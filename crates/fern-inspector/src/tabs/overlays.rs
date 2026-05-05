@@ -57,17 +57,14 @@ impl Widget for OverlaysTab {
         let mut rows: Vec<OverlayRow> = Vec::new();
         if let (Some(arena), Some(om)) = (ctx.arena(), ctx.overlay_manager()) {
             for overlay_id in om.active_ids() {
-                let content_id = om
-                    .active_content_ids()
-                    .into_iter()
-                    .find(|cid| {
-                        // Map overlay id → content id by scanning active list.
-                        // The OverlayManager exposes `active_ids` and
-                        // `active_content_ids` separately; the lists are
-                        // index-aligned in practice, but we don't depend
-                        // on that here.
-                        om.find_by_content(*cid) == Some(overlay_id)
-                    });
+                let content_id = om.active_content_ids().into_iter().find(|cid| {
+                    // Map overlay id → content id by scanning active list.
+                    // The OverlayManager exposes `active_ids` and
+                    // `active_content_ids` separately; the lists are
+                    // index-aligned in practice, but we don't depend
+                    // on that here.
+                    om.find_by_content(*cid) == Some(overlay_id)
+                });
                 let content_label = content_id
                     .and_then(|id| widget_label(arena, id))
                     .unwrap_or_else(|| "(unknown)".to_string());
@@ -115,12 +112,7 @@ impl Widget for OverlaysTab {
                 "{}  content={}  anchor={}",
                 row.overlay_id, row.content_label, row.anchor_label
             );
-            let text_rect = Rect::new(
-                bounds.x + ROW_PADDING_X,
-                y,
-                bounds.width,
-                ROW_HEIGHT,
-            );
+            let text_rect = Rect::new(bounds.x + ROW_PADDING_X, y, bounds.width, ROW_HEIGHT);
             canvas.draw_text(&line, text_rect, style, primary);
         }
     }

@@ -18,10 +18,10 @@ use std::rc::Rc;
 use fern_canvas::{Canvas, Path, Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
+use fern_core::color_prop::ColorProp;
 use fern_core::drag_payload::DragPayload;
 use fern_core::event::{EventResponse, PointerButton, WidgetEvent};
 use fern_core::signal::Signal;
-use fern_core::color_prop::ColorProp;
 use fern_core::widget::{
     CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
 };
@@ -32,12 +32,12 @@ use fern_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::primitives::{HStack, Padding, Spacer, TextWidget};
 
+use super::ColumnReorderDragData;
 use super::body::SharedColumnWidths;
 use super::column::ColumnResizePolicy;
 use super::filter::FilterIndicator;
 #[cfg(feature = "rich-text")]
 use super::filter::FilterPopoverContent;
-use super::ColumnReorderDragData;
 #[cfg(feature = "rich-text")]
 use crate::popover::Popover;
 #[cfg(feature = "rich-text")]
@@ -295,32 +295,30 @@ impl Widget for HeaderCell {
                         //    is computed against the press's local x so
                         //    the sign matches the visible drag.
                         let active = resize_state.borrow().clone();
-                        if let Some(state) = active {
-                            if state.col_id == col_id {
-                                let delta = local_x - state.start_pointer_x;
-                                let new_w = (state.start_width + delta).max(MIN_COLUMN_WIDTH);
-                                if policy == ColumnResizePolicy::Live {
-                                    write_width(&widths_signal, &state.col_id, new_w);
-                                }
-                                return EventResponse::Handled;
+                        if let Some(state) = active
+                            && state.col_id == col_id
+                        {
+                            let delta = local_x - state.start_pointer_x;
+                            let new_w = (state.start_width + delta).max(MIN_COLUMN_WIDTH);
+                            if policy == ColumnResizePolicy::Live {
+                                write_width(&widths_signal, &state.col_id, new_w);
                             }
+                            return EventResponse::Handled;
                         }
                         // 2. Press state set, no resize: if movement
                         //    crosses the threshold, escalate to a
                         //    reorder drag.
-                        if reorderable {
-                            if let Some(p) = press_state.get() {
-                                let dx = local_x - p.pointer_x;
-                                let dy = position.y - p.pointer_y;
-                                if (dx * dx + dy * dy).sqrt() > DRAG_REORDER_THRESHOLD {
-                                    press_state.set(None);
-                                    let payload = DragPayload::typed(ColumnReorderDragData {
-                                        col_id: col_id.clone(),
-                                        source_table_id: table_id,
-                                    });
-                                    ctx.start_drag(self_id, payload);
-                                    return EventResponse::Handled;
-                                }
+                        if reorderable && let Some(p) = press_state.get() {
+                            let dx = local_x - p.pointer_x;
+                            let dy = position.y - p.pointer_y;
+                            if (dx * dx + dy * dy).sqrt() > DRAG_REORDER_THRESHOLD {
+                                press_state.set(None);
+                                let payload = DragPayload::typed(ColumnReorderDragData {
+                                    col_id: col_id.clone(),
+                                    source_table_id: table_id,
+                                });
+                                ctx.start_drag(self_id, payload);
+                                return EventResponse::Handled;
                             }
                         }
                         // 3. Cursor hint near the trailing edge. Outside
@@ -355,8 +353,7 @@ impl Widget for HeaderCell {
                             .get(width_index)
                             .copied()
                             .unwrap_or(0.0);
-                        let in_resize =
-                            resizable && cell_w > 0.0 && local_x > cell_w - resize_zone;
+                        let in_resize = resizable && cell_w > 0.0 && local_x > cell_w - resize_zone;
                         if in_resize {
                             *resize_state.borrow_mut() = Some(ResizeState {
                                 col_id: col_id.clone(),
@@ -372,12 +369,8 @@ impl Widget for HeaderCell {
                         // this carve-out, the preview-pass handler
                         // would consume PointerDown and the popover
                         // would never open.
-                        let filter_zone_start =
-                            cell_w - resize_zone - filter_zone_w;
-                        if filter_zone_w > 0.0
-                            && cell_w > 0.0
-                            && local_x > filter_zone_start
-                        {
+                        let filter_zone_start = cell_w - resize_zone - filter_zone_w;
+                        if filter_zone_w > 0.0 && cell_w > 0.0 && local_x > filter_zone_start {
                             return EventResponse::Ignored;
                         }
                         // Record press: PointerUp without movement →
@@ -396,8 +389,7 @@ impl Widget for HeaderCell {
                         if let Some(state) = taken {
                             if policy == ColumnResizePolicy::OnRelease {
                                 let delta = local_x - state.start_pointer_x;
-                                let new_w =
-                                    (state.start_width + delta).max(MIN_COLUMN_WIDTH);
+                                let new_w = (state.start_width + delta).max(MIN_COLUMN_WIDTH);
                                 write_width(&widths_signal, &state.col_id, new_w);
                             }
                             ctx.release_pointer();
@@ -434,13 +426,18 @@ impl Widget for HeaderCell {
         vec![padded]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         match self.root_child_id {
             Some(id) => ctx
                 .child_size(id, proposal)
                 .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
             None => proposal.resolve(0.0, 0.0),
-        }.into()
+        }
+        .into()
     }
 
     fn place_children(
@@ -503,7 +500,11 @@ impl SortIndicator {
 }
 
 impl Widget for SortIndicator {
-    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        _proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         Size::new(self.size, self.size).into()
     }
 
@@ -564,7 +565,11 @@ impl HeaderRow {
 }
 
 impl Widget for HeaderRow {
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let width = proposal
             .width
             .unwrap_or_else(|| self.widths.borrow().iter().sum());

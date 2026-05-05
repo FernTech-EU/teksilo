@@ -18,8 +18,7 @@ use std::sync::Mutex;
 use std::time::SystemTime;
 
 use fern_core::telemetry::{
-    ConsentScope, Event, OwnedEvent, RemoteDataExport, RemoteEvent, TelemetryError,
-    UsageReporter,
+    ConsentScope, Event, OwnedEvent, RemoteDataExport, RemoteEvent, TelemetryError, UsageReporter,
 };
 
 pub struct StubReporter {

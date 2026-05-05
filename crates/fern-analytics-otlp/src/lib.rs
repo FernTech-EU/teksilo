@@ -96,9 +96,7 @@ use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use fern_core::telemetry::{
-    ConsentScope, Event, RemoteDataExport, TelemetryError, UsageReporter,
-};
+use fern_core::telemetry::{ConsentScope, Event, RemoteDataExport, TelemetryError, UsageReporter};
 
 use crate::worker::{WorkerCommand, WorkerStats, spawn_worker};
 

@@ -191,9 +191,7 @@ mod tests {
         let mgr = I18nManager::from_config(&cfg);
         install(mgr.clone());
 
-        let ls = localized(|| {
-            crate::resolve::resolve_message("greeting", &[])
-        });
+        let ls = localized(|| crate::resolve::resolve_message("greeting", &[]));
         let sig = ls.to_signal();
         assert_eq!(sig.get(), "Hello");
 
@@ -218,8 +216,7 @@ mod tests {
         // signal. We verify this by counting resolver invocations —
         // after dropping the signal, the resolver must not run again.
         clear();
-        let cfg = I18nConfig::test_only("en-US", &[("k", "v")])
-            .with_locale("fr-FR", &[("k", "w")]);
+        let cfg = I18nConfig::test_only("en-US", &[("k", "v")]).with_locale("fr-FR", &[("k", "w")]);
         let mgr = I18nManager::from_config(&cfg);
         install(mgr.clone());
 

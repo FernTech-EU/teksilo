@@ -13,9 +13,7 @@ use std::rc::Rc;
 
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::event::{EventResponse, PointerButton, WidgetEvent};
-use fern_core::widget::{
-    CursorIcon, LayoutContext, PaintContext, Widget, WidgetPlacement,
-};
+use fern_core::widget::{CursorIcon, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_core::{PlatformTitleBarHost, ResizeEdge};
@@ -45,7 +43,11 @@ impl ResizeStrip {
     /// Build a horizontal (top / bottom) strip of the given height. The
     /// width is unconstrained — the strip claims whatever its parent
     /// container offers, so it can stretch across the full window width.
-    pub fn horizontal(host: Rc<dyn PlatformTitleBarHost>, edge: ResizeEdge, thickness: f32) -> Self {
+    pub fn horizontal(
+        host: Rc<dyn PlatformTitleBarHost>,
+        edge: ResizeEdge,
+        thickness: f32,
+    ) -> Self {
         debug_assert!(matches!(edge, ResizeEdge::Top | ResizeEdge::Bottom));
         Self {
             host,
@@ -101,10 +103,7 @@ fn cursor_for_edge(edge: ResizeEdge) -> CursorIcon {
 }
 
 impl Widget for ResizeStrip {
-    fn build(
-        &mut self,
-        ctx: &mut fern_core::build_context::BuildContext,
-    ) -> Vec<WidgetId> {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
         let host = self.host.clone();
         let edge = self.edge;
 
@@ -126,7 +125,11 @@ impl Widget for ResizeStrip {
         Vec::new()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         // Horizontal strips: claim full proposed width, fixed height.
         // Vertical strips: claim full proposed height, fixed width.
         let w = if self.width > 0.0 {
@@ -154,5 +157,4 @@ impl Widget for ResizeStrip {
     fn paint(&self, _bounds: Rect, _canvas: &mut fern_canvas::Canvas, _ctx: &PaintContext) {
         // Invisible.
     }
-
 }

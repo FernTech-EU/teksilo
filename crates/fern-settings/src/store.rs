@@ -167,10 +167,7 @@ impl SettingsStore {
     /// Duration::ZERO` is useful for tests — every set writes through
     /// on the next worker iteration, and `flush_now()` is fully
     /// deterministic.
-    pub fn open_with_delay(
-        path: PathBuf,
-        delay: Duration,
-    ) -> Result<Self, SettingsStoreError> {
+    pub fn open_with_delay(path: PathBuf, delay: Duration) -> Result<Self, SettingsStoreError> {
         let raw = match fs::read_to_string(&path) {
             Ok(s) => toml::from_str::<toml::Value>(&s).map_err(SettingsStoreError::Parse)?,
             Err(e) if e.kind() == io::ErrorKind::NotFound => empty_table(),
@@ -260,8 +257,8 @@ impl SettingsStore {
 
         // Stamp the seed back into raw so that the on-disk shape
         // matches the program's understanding immediately.
-        let initial_value = serialize_to_value(&initial)
-            .expect("initial T value must serialize as TOML");
+        let initial_value =
+            serialize_to_value(&initial).expect("initial T value must serialize as TOML");
 
         // Reject struct-shaped values at the leaf: they serialize as
         // TOML tables, which collide with the store's nested-key model
@@ -413,7 +410,10 @@ fn write_nested(raw: &mut toml::Value, key: &str, value: toml::Value) {
 enum CollisionKind {
     /// An intermediate component of the dotted path is a non-table
     /// scalar, so the path can't be deepened.
-    IntermediateIsValue { existing_path: String, existing_kind: &'static str },
+    IntermediateIsValue {
+        existing_path: String,
+        existing_kind: &'static str,
+    },
     /// The leaf is currently a table, so the path can't be assigned a
     /// scalar.
     LeafIsTable { existing_path: String },
@@ -572,10 +572,8 @@ mod tests {
 
         {
             let store = SettingsStore::open_with_delay(path.clone(), Duration::ZERO).unwrap();
-            let palette = store.signal::<Vec<String>>(
-                "ui.palette",
-                vec!["red".into(), "blue".into()],
-            );
+            let palette =
+                store.signal::<Vec<String>>("ui.palette", vec!["red".into(), "blue".into()]);
             palette.set(vec!["green".into(), "yellow".into(), "purple".into()]);
             store.flush_now().unwrap();
         }

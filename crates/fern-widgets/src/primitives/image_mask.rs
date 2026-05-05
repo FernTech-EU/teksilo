@@ -80,12 +80,7 @@ pub fn center_crop_square(pixels: &[u8], width: u32, height: u32) -> (Vec<u8>, u
 /// The `shape` accepts the public [`ImageMaskShape`] surface; the
 /// `RoundedSquare` radius is interpreted as a **fraction** of
 /// `min(width, height)`, clamped to `0.0..=0.5`. `None` is a no-op.
-pub fn apply_alpha_mask(
-    pixels: &mut [u8],
-    width: u32,
-    height: u32,
-    shape: ImageMaskShape,
-) {
+pub fn apply_alpha_mask(pixels: &mut [u8], width: u32, height: u32, shape: ImageMaskShape) {
     debug_assert_eq!(pixels.len(), (width * height * 4) as usize);
     let internal = match shape {
         ImageMaskShape::None => return,

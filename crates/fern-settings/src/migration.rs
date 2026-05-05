@@ -64,17 +64,11 @@ pub trait Versioned {
 pub enum MigrationError {
     /// The on-disk version is newer than this build can read. Refuse
     /// to deserialize rather than risk silent corruption.
-    NewerThanCurrent {
-        on_disk: u32,
-        current: u32,
-    },
+    NewerThanCurrent { on_disk: u32, current: u32 },
     /// No migration step is registered for the on-disk version.
     NoStepFor(u32),
     /// A migration step itself returned an error.
-    Step {
-        from: u32,
-        message: String,
-    },
+    Step { from: u32, message: String },
     /// The post-migration value did not deserialize as the target type.
     Deserialize(toml::de::Error),
 }
@@ -86,15 +80,12 @@ impl std::fmt::Display for MigrationError {
                 f,
                 "settings file is version {on_disk}, but this build only reads up to {current}",
             ),
-            MigrationError::NoStepFor(v) => write!(
-                f,
-                "no migration step registered for settings version {v}",
-            ),
-            MigrationError::Step { from, message } => write!(
-                f,
-                "migration step {from} -> {} failed: {message}",
-                from + 1,
-            ),
+            MigrationError::NoStepFor(v) => {
+                write!(f, "no migration step registered for settings version {v}",)
+            }
+            MigrationError::Step { from, message } => {
+                write!(f, "migration step {from} -> {} failed: {message}", from + 1,)
+            }
             MigrationError::Deserialize(e) => write!(f, "post-migration deserialization: {e}"),
         }
     }
@@ -278,7 +269,7 @@ mod tests {
             Ok(v)
         });
         let v = migrator.run(raw).unwrap();
-        assert_eq!(v.pinned, true);
+        assert!(v.pinned);
         assert_eq!(v.version, 2);
     }
 

@@ -85,8 +85,7 @@ impl Widget for MonthsGrid {
                 let visible_month_for_cell = self.visible_month.clone();
                 let mode_for_cell = self.mode.clone();
                 let label = resolve_message_widget(month_long_key(month), &[]);
-                let selected_signal = visible_month_for_cell
-                    .map(move |ym| ym.month() == month);
+                let selected_signal = visible_month_for_cell.map(move |ym| ym.month() == month);
                 let cell = ZoomCell::new(
                     label,
                     selected_signal,
@@ -221,8 +220,7 @@ impl Widget for YearsGrid {
                 let visible_for_cell = self.visible_month.clone();
                 let mode_for_cell = self.mode.clone();
                 let label = format!("{cell_year}");
-                let selected_signal = visible_for_cell
-                    .map(move |ym| ym.year() == cell_year);
+                let selected_signal = visible_for_cell.map(move |ym| ym.year() == cell_year);
                 let cell = ZoomCell::new(
                     label,
                     selected_signal,
@@ -309,7 +307,9 @@ struct ZoomCell {
 
 impl std::fmt::Debug for ZoomCell {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ZoomCell").field("label", &self.label).finish()
+        f.debug_struct("ZoomCell")
+            .field("label", &self.label)
+            .finish()
     }
 }
 

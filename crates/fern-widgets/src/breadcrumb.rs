@@ -1,9 +1,9 @@
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::signal::Signal;
-use fern_core::binding::BindingLevel;
 use fern_core::widget::{
     CursorIcon, EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
 };
@@ -241,7 +241,11 @@ impl Widget for BreadcrumbSegment {
         Vec::new()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let style = ctx.theme.components.breadcrumb;
         let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
         let width = proposal.width.unwrap_or_else(|| self.estimate_width(ctx));
@@ -354,7 +358,11 @@ impl Widget for BreadcrumbSegment {
 struct BreadcrumbSeparator;
 
 impl Widget for BreadcrumbSeparator {
-    fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        _proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let style = ctx.theme.components.breadcrumb;
         Size::new(style.separator_gap * 3.0, style.item_height).into()
     }
@@ -502,10 +510,15 @@ impl Widget for Breadcrumb {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -532,4 +545,3 @@ impl Widget for Breadcrumb {
         self.root_child_id.into_iter().collect()
     }
 }
-

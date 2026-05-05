@@ -104,7 +104,10 @@ fn calendar_value_emits_iso_string_in_single_mode() {
         .find(|(nid, _)| *nid == target_node_id)
         .expect("calendar node present in AT update");
     let value = node.value().unwrap_or_default();
-    assert!(value.contains("2026-05-02"), "expected ISO date in value, got: {value}");
+    assert!(
+        value.contains("2026-05-02"),
+        "expected ISO date in value, got: {value}"
+    );
     assert!(
         value.contains("selected"),
         "expected `selected: ...` suffix when value is set, got: {value}"

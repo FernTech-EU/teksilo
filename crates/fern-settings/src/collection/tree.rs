@@ -197,9 +197,7 @@ mod tests {
         let ptm: PersistedTreeModel<Folder> =
             PersistedTreeModel::open(path.clone(), Duration::ZERO, Migrator::new()).unwrap();
 
-        let n = ptm
-            .model()
-            .insert_root(0, Folder { name: "x".into() });
+        let n = ptm.model().insert_root(0, Folder { name: "x".into() });
         ptm.model().remove(n);
         ptm.flush_now().unwrap();
 
@@ -217,9 +215,26 @@ mod tests {
             let ptm: PersistedTreeModel<Folder> =
                 PersistedTreeModel::open(path.clone(), Duration::ZERO, Migrator::new()).unwrap();
             let m = ptm.model();
-            let root = m.insert_root(0, Folder { name: "root".into() });
-            let child = m.insert_child(root, 0, Folder { name: "child".into() });
-            m.insert_child(child, 0, Folder { name: "leaf".into() });
+            let root = m.insert_root(
+                0,
+                Folder {
+                    name: "root".into(),
+                },
+            );
+            let child = m.insert_child(
+                root,
+                0,
+                Folder {
+                    name: "child".into(),
+                },
+            );
+            m.insert_child(
+                child,
+                0,
+                Folder {
+                    name: "leaf".into(),
+                },
+            );
             ptm.flush_now().unwrap();
         }
 
@@ -248,14 +263,11 @@ mod tests {
         let path = dir.path().join("t.toml");
         let ptm: PersistedTreeModel<Folder> =
             PersistedTreeModel::open(path.clone(), Duration::ZERO, Migrator::new()).unwrap();
-        let n = ptm
-            .model()
-            .insert_root(0, Folder { name: "old".into() });
+        let n = ptm.model().insert_root(0, Folder { name: "old".into() });
         ptm.model().update(n, Folder { name: "new".into() });
         ptm.flush_now().unwrap();
 
-        let parsed: TreeFile<Folder> =
-            toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let parsed: TreeFile<Folder> = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(parsed.roots[0].value.name, "new");
     }
 
@@ -272,8 +284,7 @@ mod tests {
         m.move_to_root(c, 0);
         ptm.flush_now().unwrap();
 
-        let parsed: TreeFile<Folder> =
-            toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let parsed: TreeFile<Folder> = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(parsed.roots.len(), 3);
         assert_eq!(parsed.roots[0].value.name, "c");
     }

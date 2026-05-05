@@ -131,7 +131,8 @@ impl Widget for AnimationsRoot {
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 }
 
@@ -168,10 +169,7 @@ fn animated_page() -> impl Widget + 'static {
 fn labelled_bar(label: &str) -> impl Widget + use<> {
     HStack::new()
         .spacing(12.0)
-        .child(
-            TextWidget::new_literal(label.to_string())
-                .style(TextStyleRole::Small),
-        )
+        .child(TextWidget::new_literal(label.to_string()).style(TextStyleRole::Small))
         .child(ProgressBar::indeterminate())
 }
 

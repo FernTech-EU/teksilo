@@ -35,9 +35,7 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::signal::Signal;
-use fern_core::widget::{
-    LayoutContext, LayoutResponse, PendingChild, Widget, WidgetPlacement,
-};
+use fern_core::widget::{LayoutContext, LayoutResponse, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_data::ListModel;
 
@@ -56,11 +54,11 @@ mod a11y_tests;
 mod tests;
 
 pub use bar::{
-    TabBar, DEFAULT_BAR_SLOT_SPACING, DEFAULT_MAX_TAB_WIDTH, DEFAULT_MIN_TAB_WIDTH,
-    DEFAULT_PINNED_TAB_WIDTH, DEFAULT_TAB_SPACING,
+    DEFAULT_BAR_SLOT_SPACING, DEFAULT_MAX_TAB_WIDTH, DEFAULT_MIN_TAB_WIDTH,
+    DEFAULT_PINNED_TAB_WIDTH, DEFAULT_TAB_SPACING, TabBar,
 };
 pub use delegate::{ContextMenuFactory, TabBarOrientation, TabDelegate, TabSizing};
-pub use handle::{TabHandle, STATIC_KIND};
+pub use handle::{STATIC_KIND, TabHandle};
 pub use id::TabId;
 pub use info::{IconFactory, TabInfo};
 
@@ -77,8 +75,7 @@ pub type StaticContentFactory = Rc<dyn Fn(&TabHandle) -> Box<dyn Widget>>;
 /// handle and downcast typed payload. Internal — apps register via
 /// [`TabWidget::dynamic_tab::<S>`](TabWidget::dynamic_tab) which
 /// hides the `Any` downcast behind the type parameter.
-pub(crate) type DynamicContentFactory =
-    Rc<dyn Fn(&TabHandle, &dyn Any) -> Box<dyn Widget>>;
+pub(crate) type DynamicContentFactory = Rc<dyn Fn(&TabHandle, &dyn Any) -> Box<dyn Widget>>;
 
 // ─── Static-tab content shapes ──────────────────────────────────────
 
@@ -99,6 +96,7 @@ enum StaticContentSource {
 }
 
 impl StaticContentSource {
+    #[allow(clippy::wrong_self_convention)]
     fn into_widget(&mut self, handle: &TabHandle) -> Box<dyn Widget> {
         match self {
             StaticContentSource::Owned(opt) => opt
@@ -109,7 +107,10 @@ impl StaticContentSource {
                 let id = opt
                     .take()
                     .expect("static tab pre-registered id has already been consumed");
-                Box::new(AliasWidget { target: Some(id), child_id: None })
+                Box::new(AliasWidget {
+                    target: Some(id),
+                    child_id: None,
+                })
             }
         }
     }
@@ -133,7 +134,10 @@ struct BarSlot {
 
 impl BarSlot {
     fn new(child: PendingChild) -> Self {
-        Self { pending: Some(child), resolved: None }
+        Self {
+            pending: Some(child),
+            resolved: None,
+        }
     }
 
     /// Resolve the slot to a stable WidgetId, registering the pending
@@ -142,7 +146,11 @@ impl BarSlot {
         if let Some(id) = self.resolved {
             return id;
         }
-        let id = match self.pending.take().expect("bar slot already resolved without id") {
+        let id = match self
+            .pending
+            .take()
+            .expect("bar slot already resolved without id")
+        {
             PendingChild::Id(id) => id,
             PendingChild::Deferred(w) => ctx.add_boxed(w),
         };
@@ -220,7 +228,10 @@ impl std::fmt::Debug for TabWidget {
         f.debug_struct("TabWidget")
             .field("selected", &self.selected_id.get())
             .field("static_tabs", &self.static_tabs.len())
-            .field("dynamic_registry", &self.dynamic_registry.keys().collect::<Vec<_>>())
+            .field(
+                "dynamic_registry",
+                &self.dynamic_registry.keys().collect::<Vec<_>>(),
+            )
             .field("has_dynamic_model", &self.dynamic_model.is_some())
             .finish()
     }
@@ -288,11 +299,7 @@ impl TabWidget {
     /// subsequent rebuilds (caused by adjacent dynamic-model
     /// mutations) reuse the same pane WidgetId, preserving any
     /// internal state the content owns.
-    pub fn static_tab(
-        mut self,
-        info: TabInfo,
-        content: impl Widget + 'static,
-    ) -> Self {
+    pub fn static_tab(mut self, info: TabInfo, content: impl Widget + 'static) -> Self {
         let handle = TabHandle::static_handle(TabId::fresh(), info);
         self.static_tabs.push(StaticTabSlot {
             handle,
@@ -441,10 +448,7 @@ impl TabWidget {
     /// selection is conveyed only by the accent indicator and the
     /// label-color shift (Int UI editor-strip convention). Default
     /// is transparent.
-    pub fn tab_background(
-        mut self,
-        color: impl Into<fern_core::color_prop::ColorProp>,
-    ) -> Self {
+    pub fn tab_background(mut self, color: impl Into<fern_core::color_prop::ColorProp>) -> Self {
         self.tab_background = Some(color.into());
         self
     }
@@ -504,13 +508,11 @@ impl TabWidget {
     }
 
     pub fn bar_leading_slot(mut self, w: impl Widget + 'static) -> Self {
-        self.bar_leading_slot =
-            Some(BarSlot::new(PendingChild::Deferred(Box::new(w))));
+        self.bar_leading_slot = Some(BarSlot::new(PendingChild::Deferred(Box::new(w))));
         self
     }
     pub fn bar_trailing_slot(mut self, w: impl Widget + 'static) -> Self {
-        self.bar_trailing_slot =
-            Some(BarSlot::new(PendingChild::Deferred(Box::new(w))));
+        self.bar_trailing_slot = Some(BarSlot::new(PendingChild::Deferred(Box::new(w))));
         self
     }
 
@@ -557,11 +559,7 @@ impl Widget for TabWidget {
         // Snapshot static + dynamic into a single ordered handle
         // list. Static tabs come first, in declaration order.
         let static_count = self.static_tabs.len();
-        let dyn_count = self
-            .dynamic_model
-            .as_ref()
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let dyn_count = self.dynamic_model.as_ref().map(|m| m.len()).unwrap_or(0);
         let total = static_count + dyn_count;
 
         let mut all_handles: Vec<TabHandle> = Vec::with_capacity(total);
@@ -581,8 +579,7 @@ impl Widget for TabWidget {
         // index-shaped events into id-shaped app callbacks. The
         // id ↔ selection bridge itself lives inside [`TabBar`] now;
         // TabWidget hands the bar `selected_id` and `id_of` directly.
-        let index_to_id: Rc<Vec<TabId>> =
-            Rc::new(all_handles.iter().map(|h| h.id).collect());
+        let index_to_id: Rc<Vec<TabId>> = Rc::new(all_handles.iter().map(|h| h.id).collect());
         let id_to_index: Rc<HashMap<TabId, usize>> = Rc::new(
             index_to_id
                 .iter()
@@ -612,12 +609,11 @@ impl Widget for TabWidget {
         let id_to_idx = id_to_index.clone();
         let switcher_idx = self.switcher_index.clone();
         ctx.effect(&self.selected_id, move |maybe_id| {
-            if let Some(id) = maybe_id {
-                if let Some(&i) = id_to_idx.get(id) {
-                    if switcher_idx.get() != i {
-                        switcher_idx.set(i);
-                    }
-                }
+            if let Some(id) = maybe_id
+                && let Some(&i) = id_to_idx.get(id)
+                && switcher_idx.get() != i
+            {
+                switcher_idx.set(i);
             }
         });
 
@@ -830,8 +826,8 @@ impl Widget for TabWidget {
         // root and the arena will reap them.
         self.dyn_pane_ids.retain(|id, _| alive_dyn.contains(id));
 
-        let mut switcher = Switcher::new(self.switcher_index.clone())
-            .capture_child_ids_into(panel_ids);
+        let mut switcher =
+            Switcher::new(self.switcher_index.clone()).capture_child_ids_into(panel_ids);
         for &pane_id in &pane_ids {
             switcher = switcher.child_id(pane_id);
         }
@@ -848,19 +844,17 @@ impl Widget for TabWidget {
             TabBarOrientation::Horizontal => {
                 ctx.add(VStack::new().add_child(bar_id).add_child(content_id))
             }
-            TabBarOrientation::Vertical => {
-                ctx.add(crate::primitives::HStack::new().add_child(bar_id).add_child(content_id))
-            }
+            TabBarOrientation::Vertical => ctx.add(
+                crate::primitives::HStack::new()
+                    .add_child(bar_id)
+                    .add_child(content_id),
+            ),
         };
         self.root_child_id = Some(root_id);
         vec![root_id]
     }
 
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        ctx: &LayoutContext,
-    ) -> LayoutResponse {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
             .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
@@ -953,11 +947,7 @@ impl Widget for TabPane {
         self.child_id.into_iter().collect()
     }
 
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        ctx: &LayoutContext,
-    ) -> LayoutResponse {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         self.child_id
             .and_then(|id| ctx.child_size(id, proposal))
             .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
@@ -1012,11 +1002,7 @@ impl Widget for AliasWidget {
         self.child_id.into_iter().collect()
     }
 
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        ctx: &LayoutContext,
-    ) -> LayoutResponse {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         self.child_id
             .and_then(|id| ctx.child_size(id, proposal))
             .unwrap_or_else(|| proposal.resolve(0.0, 0.0))

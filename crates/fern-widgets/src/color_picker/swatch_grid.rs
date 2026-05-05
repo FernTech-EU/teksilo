@@ -16,9 +16,7 @@ use fern_core::accesskit::Role;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::signal::Signal;
-use fern_core::widget::{
-    EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement,
-};
+use fern_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_i18n::resolve_message_widget;
@@ -78,8 +76,16 @@ impl Widget for SwatchGrid {
         let registry = ctx.binding_registry();
         // Re-layout when the swatches list changes; repaint when
         // selection moves (children re-render with the new ring).
-        self.swatches.bind_to(self_id, registry, fern_core::binding::BindingLevel::Relayout);
-        self.selected.bind_to(self_id, registry, fern_core::binding::BindingLevel::RepaintOnly);
+        self.swatches.bind_to(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::Relayout,
+        );
+        self.selected.bind_to(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::RepaintOnly,
+        );
 
         let swatches = self.swatches.get();
         let columns = self.columns;
@@ -115,61 +121,60 @@ impl Widget for SwatchGrid {
         let enabled = self.enabled;
         let on_select_keys = self.on_select.clone();
         let swatches_for_keys = self.swatches.clone();
-        let handlers = HandlerSet::new()
-            .focusable(enabled && count > 0)
-            .on_key(move |event, ctx_evt| {
-                if !enabled || count == 0 {
-                    return EventResponse::Ignored;
-                }
-                let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
-                    return EventResponse::Ignored;
-                };
-                let mut idx = focused_index.get().min(count.saturating_sub(1));
-                let last = count.saturating_sub(1);
-                let row = idx / columns_for_keys;
-                let col = idx % columns_for_keys;
-                let row_start = row * columns_for_keys;
-                let row_end = ((row + 1) * columns_for_keys - 1).min(last);
-                match key {
-                    Key::ArrowLeft => {
-                        if idx > 0 {
-                            idx -= 1;
+        let handlers =
+            HandlerSet::new()
+                .focusable(enabled && count > 0)
+                .on_key(move |event, ctx_evt| {
+                    if !enabled || count == 0 {
+                        return EventResponse::Ignored;
+                    }
+                    let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
+                        return EventResponse::Ignored;
+                    };
+                    let mut idx = focused_index.get().min(count.saturating_sub(1));
+                    let last = count.saturating_sub(1);
+                    let row = idx / columns_for_keys;
+                    let col = idx % columns_for_keys;
+                    let row_start = row * columns_for_keys;
+                    let row_end = ((row + 1) * columns_for_keys - 1).min(last);
+                    match key {
+                        Key::ArrowLeft => {
+                            idx = idx.saturating_sub(1);
                         }
-                    }
-                    Key::ArrowRight => {
-                        if idx < last {
-                            idx += 1;
+                        Key::ArrowRight => {
+                            if idx < last {
+                                idx += 1;
+                            }
                         }
-                    }
-                    Key::ArrowUp => {
-                        if idx >= columns_for_keys {
-                            idx -= columns_for_keys;
+                        Key::ArrowUp => {
+                            if idx >= columns_for_keys {
+                                idx -= columns_for_keys;
+                            }
                         }
-                    }
-                    Key::ArrowDown => {
-                        if idx + columns_for_keys <= last {
-                            idx += columns_for_keys;
+                        Key::ArrowDown => {
+                            if idx + columns_for_keys <= last {
+                                idx += columns_for_keys;
+                            }
                         }
-                    }
-                    Key::Home => {
-                        idx = if modifiers.ctrl() { 0 } else { row_start };
-                    }
-                    Key::End => {
-                        idx = if modifiers.ctrl() { last } else { row_end };
-                    }
-                    Key::Enter | Key::Space => {
-                        let list = swatches_for_keys.get();
-                        if let Some(c) = list.get(idx) {
-                            (on_select_keys)(*c, ctx_evt);
+                        Key::Home => {
+                            idx = if modifiers.ctrl() { 0 } else { row_start };
                         }
-                        return EventResponse::Handled;
+                        Key::End => {
+                            idx = if modifiers.ctrl() { last } else { row_end };
+                        }
+                        Key::Enter | Key::Space => {
+                            let list = swatches_for_keys.get();
+                            if let Some(c) = list.get(idx) {
+                                (on_select_keys)(*c, ctx_evt);
+                            }
+                            return EventResponse::Handled;
+                        }
+                        _ => return EventResponse::Ignored,
                     }
-                    _ => return EventResponse::Ignored,
-                }
-                let _ = (row, col);
-                focused_index.set(idx);
-                EventResponse::Handled
-            });
+                    let _ = (row, col);
+                    focused_index.set(idx);
+                    EventResponse::Handled
+                });
         ctx.apply_self_handlers(handlers);
 
         vec![root]

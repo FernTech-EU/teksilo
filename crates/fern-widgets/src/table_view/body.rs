@@ -64,10 +64,16 @@ impl BodyRow {
 }
 
 impl Widget for BodyRow {
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         // Width: caller's proposal (the row fills its parent's bounds).
         // Height: the configured row height.
-        let width = proposal.width.unwrap_or_else(|| self.widths.borrow().iter().sum());
+        let width = proposal
+            .width
+            .unwrap_or_else(|| self.widths.borrow().iter().sum());
         Size::new(width, self.row_height).into()
     }
 

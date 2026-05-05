@@ -76,7 +76,11 @@ impl Widget for AspectRatio {
         self.child_id.into_iter().collect()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         self.constrain(proposal.width, proposal.height).into()
     }
 
@@ -112,7 +116,11 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
             Size::new(self.0, self.1).into()
         }
     }

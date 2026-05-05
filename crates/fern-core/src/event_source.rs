@@ -282,7 +282,7 @@ mod tests {
     use crate::widget::{LayoutContext, Widget};
     use crate::widget_id::WidgetId;
     use crate::widget_tree::WidgetTree;
-    use fern_canvas::{Size, SizeProposal};
+    use fern_canvas::SizeProposal;
     use std::sync::Mutex;
 
     // --- Test event source ---
@@ -305,12 +305,7 @@ mod tests {
     #[derive(Default)]
     struct MockEventSource {
         #[allow(clippy::type_complexity)]
-        subscribers: Mutex<
-            Vec<(
-                TestOrigin,
-                Arc<dyn Fn(TestEvent) + Send + Sync + 'static>,
-            )>,
-        >,
+        subscribers: Mutex<Vec<(TestOrigin, Arc<dyn Fn(TestEvent) + Send + Sync + 'static>)>>,
     }
 
     impl EventSource for MockEventSource {
@@ -322,10 +317,7 @@ mod tests {
             origin: Self::Origin,
             callback: Arc<dyn Fn(Self::Event) + Send + Sync + 'static>,
         ) -> SubscriptionHandle {
-            self.subscribers
-                .lock()
-                .unwrap()
-                .push((origin, callback));
+            self.subscribers.lock().unwrap().push((origin, callback));
             SubscriptionHandle::empty()
         }
     }
@@ -375,21 +367,19 @@ mod tests {
     }
 
     impl Widget for SubscribingWidget {
-        fn build(
-            &mut self,
-            ctx: &mut crate::build_context::BuildContext,
-        ) -> Vec<WidgetId> {
+        fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
             let last_message = self.last_message.clone();
-            ctx.subscribe_event(
-                self.origin.clone(),
-                move |event: &TestEvent| {
-                    last_message.set(event.message.clone());
-                },
-            );
+            ctx.subscribe_event(self.origin.clone(), move |event: &TestEvent| {
+                last_message.set(event.message.clone());
+            });
             Vec::new()
         }
 
-        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> crate::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
             proposal.resolve(0.0, 0.0).into()
         }
     }
@@ -423,9 +413,8 @@ mod tests {
         });
         let poster: Arc<TestPoster> = Arc::new(TestPoster::default());
         let poster_dyn: Arc<dyn AppEventPoster> = poster.clone();
-        let app_context = std::rc::Rc::new(TreeAppContext::with_source_and_poster(
-            adapter, poster_dyn,
-        ));
+        let app_context =
+            std::rc::Rc::new(TreeAppContext::with_source_and_poster(adapter, poster_dyn));
         tree.set_app_context(app_context);
         (source, poster)
     }
@@ -567,10 +556,7 @@ mod tests {
     }
 
     impl Widget for AppStateReader {
-        fn build(
-            &mut self,
-            ctx: &mut crate::build_context::BuildContext,
-        ) -> Vec<WidgetId> {
+        fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
             match ctx.app_state::<Rc<TestGlobals>>() {
                 Some(globals) => self.observed.set(globals.greeting.get()),
                 None => self.saw_none.set(true),
@@ -578,7 +564,11 @@ mod tests {
             Vec::new()
         }
 
-        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> crate::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
             proposal.resolve(0.0, 0.0).into()
         }
     }
@@ -593,9 +583,7 @@ mod tests {
         registry.insert(TypeId::of::<Rc<TestGlobals>>(), Box::new(globals.clone()));
 
         let mut tree = WidgetTree::new();
-        tree.set_app_context(Rc::new(
-            TreeAppContext::empty().with_app_state(registry),
-        ));
+        tree.set_app_context(Rc::new(TreeAppContext::empty().with_app_state(registry)));
 
         let observed = Signal::new(String::new());
         let saw_none = Signal::new(false);

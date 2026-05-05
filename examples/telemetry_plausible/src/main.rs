@@ -48,11 +48,11 @@ impl Widget for DemoRoot {
         // fires through the tap (we'd record it), but it walks all
         // the way to the root looking for a handler.
         for name in ["app.demo.click", "app.demo.save", "app.demo.about"] {
-            ctx.register_action(
-                Action::new(name).on_invoke(|intent: &fern_ui::core::Intent, _ctx| {
+            ctx.register_action(Action::new(name).on_invoke(
+                |intent: &fern_ui::core::Intent, _ctx| {
                     println!("intent dispatched: {}", intent.name);
-                }),
-            );
+                },
+            ));
         }
 
         let click_btn = Button::new_literal("Fire 'click' intent")
@@ -103,7 +103,8 @@ impl Widget for DemoRoot {
         children
             .first()
             .and_then(|c| ctx.child_size(*c, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 }
 
@@ -142,4 +143,3 @@ fn main() {
         )
         .run();
 }
-

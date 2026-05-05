@@ -34,6 +34,8 @@ impl DefaultPostRoot {
 
 impl std::fmt::Debug for DefaultPostRoot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("DefaultPostRoot").field(&"<closure>").finish()
+        f.debug_tuple("DefaultPostRoot")
+            .field(&"<closure>")
+            .finish()
     }
 }

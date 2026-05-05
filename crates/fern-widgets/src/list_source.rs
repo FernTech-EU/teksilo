@@ -76,7 +76,7 @@ impl<T: 'static> ListSource<T> {
     {
         Self {
             len_fn,
-            with_item_fn: Rc::new(move |index, f| item_at(index).as_ref().map(|item| f(item))),
+            with_item_fn: Rc::new(move |index, f| item_at(index).as_ref().map(f)),
             observe_fn,
             move_item_fn: None,
             remove_item_fn: None,

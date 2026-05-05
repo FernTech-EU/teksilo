@@ -231,8 +231,7 @@ fn paint_widget_cached(
     // happens to be at its rest pose.
     let node = arena.get(id).unwrap();
     let transform = node.transform_prop.as_ref().map(|p| p.get());
-    let push_transform = transform
-        .filter(|t| *t != fern_canvas::Transform2D::IDENTITY);
+    let push_transform = transform.filter(|t| *t != fern_canvas::Transform2D::IDENTITY);
     if let Some(t) = push_transform {
         frame
             .draw_order
@@ -717,7 +716,10 @@ mod tests {
         let ro = restore_opacity_idx.expect("RestoreOpacity emitted");
         assert!(so < pt, "opacity must open before transform: {so} < {pt}");
         assert!(pt < popt, "transform push must precede its pop");
-        assert!(popt < ro, "transform must close before opacity: {popt} < {ro}");
+        assert!(
+            popt < ro,
+            "transform must close before opacity: {popt} < {ro}"
+        );
     }
 
     #[test]

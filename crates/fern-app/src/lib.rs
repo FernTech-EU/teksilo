@@ -1,8 +1,10 @@
+#![allow(clippy::type_complexity, clippy::too_many_arguments)]
+
 pub mod app;
 pub mod default_post_root;
-pub(crate) mod window_persist;
 pub mod window_config;
 pub mod window_manager;
+pub(crate) mod window_persist;
 
 pub use app::{AppEventProxy, FernAppBuilder, HeadlessApp, ThemeMode};
 pub use default_post_root::DefaultPostRoot;

@@ -25,6 +25,7 @@ enum AppIntent {
     #[name = "app.help"]
     ShowHelp,
     #[name = "app.toggle_fullscreen"]
+    #[allow(dead_code)]
     ToggleFullscreen,
 }
 
@@ -83,17 +84,15 @@ impl Widget for MainRoot {
             );
         }));
 
-        ctx.register_action(
-            Action::new("app.toggle_fullscreen").on_invoke(|_i, ctx| {
-                let Some(w) = ctx.window() else { return };
-                let next = if w.placement().get().is_fullscreen() {
-                    WindowPlacement::Floating
-                } else {
-                    WindowPlacement::Fullscreen
-                };
-                w.placement().set(next);
-            }),
-        );
+        ctx.register_action(Action::new("app.toggle_fullscreen").on_invoke(|_i, ctx| {
+            let Some(w) = ctx.window() else { return };
+            let next = if w.placement().get().is_fullscreen() {
+                WindowPlacement::Floating
+            } else {
+                WindowPlacement::Fullscreen
+            };
+            w.placement().set(next);
+        }));
 
         let btn = ctx.add(
             Button::new_literal("Open help (F1) / Toggle fullscreen (F11)")
@@ -107,7 +106,8 @@ impl Widget for MainRoot {
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         self.child
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn children(&self) -> Vec<WidgetId> {

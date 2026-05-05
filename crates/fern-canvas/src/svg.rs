@@ -54,8 +54,8 @@ pub struct SvgIcon {
 impl SvgIcon {
     /// Parse an SVG string into an `SvgIcon`.
     pub fn parse(svg_str: &str) -> Result<Self, SvgParseError> {
-        let doc =
-            roxmltree::Document::parse(svg_str).map_err(|e| SvgParseError::XmlError(e.to_string()))?;
+        let doc = roxmltree::Document::parse(svg_str)
+            .map_err(|e| SvgParseError::XmlError(e.to_string()))?;
 
         let svg_el = doc
             .root_element()
@@ -155,11 +155,11 @@ fn parse_view_box(svg_el: &roxmltree::Node) -> Result<Rect, SvgParseError> {
     // Fallback to width/height attributes
     let w = svg_el
         .attribute("width")
-        .and_then(|s| parse_length(s))
+        .and_then(parse_length)
         .ok_or_else(|| SvgParseError::InvalidViewBox("no viewBox or width attribute".into()))?;
     let h = svg_el
         .attribute("height")
-        .and_then(|s| parse_length(s))
+        .and_then(parse_length)
         .ok_or_else(|| SvgParseError::InvalidViewBox("no viewBox or height attribute".into()))?;
     Ok(Rect::new(0.0, 0.0, w, h))
 }
@@ -278,7 +278,12 @@ fn parse_ellipse_element(node: &roxmltree::Node) -> Option<Path> {
     let cy = attr_f32(node, "cy").unwrap_or(0.0);
     let rx = attr_f32(node, "rx")?;
     let ry = attr_f32(node, "ry")?;
-    Some(Path::ellipse(Rect::new(cx - rx, cy - ry, rx * 2.0, ry * 2.0)))
+    Some(Path::ellipse(Rect::new(
+        cx - rx,
+        cy - ry,
+        rx * 2.0,
+        ry * 2.0,
+    )))
 }
 
 fn parse_line_element(node: &roxmltree::Node) -> Option<Path> {
@@ -314,7 +319,7 @@ fn parse_points_attr(node: &roxmltree::Node) -> Option<Vec<Point>> {
         .filter(|s| !s.is_empty())
         .filter_map(|s| s.parse::<f32>().ok())
         .collect();
-    if nums.len() < 4 || nums.len() % 2 != 0 {
+    if nums.len() < 4 || !nums.len().is_multiple_of(2) {
         return None;
     }
     Some(nums.chunks(2).map(|c| Point::new(c[0], c[1])).collect())
@@ -409,9 +414,9 @@ fn parse_transform_args(s: &str) -> Result<(Vec<f32>, &str), SvgParseError> {
     let s = s.strip_prefix('(').ok_or_else(|| {
         SvgParseError::InvalidTransform("expected '(' after transform function".into())
     })?;
-    let end = s.find(')').ok_or_else(|| {
-        SvgParseError::InvalidTransform("missing ')' in transform".into())
-    })?;
+    let end = s
+        .find(')')
+        .ok_or_else(|| SvgParseError::InvalidTransform("missing ')' in transform".into()))?;
     let inner = &s[..end];
     let rest = &s[end + 1..];
     let args: Vec<f32> = inner
@@ -551,8 +556,16 @@ mod tests {
         // The rect should be scaled to 48x48 and placed at (0,0)
         assert!(bounds.x.abs() < 1.0, "x should be near 0, got {}", bounds.x);
         assert!(bounds.y.abs() < 1.0, "y should be near 0, got {}", bounds.y);
-        assert!((bounds.width - 48.0).abs() < 1.0, "width should be ~48, got {}", bounds.width);
-        assert!((bounds.height - 48.0).abs() < 1.0, "height should be ~48, got {}", bounds.height);
+        assert!(
+            (bounds.width - 48.0).abs() < 1.0,
+            "width should be ~48, got {}",
+            bounds.width
+        );
+        assert!(
+            (bounds.height - 48.0).abs() < 1.0,
+            "height should be ~48, got {}",
+            bounds.height
+        );
     }
 
     #[test]
@@ -563,7 +576,8 @@ mod tests {
 
     #[test]
     fn missing_viewbox() {
-        let result = SvgIcon::parse(r#"<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>"#);
+        let result =
+            SvgIcon::parse(r#"<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>"#);
         assert!(result.is_err());
     }
 

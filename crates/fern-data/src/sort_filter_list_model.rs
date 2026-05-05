@@ -113,24 +113,24 @@ impl<T: 'static> Inner<T> {
             }
         }
 
-        if let Some((col_id, dir)) = &self.sort {
-            if let Some(cmp) = self.comparators.get(col_id).cloned() {
-                let with_item_fn = self.with_item_fn.clone();
-                let descending = *dir == SortDirection::Descending;
-                visible.sort_by(|&a, &b| {
-                    let ord = Cell::new(Ordering::Equal);
-                    (with_item_fn)(a, &|va| {
-                        (with_item_fn)(b, &|vb| {
-                            ord.set(cmp(va, vb));
-                        });
+        if let Some((col_id, dir)) = &self.sort
+            && let Some(cmp) = self.comparators.get(col_id).cloned()
+        {
+            let with_item_fn = self.with_item_fn.clone();
+            let descending = *dir == SortDirection::Descending;
+            visible.sort_by(|&a, &b| {
+                let ord = Cell::new(Ordering::Equal);
+                (with_item_fn)(a, &|va| {
+                    (with_item_fn)(b, &|vb| {
+                        ord.set(cmp(va, vb));
                     });
-                    let mut o = ord.get();
-                    if descending {
-                        o = o.reverse();
-                    }
-                    o
                 });
-            }
+                let mut o = ord.get();
+                if descending {
+                    o = o.reverse();
+                }
+                o
+            });
         }
 
         self.visible_to_source = visible;
@@ -160,9 +160,8 @@ impl<T: 'static> SortFilterListModel<T> {
         let with_item_fn: WithItemFn<T> = Rc::new(move |idx, f| {
             m_read.with_item(idx, |item| f(item));
         });
-        let observe_fn: ObserveFn = Rc::new(move |callback| {
-            m_obs.observe_changes(move |change| callback(change))
-        });
+        let observe_fn: ObserveFn =
+            Rc::new(move |callback| m_obs.observe_changes(move |change| callback(change)));
         Self::create(len_fn, with_item_fn, observe_fn)
     }
 
@@ -176,9 +175,8 @@ impl<T: 'static> SortFilterListModel<T> {
         let with_item_fn: WithItemFn<T> = Rc::new(move |idx, f| {
             s_read.with_item(idx, |item| f(item));
         });
-        let observe_fn: ObserveFn = Rc::new(move |callback| {
-            s_obs.observe_changes(move |change| callback(change))
-        });
+        let observe_fn: ObserveFn =
+            Rc::new(move |callback| s_obs.observe_changes(move |change| callback(change)));
         Self::create(len_fn, with_item_fn, observe_fn)
     }
 
@@ -432,7 +430,10 @@ impl<T: 'static> ListDataSource for SortFilterListModel<T> {
             id,
             Rc::new(move |observer_id| {
                 if let Some(strong) = weak.upgrade() {
-                    strong.borrow_mut().observers.retain(|e| e.id != observer_id);
+                    strong
+                        .borrow_mut()
+                        .observers
+                        .retain(|e| e.id != observer_id);
                 }
             }),
         )
@@ -462,10 +463,22 @@ mod tests {
 
     fn sample() -> ListModel<Row> {
         ListModel::from_vec(vec![
-            Row { id: 3, name: "carol".into() },
-            Row { id: 1, name: "alice".into() },
-            Row { id: 2, name: "bob".into() },
-            Row { id: 4, name: "dan".into() },
+            Row {
+                id: 3,
+                name: "carol".into(),
+            },
+            Row {
+                id: 1,
+                name: "alice".into(),
+            },
+            Row {
+                id: 2,
+                name: "bob".into(),
+            },
+            Row {
+                id: 4,
+                name: "dan".into(),
+            },
         ])
     }
 
@@ -492,8 +505,8 @@ mod tests {
 
     #[test]
     fn sort_descending_by_id() {
-        let proxy = SortFilterListModel::new(sample())
-            .with_comparator("id", |a: &Row, b| a.id.cmp(&b.id));
+        let proxy =
+            SortFilterListModel::new(sample()).with_comparator("id", |a: &Row, b| a.id.cmp(&b.id));
         proxy.set_sort(Some("id"), SortDirection::Descending);
         let ids: Vec<u32> = (0..proxy.len())
             .map(|i| proxy.with_item(i, |r| r.id).unwrap())
@@ -512,11 +525,10 @@ mod tests {
 
     #[test]
     fn filter_excludes_rows() {
-        let proxy = SortFilterListModel::new(sample())
-            .with_predicate("name", |text| {
-                let t = text.to_lowercase();
-                Box::new(move |r: &Row| r.name.to_lowercase().contains(&t))
-            });
+        let proxy = SortFilterListModel::new(sample()).with_predicate("name", |text| {
+            let t = text.to_lowercase();
+            Box::new(move |r: &Row| r.name.to_lowercase().contains(&t))
+        });
         proxy.set_filter("name", "a");
         // alice, carol, dan all contain 'a'; bob does not.
         let names = collect_names(&proxy);
@@ -583,15 +595,18 @@ mod tests {
         });
         // Construction issued a Reset already; clear our counter.
         count.set(0);
-        model.push(Row { id: 5, name: "eve".into() });
+        model.push(Row {
+            id: 5,
+            name: "eve".into(),
+        });
         assert_eq!(count.get(), 1);
         assert_eq!(proxy.len(), 5);
     }
 
     #[test]
     fn clone_shares_state() {
-        let proxy = SortFilterListModel::new(sample())
-            .with_comparator("id", |a: &Row, b| a.id.cmp(&b.id));
+        let proxy =
+            SortFilterListModel::new(sample()).with_comparator("id", |a: &Row, b| a.id.cmp(&b.id));
         let c1 = proxy.clone();
         c1.set_sort(Some("id"), SortDirection::Ascending);
         let names_via_clone = collect_names(&c1);
@@ -637,8 +652,8 @@ mod tests {
 
     #[test]
     fn set_sort_writes_through_bound_signal() {
-        let proxy = SortFilterListModel::new(sample())
-            .with_comparator("id", |a: &Row, b| a.id.cmp(&b.id));
+        let proxy =
+            SortFilterListModel::new(sample()).with_comparator("id", |a: &Row, b| a.id.cmp(&b.id));
         let sig: Signal<Option<(String, SortDirection)>> = Signal::new(None);
         proxy.bind_sort_signal(sig.clone());
         proxy.set_sort(Some("id"), SortDirection::Ascending);
@@ -687,10 +702,15 @@ mod tests {
         // construction compiles and runs over a ListDataSource impl: see
         // `crate::filterable_list_source` if present, otherwise use a
         // minimal hand-rolled impl below.)
-        struct VecSource(Rc<RefCell<Vec<Row>>>, Rc<RefCell<Vec<ObserverEntry>>>);
+        struct VecSource(
+            Rc<RefCell<Vec<Row>>>,
+            #[allow(dead_code)] Rc<RefCell<Vec<ObserverEntry>>>,
+        );
         impl ListDataSource for VecSource {
             type Item = Row;
-            fn len(&self) -> usize { self.0.borrow().len() }
+            fn len(&self) -> usize {
+                self.0.borrow().len()
+            }
             fn with_item<R>(&self, idx: usize, f: impl FnOnce(&Row) -> R) -> Option<R> {
                 self.0.borrow().get(idx).map(f)
             }
@@ -702,8 +722,14 @@ mod tests {
         }
         let src = VecSource(
             Rc::new(RefCell::new(vec![
-                Row { id: 9, name: "x".into() },
-                Row { id: 8, name: "y".into() },
+                Row {
+                    id: 9,
+                    name: "x".into(),
+                },
+                Row {
+                    id: 8,
+                    name: "y".into(),
+                },
             ])),
             Rc::new(RefCell::new(Vec::new())),
         );

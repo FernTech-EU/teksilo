@@ -51,6 +51,7 @@ pub struct FernElement {
 }
 
 /// One item in an element's body block.
+#[allow(clippy::large_enum_variant)]
 pub enum BodyItem {
     /// `name: arg1, arg2, ...` — builder method call with N args.
     /// A bare lowercase ident with no body is modeled as `args == []`.
@@ -74,7 +75,11 @@ pub enum BodyItem {
     /// expression-producing (block tail has no semicolon, lowered as
     /// `.child(block)`) and side-effect (block tail ends in `;`,
     /// emitted inline as a side-effect statement).
-    Rust { block: Block, span: Span, shape: RustShape },
+    Rust {
+        block: Block,
+        span: Span,
+        shape: RustShape,
+    },
     /// `if cond { Element } [else if cond { Element }]* [else { Element }]?`
     /// — spec §5.1. Lowers to `.child_opt(...)` (no-else) or
     /// `.child(FernBranch{N}::...)` (with else branches).
@@ -103,6 +108,7 @@ pub struct FernIf {
     pub body_close: Span,
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum FernElse {
     ElseIf(FernIf),
     Element {

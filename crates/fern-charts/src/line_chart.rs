@@ -17,11 +17,9 @@ use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{BorderRole, CornerRadius, TextRole, TextStyleRole};
 
-use crate::axis::{auto_tick_count, nice_ticks, AxisConfig};
-use crate::layout::{carve_plot_area, CarveParams, LegendPosition};
-use crate::legend::{
-    legend_main_axis_size, orientation_for_position, paint_embedded_legend,
-};
+use crate::axis::{AxisConfig, auto_tick_count, nice_ticks};
+use crate::layout::{CarveParams, LegendPosition, carve_plot_area};
+use crate::legend::{legend_main_axis_size, orientation_for_position, paint_embedded_legend};
 use crate::palette::ChartPalette;
 use crate::series::ChartSeries;
 use crate::text::measure_text_width;
@@ -168,70 +166,72 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
         self.palette
             .register_if_bound(id, registry, BindingLevel::RepaintOnly);
         // Hover repaints the chart but never relayouts.
-        self.hover
-            .bind_to(id, registry, BindingLevel::RepaintOnly);
+        self.hover.bind_to(id, registry, BindingLevel::RepaintOnly);
 
         if self.show_hover_tooltip {
             let hit_index = self.hit_index.clone();
             let plot_rect = self.plot_rect.clone();
             let hover = self.hover.clone();
-            let handlers = HandlerSet::new().on_pointer_event(
-                move |event, _ctx| match event {
-                    WidgetEvent::PointerMove { position } => {
-                        let plot = *plot_rect.borrow();
-                        if !plot.contains(*position) {
-                            if hover.get().is_some() {
-                                hover.set(None);
-                            }
-                            return EventResponse::Ignored;
-                        }
-                        let hits = hit_index.borrow();
-                        if hits.is_empty() {
-                            return EventResponse::Ignored;
-                        }
-                        let mut best_idx = 0_usize;
-                        let mut best_d2 = f32::INFINITY;
-                        for (i, h) in hits.iter().enumerate() {
-                            let dx = h.screen.x - position.x;
-                            let dy = h.screen.y - position.y;
-                            let d2 = dx * dx + dy * dy;
-                            if d2 < best_d2 {
-                                best_d2 = d2;
-                                best_idx = i;
-                            }
-                        }
-                        let h = &hits[best_idx];
-                        let hp = HoveredPoint {
-                            series_idx: h.series_idx,
-                            datum_idx: h.datum_idx,
-                        };
-                        let prev = hover.get();
-                        if prev.map(|p| (p.series_idx, p.datum_idx))
-                            != Some((hp.series_idx, hp.datum_idx))
-                        {
-                            hover.set(Some(hp));
-                        }
-                        EventResponse::Ignored
-                    }
-                    WidgetEvent::PointerLeave => {
+            let handlers = HandlerSet::new().on_pointer_event(move |event, _ctx| match event {
+                WidgetEvent::PointerMove { position } => {
+                    let plot = *plot_rect.borrow();
+                    if !plot.contains(*position) {
                         if hover.get().is_some() {
                             hover.set(None);
                         }
-                        EventResponse::Ignored
+                        return EventResponse::Ignored;
                     }
-                    _ => EventResponse::Ignored,
-                },
-            );
+                    let hits = hit_index.borrow();
+                    if hits.is_empty() {
+                        return EventResponse::Ignored;
+                    }
+                    let mut best_idx = 0_usize;
+                    let mut best_d2 = f32::INFINITY;
+                    for (i, h) in hits.iter().enumerate() {
+                        let dx = h.screen.x - position.x;
+                        let dy = h.screen.y - position.y;
+                        let d2 = dx * dx + dy * dy;
+                        if d2 < best_d2 {
+                            best_d2 = d2;
+                            best_idx = i;
+                        }
+                    }
+                    let h = &hits[best_idx];
+                    let hp = HoveredPoint {
+                        series_idx: h.series_idx,
+                        datum_idx: h.datum_idx,
+                    };
+                    let prev = hover.get();
+                    if prev.map(|p| (p.series_idx, p.datum_idx))
+                        != Some((hp.series_idx, hp.datum_idx))
+                    {
+                        hover.set(Some(hp));
+                    }
+                    EventResponse::Ignored
+                }
+                WidgetEvent::PointerLeave => {
+                    if hover.get().is_some() {
+                        hover.set(None);
+                    }
+                    EventResponse::Ignored
+                }
+                _ => EventResponse::Ignored,
+            });
             ctx.apply_self_handlers(handlers);
         }
         Vec::new()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         Size::new(
             proposal.width.unwrap_or(320.0),
             proposal.height.unwrap_or(200.0),
-        ).into()
+        )
+        .into()
     }
 
     fn place_children(
@@ -281,7 +281,13 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
 
         let legend_orientation = orientation_for_position(self.legend_position);
         let legend_size = if self.show_legend {
-            legend_main_axis_size(canvas.text_backend(), &series_vec, style, &label_style, legend_orientation)
+            legend_main_axis_size(
+                canvas.text_backend(),
+                &series_vec,
+                style,
+                &label_style,
+                legend_orientation,
+            )
         } else {
             0.0
         };
@@ -423,17 +429,27 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
             .take(n)
             .map(|d| format!("{}", d.category))
             .collect();
-        self.draw_axes(canvas, theme, plot, &y_ticks, &x_labels, y_lo, y_hi, &label_style);
+        self.draw_axes(
+            canvas,
+            theme,
+            plot,
+            &y_ticks,
+            &x_labels,
+            y_lo,
+            y_hi,
+            &label_style,
+        );
 
         // ─── Hover marker + tooltip ─────────────────────────────────────
-        if self.show_hover_tooltip {
-            if let Some(hp) = self.hover.get() {
-                let hits = self.hit_index.borrow();
-                if let Some(hit) = hits.iter().find(|h| {
-                    h.series_idx == hp.series_idx && h.datum_idx == hp.datum_idx
-                }) {
-                    self.draw_hover(canvas, theme, plot, hit, &label_style);
-                }
+        if self.show_hover_tooltip
+            && let Some(hp) = self.hover.get()
+        {
+            let hits = self.hit_index.borrow();
+            if let Some(hit) = hits
+                .iter()
+                .find(|h| h.series_idx == hp.series_idx && h.datum_idx == hp.datum_idx)
+            {
+                self.draw_hover(canvas, theme, plot, hit, &label_style);
             }
         }
     }

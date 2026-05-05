@@ -70,13 +70,28 @@ const SCENE_MARGIN: f32 = 32.0;
 
 /// Story cards in reading order (top-leading to bottom-trailing).
 const CARDS: [(&str, &str); 9] = [
-    ("Act I — Opening", "An ordinary morning. The protagonist discovers a strange letter."),
-    ("Inciting Incident", "The letter names a place that shouldn't exist."),
-    ("Reluctant Departure", "After a brief argument, the protagonist sets out."),
+    (
+        "Act I — Opening",
+        "An ordinary morning. The protagonist discovers a strange letter.",
+    ),
+    (
+        "Inciting Incident",
+        "The letter names a place that shouldn't exist.",
+    ),
+    (
+        "Reluctant Departure",
+        "After a brief argument, the protagonist sets out.",
+    ),
     ("Crossing", "The journey begins. New companions, new costs."),
     ("Trials", "A series of escalating obstacles tests the team."),
-    ("Midpoint Reversal", "What seemed like progress turns out to be a trap."),
-    ("Dark Night", "The protagonist confronts what they've been avoiding."),
+    (
+        "Midpoint Reversal",
+        "What seemed like progress turns out to be a trap.",
+    ),
+    (
+        "Dark Night",
+        "The protagonist confronts what they've been avoiding.",
+    ),
     ("Resolution", "A choice. Hard, but right."),
     ("Coda", "Months later. Quiet evidence of change."),
 ];
@@ -102,9 +117,7 @@ fn scene_size() -> (f32, f32) {
     let width = SCENE_MARGIN * 2.0
         + CARDS_PER_ROW as f32 * CARD_WIDTH
         + (CARDS_PER_ROW - 1) as f32 * CARD_GAP;
-    let height = SCENE_MARGIN * 2.0
-        + ROWS as f32 * CARD_HEIGHT
-        + (ROWS - 1) as f32 * CARD_GAP;
+    let height = SCENE_MARGIN * 2.0 + ROWS as f32 * CARD_HEIGHT + (ROWS - 1) as f32 * CARD_GAP;
     (width, height)
 }
 
@@ -193,7 +206,8 @@ fn build_corkboard() -> SceneView {
         let connector_id = scene.add_item(
             PathItem::new(path, bounds)
                 .stroke(connector_color, stroke_w)
-                .access_label(format!("connector {} → {}", i + 1, i + 2)), Point::ZERO
+                .access_label(format!("connector {} → {}", i + 1, i + 2)),
+            Point::ZERO,
         );
         // Phase 5b: parent the connector under the act its source
         // card belongs to. Screen-reader users walking the AT tree

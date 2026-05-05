@@ -40,28 +40,55 @@ mod tests {
 
     #[test]
     fn ltr_default() {
-        assert_eq!(rtl_from_locale(&parse("en-US")), LayoutDirection::LeftToRight);
-        assert_eq!(rtl_from_locale(&parse("fr-FR")), LayoutDirection::LeftToRight);
-        assert_eq!(rtl_from_locale(&parse("zh-Hans")), LayoutDirection::LeftToRight);
+        assert_eq!(
+            rtl_from_locale(&parse("en-US")),
+            LayoutDirection::LeftToRight
+        );
+        assert_eq!(
+            rtl_from_locale(&parse("fr-FR")),
+            LayoutDirection::LeftToRight
+        );
+        assert_eq!(
+            rtl_from_locale(&parse("zh-Hans")),
+            LayoutDirection::LeftToRight
+        );
     }
 
     #[test]
     fn rtl_via_language() {
-        assert_eq!(rtl_from_locale(&parse("ar-SA")), LayoutDirection::RightToLeft);
-        assert_eq!(rtl_from_locale(&parse("he-IL")), LayoutDirection::RightToLeft);
-        assert_eq!(rtl_from_locale(&parse("fa-IR")), LayoutDirection::RightToLeft);
+        assert_eq!(
+            rtl_from_locale(&parse("ar-SA")),
+            LayoutDirection::RightToLeft
+        );
+        assert_eq!(
+            rtl_from_locale(&parse("he-IL")),
+            LayoutDirection::RightToLeft
+        );
+        assert_eq!(
+            rtl_from_locale(&parse("fa-IR")),
+            LayoutDirection::RightToLeft
+        );
         assert_eq!(rtl_from_locale(&parse("ur")), LayoutDirection::RightToLeft);
     }
 
     #[test]
     fn rtl_via_script_subtag() {
-        assert_eq!(rtl_from_locale(&parse("ar-Arab")), LayoutDirection::RightToLeft);
-        assert_eq!(rtl_from_locale(&parse("ks-Arab-IN")), LayoutDirection::RightToLeft);
+        assert_eq!(
+            rtl_from_locale(&parse("ar-Arab")),
+            LayoutDirection::RightToLeft
+        );
+        assert_eq!(
+            rtl_from_locale(&parse("ks-Arab-IN")),
+            LayoutDirection::RightToLeft
+        );
     }
 
     #[test]
     fn ltr_when_language_uses_latin_script() {
         // Maltese uses Latin script even though it's a Semitic language.
-        assert_eq!(rtl_from_locale(&parse("mt-MT")), LayoutDirection::LeftToRight);
+        assert_eq!(
+            rtl_from_locale(&parse("mt-MT")),
+            LayoutDirection::LeftToRight
+        );
     }
 }

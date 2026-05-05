@@ -146,26 +146,26 @@ impl SceneItem for GroupItem {
                 canvas.stroke_rect(lb, color, StrokeStyle::solid(width));
             }
         }
-        if self.show_label {
-            if let Some(label) = &self.label {
-                let color = self
-                    .label_color
-                    .or_else(|| self.stroke.map(|(c, _)| c))
-                    .unwrap_or(Color::BLACK);
-                let (dx, dy) = self.label_inset;
-                let label_bounds = Rect::new(
-                    lb.x + dx,
-                    lb.y + dy,
-                    (lb.width - 2.0 * dx).max(0.0),
-                    (lb.height - 2.0 * dy).max(0.0),
-                );
-                canvas.draw_text(
-                    label,
-                    label_bounds,
-                    &fern_tokens::TextStyle::default(),
-                    color,
-                );
-            }
+        if self.show_label
+            && let Some(label) = &self.label
+        {
+            let color = self
+                .label_color
+                .or_else(|| self.stroke.map(|(c, _)| c))
+                .unwrap_or(Color::BLACK);
+            let (dx, dy) = self.label_inset;
+            let label_bounds = Rect::new(
+                lb.x + dx,
+                lb.y + dy,
+                (lb.width - 2.0 * dx).max(0.0),
+                (lb.height - 2.0 * dy).max(0.0),
+            );
+            canvas.draw_text(
+                label,
+                label_bounds,
+                &fern_tokens::TextStyle::default(),
+                color,
+            );
         }
     }
 

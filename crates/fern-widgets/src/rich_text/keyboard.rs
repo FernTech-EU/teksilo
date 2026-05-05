@@ -193,11 +193,7 @@ pub(super) fn handle_key(
                 clipboard::cut(&mut st, ctx);
                 KeyAction::ClearPreferredX
             }
-            Key::V
-                if ctrl
-                    && shift
-                    && filter.accepts(EditCommandKind::PasteUnformatted) =>
-            {
+            Key::V if ctrl && shift && filter.accepts(EditCommandKind::PasteUnformatted) => {
                 // Ctrl+Shift+V (⌘⇧V on macOS) — paste as plain text.
                 // Matched before the plain Ctrl+V arm so the shift
                 // modifier isn't absorbed by the regular paste.
@@ -266,10 +262,7 @@ pub(super) fn handle_key(
                 }
                 KeyAction::ClearPreferredX
             }
-            Key::Enter
-                if ctrl
-                    && filter.accepts(EditCommandKind::InsertBlockForced) =>
-            {
+            Key::Enter if ctrl && filter.accepts(EditCommandKind::InsertBlockForced) => {
                 // Ctrl+Enter: always insert a new block, bypassing
                 // table-cell navigation. Matches godot
                 // rich_text_edit.rs:559-563.
@@ -297,11 +290,7 @@ pub(super) fn handle_key(
                 }
                 KeyAction::ClearPreferredX
             }
-            Key::Tab
-                if !ctrl
-                    && shift
-                    && filter.accepts(EditCommandKind::NavigateTableCell) =>
-            {
+            Key::Tab if !ctrl && shift && filter.accepts(EditCommandKind::NavigateTableCell) => {
                 // Shift+Tab (no Ctrl): previous table cell when
                 // inside a table; dedent the current list item when
                 // the caret sits anywhere inside it (matches standard
@@ -326,11 +315,7 @@ pub(super) fn handle_key(
                 }
                 KeyAction::ClearPreferredX
             }
-            Key::Tab
-                if !ctrl
-                    && !shift
-                    && filter.accepts(EditCommandKind::NavigateTableCell) =>
-            {
+            Key::Tab if !ctrl && !shift && filter.accepts(EditCommandKind::NavigateTableCell) => {
                 // Tab (no Ctrl, no Shift):
                 //  * Inside a table cell → next cell (wraps to next row;
                 //    at last cell, insert a new row below).
@@ -398,8 +383,7 @@ pub(super) fn handle_key(
                     KeyAction::Unhandled
                 } else if let Some(t) = text.as_deref() {
                     if filter.accepts(EditCommandKind::InsertChar) {
-                        let clean: String =
-                            t.chars().filter(|c| !c.is_control()).collect();
+                        let clean: String = t.chars().filter(|c| !c.is_control()).collect();
                         if !clean.is_empty() {
                             st.pending_chars.push_str(&clean);
                             KeyAction::ClearPreferredX
@@ -487,7 +471,9 @@ pub(super) fn apply_select_all_ladder(st: &mut EditorState) {
 
     match next_level {
         1 => st.cursor.select(SelectionType::BlockUnderCursor),
-        2 => st.cursor.select_table_cell(cell.table_id, cell.row, cell.column),
+        2 => st
+            .cursor
+            .select_table_cell(cell.table_id, cell.row, cell.column),
         3 => {
             st.cursor.select_cell_range(
                 cell.table_id,
@@ -635,11 +621,7 @@ fn clear_ime_preedit(state: &SharedState) {
 /// Shared helper for printable-character ingestion: push the text
 /// into `pending_chars`, clear sticky `preferred_x`, request a frame.
 /// Reused by the IME commit path.
-fn push_pending_chars(
-    state: &SharedState,
-    ctx: &mut EventContext,
-    text: &str,
-) -> EventResponse {
+fn push_pending_chars(state: &SharedState, ctx: &mut EventContext, text: &str) -> EventResponse {
     if text.is_empty() {
         return EventResponse::Ignored;
     }
@@ -819,7 +801,8 @@ fn move_cursor_page(st: &mut EditorState, direction: i32, mode: MoveMode) {
     // Move by one viewport minus one line so the reader keeps a
     // line of visual context across the page jump.
     let page_step = (viewport_h - line_height).max(line_height);
-    let target_y = (center_y + (direction as f32) * page_step).clamp(0.0, st.engine.content_height());
+    let target_y =
+        (center_y + (direction as f32) * page_step).clamp(0.0, st.engine.content_height());
 
     if let Some(hit) = st.engine.hit_test(x, target_y)
         && hit.position != pos
@@ -970,12 +953,7 @@ fn navigate_table_cell_down(
 /// `table_cell_blocks_first_position` via the table handle obtained
 /// through the current cursor's snapshot. No-op if the cell doesn't
 /// exist.
-fn move_cursor_to_cell_first_block(
-    st: &mut EditorState,
-    table_id: usize,
-    row: usize,
-    col: usize,
-) {
+fn move_cursor_to_cell_first_block(st: &mut EditorState, table_id: usize, row: usize, col: usize) {
     // Re-resolve the table via `current_table_cell` is insufficient
     // because after `insert_row_below` the cursor may still be in
     // the old cell. Walk the document's flow to find the table by
@@ -1054,11 +1032,7 @@ fn find_table_by_id(
 /// Mirrors godot rich_text_edit.rs:1755-1824. The widget's
 /// `selected_cell_range` state survives across calls so repeated
 /// Shift+Arrow presses keep extending the rectangle.
-pub(super) fn try_extend_cell_selection(
-    st: &mut EditorState,
-    dcol: i32,
-    drow: i32,
-) -> bool {
+pub(super) fn try_extend_cell_selection(st: &mut EditorState, dcol: i32, drow: i32) -> bool {
     use fern_text::text_document::SelectionKind;
 
     // If already in cell-selection mode, extend the existing range.
@@ -1080,10 +1054,8 @@ pub(super) fn try_extend_cell_selection(
             return false;
         }
 
-        let new_end_row =
-            (range.end_row as i32 + drow).clamp(0, rows as i32 - 1) as usize;
-        let new_end_col =
-            (range.end_col as i32 + dcol).clamp(0, cols as i32 - 1) as usize;
+        let new_end_row = (range.end_row as i32 + drow).clamp(0, rows as i32 - 1) as usize;
+        let new_end_col = (range.end_col as i32 + dcol).clamp(0, cols as i32 - 1) as usize;
 
         st.cursor.select_cell_range(
             range.table_id,
@@ -1100,11 +1072,7 @@ pub(super) fn try_extend_cell_selection(
     let Some(cell_ref) = st.cursor.current_table_cell() else {
         return false;
     };
-    let TableCellRef {
-        table,
-        row,
-        column,
-    } = cell_ref;
+    let TableCellRef { table, row, column } = cell_ref;
     let at_start = st.cursor.at_block_start();
     let at_end = st.cursor.at_block_end();
 
@@ -1131,4 +1099,3 @@ pub(super) fn try_extend_cell_selection(
     );
     true
 }
-

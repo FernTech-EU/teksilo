@@ -16,14 +16,14 @@ use fern_core::widget_id::WidgetId;
 use fern_i18n::resolve_message_widget;
 use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole, TextStyleRole};
 
-use crate::common::datetime::types::{today_local, YearMonth};
-use crate::common::datetime::{month_long_key, weekday_long_key};
 use crate::common::datetime::Date;
+use crate::common::datetime::types::{YearMonth, today_local};
+use crate::common::datetime::{month_long_key, weekday_long_key};
 use crate::primitives::{RectWidget, TextWidget, ZStack};
 
 use super::{
-    commit_date, is_date_disabled, DisabledDateFilter, OnActivate, OnRangeChanged,
-    OnSelectionChanged, SelectionBinding,
+    DisabledDateFilter, OnActivate, OnRangeChanged, OnSelectionChanged, SelectionBinding,
+    commit_date, is_date_disabled,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -172,10 +172,10 @@ impl Widget for DayCell {
                     let v = value.clone();
                     let a = anchor.clone();
                     v.zip(&a).map(move |(rng, anc)| {
-                        if let Some(start) = anc {
-                            if date_owned == *start {
-                                return TextRole::OnAccent;
-                            }
+                        if let Some(start) = anc
+                            && date_owned == *start
+                        {
+                            return TextRole::OnAccent;
                         }
                         if let Some(rng) = rng {
                             if date_owned == rng.start || date_owned == rng.end {
@@ -226,9 +226,10 @@ impl Widget for DayCell {
         let focus_ring_id = ctx.add(focus_ring);
         let date_owned = date;
         let calendar_focused = self.calendar_focused.clone();
-        let focus_visible = self.focused_date.zip(&calendar_focused).map(
-            move |(focused_d, has_focus)| *has_focus && *focused_d == date_owned,
-        );
+        let focus_visible = self
+            .focused_date
+            .zip(&calendar_focused)
+            .map(move |(focused_d, has_focus)| *has_focus && *focused_d == date_owned);
         ctx.visible_when(focus_ring_id, focus_visible);
 
         // Day number text.
@@ -351,10 +352,9 @@ impl Widget for DayCell {
         let date = self.date;
         let selected = match &self.selection {
             SelectionBinding::Single(sig) => sig.get() == Some(date),
-            SelectionBinding::Range { value, .. } => value
-                .get()
-                .map(|r| r.contains(date))
-                .unwrap_or(false),
+            SelectionBinding::Range { value, .. } => {
+                value.get().map(|r| r.contains(date)).unwrap_or(false)
+            }
         };
         builder.set_selected(selected);
 

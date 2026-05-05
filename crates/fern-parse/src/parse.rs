@@ -46,8 +46,8 @@ fn parse_root_impl(input: ParseStream) -> Result<FernRoot> {
 
 // Re-export the submodule parse functions for sibling modules.
 pub(crate) use body::parse_body;
-pub(crate) use element::parse_element;
-pub(crate) use property::parse_property_args;
 #[allow(unused_imports)]
 pub(crate) use cursor::{peek_binding, peek_element_start, peek_escape};
+pub(crate) use element::parse_element;
+pub(crate) use property::parse_property_args;
 pub(crate) use structural::{parse_for, parse_if, parse_match, parse_spread, peek_spread};

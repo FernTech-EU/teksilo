@@ -19,9 +19,7 @@ fn fruits() -> Vec<&'static str> {
 fn combo_box_builds_and_lays_out() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
-    let cb = tree.add(
-        ComboBox::new(fruits(), selected.clone()).placeholder("Select..."),
-    );
+    let cb = tree.add(ComboBox::new(fruits(), selected.clone()).placeholder("Select..."));
     tree.layout(SizeProposal::exact(300.0, 50.0));
     let bounds = tree.bounds(cb);
     assert!(bounds.width >= 120.0);
@@ -43,9 +41,7 @@ fn combo_box_accessibility_role() {
 fn accessibility_exposes_label_via_set_name() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
-    let cb = tree.add(
-        ComboBox::new(vec!["Apple", "Banana"], selected.clone()).label("Fruit"),
-    );
+    let cb = tree.add(ComboBox::new(vec!["Apple", "Banana"], selected.clone()).label("Fruit"));
     tree.layout(SizeProposal::exact(200.0, 50.0));
     let info = tree.accessibility_node(cb);
     assert_eq!(info.name(), Some("Fruit"));
@@ -300,9 +296,18 @@ struct Fruit {
 
 fn fruit_list() -> Vec<Fruit> {
     vec![
-        Fruit { name: "Apple", emoji: "🍎" },
-        Fruit { name: "Banana", emoji: "🍌" },
-        Fruit { name: "Cherry", emoji: "🍒" },
+        Fruit {
+            name: "Apple",
+            emoji: "🍎",
+        },
+        Fruit {
+            name: "Banana",
+            emoji: "🍌",
+        },
+        Fruit {
+            name: "Cherry",
+            emoji: "🍒",
+        },
     ]
 }
 
@@ -329,9 +334,11 @@ fn model_backed_combo_reflects_insertions_via_clicks() {
     let mut tree = light_tree();
     let model = ListModel::from_vec(vec!["Apple".to_string(), "Cherry".to_string()]);
     let selected = Signal::new(None::<String>);
-    let cb = tree.add(
-        ComboBox::from_model(model.clone(), selected.clone(), |s: &String| s.clone()),
-    );
+    let cb = tree.add(ComboBox::from_model(
+        model.clone(),
+        selected.clone(),
+        |s: &String| s.clone(),
+    ));
     tree.layout(SizeProposal::exact(300.0, 400.0));
 
     // Insert Banana between Apple and Cherry — model is now [Apple, Banana, Cherry].
@@ -366,9 +373,11 @@ fn model_backed_combo_resets_selection_on_remove() {
         "Cherry".to_string(),
     ]);
     let selected = Signal::new(Some("Banana".to_string()));
-    tree.add(
-        ComboBox::from_model(model.clone(), selected.clone(), |s: &String| s.clone()),
-    );
+    tree.add(ComboBox::from_model(
+        model.clone(),
+        selected.clone(),
+        |s: &String| s.clone(),
+    ));
     tree.layout(SizeProposal::exact(300.0, 200.0));
 
     // Remove the selected item.
@@ -387,11 +396,11 @@ fn typed_selection_survives_reorder() {
         name: "Banana",
         emoji: "🍌",
     }));
-    tree.add(
-        ComboBox::from_model(model.clone(), selected.clone(), |f: &Fruit| {
-            f.name.to_string()
-        }),
-    );
+    tree.add(ComboBox::from_model(
+        model.clone(),
+        selected.clone(),
+        |f: &Fruit| f.name.to_string(),
+    ));
     tree.layout(SizeProposal::exact(300.0, 200.0));
 
     // Move Banana from index 1 to index 0.
@@ -650,9 +659,7 @@ fn page_up_down_scrolls_by_viewport_in_virtualized_combo() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
     let labels: Vec<String> = (0..200).map(|i| format!("Row {i}")).collect();
-    let cb = tree.add(
-        ComboBox::new(labels.clone(), selected.clone()).max_visible_items(8),
-    );
+    let cb = tree.add(ComboBox::new(labels.clone(), selected.clone()).max_visible_items(8));
     tree.layout(SizeProposal::exact(300.0, 600.0));
     tree.focus(cb);
     tree.click(cb);
@@ -703,9 +710,7 @@ fn scrollbar_thumb_drag_survives_midflight_rebuild() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
     let labels: Vec<String> = (0..2_000).map(|i| format!("Row {i}")).collect();
-    let cb = tree.add(
-        ComboBox::new(labels.clone(), selected.clone()).max_visible_items(8),
-    );
+    let cb = tree.add(ComboBox::new(labels.clone(), selected.clone()).max_visible_items(8));
     tree.layout(SizeProposal::exact(300.0, 600.0));
     tree.click(cb);
     tree.layout(SizeProposal::exact(300.0, 600.0));
@@ -780,9 +785,7 @@ fn wheel_keeps_targeting_list_after_scroll_driven_rebuild() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
     let labels: Vec<String> = (0..2_000).map(|i| format!("Row {i}")).collect();
-    let cb = tree.add(
-        ComboBox::new(labels.clone(), selected.clone()).max_visible_items(8),
-    );
+    let cb = tree.add(ComboBox::new(labels.clone(), selected.clone()).max_visible_items(8));
     tree.layout(SizeProposal::exact(300.0, 600.0));
     tree.click(cb);
     tree.layout(SizeProposal::exact(300.0, 600.0));
@@ -801,10 +804,7 @@ fn wheel_keeps_targeting_list_after_scroll_driven_rebuild() {
     // ListView with an 8-row viewport, ~16 rows is the buffer; scroll
     // past that.
     tree.dispatch_event(WidgetEvent::Scroll {
-        delta: fern_core::event::ScrollDelta::Pixels {
-            x: 0.0,
-            y: 1_000.0,
-        },
+        delta: fern_core::event::ScrollDelta::Pixels { x: 0.0, y: 1_000.0 },
         modifiers: Default::default(),
     });
     tree.layout(SizeProposal::exact(300.0, 600.0));
@@ -819,10 +819,7 @@ fn wheel_keeps_targeting_list_after_scroll_driven_rebuild() {
     // 3 000 px → row ~125 visible).
     let before = materialized_range(&tree, 100..200);
     tree.dispatch_event(WidgetEvent::Scroll {
-        delta: fern_core::event::ScrollDelta::Pixels {
-            x: 0.0,
-            y: 2_000.0,
-        },
+        delta: fern_core::event::ScrollDelta::Pixels { x: 0.0, y: 2_000.0 },
         modifiers: Default::default(),
     });
     tree.layout(SizeProposal::exact(300.0, 600.0));
@@ -837,10 +834,7 @@ fn wheel_keeps_targeting_list_after_scroll_driven_rebuild() {
     );
 }
 
-fn materialized_range(
-    tree: &WidgetTree,
-    range: std::ops::Range<usize>,
-) -> usize {
+fn materialized_range(tree: &WidgetTree, range: std::ops::Range<usize>) -> usize {
     range
         .filter(|i| tree.find_by_label(&format!("Row {i}")).is_some())
         .count()
@@ -855,9 +849,7 @@ fn scrollbar_thumb_drag_scrolls_virtualized_combo() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
     let labels: Vec<String> = (0..500).map(|i| format!("Row {i}")).collect();
-    let cb = tree.add(
-        ComboBox::new(labels.clone(), selected.clone()).max_visible_items(8),
-    );
+    let cb = tree.add(ComboBox::new(labels.clone(), selected.clone()).max_visible_items(8));
     tree.layout(SizeProposal::exact(300.0, 600.0));
     tree.click(cb);
     tree.layout(SizeProposal::exact(300.0, 600.0));
@@ -882,7 +874,10 @@ fn scrollbar_thumb_drag_scrolls_virtualized_combo() {
     let sb_id = find_scrollbar_like(&tree, panel_root)
         .expect("virtualized panel must expose a scrollbar sibling");
     let sb_bounds = tree.bounds(sb_id);
-    assert!(sb_bounds.width > 0.0, "scrollbar should have positive width");
+    assert!(
+        sb_bounds.width > 0.0,
+        "scrollbar should have positive width"
+    );
     assert!(
         sb_bounds.height > 0.0,
         "scrollbar should have positive height"
@@ -971,11 +966,12 @@ fn render_item_closure_receives_selection_snapshot_at_build() {
     let items = vec!["Apple".to_string(), "Banana".to_string()];
     let obs = observed.clone();
     let cb = tree.add(
-        ComboBox::from_items(items, selected.clone(), |s: &String| s.clone())
-            .render_item(move |item, is_selected| {
+        ComboBox::from_items(items, selected.clone(), |s: &String| s.clone()).render_item(
+            move |item, is_selected| {
                 obs.lock().unwrap().push((item.clone(), is_selected));
                 Box::new(crate::primitives::MinSize::new(10.0, 10.0))
-            }),
+            },
+        ),
     );
     tree.layout(SizeProposal::exact(300.0, 300.0));
     tree.click(cb);
@@ -1025,10 +1021,7 @@ fn custom_render_item_used() {
 /// Invoke `Widget::accessibility` on the widget at `id` and return the
 /// resulting raw `accesskit::Node` for inspection of properties not
 /// surfaced by `AccessibilityInfo` (placeholder, controls, auto_complete).
-fn build_raw_a11y_node(
-    tree: &mut WidgetTree,
-    id: WidgetId,
-) -> fern_core::accesskit::Node {
+fn build_raw_a11y_node(tree: &mut WidgetTree, id: WidgetId) -> fern_core::accesskit::Node {
     use fern_core::accessibility::widget_id_to_node_id;
     let update = tree.sync_accessibility();
     let target = widget_id_to_node_id(id);
@@ -1071,9 +1064,7 @@ fn accessibility_trigger_controls_popup() {
 fn accessibility_placeholder_when_no_selection() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
-    let cb = tree.add(
-        ComboBox::new(fruits(), selected.clone()).placeholder("Select a fruit"),
-    );
+    let cb = tree.add(ComboBox::new(fruits(), selected.clone()).placeholder("Select a fruit"));
     tree.layout(SizeProposal::exact(300.0, 200.0));
 
     let node = build_raw_a11y_node(&mut tree, cb);
@@ -1085,9 +1076,7 @@ fn accessibility_placeholder_when_no_selection() {
 fn accessibility_value_when_selection_present() {
     let mut tree = light_tree();
     let selected = Signal::new(Some("Banana".to_string()));
-    let cb = tree.add(
-        ComboBox::new(fruits(), selected.clone()).placeholder("Select a fruit"),
-    );
+    let cb = tree.add(ComboBox::new(fruits(), selected.clone()).placeholder("Select a fruit"));
     tree.layout(SizeProposal::exact(300.0, 200.0));
 
     let node = build_raw_a11y_node(&mut tree, cb);
@@ -1126,10 +1115,22 @@ fn searchable_filters_list_to_matching_items() {
     query.set("B".to_string());
     tree.layout(SizeProposal::exact(400.0, 500.0));
 
-    assert!(tree.find_by_label("Apple").is_none(), "Apple should be filtered out");
-    assert!(tree.find_by_label("Cherry").is_none(), "Cherry should be filtered out");
-    assert!(tree.find_by_label("Banana").is_some(), "Banana should still be visible");
-    assert!(tree.find_by_label("Blueberry").is_some(), "Blueberry should still be visible");
+    assert!(
+        tree.find_by_label("Apple").is_none(),
+        "Apple should be filtered out"
+    );
+    assert!(
+        tree.find_by_label("Cherry").is_none(),
+        "Cherry should be filtered out"
+    );
+    assert!(
+        tree.find_by_label("Banana").is_some(),
+        "Banana should still be visible"
+    );
+    assert!(
+        tree.find_by_label("Blueberry").is_some(),
+        "Blueberry should still be visible"
+    );
 }
 
 #[cfg(feature = "rich-text")]
@@ -1160,7 +1161,10 @@ fn searchable_custom_filter_is_consulted() {
     query.set("xyz".to_string()); // length 3 → only "abc" matches
     tree.layout(SizeProposal::exact(400.0, 500.0));
 
-    assert!(CALLS.load(Ordering::SeqCst) >= 3, "filter should have been called per item");
+    assert!(
+        CALLS.load(Ordering::SeqCst) >= 3,
+        "filter should have been called per item"
+    );
     assert!(tree.find_by_label("ab").is_none());
     assert!(tree.find_by_label("abc").is_some());
     assert!(tree.find_by_label("abcd").is_none());
@@ -1318,10 +1322,8 @@ fn enter_from_search_field_closes_dropdown() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
     let query = Signal::new(String::new());
-    let cb = tree.add(
-        ComboBox::new(vec!["Apple", "Banana"], selected.clone())
-            .search_query(query.clone()),
-    );
+    let cb = tree
+        .add(ComboBox::new(vec!["Apple", "Banana"], selected.clone()).search_query(query.clone()));
     tree.layout(SizeProposal::exact(400.0, 500.0));
     tree.click(cb);
     tree.layout(SizeProposal::exact(400.0, 500.0));
@@ -1341,10 +1343,8 @@ fn searchable_opens_with_focus_in_search_field() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
     let query = Signal::new(String::new());
-    let cb = tree.add(
-        ComboBox::new(vec!["Apple", "Banana"], selected.clone())
-            .search_query(query.clone()),
-    );
+    let cb = tree
+        .add(ComboBox::new(vec!["Apple", "Banana"], selected.clone()).search_query(query.clone()));
     tree.layout(SizeProposal::exact(400.0, 500.0));
 
     tree.click(cb);

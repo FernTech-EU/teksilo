@@ -184,8 +184,7 @@ mod tests {
         let new_pan =
             anchor_pan_for_pinch(center, old_pan, 1.0, 0.0, 2.0, 0.0, bounds_origin).unwrap();
 
-        let new_effective_pan =
-            Vec2::new(new_pan.x + bounds_origin.x, new_pan.y + bounds_origin.y);
+        let new_effective_pan = Vec2::new(new_pan.x + bounds_origin.x, new_pan.y + bounds_origin.y);
         let new_view = compose_view(new_effective_pan, 2.0, 0.0);
         let projected = new_view.apply_point(Point::new(200.0, 100.0));
         assert!(

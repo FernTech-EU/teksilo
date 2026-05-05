@@ -39,11 +39,11 @@ fn main() {
                     let collapse_expanded = Signal::new(false);
                     let fade_visible = Signal::new(true);
                     tree.add(
-                        ScrollArea::new().child(
-                            Padding::uniform(24.0).child(
-                                build_kit(toggle_state, collapse_expanded, fade_visible),
-                            ),
-                        ),
+                        ScrollArea::new().child(Padding::uniform(24.0).child(build_kit(
+                            toggle_state,
+                            collapse_expanded,
+                            fade_visible,
+                        ))),
                     )
                 }),
         )
@@ -97,13 +97,9 @@ fn build_kit(
              natural size at all opacity values.",
         ))
         .child(toggle_button("Toggle Fade", fade_visible.clone()))
-        .child(
-            Fade::new(fade_visible).child(
-                TextWidget::new_literal(
-                    "  ●  Faded content — opacity tweens between 0 and 1.",
-                ),
-            ),
-        )
+        .child(Fade::new(fade_visible).child(TextWidget::new_literal(
+            "  ●  Faded content — opacity tweens between 0 and 1.",
+        )))
         .child(Divider::new())
         .child(section_header("Spinner"))
         .child(caption(
@@ -139,9 +135,7 @@ fn build_kit(
         .child(
             Button::new_literal("Hover me")
                 .style(ButtonVariant::Default)
-                .tooltip_literal(
-                    "I fade in and out over `motion.duration_fast` (~120 ms).",
-                ),
+                .tooltip_literal("I fade in and out over `motion.duration_fast` (~120 ms)."),
         )
         .child(Divider::new())
         .child(section_header("Pulse"))
@@ -150,20 +144,20 @@ fn build_kit(
              attention-beacon pattern. Layout-transparent, like Fade.",
         ))
         .child(
-            HStack::new().spacing(12.0).child(
-                Pulse::opacity(0.25, 1.0)
-                    .period(Duration::from_millis(1100))
-                    .child(
-                        FixedSize::new()
-                            .bind_width(14.0)
-                            .bind_height(14.0)
-                            .child(
+            HStack::new()
+                .spacing(12.0)
+                .child(
+                    Pulse::opacity(0.25, 1.0)
+                        .period(Duration::from_millis(1100))
+                        .child(
+                            FixedSize::new().bind_width(14.0).bind_height(14.0).child(
                                 RectWidget::new()
                                     .background(Color::from_rgb(0.85, 0.18, 0.20))
                                     .corner_radius(CornerRadius::uniform(7.0)),
                             ),
-                    ),
-            ).child(TextWidget::new_literal("REC")),
+                        ),
+                )
+                .child(TextWidget::new_literal("REC")),
         )
         .child(Divider::new())
         .child(section_header("Cycle"))
@@ -225,7 +219,9 @@ fn build_kit(
                 1 => "📊  Page B — details",
                 _ => "🔧  Page C — settings",
             };
-            Box::new(Panel::new().child(Padding::uniform(16.0).child(TextWidget::new_literal(label))))
+            Box::new(
+                Panel::new().child(Padding::uniform(16.0).child(TextWidget::new_literal(label))),
+            )
         }))
         .child(Divider::new())
         .child(section_header("Slide"))
@@ -237,13 +233,9 @@ fn build_kit(
         .child(
             Slide::new(slide_visible.clone())
                 .from(SlideEdge::Trailing)
-                .child(
-                    Fade::new(slide_visible).child(
-                        Card::new().content(TextWidget::new_literal(
-                            "⚠  Banner — slides + fades.",
-                        )),
-                    ),
-                ),
+                .child(Fade::new(slide_visible).child(
+                    Card::new().content(TextWidget::new_literal("⚠  Banner — slides + fades.")),
+                )),
         )
         .child(Divider::new())
         .child(section_header("Shake"))
@@ -254,12 +246,9 @@ fn build_kit(
         .child(
             VStack::new()
                 .spacing(8.0)
-                .child(
-                    Shake::new(shake_trigger.clone()).child(
-                        Card::new()
-                            .content(TextWidget::new_literal("incorrect-password-input-field")),
-                    ),
-                )
+                .child(Shake::new(shake_trigger.clone()).child(
+                    Card::new().content(TextWidget::new_literal("incorrect-password-input-field")),
+                ))
                 .child(
                     Button::new_literal("Submit")
                         .style(ButtonVariant::Regular)
@@ -277,11 +266,9 @@ fn build_kit(
         ))
         .child(toggle_button("Toggle Scale", scale_visible.clone()))
         .child(
-            Scale::new(scale_visible).child(
-                Card::new().content(TextWidget::new_literal(
-                    "I shrink/grow visually around my center.",
-                )),
-            ),
+            Scale::new(scale_visible).child(Card::new().content(TextWidget::new_literal(
+                "I shrink/grow visually around my center.",
+            ))),
         )
         .child(Divider::new())
         .child(section_header("Scale (reflow)"))
@@ -319,30 +306,17 @@ fn build_kit(
                     // a 6×6 black reference dot centered on top. If
                     // Rotate's pivot matches the slot center, the cube
                     // rotates around the dot.
-                    FixedSize::new()
-                        .bind_width(80.0)
-                        .bind_height(80.0)
-                        .child(
-                            ZStack::new()
-                                .child(
-                                    Rotate::new(rotate_angle.clone()).child(
-                                        RectWidget::new()
-                                            .background(Color::from_rgb(0.30, 0.55, 0.85)),
-                                    ),
-                                )
-                                .child(
-                                    Center::new().child(
-                                        FixedSize::new()
-                                            .bind_width(6.0)
-                                            .bind_height(6.0)
-                                            .child(
-                                                RectWidget::new().background(
-                                                    Color::from_rgb(0.0, 0.0, 0.0),
-                                                ),
-                                            ),
-                                    ),
+                    FixedSize::new().bind_width(80.0).bind_height(80.0).child(
+                        ZStack::new()
+                            .child(Rotate::new(rotate_angle.clone()).child(
+                                RectWidget::new().background(Color::from_rgb(0.30, 0.55, 0.85)),
+                            ))
+                            .child(Center::new().child(
+                                FixedSize::new().bind_width(6.0).bind_height(6.0).child(
+                                    RectWidget::new().background(Color::from_rgb(0.0, 0.0, 0.0)),
                                 ),
-                        ),
+                            )),
+                    ),
                 )
                 .child({
                     let angle = rotate_angle.clone();

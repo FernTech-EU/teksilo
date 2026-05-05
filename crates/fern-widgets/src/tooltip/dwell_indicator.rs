@@ -61,17 +61,26 @@ impl Widget for DwellIndicator {
         // contents.
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
-        self.step.bind_to(self_id, registry, BindingLevel::RepaintOnly);
-        self.sticky.bind_to(self_id, registry, BindingLevel::RepaintOnly);
+        self.step
+            .bind_to(self_id, registry, BindingLevel::RepaintOnly);
+        self.sticky
+            .bind_to(self_id, registry, BindingLevel::RepaintOnly);
         Vec::new()
     }
 
-    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        _proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         Size::new(DWELL_INDICATOR_SIZE, DWELL_INDICATOR_SIZE).into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
-        let center = Point::new(bounds.x + bounds.width / 2.0, bounds.y + bounds.height / 2.0);
+        let center = Point::new(
+            bounds.x + bounds.width / 2.0,
+            bounds.y + bounds.height / 2.0,
+        );
         let radius = (bounds.width.min(bounds.height) / 2.0) - 1.0;
         let color = self.color;
         let sticky = self.sticky.get();

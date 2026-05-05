@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 pub mod accessibility;
 pub mod action;
 pub mod animated_quad;
@@ -5,6 +7,7 @@ pub mod animation;
 pub mod animation_builder;
 pub mod app_event;
 pub mod arena;
+pub mod binding;
 pub mod build_context;
 pub mod color_prop;
 pub mod drag_payload;
@@ -23,7 +26,6 @@ pub mod raw_handle;
 pub mod shortcut;
 pub mod signal;
 pub mod telemetry;
-pub mod binding;
 pub mod widget;
 pub mod widget_builder;
 pub mod widget_builder_branching;
@@ -36,10 +38,14 @@ pub mod window_chrome;
 pub(crate) mod test_widgets;
 
 pub use accessibility::{AccessNodeBuilder, AccessibilityInfo};
+pub use action::{Action, ActionBuilder, ActionHandler};
 pub use animated_quad::{AnimatedQuadHandle, AnimatedQuadKind, AnimatedQuadRegistry};
+pub use animation::AnimationRequest;
 pub use animation::AnimationScheduler;
+pub use animation_builder::AnimationSpec;
 pub use app_event::AppEvent;
 pub use arena::WidgetArena;
+pub use binding::{BindingLevel, BindingRegistry};
 pub use build_context::BuildContext;
 pub use color_prop::{ColorProp, TextStyleProp};
 pub use drag_payload::{DragData, DragPayload};
@@ -54,10 +60,11 @@ pub use event_source::{
 pub use focus::{FocusOrigin, FocusPolicy};
 pub use gesture::{
     DoubleTapRecognizer, DragRecognizer, GestureArena, GestureEvent, GestureRecognizer,
-    GestureResult, LongPressRecognizer, RawPointerEvent, SwipeDirection, SwipeRecognizer,
-    TapEvent, TapRecognizer, TripleTapRecognizer,
+    GestureResult, LongPressRecognizer, RawPointerEvent, SwipeDirection, SwipeRecognizer, TapEvent,
+    TapRecognizer, TripleTapRecognizer,
 };
 pub use idle::IdleDeadline;
+pub use intent::{Intent, IntentKind, IntentResponse};
 pub use modal::{
     ModalBuilder, ModalCloseBehavior, ModalContent, ModalPresentation, ModalRequest,
     QueuedModalRequest,
@@ -66,16 +73,11 @@ pub use overlay::{
     DismissBehavior, OverlayId, OverlayLayer, OverlayManager, OverlayPlacement, OverlayRequest,
 };
 pub use raw_handle::ParentHandle;
-pub use action::{Action, ActionBuilder, ActionHandler};
-pub use intent::{Intent, IntentKind, IntentResponse};
 pub use shortcut::{
     CaptureHandle, EffectiveShortcut, KeyCaptureCallback, KeyStroke, KeyStrokeOverride, Shortcut,
     ShortcutBuilder, ShortcutOnActivate, ShortcutRegistry, ShortcutScope, SlotOverride,
 };
-pub use animation::AnimationRequest;
-pub use animation_builder::AnimationSpec;
 pub use signal::{ObserverHandle, Prop, Signal, SignalAccessError};
-pub use binding::{BindingLevel, BindingRegistry};
 pub use widget::{
     CursorIcon, EventContext, LayoutContext, LayoutResponse, PaintContext, PendingChild, Widget,
     WidgetPlacement,
@@ -88,12 +90,12 @@ pub use widget_builder_branching::{
 };
 pub use widget_id::WidgetId;
 pub use widget_tree::WidgetTree;
+pub use window::state::WindowStateInit;
 pub use window::{
     DecorationsMode, FernWindowId, ModalConfig, NoopWindowOps, PostRootBuilder, RootBuilder,
     UserAttentionKind, WindowCommand, WindowConfig, WindowIcon, WindowOps, WindowPlacement,
     WindowState,
 };
-pub use window::state::WindowStateInit;
 pub use window_chrome::{
     ControlTarget, HitRegions, PlatformError, PlatformTitleBarHost, ResizeBorders, ResizeEdge,
     TitleBarHostCallbacks, TitleBarHoverEvent, TitleBarSyntheticEvent,

@@ -96,11 +96,7 @@ impl<T: MruEntry> Clone for MruList<T> {
 
 impl<T: MruEntry> MruList<T> {
     /// Open at `<paths.config_dir()>/<name>.toml`, default debounce.
-    pub fn open(
-        paths: &AppPaths,
-        name: &str,
-        max_items: usize,
-    ) -> Result<Self, SettingsFileError> {
+    pub fn open(paths: &AppPaths, name: &str, max_items: usize) -> Result<Self, SettingsFileError> {
         Self::open_with_delay(paths, name, max_items, DEFAULT_DEBOUNCE)
     }
 
@@ -222,9 +218,7 @@ impl<T: MruEntry> MruList<T> {
 
     fn find_index(&self, key: &T::Key) -> Option<usize> {
         let model = self.persisted.model();
-        (0..model.len()).find(|&i| {
-            model.with_item(i, |t| t.key() == key).unwrap_or(false)
-        })
+        (0..model.len()).find(|&i| model.with_item(i, |t| t.key() == key).unwrap_or(false))
     }
 
     fn cap_to_max(&self) {
@@ -322,10 +316,7 @@ mod tests {
         mru.add(DemoItem::new("/a", "A"));
         mru.add(DemoItem::new("/b", "B"));
         assert_eq!(mru.model().len(), 2);
-        assert_eq!(
-            mru.model().with_item(0, |i| i.name.clone()).unwrap(),
-            "B"
-        );
+        assert_eq!(mru.model().with_item(0, |i| i.name.clone()).unwrap(), "B");
     }
 
     #[test]
@@ -341,10 +332,7 @@ mod tests {
             mru.model().with_item(0, |i| i.name.clone()).unwrap(),
             "A again"
         );
-        assert_eq!(
-            mru.model().with_item(1, |i| i.name.clone()).unwrap(),
-            "B"
-        );
+        assert_eq!(mru.model().with_item(1, |i| i.name.clone()).unwrap(), "B");
     }
 
     #[test]
@@ -353,10 +341,7 @@ mod tests {
         let mru = open(dir.path(), 5);
         mru.add(DemoItem::new("/a", "A").pinned());
         mru.add(DemoItem::new("/a", "A renamed")); // not pinned in arg
-        assert_eq!(
-            mru.model().with_item(0, |i| i.pinned).unwrap(),
-            true
-        );
+        assert!(mru.model().with_item(0, |i| i.pinned).unwrap());
     }
 
     #[test]
@@ -404,11 +389,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let mru = open(dir.path(), 5);
         mru.add(DemoItem::new("/a", "A"));
-        assert_eq!(mru.model().with_item(0, |i| i.pinned).unwrap(), false);
+        assert!(!mru.model().with_item(0, |i| i.pinned).unwrap());
         mru.toggle_pin(Path::new("/a"));
-        assert_eq!(mru.model().with_item(0, |i| i.pinned).unwrap(), true);
+        assert!(mru.model().with_item(0, |i| i.pinned).unwrap());
         mru.toggle_pin(Path::new("/a"));
-        assert_eq!(mru.model().with_item(0, |i| i.pinned).unwrap(), false);
+        assert!(!mru.model().with_item(0, |i| i.pinned).unwrap());
     }
 
     #[test]
@@ -432,10 +417,7 @@ mod tests {
         }
         let mru = open(dir.path(), 5);
         assert_eq!(mru.model().len(), 2);
-        assert_eq!(
-            mru.model().with_item(0, |i| i.name.clone()).unwrap(),
-            "Bar"
-        );
+        assert_eq!(mru.model().with_item(0, |i| i.name.clone()).unwrap(), "Bar");
     }
 
     /// A second item type with a non-Path key — proves the trait

@@ -221,9 +221,7 @@ impl PersistentEventQueue {
         Ok(())
     }
 
-    fn next_id_locked(
-        write_txn: &redb::WriteTransaction,
-    ) -> Result<u64, PersistentQueueError> {
+    fn next_id_locked(write_txn: &redb::WriteTransaction) -> Result<u64, PersistentQueueError> {
         let mut next_id_table = write_txn.open_table(NEXT_ID)?;
         let current = next_id_table
             .get(NEXT_ID_KEY)?
@@ -282,18 +280,21 @@ impl EventQueue for PersistentEventQueue {
                     let bytes = v.value();
                     match serde_json::from_slice::<PersistedRecord>(bytes) {
                         Ok(rec) => taken.push((key, rec.event)),
-                        Err(_) => taken.push((key, OwnedEvent {
-                            // Synthesize a placeholder for corrupt
-                            // entries so the caller sees an event
-                            // count but the bad row gets removed.
-                            name: "telemetry.corrupt".into(),
-                            category: fern_core::telemetry::EventCategory::Custom,
-                            timestamp: SystemTime::UNIX_EPOCH,
-                            install_id: None,
-                            session_id: String::new(),
-                            schema_version: 0,
-                            props: vec![],
-                        })),
+                        Err(_) => taken.push((
+                            key,
+                            OwnedEvent {
+                                // Synthesize a placeholder for corrupt
+                                // entries so the caller sees an event
+                                // count but the bad row gets removed.
+                                name: "telemetry.corrupt".into(),
+                                category: fern_core::telemetry::EventCategory::Custom,
+                                timestamp: SystemTime::UNIX_EPOCH,
+                                install_id: None,
+                                session_id: String::new(),
+                                schema_version: 0,
+                                props: vec![],
+                            },
+                        )),
                     }
                 }
             }
@@ -316,14 +317,12 @@ impl EventQueue for PersistentEventQueue {
 
     fn len(&self) -> usize {
         let db = self.db.lock().expect("queue db mutex poisoned");
-        match (|| -> Result<usize, PersistentQueueError> {
+        (|| -> Result<usize, PersistentQueueError> {
             let read_txn = db.begin_read()?;
             let events = read_txn.open_table(EVENTS)?;
             Ok(events.len()? as usize)
-        })() {
-            Ok(n) => n,
-            Err(_) => 0,
-        }
+        })()
+        .unwrap_or_default()
     }
 
     fn discard_all(&self) {
@@ -349,7 +348,7 @@ impl EventQueue for PersistentEventQueue {
 
     fn peek_recent(&self, n: usize) -> Vec<OwnedEvent> {
         let db = self.db.lock().expect("queue db mutex poisoned");
-        match (|| -> Result<Vec<OwnedEvent>, PersistentQueueError> {
+        (|| -> Result<Vec<OwnedEvent>, PersistentQueueError> {
             let read_txn = db.begin_read()?;
             let events = read_txn.open_table(EVENTS)?;
             let mut out = Vec::with_capacity(n);
@@ -367,10 +366,8 @@ impl EventQueue for PersistentEventQueue {
                 }
             }
             Ok(out)
-        })() {
-            Ok(out) => out,
-            Err(_) => Vec::new(),
-        }
+        })()
+        .unwrap_or_default()
     }
 }
 

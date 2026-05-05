@@ -8,7 +8,7 @@
 //! - Bindings auto-registered via register_bindings (no manual bind_to)
 //! - Minimum touch target size from theme
 
-use fern_canvas::{Rect, Size, SizeProposal};
+use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
@@ -16,10 +16,10 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{BorderRole, Color, ColorTokens, CornerRadius, SurfaceRole, TextRole};
+use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole};
 
-use crate::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
 use crate::primitives::icon_widget::IconWidget;
+use crate::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
 
 /// Visual role of the button.
 ///
@@ -74,9 +74,8 @@ pub enum IconLocation {
     Trailing,
     /// Icon above the label.
     Top,
-     /// Icon below the label.
+    /// Icon below the label.
     Bottom,
-
 }
 
 /// A production-quality button widget — non-generic, composition-based.
@@ -311,10 +310,7 @@ impl Button {
     /// by the TextWidget. `new_literal("")` seeds the placeholder
     /// initial text; `bind_text` immediately overwrites it with the
     /// prop's current value (and tracks updates for `Prop::Bound`).
-    fn make_label_text(
-        &self,
-        color: impl Into<fern_core::color_prop::ColorProp>,
-    ) -> TextWidget {
+    fn make_label_text(&self, color: impl Into<fern_core::color_prop::ColorProp>) -> TextWidget {
         TextWidget::new_literal("")
             .bind_text(self.label.clone())
             .bind_color(color)
@@ -386,7 +382,12 @@ fn resolve_border_role(style: ButtonVariant, state: InteractionState) -> BorderR
 /// so the accent border is visually distinct; otherwise the
 /// variant-specific rest width (0 dp for Default/Flat, 1 dp for
 /// Regular).
-fn resolve_border_width(style: ButtonVariant, state: InteractionState, normal_bw: f32, focus_bw: f32) -> f32 {
+fn resolve_border_width(
+    style: ButtonVariant,
+    state: InteractionState,
+    normal_bw: f32,
+    focus_bw: f32,
+) -> f32 {
     if state == InteractionState::Focused {
         return focus_bw;
     }
@@ -452,9 +453,8 @@ impl fern_core::widget::Widget for Button {
         let border_role = interaction.map(move |s| resolve_border_role(style, *s));
         let normal_bw = button_style.border_width;
         let focus_bw = ctx.theme_signal().get().shape.focus_ring_width;
-        let border_width = interaction.map(move |s| {
-            resolve_border_width(style, *s, normal_bw, focus_bw)
-        });
+        let border_width =
+            interaction.map(move |s| resolve_border_width(style, *s, normal_bw, focus_bw));
 
         // Build the content (icon + label) based on icon_location
         let content_id = match self.icon_location {
@@ -463,13 +463,20 @@ impl fern_core::widget::Widget for Button {
                 ctx.add(text)
             }
             IconLocation::IconOnly => {
-                let icon = self.icon.take().unwrap_or_else(|| IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size));
+                let icon = self.icon.take().unwrap_or_else(|| {
+                    IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size)
+                });
                 let icon = icon.icon_size(button_style.icon_size).bind_color(text_role);
                 ctx.add(icon)
             }
             IconLocation::Leading => {
-                let icon = self.icon.take().unwrap_or_else(|| IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size));
-                let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_role.clone()));
+                let icon = self.icon.take().unwrap_or_else(|| {
+                    IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size)
+                });
+                let icon_id = ctx.add(
+                    icon.icon_size(button_style.icon_size)
+                        .bind_color(text_role.clone()),
+                );
                 let text = self.make_label_text(text_role);
                 let text_id = ctx.add(text);
                 ctx.add(
@@ -482,7 +489,9 @@ impl fern_core::widget::Widget for Button {
             IconLocation::Trailing => {
                 let text = self.make_label_text(text_role.clone());
                 let text_id = ctx.add(text);
-                let icon = self.icon.take().unwrap_or_else(|| IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size));
+                let icon = self.icon.take().unwrap_or_else(|| {
+                    IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size)
+                });
                 let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_role));
                 ctx.add(
                     HStack::new()
@@ -492,8 +501,13 @@ impl fern_core::widget::Widget for Button {
                 )
             }
             IconLocation::Top => {
-                let icon = self.icon.take().unwrap_or_else(|| IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size));
-                let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_role.clone()));
+                let icon = self.icon.take().unwrap_or_else(|| {
+                    IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size)
+                });
+                let icon_id = ctx.add(
+                    icon.icon_size(button_style.icon_size)
+                        .bind_color(text_role.clone()),
+                );
                 let text = self.make_label_text(text_role);
                 let text_id = ctx.add(text);
                 ctx.add(
@@ -506,7 +520,9 @@ impl fern_core::widget::Widget for Button {
             IconLocation::Bottom => {
                 let text = self.make_label_text(text_role.clone());
                 let text_id = ctx.add(text);
-                let icon = self.icon.take().unwrap_or_else(|| IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size));
+                let icon = self.icon.take().unwrap_or_else(|| {
+                    IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size)
+                });
                 let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_role));
                 ctx.add(
                     VStack::new()
@@ -694,13 +710,18 @@ impl fern_core::widget::Widget for Button {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         match self.root_child_id {
             Some(root_id) => ctx
                 .child_size(root_id, proposal)
                 .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
             None => proposal.resolve(0.0, 0.0),
-        }.into()
+        }
+        .into()
     }
 
     fn place_children(
@@ -766,11 +787,9 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let fired = Rc::new(Cell::new(0_u32));
         let fired_for_btn = fired.clone();
-        let btn = tree.add(
-            Button::new_literal("T").on_activate_fn(move |_ctx| {
-                fired_for_btn.set(fired_for_btn.get() + 1);
-            }),
-        );
+        let btn = tree.add(Button::new_literal("T").on_activate_fn(move |_ctx| {
+            fired_for_btn.set(fired_for_btn.get() + 1);
+        }));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         tree.focus(btn);
 
@@ -942,6 +961,7 @@ mod tests {
         use fern_core::accessibility::widget_id_to_node_id;
         use fern_core::accesskit::Role;
         use fern_core::widget_builder::WidgetBuilder;
+        use fern_tokens::Color;
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let id = tree.add(
             Button::new_literal("Pick")
@@ -967,4 +987,3 @@ mod tests {
         );
     }
 }
-

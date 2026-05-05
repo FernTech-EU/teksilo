@@ -118,10 +118,10 @@ impl MenuContext {
         ctx.dismiss_all_overlays();
 
         // Restore focus to the trigger that was open
-        if let Some(index) = current_index {
-            if let Some(trigger_id) = self.trigger_id(index) {
-                ctx.request_focus(trigger_id);
-            }
+        if let Some(index) = current_index
+            && let Some(trigger_id) = self.trigger_id(index)
+        {
+            ctx.request_focus(trigger_id);
         }
     }
 
@@ -138,10 +138,10 @@ impl MenuContext {
         let next = ((current + delta).rem_euclid(count as i32)) as usize;
 
         // If we're navigating from an open menu, close it first and restore focus to trigger
-        if let Some(current_index) = current_index {
-            if let Some(trigger_id) = self.trigger_id(current_index) {
-                ctx.request_focus(trigger_id);
-            }
+        if let Some(current_index) = current_index
+            && let Some(trigger_id) = self.trigger_id(current_index)
+        {
+            ctx.request_focus(trigger_id);
         }
 
         // Open the next menu

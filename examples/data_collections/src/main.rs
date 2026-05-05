@@ -117,7 +117,7 @@ impl Root {
                                                 .spacing(8.0)
                                                 .child(
                                                     TextWidget::new_literal(
-                                                        format!("{}.", i + 1).leak() as &str
+                                                        format!("{}.", i + 1).leak() as &str,
                                                     )
                                                     .color(Color::from_rgba(0.5, 0.5, 0.5, 1.0)),
                                                 )
@@ -205,9 +205,11 @@ impl Root {
                                 HStack::new()
                                     .spacing(12.0)
                                     .child(
-                                        TextWidget::new_literal(format!("{:>4}", index + 1).leak() as &str)
-                                            .color(Color::from_rgba(0.5, 0.5, 0.5, 1.0))
-                                            .style(body_style.clone()),
+                                        TextWidget::new_literal(
+                                            format!("{:>4}", index + 1).leak() as &str
+                                        )
+                                        .color(Color::from_rgba(0.5, 0.5, 0.5, 1.0))
+                                        .style(body_style.clone()),
                                     )
                                     .child(
                                         TextWidget::new_literal(item.as_str())
@@ -302,29 +304,27 @@ impl Root {
                     };
 
                     Box::new(
-                        ZStack::new()
-                            .child(RectWidget::new().background(bg))
-                            .child(
-                                Padding::new(2.0, 8.0, 2.0, indent + 8.0).child(
-                                    HStack::new()
-                                        .spacing(4.0)
-                                        .child(
-                                            TextWidget::new_literal(arrow.to_string().leak() as &str)
-                                                .color(Color::from_rgba(0.4, 0.4, 0.4, 1.0))
-                                                .style(label_style.clone()),
-                                        )
-                                        .child(
-                                            TextWidget::new_literal(item.as_str()).color(on_surface).style(
-                                                if is_folder {
-                                                    body_style.clone()
-                                                } else {
-                                                    label_style.clone()
-                                                },
-                                            ),
-                                        )
-                                        .child(Spacer::new()),
-                                ),
+                        ZStack::new().child(RectWidget::new().background(bg)).child(
+                            Padding::new(2.0, 8.0, 2.0, indent + 8.0).child(
+                                HStack::new()
+                                    .spacing(4.0)
+                                    .child(
+                                        TextWidget::new_literal(arrow.to_string().leak() as &str)
+                                            .color(Color::from_rgba(0.4, 0.4, 0.4, 1.0))
+                                            .style(label_style.clone()),
+                                    )
+                                    .child(
+                                        TextWidget::new_literal(item.as_str())
+                                            .color(on_surface)
+                                            .style(if is_folder {
+                                                body_style.clone()
+                                            } else {
+                                                label_style.clone()
+                                            }),
+                                    )
+                                    .child(Spacer::new()),
                             ),
+                        ),
                     )
                 })
                 .item_height(28.0)
@@ -368,7 +368,8 @@ impl Widget for Root {
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -422,15 +423,15 @@ fn main() {
         .theme(Theme::light_default())
         .initial_window(
             WindowConfig::new()
-            .title("Data Collections — Milestone 6")
-            .size(960, 680)
-            .root(move |tree, _state| {
-            tree.add(Root::new(
-            tags.clone(),
-            list_items.clone(),
-            tree_model.clone(),
-            ))
-            })
+                .title("Data Collections — Milestone 6")
+                .size(960, 680)
+                .root(move |tree, _state| {
+                    tree.add(Root::new(
+                        tags.clone(),
+                        list_items.clone(),
+                        tree_model.clone(),
+                    ))
+                }),
         )
         .run();
 }

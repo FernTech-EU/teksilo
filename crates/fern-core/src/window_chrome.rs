@@ -90,12 +90,7 @@ pub trait PlatformTitleBarHost {
     ///
     /// Default: no-op. macOS / Wayland never need this — they get
     /// hover events through the widget tree's pointer pipeline.
-    fn register_hover_signal(
-        &self,
-        _target: ControlTarget,
-        _signal: crate::signal::Signal<bool>,
-    ) {
-    }
+    fn register_hover_signal(&self, _target: ControlTarget, _signal: crate::signal::Signal<bool>) {}
 }
 
 /// Target a synthetic title-bar tap or hover at a specific button.
@@ -179,7 +174,8 @@ impl TitleBarHostCallbacks {
 
 impl fmt::Debug for TitleBarHostCallbacks {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("TitleBarHostCallbacks").finish_non_exhaustive()
+        f.debug_struct("TitleBarHostCallbacks")
+            .finish_non_exhaustive()
     }
 }
 

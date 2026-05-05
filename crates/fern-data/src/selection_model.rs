@@ -161,10 +161,10 @@ impl SelectionModel {
         if new_set != old {
             self.selection.set(new_set);
         }
-        if let Some(a) = self.anchor.get() {
-            if a >= start {
-                self.anchor.set(Some(a + count));
-            }
+        if let Some(a) = self.anchor.get()
+            && a >= start
+        {
+            self.anchor.set(Some(a + count));
         }
     }
 
@@ -219,11 +219,10 @@ impl SelectionModel {
     pub fn debug_named(self, _name: impl Into<String>) -> Self {
         #[cfg(debug_assertions)]
         {
-            let adapter: Rc<dyn crate::debug_registry::ModelDebug> =
-                Rc::new(SelectionModelDebug {
-                    selection: self.selection.clone(),
-                    mode: self.mode,
-                });
+            let adapter: Rc<dyn crate::debug_registry::ModelDebug> = Rc::new(SelectionModelDebug {
+                selection: self.selection.clone(),
+                mode: self.mode,
+            });
             crate::debug_registry::register(_name.into(), Rc::downgrade(&adapter));
             *self.debug_adapter_holder.borrow_mut() = Some(adapter);
         }

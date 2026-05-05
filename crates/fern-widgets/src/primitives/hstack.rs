@@ -233,8 +233,11 @@ impl Widget for HStack {
         // signals trigger a relayout when they change.
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
-        self.spacing
-            .register_if_bound(self_id, registry, fern_core::binding::BindingLevel::Relayout);
+        self.spacing.register_if_bound(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::Relayout,
+        );
         self.child_ids.clone()
     }
 }
@@ -248,7 +251,11 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
             Size::new(self.0, self.1).into()
         }
     }
@@ -386,12 +393,7 @@ mod tests {
         let fixed = tree.add(FixedLeaf(100.0, 30.0));
         let a = tree.add(Expand::new().flex(1.0));
         let b = tree.add(Expand::new().flex(2.0));
-        let _stack = tree.add(
-            HStack::new()
-                .add_child(fixed)
-                .add_child(a)
-                .add_child(b),
-        );
+        let _stack = tree.add(HStack::new().add_child(fixed).add_child(a).add_child(b));
         tree.layout(SizeProposal::exact(400.0, 50.0));
 
         assert!((tree.bounds(fixed).width - 100.0).abs() < 0.01);

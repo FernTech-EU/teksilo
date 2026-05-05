@@ -57,7 +57,10 @@ pub(crate) fn copy(state: &mut EditorState, ctx: &EventContext) {
     let fragment = state.cursor.selection();
     let plain = fragment.to_plain_text().to_string();
     let marker = new_marker();
-    let html = format!("{MARKER_PREFIX}{marker}{MARKER_SUFFIX}{}", fragment.to_html());
+    let html = format!(
+        "{MARKER_PREFIX}{marker}{MARKER_SUFFIX}{}",
+        fragment.to_html()
+    );
     if let Some(cb) = ctx.app_state::<ClipboardHandle>() {
         // `set_html` writes both payloads in one transaction. Backends
         // without native HTML support see the default trait body and
@@ -139,9 +142,10 @@ pub(crate) fn paste(state: &mut EditorState, ctx: &EventContext) {
     } else {
         None
     };
-    if let (Some(html), Some(stored_marker)) =
-        (html_payload.as_deref(), state.rich_clipboard_marker.as_deref())
-        && payload_marker(html).is_some_and(|m| m == stored_marker)
+    if let (Some(html), Some(stored_marker)) = (
+        html_payload.as_deref(),
+        state.rich_clipboard_marker.as_deref(),
+    ) && payload_marker(html).is_some_and(|m| m == stored_marker)
         && let Some(frag) = state.rich_clipboard_fragment.as_ref()
     {
         let _ = state.cursor.insert_fragment(&frag.clone());

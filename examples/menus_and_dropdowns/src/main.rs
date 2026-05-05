@@ -8,9 +8,6 @@
 //!
 //! Run with: `cargo run -p menus-and-dropdowns`
 
-use std::cell::Cell;
-use std::rc::Rc;
-
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
     Button, ButtonVariant, ComboBox, Divider, Expand, HStack, IconWidget, MenuBar, MenuItem,
@@ -36,7 +33,7 @@ impl Root {
 
 impl Widget for Root {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme_signal().get();
+        let _theme = ctx.theme_signal().get();
 
         // --- Section 1: ComboBox demos ---
 
@@ -231,9 +228,11 @@ impl Widget for Root {
                                                 .color(TextRole::Primary),
                                         )
                                         .child(
-                                            TextWidget::new_literal("Right-click for Cut/Copy/Paste")
-                                                .style(TextStyleRole::Body)
-                                                .color(TextRole::Primary),
+                                            TextWidget::new_literal(
+                                                "Right-click for Cut/Copy/Paste",
+                                            )
+                                            .style(TextStyleRole::Body)
+                                            .color(TextRole::Primary),
                                         ),
                                 )
                                 .context_menu(|_pos, _ctx| {
@@ -277,19 +276,27 @@ impl Widget for Root {
                                                     MenuList::new()
                                                         .item(
                                                             MenuItem::new_literal("Left")
-                                                                .on_activate_fn(|_| println!("AlignLeft")),
+                                                                .on_activate_fn(|_| {
+                                                                    println!("AlignLeft")
+                                                                }),
                                                         )
                                                         .item(
                                                             MenuItem::new_literal("Center")
-                                                                .on_activate_fn(|_| println!("AlignCenter")),
+                                                                .on_activate_fn(|_| {
+                                                                    println!("AlignCenter")
+                                                                }),
                                                         )
                                                         .item(
                                                             MenuItem::new_literal("Right")
-                                                                .on_activate_fn(|_| println!("AlignRight")),
+                                                                .on_activate_fn(|_| {
+                                                                    println!("AlignRight")
+                                                                }),
                                                         )
                                                         .item(
                                                             MenuItem::new_literal("Justify")
-                                                                .on_activate_fn(|_| println!("AlignJustify")),
+                                                                .on_activate_fn(|_| {
+                                                                    println!("AlignJustify")
+                                                                }),
                                                         ),
                                                 )
                                             })),
@@ -310,9 +317,11 @@ impl Widget for Root {
                                                 .color(TextRole::Primary),
                                         )
                                         .child(
-                                            TextWidget::new_literal("Right-click for file operations")
-                                                .style(TextStyleRole::Body)
-                                                .color(TextRole::Primary),
+                                            TextWidget::new_literal(
+                                                "Right-click for file operations",
+                                            )
+                                            .style(TextStyleRole::Body)
+                                            .color(TextRole::Primary),
                                         ),
                                 )
                                 .context_menu(|_pos, _ctx| {
@@ -334,7 +343,10 @@ impl Widget for Root {
                                                     .shortcut_label("Ctrl+S"),
                                             )
                                             .separator()
-                                            .item(MenuItem::new_literal("Export as PDF").enabled(false)),
+                                            .item(
+                                                MenuItem::new_literal("Export as PDF")
+                                                    .enabled(false),
+                                            ),
                                     ))
                                 }),
                         ),
@@ -441,7 +453,10 @@ impl Widget for Root {
                                     .shortcut_label("Ctrl+S"),
                             )
                             .separator()
-                            .item(MenuItem::new_literal("Quit").on_activate_fn(|_| println!("ToggleDarkMode"))),
+                            .item(
+                                MenuItem::new_literal("Quit")
+                                    .on_activate_fn(|_| println!("ToggleDarkMode")),
+                            ),
                     )
                 })
                 .menu_literal("Edit", || {
@@ -487,17 +502,28 @@ impl Widget for Root {
                             .item(MenuItem::submenu_literal("Alignment", || {
                                 Box::new(
                                     MenuList::new()
-                                        .item(MenuItem::new_literal("Left").on_activate_fn(|_| println!("AlignLeft")))
-                                        .item(MenuItem::new_literal("Center").on_activate_fn(|_| println!("AlignCenter")))
-                                        .item(MenuItem::new_literal("Right").on_activate_fn(|_| println!("AlignRight")))
                                         .item(
-                                            MenuItem::new_literal("Justify").on_activate_fn(|_| println!("AlignJustify")),
+                                            MenuItem::new_literal("Left")
+                                                .on_activate_fn(|_| println!("AlignLeft")),
+                                        )
+                                        .item(
+                                            MenuItem::new_literal("Center")
+                                                .on_activate_fn(|_| println!("AlignCenter")),
+                                        )
+                                        .item(
+                                            MenuItem::new_literal("Right")
+                                                .on_activate_fn(|_| println!("AlignRight")),
+                                        )
+                                        .item(
+                                            MenuItem::new_literal("Justify")
+                                                .on_activate_fn(|_| println!("AlignJustify")),
                                         ),
                                 )
                             }))
                             .separator()
                             .item(
-                                MenuItem::new_literal("Toggle Dark Mode").on_activate_fn(|_| println!("ToggleDarkMode")),
+                                MenuItem::new_literal("Toggle Dark Mode")
+                                    .on_activate_fn(|_| println!("ToggleDarkMode")),
                             ),
                     )
                 })
@@ -532,7 +558,8 @@ impl Widget for Root {
                 .child_size(id, proposal)
                 .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
             None => proposal.resolve(0.0, 0.0),
-        }.into()
+        }
+        .into()
     }
 }
 
@@ -545,9 +572,9 @@ fn main() {
         .theme(Theme::light_default())
         .initial_window(
             WindowConfig::new()
-            .title("FernUI — Menus & Dropdowns (Milestone 4)")
-            .size(900, 700)
-            .root(|tree, _state| tree.add(Root::new()))
+                .title("FernUI — Menus & Dropdowns (Milestone 4)")
+                .size(900, 700)
+                .root(|tree, _state| tree.add(Root::new())),
         )
         .run();
 }

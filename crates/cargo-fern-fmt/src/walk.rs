@@ -112,7 +112,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let f = tmp.path().join("a.rs");
         fs::write(&f, "").unwrap();
-        let found = collect(&[f.clone()]).unwrap();
+        let found = collect(std::slice::from_ref(&f)).unwrap();
         assert_eq!(found, vec![f]);
     }
 

@@ -346,8 +346,8 @@ fn read_only_editor_is_focusable_and_dispatches_key_events() {
     // widget must be marked focusable (so click-to-focus finds it)
     // and it must actually receive KeyDown events on its on_key
     // handler after gaining focus.
-    use fern_core::event::{Key, Modifiers, WidgetEvent};
     use fern_canvas::Point;
+    use fern_core::event::{Key, Modifiers, WidgetEvent};
 
     let doc = TextDocument::new();
     doc.set_plain_text("abcdef").unwrap();
@@ -441,7 +441,8 @@ fn read_only_editor_emits_glyphs_into_final_render_frame() {
     // and runs layout, and `frame_loop::tick` gates `set_cursor` /
     // `ensure_caret_visible` behind `engine.has_full_layout()`.
     let doc = TextDocument::new();
-    doc.set_plain_text("Alpha Beta Gamma Delta Epsilon").unwrap();
+    doc.set_plain_text("Alpha Beta Gamma Delta Epsilon")
+        .unwrap();
 
     let mut tree = WidgetTree::new();
     let id = tree.add(RichTextEditor::read_only(doc));
@@ -845,10 +846,7 @@ fn ctx_with_memory_clipboard(tree: &mut WidgetTree) -> fern_platform::clipboard:
     use std::collections::HashMap;
     let handle = ClipboardHandle::new(MemoryClipboard::new());
     let mut registry: HashMap<TypeId, Box<dyn std::any::Any>> = HashMap::new();
-    registry.insert(
-        TypeId::of::<ClipboardHandle>(),
-        Box::new(handle.clone()),
-    );
+    registry.insert(TypeId::of::<ClipboardHandle>(), Box::new(handle.clone()));
     let ctx = TreeAppContext::empty().with_app_state(registry);
     tree.set_app_context(std::rc::Rc::new(ctx));
     handle
@@ -1158,7 +1156,8 @@ fn drag_select_extends_selection() {
     // position. Uses PointerMove (not PointerDown) for the second
     // event so the editor's drag-state machine handles it.
     let doc = TextDocument::new();
-    doc.set_plain_text("alpha bravo charlie delta echo").unwrap();
+    doc.set_plain_text("alpha bravo charlie delta echo")
+        .unwrap();
     let editor = RichTextEditor::editor(doc);
     let state = editor.state_handle();
 
@@ -1424,9 +1423,7 @@ fn editor_paste_from_external_html_inserts_rich_content() {
     // Seed the clipboard as if another app had copied a bold word.
     // Plain text and HTML both present — the paste path prefers HTML
     // because the stashed fragment is None (no self-round-trip).
-    clipboard
-        .set_html("<p><b>BOLD</b></p>", "BOLD")
-        .unwrap();
+    clipboard.set_html("<p><b>BOLD</b></p>", "BOLD").unwrap();
     let id = tree.add(editor);
     tree.layout(SizeProposal::exact(400.0, 300.0));
     focus_editor(&mut tree, id);
@@ -1455,10 +1452,7 @@ fn editor_paste_from_external_html_inserts_rich_content() {
     // locate the first B, then position a probe cursor there.
     let b_pos = plain.find("BOLD").expect("BOLD substring");
     let probe = doc.cursor();
-    probe.set_position(
-        b_pos,
-        fern_text::text_document::MoveMode::MoveAnchor,
-    );
+    probe.set_position(b_pos, fern_text::text_document::MoveMode::MoveAnchor);
     let fmt = probe.char_format().unwrap_or_default();
     assert_eq!(
         fmt.font_bold,
@@ -1499,10 +1493,7 @@ fn editor_paste_falls_back_to_plain_when_html_unsupported() {
 
     let mut tree = WidgetTree::new();
     let mut registry: HashMap<TypeId, Box<dyn std::any::Any>> = HashMap::new();
-    registry.insert(
-        TypeId::of::<ClipboardHandle>(),
-        Box::new(handle.clone()),
-    );
+    registry.insert(TypeId::of::<ClipboardHandle>(), Box::new(handle.clone()));
     let ctx = TreeAppContext::empty().with_app_state(registry);
     tree.set_app_context(std::rc::Rc::new(ctx));
 
@@ -1542,9 +1533,7 @@ fn editor_paste_unformatted_strips_html_to_plain() {
 
     let mut tree = WidgetTree::new();
     let clipboard = ctx_with_memory_clipboard(&mut tree);
-    clipboard
-        .set_html("<p><b>BOLD</b></p>", "BOLD")
-        .unwrap();
+    clipboard.set_html("<p><b>BOLD</b></p>", "BOLD").unwrap();
     let id = tree.add(editor);
     tree.layout(SizeProposal::exact(400.0, 300.0));
     focus_editor(&mut tree, id);
@@ -1572,10 +1561,7 @@ fn editor_paste_unformatted_strips_html_to_plain() {
     // explicitly plain-only.
     let b_pos = plain.find("BOLD").expect("BOLD substring");
     let probe = doc.cursor();
-    probe.set_position(
-        b_pos,
-        fern_text::text_document::MoveMode::MoveAnchor,
-    );
+    probe.set_position(b_pos, fern_text::text_document::MoveMode::MoveAnchor);
     let fmt = probe.char_format().unwrap_or_default();
     assert!(
         !matches!(fmt.font_bold, Some(true)),
@@ -1730,7 +1716,10 @@ fn editor_paste_external_identical_plain_does_not_reuse_stale_fragment() {
     // Paste must land as plain text (no bold) because the clipboard
     // no longer carries our marker.
     let plain = doc.to_plain_text().unwrap_or_default();
-    assert!(plain.contains("foo"), "plain paste must succeed, got {plain:?}");
+    assert!(
+        plain.contains("foo"),
+        "plain paste must succeed, got {plain:?}"
+    );
     let probe = doc.cursor();
     probe.set_position(
         plain.find("foo").unwrap(),
@@ -1756,7 +1745,9 @@ fn editor_paste_plain_text_with_newlines_splits_into_blocks() {
 
     let mut tree = WidgetTree::new();
     let clipboard = ctx_with_memory_clipboard(&mut tree);
-    clipboard.set_text("line one\nline two\nline three").unwrap();
+    clipboard
+        .set_text("line one\nline two\nline three")
+        .unwrap();
     let id = tree.add(editor);
     tree.layout(SizeProposal::exact(400.0, 300.0));
     focus_editor(&mut tree, id);
@@ -1921,8 +1912,7 @@ fn editor_context_menu_copy_item_copies_selection_to_clipboard() {
         .nodes
         .iter()
         .find(|(_, n)| {
-            n.role() == fern_core::accesskit::Role::MenuItem
-                && n.label() == Some("Copy")
+            n.role() == fern_core::accesskit::Role::MenuItem && n.label() == Some("Copy")
         })
         .map(|(id, _)| *id)
         .expect("Copy menu item must appear in the a11y tree after right-click");
@@ -2011,10 +2001,7 @@ fn editor_context_menu_paste_unformatted_item_strips_formatting() {
     // No bold formatting because this is the plain-text path.
     let b_pos = plain.find("BOLD").expect("BOLD substring");
     let probe = doc.cursor();
-    probe.set_position(
-        b_pos,
-        fern_text::text_document::MoveMode::MoveAnchor,
-    );
+    probe.set_position(b_pos, fern_text::text_document::MoveMode::MoveAnchor);
     let fmt = probe.char_format().unwrap_or_default();
     assert!(
         !matches!(fmt.font_bold, Some(true)),
@@ -2053,8 +2040,7 @@ fn editor_context_menu_copy_item_disabled_without_selection() {
         .nodes
         .iter()
         .find(|(_, n)| {
-            n.role() == fern_core::accesskit::Role::MenuItem
-                && n.label() == Some("Copy")
+            n.role() == fern_core::accesskit::Role::MenuItem && n.label() == Some("Copy")
         })
         .expect("Copy menu item must appear in the a11y tree");
     assert!(
@@ -2317,11 +2303,11 @@ fn accessibility_emits_paragraph_and_text_run_children() {
         .nodes
         .iter()
         .any(|(_, n)| n.role() == Role::Paragraph);
-    let has_text_run = update
-        .nodes
-        .iter()
-        .any(|(_, n)| n.role() == Role::TextRun);
-    assert!(has_paragraph, "editor must emit at least one Paragraph child");
+    let has_text_run = update.nodes.iter().any(|(_, n)| n.role() == Role::TextRun);
+    assert!(
+        has_paragraph,
+        "editor must emit at least one Paragraph child"
+    );
     assert!(has_text_run, "editor must emit at least one TextRun child");
 }
 
@@ -2876,7 +2862,10 @@ fn editor_tab_in_multi_item_list_indents_only_current_item() {
     // block "b": in a text-document the layout for "a\nb\nc" is
     // block 0 = "a" (pos 0..1), block 1 = "b" (pos 2..3), block 2
     // = "c" (pos 4..5). We place the caret at position 2.
-    state.borrow().cursor.set_position(2, fern_text::text_document::MoveMode::MoveAnchor);
+    state
+        .borrow()
+        .cursor
+        .set_position(2, fern_text::text_document::MoveMode::MoveAnchor);
 
     press_key(
         &mut tree,
@@ -2887,12 +2876,33 @@ fn editor_tab_in_multi_item_list_indents_only_current_item() {
 
     // After Tab: block "b" is now in a new list at indent 1; blocks
     // "a" and "c" still sit in the original list at indent 0.
-    let a_list_id = doc.block_at_position(0).and_then(|b| b.list()).map(|l| l.id());
-    let b_list_id = doc.block_at_position(2).and_then(|b| b.list()).map(|l| l.id());
-    let c_list_id = doc.block_at_position(4).and_then(|b| b.list()).map(|l| l.id());
-    let a_indent = doc.block_at_position(0).and_then(|b| b.list()).map(|l| l.indent()).unwrap_or(255);
-    let b_indent = doc.block_at_position(2).and_then(|b| b.list()).map(|l| l.indent()).unwrap_or(255);
-    let c_indent = doc.block_at_position(4).and_then(|b| b.list()).map(|l| l.indent()).unwrap_or(255);
+    let a_list_id = doc
+        .block_at_position(0)
+        .and_then(|b| b.list())
+        .map(|l| l.id());
+    let b_list_id = doc
+        .block_at_position(2)
+        .and_then(|b| b.list())
+        .map(|l| l.id());
+    let c_list_id = doc
+        .block_at_position(4)
+        .and_then(|b| b.list())
+        .map(|l| l.id());
+    let a_indent = doc
+        .block_at_position(0)
+        .and_then(|b| b.list())
+        .map(|l| l.indent())
+        .unwrap_or(255);
+    let b_indent = doc
+        .block_at_position(2)
+        .and_then(|b| b.list())
+        .map(|l| l.indent())
+        .unwrap_or(255);
+    let c_indent = doc
+        .block_at_position(4)
+        .and_then(|b| b.list())
+        .map(|l| l.indent())
+        .unwrap_or(255);
 
     assert_eq!(a_indent, 0, "sibling 'a' must stay at indent 0");
     assert_eq!(b_indent, 1, "current item 'b' must move to indent 1");
@@ -2901,7 +2911,10 @@ fn editor_tab_in_multi_item_list_indents_only_current_item() {
     // And 'a' and 'c' should still be in the SAME list (the original),
     // distinct from 'b's new nested list.
     assert!(a_list_id.is_some() && b_list_id.is_some() && c_list_id.is_some());
-    assert_eq!(a_list_id, c_list_id, "'a' and 'c' must share the parent list");
+    assert_eq!(
+        a_list_id, c_list_id,
+        "'a' and 'c' must share the parent list"
+    );
     assert_ne!(a_list_id, b_list_id, "'b' must be in its own nested list");
 }
 
@@ -2927,7 +2940,10 @@ fn editor_shift_tab_in_multi_item_list_dedents_only_current_item() {
     focus_editor(&mut tree, id);
     // focus_editor moves the caret via a synthetic click, so set
     // position AFTER focusing (see the matching Tab test).
-    state.borrow().cursor.set_position(2, fern_text::text_document::MoveMode::MoveAnchor);
+    state
+        .borrow()
+        .cursor
+        .set_position(2, fern_text::text_document::MoveMode::MoveAnchor);
 
     press_key(
         &mut tree,
@@ -2936,9 +2952,21 @@ fn editor_shift_tab_in_multi_item_list_dedents_only_current_item() {
     );
     tick_past_debounce(&mut tree);
 
-    let a_indent = doc.block_at_position(0).and_then(|b| b.list()).map(|l| l.indent()).unwrap_or(99);
-    let b_indent = doc.block_at_position(2).and_then(|b| b.list()).map(|l| l.indent()).unwrap_or(99);
-    let c_indent = doc.block_at_position(4).and_then(|b| b.list()).map(|l| l.indent()).unwrap_or(99);
+    let a_indent = doc
+        .block_at_position(0)
+        .and_then(|b| b.list())
+        .map(|l| l.indent())
+        .unwrap_or(99);
+    let b_indent = doc
+        .block_at_position(2)
+        .and_then(|b| b.list())
+        .map(|l| l.indent())
+        .unwrap_or(99);
+    let c_indent = doc
+        .block_at_position(4)
+        .and_then(|b| b.list())
+        .map(|l| l.indent())
+        .unwrap_or(99);
 
     assert_eq!(a_indent, 2, "sibling 'a' must stay at indent 2");
     assert_eq!(b_indent, 1, "current item 'b' must dedent to indent 1");
@@ -2994,10 +3022,7 @@ fn editor_backspace_at_list_start_dedents_or_exits() {
     );
     tick_past_debounce(&mut tree);
 
-    let in_list = doc
-        .block_at_position(0)
-        .and_then(|b| b.list())
-        .is_some();
+    let in_list = doc.block_at_position(0).and_then(|b| b.list()).is_some();
     assert!(
         !in_list,
         "second Backspace at indent 0 must remove block from list"
@@ -3026,11 +3051,9 @@ fn link_click_callback_installs_without_panicking() {
 
     let seen = Rc::new(RefCell::new(Vec::<String>::new()));
     let seen_clone = seen.clone();
-    let editor = RichTextEditor::editor(doc).on_link_activated(
-        move |href, _ctx| {
-            seen_clone.borrow_mut().push(href.to_string());
-        },
-    );
+    let editor = RichTextEditor::editor(doc).on_link_activated(move |href, _ctx| {
+        seen_clone.borrow_mut().push(href.to_string());
+    });
 
     let mut tree = WidgetTree::new();
     let _ = tree.add(editor);
@@ -3189,4 +3212,3 @@ fn min_and_max_lines_clamp_growth_within_window() {
         bounds.height
     );
 }
-

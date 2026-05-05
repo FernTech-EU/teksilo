@@ -30,21 +30,17 @@ use fern_core::build_context::BuildContext;
 use fern_core::signal::Signal;
 use fern_core::widget_id::WidgetId;
 use fern_preview::{KnobDecl, KnobKind, KnobSpec, KnobValues};
+use fern_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
 use fern_widgets::primitives::Padding;
 use fern_widgets::{
     Checkbox, ComboBox, HStack, MaxSize, SegmentedControl, Slider, TextInput, TextWidget, Toggle,
     VStack,
 };
-use fern_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
 
 /// Build the form for `(spec, values)`. Returns a single `WidgetId`
 /// for the column of rows. Knobs that share a `group` are clustered
 /// under a small group header.
-pub fn build_knob_form(
-    ctx: &mut BuildContext,
-    spec: &KnobSpec,
-    values: &KnobValues,
-) -> WidgetId {
+pub fn build_knob_form(ctx: &mut BuildContext, spec: &KnobSpec, values: &KnobValues) -> WidgetId {
     let mut column = VStack::new().spacing(8.0);
     let mut current_group: Option<&'static str> = None;
     for decl in spec.declarations() {
@@ -71,7 +67,10 @@ fn build_row(ctx: &mut BuildContext, decl: &KnobDecl, values: &KnobValues) -> Wi
         .single_line();
     let label_box = MaxSize::new(110.0, f32::INFINITY).child(label);
     let editor_widget = MaxSize::new(f32::INFINITY, f32::INFINITY).child_id(editor);
-    let row = HStack::new().spacing(8.0).child(label_box).child(editor_widget);
+    let row = HStack::new()
+        .spacing(8.0)
+        .child(label_box)
+        .child(editor_widget);
     ctx.add(row)
 }
 
@@ -308,12 +307,11 @@ fn build_choice(
         let items_obs = items.clone();
         let sig_w = sig.clone();
         let h = combo_sel.observe(move |selected| {
-            if let Some(s) = selected {
-                if let Some(idx) = items_obs.iter().position(|o| o == s) {
-                    if sig_w.get() != idx {
-                        sig_w.set(idx);
-                    }
-                }
+            if let Some(s) = selected
+                && let Some(idx) = items_obs.iter().position(|o| o == s)
+                && sig_w.get() != idx
+            {
+                sig_w.set(idx);
             }
         });
         ctx.own_handle(h);
@@ -361,12 +359,11 @@ where
         let sig_w = sig.clone();
         let lookup_value = Rc::new(lookup_value);
         let h = combo_sel.observe(move |selected| {
-            if let Some(label) = selected {
-                if let Some(value) = (lookup_value)(label) {
-                    if sig_w.get() != value {
-                        sig_w.set(value);
-                    }
-                }
+            if let Some(label) = selected
+                && let Some(value) = (lookup_value)(label)
+                && sig_w.get() != value
+            {
+                sig_w.set(value);
             }
         });
         ctx.own_handle(h);

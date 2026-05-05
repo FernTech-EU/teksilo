@@ -14,13 +14,13 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use fern_app::FernAppBuilder;
-use fern_canvas::{Size, SizeProposal};
+use fern_canvas::SizeProposal;
+use fern_core::BuildContext;
 use fern_core::widget::{LayoutContext, Widget};
 use fern_core::widget_id::WidgetId;
-use fern_core::BuildContext;
 use fern_settings::{
-    AppPaths, MruEntry, MruList, SettingsBundle, SettingsExt, SettingsKey,
-    SettingsStore, WindowStateService,
+    AppPaths, MruEntry, MruList, SettingsBundle, SettingsExt, SettingsKey, SettingsStore,
+    WindowStateService,
 };
 use serde::{Deserialize, Serialize};
 use tempfile::tempdir;
@@ -74,7 +74,11 @@ impl Widget for ProbeWidget {
         Vec::new()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         proposal.resolve(0.0, 0.0).into()
     }
 }
@@ -148,12 +152,7 @@ fn build_context_can_reach_settings_and_mru_via_ext_trait() {
     app.tree.add(ProbeWidget);
     app.tree.layout(SizeProposal::exact(100.0, 100.0));
 
-    let store = app
-        .settings
-        .as_ref()
-        .unwrap()
-        .store
-        .signal_for(&FONT_SIZE);
+    let store = app.settings.as_ref().unwrap().store.signal_for(&FONT_SIZE);
     assert_eq!(store.get(), 15.0);
 }
 
@@ -164,7 +163,10 @@ fn settings_without_app_paths_panics() {
             .settings(SettingsBundle::new())
             .build_headless();
     });
-    assert!(result.is_err(), "expected panic when settings used without paths");
+    assert!(
+        result.is_err(),
+        "expected panic when settings used without paths"
+    );
 }
 
 #[test]

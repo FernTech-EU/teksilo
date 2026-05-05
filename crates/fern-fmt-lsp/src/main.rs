@@ -92,9 +92,7 @@ impl Server {
                 self.handle_did_close(&params);
                 None
             }
-            ("textDocument/formatting", true) => {
-                Some(self.handle_formatting(id.unwrap(), &params))
-            }
+            ("textDocument/formatting", true) => Some(self.handle_formatting(id.unwrap(), &params)),
             ("shutdown", true) => Some(ok(id.unwrap(), Value::Null)),
             ("exit", false) => None,
             (_, true) => Some(err(
@@ -123,13 +121,22 @@ impl Server {
     }
 
     fn handle_did_open(&mut self, params: &Value) {
-        let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
-        let text = params["textDocument"]["text"].as_str().unwrap_or("").to_string();
+        let uri = params["textDocument"]["uri"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        let text = params["textDocument"]["text"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
         self.documents.insert(uri, text);
     }
 
     fn handle_did_change(&mut self, params: &Value) {
-        let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
+        let uri = params["textDocument"]["uri"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
         // With full-sync (mode 1) the last contentChange.text is the
         // entire new document. We pick the last entry defensively.
         let new_text = params["contentChanges"]
@@ -142,7 +149,10 @@ impl Server {
     }
 
     fn handle_did_close(&mut self, params: &Value) {
-        let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
+        let uri = params["textDocument"]["uri"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
         self.documents.remove(&uri);
     }
 
@@ -174,7 +184,10 @@ fn whole_document_edit(original: &str, formatted: &str) -> TextEdit {
     let end = end_position(original);
     TextEdit {
         range: Range {
-            start: Position { line: 0, character: 0 },
+            start: Position {
+                line: 0,
+                character: 0,
+            },
             end,
         },
         new_text: formatted.to_string(),
@@ -256,9 +269,9 @@ fn read_message<R: BufRead>(reader: &mut R) -> io::Result<Option<IncomingMessage
     })?;
     let mut body = vec![0u8; len];
     reader.read_exact(&mut body)?;
-    serde_json::from_slice(&body).map(Some).map_err(|e| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("invalid JSON: {e}"))
-    })
+    serde_json::from_slice(&body)
+        .map(Some)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("invalid JSON: {e}")))
 }
 
 fn write_message<W: Write>(w: &mut W, msg: &Value) -> io::Result<()> {
@@ -317,8 +330,7 @@ mod tests {
     #[test]
     fn formatting_returns_empty_edits_when_already_formatted() {
         let mut s = Server::new();
-        let canonical =
-            "fn build() {\n    fern!(VStack {\n        spacing: 8.0\n    });\n}\n";
+        let canonical = "fn build() {\n    fern!(VStack {\n        spacing: 8.0\n    });\n}\n";
         s.documents
             .insert("file:///a.rs".to_string(), canonical.to_string());
         let resp = s.handle_formatting(
@@ -345,7 +357,7 @@ mod tests {
 
     #[test]
     fn formatting_unknown_uri_returns_empty_edits() {
-        let mut s = Server::new();
+        let s = Server::new();
         let resp = s.handle_formatting(
             json!(3),
             &json!({ "textDocument": { "uri": "file:///never-opened.rs" } }),
@@ -359,8 +371,10 @@ mod tests {
         // Garbage that won't parse via syn::parse_file. We treat parse
         // errors as "leave it alone" rather than returning a JSON-RPC
         // error — same model rustfmt uses on save.
-        s.documents
-            .insert("file:///b.rs".to_string(), "fn { not rust !!! }".to_string());
+        s.documents.insert(
+            "file:///b.rs".to_string(),
+            "fn { not rust !!! }".to_string(),
+        );
         let resp = s.handle_formatting(
             json!(4),
             &json!({ "textDocument": { "uri": "file:///b.rs" } }),

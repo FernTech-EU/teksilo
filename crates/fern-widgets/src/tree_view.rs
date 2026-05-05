@@ -12,9 +12,9 @@ use fern_canvas::{Point, Rect, Size, SizeProposal};
 
 use fern_core::DropFeedback;
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::binding::BindingLevel;
 use fern_core::drag_payload::DragPayload;
 use fern_core::signal::Signal;
-use fern_core::binding::BindingLevel;
 use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
@@ -213,8 +213,11 @@ impl<T: 'static> Widget for TreeView<T> {
 
         // Bind scroll_y at Relayout so place_children runs on every scroll
         // position change (repositions items) without a full rebuild.
-        self.scroll_y
-            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Relayout);
+        self.scroll_y.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
 
         ctx.register_animated_signal(&self.scroll_y);
 
@@ -344,71 +347,68 @@ impl<T: 'static> Widget for TreeView<T> {
                             .as_ref()
                             .and_then(|s| s.selected_indices().first().copied())
                             .or(fi.get());
-                        
-                        if let Some(flat_idx) = selected_idx {
-                            if let Some(entry) = tsh.entry_at(flat_idx) {
-                                let node_id = entry.node_id;
-                                let tree = tsh.tree();
-                                let parent = tree.parent(node_id);
-                                
-                                // Determine siblings: either children of parent or root list
-                                let (siblings, is_root_level) = if let Some(parent_id) = parent {
-                                    (tree.children(parent_id), false)
-                                } else {
-                                    // Node is a root - get all roots
-                                    let root_count = tree.root_count();
-                                    let siblings: Vec<NodeId> = (0..root_count)
-                                        .map(|i| tree.root(i))
-                                        .collect();
-                                    (siblings, true)
-                                };
-                                
-                                let sibling_idx = siblings
-                                    .iter()
-                                    .position(|&n| n == node_id)
-                                    .unwrap_or(0);
-                                
-                                match key {
-                                    fern_core::event::Key::ArrowUp if sibling_idx > 0 => {
-                                        if is_root_level {
-                                            tree.move_to_root(node_id, sibling_idx - 1);
-                                        } else {
-                                            tree.move_node(node_id, parent.unwrap(), sibling_idx - 1);
-                                        }
-                                        // Find new flat index after node was moved
-                                        for new_flat in 0..visible_count {
-                                            if tsh.visible_node_id(new_flat) == Some(node_id) {
-                                                fi.set(Some(new_flat));
-                                                if let Some(ref sel) = sel_for_key {
-                                                    sel.select(new_flat);
-                                                }
-                                                break;
-                                            }
-                                        }
-                                        return fern_core::event::EventResponse::Handled;
+
+                        if let Some(flat_idx) = selected_idx
+                            && let Some(entry) = tsh.entry_at(flat_idx)
+                        {
+                            let node_id = entry.node_id;
+                            let tree = tsh.tree();
+                            let parent = tree.parent(node_id);
+
+                            // Determine siblings: either children of parent or root list
+                            let (siblings, is_root_level) = if let Some(parent_id) = parent {
+                                (tree.children(parent_id), false)
+                            } else {
+                                // Node is a root - get all roots
+                                let root_count = tree.root_count();
+                                let siblings: Vec<NodeId> =
+                                    (0..root_count).map(|i| tree.root(i)).collect();
+                                (siblings, true)
+                            };
+
+                            let sibling_idx =
+                                siblings.iter().position(|&n| n == node_id).unwrap_or(0);
+
+                            match key {
+                                fern_core::event::Key::ArrowUp if sibling_idx > 0 => {
+                                    if is_root_level {
+                                        tree.move_to_root(node_id, sibling_idx - 1);
+                                    } else {
+                                        tree.move_node(node_id, parent.unwrap(), sibling_idx - 1);
                                     }
-                                    fern_core::event::Key::ArrowDown
-                                        if sibling_idx + 1 < siblings.len() =>
-                                    {
-                                        if is_root_level {
-                                            tree.move_to_root(node_id, sibling_idx + 1);
-                                        } else {
-                                            tree.move_node(node_id, parent.unwrap(), sibling_idx + 1);
-                                        }
-                                        // Find new flat index after node was moved
-                                        for new_flat in 0..visible_count {
-                                            if tsh.visible_node_id(new_flat) == Some(node_id) {
-                                                fi.set(Some(new_flat));
-                                                if let Some(ref sel) = sel_for_key {
-                                                    sel.select(new_flat);
-                                                }
-                                                break;
+                                    // Find new flat index after node was moved
+                                    for new_flat in 0..visible_count {
+                                        if tsh.visible_node_id(new_flat) == Some(node_id) {
+                                            fi.set(Some(new_flat));
+                                            if let Some(ref sel) = sel_for_key {
+                                                sel.select(new_flat);
                                             }
+                                            break;
                                         }
-                                        return fern_core::event::EventResponse::Handled;
                                     }
-                                    _ => {}
+                                    return fern_core::event::EventResponse::Handled;
                                 }
+                                fern_core::event::Key::ArrowDown
+                                    if sibling_idx + 1 < siblings.len() =>
+                                {
+                                    if is_root_level {
+                                        tree.move_to_root(node_id, sibling_idx + 1);
+                                    } else {
+                                        tree.move_node(node_id, parent.unwrap(), sibling_idx + 1);
+                                    }
+                                    // Find new flat index after node was moved
+                                    for new_flat in 0..visible_count {
+                                        if tsh.visible_node_id(new_flat) == Some(node_id) {
+                                            fi.set(Some(new_flat));
+                                            if let Some(ref sel) = sel_for_key {
+                                                sel.select(new_flat);
+                                            }
+                                            break;
+                                        }
+                                    }
+                                    return fern_core::event::EventResponse::Handled;
+                                }
+                                _ => {}
                             }
                         }
                         return fern_core::event::EventResponse::Ignored;
@@ -417,11 +417,12 @@ impl<T: 'static> Widget for TreeView<T> {
                     // ArrowRight: expand / ArrowLeft: collapse or move to parent
                     match key {
                         fern_core::event::Key::ArrowRight => {
-                            if let Some(entry) = tsh.entry_at(current) {
-                                if entry.has_children && !entry.is_expanded {
-                                    tsh.expand(entry.node_id);
-                                    return fern_core::event::EventResponse::Handled;
-                                }
+                            if let Some(entry) = tsh.entry_at(current)
+                                && entry.has_children
+                                && !entry.is_expanded
+                            {
+                                tsh.expand(entry.node_id);
+                                return fern_core::event::EventResponse::Handled;
                             }
                         }
                         fern_core::event::Key::ArrowLeft => {
@@ -539,11 +540,8 @@ impl<T: 'static> Widget for TreeView<T> {
                     let node = tsh_for_hover.entry_at(row_idx).map(|e| e.node_id);
                     let prev = hn_for_hover.get();
                     match (prev, node) {
-                        (Some((p, t)), Some(n)) if p == n => {
-                            hn_for_hover.set(Some((n, t)))
-                        }
-                        (_, Some(n)) => hn_for_hover
-                            .set(Some((n, std::time::Instant::now()))),
+                        (Some((p, t)), Some(n)) if p == n => hn_for_hover.set(Some((n, t))),
+                        (_, Some(n)) => hn_for_hover.set(Some((n, std::time::Instant::now()))),
                         (_, None) => hn_for_hover.set(None),
                     }
 
@@ -566,124 +564,123 @@ impl<T: 'static> Widget for TreeView<T> {
 
             let tsh_for_drop = self.tree_slice.handle();
             handlers = handlers.on_drop(move |mut payload, position, _ctx| {
-                if let Some(drag_data) = payload.take_typed::<TreeViewDragData>() {
-                    if drag_data.source_tree_id == my_tree_id {
-                        let source_node = drag_data.source_node;
+                if let Some(drag_data) = payload.take_typed::<TreeViewDragData>()
+                    && drag_data.source_tree_id == my_tree_id
+                {
+                    let source_node = drag_data.source_node;
 
-                        // Compute target flat index from Y
-                        let scroll = scroll_for_drop.get().max(0.0);
-                        let content_y = position.y + scroll;
-                        let flat_idx = if ih_for_drop > 0.0 {
-                            (content_y / ih_for_drop).floor().max(0.0) as usize
-                        } else {
-                            0
-                        };
+                    // Compute target flat index from Y
+                    let scroll = scroll_for_drop.get().max(0.0);
+                    let content_y = position.y + scroll;
+                    let flat_idx = if ih_for_drop > 0.0 {
+                        (content_y / ih_for_drop).floor().max(0.0) as usize
+                    } else {
+                        0
+                    };
 
-                        // Get the target entry for drop zone computation
-                        if let Some(entry) = tsh_for_drop.entry_at(flat_idx) {
-                            if entry.node_id == source_node {
-                                return true; // dropped on self, no-op
-                            }
-
-                            // Compute drop zone from Y within the row:
-                            // top third = before, middle = into (if has children), bottom = after
-                            let row_top = flat_idx as f32 * ih_for_drop;
-                            let y_in_row = content_y - row_top;
-                            let third = ih_for_drop / 3.0;
-
-                            if y_in_row < third {
-                                // Drop BEFORE target: move as sibling above
-                                let target = entry.node_id;
-                                let source_parent = tree_model_for_drop.parent(source_node);
-                                if let Some(parent) = tree_model_for_drop.parent(target) {
-                                    let siblings = tree_model_for_drop.children(parent);
-                                    let mut idx =
-                                        siblings.iter().position(|&n| n == target).unwrap_or(0);
-                                    // Adjust: if source is an earlier sibling under the same
-                                    // parent, move_node removes it first, shifting indices down.
-                                    if source_parent == Some(parent) {
-                                        let src_idx = siblings.iter().position(|&n| n == source_node);
-                                        if let Some(si) = src_idx {
-                                            if si < idx {
-                                                idx -= 1;
-                                            }
-                                        }
-                                    }
-                                    tree_model_for_drop.move_node(source_node, parent, idx);
-                                } else {
-                                    // Target is a root — move to root before it
-                                    let root_count = tree_model_for_drop.root_count();
-                                    let mut idx = 0;
-                                    for i in 0..root_count {
-                                        if tree_model_for_drop.root(i) == target {
-                                            idx = i;
-                                            break;
-                                        }
-                                    }
-                                    // Adjust if source is also a root before target
-                                    if source_parent.is_none() {
-                                        for i in 0..root_count {
-                                            if tree_model_for_drop.root(i) == source_node {
-                                                if i < idx {
-                                                    idx -= 1;
-                                                }
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    tree_model_for_drop.move_to_root(source_node, idx);
-                                }
-                            } else if y_in_row > 2.0 * third {
-                                // Drop AFTER target: move as sibling below
-                                let target = entry.node_id;
-                                let source_parent = tree_model_for_drop.parent(source_node);
-                                if let Some(parent) = tree_model_for_drop.parent(target) {
-                                    let siblings = tree_model_for_drop.children(parent);
-                                    let mut idx = siblings
-                                        .iter()
-                                        .position(|&n| n == target)
-                                        .map(|i| i + 1)
-                                        .unwrap_or(0);
-                                    // Adjust for same-parent removal shifting indices
-                                    if source_parent == Some(parent) {
-                                        let src_idx = siblings.iter().position(|&n| n == source_node);
-                                        if let Some(si) = src_idx {
-                                            if si < idx {
-                                                idx -= 1;
-                                            }
-                                        }
-                                    }
-                                    tree_model_for_drop.move_node(source_node, parent, idx);
-                                } else {
-                                    let root_count = tree_model_for_drop.root_count();
-                                    let mut idx = root_count;
-                                    for i in 0..root_count {
-                                        if tree_model_for_drop.root(i) == target {
-                                            idx = i + 1;
-                                            break;
-                                        }
-                                    }
-                                    // Adjust if source is also a root before target
-                                    if source_parent.is_none() {
-                                        for i in 0..root_count {
-                                            if tree_model_for_drop.root(i) == source_node {
-                                                if i < idx {
-                                                    idx -= 1;
-                                                }
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    tree_model_for_drop
-                                        .move_to_root(source_node, idx.min(root_count));
-                                }
-                            } else {
-                                // Drop INTO target (middle third): reparent as first child
-                                tree_model_for_drop.move_node(source_node, entry.node_id, 0);
-                            }
+                    // Get the target entry for drop zone computation
+                    if let Some(entry) = tsh_for_drop.entry_at(flat_idx) {
+                        if entry.node_id == source_node {
+                            return true; // dropped on self, no-op
                         }
-                        return true;
+
+                        // Compute drop zone from Y within the row:
+                        // top third = before, middle = into (if has children), bottom = after
+                        let row_top = flat_idx as f32 * ih_for_drop;
+                        let y_in_row = content_y - row_top;
+                        let third = ih_for_drop / 3.0;
+
+                        if y_in_row < third {
+                            // Drop BEFORE target: move as sibling above
+                            let target = entry.node_id;
+                            let source_parent = tree_model_for_drop.parent(source_node);
+                            if let Some(parent) = tree_model_for_drop.parent(target) {
+                                let siblings = tree_model_for_drop.children(parent);
+                                let mut idx =
+                                    siblings.iter().position(|&n| n == target).unwrap_or(0);
+                                // Adjust: if source is an earlier sibling under the same
+                                // parent, move_node removes it first, shifting indices down.
+                                if source_parent == Some(parent) {
+                                    let src_idx = siblings.iter().position(|&n| n == source_node);
+                                    if let Some(si) = src_idx
+                                        && si < idx
+                                    {
+                                        idx -= 1;
+                                    }
+                                }
+                                tree_model_for_drop.move_node(source_node, parent, idx);
+                            } else {
+                                // Target is a root — move to root before it
+                                let root_count = tree_model_for_drop.root_count();
+                                let mut idx = 0;
+                                for i in 0..root_count {
+                                    if tree_model_for_drop.root(i) == target {
+                                        idx = i;
+                                        break;
+                                    }
+                                }
+                                // Adjust if source is also a root before target
+                                if source_parent.is_none() {
+                                    for i in 0..root_count {
+                                        if tree_model_for_drop.root(i) == source_node {
+                                            if i < idx {
+                                                idx -= 1;
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+                                tree_model_for_drop.move_to_root(source_node, idx);
+                            }
+                        } else if y_in_row > 2.0 * third {
+                            // Drop AFTER target: move as sibling below
+                            let target = entry.node_id;
+                            let source_parent = tree_model_for_drop.parent(source_node);
+                            if let Some(parent) = tree_model_for_drop.parent(target) {
+                                let siblings = tree_model_for_drop.children(parent);
+                                let mut idx = siblings
+                                    .iter()
+                                    .position(|&n| n == target)
+                                    .map(|i| i + 1)
+                                    .unwrap_or(0);
+                                // Adjust for same-parent removal shifting indices
+                                if source_parent == Some(parent) {
+                                    let src_idx = siblings.iter().position(|&n| n == source_node);
+                                    if let Some(si) = src_idx
+                                        && si < idx
+                                    {
+                                        idx -= 1;
+                                    }
+                                }
+                                tree_model_for_drop.move_node(source_node, parent, idx);
+                            } else {
+                                let root_count = tree_model_for_drop.root_count();
+                                let mut idx = root_count;
+                                for i in 0..root_count {
+                                    if tree_model_for_drop.root(i) == target {
+                                        idx = i + 1;
+                                        break;
+                                    }
+                                }
+                                // Adjust if source is also a root before target
+                                if source_parent.is_none() {
+                                    for i in 0..root_count {
+                                        if tree_model_for_drop.root(i) == source_node {
+                                            if i < idx {
+                                                idx -= 1;
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+                                tree_model_for_drop.move_to_root(source_node, idx.min(root_count));
+                            }
+                        } else {
+                            // Drop INTO target (middle third): reparent as first child
+                            tree_model_for_drop.move_node(source_node, entry.node_id, 0);
+                        }
                     }
+                    return true;
                 }
                 false
             });
@@ -769,23 +766,23 @@ impl<T: 'static> Widget for TreeView<T> {
                 let inner_id = ctx.add_boxed(widget);
                 let (level, position_1based, total_siblings, expanded_opt) =
                     if let Some(ref e) = entry_meta {
-                        let exp = if e.has_children { Some(e.is_expanded) } else { None };
+                        let exp = if e.has_children {
+                            Some(e.is_expanded)
+                        } else {
+                            None
+                        };
                         let tree_model = self.tree_slice.tree();
-                        let (pos, total) =
-                            if let Some(parent_id) = tree_model.parent(e.node_id) {
-                                let siblings = tree_model.children(parent_id);
-                                let idx = siblings
-                                    .iter()
-                                    .position(|&s| s == e.node_id)
-                                    .unwrap_or(0);
-                                (idx + 1, siblings.len())
-                            } else {
-                                let root_count = tree_model.root_count();
-                                let idx = (0..root_count)
-                                    .find(|&k| tree_model.root(k) == e.node_id)
-                                    .unwrap_or(0);
-                                (idx + 1, root_count)
-                            };
+                        let (pos, total) = if let Some(parent_id) = tree_model.parent(e.node_id) {
+                            let siblings = tree_model.children(parent_id);
+                            let idx = siblings.iter().position(|&s| s == e.node_id).unwrap_or(0);
+                            (idx + 1, siblings.len())
+                        } else {
+                            let root_count = tree_model.root_count();
+                            let idx = (0..root_count)
+                                .find(|&k| tree_model.root(k) == e.node_id)
+                                .unwrap_or(0);
+                            (idx + 1, root_count)
+                        };
                         (e.depth + 1, pos, total, exp)
                     } else {
                         (1, 1, 1, None)
@@ -840,10 +837,8 @@ impl<T: 'static> Widget for TreeView<T> {
                                 // gesture pre-empts it (once active_drag is
                                 // set, PointerUp is routed to handle_drag_drop
                                 // and never reaches this widget).
-                                if has_children {
-                                    if let Some(node_id) = node_for_toggle {
-                                        tsh_click.toggle_expand(node_id);
-                                    }
+                                if has_children && let Some(node_id) = node_for_toggle {
+                                    tsh_click.toggle_expand(node_id);
                                 }
                                 fern_core::event::EventResponse::Ignored
                             }
@@ -856,54 +851,49 @@ impl<T: 'static> Widget for TreeView<T> {
                 // visible preview by re-invoking the delegate for this row
                 // and wrapping it in a DragPreview so it reads as
                 // "picked up" at the pointer.
-                if reorderable {
-                    if let Some(node_id) = self.tree_slice.visible_node_id(i) {
-                        let drag_tree_id = tree_id;
-                        let drag_self_id = self_id;
-                        let delegate_for_preview = self.delegate.clone();
-                        let tsh_for_preview = self.tree_slice.handle();
-                        let tree_model_for_preview = self.tree_slice.tree().clone();
-                        let flat_idx = i;
-                        let item_height_for_preview = self.item_height;
-                        ctx.apply_handlers(
-                            child_id,
-                            HandlerSet::new().on_drag(move |phase, ctx| {
-                                if let fern_core::gesture::DragPhase::Started { .. } = phase {
-                                    let payload = DragPayload::typed(TreeViewDragData {
-                                        source_node: node_id,
-                                        source_tree_id: drag_tree_id,
-                                    });
-                                    let delegate = delegate_for_preview.clone();
-                                    const PREVIEW_WIDTH: f32 = 240.0;
-                                    let h = item_height_for_preview;
-                                    // Build the preview from the source
-                                    // node's item + entry metadata. The
-                                    // entry captures depth / expansion
-                                    // state so the floating preview matches
-                                    // the row it was plucked from.
-                                    let entry_meta = tsh_for_preview.entry_at(flat_idx);
-                                    let preview_opt = entry_meta.and_then(|entry| {
-                                        tree_model_for_preview.with_item(node_id, |item| {
-                                            Box::new(crate::drag_preview::DragPreview::new(
-                                                PREVIEW_WIDTH,
-                                                h,
-                                                delegate(item, &entry, false),
-                                            )) as Box<dyn Widget>
-                                        })
-                                    });
-                                    if let Some(preview) = preview_opt {
-                                        ctx.start_drag_with_preview(
-                                            drag_self_id,
-                                            payload,
-                                            preview,
-                                        );
-                                    } else {
-                                        ctx.start_drag(drag_self_id, payload);
-                                    }
+                if reorderable && let Some(node_id) = self.tree_slice.visible_node_id(i) {
+                    let drag_tree_id = tree_id;
+                    let drag_self_id = self_id;
+                    let delegate_for_preview = self.delegate.clone();
+                    let tsh_for_preview = self.tree_slice.handle();
+                    let tree_model_for_preview = self.tree_slice.tree().clone();
+                    let flat_idx = i;
+                    let item_height_for_preview = self.item_height;
+                    ctx.apply_handlers(
+                        child_id,
+                        HandlerSet::new().on_drag(move |phase, ctx| {
+                            if let fern_core::gesture::DragPhase::Started { .. } = phase {
+                                let payload = DragPayload::typed(TreeViewDragData {
+                                    source_node: node_id,
+                                    source_tree_id: drag_tree_id,
+                                });
+                                let delegate = delegate_for_preview.clone();
+                                const PREVIEW_WIDTH: f32 = 240.0;
+                                let h = item_height_for_preview;
+                                // Build the preview from the source
+                                // node's item + entry metadata. The
+                                // entry captures depth / expansion
+                                // state so the floating preview matches
+                                // the row it was plucked from.
+                                let entry_meta = tsh_for_preview.entry_at(flat_idx);
+                                let preview_opt = entry_meta.and_then(|entry| {
+                                    tree_model_for_preview.with_item(node_id, |item| {
+                                        Box::new(crate::drag_preview::DragPreview::new(
+                                            PREVIEW_WIDTH,
+                                            h,
+                                            delegate(item, &entry, false),
+                                        ))
+                                            as Box<dyn Widget>
+                                    })
+                                });
+                                if let Some(preview) = preview_opt {
+                                    ctx.start_drag_with_preview(drag_self_id, payload, preview);
+                                } else {
+                                    ctx.start_drag(drag_self_id, payload);
                                 }
-                            }),
-                        );
-                    }
+                            }
+                        }),
+                    );
                 }
 
                 self.item_entries.push((i, child_id));
@@ -925,7 +915,11 @@ impl<T: 'static> Widget for TreeView<T> {
         children
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let width = proposal.width.unwrap_or(300.0);
         let height = proposal.height.unwrap_or(200.0);
         self.viewport_height.set(height);
@@ -1029,7 +1023,11 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
             Size::new(self.0, self.1).into()
         }
     }
@@ -1386,8 +1384,8 @@ mod tests {
         // TreeItemWrapper. Regression for the case where the wrapper's
         // on_pointer_event has to route through the preview/bubble path
         // to fire toggle_expand.
-        use crate::primitives::{HStack, Padding, Spacer, TextWidget, ZStack};
         use crate::RectWidget;
+        use crate::primitives::{HStack, Padding, Spacer, TextWidget, ZStack};
 
         let tree = sample_tree();
         let mut wtree = WidgetTree::new();
@@ -1409,7 +1407,7 @@ mod tests {
                             HStack::new()
                                 .spacing(8.0)
                                 .child(TextWidget::new_literal(arrow))
-                                .child(TextWidget::new_literal(name.clone()))
+                                .child(TextWidget::new_literal(name.to_string()))
                                 .child(Spacer::new()),
                         ),
                     ),
@@ -1441,8 +1439,8 @@ mod tests {
         // for the real-app scenario where the pointer hit-target is a
         // deep leaf (TextWidget) and the wrapper holding the gesture
         // arena + on_drag is an ancestor.
-        use crate::primitives::{HStack, Padding, Spacer, TextWidget, ZStack};
         use crate::RectWidget;
+        use crate::primitives::{HStack, Padding, Spacer, TextWidget, ZStack};
 
         let tree = sample_tree();
         let a = tree.root(0);
@@ -1457,7 +1455,7 @@ mod tests {
                             Padding::symmetric(4.0, 12.0).child(
                                 HStack::new()
                                     .spacing(8.0)
-                                    .child(TextWidget::new_literal(name.clone()))
+                                    .child(TextWidget::new_literal(name.to_string()))
                                     .child(Spacer::new()),
                             ),
                         ),
@@ -1549,7 +1547,7 @@ mod tests {
         });
 
         // Confirm B is currently collapsed.
-        assert!(!tree.with_item(b, |_| ()).is_none());
+        assert!(tree.with_item(b, |_| ()).is_some());
         assert_eq!(
             wtree.children(_tv_id).len() - 1,
             3,
@@ -1588,9 +1586,9 @@ mod tests {
         use fern_data::{SelectionMode, SelectionModel};
 
         let model = sample_tree(); // A, B, C (3 roots)
-        let a = model.root(0);
-        let b = model.root(1);
-        let c = model.root(2);
+        let _a = model.root(0);
+        let _b = model.root(1);
+        let _c = model.root(2);
         let selection = SelectionModel::new(SelectionMode::Single);
         let sel_clone = selection.clone();
         let model_clone = model.clone();
@@ -1619,9 +1617,7 @@ mod tests {
         });
 
         // After move: the roots should be reordered as B, A, C
-        let new_roots: Vec<NodeId> = (0..model.root_count())
-            .map(|i| model.root(i))
-            .collect();
+        let new_roots: Vec<NodeId> = (0..model.root_count()).map(|i| model.root(i)).collect();
         assert_eq!(
             model.with_item(new_roots[0], |&v| v),
             Some("B"),
@@ -1647,9 +1643,7 @@ mod tests {
         });
 
         // After move: order should be A, B, C again
-        let new_roots: Vec<NodeId> = (0..model.root_count())
-            .map(|i| model.root(i))
-            .collect();
+        let new_roots: Vec<NodeId> = (0..model.root_count()).map(|i| model.root(i)).collect();
         assert_eq!(
             model.with_item(new_roots[0], |&v| v),
             Some("A"),
@@ -1675,8 +1669,8 @@ mod tests {
         // Tree: A with children A1, A2 (in that order)
         let tree = TreeModel::new();
         let a = tree.insert_root(0, "A");
-        let a1 = tree.insert_child(a, 0, "A1");
-        let a2 = tree.insert_child(a, 1, "A2");
+        let _a1 = tree.insert_child(a, 0, "A1");
+        let _a2 = tree.insert_child(a, 1, "A2");
         let selection = SelectionModel::new(SelectionMode::Single);
         let sel_clone = selection.clone();
         let model = tree.clone();
@@ -1694,7 +1688,7 @@ mod tests {
 
         // Focus the TreeView so ArrowRight expands the focused node (A)
         wtree.focus(tv_id);
-        
+
         // Expand A so children are visible
         wtree.dispatch_event(fern_core::event::WidgetEvent::KeyDown {
             key: Key::ArrowRight,
@@ -1719,11 +1713,7 @@ mod tests {
 
         // Check model: A2 should now be at index 0 under A, A1 at index 1
         let children_of_a = tree.children(a);
-        assert_eq!(
-            children_of_a.len(),
-            2,
-            "A should still have 2 children"
-        );
+        assert_eq!(children_of_a.len(), 2, "A should still have 2 children");
         assert_eq!(
             tree.with_item(children_of_a[0], |&v| v),
             Some("A2"),

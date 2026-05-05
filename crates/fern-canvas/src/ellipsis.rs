@@ -103,7 +103,8 @@ fn middle_ellipsize(
         let head_end_byte = boundaries[head_len];
         let tail_start_byte = boundaries[n - tail_len];
 
-        let mut candidate = String::with_capacity(head_end_byte + 4 + (text.len() - tail_start_byte));
+        let mut candidate =
+            String::with_capacity(head_end_byte + 4 + (text.len() - tail_start_byte));
         candidate.push_str(&text[..head_end_byte]);
         candidate.push(ELLIPSIS);
         candidate.push_str(&text[tail_start_byte..]);
@@ -217,7 +218,10 @@ mod tests {
             EllipsisMode::Leading,
             &mut backend,
         );
-        assert!(s.starts_with(ELLIPSIS), "expected leading ellipsis in {s:?}");
+        assert!(
+            s.starts_with(ELLIPSIS),
+            "expected leading ellipsis in {s:?}"
+        );
         assert!(s.ends_with('d'), "tail preserved in {s:?}");
         let w = measure(&s, &style(), &mut backend);
         assert!(w <= 80.0, "width {w} exceeds budget 80");
@@ -235,13 +239,7 @@ mod tests {
         let mut backend = MockTextBackend::new();
         // Budget smaller than a single char — mock's ellipsis char is 8px,
         // budget is 4px, so nothing can fit.
-        let s = ellipsize(
-            "Hello",
-            &style(),
-            4.0,
-            EllipsisMode::Middle,
-            &mut backend,
-        );
+        let s = ellipsize("Hello", &style(), 4.0, EllipsisMode::Middle, &mut backend);
         // Either empty (budget < ellipsis) or bare "…" — both acceptable.
         assert!(s.is_empty() || s == ellipsis_str());
     }

@@ -23,7 +23,12 @@ fn srgb_to_linear(c: f32) -> f32 {
 /// because `Rgba8UnormSrgb` only gamma-encodes RGB.
 #[inline]
 pub fn srgb_to_linear_rgba(c: [f32; 4]) -> [f32; 4] {
-    [srgb_to_linear(c[0]), srgb_to_linear(c[1]), srgb_to_linear(c[2]), c[3]]
+    [
+        srgb_to_linear(c[0]),
+        srgb_to_linear(c[1]),
+        srgb_to_linear(c[2]),
+        c[3],
+    ]
 }
 
 /// Per-vertex flag: sample atlas `texture.rgb` directly (color emoji)
@@ -78,7 +83,11 @@ impl QuadVertex {
         // (see text-typeset's `rasterize_glyph_quad`); srgb_to_linear
         // leaves that unchanged, so the cached value still multiplies
         // cleanly against the sampled RGB as an opacity factor.
-        let flags = if quad.is_color { QUAD_FLAG_COLOR_GLYPH } else { 0 };
+        let flags = if quad.is_color {
+            QUAD_FLAG_COLOR_GLYPH
+        } else {
+            0
+        };
         let color = srgb_to_linear_rgba(quad.color);
 
         [

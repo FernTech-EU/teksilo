@@ -42,20 +42,15 @@ use crate::tree_model::TreeModel;
 use crate::tree_slice::FlatEntry;
 
 /// Filter strategy used by [`SortFilterTreeModel`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TreeFilterMode {
     /// Hide rows that don't match. Children of hidden parents stay hidden too.
     HideNonMatching,
     /// Keep ancestors of matching descendants visible (file-tree convention).
+    #[default]
     KeepAncestors,
     /// Keep matching rows AND their entire subtree.
     KeepDescendants,
-}
-
-impl Default for TreeFilterMode {
-    fn default() -> Self {
-        TreeFilterMode::KeepAncestors
-    }
 }
 
 type Comparator<T> = Rc<dyn Fn(&T, &T) -> Ordering>;
@@ -398,9 +393,10 @@ fn rebuild_and_bump<T: 'static>(inner_rc: &Rc<RefCell<Inner<T>>>) {
             .filter(|(_, t)| !t.is_empty())
             .filter_map(|(c, t)| g.predicate_factories.get(c).map(|f| f(t)))
             .collect();
-        let sort_cmp = g.sort.as_ref().and_then(|(col, dir)| {
-            g.comparators.get(col).cloned().map(|c| (c, *dir))
-        });
+        let sort_cmp = g
+            .sort
+            .as_ref()
+            .and_then(|(col, dir)| g.comparators.get(col).cloned().map(|c| (c, *dir)));
         (
             g.tree.clone(),
             predicates,
@@ -618,9 +614,14 @@ mod tests {
     ///     hash.rs
     /// build.txt
     /// ```
-    fn sample()
-    -> (TreeModel<&'static str>, NodeId, NodeId, NodeId, NodeId, NodeId)
-    {
+    fn sample() -> (
+        TreeModel<&'static str>,
+        NodeId,
+        NodeId,
+        NodeId,
+        NodeId,
+        NodeId,
+    ) {
         let t = TreeModel::new();
         let docs = t.insert_root(0, "docs");
         let readme = t.insert_child(docs, 0, "readme.md");
@@ -661,8 +662,8 @@ mod tests {
     #[test]
     fn sort_orders_siblings_per_parent() {
         let (tree, _, src, _, _, _) = sample();
-        let proxy = SortFilterTreeModel::new(tree)
-            .with_comparator("name", |a: &&str, b: &&str| a.cmp(b));
+        let proxy =
+            SortFilterTreeModel::new(tree).with_comparator("name", |a: &&str, b: &&str| a.cmp(b));
         proxy.expand(src);
         proxy.set_sort(Some("name"), SortDirection::Ascending);
         // Roots ascending: build.txt, docs, src.
@@ -677,8 +678,8 @@ mod tests {
     #[test]
     fn sort_descending() {
         let (tree, _, _, _, _, _) = sample();
-        let proxy = SortFilterTreeModel::new(tree)
-            .with_comparator("name", |a: &&str, b: &&str| a.cmp(b));
+        let proxy =
+            SortFilterTreeModel::new(tree).with_comparator("name", |a: &&str, b: &&str| a.cmp(b));
         proxy.set_sort(Some("name"), SortDirection::Descending);
         assert_eq!(collect_visible(&proxy), vec!["src", "docs", "build.txt"]);
     }
@@ -790,8 +791,8 @@ mod tests {
     #[test]
     fn bound_sort_signal_drives_view() {
         let (tree, _, _, _, _, _) = sample();
-        let proxy = SortFilterTreeModel::new(tree)
-            .with_comparator("name", |a: &&str, b: &&str| a.cmp(b));
+        let proxy =
+            SortFilterTreeModel::new(tree).with_comparator("name", |a: &&str, b: &&str| a.cmp(b));
         let sig: Signal<Option<(String, SortDirection)>> = Signal::new(None);
         proxy.bind_sort_signal(sig.clone());
         sig.set(Some(("name".to_string(), SortDirection::Ascending)));

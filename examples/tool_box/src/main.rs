@@ -57,13 +57,11 @@ impl Widget for Root {
                 .child(TextWidget::new_literal("Link: editor style guide")),
         );
 
-        let build_panel = Panel::new().padding(12.0).child(
-            TextWidget::new_literal(
-                "Build tasks appear here during export. Nothing is running — the \
+        let build_panel = Panel::new().padding(12.0).child(TextWidget::new_literal(
+            "Build tasks appear here during export. Nothing is running — the \
                  section is disabled so it keeps its slot in the palette without \
                  accepting focus.",
-            ),
-        );
+        ));
 
         let toolbox = ToolBox::new(selected.clone())
             .add(
@@ -92,9 +90,8 @@ impl Widget for Root {
                 });
             });
 
-        let selected_hint = TextWidget::new_literal("Section index:").bind_text(
-            selected.map(|i| format!("Section index: {}", i)),
-        );
+        let selected_hint = TextWidget::new_literal("Section index:")
+            .bind_text(selected.map(|i| format!("Section index: {}", i)));
 
         let header_row = HStack::new()
             .spacing(16.0)
@@ -117,16 +114,15 @@ impl Widget for Root {
             .header(TextWidget::new_literal("Palette").style(TextStyleRole::BodyBold))
             .content(toolbox);
 
-        let content_row = HStack::new()
-            .spacing(16.0)
-            .child(sidebar)
-            .child(Panel::new().padding(20.0).child(
-                TextWidget::new_literal(
+        let content_row =
+            HStack::new()
+                .spacing(16.0)
+                .child(sidebar)
+                .child(Panel::new().padding(20.0).child(TextWidget::new_literal(
                     "The ToolBox on the left is a self-contained widget — it plays \
                      the same role as Qt's QToolBox or an IntelliJ settings-group \
                      accordion: exactly one section open at any time.",
-                ),
-            ));
+                )));
 
         let root_id = ctx.add(
             Panel::new().padding(24.0).child(
@@ -145,7 +141,8 @@ impl Widget for Root {
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -171,9 +168,9 @@ fn main() {
         .theme(Theme::light_default())
         .initial_window(
             WindowConfig::new()
-            .title("ToolBox")
-            .size(840, 560)
-            .root(|tree, _state| tree.add(Root::new()))
+                .title("ToolBox")
+                .size(840, 560)
+                .root(|tree, _state| tree.add(Root::new())),
         )
         .run();
 }

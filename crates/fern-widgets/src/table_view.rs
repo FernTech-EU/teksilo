@@ -110,13 +110,11 @@ fn erase_list_model<T: 'static>(
     let m_obs = model.clone();
     let m_move = model;
     let len_fn: LenFn = Rc::new(move || m_len.len());
-    let with_item_fn: WithItemFn<T> =
-        Rc::new(move |idx, f| {
-            m_read.with_item(idx, |item| f(item));
-        });
-    let observe_fn: ObserveFn = Rc::new(move |callback| {
-        m_obs.observe_changes(move |change| callback(change))
+    let with_item_fn: WithItemFn<T> = Rc::new(move |idx, f| {
+        m_read.with_item(idx, |item| f(item));
     });
+    let observe_fn: ObserveFn =
+        Rc::new(move |callback| m_obs.observe_changes(move |change| callback(change)));
     let move_fn: MoveItemFn = Rc::new(move |from, to| m_move.move_item(from, to));
     (len_fn, with_item_fn, observe_fn, Some(move_fn))
 }
@@ -129,13 +127,11 @@ fn erase_data_source<S: ListDataSource<Item = T>, T: 'static>(
     let s_read = s.clone();
     let s_obs = s;
     let len_fn: LenFn = Rc::new(move || s_len.len());
-    let with_item_fn: WithItemFn<T> =
-        Rc::new(move |idx, f| {
-            s_read.with_item(idx, |item| f(item));
-        });
-    let observe_fn: ObserveFn = Rc::new(move |callback| {
-        s_obs.observe_changes(move |change| callback(change))
+    let with_item_fn: WithItemFn<T> = Rc::new(move |idx, f| {
+        s_read.with_item(idx, |item| f(item));
     });
+    let observe_fn: ObserveFn =
+        Rc::new(move |callback| s_obs.observe_changes(move |change| callback(change)));
     (len_fn, with_item_fn, observe_fn, None)
 }
 
@@ -205,8 +201,15 @@ pub struct TableView<T: 'static> {
     on_row_activate: Option<Rc<dyn Fn(usize, &mut fern_core::widget::EventContext)>>,
     /// External row-drop callback for inter-table or app-defined drops.
     #[allow(clippy::type_complexity)]
-    on_row_drop:
-        Option<Rc<dyn Fn(fern_core::drag_payload::DragPayload, usize, &mut fern_core::widget::EventContext) -> bool>>,
+    on_row_drop: Option<
+        Rc<
+            dyn Fn(
+                fern_core::drag_payload::DragPayload,
+                usize,
+                &mut fern_core::widget::EventContext,
+            ) -> bool,
+        >,
+    >,
     reorderable_rows: bool,
 
     // Build state
@@ -374,8 +377,12 @@ impl<T: 'static> TableView<T> {
     /// (intra-table) do not invoke this — the table consumes them.
     pub fn on_row_drop(
         mut self,
-        f: impl Fn(fern_core::drag_payload::DragPayload, usize, &mut fern_core::widget::EventContext) -> bool
-            + 'static,
+        f: impl Fn(
+            fern_core::drag_payload::DragPayload,
+            usize,
+            &mut fern_core::widget::EventContext,
+        ) -> bool
+        + 'static,
     ) -> Self {
         self.on_row_drop = Some(Rc::new(f));
         self
@@ -666,16 +673,14 @@ impl<T: 'static> TableView<T> {
         sort_pane(&mut leading, &self.columns);
         sort_pane(&mut middle, &self.columns);
         sort_pane(&mut trailing, &self.columns);
-        let mut out =
-            Vec::with_capacity(leading.len() + middle.len() + trailing.len());
+        let mut out = Vec::with_capacity(leading.len() + middle.len() + trailing.len());
         out.extend(leading);
         let leading_count = out.len();
         out.extend(middle);
         let middle_end = out.len();
         out.extend(trailing);
         // Stash the boundaries so paint / drop-zone math can read them.
-        *self.pane_boundaries.borrow_mut() =
-            PaneBoundaries::new(leading_count, middle_end);
+        *self.pane_boundaries.borrow_mut() = PaneBoundaries::new(leading_count, middle_end);
         out
     }
 
@@ -690,8 +695,7 @@ impl<T: 'static> TableView<T> {
         if item_top < scroll {
             self.scroll_y.set(item_top.clamp(0.0, max));
         } else if item_bottom > scroll + viewport {
-            self.scroll_y
-                .set((item_bottom - viewport).clamp(0.0, max));
+            self.scroll_y.set((item_bottom - viewport).clamp(0.0, max));
         }
     }
 
@@ -771,8 +775,11 @@ impl<T: 'static> Widget for TableView<T> {
         version.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
         // Scroll-y at Relayout: place_children re-runs without rebuild.
-        self.scroll_y
-            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Relayout);
+        self.scroll_y.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
         ctx.register_animated_signal(&self.scroll_y);
 
         // Column width overrides: any change re-runs place_children
@@ -1047,21 +1054,20 @@ impl<T: 'static> Widget for TableView<T> {
                     0
                 };
 
-                if let Some(drag) = payload.take_typed::<RowReorderDragData>() {
-                    if drag.source_table_id == table_id_for_drop {
-                        if let Some(ref mover) = move_item_fn {
-                            let from = drag.source_row;
-                            let to = if from < insertion_row {
-                                insertion_row.saturating_sub(1)
-                            } else {
-                                insertion_row
-                            };
-                            if from != to {
-                                mover(from, to);
-                            }
-                            return true;
-                        }
+                if let Some(drag) = payload.take_typed::<RowReorderDragData>()
+                    && drag.source_table_id == table_id_for_drop
+                    && let Some(ref mover) = move_item_fn
+                {
+                    let from = drag.source_row;
+                    let to = if from < insertion_row {
+                        insertion_row.saturating_sub(1)
+                    } else {
+                        insertion_row
+                    };
+                    if from != to {
+                        mover(from, to);
                     }
+                    return true;
                 }
                 if let Some(ref handler) = on_row_drop {
                     return handler(payload, insertion_row, ctx);
@@ -1096,8 +1102,7 @@ impl<T: 'static> Widget for TableView<T> {
                 // Filter zone width: indicator glyph + a small horizontal
                 // padding for tap tolerance. Mirrors the layout of the
                 // HStack inside HeaderCell::build.
-                let filter_zone_width =
-                    style.filter_indicator_size + style.cell_padding_horizontal;
+                let filter_zone_width = style.filter_indicator_size + style.cell_padding_horizontal;
                 let cell = header::HeaderCell::new(
                     col.id.clone(),
                     col.header_label.resolve_now(),
@@ -1136,10 +1141,7 @@ impl<T: 'static> Widget for TableView<T> {
                 self.pane_boundaries.clone(),
                 self.column_order_signal.clone(),
                 self.column_pinning_signal.clone(),
-                self.columns
-                    .iter()
-                    .map(|c| c.id.clone())
-                    .collect(),
+                self.columns.iter().map(|c| c.id.clone()).collect(),
             );
             self.header_row_id = Some(header_row_id);
         }
@@ -1220,7 +1222,11 @@ impl<T: 'static> Widget for TableView<T> {
         children
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let width = proposal.width.unwrap_or(400.0);
         let height = proposal.height.unwrap_or(300.0);
         self.viewport_height.set(height);
@@ -1306,10 +1312,8 @@ impl<T: 'static> Widget for TableView<T> {
         if self.scrollbar_id.is_some() {
             if let Some(child) = children.get_mut(next) {
                 if needs_scrollbar {
-                    child.origin = Point::new(
-                        bounds.x + bounds.width - SCROLLBAR_THICKNESS,
-                        body_origin_y,
-                    );
+                    child.origin =
+                        Point::new(bounds.x + bounds.width - SCROLLBAR_THICKNESS, body_origin_y);
                     child.size = Size::new(SCROLLBAR_THICKNESS, body_height);
                 } else {
                     child.origin = bounds.origin();
@@ -1321,11 +1325,11 @@ impl<T: 'static> Widget for TableView<T> {
 
         // Header strip last — placed at top y but emitted last so paint
         // z-order draws it above any overscrolled body rows.
-        if self.header_row_id.is_some() {
-            if let Some(child) = children.get_mut(next) {
-                child.origin = Point::new(bounds.x, bounds.y);
-                child.size = Size::new(body_width, header_h);
-            }
+        if self.header_row_id.is_some()
+            && let Some(child) = children.get_mut(next)
+        {
+            child.origin = Point::new(bounds.x, bounds.y);
+            child.size = Size::new(body_width, header_h);
         }
     }
 
@@ -1362,20 +1366,20 @@ impl<T: 'static> Widget for TableView<T> {
         }
 
         // Selection highlights — row selection modes only.
-        if let Some(ref sel) = self.selection {
-            if matches!(
+        if let Some(ref sel) = self.selection
+            && matches!(
                 self.selection_mode,
                 TableSelectionMode::SingleRow | TableSelectionMode::MultiRow
-            ) {
-                let bg = SurfaceRole::Selected.resolve(colors);
-                for row_idx in sel.selected_indices() {
-                    let y = body_origin_y + (row_idx as f32) * row_h - scroll_y;
-                    if y + row_h < body_origin_y || y > body_origin_y + body_height {
-                        continue;
-                    }
-                    let rect = Rect::new(bounds.x, y, body_width_for_paint, row_h);
-                    canvas.fill_rect(rect, bg);
+            )
+        {
+            let bg = SurfaceRole::Selected.resolve(colors);
+            for row_idx in sel.selected_indices() {
+                let y = body_origin_y + (row_idx as f32) * row_h - scroll_y;
+                if y + row_h < body_origin_y || y > body_origin_y + body_height {
+                    continue;
                 }
+                let rect = Rect::new(bounds.x, y, body_width_for_paint, row_h);
+                canvas.fill_rect(rect, bg);
             }
         }
 
@@ -1389,8 +1393,7 @@ impl<T: 'static> Widget for TableView<T> {
             let row_count = (self.len_fn)();
             let last_visible = last_visible.min(row_count);
             for row_idx in first_visible..last_visible {
-                let y =
-                    body_origin_y + (row_idx as f32 + 1.0) * row_h - scroll_y - line_w;
+                let y = body_origin_y + (row_idx as f32 + 1.0) * row_h - scroll_y - line_w;
                 let rect = Rect::new(bounds.x, y, body_width_for_paint, line_w);
                 canvas.fill_rect(rect, line_color);
             }
@@ -1408,37 +1411,31 @@ impl<T: 'static> Widget for TableView<T> {
         }
 
         // Focus ring on the currently-focused cell.
-        if let Some((focus_row, focus_col)) = self.focused_cell.get() {
-            if focus_col < widths.len() {
-                let mut x_off = 0.0_f32;
-                for &w in widths.iter().take(focus_col) {
-                    x_off += w;
-                }
-                let cell_w = widths[focus_col];
-                let y = body_origin_y + (focus_row as f32) * row_h - scroll_y;
-                if y + row_h >= body_origin_y && y <= body_origin_y + body_height {
-                    let inset = style.focus_ring_inset;
-                    let stroke = style.grid_line_thickness.max(1.5);
-                    let ring_color = BorderRole::Focused.resolve(colors);
-                    let rx = bounds.x + x_off + inset;
-                    let ry = y + inset;
-                    let rw = (cell_w - inset * 2.0).max(0.0);
-                    let rh = (row_h - inset * 2.0).max(0.0);
-                    // Top
-                    canvas.fill_rect(Rect::new(rx, ry, rw, stroke), ring_color);
-                    // Bottom
-                    canvas.fill_rect(
-                        Rect::new(rx, ry + rh - stroke, rw, stroke),
-                        ring_color,
-                    );
-                    // Left
-                    canvas.fill_rect(Rect::new(rx, ry, stroke, rh), ring_color);
-                    // Right
-                    canvas.fill_rect(
-                        Rect::new(rx + rw - stroke, ry, stroke, rh),
-                        ring_color,
-                    );
-                }
+        if let Some((focus_row, focus_col)) = self.focused_cell.get()
+            && focus_col < widths.len()
+        {
+            let mut x_off = 0.0_f32;
+            for &w in widths.iter().take(focus_col) {
+                x_off += w;
+            }
+            let cell_w = widths[focus_col];
+            let y = body_origin_y + (focus_row as f32) * row_h - scroll_y;
+            if y + row_h >= body_origin_y && y <= body_origin_y + body_height {
+                let inset = style.focus_ring_inset;
+                let stroke = style.grid_line_thickness.max(1.5);
+                let ring_color = BorderRole::Focused.resolve(colors);
+                let rx = bounds.x + x_off + inset;
+                let ry = y + inset;
+                let rw = (cell_w - inset * 2.0).max(0.0);
+                let rh = (row_h - inset * 2.0).max(0.0);
+                // Top
+                canvas.fill_rect(Rect::new(rx, ry, rw, stroke), ring_color);
+                // Bottom
+                canvas.fill_rect(Rect::new(rx, ry + rh - stroke, rw, stroke), ring_color);
+                // Left
+                canvas.fill_rect(Rect::new(rx, ry, stroke, rh), ring_color);
+                // Right
+                canvas.fill_rect(Rect::new(rx + rw - stroke, ry, stroke, rh), ring_color);
             }
         }
     }
@@ -1594,6 +1591,3 @@ fn attach_header_reorder_handlers(
             }),
     );
 }
-
-
-

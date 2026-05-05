@@ -147,9 +147,7 @@ impl Widget for Shake {
             return vec![child_id];
         }
 
-        let duration = self
-            .duration
-            .unwrap_or(ctx.theme().motion.duration_slow);
+        let duration = self.duration.unwrap_or(ctx.theme().motion.duration_slow);
         let progress_for_effect = progress;
         ctx.effect(&self.trigger, move |_| {
             // Restart from 0 each time, even if the previous shake
@@ -163,7 +161,11 @@ impl Widget for Shake {
         vec![child_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let Some(child_id) = self.child_id else {
             return (proposal.resolve(0.0, 0.0)).into();
         };

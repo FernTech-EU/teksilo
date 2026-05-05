@@ -77,7 +77,10 @@ fn body_needs_stmt_form(body: &[BodyItem]) -> bool {
         matches!(
             item,
             BodyItem::Let(_)
-                | BodyItem::Rust { shape: RustShape::SideEffect, .. }
+                | BodyItem::Rust {
+                    shape: RustShape::SideEffect,
+                    ..
+                }
                 | BodyItem::Spread { .. }
         )
     })
@@ -109,7 +112,7 @@ fn reordered_body(body: &[BodyItem]) -> impl Iterator<Item = &BodyItem> {
     let (non_handlers, handlers): (Vec<_>, Vec<_>) = body.iter().partition(|item| {
         !matches!(item, BodyItem::Property(p) if diag::is_widget_builder_method(&p.name.to_string()))
     });
-    non_handlers.into_iter().chain(handlers.into_iter())
+    non_handlers.into_iter().chain(handlers)
 }
 
 fn lower_element_stmt(
@@ -197,7 +200,10 @@ fn lower_body_attach(
         BodyItem::Match(fern_match) => lower_match_attach(fern_match, ctx_tok, hoisted),
         BodyItem::For(fern_for) => lower_for_attach(fern_for, ctx_tok, hoisted),
         BodyItem::Let(_)
-        | BodyItem::Rust { shape: RustShape::SideEffect, .. }
+        | BodyItem::Rust {
+            shape: RustShape::SideEffect,
+            ..
+        }
         | BodyItem::Spread { .. } => {
             unreachable!("stmt-form items shouldn't reach lower_body_attach")
         }

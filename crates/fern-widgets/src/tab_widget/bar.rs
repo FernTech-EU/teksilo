@@ -17,33 +17,32 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal};
+use fern_core::DropFeedback;
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::drag_payload::DragPayload;
-use fern_core::DropFeedback;
 use fern_core::event::{EventResponse, ScrollDelta, WidgetEvent};
 use fern_core::overlay::OverlayPlacement;
 use fern_core::signal::Signal;
-use fern_core::gesture::DragPhase;
 use fern_core::widget::{
     EventContext, LayoutContext, LayoutResponse, PaintContext, PendingChild, Widget,
     WidgetPlacement,
 };
-use fern_core::widget_id::WidgetId;
 use fern_core::widget_builder::HandlerSet;
+use fern_core::widget_id::WidgetId;
 use fern_data::{ListDataSource, ListModel};
 use fern_i18n::LocalizedString;
 use fern_tokens::Easing;
 
 use crate::list_source::ListSource;
+use crate::primitives::FixedSize;
 use crate::scroll_area::{ScrollArea, ScrollBarMode, ScrollBarPolicy};
 use crate::tab_widget::delegate::{TabBarOrientation, TabDelegate, TabSizing};
 use crate::tab_widget::header::{HeaderShared, TabHeader, TabHeaderConfig};
 use crate::tab_widget::id::TabId;
-use crate::primitives::FixedSize;
 use crate::{
-    Button, ButtonVariant, BuiltInButton, BuiltInButtonSize, Expand, HStack, IconLocation,
+    BuiltInButton, BuiltInButtonSize, Button, ButtonVariant, Expand, HStack, IconLocation,
     IconWidget, ListView, Panel, PopoverButton,
 };
 use fern_core::accesskit::HasPopup;
@@ -350,10 +349,7 @@ impl<T: 'static> TabBar<T> {
     /// selected, idle, and hovered all paint the same fill. Accepts
     /// any `Color`, `SurfaceRole`, or `Signal<Color>`. Default `None`
     /// = transparent.
-    pub fn tab_background(
-        mut self,
-        color: impl Into<fern_core::color_prop::ColorProp>,
-    ) -> Self {
+    pub fn tab_background(mut self, color: impl Into<fern_core::color_prop::ColorProp>) -> Self {
         self.tab_background = Some(color.into());
         self
     }
@@ -469,14 +465,10 @@ impl<T: 'static> TabBar<T> {
     /// `Switcher`'s captured panel ids in; the headers read them in
     /// `accessibility()` to publish the Tab → TabPanel `controls()`
     /// relation.
-    pub(crate) fn with_panel_ids(
-        mut self,
-        buffer: Rc<RefCell<Vec<WidgetId>>>,
-    ) -> Self {
+    pub(crate) fn with_panel_ids(mut self, buffer: Rc<RefCell<Vec<WidgetId>>>) -> Self {
         self.panel_ids_buffer = Some(buffer);
         self
     }
-
 }
 
 impl<T: 'static> Widget for TabBar<T> {
@@ -584,12 +576,11 @@ impl<T: 'static> Widget for TabBar<T> {
         let id_to_idx_for_eff = id_to_index.clone();
         let idx_for_id_eff = self.selected.clone();
         ctx.effect(&self.selected_id, move |maybe_id| {
-            if let Some(id) = maybe_id {
-                if let Some(&i) = id_to_idx_for_eff.get(id) {
-                    if idx_for_id_eff.get() != i {
-                        idx_for_id_eff.set(i);
-                    }
-                }
+            if let Some(id) = maybe_id
+                && let Some(&i) = id_to_idx_for_eff.get(id)
+                && idx_for_id_eff.get() != i
+            {
+                idx_for_id_eff.set(i);
             }
         });
         let idx_to_id_for_eff = index_to_id.clone();
@@ -618,12 +609,12 @@ impl<T: 'static> Widget for TabBar<T> {
         // with the strips in the right order below.
         let mut pinned_header_ids: Vec<WidgetId> = Vec::new();
         let mut unpinned_header_ids: Vec<WidgetId> = Vec::with_capacity(n);
-        /// Maps each unpinned-region position to its index in the
-        /// **model**. Used by the drop handler to translate the
-        /// `insertion_index_for(...)` result (which is in unpinned
-        /// space — `header_bounds_buf` only contains the unpinned
-        /// row's bounds) to a model index that `move_item` can
-        /// consume directly.
+        // Maps each unpinned-region position to its index in the
+        // **model**. Used by the drop handler to translate the
+        // `insertion_index_for(...)` result (which is in unpinned
+        // space — `header_bounds_buf` only contains the unpinned
+        // row's bounds) to a model index that `move_item` can
+        // consume directly.
         let mut unpinned_to_model: Vec<usize> = Vec::with_capacity(n);
         // Collected per-tab labels are reused by the overflow
         // dropdown's MenuList. Resolved at build time → re-resolved on
@@ -694,8 +685,7 @@ impl<T: 'static> Widget for TabBar<T> {
             } else {
                 (self.min_tab_width, self.max_tab_width)
             };
-            let label_capture: Rc<RefCell<Option<LocalizedString>>> =
-                Rc::new(RefCell::new(None));
+            let label_capture: Rc<RefCell<Option<LocalizedString>>> = Rc::new(RefCell::new(None));
             let label_capture_clone = label_capture.clone();
             let close_handler_for_tab = close_handler.clone();
             let header = (self.source.with_item_fn)(i, &|item| -> Box<dyn Widget> {
@@ -708,24 +698,21 @@ impl<T: 'static> Widget for TabBar<T> {
                 let context_menu_factory = self.delegate.resolve_context_menu(i, item);
                 let enabled = self.delegate.resolve_enabled(i, item);
                 let closable = self.delegate.resolve_closable(i, item);
-                let on_close: Option<Rc<dyn Fn()>> =
-                    if closable {
-                        close_handler_for_tab.clone().map(|f| {
-                            Rc::new(move || (f)(i)) as Rc<dyn Fn()>
-                        })
-                    } else {
-                        None
-                    };
+                let on_close: Option<Rc<dyn Fn()>> = if closable {
+                    close_handler_for_tab
+                        .clone()
+                        .map(|f| Rc::new(move || (f)(i)) as Rc<dyn Fn()>)
+                } else {
+                    None
+                };
 
-                let on_reorder_to: Option<Rc<dyn Fn(usize)>> =
-                    if !is_pinned {
-                        reorder_handler.clone().map(|reorder| {
-                            Rc::new(move |to: usize| (reorder)(i, to))
-                                as Rc<dyn Fn(usize)>
-                        })
-                    } else {
-                        None
-                    };
+                let on_reorder_to: Option<Rc<dyn Fn(usize)>> = if !is_pinned {
+                    reorder_handler.clone().map(|reorder| {
+                        Rc::new(move |to: usize| (reorder)(i, to)) as Rc<dyn Fn(usize)>
+                    })
+                } else {
+                    None
+                };
 
                 Box::new(TabHeader::new(TabHeaderConfig {
                     label,
@@ -911,12 +898,8 @@ impl<T: 'static> Widget for TabBar<T> {
 
         // The scroll area takes all the slack along the layout axis.
         let scroll_slot = match self.orientation {
-            TabBarOrientation::Horizontal => {
-                ctx.add(Expand::horizontal().child_id(scroll_id))
-            }
-            TabBarOrientation::Vertical => {
-                ctx.add(Expand::vertical().child_id(scroll_id))
-            }
+            TabBarOrientation::Horizontal => ctx.add(Expand::horizontal().child_id(scroll_id)),
+            TabBarOrientation::Vertical => ctx.add(Expand::vertical().child_id(scroll_id)),
         };
         outer_children.push(scroll_slot);
 
@@ -957,11 +940,7 @@ impl<T: 'static> Widget for TabBar<T> {
                     enabled,
                 })
                 .collect();
-            let dropdown_id = build_overflow_dropdown(
-                ctx,
-                self.selected_id.clone(),
-                entries,
-            );
+            let dropdown_id = build_overflow_dropdown(ctx, self.selected_id.clone(), entries);
             outer_children.push(dropdown_id);
         }
 
@@ -1041,8 +1020,8 @@ impl<T: 'static> Widget for TabBar<T> {
                 // Sign convention matches ScrollArea: positive delta
                 // moves the content (so positive `y` from a wheel-down
                 // event scrolls right when remapped to horizontal).
-                let new_x = (scroll_x_for_wheel.get() + mapped_dx)
-                    .clamp(0.0, max_scroll_x_for_wheel.get());
+                let new_x =
+                    (scroll_x_for_wheel.get() + mapped_dx).clamp(0.0, max_scroll_x_for_wheel.get());
                 scroll_x_for_wheel.set(new_x);
                 EventResponse::Handled
             },
@@ -1063,7 +1042,10 @@ impl<T: 'static> Widget for TabBar<T> {
                     let header_bounds = header_bounds_buf.clone();
                     let drop_indicator = self.paint_state.drop_indicator_x.clone();
                     let bar_bounds = self.paint_state.last_bar_bounds.clone();
-                    move |payload: &DragPayload, position: Point, _ctx: &mut EventContext| -> DropFeedback {
+                    move |payload: &DragPayload,
+                          position: Point,
+                          _ctx: &mut EventContext|
+                          -> DropFeedback {
                         let Some(data) = payload.get_typed::<TabBarDragData>() else {
                             drop_indicator.set(None);
                             return DropFeedback::NoFeedback;
@@ -1081,12 +1063,8 @@ impl<T: 'static> Widget for TabBar<T> {
                         // Layout-axis pointer position in world coords:
                         // x for horizontal bars, y for vertical bars.
                         let (pointer_world_main, bar_origin_main) = match axis {
-                            TabBarOrientation::Horizontal => {
-                                (position.x + bar.x, bar.x)
-                            }
-                            TabBarOrientation::Vertical => {
-                                (position.y + bar.y, bar.y)
-                            }
+                            TabBarOrientation::Horizontal => (position.x + bar.x, bar.x),
+                            TabBarOrientation::Vertical => (position.y + bar.y, bar.y),
                         };
                         let insertion_world_main =
                             insertion_world_main_for(&bounds, pointer_world_main, axis);
@@ -1111,12 +1089,14 @@ impl<T: 'static> Widget for TabBar<T> {
                     let reorder = reorder.clone();
                     let unpinned_to_model = unpinned_to_model.clone();
                     let bar_id = bar_id_for_drop;
-                    move |mut payload: DragPayload, position: Point, _ctx: &mut EventContext| -> bool {
+                    move |mut payload: DragPayload,
+                          position: Point,
+                          _ctx: &mut EventContext|
+                          -> bool {
                         drop_indicator.set(None);
                         let Some(data) = payload.take_typed::<TabBarDragData>() else {
                             return false;
-                        }
-                        ;
+                        };
                         if data.source_bar_id != bar_id {
                             return false;
                         }
@@ -1136,8 +1116,7 @@ impl<T: 'static> Widget for TabBar<T> {
                         // doing any arithmetic against
                         // `data.source_index`, which is already in
                         // model space.
-                        let to_unpinned =
-                            insertion_index_for(&bounds, pointer_world_main, axis);
+                        let to_unpinned = insertion_index_for(&bounds, pointer_world_main, axis);
                         let to_model = if to_unpinned < unpinned_to_model.len() {
                             unpinned_to_model[to_unpinned]
                         } else {
@@ -1188,8 +1167,7 @@ impl<T: 'static> Widget for TabBar<T> {
                         let max = max_scroll_main.get();
                         let cur = scroll_main.get();
                         let leading_in = (DRAG_EDGE_ZONE - pointer_main).max(0.0);
-                        let trailing_in =
-                            (pointer_main - (bar_extent - DRAG_EDGE_ZONE)).max(0.0);
+                        let trailing_in = (pointer_main - (bar_extent - DRAG_EDGE_ZONE)).max(0.0);
                         let delta = if leading_in > 0.0 {
                             -(leading_in / DRAG_EDGE_ZONE) * DRAG_MAX_VELOCITY
                         } else if trailing_in > 0.0 {
@@ -1242,8 +1220,7 @@ impl<T: 'static> Widget for TabBar<T> {
             // the separator in its own column (the "tab merges into
             // content pane" effect).
             let border_width = ctx.theme.shape.border_width;
-            let envelope =
-                ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
+            let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
             let separator = match self.orientation {
                 TabBarOrientation::Horizontal => Rect::new(
                     bounds.x,
@@ -1343,8 +1320,7 @@ impl TabHeaderRow {
                         // the layout-axis [min, max] knobs.
                         let total_spacing = self.spacing * (n.saturating_sub(1)) as f32;
                         let avail = viewport_main.unwrap_or(0.0).max(0.0);
-                        let ideal =
-                            ((avail - total_spacing).max(0.0) / n as f32).max(0.0);
+                        let ideal = ((avail - total_spacing).max(0.0) / n as f32).max(0.0);
                         ideal.clamp(self.min_extent, self.max_extent)
                     }
                     TabBarOrientation::Vertical => {
@@ -1398,11 +1374,7 @@ impl Widget for TabHeaderRow {
         self.header_ids.clone()
     }
 
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        ctx: &LayoutContext,
-    ) -> LayoutResponse {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         let n = self.header_ids.len();
         if n == 0 {
             return Size::new(0.0, 0.0).into();
@@ -1545,9 +1517,7 @@ fn build_scroll_arrow(
             let cur = scroll_main.get();
             let target = match kind {
                 ScrollArrowKind::Leading => (cur - SCROLL_ARROW_STEP).max(0.0),
-                ScrollArrowKind::Trailing => {
-                    (cur + SCROLL_ARROW_STEP).min(max_scroll_main.get())
-                }
+                ScrollArrowKind::Trailing => (cur + SCROLL_ARROW_STEP).min(max_scroll_main.get()),
             };
             // The main-axis scroll signal is created via
             // `Signal::new_animated` inside ScrollArea, so
@@ -1625,8 +1595,7 @@ fn build_overflow_dropdown(
     // Compute a shrink-to-content height for short tab lists; cap
     // at `DROPDOWN_MAX_HEIGHT` for long ones (the ListView's
     // internal scroll bar takes over past the cap).
-    let natural_h =
-        (row_count as f32 * DROPDOWN_ROW_HEIGHT) + (DROPDOWN_PADDING * 2.0);
+    let natural_h = (row_count as f32 * DROPDOWN_ROW_HEIGHT) + (DROPDOWN_PADDING * 2.0);
     let content_h = natural_h.min(DROPDOWN_MAX_HEIGHT);
 
     // Sized container. `FixedSize` forces both axes (content_h
@@ -1671,11 +1640,7 @@ fn axis_range(rect: &Rect, axis: TabBarOrientation) -> (f32, f32) {
 /// position closest to `pointer_main`, given each header's world
 /// bounds. The returned coordinate is a tab boundary — the leading
 /// edge of a header, or the trailing edge of the last header.
-fn insertion_world_main_for(
-    bounds: &[Rect],
-    pointer_main: f32,
-    axis: TabBarOrientation,
-) -> f32 {
+fn insertion_world_main_for(bounds: &[Rect], pointer_main: f32, axis: TabBarOrientation) -> f32 {
     let n = bounds.len();
     debug_assert!(n > 0);
     let (_, last_end) = axis_range(&bounds[n - 1], axis);
@@ -1699,11 +1664,7 @@ fn insertion_world_main_for(
 /// Find the model index where the dragged tab should be inserted.
 /// `n` items → `n+1` valid insertion indices: 0 means "before the
 /// first", `n` means "after the last".
-fn insertion_index_for(
-    bounds: &[Rect],
-    pointer_main: f32,
-    axis: TabBarOrientation,
-) -> usize {
+fn insertion_index_for(bounds: &[Rect], pointer_main: f32, axis: TabBarOrientation) -> usize {
     let n = bounds.len();
     if n == 0 {
         return 0;
@@ -1747,9 +1708,9 @@ mod drop_math_tests {
 
     fn three_tabs_vertical() -> Vec<Rect> {
         vec![
-            Rect::new(0.0, 0.0, 200.0, 50.0),     // y ∈ [0..50)
-            Rect::new(0.0, 50.0, 200.0, 50.0),    // y ∈ [50..100)
-            Rect::new(0.0, 100.0, 200.0, 50.0),   // y ∈ [100..150)
+            Rect::new(0.0, 0.0, 200.0, 50.0),   // y ∈ [0..50)
+            Rect::new(0.0, 50.0, 200.0, 50.0),  // y ∈ [50..100)
+            Rect::new(0.0, 100.0, 200.0, 50.0), // y ∈ [100..150)
         ]
     }
 
@@ -1832,11 +1793,7 @@ mod drop_math_tests {
 struct EnabledProbe;
 
 impl Widget for EnabledProbe {
-    fn layout_response(
-        &self,
-        _proposal: SizeProposal,
-        _ctx: &LayoutContext,
-    ) -> LayoutResponse {
+    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
         Size::new(0.0, 0.0).into()
     }
 }

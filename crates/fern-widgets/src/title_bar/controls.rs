@@ -19,6 +19,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use fern_canvas::{Rect, Size, SizeProposal};
+use fern_core::PlatformTitleBarHost;
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::signal::Signal;
 use fern_core::widget::{
@@ -26,7 +27,6 @@ use fern_core::widget::{
 };
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_core::PlatformTitleBarHost;
 use fern_tokens::{Color, TextStyleRole};
 
 use crate::primitives::{Center, FixedSize, HStack, RectWidget, Switcher, TextWidget, ZStack};
@@ -145,11 +145,7 @@ impl ControlButton {
 }
 
 impl Widget for ControlButton {
-    fn build(
-        &mut self,
-        ctx: &mut fern_core::build_context::BuildContext,
-    ) -> Vec<WidgetId> {
-
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
         // Reactive hover background: starts transparent, flips to
         // `hover_bg` while the pointer is inside, back to transparent on
         // leave. RectWidget with `bind_background` repaints on change.
@@ -177,15 +173,16 @@ impl Widget for ControlButton {
         let bg_enter = bg_signal.clone();
         let bg_leave = bg_signal.clone();
         let hover_color = self.hover_bg;
-        let mut handlers = HandlerSet::new()
-            .cursor(CursorIcon::Pointer)
-            .on_hover(move |entered, _ctx| {
-                if entered {
-                    bg_enter.set(hover_color);
-                } else {
-                    bg_leave.set(Color::TRANSPARENT);
-                }
-            });
+        let mut handlers =
+            HandlerSet::new()
+                .cursor(CursorIcon::Pointer)
+                .on_hover(move |entered, _ctx| {
+                    if entered {
+                        bg_enter.set(hover_color);
+                    } else {
+                        bg_leave.set(Color::TRANSPARENT);
+                    }
+                });
 
         if let Some(action) = self.action.take() {
             handlers = handlers.on_tap(move |_pos, ctx| action(ctx));
@@ -203,7 +200,11 @@ impl Widget for ControlButton {
             let bg_target = self.bg_signal.clone();
             let hover_color = self.hover_bg;
             ctx.effect(&ext, move |entered| {
-                bg_target.set(if *entered { hover_color } else { Color::TRANSPARENT });
+                bg_target.set(if *entered {
+                    hover_color
+                } else {
+                    Color::TRANSPARENT
+                });
             });
         }
 
@@ -220,7 +221,11 @@ impl Widget for ControlButton {
         vec![sized]
     }
 
-    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        _proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         // Always exactly the configured cell. Returning the proposal here
         // would let an HStack stretch us to the leftover width.
         Size::new(self.width, self.height).into()
@@ -294,20 +299,14 @@ impl WindowControls {
     /// Wire a sink the parent `TitleBar` will read from in its
     /// `after_paint` hook. The sink receives a [`WindowControlsLayout`]
     /// snapshot during this widget's `build` pass.
-    pub(crate) fn layout_sink(
-        mut self,
-        sink: Rc<Cell<Option<WindowControlsLayout>>>,
-    ) -> Self {
+    pub(crate) fn layout_sink(mut self, sink: Rc<Cell<Option<WindowControlsLayout>>>) -> Self {
         self.layout_sink = Some(sink);
         self
     }
 }
 
 impl Widget for WindowControls {
-    fn build(
-        &mut self,
-        ctx: &mut fern_core::build_context::BuildContext,
-    ) -> Vec<WidgetId> {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
         // Window controls are painted once during build — swapping the
         // `Color` fields on a new build would be wasted allocation when
         // the glyph/hover colors follow the theme. We read a snapshot and
@@ -400,9 +399,7 @@ impl Widget for WindowControls {
         //   - the action (toggles correctly via `WindowState::placement`).
         // A future pass can swap the glyph for custom rect-primitive
         // icons to restore the visual delta.
-        let switcher_idx = self
-            .is_maximized
-            .map(|b| if *b { 1usize } else { 0usize });
+        let switcher_idx = self.is_maximized.map(|b| if *b { 1usize } else { 0usize });
         let maximize_action_restore = maximize_action.clone();
         // Both Switcher children share the same external_hover
         // signal: only one is visible at a time, and the host
@@ -469,18 +466,21 @@ impl Widget for WindowControls {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::Group);
-        builder.set_name(
-            fern_i18n::tr_widget!(a11y_window_controls_name()).resolve_now(),
-        );
+        builder.set_name(fern_i18n::tr_widget!(a11y_window_controls_name()).resolve_now());
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         match self.root_child_id {
             Some(root_id) => ctx
                 .child_size(root_id, proposal)
                 .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
             None => proposal.resolve(0.0, 0.0),
-        }.into()
+        }
+        .into()
     }
 
     fn place_children(

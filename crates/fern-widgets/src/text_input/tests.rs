@@ -136,10 +136,7 @@ fn focus_field(tree: &mut WidgetTree, outer: fern_core::widget_id::WidgetId) {
 fn char_filter_rejects_disallowed_keystrokes() {
     let text = Signal::new(String::new());
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-    let id = tree.add(
-        TextInput::new(text.clone())
-            .char_filter(|c| c.is_ascii_digit()),
-    );
+    let id = tree.add(TextInput::new(text.clone()).char_filter(|c| c.is_ascii_digit()));
     tree.layout(SizeProposal::exact(300.0, 40.0));
     tick(&mut tree);
     focus_field(&mut tree, id);
@@ -156,8 +153,7 @@ fn char_filter_admits_allowed_keystrokes() {
     let text = Signal::new(String::new());
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
     let id = tree.add(
-        TextInput::new(text.clone())
-            .char_filter(|c| c.is_ascii_digit() || c == '.' || c == '-'),
+        TextInput::new(text.clone()).char_filter(|c| c.is_ascii_digit() || c == '.' || c == '-'),
     );
     tree.layout(SizeProposal::exact(300.0, 40.0));
     tick(&mut tree);
@@ -202,14 +198,9 @@ fn on_blur_fires_when_focus_is_lost() {
     let fired = Rc::new(Cell::new(0u32));
     let fired_c = fired.clone();
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-    let id = tree.add(
-        TextInput::new(text)
-            .on_blur_fn(move |_| fired_c.set(fired_c.get() + 1)),
-    );
+    let id = tree.add(TextInput::new(text).on_blur_fn(move |_| fired_c.set(fired_c.get() + 1)));
     // A focusable sibling button we can park focus on to force blur.
-    let sink = tree.add(
-        crate::button::Button::new_literal("sink").on_activate_fn(|_| {}),
-    );
+    let sink = tree.add(crate::button::Button::new_literal("sink").on_activate_fn(|_| {}));
     tree.layout(SizeProposal::exact(300.0, 40.0));
     tick(&mut tree);
 
@@ -220,7 +211,11 @@ fn on_blur_fires_when_focus_is_lost() {
     // Blur by moving focus to a sibling widget.
     tree.focus(tree.first_focusable_descendant(sink).unwrap());
     tick(&mut tree);
-    assert_eq!(fired.get(), 1, "on_blur must fire exactly once on focus loss");
+    assert_eq!(
+        fired.get(),
+        1,
+        "on_blur must fire exactly once on focus loss"
+    );
 }
 
 #[test]
@@ -238,9 +233,7 @@ fn on_blur_and_on_submit_coexist() {
             .on_submit_fn(move |_| s.set(true))
             .on_blur_fn(move |_| b.set(true)),
     );
-    let sink = tree.add(
-        crate::button::Button::new_literal("sink").on_activate_fn(|_| {}),
-    );
+    let sink = tree.add(crate::button::Button::new_literal("sink").on_activate_fn(|_| {}));
     tree.layout(SizeProposal::exact(300.0, 40.0));
     tick(&mut tree);
 

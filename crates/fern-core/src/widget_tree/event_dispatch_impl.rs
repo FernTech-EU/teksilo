@@ -34,6 +34,7 @@ impl WidgetTree {
     /// - Keyboard/IME events -> focused widget
     /// - AccessKit actions -> target widget directly
     /// - Scroll events -> hit testing (scroll target under pointer)
+    ///
     /// Dispatch an event with the caller-supplied app-level
     /// [`WindowOps`](crate::window::WindowOps) sink. `fern-app` calls
     /// this variant; handlers can reach the multi-window API
@@ -57,11 +58,7 @@ impl WidgetTree {
         self.dispatch_event_impl(event, &mut noop);
     }
 
-    fn dispatch_event_impl(
-        &mut self,
-        event: WidgetEvent,
-        ops: &mut dyn crate::window::WindowOps,
-    ) {
+    fn dispatch_event_impl(&mut self, event: WidgetEvent, ops: &mut dyn crate::window::WindowOps) {
         if let WidgetEvent::KeyDown {
             key: Key::ArrowLeft,
             ..
@@ -70,10 +67,10 @@ impl WidgetTree {
         {
             if let Some((_id, content_ids, focus_restore)) = self.overlay_manager.dismiss_top() {
                 self.dormant_dismissed_content(&content_ids, &mut *ops);
-                if let Some(restore_id) = focus_restore {
-                    if self.arena.is_active(restore_id) {
-                        self.focus_ops(restore_id, &mut *ops);
-                    }
+                if let Some(restore_id) = focus_restore
+                    && self.arena.is_active(restore_id)
+                {
+                    self.focus_ops(restore_id, &mut *ops);
                 }
             }
             return;
@@ -83,32 +80,29 @@ impl WidgetTree {
             key: Key::Escape, ..
         } = &event
             && !self.overlay_manager.is_empty()
-        {
-            if let Some((_id, content_ids, focus_restore)) =
+            && let Some((_id, content_ids, focus_restore)) =
                 self.overlay_manager.try_dismiss_top_on_escape()
+        {
+            self.dormant_dismissed_content(&content_ids, &mut *ops);
+            if let Some(restore_id) = focus_restore
+                && self.arena.is_active(restore_id)
             {
-                self.dormant_dismissed_content(&content_ids, &mut *ops);
-                if let Some(restore_id) = focus_restore {
-                    if self.arena.is_active(restore_id) {
-                        self.focus_ops(restore_id, &mut *ops);
-                    }
-                }
-                return;
+                self.focus_ops(restore_id, &mut *ops);
             }
+            return;
         }
 
         if let WidgetEvent::PointerDown {
             position, button, ..
         } = &event
         {
-            let (dismissed, focus_restore) =
-                self.overlay_manager.handle_click_outside(*position);
+            let (dismissed, focus_restore) = self.overlay_manager.handle_click_outside(*position);
             if !dismissed.is_empty() {
                 self.dormant_dismissed_content(&dismissed, &mut *ops);
-                if let Some(restore_id) = focus_restore {
-                    if self.arena.is_active(restore_id) {
-                        self.focus_ops(restore_id, &mut *ops);
-                    }
+                if let Some(restore_id) = focus_restore
+                    && self.arena.is_active(restore_id)
+                {
+                    self.focus_ops(restore_id, &mut *ops);
                 }
                 if *button != PointerButton::Secondary {
                     return;
@@ -126,20 +120,20 @@ impl WidgetTree {
         // `begin_key_capture` call from inside the callback arms a
         // fresh session (rather than competing with the in-flight
         // one).
-        if let WidgetEvent::KeyDown { key, modifiers, .. } = &event {
-            if let Some(callback) = self.take_key_capture() {
-                let keystroke = crate::shortcut::KeyStroke::new(*key, *modifiers);
-                let mut cap_ctx = self.make_event_context(&mut *ops);
-                callback(keystroke, self.shortcut_registry_mut(), &mut cap_ctx);
-                // Route side effects of the callback through the
-                // focused widget (or an arbitrary root if no focus).
-                let anchor = self.focused.or_else(|| self.arena.roots().first().copied());
-                if let Some(anchor_id) = anchor {
-                    self.collect_from_ctx(cap_ctx, anchor_id);
-                    self.drain_pending_intents(&mut *ops);
-                }
-                return;
+        if let WidgetEvent::KeyDown { key, modifiers, .. } = &event
+            && let Some(callback) = self.take_key_capture()
+        {
+            let keystroke = crate::shortcut::KeyStroke::new(*key, *modifiers);
+            let mut cap_ctx = self.make_event_context(&mut *ops);
+            callback(keystroke, self.shortcut_registry_mut(), &mut cap_ctx);
+            // Route side effects of the callback through the
+            // focused widget (or an arbitrary root if no focus).
+            let anchor = self.focused.or_else(|| self.arena.roots().first().copied());
+            if let Some(anchor_id) = anchor {
+                self.collect_from_ctx(cap_ctx, anchor_id);
+                self.drain_pending_intents(&mut *ops);
             }
+            return;
         }
 
         // Shortcut → intent → action dispatch. A KeyDown whose chord
@@ -158,42 +152,40 @@ impl WidgetTree {
         // the closure never runs.
         if let WidgetEvent::KeyDown { key, modifiers, .. } = &event {
             let keystroke = crate::shortcut::KeyStroke::new(*key, *modifiers);
-            let lookup = self.shortcut_registry.find_by_keystroke(keystroke).map(
-                |eff| {
+            let lookup = self
+                .shortcut_registry
+                .find_by_keystroke(keystroke)
+                .map(|eff| {
                     (
                         eff.shortcut.id,
                         eff.shortcut.scope,
                         eff.shortcut.propagate_when_disabled,
                     )
-                },
-            );
+                });
             if let Some((id, scope, propagate_when_disabled)) = lookup {
                 let anchor = match scope {
                     // Global shortcuts fire regardless of focus. If no
                     // widget is currently focused, anchor the intent
                     // walk at an arbitrary root so actions registered
                     // at the top of the tree still see the intent.
-                    crate::shortcut::ShortcutScope::Global => self
-                        .focused
-                        .or_else(|| self.arena.roots().first().copied()),
-                    crate::shortcut::ShortcutScope::Scoped(scope_id) => self
-                        .focused
-                        .filter(|f| self.is_descendant_of(*f, scope_id)),
+                    crate::shortcut::ShortcutScope::Global => {
+                        self.focused.or_else(|| self.arena.roots().first().copied())
+                    }
+                    crate::shortcut::ShortcutScope::Scoped(scope_id) => {
+                        self.focused.filter(|f| self.is_descendant_of(*f, scope_id))
+                    }
                 };
                 if let Some(anchor_id) = anchor {
                     let mut act_ctx = self.make_event_context(&mut *ops);
-                    if let Some(intent) = self.shortcut_registry.invoke_on_activate(
-                        id,
-                        keystroke,
-                        &mut act_ctx,
-                    ) {
+                    if let Some(intent) =
+                        self.shortcut_registry
+                            .invoke_on_activate(id, keystroke, &mut act_ctx)
+                    {
                         self.collect_from_ctx(act_ctx, anchor_id);
                         // Phase 5.2: tag shortcut origin so analytics can
                         // distinguish keyboard-driven activations from
                         // button / menu / programmatic ones.
-                        let intent = intent.with_source(
-                            crate::telemetry::IntentSource::Shortcut,
-                        );
+                        let intent = intent.with_source(crate::telemetry::IntentSource::Shortcut);
                         self.enqueue_intent(anchor_id, intent, propagate_when_disabled);
                         self.drain_pending_intents(&mut *ops);
                         return;
@@ -228,16 +220,17 @@ impl WidgetTree {
                     // synthesise a hover at the stationary pointer so
                     // feedback, drop-index math and the preview overlay
                     // all reflect the new scroll offset.
-                    let target_and_pos = self.active_drag.as_ref().and_then(|d| {
-                        d.current_target.map(|t| (t, d.current_position))
-                    });
+                    let target_and_pos = self
+                        .active_drag
+                        .as_ref()
+                        .and_then(|d| d.current_target.map(|t| (t, d.current_position)));
                     if let Some((target, _pos)) = target_and_pos {
                         self.dispatch_to_widget(target, &event, &mut *ops);
                     }
-                    if let Some((_, pos)) = target_and_pos {
-                        if self.active_drag.is_some() {
-                            self.handle_drag_move(pos, &mut *ops);
-                        }
+                    if let Some((_, pos)) = target_and_pos
+                        && self.active_drag.is_some()
+                    {
+                        self.handle_drag_move(pos, &mut *ops);
                     }
                     return;
                 }
@@ -454,11 +447,7 @@ impl WidgetTree {
         true
     }
 
-    fn handle_pointer_move(
-        &mut self,
-        position: Point,
-        ops: &mut dyn crate::window::WindowOps,
-    ) {
+    fn handle_pointer_move(&mut self, position: Point, ops: &mut dyn crate::window::WindowOps) {
         self.last_pointer_position = Some(position);
         let target = self.hit_test(position);
 
@@ -477,11 +466,7 @@ impl WidgetTree {
         }
 
         if let Some(target) = target {
-            self.dispatch_to_widget(
-                target,
-                &WidgetEvent::PointerMove { position },
-                &mut *ops,
-            );
+            self.dispatch_to_widget(target, &WidgetEvent::PointerMove { position }, &mut *ops);
         }
     }
 
@@ -572,8 +557,7 @@ impl WidgetTree {
 
         let mut ctx = self.make_event_context(&mut *ops);
         let response = if let Some(node) = self.arena.get_mut(target) {
-            Self::try_handler_bubble(node, event, &mut ctx, true)
-                .unwrap_or(EventResponse::Ignored)
+            Self::try_handler_bubble(node, event, &mut ctx, true).unwrap_or(EventResponse::Ignored)
         } else {
             EventResponse::Ignored
         };
@@ -748,9 +732,9 @@ impl WidgetTree {
                 // Phase 5.2 — assistive-tech action paths run under
                 // the `Accessibility` source label. Restored after
                 // the inner if/else.
-                let saved_a11y_source = ctx.current_source.replace(
-                    crate::telemetry::IntentSource::Accessibility,
-                );
+                let saved_a11y_source = ctx
+                    .current_source
+                    .replace(crate::telemetry::IntentSource::Accessibility);
                 let request_is_set = node.handlers.on_access_action_request.is_some()
                     || node.external_handlers.on_access_action_request.is_some();
                 let user_handled = if request_is_set {
@@ -807,11 +791,11 @@ impl WidgetTree {
                 let mut override_handled = false;
                 if let Some(ov) = node.access_overrides.as_deref_mut() {
                     if matches!(action, accesskit::Action::CustomAction) {
-                        if let Some(accesskit::ActionData::CustomAction(idx)) = data {
-                            if let Some((_, cb)) = ov.custom_actions.get_mut(*idx as usize) {
-                                cb(ctx);
-                                override_handled = true;
-                            }
+                        if let Some(accesskit::ActionData::CustomAction(idx)) = data
+                            && let Some((_, cb)) = ov.custom_actions.get_mut(*idx as usize)
+                        {
+                            cb(ctx);
+                            override_handled = true;
                         }
                     } else {
                         for (a, cb) in ov.actions.iter_mut() {
@@ -846,12 +830,8 @@ impl WidgetTree {
                     let has_handler = match gesture {
                         GestureEvent::PinchStarted { .. }
                         | GestureEvent::PinchChanged { .. }
-                        | GestureEvent::PinchEnded => {
-                            node.any_handler(|h| h.on_pinch.is_some())
-                        }
-                        GestureEvent::Swipe { .. } => {
-                            node.any_handler(|h| h.on_swipe.is_some())
-                        }
+                        | GestureEvent::PinchEnded => node.any_handler(|h| h.on_pinch.is_some()),
+                        GestureEvent::Swipe { .. } => node.any_handler(|h| h.on_swipe.is_some()),
                         GestureEvent::DoubleTap { .. } => {
                             node.any_handler(|h| h.on_double_tap.is_some())
                         }
@@ -861,7 +841,7 @@ impl WidgetTree {
                         _ => false,
                     };
                     if has_handler {
-                        Self::dispatch_recognized_gesture(node, gesture.clone(), ctx);
+                        Self::dispatch_recognized_gesture(node, *gesture, ctx);
                     }
                     has_handler
                 };
@@ -980,7 +960,6 @@ impl WidgetTree {
                 }
                 None
             }
-            _ => None,
         }
     }
 
@@ -1003,12 +982,7 @@ impl WidgetTree {
         let has_long_press = node.any_handler(|h| h.on_long_press.is_some());
         let has_swipe = node.any_handler(|h| h.on_swipe.is_some());
 
-        if !(has_tap
-            || has_double_tap
-            || has_triple_tap
-            || has_drag
-            || has_long_press
-            || has_swipe)
+        if !(has_tap || has_double_tap || has_triple_tap || has_drag || has_long_press || has_swipe)
         {
             return;
         }
@@ -1230,9 +1204,9 @@ impl WidgetTree {
         // lifetime propagation when other fields of `ctx` are moved.
         // When no ops is set (standalone trees / tests), fall back to
         // a stack NoopWindowOps.
-        let mut local_ops = ctx.window_ops.take();
+        let local_ops = ctx.window_ops.take();
         let mut noop = crate::window::NoopWindowOps;
-        let ops: &mut dyn crate::window::WindowOps = match local_ops.as_deref_mut() {
+        let ops: &mut dyn crate::window::WindowOps = match local_ops {
             Some(o) => o,
             None => &mut noop,
         };
@@ -1300,10 +1274,10 @@ impl WidgetTree {
         } else if ctx.dismiss_top {
             if let Some((_id, content_ids, focus_restore)) = self.overlay_manager.dismiss_top() {
                 self.dormant_dismissed_content(&content_ids, &mut *ops);
-                if let Some(restore_id) = focus_restore {
-                    if self.arena.is_active(restore_id) {
-                        self.focus_ops(restore_id, &mut *ops);
-                    }
+                if let Some(restore_id) = focus_restore
+                    && self.arena.is_active(restore_id)
+                {
+                    self.focus_ops(restore_id, &mut *ops);
                 }
             }
         } else {
@@ -1313,11 +1287,7 @@ impl WidgetTree {
             }
         }
         for preserve_content in ctx.dismiss_descendant_overlays {
-            self.dismiss_child_overlays_for_source(
-                source_widget,
-                preserve_content,
-                &mut *ops,
-            );
+            self.dismiss_child_overlays_for_source(source_widget, preserve_content, &mut *ops);
         }
         self.apply_tree_mutations(&ctx.tree_mutations);
         for mut req in ctx.overlay_requests {
@@ -1491,10 +1461,7 @@ impl WidgetTree {
     /// release pointer capture. Used by Escape, explicit cancel requests,
     /// and the source-destroyed salvage in `revalidate_interaction_state`.
     pub(super) fn cancel_active_drag(&mut self, ops: &mut dyn crate::window::WindowOps) {
-        let prev_target = self
-            .active_drag
-            .as_ref()
-            .and_then(|d| d.current_target);
+        let prev_target = self.active_drag.as_ref().and_then(|d| d.current_target);
         self.cleanup_drag_preview();
         self.active_drag = None;
         self.pointer_captured_by = None;
@@ -1627,17 +1594,15 @@ impl WidgetTree {
         // of actual drop targets.
         let exclude_overlay = self.active_drag.as_ref().and_then(|d| d.preview_overlay_id);
         let exclude_widget = self.active_drag.as_ref().and_then(|d| d.preview_content_id);
-        let target = self.hit_test_excluding_overlay_and_widget(position, exclude_overlay, exclude_widget);
+        let target =
+            self.hit_test_excluding_overlay_and_widget(position, exclude_overlay, exclude_widget);
 
         // Walk up from hit target to find a widget with on_drag_hover
         let drop_target = target.and_then(|t| self.find_drop_target_at_or_above(t));
 
         // Detect target change BEFORE firing new handlers so we can fire
         // on_drag_leave on the outgoing target first.
-        let prev_target = self
-            .active_drag
-            .as_ref()
-            .and_then(|d| d.current_target);
+        let prev_target = self.active_drag.as_ref().and_then(|d| d.current_target);
         if prev_target != drop_target {
             if let Some(ref mut drag) = self.active_drag {
                 drag.feedback = crate::drag_state::DropFeedback::NoFeedback;
@@ -1658,10 +1623,8 @@ impl WidgetTree {
         // own feedback reflects its internal view of acceptance.
         if let Some(target_id) = drop_target {
             let target_bounds = self.arena.bounds(target_id);
-            let local = fern_canvas::Point::new(
-                position.x - target_bounds.x,
-                position.y - target_bounds.y,
-            );
+            let local =
+                fern_canvas::Point::new(position.x - target_bounds.x, position.y - target_bounds.y);
             let (mut ext_handler, mut own_handler) = match self.arena.get_mut(target_id) {
                 Some(node) => (
                     node.external_handlers.on_drag_hover.take(),
@@ -1731,10 +1694,8 @@ impl WidgetTree {
         // external. Fires exactly once, not both.
         if let Some(target_id) = drop_target {
             let target_bounds = self.arena.bounds(target_id);
-            let local = fern_canvas::Point::new(
-                position.x - target_bounds.x,
-                position.y - target_bounds.y,
-            );
+            let local =
+                fern_canvas::Point::new(position.x - target_bounds.x, position.y - target_bounds.y);
             let (taken_own, taken_ext) = match self.arena.get_mut(target_id) {
                 Some(node) => {
                     let own = node.handlers.on_drop.take();
@@ -1764,7 +1725,6 @@ impl WidgetTree {
                 }
                 self.collect_from_ctx(ctx, target_id);
                 self.arena.mark_needs_paint(target_id);
-                return;
             }
         }
         // Drop was not accepted — payload is dropped (Rust Drop)
@@ -1775,10 +1735,10 @@ impl WidgetTree {
     fn find_drop_target_at_or_above(&self, start: WidgetId) -> Option<WidgetId> {
         let mut current = Some(start);
         while let Some(id) = current {
-            if let Some(node) = self.arena.get(id) {
-                if node.any_handler(|h| h.on_drop.is_some() || h.on_drag_hover.is_some()) {
-                    return Some(id);
-                }
+            if let Some(node) = self.arena.get(id)
+                && node.any_handler(|h| h.on_drop.is_some() || h.on_drag_hover.is_some())
+            {
+                return Some(id);
             }
             current = self.arena.parent(id);
         }
@@ -1814,7 +1774,11 @@ impl WidgetTree {
             if Some(overlay_id) == exclude_overlay {
                 // Skip this excluded overlay, fall through to widget tree
             } else if let Some(overlay) = self.overlay_manager.overlay(overlay_id) {
-                return self.hit_test_recursive_excluding(overlay.content_id, point, exclude_widget);
+                return self.hit_test_recursive_excluding(
+                    overlay.content_id,
+                    point,
+                    exclude_widget,
+                );
             }
         }
 
@@ -1827,7 +1791,12 @@ impl WidgetTree {
         self.arena.hit_test_at(point, exclude_widget)
     }
 
-    fn hit_test_recursive_excluding(&self, id: WidgetId, point: Point, exclude: Option<WidgetId>) -> Option<WidgetId> {
+    fn hit_test_recursive_excluding(
+        &self,
+        id: WidgetId,
+        point: Point,
+        exclude: Option<WidgetId>,
+    ) -> Option<WidgetId> {
         // Subtree hit-test from a specific root — used by the overlay
         // path. Delegates to a tiny wrapper around the arena's recursion
         // by walking from `id` only.
@@ -1877,7 +1846,6 @@ impl WidgetTree {
         }
         Some(id)
     }
-
 }
 
 #[cfg(test)]
@@ -1886,7 +1854,6 @@ mod tests {
     use crate::test_widgets::FillWidget;
     use crate::widget::CursorIcon;
     use crate::widget_builder::WidgetBuilder;
-
 
     #[test]
     fn pointer_enter_leave_synthesized() {
@@ -1941,7 +1908,10 @@ mod tests {
 
         enabled.set(false);
         tree.click(child);
-        assert!(!tapped.get(), "disabled ancestor should block descendant tap");
+        assert!(
+            !tapped.get(),
+            "disabled ancestor should block descendant tap"
+        );
 
         enabled.set(true);
         tree.click(child);
@@ -2022,17 +1992,18 @@ mod tests {
             EventResponse::Handled
         }));
         let mid = tree.add(StackWidget::new().add_child(leaf));
-        let _root = tree.add(StackWidget::new().add_child(mid).on_key_preview(
-            move |event, _c| match event {
-                WidgetEvent::KeyDown {
-                    key: Key::Enter, ..
-                } => {
-                    preview_flag.set(true);
-                    EventResponse::Handled
-                }
-                _ => EventResponse::Ignored,
-            },
-        ));
+        let _root =
+            tree.add(StackWidget::new().add_child(mid).on_key_preview(
+                move |event, _c| match event {
+                    WidgetEvent::KeyDown {
+                        key: Key::Enter, ..
+                    } => {
+                        preview_flag.set(true);
+                        EventResponse::Handled
+                    }
+                    _ => EventResponse::Ignored,
+                },
+            ));
 
         tree.layout(SizeProposal::exact(100.0, 50.0));
         tree.focus(leaf);
@@ -2068,14 +2039,12 @@ mod tests {
             EventResponse::Handled
         }));
         let mid = tree.add(StackWidget::new().add_child(leaf));
-        let _root = tree.add(
-            StackWidget::new()
-                .add_child(mid)
-                .on_key_preview(move |_event, _c| {
-                    preview_flag.set(true);
-                    EventResponse::Ignored
-                }),
-        );
+        let _root = tree.add(StackWidget::new().add_child(mid).on_key_preview(
+            move |_event, _c| {
+                preview_flag.set(true);
+                EventResponse::Ignored
+            },
+        ));
 
         tree.layout(SizeProposal::exact(100.0, 50.0));
         tree.focus(leaf);
@@ -2101,14 +2070,10 @@ mod tests {
         let pf = preview_on_target.clone();
 
         let mut tree = WidgetTree::new();
-        let leaf = tree.add(
-            FillWidget::new()
-                .focusable()
-                .on_key_preview(move |_e, _c| {
-                    pf.set(true);
-                    EventResponse::Handled
-                }),
-        );
+        let leaf = tree.add(FillWidget::new().focusable().on_key_preview(move |_e, _c| {
+            pf.set(true);
+            EventResponse::Handled
+        }));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         tree.focus(leaf);
         tree.press_key(Key::Enter, Modifiers::NONE);
@@ -2197,7 +2162,7 @@ mod tests {
         let end_flag = drag_ended.clone();
 
         let mut tree = WidgetTree::new();
-        let widget = tree.add(FillWidget::new().on_drag(move |phase, _ctx| match phase {
+        let _widget = tree.add(FillWidget::new().on_drag(move |phase, _ctx| match phase {
             DragPhase::Started { .. } => start_flag.set(true),
             DragPhase::Ended { .. } => end_flag.set(true),
             _ => {}
@@ -2238,9 +2203,11 @@ mod tests {
         let flag = observed.clone();
 
         let mut tree = WidgetTree::new();
-        tree.add(FillWidget::new().on_swipe(move |direction, velocity, _ctx| {
-            flag.set(Some((direction, velocity as i32)));
-        }));
+        tree.add(
+            FillWidget::new().on_swipe(move |direction, velocity, _ctx| {
+                flag.set(Some((direction, velocity as i32)));
+            }),
+        );
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         tree.pointer_move(Point::new(50.0, 25.0));
@@ -2269,13 +2236,11 @@ mod tests {
         let ended_flag = ended.clone();
 
         let mut tree = WidgetTree::new();
-        tree.add(
-            FillWidget::new().on_pinch(move |phase, _ctx| match phase {
-                PinchPhase::Started { .. } => started_flag.set(true),
-                PinchPhase::Changed { scale, .. } => scale_flag.set(scale),
-                PinchPhase::Ended => ended_flag.set(true),
-            }),
-        );
+        tree.add(FillWidget::new().on_pinch(move |phase, _ctx| match phase {
+            PinchPhase::Started { .. } => started_flag.set(true),
+            PinchPhase::Changed { scale, .. } => scale_flag.set(scale),
+            PinchPhase::Ended => ended_flag.set(true),
+        }));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         tree.pointer_move(Point::new(50.0, 25.0));
@@ -2314,13 +2279,11 @@ mod tests {
         let ended_flag = ended.clone();
 
         let mut tree = WidgetTree::new();
-        let widget = tree.add(
-            FillWidget::new().on_drag(move |phase, _ctx| match phase {
-                DragPhase::Started { .. } => started_flag.set(true),
-                DragPhase::Moved { .. } => moved_flag.set(moved_flag.get() + 1),
-                DragPhase::Ended { .. } => ended_flag.set(true),
-            }),
-        );
+        let widget = tree.add(FillWidget::new().on_drag(move |phase, _ctx| match phase {
+            DragPhase::Started { .. } => started_flag.set(true),
+            DragPhase::Moved { .. } => moved_flag.set(moved_flag.get() + 1),
+            DragPhase::Ended { .. } => ended_flag.set(true),
+        }));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         // Press inside, move past the 5px threshold while still inside —
@@ -2341,7 +2304,10 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerMove {
             position: Point::new(500.0, 500.0),
         });
-        assert!(moved.get() >= 1, "Move outside bounds must still reach drag handler");
+        assert!(
+            moved.get() >= 1,
+            "Move outside bounds must still reach drag handler"
+        );
 
         // Release outside bounds — must still fire DragEnded on the
         // original widget, and pointer capture must be released.
@@ -2757,14 +2723,12 @@ mod tests {
         let mut tree = WidgetTree::new();
         let source = tree.add(FillWidget::new());
         let child = tree.add(FillWidget::new());
-        let _parent = tree.add(
-            StackWidget::new()
-                .add_child(child)
-                .on_drop(move |_payload, _pos, _ctx| {
-                    pf.set(true);
-                    true
-                }),
-        );
+        let _parent = tree.add(StackWidget::new().add_child(child).on_drop(
+            move |_payload, _pos, _ctx| {
+                pf.set(true);
+                true
+            },
+        ));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         // Start a drag.
@@ -2979,12 +2943,12 @@ mod tests {
         let source = tree.add(FillWidget::new());
         let target = tree.add(
             FillWidget::new()
-                .on_drag_hover(|_p, _pos, _ctx| {
-                    crate::drag_state::DropFeedback::InsertionLine {
+                .on_drag_hover(
+                    |_p, _pos, _ctx| crate::drag_state::DropFeedback::InsertionLine {
                         y: 0.0,
                         width: 10.0,
-                    }
-                })
+                    },
+                )
                 .on_drag_leave(move |_ctx| l.set(l.get() + 1))
                 .on_drop(|_, _, _| true),
         );
@@ -3021,7 +2985,11 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerMove {
             position: Point::new(100.0, 50.0),
         });
-        assert_eq!(leave.get(), 1, "leave fires at most once per leave transition");
+        assert_eq!(
+            leave.get(),
+            1,
+            "leave fires at most once per leave transition"
+        );
 
         // Leaving again fires a second time.
         tree.dispatch_event(WidgetEvent::PointerMove {
@@ -3042,12 +3010,12 @@ mod tests {
         let source = tree.add(FillWidget::new());
         let _target = tree.add(
             FillWidget::new()
-                .on_drag_hover(|_p, _pos, _ctx| {
-                    crate::drag_state::DropFeedback::InsertionLine {
+                .on_drag_hover(
+                    |_p, _pos, _ctx| crate::drag_state::DropFeedback::InsertionLine {
                         y: 0.0,
                         width: 10.0,
-                    }
-                })
+                    },
+                )
                 .on_drag_leave(move |_ctx| l.set(l.get() + 1))
                 .on_drop(|_, _, _| true),
         );
@@ -3080,12 +3048,12 @@ mod tests {
         let source = tree.add(FillWidget::new());
         let _target = tree.add(
             FillWidget::new()
-                .on_drag_hover(|_p, _pos, _ctx| {
-                    crate::drag_state::DropFeedback::InsertionLine {
+                .on_drag_hover(
+                    |_p, _pos, _ctx| crate::drag_state::DropFeedback::InsertionLine {
                         y: 0.0,
                         width: 10.0,
-                    }
-                })
+                    },
+                )
                 .on_drag_leave(move |_ctx| l.set(l.get() + 1))
                 .on_drop(|_, _, _| true),
         );
@@ -3118,12 +3086,12 @@ mod tests {
         let source = tree.add(FillWidget::new());
         let _target = tree.add(
             FillWidget::new()
-                .on_drag_hover(|_p, _pos, _ctx| {
-                    crate::drag_state::DropFeedback::InsertionLine {
+                .on_drag_hover(
+                    |_p, _pos, _ctx| crate::drag_state::DropFeedback::InsertionLine {
                         y: 0.0,
                         width: 10.0,
-                    }
-                })
+                    },
+                )
                 .on_drag_leave(move |_ctx| l.set(l.get() + 1))
                 .on_drop(|_, _, _| true),
         );
@@ -3164,12 +3132,12 @@ mod tests {
         let source = tree.add(FillWidget::new());
         let _target = tree.add(
             FillWidget::new()
-                .on_drag_hover(|_p, _pos, _ctx| {
-                    crate::drag_state::DropFeedback::InsertionLine {
+                .on_drag_hover(
+                    |_p, _pos, _ctx| crate::drag_state::DropFeedback::InsertionLine {
                         y: 0.0,
                         width: 10.0,
-                    }
-                })
+                    },
+                )
                 .on_drag_tick(move |_pos, _ctx| t.set(t.get() + 1))
                 .on_drop(|_, _, _| true),
         );
@@ -3256,7 +3224,8 @@ mod tests {
         let hov = hover_local.get();
         assert!(
             (hov.x - 60.0).abs() < 0.01 && (hov.y - 20.0).abs() < 0.01,
-            "on_drag_hover should receive local coords, got {:?}", hov,
+            "on_drag_hover should receive local coords, got {:?}",
+            hov,
         );
 
         // Drop at (110, 55) tree coords → local (70, 15).
@@ -3268,7 +3237,8 @@ mod tests {
         let drp = drop_local.get();
         assert!(
             (drp.x - 70.0).abs() < 0.01 && (drp.y - 15.0).abs() < 0.01,
-            "on_drop should receive local coords, got {:?}", drp,
+            "on_drop should receive local coords, got {:?}",
+            drp,
         );
     }
 
@@ -3339,10 +3309,7 @@ mod tests {
             built: Rc<Cell<bool>>,
         }
         impl Widget for CheckingWidget {
-            fn build(
-                &mut self,
-                _ctx: &mut crate::build_context::BuildContext,
-            ) -> Vec<WidgetId> {
+            fn build(&mut self, _ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
                 self.built.set(true);
                 Vec::new()
             }
@@ -3398,7 +3365,10 @@ mod tests {
             "drag start must mark preview content for layout"
         );
         tree.layout(SizeProposal::exact(200.0, 200.0));
-        assert!(!tree.needs_layout(), "layout should have cleared dirty flag");
+        assert!(
+            !tree.needs_layout(),
+            "layout should have cleared dirty flag"
+        );
 
         // A subsequent PointerMove must remark the preview so its
         // overlay bounds get repositioned on the next layout pass.
@@ -3423,12 +3393,12 @@ mod tests {
         let source = tree.add(FillWidget::new());
         let _target = tree.add(
             FillWidget::new()
-                .on_drag_hover(|_p, _pos, _ctx| {
-                    crate::drag_state::DropFeedback::InsertionLine {
+                .on_drag_hover(
+                    |_p, _pos, _ctx| crate::drag_state::DropFeedback::InsertionLine {
                         y: 0.0,
                         width: 10.0,
-                    }
-                })
+                    },
+                )
                 .on_scroll(move |event, _ctx| match event {
                     WidgetEvent::Scroll { .. } => {
                         sc.set(sc.get() + 1);
@@ -3609,12 +3579,20 @@ mod tests {
         // Focus outside the scope: the shortcut does NOT activate.
         tree.focus(outside);
         tree.press_key(Key::F, Modifiers::CTRL);
-        assert_eq!(fired.get(), 0, "scoped shortcut must not fire outside scope");
+        assert_eq!(
+            fired.get(),
+            0,
+            "scoped shortcut must not fire outside scope"
+        );
 
         // Focus inside the scope: it fires.
         tree.focus(inside);
         tree.press_key(Key::F, Modifiers::CTRL);
-        assert_eq!(fired.get(), 1, "scoped shortcut must fire when focus in scope");
+        assert_eq!(
+            fired.get(),
+            1,
+            "scoped shortcut must fire when focus in scope"
+        );
     }
 
     #[test]
@@ -3747,7 +3725,10 @@ mod tests {
 
         tree.press_key(Key::S, Modifiers::CTRL);
         assert!(!inner_seen.get(), "disabled inner must not run");
-        assert!(outer_seen.get(), "intent must propagate past disabled inner");
+        assert!(
+            outer_seen.get(),
+            "intent must propagate past disabled inner"
+        );
     }
 
     #[test]
@@ -3827,7 +3808,10 @@ mod tests {
 
         tree.layout(SizeProposal::exact(100.0, 50.0));
         tree.click(button);
-        assert!(save_seen.get(), "ctx.send_intent must reach ancestor action");
+        assert!(
+            save_seen.get(),
+            "ctx.send_intent must reach ancestor action"
+        );
     }
 
     #[test]
@@ -3843,7 +3827,10 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 100.0));
         let histogram = tree.widget_type_histogram();
         let total: u32 = histogram.values().sum();
-        assert!(total >= 3, "expected at least 3 active widgets, got {total}: {histogram:?}");
+        assert!(
+            total >= 3,
+            "expected at least 3 active widgets, got {total}: {histogram:?}"
+        );
         let fillwidget_entries: u32 = histogram
             .iter()
             .filter(|(k, _)| k.contains("FillWidget"))
@@ -3946,24 +3933,20 @@ mod tests {
         let enabled = Signal::new(false);
 
         let mut tree = WidgetTree::new();
-        let widget = tree.add(
-            FillWidget::new()
-                .focusable()
-                .on_key(move |event, _ctx| {
-                    if matches!(
-                        event,
-                        WidgetEvent::KeyDown {
-                            key: Key::S,
-                            modifiers,
-                            ..
-                        } if modifiers.ctrl()
-                    ) {
-                        kf.set(true);
-                        return EventResponse::Handled;
-                    }
-                    EventResponse::Ignored
-                }),
-        );
+        let widget = tree.add(FillWidget::new().focusable().on_key(move |event, _ctx| {
+            if matches!(
+                event,
+                WidgetEvent::KeyDown {
+                    key: Key::S,
+                    modifiers,
+                    ..
+                } if modifiers.ctrl()
+            ) {
+                kf.set(true);
+                return EventResponse::Handled;
+            }
+            EventResponse::Ignored
+        }));
         tree.push_action(
             widget,
             Action::new("app.save").on_invoke(move |_i, _c| af.set(true)),
@@ -4132,8 +4115,7 @@ mod tests {
         let widget = tree.add(FillWidget::new().focusable());
         tree.push_action(
             widget,
-            crate::action::Action::new("app.save")
-                .on_invoke(move |_i, _c| af.set(true)),
+            crate::action::Action::new("app.save").on_invoke(move |_i, _c| af.set(true)),
         );
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.save")
@@ -4166,7 +4148,6 @@ mod tests {
 
     #[test]
     fn second_begin_key_capture_does_not_racecancel_first() {
-        use crate::shortcut::KeyStroke;
         use std::cell::Cell;
         use std::rc::Rc;
 
@@ -4202,7 +4183,7 @@ mod tests {
     fn capture_callback_can_send_intent() {
         use crate::action::Action;
         use crate::intent::Intent;
-        use crate::shortcut::KeyStroke;
+
         use std::cell::Cell;
         use std::rc::Rc;
 
@@ -4238,10 +4219,7 @@ mod tests {
             tick: Signal<u64>,
         }
         impl crate::widget::Widget for BoundLeaf {
-            fn build(
-                &mut self,
-                ctx: &mut crate::build_context::BuildContext,
-            ) -> Vec<WidgetId> {
+            fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
                 self.tick.bind_to(
                     ctx.self_id(),
                     ctx.binding_registry(),
@@ -4260,9 +4238,7 @@ mod tests {
 
         let mut tree = WidgetTree::new();
         let tick = Signal::new(0_u64);
-        let widget = tree.add(BoundLeaf {
-            tick: tick.clone(),
-        });
+        let widget = tree.add(BoundLeaf { tick: tick.clone() });
         tree.layout(SizeProposal::exact(200.0, 200.0));
         let after_first_build = tree.binding_registry().len();
         assert!(after_first_build >= 1);
@@ -4355,11 +4331,17 @@ mod tests {
                 .build(),
             widget_owner,
         );
-        assert!(tree.shortcut_registry().get_default("scoped.thing").is_some());
+        assert!(
+            tree.shortcut_registry()
+                .get_default("scoped.thing")
+                .is_some()
+        );
 
         tree.destroy_subtree(widget);
         assert!(
-            tree.shortcut_registry().get_default("scoped.thing").is_none(),
+            tree.shortcut_registry()
+                .get_default("scoped.thing")
+                .is_none(),
             "destroying the owner must unregister its shortcut"
         );
     }
@@ -4569,12 +4551,12 @@ mod tests {
         let outer_flag = outer_called.clone();
         let mut tree = WidgetTree::new();
         let inner = tree.add(FillWidget::new().context_menu(|_pos, _ctx| None));
-        let _outer = tree.add(
-            StackWidget::new().add_child(inner).context_menu(move |_pos, _ctx| {
+        let _outer = tree.add(StackWidget::new().add_child(inner).context_menu(
+            move |_pos, _ctx| {
                 outer_flag.set(outer_flag.get() + 1);
                 Some(Box::new(StubMenu) as Box<dyn crate::widget::Widget>)
-            }),
-        );
+            },
+        ));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         tree.dispatch_event(WidgetEvent::PointerDown {

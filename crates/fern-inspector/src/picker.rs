@@ -7,9 +7,7 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, PointerButton, WidgetEvent};
-use fern_core::overlay::{
-    DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest,
-};
+use fern_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
 use fern_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
@@ -217,8 +215,8 @@ impl Widget for PickResolver {
 
 /// Bridge from the picker's `PointerUp` handler to the chain-menu
 /// overlay registered in `InspectorShell::build`. Reads the chain
-/// + anchor stashed by `PickResolver` in the previous layout pass,
-/// activates the pre-registered menu widget, and submits the
+/// and the anchor stashed by `PickResolver` in the previous layout
+/// pass, activates the pre-registered menu widget, and submits the
 /// overlay request through `EventContext`. Clearing the anchor
 /// signal here gates re-entry: subsequent `PointerUp` events that
 /// arrive before the next picker click are no-ops.

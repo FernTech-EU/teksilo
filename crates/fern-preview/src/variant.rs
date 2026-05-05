@@ -1,13 +1,13 @@
 //! Preview variant — a named instance of a widget.
 //!
 //! Two flavours:
-//! - `Knobs`  — the variant supplies preset overrides for the
-//!              widget's `KnobSpec`. The widget is built from a
-//!              `KnobValues` populated with those overrides.
+//! - `Knobs` — the variant supplies preset overrides for the
+//!   widget's `KnobSpec`. The widget is built from a
+//!   `KnobValues` populated with those overrides.
 //! - `Scenario` — the variant ignores the spec entirely and runs a
-//!              hand-authored builder function. Used by composites
-//!              (Wizard, Dialog, ListView with sample data) where a
-//!              flat knob surface doesn't describe the shape.
+//!   hand-authored builder function. Used by composites
+//!   (Wizard, Dialog, ListView with sample data) where a
+//!   flat knob surface doesn't describe the shape.
 
 use crate::knob::KnobOverrides;
 use fern_core::widget::Widget;

@@ -12,18 +12,13 @@ use fern_tokens::{Color, Theme};
 /// A series color palette. `FromTheme` is the typical choice — it tracks
 /// the active theme's `chart_palette`. `Custom` lets a chart override
 /// just for itself without touching the theme.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum ChartPalette {
     /// Use `theme.colors.chart_palette` (Okabe-Ito by default; theme can override).
+    #[default]
     FromTheme,
     /// Use this fixed list of colors instead of the theme palette.
     Custom(Vec<Color>),
-}
-
-impl Default for ChartPalette {
-    fn default() -> Self {
-        ChartPalette::FromTheme
-    }
 }
 
 impl ChartPalette {

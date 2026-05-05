@@ -44,9 +44,7 @@ use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius, FontWeight, TextStyle};
 
 use crate::primitives::ImageWidget;
-use crate::primitives::image_mask::{
-    ImageMaskShape, apply_alpha_mask, center_crop_square,
-};
+use crate::primitives::image_mask::ImageMaskShape;
 use crate::primitives::image_widget::ImageFit;
 
 // ─── Public types ──────────────────────────────────────────────────────────
@@ -161,7 +159,6 @@ pub struct Avatar {
     image_visible: Prop<bool>,
 
     // ── Dynamic signal overrides (each None ⇒ use the static field) ─
-
     /// Reactive name. Drives derived initials and the hash seed when
     /// bound. Bound at `BindingLevel::Rebuild` so the inner children
     /// are recreated on flip.
@@ -510,7 +507,10 @@ impl std::fmt::Debug for Avatar {
             .field("initials", &self.initials)
             .field("size", &self.size)
             .field("shape", &self.shape)
-            .field("has_image", &(self.image_source.is_some() || self.image_signal.is_some()))
+            .field(
+                "has_image",
+                &(self.image_source.is_some() || self.image_signal.is_some()),
+            )
             .field("clickable", &self.action.is_some())
             .finish()
     }
@@ -652,10 +652,7 @@ impl Avatar {
     fn current_seed(&self) -> String {
         match &self.name_signal {
             Some(sig) => sig.get(),
-            None => self
-                .seed
-                .clone()
-                .unwrap_or_else(|| self.initials.clone()),
+            None => self.seed.clone().unwrap_or_else(|| self.initials.clone()),
         }
     }
 
@@ -685,9 +682,9 @@ impl Avatar {
     /// `None` ⇒ initials-only mode.
     fn current_image(&self) -> Option<(Rc<Vec<u8>>, u32, u32)> {
         if let Some(sig) = &self.image_signal {
-            return sig.get().map(|rc| {
-                (Rc::new(rc.pixels().to_vec()), rc.width(), rc.height())
-            });
+            return sig
+                .get()
+                .map(|rc| (Rc::new(rc.pixels().to_vec()), rc.width(), rc.height()));
         }
         self.image_source
             .as_ref()
@@ -709,7 +706,8 @@ impl Widget for Avatar {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
         let theme = ctx.theme();
-        let mask_shape = shape_to_image_mask(self.shape, theme.components.avatar.rounded_radius_ratio);
+        let mask_shape =
+            shape_to_image_mask(self.shape, theme.components.avatar.rounded_radius_ratio);
 
         // 1. Resolve current content state. Each `current_*` reads
         //    the signal if bound, falling back to the static field.
@@ -781,10 +779,18 @@ impl Widget for Avatar {
             sig.bind_to(self_id, registry, fern_core::binding::BindingLevel::Rebuild);
         }
         if let Some(sig) = &self.alt_signal {
-            sig.bind_to(self_id, registry, fern_core::binding::BindingLevel::AccessibilityOnly);
+            sig.bind_to(
+                self_id,
+                registry,
+                fern_core::binding::BindingLevel::AccessibilityOnly,
+            );
         }
         if let Some(sig) = &self.label_signal {
-            sig.bind_to(self_id, registry, fern_core::binding::BindingLevel::AccessibilityOnly);
+            sig.bind_to(
+                self_id,
+                registry,
+                fern_core::binding::BindingLevel::AccessibilityOnly,
+            );
         }
 
         // 3. If clickable, install attached handlers — including the
@@ -851,7 +857,11 @@ impl Widget for Avatar {
         children
     }
 
-    fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        _proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let style = ctx.theme.components.avatar;
         let side = self.size.resolve(&style);
         Size::new(side, side).into()
@@ -999,9 +1009,7 @@ impl Widget for Avatar {
                 label.is_some() || alt.is_some(),
                 "Avatar::on_activate_fn requires a `.label(\"...\")` (preferred) or `.alt(\"...\")` (or a `.bind_label(...)` / `.bind_alt(...)`) for screen readers"
             );
-            let name = label
-                .or(alt)
-                .unwrap_or_else(|| initials.clone());
+            let name = label.or(alt).unwrap_or_else(|| initials.clone());
             builder.set_name(name);
             builder.add_action(fern_core::accesskit::Action::Click);
             builder.add_action(fern_core::accesskit::Action::Focus);
@@ -1013,9 +1021,7 @@ impl Widget for Avatar {
                 alt.is_some() || label.is_some(),
                 "Avatar::with_image requires a `.alt(\"...\")` (or `.bind_alt(...)`) for meaningful images, or call `.a11y_hidden()` if decorative"
             );
-            let name = alt
-                .or(label)
-                .unwrap_or_else(|| initials.clone());
+            let name = alt.or(label).unwrap_or_else(|| initials.clone());
             builder.set_name(name);
         } else {
             builder.set_role(fern_core::accesskit::Role::Label);
@@ -1067,11 +1073,13 @@ fn paint_focus_ring(
     match shape {
         AvatarShape::Circle => {
             let radius = outer.width.min(outer.height) / 2.0;
-            let center = Point::new(
-                outer.x + outer.width / 2.0,
-                outer.y + outer.height / 2.0,
+            let center = Point::new(outer.x + outer.width / 2.0, outer.y + outer.height / 2.0);
+            canvas.stroke_circle(
+                center,
+                radius,
+                Paint::from(color),
+                StrokeStyle::solid(width),
             );
-            canvas.stroke_circle(center, radius, Paint::from(color), StrokeStyle::solid(width));
         }
         AvatarShape::RoundedSquare => {
             // Grow the corner radius by the outset so the ring
@@ -1116,11 +1124,13 @@ fn paint_border(
     match shape {
         AvatarShape::Circle => {
             let radius = inner.width.min(inner.height) / 2.0;
-            let center = Point::new(
-                inner.x + inner.width / 2.0,
-                inner.y + inner.height / 2.0,
+            let center = Point::new(inner.x + inner.width / 2.0, inner.y + inner.height / 2.0);
+            canvas.stroke_circle(
+                center,
+                radius,
+                Paint::from(color),
+                StrokeStyle::solid(width),
             );
-            canvas.stroke_circle(center, radius, Paint::from(color), StrokeStyle::solid(width));
         }
         AvatarShape::RoundedSquare => {
             let r = inner.width.min(inner.height) * rounded_radius_ratio;
@@ -1177,7 +1187,11 @@ impl InitialsLeaf {
 }
 
 impl Widget for InitialsLeaf {
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         // Always fill the proposal — the parent Avatar drives sizing.
         proposal.resolve(0.0, 0.0).into()
     }
@@ -1353,9 +1367,7 @@ mod tests {
     #[test]
     fn size_custom_passes_through() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let id = tree.add(
-            Avatar::with_initials_literal("JD").size(AvatarSize::Custom(40.0)),
-        );
+        let id = tree.add(Avatar::with_initials_literal("JD").size(AvatarSize::Custom(40.0)));
         tree.layout(SizeProposal {
             width: None,
             height: None,
@@ -1375,7 +1387,9 @@ mod tests {
         let widget = Avatar::with_initials_literal("JD");
         let theme = Theme::light_default();
         let ctx = LayoutContext::for_testing(&theme);
-        let s = widget.layout_response(SizeProposal::exact(400.0, 400.0), &ctx).size;
+        let s = widget
+            .layout_response(SizeProposal::exact(400.0, 400.0), &ctx)
+            .size;
         assert!((s.width - 32.0).abs() < 0.01);
         assert!((s.height - 32.0).abs() < 0.01);
     }
@@ -1448,9 +1462,8 @@ mod tests {
     #[test]
     fn paint_presence_adds_two_shapes() {
         let plain = render_avatar(Avatar::with_initials_literal("JD"));
-        let with_dot = render_avatar(
-            Avatar::with_initials_literal("JD").presence(AvatarPresence::Online),
-        );
+        let with_dot =
+            render_avatar(Avatar::with_initials_literal("JD").presence(AvatarPresence::Online));
         // Outline + dot.
         assert_eq!(count_shapes(&with_dot), count_shapes(&plain) + 2);
     }
@@ -1466,8 +1479,7 @@ mod tests {
 
     #[test]
     fn paint_square_emits_shape() {
-        let frame =
-            render_avatar(Avatar::with_initials_literal("JD").shape(AvatarShape::Square));
+        let frame = render_avatar(Avatar::with_initials_literal("JD").shape(AvatarShape::Square));
         assert!(count_shapes(&frame) >= 1);
     }
 
@@ -1475,7 +1487,10 @@ mod tests {
     fn paint_image_uses_image_pipeline() {
         let icon = rgba_solid(8, [50, 100, 200, 255]);
         let frame = render_avatar(Avatar::with_image(&icon).alt_literal("avatar"));
-        assert!(!frame.images.is_empty(), "image avatar should render an image");
+        assert!(
+            !frame.images.is_empty(),
+            "image avatar should render an image"
+        );
     }
 
     #[test]
@@ -1526,8 +1541,14 @@ mod tests {
         tree.layout(SizeProposal::exact(32.0, 32.0));
         let info = tree.accessibility_node(id);
         assert_eq!(info.role(), fern_core::accesskit::Role::Button);
-        assert!(info.actions().contains(&fern_core::accesskit::Action::Click));
-        assert!(info.actions().contains(&fern_core::accesskit::Action::Focus));
+        assert!(
+            info.actions()
+                .contains(&fern_core::accesskit::Action::Click)
+        );
+        assert!(
+            info.actions()
+                .contains(&fern_core::accesskit::Action::Focus)
+        );
         assert_eq!(info.name(), Some("Open user menu"));
     }
 
@@ -1545,9 +1566,7 @@ mod tests {
     #[test]
     fn accessibility_label_overrides_initials() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let id = tree.add(
-            Avatar::with_initials_literal("JD").label_literal("Jane Doe (offline)"),
-        );
+        let id = tree.add(Avatar::with_initials_literal("JD").label_literal("Jane Doe (offline)"));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         let info = tree.accessibility_node(id);
         assert_eq!(info.name(), Some("Jane Doe (offline)"));
@@ -1556,9 +1575,7 @@ mod tests {
     #[test]
     fn accessibility_presence_appears_in_description() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let id = tree.add(
-            Avatar::with_initials_literal("JD").presence(AvatarPresence::Online),
-        );
+        let id = tree.add(Avatar::with_initials_literal("JD").presence(AvatarPresence::Online));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         // Just verify it builds — `description` isn't surfaced by the
         // test introspection helper, but that the avatar accepts the
@@ -1630,7 +1647,9 @@ mod tests {
         );
         let target = Color::from_rgb(1.0, 0.0, 0.5);
         assert!(
-            glyph_colors(&frame).iter().any(|c| approx_color_eq(*c, target)),
+            glyph_colors(&frame)
+                .iter()
+                .any(|c| approx_color_eq(*c, target)),
             "expected at least one glyph painted with the foreground override"
         );
     }
@@ -1642,7 +1661,9 @@ mod tests {
         );
         let target = Color::from_rgb(0.1, 0.7, 0.2);
         assert!(
-            shape_colors(&frame).iter().any(|c| approx_color_eq(*c, target)),
+            shape_colors(&frame)
+                .iter()
+                .any(|c| approx_color_eq(*c, target)),
             "expected the bg override colour to appear on a Shape quad"
         );
     }
@@ -1652,8 +1673,7 @@ mod tests {
         // With a near-white background override and no foreground
         // override, auto-contrast should pick a dark text colour.
         let frame = render_avatar(
-            Avatar::with_initials_literal("JD")
-                .background(Color::from_rgb(0.95, 0.95, 0.95)),
+            Avatar::with_initials_literal("JD").background(Color::from_rgb(0.95, 0.95, 0.95)),
         );
         let glyphs = glyph_colors(&frame);
         assert!(
@@ -1747,8 +1767,7 @@ mod tests {
         // wrappers that supply external state.
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let id = tree.add(
-            Avatar::with_initials_literal("JD")
-                .has_popup(fern_core::accesskit::HasPopup::Menu),
+            Avatar::with_initials_literal("JD").has_popup(fern_core::accesskit::HasPopup::Menu),
         );
         tree.layout(SizeProposal::exact(32.0, 32.0));
         // Role stays Label since there's no on_activate_fn.
@@ -1764,7 +1783,7 @@ mod tests {
     fn focus_ring_only_paints_when_focused() {
         // Synthesize the same bookkeeping as build() does for a
         // clickable avatar, then drive the focus signal directly.
-        use fern_core::signal::Signal;
+
         let mut tree = WidgetTree::new()
             .with_theme(Theme::light_default())
             .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
@@ -1793,7 +1812,6 @@ mod tests {
 
     #[test]
     fn focus_ring_uses_theme_focus_ring_color() {
-        use fern_core::signal::Signal;
         let mut tree = WidgetTree::new()
             .with_theme(Theme::light_default())
             .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
@@ -1810,7 +1828,9 @@ mod tests {
         let frame = tree.render();
         let target = Theme::light_default().colors.focus_ring;
         assert!(
-            shape_colors(&frame).iter().any(|c| approx_color_eq(*c, target)),
+            shape_colors(&frame)
+                .iter()
+                .any(|c| approx_color_eq(*c, target)),
             "expected at least one Shape painted with the theme's focus_ring colour"
         );
     }
@@ -1879,10 +1899,7 @@ mod tests {
         let mut tree = WidgetTree::new()
             .with_theme(Theme::light_default())
             .with_text_backend(StdRc::new(RefCell::new(MockTextBackend::new())));
-        let id = tree.add(
-            Avatar::with_initials_literal("?")
-                .bind_name(name.clone()),
-        );
+        let id = tree.add(Avatar::with_initials_literal("?").bind_name(name.clone()));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         // Empty name ⇒ derived initials = "?".
         assert_eq!(tree.accessibility_node(id).name(), Some("?"));
@@ -1985,9 +2002,7 @@ mod tests {
         use fern_core::signal::Signal;
         let label = Signal::new(Some("Profile".to_string()));
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let id = tree.add(
-            Avatar::with_initials_literal("JD").bind_label(label.clone()),
-        );
+        let id = tree.add(Avatar::with_initials_literal("JD").bind_label(label.clone()));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         assert_eq!(tree.accessibility_node(id).name(), Some("Profile"));
 
@@ -1999,16 +2014,13 @@ mod tests {
     #[test]
     fn bind_presence_swap_changes_dot_color_and_a11y_description() {
         use fern_core::signal::Signal;
-        let presence: Signal<Option<AvatarPresence>> =
-            Signal::new(Some(AvatarPresence::Online));
+        let presence: Signal<Option<AvatarPresence>> = Signal::new(Some(AvatarPresence::Online));
         let mut tree = WidgetTree::new()
             .with_theme(Theme::light_default())
             .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
                 fern_canvas::MockTextBackend::new(),
             )));
-        let id = tree.add(
-            Avatar::with_initials_literal("JD").bind_presence(presence.clone()),
-        );
+        let id = tree.add(Avatar::with_initials_literal("JD").bind_presence(presence.clone()));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         let online_color = Theme::light_default().colors.status_success_fg;
         assert!(
@@ -2036,8 +2048,9 @@ mod tests {
         let frame = tree.render();
         // No presence dot ⇒ neither status colour is on the frame.
         assert!(
-            !shape_colors(&frame).iter().any(|c| approx_color_eq(*c, online_color)
-                || approx_color_eq(*c, busy_color)),
+            !shape_colors(&frame)
+                .iter()
+                .any(|c| approx_color_eq(*c, online_color) || approx_color_eq(*c, busy_color)),
             "presence None must remove the dot from the frame"
         );
     }
@@ -2055,9 +2068,7 @@ mod tests {
         let mut tree = WidgetTree::new()
             .with_theme(Theme::light_default())
             .with_text_backend(StdRc::new(RefCell::new(MockTextBackend::new())));
-        let _id = tree.add(
-            Avatar::with_initials_literal("?").bind_name(name.clone()),
-        );
+        let _id = tree.add(Avatar::with_initials_literal("?").bind_name(name.clone()));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         let bg_jd = shape_colors(&tree.render())
             .into_iter()
@@ -2066,10 +2077,7 @@ mod tests {
 
         name.set("Jules Dupont".to_string());
         tree.layout(SizeProposal::exact(32.0, 32.0));
-        let bg_jd2 = shape_colors(&tree.render())
-            .into_iter()
-            .next()
-            .unwrap();
+        let bg_jd2 = shape_colors(&tree.render()).into_iter().next().unwrap();
         assert_ne!(
             bg_jd, bg_jd2,
             "different bound names must hash to different palette buckets"

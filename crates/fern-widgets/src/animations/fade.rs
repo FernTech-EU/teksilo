@@ -34,7 +34,7 @@
 //! Honours `prefers-reduced-motion`: under reduced motion the
 //! opacity snaps to its end value instead of tweening.
 
-use fern_canvas::{Point, Rect, Size, SizeProposal};
+use fern_canvas::{Point, Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::signal::{Prop, Signal};
@@ -124,14 +124,19 @@ impl Widget for Fade {
         vec![child_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         // Layout-transparent: report the child's natural size at all
         // opacity values. A faded-out tooltip still occupies its
         // future visible footprint so `Fade` doesn't drive layout
         // jitter when used purely as a visual modulator.
         self.child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -185,10 +190,7 @@ mod tests {
     fn starts_hidden_when_signal_is_false() {
         let visible = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(
-            Fade::new(visible.clone())
-                .child(RectWidget::new().background(Color::RED)),
-        );
+        tree.add(Fade::new(visible.clone()).child(RectWidget::new().background(Color::RED)));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let frame = tree.render();
         // Sub-perceptual opacity skips the subtree entirely — no
@@ -207,10 +209,7 @@ mod tests {
     fn starts_visible_when_signal_is_true() {
         let visible = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(
-            Fade::new(visible.clone())
-                .child(RectWidget::new().background(Color::RED)),
-        );
+        tree.add(Fade::new(visible.clone()).child(RectWidget::new().background(Color::RED)));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let frame = tree.render();
         // Initially visible: opacity 1.0 emits exactly one SetOpacity
@@ -225,10 +224,7 @@ mod tests {
     fn flipping_signal_drives_animation() {
         let visible = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(
-            Fade::new(visible.clone())
-                .child(TextWidget::new_literal("payload")),
-        );
+        tree.add(Fade::new(visible.clone()).child(TextWidget::new_literal("payload")));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         visible.set(true);
@@ -250,10 +246,7 @@ mod tests {
     fn animation_completes_at_target() {
         let visible = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(
-            Fade::new(visible.clone())
-                .child(TextWidget::new_literal("payload")),
-        );
+        tree.add(Fade::new(visible.clone()).child(TextWidget::new_literal("payload")));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         visible.set(true);
@@ -275,10 +268,7 @@ mod tests {
         // bounds match it regardless of opacity.
         let visible = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let id = tree.add(
-            Fade::new(visible.clone())
-                .child(TextWidget::new_literal("hello")),
-        );
+        let id = tree.add(Fade::new(visible.clone()).child(TextWidget::new_literal("hello")));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,

@@ -36,19 +36,14 @@ use crate::typesetter_bridge::TypesetterBridge;
 /// Wrap mode chosen at construction; forwarded to the owned
 /// [`DocumentFlow`] via `set_content_width_auto()` or
 /// `set_content_width(INFINITY)`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WrapMode {
     /// Text reflows at the viewport width. No horizontal scroll
     /// needed.
+    #[default]
     Word,
     /// Text does not wrap; horizontal scrolling exposes long lines.
     None,
-}
-
-impl Default for WrapMode {
-    fn default() -> Self {
-        WrapMode::Word
-    }
 }
 
 pub struct RichTextEngine {
@@ -248,12 +243,10 @@ impl RichTextEngine {
         let block_id = snap.block_id;
         let params = text_typeset::bridge::convert_block(&snap);
         let bridge = self.shared.borrow();
-        self.flow
-            .relayout_block(bridge.service(), &params)
-            .expect(
-                "relayout_block invariant violated: has_full_layout() should already \
+        self.flow.relayout_block(bridge.service(), &params).expect(
+            "relayout_block invariant violated: has_full_layout() should already \
                  guarantee has_layout() && !layout_dirty_for_scale()",
-            );
+        );
         Ok(block_id)
     }
 
@@ -276,9 +269,7 @@ impl RichTextEngine {
         f: impl FnOnce(&RenderFrame) -> R,
     ) -> R {
         let mut bridge = self.shared.borrow_mut();
-        let frame = self
-            .flow
-            .render_block_only(bridge.service_mut(), block_id);
+        let frame = self.flow.render_block_only(bridge.service_mut(), block_id);
         f(frame)
     }
 
@@ -313,8 +304,7 @@ impl RichTextEngine {
         char_start: usize,
         char_end: usize,
     ) -> Vec<text_typeset::CharacterGeometry> {
-        self.flow
-            .character_geometry(block_id, char_start, char_end)
+        self.flow.character_geometry(block_id, char_start, char_end)
     }
 
     pub fn ensure_caret_visible(&mut self) -> Option<f32> {

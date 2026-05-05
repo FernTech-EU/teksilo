@@ -47,16 +47,15 @@ use crate::accordion::Accordion;
 use crate::keystroke_format::format_keystroke;
 use crate::primitives::{Grid, Padding, Spacer, TextWidget, TrackSize, VStack};
 use crate::tooltip::dwell_indicator::DwellIndicator;
-use crate::tooltip::registry::{with_tooltip_registry, TooltipContent, TooltipRegistry};
+use crate::tooltip::registry::{TooltipContent, TooltipRegistry, with_tooltip_registry};
 
 /// Total dwell time before the tooltip promotes to sticky.
 pub(crate) const DWELL_PROMOTION: Duration = Duration::from_secs(2);
 /// Maximum step value (4 = full circle = pin icon).
 const DWELL_STEPS: u32 = 4;
 /// Per-step dwell duration: total / steps = 500 ms.
-const DWELL_STEP_DURATION: Duration = Duration::from_millis(
-    (DWELL_PROMOTION.as_millis() / DWELL_STEPS as u128) as u64,
-);
+const DWELL_STEP_DURATION: Duration =
+    Duration::from_millis((DWELL_PROMOTION.as_millis() / DWELL_STEPS as u128) as u64);
 
 /// Rich tooltip content widget.
 ///
@@ -148,8 +147,8 @@ impl RichTooltipWidget {
         };
 
         let elapsed = Instant::now().saturating_duration_since(shown_at);
-        let new_step = ((elapsed.as_millis() / DWELL_STEP_DURATION.as_millis()) as u32)
-            .min(DWELL_STEPS);
+        let new_step =
+            ((elapsed.as_millis() / DWELL_STEP_DURATION.as_millis()) as u32).min(DWELL_STEPS);
         if self.dwell_step.get() != new_step {
             self.dwell_step.set(new_step);
         }
@@ -208,9 +207,7 @@ impl Widget for RichTooltipWidget {
         // Only pre-create for keys that actually exist in the registry.
         let registered: Vec<String> = nested_keys
             .into_iter()
-            .filter(|k| {
-                with_tooltip_registry(|r| r.get(k).is_some()).unwrap_or(false)
-            })
+            .filter(|k| with_tooltip_registry(|r| r.get(k).is_some()).unwrap_or(false))
             .collect();
         for key in &registered {
             let nested = RichTooltipWidget::from_key(key.clone());
@@ -236,7 +233,7 @@ impl Widget for RichTooltipWidget {
         let shortcut_text: Option<String> = content.shortcut_label.clone().or_else(|| {
             content.shortcut_id.and_then(|id| {
                 ctx.effective_shortcut(id)
-                    .and_then(|eff| eff.primary.map(|ks| format_keystroke(ks)))
+                    .and_then(|eff| eff.primary.map(format_keystroke))
             })
         });
         if content.shortcut_id.is_some() {
@@ -375,22 +372,22 @@ impl Widget for RichTooltipWidget {
         vec![padded]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         // Clamp proposal width to the tooltip max_width token so long
         // bodies wrap rather than stretching the surface.
         let max_w = ctx.theme.components.tooltip.max_width;
         let clamped = SizeProposal {
-            width: Some(
-                proposal
-                    .width
-                    .map(|w| w.min(max_w))
-                    .unwrap_or(max_w),
-            ),
+            width: Some(proposal.width.map(|w| w.min(max_w)).unwrap_or(max_w)),
             height: proposal.height,
         };
         self.root_child_id
             .and_then(|id| ctx.child_size(id, clamped))
-            .unwrap_or_else(|| Size::new(0.0, 0.0)).into()
+            .unwrap_or_else(|| Size::new(0.0, 0.0))
+            .into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -414,7 +411,7 @@ impl Widget for RichTooltipWidget {
         };
         builder.set_role(role);
         if let Some(content) = self.content.as_ref() {
-            builder.set_name(&content.text.resolve_now());
+            builder.set_name(content.text.resolve_now());
         }
         if is_sticky {
             builder.add_action(fern_core::accesskit::Action::Focus);
@@ -499,7 +496,9 @@ fn scan_tooltip_key_urls(source: &str, out: &mut Vec<String>) {
             while end < bytes.len() && bytes[end] != b')' && bytes[end] != b'\\' {
                 end += 1;
             }
-            if end < bytes.len() && bytes[end] == b')' && start < end
+            if end < bytes.len()
+                && bytes[end] == b')'
+                && start < end
                 && let Ok(key) = std::str::from_utf8(&bytes[start..end])
             {
                 out.push(key.to_string());
@@ -518,10 +517,7 @@ mod tests {
     #[test]
     fn scan_tooltip_key_urls_finds_colon_keys() {
         let mut out = Vec::new();
-        scan_tooltip_key_urls(
-            "see [docs](:docs-key) and [more](:more-key) here",
-            &mut out,
-        );
+        scan_tooltip_key_urls("see [docs](:docs-key) and [more](:more-key) here", &mut out);
         assert_eq!(out, vec!["docs-key".to_string(), "more-key".to_string()]);
     }
 
@@ -556,4 +552,3 @@ mod tests {
         assert!(out.is_empty());
     }
 }
-

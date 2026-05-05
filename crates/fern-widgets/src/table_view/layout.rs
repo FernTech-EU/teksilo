@@ -32,7 +32,13 @@ impl ColumnSolver {
         overrides: &HashMap<String, f32>,
     ) -> Vec<f32> {
         let order: Vec<usize> = (0..columns.len()).collect();
-        Self::resolve_in_order(columns, &order, available_width, min_width_default, overrides)
+        Self::resolve_in_order(
+            columns,
+            &order,
+            available_width,
+            min_width_default,
+            overrides,
+        )
     }
 
     /// Resolve widths for the given columns, returning a `Vec<f32>` in
@@ -248,7 +254,11 @@ mod tests {
 
     #[test]
     fn override_clamps_to_min_max() {
-        let cols = vec![col("a", ColumnWidth::Flex(1.0)).min_width(80.0).max_width(200.0)];
+        let cols = vec![
+            col("a", ColumnWidth::Flex(1.0))
+                .min_width(80.0)
+                .max_width(200.0),
+        ];
         let mut over = HashMap::new();
         over.insert("a".to_string(), 5.0); // below min
         let widths = ColumnSolver::resolve(&cols, 400.0, 32.0, &over);

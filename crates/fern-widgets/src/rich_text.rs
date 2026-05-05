@@ -48,17 +48,15 @@ pub use context_menu::{
 };
 pub use hit_test::ContextTarget;
 pub use policy::{
-    AccessibilityRole, CaretPolicy, ClipboardPolicy, CommandFilter, EditCommandKind,
-    PolicyBundle, EDITOR_PRESET, READ_ONLY_PRESET,
+    AccessibilityRole, CaretPolicy, ClipboardPolicy, CommandFilter, EDITOR_PRESET, EditCommandKind,
+    PolicyBundle, READ_ONLY_PRESET,
 };
 
 use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::signal::Signal;
-use fern_core::widget::{
-    CursorIcon, LayoutContext, PaintContext, Widget, WidgetPlacement,
-};
+use fern_core::widget::{CursorIcon, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_text::text_document::{
@@ -71,21 +69,16 @@ use self::paint::{PaintParams, paint_frame};
 use self::state::{EditorState, SharedState};
 
 /// Scrollbar visibility policy, applied independently per axis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScrollPolicy {
     /// Visible only when the corresponding `max_scroll_axis > 0`.
+    #[default]
     Auto,
     /// Always visible (reserves gutter width even when content fits).
     AlwaysOn,
     /// Never rendered. Useful when embedding the editor in an outer
     /// scroll container, or in tests.
     AlwaysOff,
-}
-
-impl Default for ScrollPolicy {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 /// The main rich text widget. Construct via [`RichTextEditor::read_only`]
@@ -965,8 +958,7 @@ impl RichTextEditor {
         self,
         handler: impl Fn(&str, &mut fern_core::widget::EventContext) + 'static,
     ) -> Self {
-        self.state.borrow_mut().on_link_activated =
-            Some(std::rc::Rc::new(handler));
+        self.state.borrow_mut().on_link_activated = Some(std::rc::Rc::new(handler));
         self
     }
 
@@ -977,8 +969,7 @@ impl RichTextEditor {
         self,
         handler: impl Fn(&str, &mut fern_core::widget::EventContext) + 'static,
     ) -> Self {
-        self.state.borrow_mut().on_image_activated =
-            Some(std::rc::Rc::new(handler));
+        self.state.borrow_mut().on_image_activated = Some(std::rc::Rc::new(handler));
         self
     }
 }
@@ -1066,10 +1057,8 @@ impl Widget for RichTextEditor {
                 let mut st = state.borrow_mut();
                 let more = frame_loop::tick(&mut st, *delta);
                 st.has_selection.set(st.cursor.has_selection());
-                if more {
-                    if let Some(handle) = &st.frame_request {
-                        handle.set(true);
-                    }
+                if more && let Some(handle) = &st.frame_request {
+                    handle.set(true);
                 }
                 drop(st);
             });
@@ -1135,15 +1124,11 @@ impl Widget for RichTextEditor {
             })
             .on_double_tap({
                 let state = self.state.clone();
-                move |event, ctx| {
-                    self::mouse::handle_double_tap(&state, event.position, ctx)
-                }
+                move |event, ctx| self::mouse::handle_double_tap(&state, event.position, ctx)
             })
             .on_triple_tap({
                 let state = self.state.clone();
-                move |event, ctx| {
-                    self::mouse::handle_triple_tap(&state, event.position, ctx)
-                }
+                move |event, ctx| self::mouse::handle_triple_tap(&state, event.position, ctx)
             })
             .on_access_action_request({
                 let state = self.state.clone();
@@ -1179,7 +1164,11 @@ impl Widget for RichTextEditor {
         Vec::new()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let w = proposal.width.unwrap_or(200.0).max(0.0);
 
         // Greedy mode (default, behaviour unchanged): both knobs
@@ -1198,10 +1187,7 @@ impl Widget for RichTextEditor {
         let content_h = st.engine.content_height();
         drop(st);
 
-        let min_h = self
-            .min_lines
-            .map(|n| n as f32 * line_h)
-            .unwrap_or(0.0);
+        let min_h = self.min_lines.map(|n| n as f32 * line_h).unwrap_or(0.0);
         let max_h = self
             .max_lines
             .map(|n| n as f32 * line_h)
@@ -1301,7 +1287,7 @@ impl Widget for RichTextEditor {
         // Split-borrow the state fields so the paint walker can hold
         // `&engine.with_render_frame(...)`, `&document`, and
         // `&mut image_cache` simultaneously.
-        let state_ref: &mut EditorState = &mut *st;
+        let state_ref: &mut EditorState = &mut st;
         let EditorState {
             ref mut engine,
             ref document,
@@ -1393,13 +1379,12 @@ impl Widget for RichTextEditor {
                             // (matches LayoutLine::char_range's coordinate space).
                             let char_start = *offset;
                             let char_end = char_start + *length;
-                            let geom = st
-                                .engine
-                                .character_geometry(block.block_id, char_start, char_end);
+                            let geom =
+                                st.engine
+                                    .character_geometry(block.block_id, char_start, char_end);
                             let char_positions: Vec<f32> =
                                 geom.iter().map(|g| g.position).collect();
-                            let char_widths: Vec<f32> =
-                                geom.iter().map(|g| g.width).collect();
+                            let char_widths: Vec<f32> = geom.iter().map(|g| g.width).collect();
 
                             let node_id = builder.push_text_run_child(
                                 para_id,
@@ -1438,17 +1423,12 @@ impl Widget for RichTextEditor {
                             // [absolute_start, absolute_start + length].
                             let absolute_end = absolute_start + *length;
                             if user_pos >= absolute_start && user_pos <= absolute_end {
-                                let char_idx = char_index_in_text(
-                                    text,
-                                    user_pos - absolute_start,
-                                );
+                                let char_idx = char_index_in_text(text, user_pos - absolute_start);
                                 caret_pair = Some((node_id, char_idx));
                             }
                             if user_anchor >= absolute_start && user_anchor <= absolute_end {
-                                let char_idx = char_index_in_text(
-                                    text,
-                                    user_anchor - absolute_start,
-                                );
+                                let char_idx =
+                                    char_index_in_text(text, user_anchor - absolute_start);
                                 anchor_pair = Some((node_id, char_idx));
                             }
                         }

@@ -102,7 +102,11 @@ impl Widget for Toolbar {
         vec![root]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         if let Some(root) = self.root_child_id
             && let Some(size) = ctx.child_size(root, proposal)
         {
@@ -171,7 +175,10 @@ mod tests {
         tree.layout(SizeProposal::exact(400.0, 50.0));
         let info = tree.accessibility_node(tb);
         assert_eq!(info.role(), fern_core::accesskit::Role::Toolbar);
-        assert!(info.name().is_some(), "toolbar should carry a default a11y name");
+        assert!(
+            info.name().is_some(),
+            "toolbar should carry a default a11y name"
+        );
     }
 
     #[test]

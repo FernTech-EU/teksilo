@@ -49,24 +49,30 @@ impl Widget for HighlightLayer {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
         // Repaint when selection, mode, opacity, or hover change.
-        self.state
-            .selected_bounds
-            .bind_to(self_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
+        self.state.selected_bounds.bind_to(
+            self_id,
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
         self.state
             .overlay_mode
             .bind_to(self_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
-        self.state
-            .overlay_opacity
-            .bind_to(self_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
+        self.state.overlay_opacity.bind_to(
+            self_id,
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
         self.state
             .selected_id
             .bind_to(self_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
         self.state
             .hover_info
             .bind_to(self_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
-        self.state
-            .band_snapshot
-            .bind_to(self_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
+        self.state.band_snapshot.bind_to(
+            self_id,
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
         Vec::new()
     }
 
@@ -92,16 +98,12 @@ impl Widget for HighlightLayer {
         }
 
         // Selection stroke (drawn over everything in AllBounds mode).
-        if let Some(rect) = self.state.selected_bounds.get() {
-            if rect.width > 0.0 && rect.height > 0.0 {
-                let stroke = Color::from_rgba(0.13, 0.55, 1.0, 0.95 * opacity);
-                canvas.stroke_rounded_rect(
-                    rect,
-                    fern_tokens::CornerRadius::ZERO,
-                    stroke,
-                    2.0,
-                );
-            }
+        if let Some(rect) = self.state.selected_bounds.get()
+            && rect.width > 0.0
+            && rect.height > 0.0
+        {
+            let stroke = Color::from_rgba(0.13, 0.55, 1.0, 0.95 * opacity);
+            canvas.stroke_rounded_rect(rect, fern_tokens::CornerRadius::ZERO, stroke, 2.0);
         }
     }
 
@@ -343,8 +345,7 @@ impl Widget for BoundsTracker {
                         if bounds.width <= 0.0 || bounds.height <= 0.0 {
                             return None;
                         }
-                        let type_label =
-                            last_segment(node.widget.type_name()).to_string();
+                        let type_label = last_segment(node.widget.type_name()).to_string();
                         let is_layout = is_layout_primitive(node.widget.type_name());
                         Some(HoverInfo {
                             bounds,

@@ -247,10 +247,10 @@ pub(crate) const MAX_PANEL_HEIGHT: f32 = 720.0;
 impl InspectorState {
     pub(crate) fn new(initial_open: bool) -> Self {
         let active_tab: Signal<usize> = Signal::new(0);
-        let tab_ids: Vec<fern_widgets::TabId> =
-            (0..NUM_TABS).map(|_| fern_widgets::TabId::fresh()).collect();
-        let active_tab_id: Signal<Option<fern_widgets::TabId>> =
-            Signal::new(Some(tab_ids[0]));
+        let tab_ids: Vec<fern_widgets::TabId> = (0..NUM_TABS)
+            .map(|_| fern_widgets::TabId::fresh())
+            .collect();
+        let active_tab_id: Signal<Option<fern_widgets::TabId>> = Signal::new(Some(tab_ids[0]));
 
         // Index → id observer: when the index signal changes (keyboard
         // nav / persistence load), update the id signal so the
@@ -259,10 +259,10 @@ impl InspectorState {
             let id_sig = active_tab_id.clone();
             let ids = tab_ids.clone();
             active_tab.observe(move |i| {
-                if let Some(&id) = ids.get(*i) {
-                    if id_sig.get() != Some(id) {
-                        id_sig.set(Some(id));
-                    }
+                if let Some(&id) = ids.get(*i)
+                    && id_sig.get() != Some(id)
+                {
+                    id_sig.set(Some(id));
                 }
             })
         };
@@ -274,12 +274,11 @@ impl InspectorState {
             let idx_sig = active_tab.clone();
             let ids = tab_ids.clone();
             active_tab_id.observe(move |maybe_id| {
-                if let Some(id) = maybe_id {
-                    if let Some(i) = ids.iter().position(|x| x == id) {
-                        if idx_sig.get() != i {
-                            idx_sig.set(i);
-                        }
-                    }
+                if let Some(id) = maybe_id
+                    && let Some(i) = ids.iter().position(|x| x == id)
+                    && idx_sig.get() != i
+                {
+                    idx_sig.set(i);
                 }
             })
         };
@@ -363,18 +362,18 @@ pub(crate) fn install(builder: FernAppBuilder) -> FernAppBuilder {
                 Intent::new("__fern_inspector.toggle")
             })
             .build();
-        tree.shortcut_registry_mut().register_owned(shortcut, root_id);
+        tree.shortcut_registry_mut()
+            .register_owned(shortcut, root_id);
 
         // First time only: bridge state signals to SettingsStore (if
         // the app has wired one). Idempotent guard via Cell so
         // multi-window apps don't bridge twice.
-        if !persistence_wired.replace(true) {
-            if let Some(store) = tree
+        if !persistence_wired.replace(true)
+            && let Some(store) = tree
                 .app_context()
                 .app_state::<fern_settings::SettingsStore>()
-            {
-                crate::persistence::wire(&state_for_post_root, store);
-            }
+        {
+            crate::persistence::wire(&state_for_post_root, store);
         }
 
         // First time only: bridge a handful of `tree.*_signal()`

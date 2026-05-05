@@ -419,10 +419,7 @@ impl<T: Clone + 'static> Signal<T> {
     /// upstream sources being read together (a compose function);
     /// when only one upstream changes per frame, [`map`](Self::map) is
     /// equivalent and cheaper.
-    pub fn map_coalesced<U: Clone + 'static>(
-        &self,
-        f: impl Fn(&T) -> U + 'static,
-    ) -> Signal<U> {
+    pub fn map_coalesced<U: Clone + 'static>(&self, f: impl Fn(&T) -> U + 'static) -> Signal<U> {
         let compute = self.as_compute();
         let underlying = self.as_sources();
         if underlying.len() <= 1 {
@@ -434,7 +431,7 @@ impl<T: Clone + 'static> Signal<T> {
         // Each closure captures a clone so the Rc lives as long as the
         // resulting signal's source vec.
         let token: Rc<()> = Rc::new(());
-        let source_id = Rc::as_ptr(&token) as *const () as usize;
+        let source_id = Rc::as_ptr(&token) as usize;
         let dirty_token = token.clone();
         let dirty_underlying = underlying.clone();
         let clear_token = token;

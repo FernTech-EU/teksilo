@@ -290,19 +290,17 @@ impl Widget for Root {
                                     ctx.send_intent(AppIntent::ScrollBy(-1));
                                 }),
                         )
-                        .item(
-                            MenuItem::new_literal("Scroll down")
-                                .on_activate_fn(|ctx: &mut EventContext| {
-                                    ctx.send_intent(AppIntent::ScrollBy(1));
-                                }),
-                        )
+                        .item(MenuItem::new_literal("Scroll down").on_activate_fn(
+                            |ctx: &mut EventContext| {
+                                ctx.send_intent(AppIntent::ScrollBy(1));
+                            },
+                        ))
                         .separator()
-                        .item(
-                            MenuItem::new_literal("Go to line 100")
-                                .on_activate_fn(|ctx: &mut EventContext| {
-                                    ctx.send_intent(AppIntent::GoToLine { line: 100 });
-                                }),
-                        ),
+                        .item(MenuItem::new_literal("Go to line 100").on_activate_fn(
+                            |ctx: &mut EventContext| {
+                                ctx.send_intent(AppIntent::GoToLine { line: 100 });
+                            },
+                        )),
                 )
             })
             .menu_literal("Help", || {
@@ -330,14 +328,15 @@ impl Widget for Root {
             .rich_tooltip_content(tooltip);
 
         // Button firing a tuple payload programmatically.
-        let open_button = Button::new_literal("Open 'from-button.md'")
-            .on_activate_fn(|ctx: &mut EventContext| {
+        let open_button = Button::new_literal("Open 'from-button.md'").on_activate_fn(
+            |ctx: &mut EventContext| {
                 ctx.send_intent(AppIntent::Open("from-button.md".into()));
-            });
+            },
+        );
 
         // Button firing a struct payload programmatically.
-        let goto_button = Button::new_literal("Go to line 7")
-            .on_activate_fn(|ctx: &mut EventContext| {
+        let goto_button =
+            Button::new_literal("Go to line 7").on_activate_fn(|ctx: &mut EventContext| {
                 ctx.send_intent(AppIntent::GoToLine { line: 7 });
             });
 
@@ -397,7 +396,8 @@ impl Widget for Root {
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 }
 
@@ -406,9 +406,9 @@ fn main() {
         .theme(Theme::light_default())
         .initial_window(
             WindowConfig::new()
-            .title("FernUI — Shortcuts Demo")
-            .size(1100, 720)
-            .root(|tree, _state| tree.add(Root::new()))
+                .title("FernUI — Shortcuts Demo")
+                .size(1100, 720)
+                .root(|tree, _state| tree.add(Root::new())),
         )
         .run();
 }
@@ -464,7 +464,7 @@ mod intent_kind_shapes {
         match Mixed::from_intent(&intent) {
             Some(Mixed::LoadFile(path, readonly)) => {
                 assert_eq!(path, "/etc/fstab");
-                assert_eq!(*readonly, true);
+                assert!(*readonly);
             }
             other => panic!("got {:?}", other),
         }

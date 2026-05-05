@@ -69,15 +69,27 @@ impl Widget for FixedSize {
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
         if let Some(ref w) = self.width {
-            w.register_if_bound(self_id, registry, fern_core::binding::BindingLevel::Relayout);
+            w.register_if_bound(
+                self_id,
+                registry,
+                fern_core::binding::BindingLevel::Relayout,
+            );
         }
         if let Some(ref h) = self.height {
-            h.register_if_bound(self_id, registry, fern_core::binding::BindingLevel::Relayout);
+            h.register_if_bound(
+                self_id,
+                registry,
+                fern_core::binding::BindingLevel::Relayout,
+            );
         }
         self.child_id.into_iter().collect()
     }
 
-    fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        _proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         // Forward the bound width/height to the child as its size proposal so
         // wrap-aware children (TextWidget in TextOverflow::Wrap, ScrollArea,
         // etc.) can compute their intrinsic cross-axis size against the same
@@ -128,7 +140,11 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
             Size::new(self.0, self.1).into()
         }
     }

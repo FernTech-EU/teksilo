@@ -44,9 +44,7 @@ impl MacOsHost {
     }
 }
 
-unsafe fn ns_window_from_winit(
-    window: &Arc<Window>,
-) -> Result<Retained<NSWindow>, PlatformError> {
+unsafe fn ns_window_from_winit(window: &Arc<Window>) -> Result<Retained<NSWindow>, PlatformError> {
     let handle = window
         .window_handle()
         .map_err(|e| PlatformError::Os(format!("window_handle: {e}")))?;

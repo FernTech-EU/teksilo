@@ -12,8 +12,8 @@ use std::time::Duration;
 
 use fern_core::ObserverHandle;
 use fern_data::ListModel;
-use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 use crate::file::{SettingsFile, SettingsFileError};
 use crate::migration::{Migrator, Versioned};
@@ -196,11 +196,32 @@ mod tests {
             PersistedListModel::open(path.clone(), Duration::ZERO, Migrator::new()).unwrap();
 
         let m = plm.model();
-        m.push(Item { name: "a".into(), count: 1 });
-        m.push(Item { name: "b".into(), count: 2 });
-        m.push(Item { name: "c".into(), count: 3 });
-        m.insert(1, Item { name: "x".into(), count: 99 });
-        m.set(0, Item { name: "A".into(), count: 10 });
+        m.push(Item {
+            name: "a".into(),
+            count: 1,
+        });
+        m.push(Item {
+            name: "b".into(),
+            count: 2,
+        });
+        m.push(Item {
+            name: "c".into(),
+            count: 3,
+        });
+        m.insert(
+            1,
+            Item {
+                name: "x".into(),
+                count: 99,
+            },
+        );
+        m.set(
+            0,
+            Item {
+                name: "A".into(),
+                count: 10,
+            },
+        );
         m.move_item(3, 0);
         m.remove(0);
         plm.flush_now().unwrap();
@@ -219,12 +240,13 @@ mod tests {
         let path = dir.path().join("list.toml");
         let plm: PersistedListModel<Item> =
             PersistedListModel::open(path.clone(), Duration::ZERO, Migrator::new()).unwrap();
-        plm.model()
-            .replace_all(vec![Item { name: "a".into(), count: 1 }]);
+        plm.model().replace_all(vec![Item {
+            name: "a".into(),
+            count: 1,
+        }]);
         plm.flush_now().unwrap();
 
-        let parsed: ListFile<Item> =
-            toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let parsed: ListFile<Item> = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(parsed.items.len(), 1);
         assert_eq!(parsed.items[0].name, "a");
     }
@@ -237,11 +259,13 @@ mod tests {
             PersistedListModel::open(path.clone(), Duration::ZERO, Migrator::new()).unwrap();
         let model_clone = plm.model().clone();
 
-        model_clone.push(Item { name: "via-clone".into(), count: 1 });
+        model_clone.push(Item {
+            name: "via-clone".into(),
+            count: 1,
+        });
         plm.flush_now().unwrap();
 
-        let parsed: ListFile<Item> =
-            toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let parsed: ListFile<Item> = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(parsed.items.len(), 1);
         assert_eq!(parsed.items[0].name, "via-clone");
     }

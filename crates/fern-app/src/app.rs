@@ -405,10 +405,11 @@ impl FernAppHandler {
                             continue;
                         };
 
-                        let mut config = WindowConfig::new().modal(crate::window_config::ModalConfig {
-                            parent: source_window,
-                            focus_target,
-                        });
+                        let mut config =
+                            WindowConfig::new().modal(crate::window_config::ModalConfig {
+                                parent: source_window,
+                                focus_target,
+                            });
                         if let Some(title) = title {
                             config = config.title(title);
                         }
@@ -463,10 +464,10 @@ impl FernAppHandler {
                 .map(|m| m.tree.has_idle_work())
                 .unwrap_or(false);
             self.tick_gestures_in_window(winit_id, now, event_loop);
-            if let Some(managed) = self.wm.get_by_winit_mut(winit_id) {
-                if managed.tree.has_idle_work() != before {
-                    managed.platform_window.request_redraw();
-                }
+            if let Some(managed) = self.wm.get_by_winit_mut(winit_id)
+                && managed.tree.has_idle_work() != before
+            {
+                managed.platform_window.request_redraw();
             }
         }
 
@@ -740,11 +741,12 @@ impl FernAppHandler {
                 // WidgetId by value alone — look them up via the
                 // tree's reverse-map. For plain widget NodeIds the
                 // infallible converter is fine.
-                let target_widget = if fern_core::accessibility::is_synthetic(req.target_node)
-                {
+                let target_widget = if fern_core::accessibility::is_synthetic(req.target_node) {
                     managed.tree.widget_for_synthetic(req.target_node)
                 } else {
-                    Some(fern_core::accessibility::node_id_to_widget_id(req.target_node))
+                    Some(fern_core::accessibility::node_id_to_widget_id(
+                        req.target_node,
+                    ))
                 };
                 let evt = WidgetEvent::AccessAction {
                     action: req.action,
@@ -907,12 +909,13 @@ impl FernAppHandler {
     ) {
         let fern_id = self.wm.fern_id_for_winit(window_id);
 
-        if let Some(fid) = fern_id {
-            if self.wm.is_blocked(fid) && !matches!(event, WindowEvent::CloseRequested) {
-                self.wm.refocus_modal_child(fid);
-                self.update_control_flow(event_loop);
-                return;
-            }
+        if let Some(fid) = fern_id
+            && self.wm.is_blocked(fid)
+            && !matches!(event, WindowEvent::CloseRequested)
+        {
+            self.wm.refocus_modal_child(fid);
+            self.update_control_flow(event_loop);
+            return;
         }
 
         self.handle_accessibility_actions(window_id, &event, event_loop);
@@ -938,13 +941,9 @@ impl FernAppHandler {
                     // button (bound to `WindowState::placement`) stays
                     // in sync.
                     let sf = managed.platform_window.scale_factor();
-                    let logical_w =
-                        (new_size.width as f64 / sf).round().max(0.0) as u32;
-                    let logical_h =
-                        (new_size.height as f64 / sf).round().max(0.0) as u32;
-                    managed
-                        .state
-                        .set_size_from_os((logical_w, logical_h));
+                    let logical_w = (new_size.width as f64 / sf).round().max(0.0) as u32;
+                    let logical_h = (new_size.height as f64 / sf).round().max(0.0) as u32;
+                    managed.state.set_size_from_os((logical_w, logical_h));
                     let placement = query_window_placement(managed.platform_window.window());
                     managed.state.set_placement_from_os(placement);
                     if let Some(trace) = &mut self.idle_trace {
@@ -1038,9 +1037,9 @@ impl FernAppHandler {
             WindowEvent::ModifiersChanged(mods) => {
                 if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     managed.current_modifiers = mods.state();
-                    managed.translation_state.set_modifiers(
-                        event_translation::translate_modifiers(mods.state()),
-                    );
+                    managed
+                        .translation_state
+                        .set_modifiers(event_translation::translate_modifiers(mods.state()));
                 }
             }
             WindowEvent::KeyboardInput {
@@ -1052,13 +1051,11 @@ impl FernAppHandler {
                             event_translation::translate_modifiers(managed.current_modifiers);
                         let text = key_event.text.as_ref().map(|t| t.to_string());
                         match key_event.state {
-                            winit::event::ElementState::Pressed => {
-                                WidgetEvent::KeyDown {
-                                    key,
-                                    modifiers,
-                                    text,
-                                }
-                            }
+                            winit::event::ElementState::Pressed => WidgetEvent::KeyDown {
+                                key,
+                                modifiers,
+                                text,
+                            },
                             winit::event::ElementState::Released => {
                                 WidgetEvent::KeyUp { key, modifiers }
                             }
@@ -1158,11 +1155,11 @@ impl FernAppHandler {
 
 impl ApplicationHandler<AppEvent> for FernAppHandler {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if !self.initial_created {
-            if let Some(config) = self.initial_window.take() {
-                self.wm.create_window(config, event_loop);
-                self.initial_created = true;
-            }
+        if !self.initial_created
+            && let Some(config) = self.initial_window.take()
+        {
+            self.wm.create_window(config, event_loop);
+            self.initial_created = true;
         }
 
         self.process_pending(event_loop);
@@ -1205,10 +1202,9 @@ impl ApplicationHandler<AppEvent> for FernAppHandler {
                 let parsed: Result<fern_i18n::LanguageIdentifier, _> = locale.parse();
                 match parsed {
                     Ok(loc) => {
-                        let reloaded =
-                            fern_i18n::thread_local::with_active(|mgr| {
-                                mgr.reload_from_path(&loc, &path)
-                            });
+                        let reloaded = fern_i18n::thread_local::with_active(|mgr| {
+                            mgr.reload_from_path(&loc, &path)
+                        });
                         match reloaded {
                             Some(Ok(())) => {}
                             Some(Err(e)) => eprintln!(
@@ -1220,9 +1216,9 @@ impl ApplicationHandler<AppEvent> for FernAppHandler {
                             ),
                         }
                     }
-                    Err(e) => eprintln!(
-                        "fern-app: hot-reload event with invalid locale `{locale}`: {e}"
-                    ),
+                    Err(e) => {
+                        eprintln!("fern-app: hot-reload event with invalid locale `{locale}`: {e}")
+                    }
                 }
             }
             // Title-bar hosts route their `close()` through this variant so
@@ -1239,9 +1235,7 @@ impl ApplicationHandler<AppEvent> for FernAppHandler {
                     Err(payload) => {
                         if let Some(req) = payload.downcast_ref::<CloseWindowRequest>() {
                             self.wm.queue_close(req.fern_id);
-                        } else if let Some(evt) =
-                            payload.downcast_ref::<TitleBarSyntheticEvent>()
-                        {
+                        } else if let Some(evt) = payload.downcast_ref::<TitleBarSyntheticEvent>() {
                             // Windows custom-chrome wndproc sends this when
                             // `WM_NCLBUTTONUP` fires over a control-button
                             // hit-region. The button's pixels are owned by
@@ -1250,9 +1244,7 @@ impl ApplicationHandler<AppEvent> for FernAppHandler {
                             // matching `ControlButton`.
                             self.wm
                                 .route_title_bar_synthetic_tap(evt.fern_id, evt.target);
-                        } else if let Some(evt) =
-                            payload.downcast_ref::<TitleBarHoverEvent>()
-                        {
+                        } else if let Some(evt) = payload.downcast_ref::<TitleBarHoverEvent>() {
                             // Same idea for hover: `WM_NCMOUSEMOVE` over a
                             // control-button hit-region delivers an
                             // entered/leave event the widget tree never
@@ -1458,12 +1450,7 @@ impl FernAppBuilder {
     /// (typically a sandboxed environment with `HOME` unset). Use
     /// [`app_paths`](Self::app_paths) to supply an explicit path
     /// in that situation.
-    pub fn application(
-        mut self,
-        qualifier: &str,
-        organization: &str,
-        application: &str,
-    ) -> Self {
+    pub fn application(mut self, qualifier: &str, organization: &str, application: &str) -> Self {
         let paths = fern_settings::AppPaths::new(qualifier, organization, application)
             .unwrap_or_else(|| {
                 panic!(
@@ -1733,9 +1720,8 @@ impl FernAppBuilder {
                 // The dispatch tap looks this up by TypeId.
                 let session_id = generate_session_id();
                 let tcx = fern_core::telemetry::TelemetryContext {
-                    reporter: opened.reporter.clone() as std::rc::Rc<
-                        dyn fern_core::telemetry::UsageReporter,
-                    >,
+                    reporter: opened.reporter.clone()
+                        as std::rc::Rc<dyn fern_core::telemetry::UsageReporter>,
                     session_id,
                     schema_version: opened.event_schema_version,
                 };
@@ -1810,25 +1796,25 @@ impl FernAppBuilder {
         // Build the root from the `initial_window`'s builder if one was
         // provided. Headless apps without an `initial_window` run with an
         // empty tree — tests add widgets via `tree.add(...)` directly.
-        if let Some(mut config) = self.initial_window.take() {
-            if let Some(root_builder) = config.take_root_builder() {
-                // Headless has no real WindowState; construct a stub so
-                // widgets that bind against their own window signals
-                // still get a valid handle.
-                let stub_state = fern_core::WindowState::new(fern_core::WindowStateInit {
-                    id: crate::FernWindowId::new(0),
-                    string_id: config.string_id.clone(),
-                    placement: config.initial_placement,
-                    title: config.title.clone(),
-                    size: config.size,
-                    position: config.position.unwrap_or((0, 0)),
-                    focused: true,
-                    resizable: config.resizable,
-                    always_on_top: config.always_on_top,
-                });
-                tree.set_window_state(stub_state.clone());
-                root_builder(&mut tree, stub_state);
-            }
+        if let Some(mut config) = self.initial_window.take()
+            && let Some(root_builder) = config.take_root_builder()
+        {
+            // Headless has no real WindowState; construct a stub so
+            // widgets that bind against their own window signals
+            // still get a valid handle.
+            let stub_state = fern_core::WindowState::new(fern_core::WindowStateInit {
+                id: crate::FernWindowId::new(0),
+                string_id: config.string_id.clone(),
+                placement: config.initial_placement,
+                title: config.title.clone(),
+                size: config.size,
+                position: config.position.unwrap_or((0, 0)),
+                focused: true,
+                resizable: config.resizable,
+                always_on_top: config.always_on_top,
+            });
+            tree.set_window_state(stub_state.clone());
+            root_builder(&mut tree, stub_state);
         }
 
         HeadlessApp {
@@ -1873,11 +1859,11 @@ impl FernAppBuilder {
         // so the hot-reload watcher can be spun up after the winit
         // event loop exists (we need the `EventLoopProxy` as the sink
         // target) without a second borrow of `self.i18n`.
-        let runtime_overrides: Vec<(LanguageIdentifier, std::path::PathBuf)> =
-            self.i18n
-                .as_ref()
-                .map(|cfg| cfg.runtime_overrides().to_vec())
-                .unwrap_or_default();
+        let runtime_overrides: Vec<(LanguageIdentifier, std::path::PathBuf)> = self
+            .i18n
+            .as_ref()
+            .map(|cfg| cfg.runtime_overrides().to_vec())
+            .unwrap_or_default();
 
         if let Some(cfg) = self.i18n.as_ref() {
             install_i18n_manager(cfg);
@@ -1949,8 +1935,8 @@ impl FernAppBuilder {
         // still works in-process.
         #[cfg(feature = "clipboard")]
         {
-            use std::any::TypeId;
             use fern_platform::clipboard::{ArboardClipboard, ClipboardHandle, MemoryClipboard};
+            use std::any::TypeId;
             let handle = match ArboardClipboard::new() {
                 Ok(backend) => ClipboardHandle::new(backend),
                 Err(_) => ClipboardHandle::new(MemoryClipboard::new()),
@@ -1965,10 +1951,9 @@ impl FernAppBuilder {
         // an event-source registration. Apps without an event source,
         // app-state registry, or background-work feature simply pay an
         // unused Arc<AppEventPoster> per tree.
-        let poster: std::sync::Arc<dyn AppEventPoster> =
-            std::sync::Arc::new(WinitAppEventPoster {
-                proxy: proxy.clone(),
-            });
+        let poster: std::sync::Arc<dyn AppEventPoster> = std::sync::Arc::new(WinitAppEventPoster {
+            proxy: proxy.clone(),
+        });
         let base = match self.event_source {
             Some(adapter) => TreeAppContext::with_source_and_poster(adapter, poster.clone()),
             None => TreeAppContext::empty(),
@@ -2005,10 +1990,10 @@ impl FernAppBuilder {
         // flush on Drop, but doing it synchronously here also surfaces
         // any I/O errors to stderr before the binding goes out of
         // scope.
-        if let Some(opened) = opened_settings {
-            if let Err(e) = opened.flush_all() {
-                eprintln!("fern-app: settings flush on exit failed: {e}");
-            }
+        if let Some(opened) = opened_settings
+            && let Err(e) = opened.flush_all()
+        {
+            eprintln!("fern-app: settings flush on exit failed: {e}");
         }
     }
 }
@@ -2117,7 +2102,6 @@ mod tests {
 
     #[test]
     fn app_state_flows_through_headless_builder() {
-        use fern_canvas::Size;
         use fern_core::build_context::BuildContext;
         use fern_core::signal::Signal;
         use fern_core::widget::{LayoutContext, Widget};
@@ -2141,7 +2125,11 @@ mod tests {
                 Vec::new()
             }
 
-            fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> fern_core::widget::LayoutResponse {
                 proposal.resolve(0.0, 0.0).into()
             }
         }
@@ -2258,7 +2246,11 @@ mod tests {
         fn build(&mut self, ctx: &mut fern_core::BuildContext) -> Vec<WidgetId> {
             let first = ctx.add(Button::new_literal("First"));
             let second = ctx.add(Button::new_literal("Second"));
-            let row = ctx.add(fern_widgets::HStack::new().add_child(first).add_child(second));
+            let row = ctx.add(
+                fern_widgets::HStack::new()
+                    .add_child(first)
+                    .add_child(second),
+            );
             self.root = Some(row);
             self.second = Some(second);
             vec![row]
@@ -2271,7 +2263,8 @@ mod tests {
         ) -> fern_core::widget::LayoutResponse {
             self.root
                 .and_then(|id| ctx.child_size(id, proposal))
-                .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+                .into()
         }
 
         fn initial_focus_hint(&self) -> Option<WidgetId> {

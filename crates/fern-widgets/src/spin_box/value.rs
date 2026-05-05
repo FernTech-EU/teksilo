@@ -108,13 +108,19 @@ pub trait SpinValue: sealed::Sealed + Copy + PartialOrd + Debug + 'static {
 macro_rules! impl_spin_value_int {
     ($t:ty, signed = $signed:expr) => {
         impl SpinValue for $t {
-            fn to_f64(self) -> f64 { self as f64 }
+            fn to_f64(self) -> f64 {
+                self as f64
+            }
             fn from_f64_saturating(v: f64) -> Self {
                 if v.is_nan() {
                     return 0;
                 }
-                if v <= <$t>::MIN as f64 { return <$t>::MIN; }
-                if v >= <$t>::MAX as f64 { return <$t>::MAX; }
+                if v <= <$t>::MIN as f64 {
+                    return <$t>::MIN;
+                }
+                if v >= <$t>::MAX as f64 {
+                    return <$t>::MAX;
+                }
                 v as Self
             }
             fn parse(s: &str) -> Option<Self> {
@@ -133,11 +139,17 @@ macro_rules! impl_spin_value_int {
                 // Widen to i128 so the multiply is always exact,
                 // then saturate into the target type's range.
                 let wide = (self as i128) * (rhs as i128);
-                if wide <= <$t>::MIN as i128 { <$t>::MIN }
-                else if wide >= <$t>::MAX as i128 { <$t>::MAX }
-                else { wide as Self }
+                if wide <= <$t>::MIN as i128 {
+                    <$t>::MIN
+                } else if wide >= <$t>::MAX as i128 {
+                    <$t>::MAX
+                } else {
+                    wide as Self
+                }
             }
-            fn is_integer() -> bool { true }
+            fn is_integer() -> bool {
+                true
+            }
             fn is_valid_input_char(c: char) -> bool {
                 if $signed {
                     c.is_ascii_digit() || c == '-'
@@ -161,7 +173,9 @@ impl_spin_value_int!(usize, signed = false);
 macro_rules! impl_spin_value_float {
     ($t:ty) => {
         impl SpinValue for $t {
-            fn to_f64(self) -> f64 { self as f64 }
+            fn to_f64(self) -> f64 {
+                self as f64
+            }
             fn from_f64_saturating(v: f64) -> Self {
                 if v.is_nan() {
                     return 0.0;
@@ -173,7 +187,10 @@ macro_rules! impl_spin_value_float {
                 v as Self
             }
             fn parse(s: &str) -> Option<Self> {
-                s.trim().parse::<Self>().ok().filter(|f: &Self| f.is_finite())
+                s.trim()
+                    .parse::<Self>()
+                    .ok()
+                    .filter(|f: &Self| f.is_finite())
             }
             fn format(self, decimals: u8) -> String {
                 // `{:.N$}` formats with exactly N decimal places
@@ -211,7 +228,9 @@ macro_rules! impl_spin_value_float {
                     <$t>::MIN
                 }
             }
-            fn is_integer() -> bool { false }
+            fn is_integer() -> bool {
+                false
+            }
             fn is_valid_input_char(c: char) -> bool {
                 c.is_ascii_digit() || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E'
             }
@@ -252,7 +271,7 @@ mod tests {
     fn f64_parse_rejects_nan_and_infinity() {
         assert_eq!(<f64 as SpinValue>::parse("nan"), None);
         assert_eq!(<f64 as SpinValue>::parse("inf"), None);
-        assert_eq!(<f64 as SpinValue>::parse("3.14"), Some(3.14));
+        assert_eq!(<f64 as SpinValue>::parse("3.5"), Some(3.5));
     }
 
     #[test]
@@ -264,7 +283,10 @@ mod tests {
 
     #[test]
     fn page_step_multiply_saturates() {
-        assert_eq!(SpinValue::saturating_mul_u32(1_000_000_i32, 1_000_000), i32::MAX);
+        assert_eq!(
+            SpinValue::saturating_mul_u32(1_000_000_i32, 1_000_000),
+            i32::MAX
+        );
     }
 
     #[test]

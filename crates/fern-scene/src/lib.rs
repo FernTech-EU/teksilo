@@ -43,6 +43,8 @@
 //! tree.add(view);
 //! ```
 
+#![allow(clippy::type_complexity)]
+
 pub mod a11y;
 pub mod animation;
 pub mod cache;
@@ -62,17 +64,17 @@ pub use a11y::{
     A11yBoundsSpace, A11yCategory, A11yGroup, A11yGroupBuilder, A11yGroupId, A11yNode,
     A11yOffScreenMode, A11yRelation,
 };
+pub use animation::{pulse_once, register_animated_item_signal};
 pub use cache::{CacheMode, ItemCoordinateCache};
 pub use flags::ItemFlags;
 pub use index::{GridHashIndex, SpatialIndex};
+pub use item::{ItemId, SceneItem, SceneItemA11yContext, SceneItemPaintContext};
 pub use item_handlers::{DragMode, SceneItemHandlerSet};
 pub use items::AccessSubtreeMode;
-pub use scene::{ItemChange, PanAxes};
-pub use item::{ItemId, SceneItem, SceneItemA11yContext, SceneItemPaintContext};
 pub use items::{GroupItem, ImageItem, PathItem, RectItem, TextItem};
-pub use animation::{pulse_once, register_animated_item_signal};
 pub use minimap::SceneMinimap;
-pub use state::SceneViewState;
 pub use scene::Scene;
+pub use scene::{ItemChange, PanAxes};
 pub use selection::{SceneSelection, SceneSelectionMode};
+pub use state::SceneViewState;
 pub use view::{DebugOverlay, FocusDirection, SceneView};

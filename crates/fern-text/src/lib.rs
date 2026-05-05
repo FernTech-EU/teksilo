@@ -13,9 +13,7 @@ pub use shared_typesetter::SharedTypesetter;
 pub use typesetter_bridge::TypesetterBridge;
 
 #[cfg(feature = "rich-text")]
-pub use font_registrar::{
-    EmbeddedInterRegistrar, FontFaceSpec, FontRegistrar, VecFontRegistrar,
-};
+pub use font_registrar::{EmbeddedInterRegistrar, FontFaceSpec, FontRegistrar, VecFontRegistrar};
 #[cfg(feature = "rich-text")]
 pub use rich_text_engine::{RichTextEngine, WrapMode};
 

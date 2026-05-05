@@ -18,16 +18,16 @@ use fern_canvas::{Canvas, Path, Point, Rect, Size, SizeProposal, TextBackend};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
+use fern_core::color_prop::ColorProp;
 use fern_core::event::{EventResponse, WidgetEvent};
 use fern_core::signal::{Prop, Signal};
 use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_core::color_prop::ColorProp;
 use fern_tokens::{CornerRadius, TextRole, TextStyleRole};
 
-use crate::layout::{carve_plot_area, CarveParams, LegendPosition};
-use crate::legend::{orientation_for_position, paint_embedded_legend, LegendOrientation};
+use crate::layout::{CarveParams, LegendPosition, carve_plot_area};
+use crate::legend::{LegendOrientation, orientation_for_position, paint_embedded_legend};
 use crate::palette::ChartPalette;
 use crate::series::{ChartDatum, ChartSeries};
 use crate::text::measure_text_width;
@@ -207,8 +207,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
             .register_if_bound(id, registry, BindingLevel::Relayout);
         self.palette
             .register_if_bound(id, registry, BindingLevel::RepaintOnly);
-        self.hover
-            .bind_to(id, registry, BindingLevel::RepaintOnly);
+        self.hover.bind_to(id, registry, BindingLevel::RepaintOnly);
 
         // Resolve the center slot via ctx.add_boxed.
         if let Some(c) = self.pending_center.take() {
@@ -225,70 +224,68 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
             let hover = self.hover.clone();
             let clockwise = self.clockwise;
             let start_angle_rad = self.start_angle_degrees.to_radians();
-            let handlers = HandlerSet::new().on_pointer_event(
-                move |event, _ctx| match event {
-                    WidgetEvent::PointerMove { position } => {
-                        let (center, outer, inner) = *disc.borrow();
-                        if outer <= 0.0 {
-                            return EventResponse::Ignored;
-                        }
-                        let dx = position.x - center.x;
-                        let dy = position.y - center.y;
-                        let dist = (dx * dx + dy * dy).sqrt();
-                        if dist < inner || dist > outer {
-                            if hover.get().is_some() {
-                                hover.set(None);
-                            }
-                            return EventResponse::Ignored;
-                        }
-                        // Pointer angle in screen-space radians, measured
-                        // from +x axis (3 o'clock = 0). Translate into the
-                        // chart's logical angle space (rooted at
-                        // `start_angle_rad`), then flip for non-clockwise.
-                        // SliceHit::start_rad is stored in this same logical
-                        // space, so the comparison is direct.
-                        let raw = dy.atan2(dx).rem_euclid(std::f32::consts::TAU);
-                        let logical = (raw - start_angle_rad).rem_euclid(std::f32::consts::TAU);
-                        let test_angle = if clockwise {
-                            logical
-                        } else {
-                            (std::f32::consts::TAU - logical) % std::f32::consts::TAU
-                        };
-                        let hits = hits.borrow();
-                        if hits.is_empty() {
-                            return EventResponse::Ignored;
-                        }
-                        let mut found = None;
-                        for (i, h) in hits.iter().enumerate() {
-                            if angle_in_sweep(test_angle, h.start_rad, h.sweep_rad) {
-                                found = Some(i);
-                                break;
-                            }
-                        }
-                        match found {
-                            Some(idx) => {
-                                let prev = hover.get().map(|h| h.slice_idx);
-                                if prev != Some(idx) {
-                                    hover.set(Some(HoveredSlice { slice_idx: idx }));
-                                }
-                            }
-                            None => {
-                                if hover.get().is_some() {
-                                    hover.set(None);
-                                }
-                            }
-                        }
-                        EventResponse::Ignored
+            let handlers = HandlerSet::new().on_pointer_event(move |event, _ctx| match event {
+                WidgetEvent::PointerMove { position } => {
+                    let (center, outer, inner) = *disc.borrow();
+                    if outer <= 0.0 {
+                        return EventResponse::Ignored;
                     }
-                    WidgetEvent::PointerLeave => {
+                    let dx = position.x - center.x;
+                    let dy = position.y - center.y;
+                    let dist = (dx * dx + dy * dy).sqrt();
+                    if dist < inner || dist > outer {
                         if hover.get().is_some() {
                             hover.set(None);
                         }
-                        EventResponse::Ignored
+                        return EventResponse::Ignored;
                     }
-                    _ => EventResponse::Ignored,
-                },
-            );
+                    // Pointer angle in screen-space radians, measured
+                    // from +x axis (3 o'clock = 0). Translate into the
+                    // chart's logical angle space (rooted at
+                    // `start_angle_rad`), then flip for non-clockwise.
+                    // SliceHit::start_rad is stored in this same logical
+                    // space, so the comparison is direct.
+                    let raw = dy.atan2(dx).rem_euclid(std::f32::consts::TAU);
+                    let logical = (raw - start_angle_rad).rem_euclid(std::f32::consts::TAU);
+                    let test_angle = if clockwise {
+                        logical
+                    } else {
+                        (std::f32::consts::TAU - logical) % std::f32::consts::TAU
+                    };
+                    let hits = hits.borrow();
+                    if hits.is_empty() {
+                        return EventResponse::Ignored;
+                    }
+                    let mut found = None;
+                    for (i, h) in hits.iter().enumerate() {
+                        if angle_in_sweep(test_angle, h.start_rad, h.sweep_rad) {
+                            found = Some(i);
+                            break;
+                        }
+                    }
+                    match found {
+                        Some(idx) => {
+                            let prev = hover.get().map(|h| h.slice_idx);
+                            if prev != Some(idx) {
+                                hover.set(Some(HoveredSlice { slice_idx: idx }));
+                            }
+                        }
+                        None => {
+                            if hover.get().is_some() {
+                                hover.set(None);
+                            }
+                        }
+                    }
+                    EventResponse::Ignored
+                }
+                WidgetEvent::PointerLeave => {
+                    if hover.get().is_some() {
+                        hover.set(None);
+                    }
+                    EventResponse::Ignored
+                }
+                _ => EventResponse::Ignored,
+            });
             ctx.apply_self_handlers(handlers);
         }
 
@@ -296,11 +293,16 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
         self.center_id.into_iter().collect()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         Size::new(
             proposal.width.unwrap_or(320.0),
             proposal.height.unwrap_or(220.0),
-        ).into()
+        )
+        .into()
     }
 
     fn place_children(
@@ -478,9 +480,7 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
         }
         let orientation = orientation_for_position(self.legend_position);
         match orientation {
-            LegendOrientation::Horizontal => {
-                style.legend_swatch_size.max(label_style.size * 1.2)
-            }
+            LegendOrientation::Horizontal => style.legend_swatch_size.max(label_style.size * 1.2),
             LegendOrientation::Vertical => {
                 let data = self.data.get();
                 let max_w = data
@@ -537,7 +537,14 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
         let usable_h = (bounds.height - pad * 2.0).max(0.0);
         let diameter = usable_w.min(usable_h);
         if diameter <= 0.0 {
-            return (Point::new(bounds.x + bounds.width * 0.5, bounds.y + bounds.height * 0.5), 0.0, 0.0);
+            return (
+                Point::new(
+                    bounds.x + bounds.width * 0.5,
+                    bounds.y + bounds.height * 0.5,
+                ),
+                0.0,
+                0.0,
+            );
         }
         let outer = diameter * 0.5;
         let center = Point::new(
@@ -677,7 +684,8 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
         let height = label_style.size * 1.4 + style.tooltip_padding;
 
         // Anchor at the bisector midpoint between inner and outer radius.
-        let bisector_rad = self.start_angle_degrees.to_radians() + hit.start_rad + hit.sweep_rad * 0.5;
+        let bisector_rad =
+            self.start_angle_degrees.to_radians() + hit.start_rad + hit.sweep_rad * 0.5;
         let (cos, sin) = bisector_direction(bisector_rad, self.clockwise);
         let r_anchor = outer + 12.0;
         let mut tx = center.x + r_anchor * cos - approx_w * 0.5;
@@ -732,13 +740,9 @@ fn legend_band_rect(bounds: Rect, pos: LegendPosition, size: f32) -> Rect {
     }
     match pos {
         LegendPosition::Top => Rect::new(bounds.x, bounds.y, bounds.width, size),
-        LegendPosition::Bottom => {
-            Rect::new(bounds.x, bounds.bottom() - size, bounds.width, size)
-        }
+        LegendPosition::Bottom => Rect::new(bounds.x, bounds.bottom() - size, bounds.width, size),
         LegendPosition::Leading => Rect::new(bounds.x, bounds.y, size, bounds.height),
-        LegendPosition::Trailing => {
-            Rect::new(bounds.right() - size, bounds.y, size, bounds.height)
-        }
+        LegendPosition::Trailing => Rect::new(bounds.right() - size, bounds.y, size, bounds.height),
     }
 }
 
@@ -755,18 +759,17 @@ fn build_slice_path(
     // The Path::arc_to API takes degrees; convert.
     let start_deg = start_rad.to_degrees();
     // Sweep direction: positive = clockwise in screen-space (y-down).
-    let sweep_deg = if clockwise { sweep_rad.to_degrees() } else { -sweep_rad.to_degrees() };
+    let sweep_deg = if clockwise {
+        sweep_rad.to_degrees()
+    } else {
+        -sweep_rad.to_degrees()
+    };
 
     // Use direction-aware sin/cos for endpoint placement.
     let (sx_o, sy_o) = endpoint(center, outer, start_rad, clockwise);
     let (ex_o, ey_o) = endpoint(center, outer, start_rad + sweep_rad, clockwise);
 
-    let outer_rect = Rect::new(
-        center.x - outer,
-        center.y - outer,
-        outer * 2.0,
-        outer * 2.0,
-    );
+    let outer_rect = Rect::new(center.x - outer, center.y - outer, outer * 2.0, outer * 2.0);
 
     let mut path = Path::new();
     if inner <= 0.0 {
@@ -781,12 +784,7 @@ fn build_slice_path(
         // arc → close back.
         let (sx_i, sy_i) = endpoint(center, inner, start_rad, clockwise);
         let (ex_i, ey_i) = endpoint(center, inner, start_rad + sweep_rad, clockwise);
-        let inner_rect = Rect::new(
-            center.x - inner,
-            center.y - inner,
-            inner * 2.0,
-            inner * 2.0,
-        );
+        let inner_rect = Rect::new(center.x - inner, center.y - inner, inner * 2.0, inner * 2.0);
         path.move_to(Point::new(sx_o, sy_o));
         path.arc_to(outer_rect, start_deg, sweep_deg);
         let _ = (ex_o, ey_o);
@@ -855,7 +853,12 @@ mod tests {
         tree.add(PieChart::new(three_slices()));
         tree.layout(SizeProposal::exact(400.0, 300.0));
         let frame = tree.render();
-        assert_eq!(frame.paths.len(), 3, "expected 3 wedge paths, got {}", frame.paths.len());
+        assert_eq!(
+            frame.paths.len(),
+            3,
+            "expected 3 wedge paths, got {}",
+            frame.paths.len()
+        );
     }
 
     #[test]

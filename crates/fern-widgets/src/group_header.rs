@@ -13,7 +13,7 @@
 //! Trivially composed from existing primitives:
 //! `HStack → TextWidget + Expand(Divider)`.
 
-use fern_canvas::{Rect, Size, SizeProposal};
+use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::color_prop::ColorProp;
@@ -124,13 +124,18 @@ impl Widget for GroupHeader {
         vec![row_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         match self.root_child_id {
             Some(id) => ctx
                 .child_size(id, proposal)
                 .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
             None => proposal.resolve(0.0, 0.0),
-        }.into()
+        }
+        .into()
     }
 
     fn place_children(

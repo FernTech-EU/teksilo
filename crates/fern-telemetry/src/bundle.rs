@@ -220,9 +220,7 @@ impl TelemetryBundle {
         // function runs, so they already hold their endpoint by value;
         // the override path is for adapters that subscribe to the
         // signal directly. Phase 1 stores only the recipient marker.
-        let endpoint_override = settings
-            .signal_for(&TELEMETRY_ENDPOINT_OVERRIDE)
-            .get();
+        let endpoint_override = settings.signal_for(&TELEMETRY_ENDPOINT_OVERRIDE).get();
         let _region_override = settings.signal_for(&TELEMETRY_REGION_OVERRIDE).get();
 
         let endpoint_for_consent = match (&self.anonymous, &self.pseudonymous) {
@@ -338,11 +336,8 @@ mod tests {
     fn empty_bundle_errors() {
         let dir = tempdir().unwrap();
         let paths = AppPaths::for_testing(dir.path());
-        let store = SettingsStore::open_with_delay(
-            paths.config_file("general"),
-            Duration::ZERO,
-        )
-        .unwrap();
+        let store =
+            SettingsStore::open_with_delay(paths.config_file("general"), Duration::ZERO).unwrap();
         let bundle = TelemetryBundle::new(1);
         let err = bundle.open(&paths, &store).unwrap_err();
         assert!(matches!(err, TelemetryBundleError::NoAdapter));
@@ -352,11 +347,8 @@ mod tests {
     fn anonymous_only_bundle_opens() {
         let dir = tempdir().unwrap();
         let paths = AppPaths::for_testing(dir.path());
-        let store = SettingsStore::open_with_delay(
-            paths.config_file("general"),
-            Duration::ZERO,
-        )
-        .unwrap();
+        let store =
+            SettingsStore::open_with_delay(paths.config_file("general"), Duration::ZERO).unwrap();
         let opened = TelemetryBundle::new(1)
             .with_anonymous(Rc::new(StubReporter::anonymous()))
             .with_default_mode(TelemetryMode::Anonymous)
@@ -371,11 +363,8 @@ mod tests {
     fn pseudonymous_bundle_creates_install_id() {
         let dir = tempdir().unwrap();
         let paths = AppPaths::for_testing(dir.path());
-        let store = SettingsStore::open_with_delay(
-            paths.config_file("general"),
-            Duration::ZERO,
-        )
-        .unwrap();
+        let store =
+            SettingsStore::open_with_delay(paths.config_file("general"), Duration::ZERO).unwrap();
         let opened = TelemetryBundle::new(1)
             .with_pseudonymous(Rc::new(StubReporter::pseudonymous("u")))
             .with_default_mode(TelemetryMode::Pseudonymous)
@@ -391,11 +380,8 @@ mod tests {
     fn default_mode_falls_back_when_unsupported() {
         let dir = tempdir().unwrap();
         let paths = AppPaths::for_testing(dir.path());
-        let store = SettingsStore::open_with_delay(
-            paths.config_file("general"),
-            Duration::ZERO,
-        )
-        .unwrap();
+        let store =
+            SettingsStore::open_with_delay(paths.config_file("general"), Duration::ZERO).unwrap();
         // Request pseudonymous default but only ship anonymous adapter.
         let opened = TelemetryBundle::new(1)
             .with_anonymous(Rc::new(StubReporter::anonymous()))

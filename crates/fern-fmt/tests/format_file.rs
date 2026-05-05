@@ -2,7 +2,7 @@
 //! Rust source file and reformatting them in place while leaving
 //! surrounding source untouched.
 
-use fern_fmt::{format_file, FmtConfig};
+use fern_fmt::{FmtConfig, format_file};
 
 fn fmt(s: &str) -> String {
     let cfg = FmtConfig::default();
@@ -42,7 +42,10 @@ fn b() { fern!(VStack { Button("b") }); }
     assert!(out.contains("Button(\"b\")"));
     // Each macro got expanded across multiple lines.
     let line_count = out.lines().count();
-    assert!(line_count > src.lines().count(), "expected expansion, got:\n{out}");
+    assert!(
+        line_count > src.lines().count(),
+        "expected expansion, got:\n{out}"
+    );
 }
 
 #[test]
@@ -78,7 +81,10 @@ fn crlf_input_produces_crlf_output() {
 fn lf_input_stays_lf() {
     let src = "fn build() {\n    fern!(VStack { spacing: 8.0 Button(\"ok\") });\n}\n";
     let out = fmt(src);
-    assert!(!out.contains('\r'), "expected pure LF output, got:\n{out:?}");
+    assert!(
+        !out.contains('\r'),
+        "expected pure LF output, got:\n{out:?}"
+    );
 }
 
 #[test]

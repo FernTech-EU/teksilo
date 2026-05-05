@@ -6,9 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use fern_settings::{
-    AppPaths, MruEntry, MruList, SettingsBundle, SettingsKey, SettingsStore,
-};
+use fern_settings::{AppPaths, MruEntry, MruList, SettingsBundle, SettingsKey, SettingsStore};
 use serde::{Deserialize, Serialize};
 use tempfile::tempdir;
 
@@ -48,11 +46,7 @@ impl MruEntry for DemoProject {
 #[test]
 fn store_signal_clones_share_value() {
     let dir = tempdir().unwrap();
-    let store = SettingsStore::open_with_delay(
-        dir.path().join("p.toml"),
-        Duration::ZERO,
-    )
-    .unwrap();
+    let store = SettingsStore::open_with_delay(dir.path().join("p.toml"), Duration::ZERO).unwrap();
 
     let a = store.signal_for(&FONT_SIZE);
     let b = store.signal_for(&FONT_SIZE);
@@ -74,7 +68,7 @@ fn store_persists_multiple_keys_across_reopen() {
 
     let store = SettingsStore::open_with_delay(path, Duration::ZERO).unwrap();
     assert_eq!(store.signal_for(&FONT_SIZE).get(), 22.0);
-    assert_eq!(store.signal_for(&SHOW_MINIMAP).get(), false);
+    assert!(!store.signal_for(&SHOW_MINIMAP).get());
 }
 
 #[test]
@@ -161,11 +155,7 @@ fn bundle_full_round_trip() {
 #[test]
 fn signal_observation_outside_store_works() {
     let dir = tempdir().unwrap();
-    let store = SettingsStore::open_with_delay(
-        dir.path().join("p.toml"),
-        Duration::ZERO,
-    )
-    .unwrap();
+    let store = SettingsStore::open_with_delay(dir.path().join("p.toml"), Duration::ZERO).unwrap();
 
     let sig = store.signal_for(&FONT_SIZE);
     let observed = std::rc::Rc::new(std::cell::Cell::new(0.0_f32));

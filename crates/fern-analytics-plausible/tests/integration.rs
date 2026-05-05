@@ -12,9 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use fern_analytics_plausible::PlausibleAdapter;
-use fern_core::telemetry::{
-    Event, EventCategory, IntentSource, Prop, PropValue, UsageReporter,
-};
+use fern_core::telemetry::{Event, EventCategory, IntentSource, Prop, PropValue, UsageReporter};
 
 /// Recorded request metadata for assertions.
 #[derive(Debug, Clone)]
@@ -311,7 +309,10 @@ fn retries_5xx_then_succeeds() {
         thread::sleep(Duration::from_millis(50));
         adapter.events_accepted() == 1
     });
-    assert!(success, "event should eventually be accepted after 5xx retries");
+    assert!(
+        success,
+        "event should eventually be accepted after 5xx retries"
+    );
     assert!(server.state.captured_count() >= 3);
 }
 

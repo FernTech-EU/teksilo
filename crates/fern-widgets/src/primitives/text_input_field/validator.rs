@@ -55,10 +55,11 @@ pub enum ValidationOutcome {
 /// feedback adds a `since` instant so the visual layer can decay an
 /// auto-correction announcement after a window without re-running the
 /// validator.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ValidationFeedback {
     /// No commit has happened yet, or the user is editing again after
     /// a previous outcome (typing always clears prior feedback).
+    #[default]
     Pristine,
     /// Last commit returned [`ValidationOutcome::Valid`]. Composites
     /// typically render this identically to `Pristine` — the
@@ -73,12 +74,6 @@ pub enum ValidationFeedback {
     /// Last commit returned [`ValidationOutcome::Invalid`]. Persists
     /// until the user edits again or an external `Pristine` reset.
     Invalid { message: String },
-}
-
-impl Default for ValidationFeedback {
-    fn default() -> Self {
-        Self::Pristine
-    }
 }
 
 impl ValidationFeedback {

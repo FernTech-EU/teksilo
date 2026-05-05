@@ -15,9 +15,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{
-    BorderRole, CornerRadius, SurfaceRole, TextRole, TextStyleRole, VAlignment,
-};
+use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole, TextStyleRole, VAlignment};
 
 use crate::button::InteractionState;
 use crate::primitives::{FixedSize, HStack, MinSize, RectWidget, TextWidget, VStack, ZStack};
@@ -220,7 +218,9 @@ impl Widget for RadioButton {
         // Int UI convention applied uniformly across widgets.
         let radio = ctx.add(ZStack::new().add_child(outer_sized).add_child(dot_sized));
 
-        let mut row = HStack::new().spacing(radio_style.label_gap).add_child(radio);
+        let mut row = HStack::new()
+            .spacing(radio_style.label_gap)
+            .add_child(radio);
         if let Some(ref label) = self.label {
             let label_widget = TextWidget::new_literal(label)
                 .style(TextStyleRole::Body)
@@ -349,7 +349,11 @@ impl Widget for RadioButton {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         if let Some(root) = self.root_child_id
             && let Some(size) = ctx.child_size(root, proposal)
         {
@@ -387,9 +391,7 @@ impl Widget for RadioButton {
         // (including itself) so AT can announce "2 of 3".
         if let Some(group_ids) = &self.group_ids {
             for &id in group_ids.borrow().iter() {
-                builder.push_to_radio_group(
-                    fern_core::accessibility::widget_id_to_node_id(id),
-                );
+                builder.push_to_radio_group(fern_core::accessibility::widget_id_to_node_id(id));
             }
         }
         if !self.enabled {

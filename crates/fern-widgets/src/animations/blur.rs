@@ -227,8 +227,12 @@ mod tests {
         let radius = Signal::new(0.0_f32);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let id = tree.add(
-            Blur::new(radius.clone())
-                .child(FixedSize::new().bind_width(120.0).bind_height(40.0).child(RectWidget::new())),
+            Blur::new(radius.clone()).child(
+                FixedSize::new()
+                    .bind_width(120.0)
+                    .bind_height(40.0)
+                    .child(RectWidget::new()),
+            ),
         );
         tree.layout(SizeProposal::exact(300.0, 200.0));
         let off_bounds = tree.bounds(id);
@@ -261,16 +265,16 @@ mod tests {
         let radius = Signal::new_animated(12.0_f32);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(
-            Blur::new(radius.clone())
-                .child(FixedSize::new().bind_width(80.0).bind_height(40.0).child(RectWidget::new())),
+            Blur::new(radius.clone()).child(
+                FixedSize::new()
+                    .bind_width(80.0)
+                    .bind_height(40.0)
+                    .child(RectWidget::new()),
+            ),
         );
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
-        radius.animate_to(
-            0.0,
-            Duration::from_millis(100),
-            fern_tokens::Easing::Linear,
-        );
+        radius.animate_to(0.0, Duration::from_millis(100), fern_tokens::Easing::Linear);
         // Drain the pending request onto the scheduler.
         tree.layout(SizeProposal::exact(200.0, 100.0));
         assert!(
@@ -287,7 +291,12 @@ mod tests {
         // composite blit.
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let id = tree.add(
-            Blur::new(8.0_f32).child(FixedSize::new().bind_width(80.0).bind_height(40.0).child(RectWidget::new())),
+            Blur::new(8.0_f32).child(
+                FixedSize::new()
+                    .bind_width(80.0)
+                    .bind_height(40.0)
+                    .child(RectWidget::new()),
+            ),
         );
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let bounds = tree.bounds(id);

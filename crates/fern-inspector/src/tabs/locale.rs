@@ -106,12 +106,7 @@ impl Widget for LocaleTab {
                 let bg = Color::from_rgba(0.13, 0.55, 1.0, 0.15);
                 canvas.fill_rounded_rect(row_rect, CornerRadius::ZERO, bg);
             }
-            let text_rect = Rect::new(
-                bounds.x + ROW_PADDING_X,
-                y + 2.0,
-                bounds.width,
-                ROW_HEIGHT,
-            );
+            let text_rect = Rect::new(bounds.x + ROW_PADDING_X, y + 2.0, bounds.width, ROW_HEIGHT);
             let color = if is_active { primary } else { secondary };
             let label = if is_active {
                 format!("{}  (active)", tag)

@@ -26,7 +26,7 @@
 #[cfg(test)]
 mod tests;
 
-use fern_canvas::{Point, Rect, Size, SizeProposal};
+use fern_canvas::{Point, Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::signal::Signal;
@@ -38,9 +38,7 @@ use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole};
 use crate::button::InteractionState;
 use crate::primitives::text_input_field::{TextInputField, ValidationFeedback};
 use crate::primitives::validation_strip::ValidationStrip;
-use crate::primitives::{
-    Expand, HStack, MinSize, Padding, RectWidget, TextWidget, VStack, ZStack,
-};
+use crate::primitives::{Expand, HStack, MinSize, Padding, RectWidget, TextWidget, VStack, ZStack};
 use crate::tooltip::{self, RichTooltipSource};
 
 /// Validation state for the text input field.
@@ -322,10 +320,7 @@ impl TextInput {
     /// - `Pristine` / `Valid` → `ValidationState::None`
     /// - `Corrected { message, .. }` → `ValidationState::Corrected(message)`
     /// - `Invalid { message }` → `ValidationState::Error(message)`
-    pub fn bind_validation_feedback(
-        mut self,
-        feedback: Signal<ValidationFeedback>,
-    ) -> Self {
+    pub fn bind_validation_feedback(mut self, feedback: Signal<ValidationFeedback>) -> Self {
         let target = self.validation.clone();
         // Snapshot once now so we observe the current state at construction
         // time too (subsequent changes flow via the field's own commit
@@ -436,8 +431,12 @@ impl Widget for TextInput {
         // (BuiltInButton etc.) sit flush against top/bottom of the
         // inner border area and are vertically centered by the HStack.
         let padded_field = Padding::new(
-            field_style.padding_vertical, 0.0, field_style.padding_vertical, 0.0,
-        ).child(field);
+            field_style.padding_vertical,
+            0.0,
+            field_style.padding_vertical,
+            0.0,
+        )
+        .child(field);
 
         // The placeholder lives in a local ZStack with the text field so
         // it shares the same column in the HStack — no overlap with
@@ -457,9 +456,12 @@ impl Widget for TextInput {
             let ph_id = ctx.add(
                 Expand::new().respect_intrinsic().child(
                     Padding::new(
-                        field_style.padding_vertical, 0.0,
-                        field_style.padding_vertical, 0.0,
-                    ).child(ph),
+                        field_style.padding_vertical,
+                        0.0,
+                        field_style.padding_vertical,
+                        0.0,
+                    )
+                    .child(ph),
                 ),
             );
             let visible = text_signal_for_vis.map(|t| t.is_empty());
@@ -468,8 +470,8 @@ impl Widget for TextInput {
             ctx.add(
                 Expand::horizontal().respect_intrinsic().child(
                     ZStack::new()
-                        .add_child(ph_id)       // below (placeholder)
-                        .child(padded_field),    // on top (text field, gets hits)
+                        .add_child(ph_id) // below (placeholder)
+                        .child(padded_field), // on top (text field, gets hits)
                 ),
             )
         } else {
@@ -523,8 +525,13 @@ impl Widget for TextInput {
 
         // Horizontal-only padding around the row.
         let padded_id = ctx.add(
-            Padding::new(0.0, field_style.padding_horizontal, 0.0, field_style.padding_horizontal)
-                .child_id(row_id),
+            Padding::new(
+                0.0,
+                field_style.padding_horizontal,
+                0.0,
+                field_style.padding_horizontal,
+            )
+            .child_id(row_id),
         );
 
         // Border color + width depend on interaction state AND validation
@@ -558,27 +565,24 @@ impl Widget for TextInput {
         let zstack_id = ctx.add(zstack);
 
         let min_w = self.min_width.unwrap_or(65.0);
-        let frame_id = ctx.add(
-            MinSize::new(min_w, field_style.height).child_id(zstack_id),
-        );
+        let frame_id = ctx.add(MinSize::new(min_w, field_style.height).child_id(zstack_id));
 
         // ── Inline validation strip ────────────────────────────────
         // Maps `Signal<ValidationState>` to the `Signal<ValidationFeedback>`
         // that `ValidationStrip` consumes. Empty/Pristine renders nothing
         // (zero height) so the layout doesn't reflow.
-        let strip_feedback: Signal<ValidationFeedback> =
-            self.validation.map(|v| match v {
-                ValidationState::None => ValidationFeedback::Pristine,
-                ValidationState::Error(msg) | ValidationState::Warning(msg) => {
-                    ValidationFeedback::Invalid {
-                        message: msg.clone(),
-                    }
-                }
-                ValidationState::Corrected(msg) => ValidationFeedback::Corrected {
+        let strip_feedback: Signal<ValidationFeedback> = self.validation.map(|v| match v {
+            ValidationState::None => ValidationFeedback::Pristine,
+            ValidationState::Error(msg) | ValidationState::Warning(msg) => {
+                ValidationFeedback::Invalid {
                     message: msg.clone(),
-                    since: std::time::Instant::now(),
-                },
-            });
+                }
+            }
+            ValidationState::Corrected(msg) => ValidationFeedback::Corrected {
+                message: msg.clone(),
+                since: std::time::Instant::now(),
+            },
+        });
         let strip_id = ctx.add(ValidationStrip::new(strip_feedback));
 
         // Wrap frame + strip in a VStack with the configured gap.
@@ -660,10 +664,15 @@ impl Widget for TextInput {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -701,15 +710,11 @@ impl Widget for TextInput {
 /// both clear; `Corrected` and `Invalid` carry their messages through.
 fn feedback_to_state(fb: &ValidationFeedback) -> ValidationState {
     match fb {
-        ValidationFeedback::Pristine | ValidationFeedback::Valid => {
-            ValidationState::None
-        }
+        ValidationFeedback::Pristine | ValidationFeedback::Valid => ValidationState::None,
         ValidationFeedback::Corrected { message, .. } => {
             ValidationState::Corrected(message.clone())
         }
-        ValidationFeedback::Invalid { message } => {
-            ValidationState::Error(message.clone())
-        }
+        ValidationFeedback::Invalid { message } => ValidationState::Error(message.clone()),
     }
 }
 
@@ -717,9 +722,7 @@ fn feedback_to_state(fb: &ValidationFeedback) -> ValidationState {
 /// The paint-time resolver converts the role to a `Color` against the
 /// current theme, so runtime theme switches refresh the border without
 /// riding through a zip here.
-fn derive_border_role(
-    combined: Signal<(InteractionState, ValidationState)>,
-) -> Signal<BorderRole> {
+fn derive_border_role(combined: Signal<(InteractionState, ValidationState)>) -> Signal<BorderRole> {
     combined.map(|(state, val)| match val {
         ValidationState::Error(_) => BorderRole::Error,
         ValidationState::Warning(_) => BorderRole::Warning,

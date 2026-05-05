@@ -31,29 +31,23 @@ use crate::IconWidget;
 /// [`EventContext`], and returns `Some(menu)` to mount or `None` to
 /// decline. The `Rc` wrapping is a tab-widget convenience: the
 /// delegate clones the factory per-tab without reallocating.
-pub type ContextMenuFactory =
-    Rc<dyn Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>>>;
+pub type ContextMenuFactory = Rc<dyn Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>>>;
 
 /// Bar orientation. Selects between a horizontal row of tabs (default
 /// for browser-style document tabs) and a vertical column of pills
 /// (sidebar / IDE perspective convention).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TabBarOrientation {
     /// Tabs flow left-to-right in a horizontal row. Scroll axis is
     /// horizontal; a vertical wheel maps to horizontal scroll
     /// (Firefox / Chrome convention) when
     /// `vertical_wheel_scrolls_horizontally` is on.
+    #[default]
     Horizontal,
     /// Tabs flow top-to-bottom in a vertical column. Scroll axis is
     /// vertical; vertical wheel scrolls vertically. Pinned tabs
     /// render in a non-scrolling strip at the top of the column.
     Vertical,
-}
-
-impl Default for TabBarOrientation {
-    fn default() -> Self {
-        TabBarOrientation::Horizontal
-    }
 }
 
 /// Whether the layout-axis extent (width in horizontal bars, height in
@@ -205,10 +199,7 @@ impl<T: 'static> TabDelegate<T> {
 
     /// Per-tab tooltip text. Shown on hover via the existing
     /// `WidgetBuilder::tooltip` mechanism.
-    pub fn tooltip(
-        mut self,
-        f: impl Fn(usize, &T) -> Option<LocalizedString> + 'static,
-    ) -> Self {
+    pub fn tooltip(mut self, f: impl Fn(usize, &T) -> Option<LocalizedString> + 'static) -> Self {
         self.tooltip = Some(Box::new(f));
         self
     }
@@ -238,15 +229,24 @@ impl<T: 'static> TabDelegate<T> {
     }
 
     pub(crate) fn resolve_closable(&self, index: usize, item: &T) -> bool {
-        self.closable.as_ref().map(|f| f(index, item)).unwrap_or(false)
+        self.closable
+            .as_ref()
+            .map(|f| f(index, item))
+            .unwrap_or(false)
     }
 
     pub(crate) fn resolve_pinned(&self, index: usize, item: &T) -> bool {
-        self.pinned.as_ref().map(|f| f(index, item)).unwrap_or(false)
+        self.pinned
+            .as_ref()
+            .map(|f| f(index, item))
+            .unwrap_or(false)
     }
 
     pub(crate) fn resolve_enabled(&self, index: usize, item: &T) -> bool {
-        self.enabled.as_ref().map(|f| f(index, item)).unwrap_or(true)
+        self.enabled
+            .as_ref()
+            .map(|f| f(index, item))
+            .unwrap_or(true)
     }
 
     pub(crate) fn resolve_tooltip(&self, index: usize, item: &T) -> Option<LocalizedString> {

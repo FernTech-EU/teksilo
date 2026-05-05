@@ -11,18 +11,18 @@
 //! when the selected widget changes (different `KnobSpec`, different
 //! variant list).
 
-use fern_canvas::{Rect, Size, SizeProposal};
+use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
+use fern_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
 use fern_widgets::primitives::{Padding, ZStack};
 use fern_widgets::{
     Button, ButtonVariant, Divider, HStack, MaxSize, RadioButton, RectWidget, ScrollArea, Spacer,
     TextWidget, VStack,
 };
-use fern_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::app_state::AppState;
 use crate::knob_form::build_knob_form;
@@ -50,7 +50,10 @@ pub struct InspectorBody {
 
 impl InspectorBody {
     pub fn new(state: AppState) -> Self {
-        Self { state, root_id: None }
+        Self {
+            state,
+            root_id: None,
+        }
     }
 }
 
@@ -102,13 +105,18 @@ impl Widget for InspectorBody {
         vec![scroll_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         match self.root_id {
             Some(id) => ctx
                 .child_size(id, proposal)
                 .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
             None => proposal.resolve(0.0, 0.0),
-        }.into()
+        }
+        .into()
     }
 
     fn place_children(
@@ -185,10 +193,9 @@ impl InspectorBody {
                 if let Some(target) = opt
                     .as_ref()
                     .and_then(|n| names_c.iter().position(|m| m == n))
+                    && idx_sig.get() != target
                 {
-                    if idx_sig.get() != target {
-                        idx_sig.set(target);
-                    }
+                    idx_sig.set(target);
                 }
             });
             ctx.own_handle(h);
@@ -250,7 +257,12 @@ impl InspectorBody {
         let divider = MaxSize::new(f32::INFINITY, 1.0).child(Divider::horizontal());
         let header_block = VStack::new().spacing(4.0).child(header_row).child(divider);
 
-        ctx.add(VStack::new().spacing(6.0).child(header_block).add_child(form_id))
+        ctx.add(
+            VStack::new()
+                .spacing(6.0)
+                .child(header_block)
+                .add_child(form_id),
+        )
     }
 
     fn build_export_section(&self, ctx: &mut BuildContext) -> WidgetId {
@@ -272,7 +284,12 @@ fn section_header(ctx: &mut BuildContext, title: &str) -> WidgetId {
         .style(TextStyleRole::SmallBold)
         .color(TextRole::Primary);
     let divider = MaxSize::new(f32::INFINITY, 1.0).child(Divider::horizontal());
-    ctx.add(VStack::new().spacing(4.0).child(title_widget).child(divider))
+    ctx.add(
+        VStack::new()
+            .spacing(4.0)
+            .child(title_widget)
+            .child(divider),
+    )
 }
 
 fn placeholder_section(ctx: &mut BuildContext, msg: &str) -> WidgetId {

@@ -111,8 +111,7 @@ impl ImageWidget {
         if matches!(shape, ImageMaskShape::None) {
             return self;
         }
-        let (mut cropped, side) =
-            center_crop_square(&self.upload_pixels, self.width, self.height);
+        let (mut cropped, side) = center_crop_square(&self.upload_pixels, self.width, self.height);
         apply_alpha_mask(&mut cropped, side, side, shape);
         self.upload_pixels = cropped;
         self.width = side;
@@ -238,7 +237,11 @@ impl std::fmt::Debug for ImageWidget {
 }
 
 impl Widget for ImageWidget {
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let natural_w = self.display_width.unwrap_or(self.width as f32);
         let natural_h = self.display_height.unwrap_or(self.height as f32);
         let ar = self.aspect_ratio();
@@ -255,7 +258,8 @@ impl Widget for ImageWidget {
             (None, Some(ph)) => Size::new(ph * ar, ph),
             // Unconstrained: natural size
             (None, None) => Size::new(natural_w, natural_h),
-        }.into()
+        }
+        .into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
@@ -323,7 +327,13 @@ mod tests {
         let ctx = LayoutContext::for_testing(&theme);
         // Width constrained to 100, no height constraint → 100x50
         let size = widget
-            .layout_response(SizeProposal { width: Some(100.0), height: None }, &ctx)
+            .layout_response(
+                SizeProposal {
+                    width: Some(100.0),
+                    height: None,
+                },
+                &ctx,
+            )
             .size;
         assert!((size.width - 100.0).abs() < 0.5, "width: {}", size.width);
         assert!((size.height - 50.0).abs() < 0.5, "height: {}", size.height);
@@ -347,7 +357,10 @@ mod tests {
         tree.add(ImageWidget::new(&icon));
         tree.layout(SizeProposal::exact(10.0, 10.0));
         let frame = tree.render();
-        assert!(!frame.pending_images.is_empty(), "should register pending image");
+        assert!(
+            !frame.pending_images.is_empty(),
+            "should register pending image"
+        );
     }
 
     #[test]
@@ -366,12 +379,8 @@ mod tests {
         // The reusable `.mask(Circle)` modifier — anywhere a photo
         // needs a circular crop, not just inside Avatar.
         let icon = RasterIcon::from_raw(vec![255; 32 * 32 * 4], 32, 32);
-        let widget = ImageWidget::from_raw(
-            icon.pixels().to_vec(),
-            icon.width(),
-            icon.height(),
-        )
-        .mask(ImageMaskShape::Circle);
+        let widget = ImageWidget::from_raw(icon.pixels().to_vec(), icon.width(), icon.height())
+            .mask(ImageMaskShape::Circle);
         // After cropping to a square (already 32×32 here) and
         // masking, corner pixels have alpha 0.
         let stride = (widget.width * 4) as usize;
@@ -387,8 +396,7 @@ mod tests {
     #[test]
     fn mask_none_is_passthrough() {
         let original = vec![123, 45, 67, 200, 8, 9, 10, 200];
-        let widget = ImageWidget::from_raw(original.clone(), 2, 1)
-            .mask(ImageMaskShape::None);
+        let widget = ImageWidget::from_raw(original.clone(), 2, 1).mask(ImageMaskShape::None);
         assert_eq!(widget.upload_pixels, original);
     }
 

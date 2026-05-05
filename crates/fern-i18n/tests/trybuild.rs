@@ -18,8 +18,8 @@ fn ui() {
     // cargo invocations. `std::env::set_var` mutates the current
     // process's environment; child processes (trybuild's cargo calls)
     // inherit it on spawn.
-    let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/ui/locales/en-US.ftl");
+    let fixture =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ui/locales/en-US.ftl");
     // SAFETY: single-threaded test entry; no other thread observes env.
     unsafe {
         std::env::set_var("FERN_I18N_SOURCE_PATH", fixture);

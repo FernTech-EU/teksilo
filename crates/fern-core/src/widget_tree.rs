@@ -363,11 +363,7 @@ impl WidgetTree {
     /// semantics. There is no source widget for app-level events,
     /// so intents are anchored at the tree's first root id (or
     /// silently dropped when the tree is empty).
-    pub fn run_with_event_context<F>(
-        &mut self,
-        ops: &mut dyn crate::window::WindowOps,
-        f: F,
-    )
+    pub fn run_with_event_context<F>(&mut self, ops: &mut dyn crate::window::WindowOps, f: F)
     where
         F: FnOnce(&mut crate::widget::EventContext),
     {
@@ -606,10 +602,7 @@ impl WidgetTree {
         );
     }
 
-    fn process_pointer_leave_overlays_real(
-        &mut self,
-        ops: &mut dyn crate::window::WindowOps,
-    ) {
+    fn process_pointer_leave_overlays_real(&mut self, ops: &mut dyn crate::window::WindowOps) {
         let real_now = std::time::Instant::now();
         self.process_pointer_leave_overlays_impl(
             |overlay| {
@@ -634,10 +627,7 @@ impl WidgetTree {
         );
     }
 
-    fn process_auto_dismiss_overlays_real(
-        &mut self,
-        ops: &mut dyn crate::window::WindowOps,
-    ) {
+    fn process_auto_dismiss_overlays_real(&mut self, ops: &mut dyn crate::window::WindowOps) {
         let real_now = std::time::Instant::now();
         self.process_auto_dismiss_overlays_impl(
             |overlay| {
@@ -719,10 +709,10 @@ impl WidgetTree {
             let (dismissed, focus_restore) =
                 self.overlay_manager.dismiss_with_focus_restore(overlay_id);
             self.dormant_dismissed_content(&dismissed, &mut *ops);
-            if let Some(restore_id) = focus_restore {
-                if self.arena.is_active(restore_id) {
-                    self.focus_ops(restore_id, &mut *ops);
-                }
+            if let Some(restore_id) = focus_restore
+                && self.arena.is_active(restore_id)
+            {
+                self.focus_ops(restore_id, &mut *ops);
             }
         }
     }
@@ -757,10 +747,10 @@ impl WidgetTree {
             let (dismissed, focus_restore) =
                 self.overlay_manager.dismiss_with_focus_restore(overlay_id);
             self.dormant_dismissed_content(&dismissed, &mut *ops);
-            if let Some(restore_id) = focus_restore {
-                if self.arena.is_active(restore_id) {
-                    self.focus_ops(restore_id, &mut *ops);
-                }
+            if let Some(restore_id) = focus_restore
+                && self.arena.is_active(restore_id)
+            {
+                self.focus_ops(restore_id, &mut *ops);
             }
         }
     }
@@ -1064,10 +1054,7 @@ impl WidgetTree {
     /// state when the target still exists in the arena. Called from
     /// data-driven rebuild paths (`process_state_changes`); theme and locale
     /// switches no longer rebuild.
-    pub(crate) fn revalidate_interaction_state(
-        &mut self,
-        ops: &mut dyn crate::window::WindowOps,
-    ) {
+    pub(crate) fn revalidate_interaction_state(&mut self, ops: &mut dyn crate::window::WindowOps) {
         if let Some(id) = self.focused
             && !self.arena.is_active(id)
         {
@@ -1349,11 +1336,8 @@ impl WidgetTree {
         id: WidgetId,
         handler_set: crate::widget_builder::HandlerSet,
     ) {
-        self.arena.apply_handler_set(
-            id,
-            handler_set,
-            crate::arena::HandlerScope::Own,
-        );
+        self.arena
+            .apply_handler_set(id, handler_set, crate::arena::HandlerScope::Own);
     }
 
     /// Apply a `HandlerSet` to an existing node as *external* handlers —
@@ -1366,11 +1350,8 @@ impl WidgetTree {
         id: WidgetId,
         handler_set: crate::widget_builder::HandlerSet,
     ) {
-        self.arena.apply_handler_set(
-            id,
-            handler_set,
-            crate::arena::HandlerScope::External,
-        );
+        self.arena
+            .apply_handler_set(id, handler_set, crate::arena::HandlerScope::External);
     }
 
     /// Set a per-child alignment override on a widget.
@@ -1412,10 +1393,10 @@ impl WidgetTree {
     pub fn begin_key_capture(
         &mut self,
         callback: impl FnOnce(
-                crate::shortcut::KeyStroke,
-                &mut crate::shortcut::ShortcutRegistry,
-                &mut EventContext,
-            ) + 'static,
+            crate::shortcut::KeyStroke,
+            &mut crate::shortcut::ShortcutRegistry,
+            &mut EventContext,
+        ) + 'static,
     ) -> crate::shortcut::CaptureHandle {
         let slot: crate::shortcut::KeyCaptureSlot =
             std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new(callback))));
@@ -1603,16 +1584,11 @@ impl WidgetTree {
             // arena-wide borrow. The action is reinserted at its
             // original position so declaration order is preserved
             // for any follow-on dispatch.
-            let Some((mut action, idx, enabled)) =
-                self.arena.get_mut(id).and_then(|node| {
-                    let idx = node
-                        .actions
-                        .iter()
-                        .position(|a| a.intent == intent.name)?;
-                    let enabled = node.actions[idx].is_enabled();
-                    Some((node.actions.remove(idx), idx, enabled))
-                })
-            else {
+            let Some((mut action, idx, enabled)) = self.arena.get_mut(id).and_then(|node| {
+                let idx = node.actions.iter().position(|a| a.intent == intent.name)?;
+                let enabled = node.actions[idx].is_enabled();
+                Some((node.actions.remove(idx), idx, enabled))
+            }) else {
                 continue;
             };
 
@@ -2028,7 +2004,6 @@ impl WidgetTree {
     pub fn resolved_theme(&self, id: WidgetId) -> fern_tokens::Theme {
         self.arena.resolve_theme(id, &self.theme)
     }
-
 }
 
 impl Default for WidgetTree {
@@ -2036,4 +2011,3 @@ impl Default for WidgetTree {
         Self::new()
     }
 }
-

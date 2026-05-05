@@ -12,9 +12,9 @@ use fern_core::widget_id::WidgetId;
 use fern_i18n::resolve_message_widget;
 use fern_tokens::{BorderRole, CornerRadius, SurfaceRole};
 
+use crate::common::datetime::Date;
 use crate::common::datetime::month_long_key;
 use crate::common::datetime::types::YearMonth;
-use crate::common::datetime::Date;
 use crate::primitives::{Center, Expand, FixedSize, HStack, IconWidget, RectWidget, ZStack};
 
 use super::{CalendarMode, OnMonthChanged};
@@ -68,44 +68,52 @@ impl Widget for CalendarHeader {
             let focused = self.focused_date.clone();
             let mode = self.mode.clone();
             let cb = self.on_month_changed.clone();
-            std::rc::Rc::new(move |dir: i32, ctx_evt: &mut fern_core::widget::EventContext| {
-                let cur = visible.get();
-                let new_ym = match mode.get() {
-                    CalendarMode::Days => {
-                        if dir > 0 { cur.next_month() } else { cur.prev_month() }
+            std::rc::Rc::new(
+                move |dir: i32, ctx_evt: &mut fern_core::widget::EventContext| {
+                    let cur = visible.get();
+                    let new_ym = match mode.get() {
+                        CalendarMode::Days => {
+                            if dir > 0 {
+                                cur.next_month()
+                            } else {
+                                cur.prev_month()
+                            }
+                        }
+                        CalendarMode::Months => cur.offset_months(dir * 12),
+                        CalendarMode::Years => cur.offset_months(dir * 120),
+                    };
+                    visible.set(new_ym);
+                    clamp_focus_into_month(&focused, new_ym);
+                    if let Some(cb) = cb.as_ref() {
+                        cb(new_ym, ctx_evt);
                     }
-                    CalendarMode::Months => cur.offset_months(dir * 12),
-                    CalendarMode::Years => cur.offset_months(dir * 120),
-                };
-                visible.set(new_ym);
-                clamp_focus_into_month(&focused, new_ym);
-                if let Some(cb) = cb.as_ref() {
-                    cb(new_ym, ctx_evt);
-                }
-                ctx_evt.request_frame();
-            })
+                    ctx_evt.request_frame();
+                },
+            )
         };
         let step_double = {
             let visible = self.visible_month.clone();
             let focused = self.focused_date.clone();
             let mode = self.mode.clone();
             let cb = self.on_month_changed.clone();
-            std::rc::Rc::new(move |dir: i32, ctx_evt: &mut fern_core::widget::EventContext| {
-                let cur = visible.get();
-                let new_ym = match mode.get() {
-                    CalendarMode::Days => cur.offset_months(dir * 12),
-                    CalendarMode::Months => cur.offset_months(dir * 120),
-                    // Years: a "double" step = +/- 100 years, but
-                    // YearMonth saturates so this is a soft jump.
-                    CalendarMode::Years => cur.offset_months(dir * 1200),
-                };
-                visible.set(new_ym);
-                clamp_focus_into_month(&focused, new_ym);
-                if let Some(cb) = cb.as_ref() {
-                    cb(new_ym, ctx_evt);
-                }
-                ctx_evt.request_frame();
-            })
+            std::rc::Rc::new(
+                move |dir: i32, ctx_evt: &mut fern_core::widget::EventContext| {
+                    let cur = visible.get();
+                    let new_ym = match mode.get() {
+                        CalendarMode::Days => cur.offset_months(dir * 12),
+                        CalendarMode::Months => cur.offset_months(dir * 120),
+                        // Years: a "double" step = +/- 100 years, but
+                        // YearMonth saturates so this is a soft jump.
+                        CalendarMode::Years => cur.offset_months(dir * 1200),
+                    };
+                    visible.set(new_ym);
+                    clamp_focus_into_month(&focused, new_ym);
+                    if let Some(cb) = cb.as_ref() {
+                        cb(new_ym, ctx_evt);
+                    }
+                    ctx_evt.request_frame();
+                },
+            )
         };
 
         // ── Previous double (year / decade / century) ─────────
@@ -118,11 +126,9 @@ impl Widget for CalendarHeader {
 
         // ── Previous single (month / year / decade) ───────────
         let step_sgl_prev = step_single.clone();
-        let prev_id = ctx.add(NavArrow::new(
-            ArrowKind::Left,
-            prev_label,
-            move |ctx_evt| step_sgl_prev(-1, ctx_evt),
-        ));
+        let prev_id = ctx.add(NavArrow::new(ArrowKind::Left, prev_label, move |ctx_evt| {
+            step_sgl_prev(-1, ctx_evt)
+        }));
 
         // ── Next single (month / year / decade) ───────────────
         let step_sgl_next = step_single.clone();
@@ -290,7 +296,12 @@ impl Widget for NavArrow {
             .corner_radius(CornerRadius::uniform(4.0));
         let bg_id = ctx.add(bg);
         let z = ctx.add(ZStack::new().add_child(bg_id).add_child(centered));
-        let sized = ctx.add(FixedSize::new().bind_width(24.0).bind_height(24.0).child_id(z));
+        let sized = ctx.add(
+            FixedSize::new()
+                .bind_width(24.0)
+                .bind_height(24.0)
+                .child_id(z),
+        );
 
         // Activation needs to fire from pointer click (`on_tap`),
         // keyboard Enter / Space when the button is focused
@@ -309,11 +320,11 @@ impl Widget for NavArrow {
             .cursor(CursorIcon::Pointer)
             .on_tap(move |_pos, ctx_evt| tap_action(ctx_evt))
             .on_key(move |event, ctx_evt| {
-                if let WidgetEvent::KeyDown { key, .. } = event {
-                    if matches!(key, Key::Enter | Key::Space) {
-                        key_action(ctx_evt);
-                        return EventResponse::Handled;
-                    }
+                if let WidgetEvent::KeyDown { key, .. } = event
+                    && matches!(key, Key::Enter | Key::Space)
+                {
+                    key_action(ctx_evt);
+                    return EventResponse::Handled;
                 }
                 EventResponse::Ignored
             })

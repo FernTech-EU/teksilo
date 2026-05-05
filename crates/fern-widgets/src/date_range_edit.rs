@@ -67,15 +67,13 @@ use jiff::civil::Weekday;
 
 use crate::built_in_button::{BuiltInButton, BuiltInButtonSize};
 use crate::calendar::{Calendar, DateRange};
+use crate::common::datetime::Date;
 use crate::common::datetime::pattern::{
-    format_value, mask_for_pattern, parse_value, segment_at_position, step_date_field,
-    ParseTarget, ParsedPattern, ParsedValue,
+    ParseTarget, ParsedPattern, ParsedValue, format_value, mask_for_pattern, parse_value,
+    segment_at_position, step_date_field,
 };
 use crate::common::datetime::types::today_local;
-use crate::common::datetime::Date;
-use crate::date_edit::{
-    build_date_validator, calendar_glyph_icon, clamp_date, ValidationBehavior,
-};
+use crate::date_edit::{ValidationBehavior, build_date_validator, calendar_glyph_icon, clamp_date};
 use crate::primitives::text_input_field::{TextInputField, ValidationFeedback};
 use crate::primitives::{
     Center, FixedSize, HStack, IconWidget, MinSize, Padding, RectWidget, VStack, ZStack,
@@ -316,7 +314,7 @@ impl Widget for DateRangeEdit {
             HalfKind::Start,
             pattern_rc.clone(),
             &mask_string,
-            field_style.clone(),
+            field_style,
             min,
             max,
         );
@@ -325,7 +323,7 @@ impl Widget for DateRangeEdit {
             HalfKind::End,
             pattern_rc.clone(),
             &mask_string,
-            field_style.clone(),
+            field_style,
             min,
             max,
         );
@@ -344,15 +342,14 @@ impl Widget for DateRangeEdit {
         // Pre-build the dormant range calendar once.
         let value_for_cal = self.value.clone();
         let popover_open_for_cal = self.range_popover_open.clone();
-        let mut cal = Calendar::range(value_for_cal.clone()).on_range_changed(
-            move |new_range, ctx_evt| {
+        let mut cal =
+            Calendar::range(value_for_cal.clone()).on_range_changed(move |new_range, ctx_evt| {
                 if new_range.is_some() {
                     popover_open_for_cal.set(false);
                     ctx_evt.dismiss_all_overlays();
                     ctx_evt.request_frame();
                 }
-            },
-        );
+            });
         if let Some(min) = self.min_date {
             cal = cal.min_date(min);
         }
@@ -373,32 +370,33 @@ impl Widget for DateRangeEdit {
                 popover_open.set(false);
             })
         };
-        let trigger_btn = BuiltInButton::new(
-            calendar_glyph_icon(date_style.calendar_icon_size),
-        )
-        .size(BuiltInButtonSize::Default)
-        .enabled(enabled && !read_only)
-        .tooltip(resolve_message_widget("date-range-edit-trigger-tooltip", &[]))
-        .on_activate_fn(move |ctx_evt: &mut EventContext| {
-            if popover_open.get() {
-                popover_open.set(false);
-                ctx_evt.dismiss_all_overlays();
-            } else {
-                popover_open.set(true);
-                ctx_evt.activate(cal_id);
-                ctx_evt.show_overlay(OverlayRequest {
-                    content_id: cal_id,
-                    anchor: self_ref,
-                    placement: OverlayPlacement::BelowPreferred,
-                    dismiss: DismissBehavior::EscapeOrClickOutside,
-                    layer: OverlayLayer::InTree,
-                    parent_overlay: None,
-                    on_dismiss: Some(dismiss_cb.clone()),
-                    fade_duration: None,
-                });
-                ctx_evt.request_focus(cal_id);
-            }
-        });
+        let trigger_btn = BuiltInButton::new(calendar_glyph_icon(date_style.calendar_icon_size))
+            .size(BuiltInButtonSize::Default)
+            .enabled(enabled && !read_only)
+            .tooltip(resolve_message_widget(
+                "date-range-edit-trigger-tooltip",
+                &[],
+            ))
+            .on_activate_fn(move |ctx_evt: &mut EventContext| {
+                if popover_open.get() {
+                    popover_open.set(false);
+                    ctx_evt.dismiss_all_overlays();
+                } else {
+                    popover_open.set(true);
+                    ctx_evt.activate(cal_id);
+                    ctx_evt.show_overlay(OverlayRequest {
+                        content_id: cal_id,
+                        anchor: self_ref,
+                        placement: OverlayPlacement::BelowPreferred,
+                        dismiss: DismissBehavior::EscapeOrClickOutside,
+                        layer: OverlayLayer::InTree,
+                        parent_overlay: None,
+                        on_dismiss: Some(dismiss_cb.clone()),
+                        fade_duration: None,
+                    });
+                    ctx_evt.request_focus(cal_id);
+                }
+            });
         let trigger_id = ctx.add(trigger_btn);
 
         // ── Row layout ─────────────────────────────────────────
@@ -414,36 +412,44 @@ impl Widget for DateRangeEdit {
             .add_child(trigger_id);
         let inline_row_id = ctx.add(row);
         let row_id = ctx.add(
-            Padding::new(0.0, field_style.padding_horizontal, 0.0, field_style.padding_horizontal)
-                .child_id(inline_row_id),
+            Padding::new(
+                0.0,
+                field_style.padding_horizontal,
+                0.0,
+                field_style.padding_horizontal,
+            )
+            .child_id(inline_row_id),
         );
 
         // ── Frame: bg + border driven by focus + validation ───
         let feedback_for_border = self.feedback.clone();
         let focused_for_border = self.focused.clone();
-        let border_role = focused_for_border
-            .clone()
-            .zip(&feedback_for_border)
-            .map(|(focused, fb)| match fb {
-                ValidationFeedback::Invalid { .. } => BorderRole::Error,
-                ValidationFeedback::Corrected { .. } if !*focused => BorderRole::Focused,
-                _ => {
-                    if *focused {
-                        BorderRole::Focused
-                    } else {
-                        BorderRole::Default
+        let border_role =
+            focused_for_border
+                .clone()
+                .zip(&feedback_for_border)
+                .map(|(focused, fb)| match fb {
+                    ValidationFeedback::Invalid { .. } => BorderRole::Error,
+                    ValidationFeedback::Corrected { .. } if !*focused => BorderRole::Focused,
+                    _ => {
+                        if *focused {
+                            BorderRole::Focused
+                        } else {
+                            BorderRole::Default
+                        }
                     }
-                }
-            });
-        let border_width_signal = focused_for_border.clone().zip(&feedback_for_border).map(
-            move |(focused, fb)| {
-                if *focused || matches!(fb, ValidationFeedback::Invalid { .. }) {
-                    focus_ring_width
-                } else {
-                    field_style.border_width
-                }
-            },
-        );
+                });
+        let border_width_signal =
+            focused_for_border
+                .clone()
+                .zip(&feedback_for_border)
+                .map(move |(focused, fb)| {
+                    if *focused || matches!(fb, ValidationFeedback::Invalid { .. }) {
+                        focus_ring_width
+                    } else {
+                        field_style.border_width
+                    }
+                });
         let bg = RectWidget::new()
             .background(SurfaceRole::Content)
             .border_color(border_role)
@@ -454,7 +460,9 @@ impl Widget for DateRangeEdit {
         let sized_id = ctx.add(MinSize::new(0.0, field_style.height).child_id(framed_id));
 
         // ── Inline validation strip below the frame ───────────
-        let strip_id = ctx.add(crate::primitives::ValidationStrip::new(self.feedback.clone()));
+        let strip_id = ctx.add(crate::primitives::ValidationStrip::new(
+            self.feedback.clone(),
+        ));
         let root_with_strip = ctx.add(
             VStack::new()
                 .spacing(field_style.validation_strip_gap)
@@ -552,10 +560,7 @@ impl Widget for DateRangeEdit {
                 ));
             }
             None => {
-                builder.set_placeholder(resolve_message_widget(
-                    "date-range-edit-placeholder",
-                    &[],
-                ));
+                builder.set_placeholder(resolve_message_widget("date-range-edit-placeholder", &[]));
             }
         }
         if !self.enabled {
@@ -611,35 +616,30 @@ impl DateRangeEdit {
             ),
         };
 
-        let validator = build_date_validator(
-            pattern_rc.clone(),
-            min,
-            max,
-            self.validation_behavior,
-        );
+        let validator =
+            build_date_validator(pattern_rc.clone(), min, max, self.validation_behavior);
 
         let outer_value = self.value.clone();
         let on_changed = self.on_value_changed.clone();
-        let merge_into_outer = move |new_d: Option<Date>,
-                                     other_d: Option<Date>,
-                                     ctx_evt: &mut EventContext| {
-            let combined = match kind {
-                HalfKind::Start => match (new_d, other_d) {
-                    (Some(s), Some(e)) => Some(DateRange::new(s, e)),
-                    _ => None,
-                },
-                HalfKind::End => match (other_d, new_d) {
-                    (Some(s), Some(e)) => Some(DateRange::new(s, e)),
-                    _ => None,
-                },
-            };
-            if outer_value.get() != combined {
-                outer_value.set(combined);
-                if let Some(cb) = on_changed.as_ref() {
-                    cb(combined, ctx_evt);
+        let merge_into_outer =
+            move |new_d: Option<Date>, other_d: Option<Date>, ctx_evt: &mut EventContext| {
+                let combined = match kind {
+                    HalfKind::Start => match (new_d, other_d) {
+                        (Some(s), Some(e)) => Some(DateRange::new(s, e)),
+                        _ => None,
+                    },
+                    HalfKind::End => match (other_d, new_d) {
+                        (Some(s), Some(e)) => Some(DateRange::new(s, e)),
+                        _ => None,
+                    },
+                };
+                if outer_value.get() != combined {
+                    outer_value.set(combined);
+                    if let Some(cb) = on_changed.as_ref() {
+                        cb(combined, ctx_evt);
+                    }
                 }
-            }
-        };
+            };
 
         // Commit closure: parse the field text on Enter / blur, sync
         // the per-half date signal, then merge into the outer range.
@@ -667,10 +667,8 @@ impl DateRangeEdit {
             })
         };
 
-        let inner_height =
-            (field_style.height - 2.0 * field_style.border_width).max(0.0);
-        let text_area_height =
-            (inner_height - 2.0 * field_style.padding_vertical).max(0.0);
+        let inner_height = (field_style.height - 2.0 * field_style.border_width).max(0.0);
+        let text_area_height = (inner_height - 2.0 * field_style.padding_vertical).max(0.0);
 
         let pattern_for_filter = pattern_rc.clone();
         let mut field = TextInputField::new(text_signal.clone())
@@ -688,10 +686,10 @@ impl DateRangeEdit {
                     return true;
                 }
                 for tok in &pattern_for_filter.tokens {
-                    if let crate::common::datetime::pattern::PatternToken::Literal(s) = tok {
-                        if s.chars().any(|x| x == c) {
-                            return true;
-                        }
+                    if let crate::common::datetime::pattern::PatternToken::Literal(s) = tok
+                        && s.chars().any(|x| x == c)
+                    {
+                        return true;
                     }
                 }
                 false
@@ -778,8 +776,7 @@ impl DateRangeEdit {
             let merge = merge_into_outer.clone();
             Rc::new(move |delta: i32, ctx_evt: &mut EventContext| {
                 let pos = caret.get();
-                let Some((_, _, kind_seg)) = segment_at_position(&pattern, pos)
-                else {
+                let Some((_, _, kind_seg)) = segment_at_position(&pattern, pos) else {
                     return;
                 };
                 let current = date_signal.get().unwrap_or_else(today_local);
@@ -798,14 +795,15 @@ impl DateRangeEdit {
         let enabled = self.enabled;
         let read_only = self.read_only;
         let step_for_key = segment_step.clone();
-        let stepping_ancestor = ctx.add(
-            ZStack::new().add_child(sized_field_id).on_key_preview(
-                move |event, ctx_evt| {
+
+        ctx.add(
+            ZStack::new()
+                .add_child(sized_field_id)
+                .on_key_preview(move |event, ctx_evt| {
                     if !enabled || read_only {
                         return EventResponse::Ignored;
                     }
-                    let WidgetEvent::KeyDown { key, modifiers, .. } = event
-                    else {
+                    let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
                         return EventResponse::Ignored;
                     };
                     let mult = if modifiers.shift() { 10 } else { 1 };
@@ -818,11 +816,8 @@ impl DateRangeEdit {
                     };
                     step_for_key(delta, ctx_evt);
                     EventResponse::Handled
-                },
-            ),
-        );
-
-        stepping_ancestor
+                }),
+        )
     }
 }
 

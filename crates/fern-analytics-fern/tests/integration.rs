@@ -17,9 +17,9 @@ use fern_collector_proto::v1::telemetry_server::{Telemetry, TelemetryServer};
 use fern_core::telemetry::{Event, EventCategory, Prop, PropValue, UsageReporter};
 use tempfile::TempDir;
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
-use tonic::{transport::Server, Request, Response, Status, Streaming};
+use tokio_stream::wrappers::ReceiverStream;
+use tonic::{Request, Response, Status, Streaming, transport::Server};
 
 // -------------------- mock server --------------------
 
@@ -79,20 +79,20 @@ impl Telemetry for MockTelemetry {
                 if let Ok(batch) = batch_result {
                     state.received_batches.fetch_add(1, Ordering::Relaxed);
                     // Per-product scope enforcement.
-                    if let Some(want) = &expected_product {
-                        if &batch.product_id != want {
-                            let ack = proto::IngestAck {
-                                batch_id: batch.batch_id,
-                                events_accepted: 0,
-                                events_rejected: batch.events.len() as u32,
-                                rejection_reason: format!(
-                                    "token scope `{want}` does not match batch product `{}`",
-                                    batch.product_id
-                                ),
-                            };
-                            let _ = tx.send(Ok(ack)).await;
-                            continue;
-                        }
+                    if let Some(want) = &expected_product
+                        && &batch.product_id != want
+                    {
+                        let ack = proto::IngestAck {
+                            batch_id: batch.batch_id,
+                            events_accepted: 0,
+                            events_rejected: batch.events.len() as u32,
+                            rejection_reason: format!(
+                                "token scope `{want}` does not match batch product `{}`",
+                                batch.product_id
+                            ),
+                        };
+                        let _ = tx.send(Ok(ack)).await;
+                        continue;
                     }
                     let n = batch.events.len();
                     state.received_events.fetch_add(n, Ordering::Relaxed);
@@ -222,12 +222,13 @@ impl MockServer {
 
         // Bind a random port; capture the actual address before
         // handing the listener to tonic.
-        let listener = runtime.block_on(async {
-            tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap()
-        });
+        let listener =
+            runtime.block_on(async { tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap() });
         let addr = listener.local_addr().unwrap();
 
-        let svc = MockTelemetry { state: state.clone() };
+        let svc = MockTelemetry {
+            state: state.clone(),
+        };
 
         let (tx, rx) = tokio::sync::oneshot::channel();
         let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);

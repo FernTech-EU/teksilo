@@ -145,7 +145,11 @@ impl Widget for ColorSwatch {
         {
             let focus_origin = self.focus_origin.clone();
             handlers = handlers.on_focus(move |gained, _ctx| {
-                focus_origin.set(if gained { Some(FocusOrigin::Keyboard) } else { None });
+                focus_origin.set(if gained {
+                    Some(FocusOrigin::Keyboard)
+                } else {
+                    None
+                });
             });
         }
 
@@ -178,7 +182,8 @@ impl Widget for ColorSwatch {
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let style = ctx.theme.components.color_picker;
-        let radius = CornerRadius::uniform(self.corner_radius.unwrap_or(style.swatch_corner_radius));
+        let radius =
+            CornerRadius::uniform(self.corner_radius.unwrap_or(style.swatch_corner_radius));
         let color = self.color.get();
 
         // Checkerboard underlay if the swatch is partly transparent.
@@ -221,7 +226,9 @@ impl Widget for ColorSwatch {
             );
             canvas.stroke_rounded_rect(
                 ring,
-                CornerRadius::uniform(self.corner_radius.unwrap_or(style.swatch_corner_radius) + inset),
+                CornerRadius::uniform(
+                    self.corner_radius.unwrap_or(style.swatch_corner_radius) + inset,
+                ),
                 ctx.theme.colors.focus_ring,
                 ctx.theme.shape.focus_ring_width,
             );
@@ -235,10 +242,9 @@ impl Widget for ColorSwatch {
         let hex = color.to_hex_upper(color.a() < 1.0);
         let name = match &self.label {
             Some(ls) => ls.resolve_now(),
-            None => resolve_message_widget(
-                "color-picker-swatch-label",
-                &[("hex", hex.clone().into())],
-            ),
+            None => {
+                resolve_message_widget("color-picker-swatch-label", &[("hex", hex.clone().into())])
+            }
         };
         let display = if self.selected {
             let suffix = resolve_message_widget("color-picker-swatch-selected-suffix", &[]);
@@ -267,5 +273,3 @@ impl Widget for ColorSwatch {
     ) {
     }
 }
-
-

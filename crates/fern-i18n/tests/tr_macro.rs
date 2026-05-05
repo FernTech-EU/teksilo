@@ -11,9 +11,7 @@
 //! only the *happy paths* those errors protect, plus the dynamic
 //! fallback that runs when no `I18nManager` is installed.
 
-use fern_i18n::{
-    I18nConfig, I18nManager, LanguageIdentifier, LocalizedString, tr,
-};
+use fern_i18n::{I18nConfig, I18nManager, LanguageIdentifier, LocalizedString, tr};
 
 fn lid(s: &str) -> LanguageIdentifier {
     s.parse().unwrap()
@@ -49,10 +47,7 @@ fn tr_with_argument_formats_value() {
 #[test]
 fn tr_with_numeric_argument_formats_value() {
     fern_i18n::thread_local::clear();
-    let cfg = I18nConfig::test_only(
-        "en-US",
-        &[("count-items", "You have { $count } items.")],
-    );
+    let cfg = I18nConfig::test_only("en-US", &[("count-items", "You have { $count } items.")]);
     let _mgr = install(cfg);
 
     let count: i64 = 3;
@@ -81,10 +76,7 @@ fn underscore_in_ident_maps_to_dash_in_fluent_key() {
     // fixture defines the dashed form; this confirms the macro's
     // conversion matches what the runtime resolver looks up.
     fern_i18n::thread_local::clear();
-    let cfg = I18nConfig::test_only(
-        "en-US",
-        &[("count-items", "Total: { $count }")],
-    );
+    let cfg = I18nConfig::test_only("en-US", &[("count-items", "Total: { $count }")]);
     let _mgr = install(cfg);
 
     let ls: LocalizedString = tr!(count_items(count = 7_i64));

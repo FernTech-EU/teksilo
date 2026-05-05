@@ -195,25 +195,26 @@ impl Widget for SmoothSize {
         vec![child_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let Some(child_id) = self.child_id else {
             return (proposal.resolve(0.0, 0.0)).into();
         };
         let natural = ctx.child_size(child_id, proposal).unwrap_or(Size::ZERO);
         self.natural_size.set(natural);
 
-        let (Some(w_sig), Some(h_sig)) =
-            (self.width_anim.as_ref(), self.height_anim.as_ref())
+        let (Some(w_sig), Some(h_sig)) = (self.width_anim.as_ref(), self.height_anim.as_ref())
         else {
             // build() hasn't run yet — fall back to natural size.
             return (natural).into();
         };
 
         let last = self.last_target.get();
-        let width_target_changed =
-            (natural.width - last.width).abs() > SIZE_CHANGE_EPSILON;
-        let height_target_changed =
-            (natural.height - last.height).abs() > SIZE_CHANGE_EPSILON;
+        let width_target_changed = (natural.width - last.width).abs() > SIZE_CHANGE_EPSILON;
+        let height_target_changed = (natural.height - last.height).abs() > SIZE_CHANGE_EPSILON;
 
         if width_target_changed || height_target_changed {
             self.last_target.set(natural);
@@ -226,12 +227,8 @@ impl Widget for SmoothSize {
                 w_sig.set(natural.width);
                 h_sig.set(natural.height);
             } else {
-                let duration = self
-                    .duration
-                    .unwrap_or(ctx.theme.motion.duration_normal);
-                let easing = self
-                    .easing
-                    .unwrap_or(ctx.theme.motion.easing_standard);
+                let duration = self.duration.unwrap_or(ctx.theme.motion.duration_normal);
+                let easing = self.easing.unwrap_or(ctx.theme.motion.easing_standard);
                 if self.animates_width() && width_target_changed {
                     w_sig.animate_to(natural.width, duration, easing);
                 } else if !self.animates_width() {
@@ -387,9 +384,8 @@ mod tests {
     fn reduced_motion_snaps_to_natural() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.set_accessibility_preferences(false, true, 1.0);
-        let id = tree.add(
-            SmoothSize::new().child(FixedSize::new().bind_width(150.0).bind_height(60.0)),
-        );
+        let id =
+            tree.add(SmoothSize::new().child(FixedSize::new().bind_width(150.0).bind_height(60.0)));
         tree.layout(SizeProposal {
             width: None,
             height: None,

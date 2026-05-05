@@ -176,10 +176,10 @@ impl CellSelectionModel {
         if new != old {
             self.selection.set(new);
         }
-        if let Some((r, c)) = self.anchor.get() {
-            if r >= at_row {
-                self.anchor.set(Some((r + count, c)));
-            }
+        if let Some((r, c)) = self.anchor.get()
+            && r >= at_row
+        {
+            self.anchor.set(Some((r + count, c)));
         }
     }
 
@@ -224,10 +224,10 @@ impl CellSelectionModel {
         if new != old {
             self.selection.set(new);
         }
-        if let Some((r, c)) = self.anchor.get() {
-            if c >= at_col {
-                self.anchor.set(Some((r, c + count)));
-            }
+        if let Some((r, c)) = self.anchor.get()
+            && c >= at_col
+        {
+            self.anchor.set(Some((r, c + count)));
         }
     }
 

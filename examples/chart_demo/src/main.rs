@@ -6,11 +6,11 @@ use fern_charts::{
     AxisConfig, BarChart, BarGrouping, ChartDatum, ChartSeries, LegendPosition, LineChart,
     PieChart, PieLabelMode,
 };
-use fern_ui::tokens::HAlignment;
 use fern_ui::prelude::*;
+use fern_ui::tokens::HAlignment;
 use fern_ui::widgets::{
-    Button, ButtonVariant, GroupHeader, HStack, Padding, SegmentedControl, Spacer, Switcher,
-    Center, TextWidget, VStack,
+    Button, ButtonVariant, Center, GroupHeader, HStack, Padding, SegmentedControl, Spacer,
+    Switcher, TextWidget, VStack,
 };
 
 fn make_series(seed: u32) -> Vec<ChartSeries<String>> {
@@ -109,8 +109,7 @@ fn main() {
                                     .spacing(0.0)
                                     .alignment(HAlignment::Center)
                                     .child(
-                                        TextWidget::new_literal("Total")
-                                            .style(TextStyleRole::Tiny),
+                                        TextWidget::new_literal("Total").style(TextStyleRole::Tiny),
                                     )
                                     .child(
                                         TextWidget::new_literal("")
@@ -136,22 +135,19 @@ fn main() {
                         .child(segmented)
                         .child(switcher)
                         .child(
-                            HStack::new()
-                                .spacing(8.0)
-                                .child(Spacer::new())
-                                .child(
-                                    Button::new_literal("Refresh data")
-                                        .style(ButtonVariant::Default)
-                                        .on_activate_fn(move |_ctx| {
-                                            let next = counter_for_btn.get().wrapping_add(1);
-                                            counter_for_btn.set(next);
-                                            series_for_btn.set(make_series(next));
-                                            pie_for_btn.set(make_pie_data(next));
-                                            // Cycle through kinds to demo
-                                            // each chart, optional.
-                                            let _ = kind_for_btn.get();
-                                        }),
-                                ),
+                            HStack::new().spacing(8.0).child(Spacer::new()).child(
+                                Button::new_literal("Refresh data")
+                                    .style(ButtonVariant::Default)
+                                    .on_activate_fn(move |_ctx| {
+                                        let next = counter_for_btn.get().wrapping_add(1);
+                                        counter_for_btn.set(next);
+                                        series_for_btn.set(make_series(next));
+                                        pie_for_btn.set(make_pie_data(next));
+                                        // Cycle through kinds to demo
+                                        // each chart, optional.
+                                        let _ = kind_for_btn.get();
+                                    }),
+                            ),
                         );
                     tree.add(Padding::uniform(16.0).child(content))
                 }),

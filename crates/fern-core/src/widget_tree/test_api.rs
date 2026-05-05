@@ -210,7 +210,11 @@ mod tests {
         );
 
         tree.tick_animations(std::time::Duration::from_millis(100));
-        assert!((signal.get() - 50.0).abs() < 2.0, "at 50%: {}", signal.get());
+        assert!(
+            (signal.get() - 50.0).abs() < 2.0,
+            "at 50%: {}",
+            signal.get()
+        );
 
         tree.tick_animations(std::time::Duration::from_millis(100));
         assert!(

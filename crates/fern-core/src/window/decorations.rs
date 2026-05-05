@@ -5,10 +5,11 @@
 /// Three-valued and explicit. Replaces the older `custom_chrome: bool`
 /// flag on `WindowConfig`, which could not represent the
 /// "borderless / no host" case.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DecorationsMode {
     /// OS-provided title bar, borders, and resize handles. The default
     /// for application windows on every platform.
+    #[default]
     Native,
     /// No native title bar; a
     /// [`PlatformTitleBarHost`](crate::PlatformTitleBarHost) is
@@ -19,12 +20,6 @@ pub enum DecorationsMode {
     /// No decorations at all — neither OS chrome nor a host. Use for
     /// splash screens, borderless popups, or fully chrome-less embeds.
     None,
-}
-
-impl Default for DecorationsMode {
-    fn default() -> Self {
-        DecorationsMode::Native
-    }
 }
 
 impl DecorationsMode {

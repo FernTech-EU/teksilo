@@ -156,7 +156,11 @@ impl Default for Grid {
 }
 
 impl Widget for Grid {
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let num_cols = self.columns.len().max(1);
         let num_rows = self.rows.len().max(1);
 
@@ -183,8 +187,7 @@ impl Widget for Grid {
         // Resolve column tracks against the parent's width proposal.
         let col_gap = self.column_gap.get();
         let row_gap = self.row_gap.get();
-        let col_sizes =
-            Self::resolve_tracks(&self.columns, col_gap, proposal.width, &col_max);
+        let col_sizes = Self::resolve_tracks(&self.columns, col_gap, proposal.width, &col_max);
 
         // Pass 2: for every child whose column is *narrower* than its
         // intrinsic width (typical of Fractional columns receiving the
@@ -264,8 +267,7 @@ impl Widget for Grid {
 
         let col_gap = self.column_gap.get();
         let row_gap = self.row_gap.get();
-        let col_sizes =
-            Self::resolve_tracks(&self.columns, col_gap, Some(bounds.width), &col_max);
+        let col_sizes = Self::resolve_tracks(&self.columns, col_gap, Some(bounds.width), &col_max);
 
         // Pass 2: re-measure Fractional cells whose column shrank, so
         // their row height reflects wrap-induced growth.
@@ -287,8 +289,7 @@ impl Widget for Grid {
             }
         }
 
-        let row_sizes =
-            Self::resolve_tracks(&self.rows, row_gap, Some(bounds.height), &row_max);
+        let row_sizes = Self::resolve_tracks(&self.rows, row_gap, Some(bounds.height), &row_max);
 
         // Compute cell origins
         let mut col_origins = Vec::with_capacity(num_cols);
@@ -351,8 +352,11 @@ impl Widget for Grid {
             registry,
             fern_core::binding::BindingLevel::Relayout,
         );
-        self.row_gap
-            .register_if_bound(self_id, registry, fern_core::binding::BindingLevel::Relayout);
+        self.row_gap.register_if_bound(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::Relayout,
+        );
         self.child_ids.clone()
     }
 }
@@ -365,7 +369,11 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
             Size::new(self.0, self.1).into()
         }
     }

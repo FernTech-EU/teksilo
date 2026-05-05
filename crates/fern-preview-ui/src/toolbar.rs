@@ -22,11 +22,11 @@
 use fern_core::build_context::BuildContext;
 use fern_core::widget::EventContext;
 use fern_core::widget_id::WidgetId;
+use fern_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
 use fern_widgets::primitives::{Padding, ZStack};
 use fern_widgets::{
     Button, ButtonVariant, ComboBox, HStack, RectWidget, SegmentedControl, TextWidget,
 };
-use fern_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::app_state::{AppState, BackgroundMode, CanvasTheme};
 
@@ -90,8 +90,10 @@ fn build_theme_picker(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
 }
 
 fn build_background_picker(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
-    let labels: Vec<String> =
-        BackgroundMode::ALL.iter().map(|m| m.label().to_string()).collect();
+    let labels: Vec<String> = BackgroundMode::ALL
+        .iter()
+        .map(|m| m.label().to_string())
+        .collect();
     let initial_idx = BackgroundMode::ALL
         .iter()
         .position(|m| *m == state.background_mode.get())
@@ -100,10 +102,10 @@ fn build_background_picker(ctx: &mut BuildContext, state: &AppState) -> WidgetId
     {
         let bg_sig = state.background_mode.clone();
         let h = idx_sig.observe(move |i| {
-            if let Some(m) = BackgroundMode::ALL.get(*i) {
-                if bg_sig.get() != *m {
-                    bg_sig.set(*m);
-                }
+            if let Some(m) = BackgroundMode::ALL.get(*i)
+                && bg_sig.get() != *m
+            {
+                bg_sig.set(*m);
             }
         });
         ctx.own_handle(h);
@@ -111,10 +113,10 @@ fn build_background_picker(ctx: &mut BuildContext, state: &AppState) -> WidgetId
     {
         let idx_sig = idx_sig.clone();
         let h = state.background_mode.observe(move |m| {
-            if let Some(target) = BackgroundMode::ALL.iter().position(|x| x == m) {
-                if idx_sig.get() != target {
-                    idx_sig.set(target);
-                }
+            if let Some(target) = BackgroundMode::ALL.iter().position(|x| x == m)
+                && idx_sig.get() != target
+            {
+                idx_sig.set(target);
             }
         });
         ctx.own_handle(h);
@@ -125,8 +127,11 @@ fn build_background_picker(ctx: &mut BuildContext, state: &AppState) -> WidgetId
 fn build_locale_picker(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
     // List of locales is fixed for v1 — `fern-i18n` ships en-US and
     // fr-FR. A real list would come from the registered I18nConfig.
-    let locales: &[(&str, Option<&str>)] =
-        &[("Default", None), ("en-US", Some("en-US")), ("fr-FR", Some("fr-FR"))];
+    let locales: &[(&str, Option<&str>)] = &[
+        ("Default", None),
+        ("en-US", Some("en-US")),
+        ("fr-FR", Some("fr-FR")),
+    ];
     let mut row = HStack::new().spacing(4.0);
     for (label, locale_str) in locales {
         let locale_str_owned: Option<String> = locale_str.map(|s| s.to_string());

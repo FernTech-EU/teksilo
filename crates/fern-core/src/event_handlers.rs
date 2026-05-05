@@ -63,8 +63,7 @@ pub(crate) struct EventHandlers {
     /// The focused widget itself does NOT see its own
     /// `on_key_preview` — set `on_key` on the target if you need a
     /// per-widget hook.
-    pub on_key_preview:
-        Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
+    pub on_key_preview: Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
     pub on_focus: Option<Box<dyn FnMut(bool, &mut EventContext)>>,
     pub on_pointer_event: Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
     pub on_scroll: Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,

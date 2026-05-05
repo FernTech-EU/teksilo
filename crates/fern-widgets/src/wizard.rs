@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use fern_canvas::{Rect, Size, SizeProposal};
+use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
@@ -172,7 +172,8 @@ impl Widget for WizardHeader {
         let title = current_step.map({
             let steps = steps.clone();
             move |index| {
-                steps.get(*index)
+                steps
+                    .get(*index)
                     .map(|step| step.title.clone())
                     .unwrap_or_default()
             }
@@ -180,7 +181,8 @@ impl Widget for WizardHeader {
         let supporting_text = current_step.map({
             let steps = steps.clone();
             move |index| {
-                steps.get(*index)
+                steps
+                    .get(*index)
                     .and_then(|step| step.supporting_text.clone())
                     .unwrap_or_default()
             }
@@ -188,7 +190,8 @@ impl Widget for WizardHeader {
         let show_supporting = current_step.map({
             let steps = steps.clone();
             move |index| {
-                steps.get(*index)
+                steps
+                    .get(*index)
                     .and_then(|step| step.supporting_text.as_ref())
                     .is_some_and(|text| !text.is_empty())
             }
@@ -237,10 +240,15 @@ impl Widget for WizardHeader {
         vec![root]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -399,7 +407,10 @@ impl Widget for WizardFooter {
             *finish_focus_id.borrow_mut() = Some(finish_id);
 
             ctx.visible_when(back_id, current_step.map(move |index| *index > 0));
-            ctx.visible_when(next_id, current_step.map(move |index| *index + 1 < total_steps));
+            ctx.visible_when(
+                next_id,
+                current_step.map(move |index| *index + 1 < total_steps),
+            );
             ctx.visible_when(
                 finish_id,
                 current_step.map(move |index| *index + 1 >= total_steps),
@@ -424,10 +435,15 @@ impl Widget for WizardFooter {
         self.root_child_id.into_iter().collect()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -501,15 +517,12 @@ impl Widget for WizardFlow {
 
         let mut switcher = Switcher::new(self.current_step.clone());
         for step in &self.steps {
-            let factory = step
-                .content_factory
-                .as_ref()
-                .unwrap_or_else(|| {
-                    panic!(
-                        "WizardStep \"{}\" requires .content(...) — no content factory was set",
-                        step.title
-                    )
-                });
+            let factory = step.content_factory.as_ref().unwrap_or_else(|| {
+                panic!(
+                    "WizardStep \"{}\" requires .content(...) — no content factory was set",
+                    step.title
+                )
+            });
             switcher = switcher.child_boxed(factory());
         }
         let switcher_id = ctx.add(switcher);
@@ -538,10 +551,15 @@ impl Widget for WizardFlow {
         vec![root]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -870,10 +888,15 @@ impl Widget for Wizard {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(140.0, 40.0)).into()
+            .unwrap_or_else(|| proposal.resolve(140.0, 40.0))
+            .into()
     }
 
     fn place_children(
@@ -901,6 +924,7 @@ impl Widget for Wizard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fern_canvas::Size;
     use fern_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
     use fern_core::widget_tree::WidgetTree;
     use fern_core::{ModalContent, ModalPresentation};
@@ -910,7 +934,11 @@ mod tests {
     struct FixedLeaf(f32, f32);
 
     impl Widget for FixedLeaf {
-        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
             Size::new(self.0, self.1).into()
         }
     }
@@ -919,20 +947,30 @@ mod tests {
     fn wizard_queues_modal_request() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(
-            Wizard::new_literal("Open wizard").step(
-                WizardStep::new_literal("Details").content(|| FixedLeaf(220.0, 120.0)),
-            ),
+            Wizard::new_literal("Open wizard")
+                .step(WizardStep::new_literal("Details").content(|| FixedLeaf(220.0, 120.0))),
         );
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open wizard").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(trigger),
+            target_node: fern_core::accessibility::root_node_id(),
+            data: None,
+        });
 
         let requests = tree.drain_pending_modal_requests();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].request.presentation, ModalPresentation::Auto);
-        assert_eq!(requests[0].request.close_behavior, ModalCloseBehavior::Manual);
-        assert!(matches!(requests[0].request.content, ModalContent::Deferred(_)));
+        assert_eq!(
+            requests[0].request.close_behavior,
+            ModalCloseBehavior::Manual
+        );
+        assert!(matches!(
+            requests[0].request.content,
+            ModalContent::Deferred(_)
+        ));
     }
 
     #[test]
@@ -961,7 +999,12 @@ mod tests {
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let launch = tree.find_by_label("Launch").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(launch), target_node: fern_core::accessibility::root_node_id(), data: None });
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(launch),
+            target_node: fern_core::accessibility::root_node_id(),
+            data: None,
+        });
 
         let request = tree.drain_pending_modal_requests().pop().unwrap().request;
         let content_id = match request.content {
@@ -984,13 +1027,23 @@ mod tests {
         assert!(tree.find_by_label("Step 1 of 2").is_some());
 
         let next = tree.find_by_label("Next").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(next), target_node: fern_core::accessibility::root_node_id(), data: None });
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(next),
+            target_node: fern_core::accessibility::root_node_id(),
+            data: None,
+        });
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         assert!(tree.find_by_label("Step 2 of 2").is_some());
 
         let finish = tree.find_by_label("Create").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(finish), target_node: fern_core::accessibility::root_node_id(), data: None });
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(finish),
+            target_node: fern_core::accessibility::root_node_id(),
+            data: None,
+        });
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         assert!(*finished.borrow());

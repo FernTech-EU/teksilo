@@ -12,7 +12,7 @@
 //! produces a `PendingChild`, which Category A containers already know
 //! how to route through their `child()` / `add_child()` path.
 
-use fern_canvas::{Canvas, Rect, Size, SizeProposal};
+use fern_canvas::{Canvas, Rect, SizeProposal};
 
 use crate::accessibility::AccessNodeBuilder;
 use crate::build_context::BuildContext;
@@ -38,11 +38,15 @@ impl<L: Widget, R: Widget> Widget for FernBranch<L, R> {
         }
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> crate::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> crate::widget::LayoutResponse {
         match self {
             FernBranch::L(w) => w.layout_response(proposal, ctx),
             FernBranch::R(w) => w.layout_response(proposal, ctx),
-        }.into()
+        }
     }
 
     fn place_children(
@@ -128,12 +132,16 @@ impl<A: Widget, B: Widget, C: Widget> Widget for FernBranch3<A, B, C> {
         }
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> crate::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> crate::widget::LayoutResponse {
         match self {
             FernBranch3::A(w) => w.layout_response(proposal, ctx),
             FernBranch3::B(w) => w.layout_response(proposal, ctx),
             FernBranch3::C(w) => w.layout_response(proposal, ctx),
-        }.into()
+        }
     }
 
     fn place_children(
@@ -229,13 +237,17 @@ impl<A: Widget, B: Widget, C: Widget, D: Widget> Widget for FernBranch4<A, B, C,
         }
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> crate::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> crate::widget::LayoutResponse {
         match self {
             FernBranch4::A(w) => w.layout_response(proposal, ctx),
             FernBranch4::B(w) => w.layout_response(proposal, ctx),
             FernBranch4::C(w) => w.layout_response(proposal, ctx),
             FernBranch4::D(w) => w.layout_response(proposal, ctx),
-        }.into()
+        }
     }
 
     fn place_children(

@@ -29,13 +29,11 @@ const DEFAULT_CANVAS_SIZE: (u32, u32) = (1024, 768);
 /// directory is created on demand. Returns the saved path or a
 /// human-readable error.
 pub fn export_current(state: &AppState) -> Result<PathBuf, String> {
-    let (widget_id, variant_name) = match (
-        state.selected_widget.get(),
-        state.selected_variant.get(),
-    ) {
-        (Some(w), Some(v)) => (w, v),
-        _ => return Err("no widget/variant selected".into()),
-    };
+    let (widget_id, variant_name) =
+        match (state.selected_widget.get(), state.selected_variant.get()) {
+            (Some(w), Some(v)) => (w, v),
+            _ => return Err("no widget/variant selected".into()),
+        };
 
     let entry = fern_preview::find_by_id(widget_id)
         .ok_or_else(|| format!("no entry registered with id '{}'", widget_id))?;
@@ -90,10 +88,10 @@ fn output_path(
 }
 
 fn home_dir() -> Option<PathBuf> {
-    if let Ok(home) = std::env::var("HOME") {
-        if !home.is_empty() {
-            return Some(PathBuf::from(home));
-        }
+    if let Ok(home) = std::env::var("HOME")
+        && !home.is_empty()
+    {
+        return Some(PathBuf::from(home));
     }
     #[cfg(windows)]
     if let Ok(home) = std::env::var("USERPROFILE") {
@@ -116,7 +114,7 @@ async fn render_offscreen(
                 return Err(
                     "wgpu adapter unavailable — no GPU backend present for snapshot rendering"
                         .into(),
-                )
+                );
             }
         };
 
@@ -149,13 +147,14 @@ fn encode_rgba_to_png(
     width: u32,
     height: u32,
 ) -> Result<(), String> {
-    let file =
-        std::fs::File::create(path).map_err(|e| format!("create {:?}: {}", path, e))?;
+    let file = std::fs::File::create(path).map_err(|e| format!("create {:?}: {}", path, e))?;
     let writer = std::io::BufWriter::new(file);
     let mut encoder = png::Encoder::new(writer, width, height);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
-    let mut writer = encoder.write_header().map_err(|e| format!("png header: {}", e))?;
+    let mut writer = encoder
+        .write_header()
+        .map_err(|e| format!("png header: {}", e))?;
     writer
         .write_image_data(rgba)
         .map_err(|e| format!("png write: {}", e))?;

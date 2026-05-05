@@ -63,12 +63,12 @@ pub mod prelude {
     // Core widget types
     pub use fern_core::{
         AccessNodeBuilder, AccessSubtreeMode, AccessibilityOverrides, Action, AnimationSpec,
-        BuildContext, ButtonMask, CursorIcon, EventContext, EventResponse, FernBranch,
-        FernBranch3, FernBranch4, FocusPolicy, Intent, IntentKind, IntentResponse,
-        IntoFernChild, IntoFernCondition, Key, KeyStroke, LayoutContext, LayoutResponse,
-        ModalCloseBehavior, ModalPresentation, Modifiers, PaintContext, PointerButton, Prop,
-        Shortcut, ShortcutRegistry, ShortcutScope, Signal, TapEvent, Widget, WidgetBuilder,
-        WidgetEvent, WidgetId,
+        BuildContext, ButtonMask, CursorIcon, EventContext, EventResponse, FernBranch, FernBranch3,
+        FernBranch4, FocusPolicy, Intent, IntentKind, IntentResponse, IntoFernChild,
+        IntoFernCondition, Key, KeyStroke, LayoutContext, LayoutResponse, ModalCloseBehavior,
+        ModalPresentation, Modifiers, PaintContext, PointerButton, Prop, Shortcut,
+        ShortcutRegistry, ShortcutScope, Signal, TapEvent, Widget, WidgetBuilder, WidgetEvent,
+        WidgetId,
     };
 
     // Geometry (lives in fern-canvas)
@@ -90,14 +90,14 @@ pub mod prelude {
 
     // Settings (persistence layer)
     pub use fern_settings::{
-        AppPaths, MruEntry, MruList, PerWindowState, SettingsBundle, SettingsExt,
-        SettingsFile, SettingsKey, SettingsStore, WindowStateService,
+        AppPaths, MruEntry, MruList, PerWindowState, SettingsBundle, SettingsExt, SettingsFile,
+        SettingsKey, SettingsStore, WindowStateService,
     };
 
     // Multi-window API
     pub use fern_core::{
-        DecorationsMode, FernWindowId, ModalConfig, UserAttentionKind, WindowCommand,
-        WindowConfig, WindowPlacement, WindowState,
+        DecorationsMode, FernWindowId, ModalConfig, UserAttentionKind, WindowCommand, WindowConfig,
+        WindowPlacement, WindowState,
     };
 
     // i18n (architecture §12)

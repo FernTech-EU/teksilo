@@ -28,9 +28,7 @@
 //! story is stable.
 
 use fern_ui::core::widget::WidgetPlacement;
-use fern_ui::i18n::{
-    DateStyle, FernDateTime, FernDateTimeFormatter, NumberFormatter, tr_signal,
-};
+use fern_ui::i18n::{DateStyle, FernDateTime, FernDateTimeFormatter, NumberFormatter, tr_signal};
 use fern_ui::prelude::*;
 use fern_ui::widgets::{Button, ButtonVariant, HStack, Panel, TextWidget, VStack};
 
@@ -149,12 +147,9 @@ impl Widget for Root {
         // `ar-SA`, `tree.set_layout_direction(RightToLeft)` changes how
         // `HStack` resolves leading/trailing, visibly reversing the
         // button order on screen.
-        let leading_btn = ctx.add(
-            Button::new(tr!(leading_button())).style(ButtonVariant::Regular),
-        );
-        let trailing_btn = ctx.add(
-            Button::new(tr!(trailing_button())).style(ButtonVariant::Regular),
-        );
+        let leading_btn = ctx.add(Button::new(tr!(leading_button())).style(ButtonVariant::Regular));
+        let trailing_btn =
+            ctx.add(Button::new(tr!(trailing_button())).style(ButtonVariant::Regular));
         let direction_row = ctx.add(
             HStack::new()
                 .spacing(12.0)
@@ -215,9 +210,7 @@ impl Widget for Root {
         // Derive a 0..1 ratio from the price so the percent row has
         // something natural to display. Caps at 100 % so very large
         // prices don't push it off-screen.
-        let ratio = self
-            .price
-            .map(|p| (p / 2000.0).clamp(0.0, 1.0));
+        let ratio = self.price.map(|p| (p / 2000.0).clamp(0.0, 1.0));
         let percent_value = NumberFormatter::new()
             .percent()
             .fraction_digits(0, 1)
@@ -232,10 +225,8 @@ impl Widget for Root {
         let signal_date_row = formatting_row(ctx, &theme, "Date:", date_value);
 
         // ---- tr_signal! row (everything-reactive) ----
-        let cart_summary_signal: Signal<String> = tr_signal!(cart_summary(
-            count = self.count,
-            price = self.price,
-        ));
+        let cart_summary_signal: Signal<String> =
+            tr_signal!(cart_summary(count = self.count, price = self.price,));
         let cart_summary_text = ctx.add(
             TextWidget::new_literal("")
                 .bind_text(cart_summary_signal)
@@ -250,16 +241,20 @@ impl Widget for Root {
                 .color(theme.colors.text_secondary),
         );
         let price_minus = ctx.add(
-            Button::new_literal("− 100").style(ButtonVariant::Regular).on_activate_fn({
-                let price = self.price.clone();
-                move |_| price.set(price.get() - 100.0)
-            }),
+            Button::new_literal("− 100")
+                .style(ButtonVariant::Regular)
+                .on_activate_fn({
+                    let price = self.price.clone();
+                    move |_| price.set(price.get() - 100.0)
+                }),
         );
         let price_plus = ctx.add(
-            Button::new_literal("+ 100").style(ButtonVariant::Regular).on_activate_fn({
-                let price = self.price.clone();
-                move |_| price.set(price.get() + 100.0)
-            }),
+            Button::new_literal("+ 100")
+                .style(ButtonVariant::Regular)
+                .on_activate_fn({
+                    let price = self.price.clone();
+                    move |_| price.set(price.get() + 100.0)
+                }),
         );
         let price_controls = ctx.add(
             HStack::new()
@@ -275,16 +270,20 @@ impl Widget for Root {
                 .color(theme.colors.text_secondary),
         );
         let count_minus = ctx.add(
-            Button::new_literal("− 1").style(ButtonVariant::Regular).on_activate_fn({
-                let count = self.count.clone();
-                move |_| count.set((count.get() - 1).max(0))
-            }),
+            Button::new_literal("− 1")
+                .style(ButtonVariant::Regular)
+                .on_activate_fn({
+                    let count = self.count.clone();
+                    move |_| count.set((count.get() - 1).max(0))
+                }),
         );
         let count_plus = ctx.add(
-            Button::new_literal("+ 1").style(ButtonVariant::Regular).on_activate_fn({
-                let count = self.count.clone();
-                move |_| count.set(count.get() + 1)
-            }),
+            Button::new_literal("+ 1")
+                .style(ButtonVariant::Regular)
+                .on_activate_fn({
+                    let count = self.count.clone();
+                    move |_| count.set(count.get() + 1)
+                }),
         );
         let count_controls = ctx.add(
             HStack::new()
@@ -323,7 +322,8 @@ impl Widget for Root {
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -396,33 +396,25 @@ fn per_locale_currency(_ctx: &mut BuildContext) -> &'static str {
 /// error instead of a silent runtime placeholder.
 fn direction_note_label(direction: fern_ui::i18n::LayoutDirection) -> String {
     match direction {
-        fern_ui::i18n::LayoutDirection::LeftToRight => {
-            tr!(direction_note_ltr()).resolve_now()
-        }
-        fern_ui::i18n::LayoutDirection::RightToLeft => {
-            tr!(direction_note_rtl()).resolve_now()
-        }
+        fern_ui::i18n::LayoutDirection::LeftToRight => tr!(direction_note_ltr()).resolve_now(),
+        fern_ui::i18n::LayoutDirection::RightToLeft => tr!(direction_note_rtl()).resolve_now(),
     }
 }
 
 /// Initial direction label, used to seed the reactive `Signal<String>`
 /// before the first `set_locale` fires an effect. Matches what the
 /// `ctx.effect(...)` body will compute on its next run.
-fn direction_note_label_for(
-    direction: Option<&Signal<fern_ui::i18n::LayoutDirection>>,
-) -> String {
+fn direction_note_label_for(direction: Option<&Signal<fern_ui::i18n::LayoutDirection>>) -> String {
     direction
         .map(|s| s.get())
         .map(direction_note_label)
-        .unwrap_or_else(|| {
-            direction_note_label(fern_ui::i18n::LayoutDirection::LeftToRight)
-        })
+        .unwrap_or_else(|| direction_note_label(fern_ui::i18n::LayoutDirection::LeftToRight))
 }
 
 // ---------------------------------------------------------------------------
 // Entry point.
 // ---------------------------------------------------------------------------
- 
+
 /// Parse `--translation-dev LOCALE=PATH` flags from the command line.
 ///
 /// Architecture §12.6: translator hot-reload is an application-layer
@@ -456,9 +448,7 @@ fn parse_translation_dev_flags() -> Vec<(LanguageIdentifier, std::path::PathBuf)
             continue;
         };
         let Some((loc, path)) = pair.split_once('=') else {
-            eprintln!(
-                "--translation-dev expects LOCALE=PATH, got `{pair}` (missing `=`)"
-            );
+            eprintln!("--translation-dev expects LOCALE=PATH, got `{pair}` (missing `=`)");
             continue;
         };
         let Ok(parsed): Result<LanguageIdentifier, _> = loc.parse() else {

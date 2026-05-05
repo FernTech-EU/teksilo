@@ -24,10 +24,7 @@ impl WidgetTree {
     /// tests that need to mutate widget state post-layout (e.g.
     /// declaring a logical AT parent on a `SceneView` after the
     /// arena allocated the inner widget's `WidgetId`).
-    pub fn widget_as_any_mut(
-        &mut self,
-        id: WidgetId,
-    ) -> Option<&mut dyn std::any::Any> {
+    pub fn widget_as_any_mut(&mut self, id: WidgetId) -> Option<&mut dyn std::any::Any> {
         self.arena
             .get_mut(id)
             .and_then(|node| node.widget.as_any_mut())
@@ -129,7 +126,11 @@ mod tests {
     struct FixedWidget(f32, f32);
 
     impl Widget for FixedWidget {
-        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> crate::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
             Size::new(self.0, self.1).into()
         }
     }

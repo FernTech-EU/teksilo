@@ -41,11 +41,11 @@ use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_i18n::resolve_message_widget;
 
-use crate::common::datetime::pattern::{
-    format_value, mask_for_pattern, parse_value, segment_at_position, step_time_field,
-    ParseTarget, ParsedPattern, ParsedValue,
-};
 use crate::common::datetime::Time;
+use crate::common::datetime::pattern::{
+    ParseTarget, ParsedPattern, ParsedValue, format_value, mask_for_pattern, parse_value,
+    segment_at_position, step_time_field,
+};
 use crate::date_edit::ValidationBehavior;
 use crate::primitives::text_input_field::{ValidationFeedback, ValidationOutcome};
 use crate::text_input::TextInput;
@@ -263,10 +263,10 @@ impl Widget for TimeEdit {
             {
                 let src_clone = src;
                 ctx.effect(&self.value, move |v| {
-                    if let Some(t) = v {
-                        if src_clone.get() != *t {
-                            src_clone.set(*t);
-                        }
+                    if let Some(t) = v
+                        && src_clone.get() != *t
+                    {
+                        src_clone.set(*t);
                     }
                 });
             }
@@ -349,21 +349,17 @@ impl Widget for TimeEdit {
                         ),
                     };
                 }
-                if validation_behavior == ValidationBehavior::AutoCorrect {
-                    if let Some((corrected, msg)) =
+                if validation_behavior == ValidationBehavior::AutoCorrect
+                    && let Some((corrected, msg)) =
                         try_clamp_time_recovery(&pattern, trimmed, min, max)
-                    {
-                        return ValidationOutcome::Corrected {
-                            corrected,
-                            message: msg,
-                        };
-                    }
+                {
+                    return ValidationOutcome::Corrected {
+                        corrected,
+                        message: msg,
+                    };
                 }
                 ValidationOutcome::Invalid {
-                    message: resolve_message_widget(
-                        "time-edit-validation-not-a-time",
-                        &[],
-                    ),
+                    message: resolve_message_widget("time-edit-validation-not-a-time", &[]),
                 }
             })
         };
@@ -434,10 +430,10 @@ impl Widget for TimeEdit {
                     return true;
                 }
                 for tok in &pattern_for_filter.tokens {
-                    if let crate::common::datetime::pattern::PatternToken::Literal(s) = tok {
-                        if s.chars().any(|x| x == c) {
-                            return true;
-                        }
+                    if let crate::common::datetime::pattern::PatternToken::Literal(s) = tok
+                        && s.chars().any(|x| x == c)
+                    {
+                        return true;
                     }
                 }
                 false
@@ -475,7 +471,11 @@ impl Widget for TimeEdit {
             crate::date_edit::WidthPolicy::Default => ctx.add(text_input),
             crate::date_edit::WidthPolicy::Fill => {
                 let inner_id = ctx.add(text_input);
-                ctx.add(crate::primitives::Expand::horizontal().respect_intrinsic().child_id(inner_id))
+                ctx.add(
+                    crate::primitives::Expand::horizontal()
+                        .respect_intrinsic()
+                        .child_id(inner_id),
+                )
             }
         };
         self.root_child_id = Some(root_id);
@@ -492,8 +492,7 @@ impl Widget for TimeEdit {
             let caret_setter = caret_setter_for_step.clone();
             Rc::new(move |delta: i32, ctx_evt: &mut EventContext| {
                 let caret = caret_for_step.get();
-                let Some((_, _, kind)) = segment_at_position(&pattern_for_step, caret)
-                else {
+                let Some((_, _, kind)) = segment_at_position(&pattern_for_step, caret) else {
                     return;
                 };
                 let current = value_for_step.get().unwrap_or_else(Time::midnight);
@@ -649,9 +648,7 @@ pub(crate) fn build_time_validator(
         if trimmed.is_empty() {
             return ValidationOutcome::Valid;
         }
-        if let Some(ParsedValue::Time(t)) =
-            parse_value(&pattern, trimmed, ParseTarget::TimeOnly)
-        {
+        if let Some(ParsedValue::Time(t)) = parse_value(&pattern, trimmed, ParseTarget::TimeOnly) {
             let clamped = clamp_time(t, min, max);
             let formatted = format_value(&pattern, None, Some(clamped));
             if formatted == trimmed && clamped == t {
@@ -750,10 +747,10 @@ pub(crate) fn try_clamp_time_recovery(
                 let clamped = raw_v.clamp(lo, hi);
                 if clamped != raw_v {
                     let segment_key = match kind {
-                        SegmentKind::Hour24 | SegmentKind::Hour24Short
-                        | SegmentKind::Hour12 | SegmentKind::Hour12Short => {
-                            "validation-segment-hour"
-                        }
+                        SegmentKind::Hour24
+                        | SegmentKind::Hour24Short
+                        | SegmentKind::Hour12
+                        | SegmentKind::Hour12Short => "validation-segment-hour",
                         SegmentKind::Minute | SegmentKind::MinuteShort => {
                             "validation-segment-minute"
                         }
@@ -792,10 +789,7 @@ pub(crate) fn try_clamp_time_recovery(
     let t = Time::new(hour, minute.unwrap_or(0), second.unwrap_or(0), 0).ok()?;
     let final_t = clamp_time(t, min, max);
     if final_t != t {
-        clamp_notes.push(resolve_message_widget(
-            "validation-clamped-to-range",
-            &[],
-        ));
+        clamp_notes.push(resolve_message_widget("validation-clamped-to-range", &[]));
     }
     let formatted = format_value(pattern, None, Some(final_t));
     let message = if clamp_notes.is_empty() {

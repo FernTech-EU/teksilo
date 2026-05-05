@@ -38,16 +38,14 @@ pub struct I18nConfig {
     /// `framework_locales()`. Kept as raw `'static` slices so the i18n
     /// manager can construct the widget bundle at startup exactly like
     /// the application bundle (architecture §12.13.3).
-    pub(crate) framework_locales:
-        Vec<(&'static str, &'static [&'static str])>,
+    pub(crate) framework_locales: Vec<(&'static str, &'static [&'static str])>,
     /// Application-supplied overrides for framework strings
     /// (architecture §12.13.4). Same shape as `framework_locales`, but
     /// loaded into `I18nManager.widget_overrides` — which is consulted
     /// *before* the framework bundle in the §12.13.5 lookup precedence,
     /// so an application's per-locale override takes priority over
     /// whatever fern-widgets shipped.
-    pub(crate) widget_overrides:
-        Vec<(&'static str, &'static [&'static str])>,
+    pub(crate) widget_overrides: Vec<(&'static str, &'static [&'static str])>,
 }
 
 impl Default for I18nConfig {
@@ -117,10 +115,7 @@ impl I18nConfig {
         self
     }
 
-    pub fn supported_locales(
-        mut self,
-        it: impl IntoIterator<Item = LanguageIdentifier>,
-    ) -> Self {
+    pub fn supported_locales(mut self, it: impl IntoIterator<Item = LanguageIdentifier>) -> Self {
         self.supported_locales = it.into_iter().collect();
         self
     }

@@ -127,7 +127,10 @@ pub enum TelemetryError {
     /// Backend has no query endpoint configured.
     FetchUnsupportedByBackend,
     Network(io::Error),
-    Server { status: u16, body: String },
+    Server {
+        status: u16,
+        body: String,
+    },
     /// Adapter rate-limited the export (Art. 12(3) one-month SLA
     /// applies — the controller must honor the request out-of-band).
     QuotaExceeded,
@@ -176,20 +179,15 @@ impl From<io::Error> for TelemetryError {
 // --- Consent state --------------------------------------------------
 
 /// Top-level consent state, persisted via `fern-telemetry::ConsentStore`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub enum ConsentState {
     /// Pre-decision. The widget must prompt; no events emitted.
+    #[default]
     Unknown,
     /// User granted consent for the listed scopes.
     Granted(ConsentScope),
     /// User explicitly declined. No events emitted.
     Denied,
-}
-
-impl Default for ConsentState {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 impl ConsentState {
@@ -250,10 +248,7 @@ impl ConsentScope {
 
     /// True if any toggle is on.
     pub fn any(&self) -> bool {
-        self.anonymous_metrics
-            || self.crash_reports
-            || self.feature_flags
-            || self.session_recording
+        self.anonymous_metrics || self.crash_reports || self.feature_flags || self.session_recording
     }
 }
 

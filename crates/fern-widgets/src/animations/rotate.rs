@@ -109,7 +109,9 @@ impl Rotate {
 
 impl std::fmt::Debug for Rotate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Rotate").field("origin", &self.origin).finish()
+        f.debug_struct("Rotate")
+            .field("origin", &self.origin)
+            .finish()
     }
 }
 
@@ -260,7 +262,10 @@ mod tests {
         // 90° rotation: cos=0, sin=1 → matrix linear part = [0, 1, -1, 0].
         assert!(pushes[0].m[0].abs() < 1e-3, "a (cos) should be 0");
         assert!((pushes[0].m[1] - 1.0).abs() < 1e-3, "b (sin) should be 1");
-        assert!((pushes[0].m[2] - (-1.0)).abs() < 1e-3, "c (-sin) should be -1");
+        assert!(
+            (pushes[0].m[2] - (-1.0)).abs() < 1e-3,
+            "c (-sin) should be -1"
+        );
         assert!(pushes[0].m[3].abs() < 1e-3, "d (cos) should be 0");
     }
 
@@ -346,7 +351,11 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(pushes.len(), 1, "advanced angle must emit a transform scope");
+        assert_eq!(
+            pushes.len(),
+            1,
+            "advanced angle must emit a transform scope"
+        );
     }
 
     #[test]
@@ -355,31 +364,27 @@ mod tests {
         // FixedSize(80) > ZStack > [Rotate(RectWidget), Center(FixedSize(6x6)(dot))].
         // The cube fills the ZStack slot; the dot sits at slot center.
         // After rotation, the cube must rotate around the dot.
-        use std::time::Duration;
         use crate::primitives::{Center, FixedSize, RectWidget, ZStack};
         use fern_tokens::Color;
+        use std::time::Duration;
         let angle = Signal::new_animated(0.0_f32);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(
-            FixedSize::new()
-                .bind_width(80.0)
-                .bind_height(80.0)
-                .child(
-                    ZStack::new()
-                        .child(
-                            Rotate::new(angle.clone()).child(
-                                RectWidget::new().background(Color::from_rgb(0.30, 0.55, 0.85)),
-                            ),
-                        )
-                        .child(
-                            Center::new().child(
-                                FixedSize::new()
-                                    .bind_width(6.0)
-                                    .bind_height(6.0)
-                                    .child(RectWidget::new().background(Color::BLACK)),
-                            ),
+            FixedSize::new().bind_width(80.0).bind_height(80.0).child(
+                ZStack::new()
+                    .child(
+                        Rotate::new(angle.clone())
+                            .child(RectWidget::new().background(Color::from_rgb(0.30, 0.55, 0.85))),
+                    )
+                    .child(
+                        Center::new().child(
+                            FixedSize::new()
+                                .bind_width(6.0)
+                                .bind_height(6.0)
+                                .child(RectWidget::new().background(Color::BLACK)),
                         ),
-                ),
+                    ),
+            ),
         );
         tree.layout(SizeProposal::exact(120.0, 120.0));
 
@@ -435,10 +440,10 @@ mod tests {
         let cube_center_y = cube.screen[1] + cube.screen[3] * 0.5;
 
         // All three centers (dot, cube, recovered pivot) must coincide.
-        let dot_pivot_err = (recovered_px - dot_center_x).abs()
-            + (recovered_py - dot_center_y).abs();
-        let cube_pivot_err = (recovered_px - cube_center_x).abs()
-            + (recovered_py - cube_center_y).abs();
+        let dot_pivot_err =
+            (recovered_px - dot_center_x).abs() + (recovered_py - dot_center_y).abs();
+        let cube_pivot_err =
+            (recovered_px - cube_center_x).abs() + (recovered_py - cube_center_y).abs();
         assert!(
             dot_pivot_err < 1.0,
             "pivot ({}, {}) must match DOT center ({}, {}); err = {}",
@@ -465,10 +470,10 @@ mod tests {
         // inside a ScrollArea > Padding > VStack > ... > HStack chain.
         // ScrollArea positions content children with a `bounds.origin -
         // scroll_offset` shift; a wrong pivot would surface here.
-        use std::time::Duration;
         use crate::primitives::{FixedSize, HStack, Padding, RectWidget, VStack};
         use crate::scroll_area::ScrollArea;
         use fern_tokens::Color;
+        use std::time::Duration;
         let angle = Signal::new_animated(0.0_f32);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(
@@ -551,9 +556,9 @@ mod tests {
         // animate_to ticks the angle past zero, the matrix being
         // pushed must use a pivot near the cube's actual world
         // position, not (0, 0) or stale bounds.
-        use std::time::Duration;
         use crate::primitives::{FixedSize, HStack, Padding, RectWidget, VStack};
         use fern_tokens::Color;
+        use std::time::Duration;
         let angle = Signal::new_animated(0.0_f32);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         // Mirror animations-kit: lots of vertical content above the

@@ -147,7 +147,11 @@ impl Widget for Slide {
         vec![child_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let Some(child_id) = self.child_id else {
             return (proposal.resolve(0.0, 0.0)).into();
         };
@@ -222,9 +226,7 @@ mod tests {
     fn starts_visible_when_signal_is_true() {
         let visible = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let id = tree.add(
-            Slide::new(visible.clone()).child(TextWidget::new_literal("hello")),
-        );
+        let id = tree.add(Slide::new(visible.clone()).child(TextWidget::new_literal("hello")));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -328,9 +330,7 @@ mod tests {
         let visible = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.set_accessibility_preferences(false, true, 1.0);
-        tree.add(
-            Slide::new(visible.clone()).child(TextWidget::new_literal("snap")),
-        );
+        tree.add(Slide::new(visible.clone()).child(TextWidget::new_literal("snap")));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,

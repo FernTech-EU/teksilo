@@ -18,8 +18,8 @@ use fern_ui::data::{
 };
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    CellContext, Column, ColumnWidth, GridLines, TableAlignment as Alignment,
-    TableSelectionMode, TextWidget, TreeTable,
+    CellContext, Column, ColumnWidth, GridLines, TableAlignment as Alignment, TableSelectionMode,
+    TextWidget, TreeTable,
 };
 
 #[derive(Clone, Debug)]
@@ -73,7 +73,7 @@ fn main() {
         .filter_mode(TreeFilterMode::KeepAncestors)
         .with_comparator("name", |a: &FsNode, b: &FsNode| a.name.cmp(&b.name))
         .with_comparator("size", |a, b| a.size.cmp(&b.size))
-        .with_comparator("kind", |a, b| a.kind.cmp(&b.kind))
+        .with_comparator("kind", |a, b| a.kind.cmp(b.kind))
         .with_predicate("name", |t| {
             let needle = t.to_lowercase();
             Box::new(move |n: &FsNode| n.name.to_lowercase().contains(&needle))
@@ -87,59 +87,56 @@ fn main() {
 
     FernAppBuilder::new()
         .theme(Theme::light_default())
-        .initial_window(
-            WindowConfig::new()
-                .title("TreeTable")
-                .size(900, 580)
-                .root(move |tree, _| {
-                    let proxy_for_table = proxy.clone();
-                    let table = TreeTable::from_projection(proxy_for_table.clone())
-                        .add_column(
-                            Column::<FsNode>::new("name", "Name", |row, _: &CellContext| {
-                                Box::new(TextWidget::new_literal(row.name.clone()))
-                            })
-                            .width(ColumnWidth::Flex(3.0))
-                            .sortable(true)
-                            .filterable(true),
-                        )
-                        .add_column(
-                            Column::<FsNode>::new("size", "Size", |row, _: &CellContext| {
-                                let s = if row.size == 0 {
-                                    String::new()
-                                } else {
-                                    format!("{} B", row.size)
-                                };
-                                Box::new(TextWidget::new_literal(s))
-                            })
-                            .width(ColumnWidth::Fixed(96.0))
-                            .sortable(true)
-                            .alignment(Alignment::Trailing),
-                        )
-                        .add_column(
-                            Column::<FsNode>::new("kind", "Kind", |row, _: &CellContext| {
-                                Box::new(TextWidget::new_literal(row.kind))
-                            })
-                            .width(ColumnWidth::Flex(1.0))
-                            .sortable(true)
-                            .filterable(true)
-                            .alignment(Alignment::Center),
-                        )
-                        .row_height(26.0)
-                        .alternating_rows(true)
-                        .grid_lines(GridLines::Horizontal)
-                        .selection_mode(TableSelectionMode::MultiRow)
-                        .selection(selection.clone())
-                        .tree_column("name");
+        .initial_window(WindowConfig::new().title("TreeTable").size(900, 580).root(
+            move |tree, _| {
+                let proxy_for_table = proxy.clone();
+                let table = TreeTable::from_projection(proxy_for_table.clone())
+                    .add_column(
+                        Column::<FsNode>::new("name", "Name", |row, _: &CellContext| {
+                            Box::new(TextWidget::new_literal(row.name.clone()))
+                        })
+                        .width(ColumnWidth::Flex(3.0))
+                        .sortable(true)
+                        .filterable(true),
+                    )
+                    .add_column(
+                        Column::<FsNode>::new("size", "Size", |row, _: &CellContext| {
+                            let s = if row.size == 0 {
+                                String::new()
+                            } else {
+                                format!("{} B", row.size)
+                            };
+                            Box::new(TextWidget::new_literal(s))
+                        })
+                        .width(ColumnWidth::Fixed(96.0))
+                        .sortable(true)
+                        .alignment(Alignment::Trailing),
+                    )
+                    .add_column(
+                        Column::<FsNode>::new("kind", "Kind", |row, _: &CellContext| {
+                            Box::new(TextWidget::new_literal(row.kind))
+                        })
+                        .width(ColumnWidth::Flex(1.0))
+                        .sortable(true)
+                        .filterable(true)
+                        .alignment(Alignment::Center),
+                    )
+                    .row_height(26.0)
+                    .alternating_rows(true)
+                    .grid_lines(GridLines::Horizontal)
+                    .selection_mode(TableSelectionMode::MultiRow)
+                    .selection(selection.clone())
+                    .tree_column("name");
 
-                    // Wire the proxy to the table's signals.
-                    proxy_for_table.bind_sort_signal(table.sort_signal().clone());
-                    proxy_for_table.bind_filters_signal(table.filters_signal().clone());
+                // Wire the proxy to the table's signals.
+                proxy_for_table.bind_sort_signal(table.sort_signal().clone());
+                proxy_for_table.bind_filters_signal(table.filters_signal().clone());
 
-                    // Default sort by name ascending.
-                    table.set_sort(Some("name"), SortDirection::Ascending);
+                // Default sort by name ascending.
+                table.set_sort(Some("name"), SortDirection::Ascending);
 
-                    tree.add(table)
-                }),
-        )
+                tree.add(table)
+            },
+        ))
         .run();
 }

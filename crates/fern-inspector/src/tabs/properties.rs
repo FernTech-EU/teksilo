@@ -67,7 +67,8 @@ impl Widget for PropertiesTab {
                 let _ = cb.set_text(&dump.get());
             }
         });
-        let toolbar = Padding::symmetric(2.0, 4.0).child(HStack::new().spacing(6.0).child(copy_button));
+        let toolbar =
+            Padding::symmetric(2.0, 4.0).child(HStack::new().spacing(6.0).child(copy_button));
         let rows = PropertiesRows::new(self.state.clone());
         let root = ctx.add(VStack::new().spacing(2.0).child(toolbar).child(rows));
         self.root_child_id = Some(root);
@@ -126,11 +127,9 @@ impl Widget for PropertiesRows {
         let self_id = ctx.self_id();
         // Re-layout (and therefore re-snapshot + refresh dump) on
         // selection change.
-        self.state.selected_id.bind_to(
-            self_id,
-            ctx.binding_registry(),
-            BindingLevel::Relayout,
-        );
+        self.state
+            .selected_id
+            .bind_to(self_id, ctx.binding_registry(), BindingLevel::Relayout);
 
         // Right-click on a row → fresh menu carrying that row's value.
         // The factory uses `pos.y` to pick the row (rows are uniform
@@ -154,12 +153,11 @@ impl Widget for PropertiesRows {
             // activate closure — no need to thread through Signals
             // for menu actions.
             let value = row.value.clone();
-            let copy_item = MenuItem::new_literal("Copy value")
-                .on_activate_fn(move |c| {
-                    if let Some(cb) = c.app_state::<ClipboardHandle>() {
-                        let _ = cb.set_text(&value);
-                    }
-                });
+            let copy_item = MenuItem::new_literal("Copy value").on_activate_fn(move |c| {
+                if let Some(cb) = c.app_state::<ClipboardHandle>() {
+                    let _ = cb.set_text(&value);
+                }
+            });
             Some(Box::new(MenuList::new().item(copy_item)) as Box<dyn Widget>)
         });
         ctx.apply_self_handlers(handlers);
@@ -240,7 +238,11 @@ fn collect_properties(
         });
     };
     push("type", node.widget.type_name().to_string(), out);
-    push("short_type", last_segment(node.widget.type_name()).to_string(), out);
+    push(
+        "short_type",
+        last_segment(node.widget.type_name()).to_string(),
+        out,
+    );
     push("widget_id", format!("{:?}", id), out);
     let bounds = arena.bounds(id);
     push(
@@ -252,7 +254,11 @@ fn collect_properties(
         out,
     );
     push("clips_children", node.clips_children.to_string(), out);
-    push("event_pass_through", node.event_pass_through.to_string(), out);
+    push(
+        "event_pass_through",
+        node.event_pass_through.to_string(),
+        out,
+    );
     if let Some(parent) = node.parent {
         push("parent", format!("{:?}", parent), out);
     }

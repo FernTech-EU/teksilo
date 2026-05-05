@@ -52,14 +52,13 @@ impl Widget for A11yTab {
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         let mut rows: Vec<KvRow> = Vec::new();
-        if let (Some(arena), Some(id)) = (ctx.arena(), self.state.selected_id.get()) {
-            if arena.is_active(id) {
-                if let Some(node) = arena.get(id) {
-                    let mut builder = AccessNodeBuilder::new();
-                    node.widget.accessibility(&mut builder);
-                    push_from_builder(&builder, &mut rows);
-                }
-            }
+        if let (Some(arena), Some(id)) = (ctx.arena(), self.state.selected_id.get())
+            && arena.is_active(id)
+            && let Some(node) = arena.get(id)
+        {
+            let mut builder = AccessNodeBuilder::new();
+            node.widget.accessibility(&mut builder);
+            push_from_builder(&builder, &mut rows);
         }
         let height = rows.len() as f32 * ROW_HEIGHT;
         *self.rows.borrow_mut() = rows;
@@ -74,8 +73,7 @@ impl Widget for A11yTab {
 
         for (i, row) in self.rows.borrow().iter().enumerate() {
             let y = bounds.y + (i as f32) * ROW_HEIGHT + 2.0;
-            let key_rect =
-                Rect::new(bounds.x + ROW_PADDING_X, y, KEY_COLUMN_WIDTH, ROW_HEIGHT);
+            let key_rect = Rect::new(bounds.x + ROW_PADDING_X, y, KEY_COLUMN_WIDTH, ROW_HEIGHT);
             let value_x = bounds.x + ROW_PADDING_X + KEY_COLUMN_WIDTH + ROW_PADDING_X;
             let value_rect = Rect::new(
                 value_x,

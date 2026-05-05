@@ -131,12 +131,7 @@ impl KnobSpec {
         })
     }
 
-    pub fn opt_bool(
-        self,
-        id: &'static str,
-        label: &'static str,
-        default: Option<bool>,
-    ) -> Self {
+    pub fn opt_bool(self, id: &'static str, label: &'static str, default: Option<bool>) -> Self {
         self.push(KnobDecl {
             id,
             label,
@@ -220,12 +215,7 @@ impl KnobSpec {
         })
     }
 
-    pub fn opt_text(
-        self,
-        id: &'static str,
-        label: &'static str,
-        default: Option<&str>,
-    ) -> Self {
+    pub fn opt_text(self, id: &'static str, label: &'static str, default: Option<&str>) -> Self {
         self.push(KnobDecl {
             id,
             label,
@@ -255,12 +245,7 @@ impl KnobSpec {
         })
     }
 
-    pub fn text_role(
-        self,
-        id: &'static str,
-        label: &'static str,
-        default: TextRole,
-    ) -> Self {
+    pub fn text_role(self, id: &'static str, label: &'static str, default: TextRole) -> Self {
         self.push(KnobDecl {
             id,
             label,
@@ -269,12 +254,7 @@ impl KnobSpec {
         })
     }
 
-    pub fn surface_role(
-        self,
-        id: &'static str,
-        label: &'static str,
-        default: SurfaceRole,
-    ) -> Self {
+    pub fn surface_role(self, id: &'static str, label: &'static str, default: SurfaceRole) -> Self {
         self.push(KnobDecl {
             id,
             label,
@@ -283,12 +263,7 @@ impl KnobSpec {
         })
     }
 
-    pub fn border_role(
-        self,
-        id: &'static str,
-        label: &'static str,
-        default: BorderRole,
-    ) -> Self {
+    pub fn border_role(self, id: &'static str, label: &'static str, default: BorderRole) -> Self {
         self.push(KnobDecl {
             id,
             label,
@@ -297,12 +272,7 @@ impl KnobSpec {
         })
     }
 
-    pub fn text_style(
-        self,
-        id: &'static str,
-        label: &'static str,
-        default: TextStyleRole,
-    ) -> Self {
+    pub fn text_style(self, id: &'static str, label: &'static str, default: TextStyleRole) -> Self {
         self.push(KnobDecl {
             id,
             label,
@@ -526,7 +496,9 @@ impl KnobValues {
                     values.opt_texts.insert(decl.id, Signal::new(v.clone()));
                 }
                 (KnobKind::OptText { default }, _) => {
-                    values.opt_texts.insert(decl.id, Signal::new(default.clone()));
+                    values
+                        .opt_texts
+                        .insert(decl.id, Signal::new(default.clone()));
                 }
                 (KnobKind::Choice { default: _, .. }, Some(KnobValue::Choice(v))) => {
                     values.choices.insert(decl.id, Signal::new(*v));

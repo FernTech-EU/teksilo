@@ -13,11 +13,9 @@ use fern_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{BorderRole, TextRole, TextStyleRole};
 
-use crate::axis::{auto_tick_count, nice_ticks, AxisConfig};
-use crate::layout::{carve_plot_area, CarveParams, LegendPosition};
-use crate::legend::{
-    legend_main_axis_size, orientation_for_position, paint_embedded_legend,
-};
+use crate::axis::{AxisConfig, auto_tick_count, nice_ticks};
+use crate::layout::{CarveParams, LegendPosition, carve_plot_area};
+use crate::legend::{legend_main_axis_size, orientation_for_position, paint_embedded_legend};
 use crate::palette::ChartPalette;
 use crate::series::ChartSeries;
 use crate::text::measure_text_width;
@@ -152,11 +150,16 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
         Vec::new()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         Size::new(
             proposal.width.unwrap_or(320.0),
             proposal.height.unwrap_or(200.0),
-        ).into()
+        )
+        .into()
     }
 
     fn place_children(
@@ -207,7 +210,13 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
 
         let legend_orientation = orientation_for_position(self.legend_position);
         let legend_size = if self.show_legend {
-            legend_main_axis_size(canvas.text_backend(), &series_vec, style, &label_style, legend_orientation)
+            legend_main_axis_size(
+                canvas.text_backend(),
+                &series_vec,
+                style,
+                &label_style,
+                legend_orientation,
+            )
         } else {
             0.0
         };
@@ -498,8 +507,8 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
             BarOrientation::Vertical => {
                 let total_group_gap = self.group_gap * (n as f32 + 1.0);
                 let group_w = ((plot.width - total_group_gap) / n as f32).max(style.bar_min_width);
-                let bar_w =
-                    ((group_w - self.min_bar_gap * (s as f32 - 1.0)) / s as f32).max(style.bar_min_width);
+                let bar_w = ((group_w - self.min_bar_gap * (s as f32 - 1.0)) / s as f32)
+                    .max(style.bar_min_width);
                 let baseline_y = y_to_pixel(0.0_f32.max(y_lo).min(y_hi), y_lo, y_hi, plot);
                 for (gi, _) in categories.iter().enumerate() {
                     let group_x = plot.x + self.group_gap + gi as f32 * (group_w + self.group_gap);
@@ -535,8 +544,8 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
             BarOrientation::Horizontal => {
                 let total_group_gap = self.group_gap * (n as f32 + 1.0);
                 let group_h = ((plot.height - total_group_gap) / n as f32).max(style.bar_min_width);
-                let bar_h =
-                    ((group_h - self.min_bar_gap * (s as f32 - 1.0)) / s as f32).max(style.bar_min_width);
+                let bar_h = ((group_h - self.min_bar_gap * (s as f32 - 1.0)) / s as f32)
+                    .max(style.bar_min_width);
                 let baseline_x = value_to_pixel_h(0.0_f32.max(y_lo).min(y_hi), y_lo, y_hi, plot);
                 for (gi, _) in categories.iter().enumerate() {
                     let group_y = plot.y + self.group_gap + gi as f32 * (group_h + self.group_gap);
@@ -775,7 +784,10 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
             let w = measure_text_width(canvas, title, label_style);
             let rect = Rect::new(
                 plot.x + plot.width * 0.5 - w * 0.5,
-                plot.bottom() + style.axis_tick_length + style.axis_label_gap + label_style.size * 1.4,
+                plot.bottom()
+                    + style.axis_tick_length
+                    + style.axis_label_gap
+                    + label_style.size * 1.4,
                 w,
                 label_style.size * 1.2,
             );
@@ -807,7 +819,6 @@ fn measure_max_label_width(
         .map(|t| measure_text_width(canvas, &axis.format(*t), style))
         .fold(0.0_f32, f32::max)
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -904,7 +915,11 @@ mod tests {
     #[test]
     fn legend_band_reserved_when_show_legend() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(BarChart::new(sample_series()).legend(true).legend_position(LegendPosition::Bottom));
+        tree.add(
+            BarChart::new(sample_series())
+                .legend(true)
+                .legend_position(LegendPosition::Bottom),
+        );
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let frame = tree.render();
         // Legend renders one swatch (rounded rect) per series. Single series → ≥1 shape.

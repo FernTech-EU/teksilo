@@ -27,7 +27,7 @@ use fern_core::widget::{
 };
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, SurfaceRole, TextStyleRole};
+use fern_tokens::{SurfaceRole, TextStyleRole};
 
 use crate::menu_context::MenuContext;
 use crate::primitives::{HStack, Padding, RectWidget, Spacer, TextWidget, ZStack};
@@ -153,13 +153,16 @@ impl Widget for MenuBarTrigger {
         // TextRole::Secondary, which is a different hue). Keep a direct
         // `theme_signal` map for the blended case.
         let theme_signal = ctx.theme_signal();
-        let text_color = menu_ctx.open_index.zip(&theme_signal).map(move |(open, t)| {
-            if *open == Some(index) {
-                t.colors.text_primary
-            } else {
-                t.colors.text_primary.with_alpha(0.8)
-            }
-        });
+        let text_color = menu_ctx
+            .open_index
+            .zip(&theme_signal)
+            .map(move |(open, t)| {
+                if *open == Some(index) {
+                    t.colors.text_primary
+                } else {
+                    t.colors.text_primary.with_alpha(0.8)
+                }
+            });
 
         let label = TextWidget::new_literal(&self.label)
             .style(TextStyleRole::Small)
@@ -168,7 +171,8 @@ impl Widget for MenuBarTrigger {
             .a11y_hidden();
         let label_id = ctx.add(label);
 
-        let padding = Padding::symmetric(4.0, menu_style.item_padding_horizontal).child_id(label_id);
+        let padding =
+            Padding::symmetric(4.0, menu_style.item_padding_horizontal).child_id(label_id);
         let padding_id = ctx.add(padding);
 
         let bg = RectWidget::new()
@@ -250,13 +254,18 @@ impl Widget for MenuBarTrigger {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         match self.root_child_id {
             Some(id) => ctx
                 .child_size(id, proposal)
                 .unwrap_or_else(|| proposal.resolve(0.0, 28.0)),
             None => proposal.resolve(60.0, 28.0),
-        }.into()
+        }
+        .into()
     }
 
     fn place_children(
@@ -357,10 +366,15 @@ impl Widget for MenuOverlayHost {
         vec![id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         self.inner_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -483,7 +497,11 @@ impl Widget for MenuBar {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         match self.root_child_id {
             Some(id) => {
                 let content_proposal = SizeProposal {
@@ -496,7 +514,8 @@ impl Widget for MenuBar {
                 Size::new(proposal.width.unwrap_or(size.width), size.height)
             }
             None => proposal.resolve(0.0, 0.0),
-        }.into()
+        }
+        .into()
     }
 
     fn place_children(
@@ -524,4 +543,3 @@ impl Widget for MenuBar {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
-

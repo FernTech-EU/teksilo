@@ -69,11 +69,8 @@ impl Root {
     fn new() -> Self {
         // Seed the dynamic-model with three opened docs so the
         // showcase isn't empty on first run.
-        let model: ListModel<TabHandle> = ListModel::from_vec(vec![
-            new_doc_tab(1),
-            new_doc_tab(2),
-            new_doc_tab(3),
-        ]);
+        let model: ListModel<TabHandle> =
+            ListModel::from_vec(vec![new_doc_tab(1), new_doc_tab(2), new_doc_tab(3)]);
         Self {
             welcome_id: TabId::fresh(),
             locked_id: TabId::fresh(),
@@ -232,7 +229,9 @@ impl Widget for Root {
                 self.locked_id,
                 TabInfo::new()
                     .title(LocalizedString::literal("Locked"))
-                    .tooltip(LocalizedString::literal("Disabled tabs cannot be activated"))
+                    .tooltip(LocalizedString::literal(
+                        "Disabled tabs cannot be activated",
+                    ))
                     .enabled(false),
                 locked,
             )
@@ -272,13 +271,11 @@ impl Widget for Root {
                 }
                 let mut found = "Document".to_string();
                 for i in 0..model.len() {
-                    if let Some(label) =
-                        model.with_item(i, |h| (h.id, h.info_title_cloned()))
+                    if let Some(label) = model.with_item(i, |h| (h.id, h.info_title_cloned()))
+                        && label.0 == id
                     {
-                        if label.0 == id {
-                            found = label.1;
-                            break;
-                        }
+                        found = label.1;
+                        break;
                     }
                 }
                 found
@@ -333,29 +330,25 @@ impl Widget for Root {
         // TabWidget collapses to its natural height and the
         // window's vertical area shows mostly empty Panel.
         let tabs_filling = ctx.add(
-            fern_ui::widgets::Expand::vertical().respect_intrinsic().child_id(tabs),
+            fern_ui::widgets::Expand::vertical()
+                .respect_intrinsic()
+                .child_id(tabs),
         );
         let root_id = ctx.add(
-            Panel::new()
-                .padding(20.0)
-                .child(
-                    VStack::new()
-                        .spacing(12.0)
-                        .add_child(header)
-                        .add_child(tabs_filling)
-                        .add_child(status),
-                ),
+            Panel::new().padding(20.0).child(
+                VStack::new()
+                    .spacing(12.0)
+                    .add_child(header)
+                    .add_child(tabs_filling)
+                    .add_child(status),
+            ),
         );
 
         self.root_child_id = Some(root_id);
         vec![root_id]
     }
 
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        ctx: &LayoutContext,
-    ) -> LayoutResponse {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
             .unwrap_or_else(|| proposal.resolve(0.0, 0.0))

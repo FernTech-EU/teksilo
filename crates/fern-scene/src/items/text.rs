@@ -52,10 +52,7 @@ impl TextItem {
     /// resolved eagerly via [`LocalizedString::resolve_now`] at
     /// construction; locale changes rebuild the composite parent,
     /// which re-creates this `TextItem` with a fresh translation.
-    pub fn new(
-        text: impl Into<fern_i18n::LocalizedString>,
-        local_bounds: Rect,
-    ) -> Self {
+    pub fn new(text: impl Into<fern_i18n::LocalizedString>, local_bounds: Rect) -> Self {
         let ls: fern_i18n::LocalizedString = text.into();
         Self {
             text: TextSource::Static(ls.resolve_now()),

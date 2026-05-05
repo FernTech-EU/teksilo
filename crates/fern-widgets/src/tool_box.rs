@@ -30,7 +30,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use fern_canvas::{Rect, Size, SizeProposal};
+use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
 use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
@@ -96,10 +96,7 @@ impl std::fmt::Debug for ToolBoxItem {
 impl ToolBoxItem {
     /// Build an item with an inline content widget. The label may come from
     /// `tr!(...)` (translated) or `LocalizedString::literal(...)`.
-    pub fn new(
-        label: impl Into<LocalizedString>,
-        content: impl Widget + 'static,
-    ) -> Self {
+    pub fn new(label: impl Into<LocalizedString>, content: impl Widget + 'static) -> Self {
         let ls: LocalizedString = label.into();
         Self {
             label: ls.resolve_now(),
@@ -112,10 +109,7 @@ impl ToolBoxItem {
     }
 
     /// Build an item whose content is a pre-registered widget id.
-    pub fn new_id(
-        label: impl Into<LocalizedString>,
-        content_id: WidgetId,
-    ) -> Self {
+    pub fn new_id(label: impl Into<LocalizedString>, content_id: WidgetId) -> Self {
         let ls: LocalizedString = label.into();
         Self {
             label: ls.resolve_now(),
@@ -206,36 +200,25 @@ impl ToolBox {
     /// Append an item with an inline content widget. Convenience wrapper
     /// around [`ToolBox::add`] that skips the [`ToolBoxItem`] builder for
     /// the common label-plus-content case.
-    pub fn item(
-        self,
-        label: impl Into<LocalizedString>,
-        content: impl Widget + 'static,
-    ) -> Self {
+    pub fn item(self, label: impl Into<LocalizedString>, content: impl Widget + 'static) -> Self {
         self.add(ToolBoxItem::new(label, content))
     }
 
     /// Append an item whose content is a pre-registered widget id.
-    pub fn item_id(
-        self,
-        label: impl Into<LocalizedString>,
-        content_id: WidgetId,
-    ) -> Self {
+    pub fn item_id(self, label: impl Into<LocalizedString>, content_id: WidgetId) -> Self {
         self.add(ToolBoxItem::new_id(label, content_id))
     }
 
     /// Shim (permanent, `#[doc(hidden)]`) — raw-label convenience for
     /// tests and scaffolding.
     #[doc(hidden)]
-    pub fn item_literal(
-        self,
-        label: impl Into<String>,
-        content: impl Widget + 'static,
-    ) -> Self {
+    pub fn item_literal(self, label: impl Into<String>, content: impl Widget + 'static) -> Self {
         self.item(LocalizedString::literal(label), content)
     }
 
     /// Append a fully-built [`ToolBoxItem`] — required when an icon,
     /// tooltip, or disabled flag is needed.
+    #[allow(clippy::should_implement_trait)]
     pub fn add(mut self, item: ToolBoxItem) -> Self {
         self.items.push(item);
         self
@@ -279,8 +262,7 @@ fn next_enabled_index(enabled: &[bool], current: usize, direction: isize) -> usi
     let len = enabled.len() as isize;
     let mut offset = 1_isize;
     while offset <= len {
-        let candidate =
-            (current as isize + direction * offset).rem_euclid(len) as usize;
+        let candidate = (current as isize + direction * offset).rem_euclid(len) as usize;
         if enabled[candidate] {
             return candidate;
         }
@@ -379,7 +361,8 @@ impl Widget for ToolBoxHeader {
         let focus_origin: Signal<Option<fern_core::focus::FocusOrigin>> = ctx.signal(None);
 
         let registry = ctx.binding_registry();
-        self.selected.bind_to(self_id, registry, BindingLevel::RepaintOnly);
+        self.selected
+            .bind_to(self_id, registry, BindingLevel::RepaintOnly);
         interaction.bind_to(self_id, registry, BindingLevel::RepaintOnly);
         focus_origin.bind_to(self_id, registry, BindingLevel::RepaintOnly);
 
@@ -435,8 +418,7 @@ impl Widget for ToolBoxHeader {
                 SurfaceRole::Transparent
             }
         });
-        let indicator_rect_id =
-            ctx.add(RectWidget::new().background(indicator_bg));
+        let indicator_rect_id = ctx.add(RectWidget::new().background(indicator_bg));
         let indicator_id = ctx.add(
             FixedSize::new()
                 .bind_width(style.indicator_thickness)
@@ -461,19 +443,14 @@ impl Widget for ToolBoxHeader {
 
         // Optional trailing-slot widget. Registered here so its id can
         // be placed between the spacer and the chevrons.
-        let trailing_id = self
-            .pending_trailing
-            .take()
-            .map(|w| ctx.add_boxed(w));
+        let trailing_id = self.pending_trailing.take().map(|w| ctx.add_boxed(w));
 
         // Two chevron glyphs toggled via `visible_when` — cheaper than
         // re-rendering a single glyph at runtime.
-        let chevron_down_id = ctx.add(
-            IconWidget::chevron_down(style.chevron_size).bind_color(text_role.clone()),
-        );
-        let chevron_right_id = ctx.add(
-            IconWidget::chevron_right(style.chevron_size).bind_color(text_role),
-        );
+        let chevron_down_id =
+            ctx.add(IconWidget::chevron_down(style.chevron_size).bind_color(text_role.clone()));
+        let chevron_right_id =
+            ctx.add(IconWidget::chevron_right(style.chevron_size).bind_color(text_role));
         ctx.visible_when(chevron_down_id, is_selected.clone());
         ctx.visible_when(chevron_right_id, is_selected.map(|v| !*v));
 
@@ -488,9 +465,7 @@ impl Widget for ToolBoxHeader {
         if let Some(id) = trailing_id {
             row = row.add_child(id);
         }
-        row = row
-            .add_child(chevron_down_id)
-            .add_child(chevron_right_id);
+        row = row.add_child(chevron_down_id).add_child(chevron_right_id);
         let row_id = ctx.add(row);
 
         // Wrap the row in horizontal padding. The indicator sits at
@@ -520,9 +495,8 @@ impl Widget for ToolBoxHeader {
                 .bind_border_color(focus_border_color)
                 .bind_border_width(focus_border_width),
         );
-        let focus_padded_id = ctx.add(
-            crate::primitives::Padding::uniform(focus_inset).child_id(focus_rect_id),
-        );
+        let focus_padded_id =
+            ctx.add(crate::primitives::Padding::uniform(focus_inset).child_id(focus_rect_id));
         let zstack_id = ctx.add(
             ZStack::new()
                 .add_child(bg_rect_id)
@@ -531,9 +505,7 @@ impl Widget for ToolBoxHeader {
         );
 
         // Enforce the Int UI 28 dp row height.
-        let root_id = ctx.add(
-            MinSize::new(0.0, style.header_min_height).child_id(zstack_id),
-        );
+        let root_id = ctx.add(MinSize::new(0.0, style.header_min_height).child_id(zstack_id));
         self.root_child_id = Some(root_id);
 
         // Attach rich tooltip if configured.
@@ -608,7 +580,10 @@ impl Widget for ToolBoxHeader {
                         interaction_for_key.set(HeaderInteraction::Hovered);
                         EventResponse::Handled
                     }
-                    WidgetEvent::KeyDown { key: Key::ArrowDown, .. } => {
+                    WidgetEvent::KeyDown {
+                        key: Key::ArrowDown,
+                        ..
+                    } => {
                         let headers = header_ids_for_key.borrow();
                         if headers.is_empty() {
                             return EventResponse::Ignored;
@@ -619,7 +594,9 @@ impl Widget for ToolBoxHeader {
                         }
                         EventResponse::Handled
                     }
-                    WidgetEvent::KeyDown { key: Key::ArrowUp, .. } => {
+                    WidgetEvent::KeyDown {
+                        key: Key::ArrowUp, ..
+                    } => {
                         let headers = header_ids_for_key.borrow();
                         if headers.is_empty() {
                             return EventResponse::Ignored;
@@ -655,8 +632,7 @@ impl Widget for ToolBoxHeader {
             })
             .on_access_action(move |action, _ctx| {
                 match action {
-                    fern_core::accesskit::Action::Click
-                    | fern_core::accesskit::Action::Expand => {
+                    fern_core::accesskit::Action::Click | fern_core::accesskit::Action::Expand => {
                         if enabled {
                             selected_access.set(idx);
                             EventResponse::Handled
@@ -683,7 +659,11 @@ impl Widget for ToolBoxHeader {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         if let Some(root) = self.root_child_id
             && let Some(size) = ctx.child_size(root, proposal)
         {
@@ -790,7 +770,11 @@ impl Widget for ToolBoxPanel {
         vec![root]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         if let Some(root) = self.root_child_id
             && let Some(size) = ctx.child_size(root, proposal)
         {
@@ -838,8 +822,7 @@ impl Widget for ToolBoxPanel {
 impl Widget for ToolBox {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let items = std::mem::take(&mut self.items);
-        let enabled_flags: Rc<Vec<bool>> =
-            Rc::new(items.iter().map(|i| i.enabled).collect());
+        let enabled_flags: Rc<Vec<bool>> = Rc::new(items.iter().map(|i| i.enabled).collect());
         let header_ids: Rc<RefCell<Vec<WidgetId>>> =
             Rc::new(RefCell::new(Vec::with_capacity(items.len())));
         let panel_ids: Rc<RefCell<Vec<WidgetId>>> =
@@ -886,7 +869,11 @@ impl Widget for ToolBox {
         vec![root]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         if let Some(root) = self.root_child_id
             && let Some(size) = ctx.child_size(root, proposal)
         {
@@ -999,7 +986,10 @@ mod tests {
 
         let panel_a_before = t.bounds(panel_id(&t, tb, 0)).height;
         let panel_b_before = t.bounds(panel_id(&t, tb, 1)).height;
-        assert!(panel_a_before > 0.0, "active panel should have nonzero height");
+        assert!(
+            panel_a_before > 0.0,
+            "active panel should have nonzero height"
+        );
         assert!(panel_b_before < 0.5, "inactive panel should be collapsed");
 
         selected.set(1);
@@ -1039,9 +1029,7 @@ mod tests {
         let tb = t.add(
             ToolBox::new(selected.clone())
                 .item_literal("A", TextWidget::new_literal("A"))
-                .add(
-                    ToolBoxItem::new_literal("B", TextWidget::new_literal("B")).enabled(false),
-                )
+                .add(ToolBoxItem::new_literal("B", TextWidget::new_literal("B")).enabled(false))
                 .item_literal("C", TextWidget::new_literal("C")),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
@@ -1058,9 +1046,7 @@ mod tests {
         let tb = t.add(
             ToolBox::new(selected.clone())
                 .item_literal("A", TextWidget::new_literal("A"))
-                .add(
-                    ToolBoxItem::new_literal("B", TextWidget::new_literal("B")).enabled(false),
-                )
+                .add(ToolBoxItem::new_literal("B", TextWidget::new_literal("B")).enabled(false))
                 .item_literal("C", TextWidget::new_literal("C")),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
@@ -1080,8 +1066,7 @@ mod tests {
         let tb = t.add(
             ToolBox::new(selected.clone())
                 .add(
-                    ToolBoxItem::new_literal("Locked", TextWidget::new_literal("x"))
-                        .enabled(false),
+                    ToolBoxItem::new_literal("Locked", TextWidget::new_literal("x")).enabled(false),
                 )
                 .item_literal("Middle", TextWidget::new_literal("m"))
                 .item_literal("Last", TextWidget::new_literal("l")),
@@ -1194,11 +1179,7 @@ mod tests {
         let header = header_id(&t, tb, 0);
         let header_bounds = t.bounds(header);
 
-        fn find_button_inside(
-            t: &WidgetTree,
-            root: WidgetId,
-            outer: WidgetId,
-        ) -> Option<WidgetId> {
+        fn find_button_inside(t: &WidgetTree, root: WidgetId, outer: WidgetId) -> Option<WidgetId> {
             for child in t.children(root) {
                 if child != outer {
                     let info = t.accessibility_node(child);
@@ -1217,8 +1198,7 @@ mod tests {
             .expect("leading Button should be a descendant of the header");
         let btn_bounds = t.bounds(leading_btn);
         assert!(
-            btn_bounds.x >= header_bounds.x
-                && btn_bounds.right() <= header_bounds.right() + 0.01,
+            btn_bounds.x >= header_bounds.x && btn_bounds.right() <= header_bounds.right() + 0.01,
             "leading button bounds must fit inside header row"
         );
     }
@@ -1244,11 +1224,7 @@ mod tests {
         // header itself also has Role::Button — we want the trailing
         // one, characterised by sitting on the trailing edge of the
         // header row).
-        fn find_button_inside(
-            t: &WidgetTree,
-            root: WidgetId,
-            outer: WidgetId,
-        ) -> Option<WidgetId> {
+        fn find_button_inside(t: &WidgetTree, root: WidgetId, outer: WidgetId) -> Option<WidgetId> {
             for child in t.children(root) {
                 if child != outer {
                     let info = t.accessibility_node(child);
@@ -1263,12 +1239,11 @@ mod tests {
             None
         }
 
-        let trailing_btn =
-            find_button_inside(&t, header, header).expect("trailing Button should be a descendant of the header");
+        let trailing_btn = find_button_inside(&t, header, header)
+            .expect("trailing Button should be a descendant of the header");
         let btn_bounds = t.bounds(trailing_btn);
         assert!(
-            btn_bounds.x >= header_bounds.x
-                && btn_bounds.right() <= header_bounds.right() + 0.01,
+            btn_bounds.x >= header_bounds.x && btn_bounds.right() <= header_bounds.right() + 0.01,
             "trailing button bounds must fit inside header row"
         );
     }
@@ -1280,9 +1255,7 @@ mod tests {
         let tb = t.add(
             ToolBox::new(selected.clone())
                 .item_literal("A", TextWidget::new_literal("A"))
-                .add(
-                    ToolBoxItem::new_literal("B", TextWidget::new_literal("B")).enabled(false),
-                ),
+                .add(ToolBoxItem::new_literal("B", TextWidget::new_literal("B")).enabled(false)),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 

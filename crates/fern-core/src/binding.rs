@@ -201,9 +201,9 @@ impl std::fmt::Debug for BindingRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::signal::Signal;
     use std::cell::Cell;
     use std::rc::Rc;
-    use crate::signal::Signal;
 
     fn make_binding(level: BindingLevel, dirty: Rc<Cell<bool>>) -> Binding {
         let is_dirty = {
@@ -327,7 +327,10 @@ mod tests {
         reg.register(make_binding(BindingLevel::AccessibilityOnly, dirty.clone()));
 
         assert!(reg.flush_accessibility_dirty());
-        assert!(!dirty.get(), "accessibility bindings must clear after drain");
+        assert!(
+            !dirty.get(),
+            "accessibility bindings must clear after drain"
+        );
         assert!(
             !reg.flush_accessibility_dirty(),
             "second drain returns false (nothing dirty)"
@@ -339,8 +342,14 @@ mod tests {
         let reg = BindingRegistry::new();
         let repaint_dirty = Rc::new(Cell::new(true));
         let a11y_dirty = Rc::new(Cell::new(false));
-        reg.register(make_binding(BindingLevel::RepaintOnly, repaint_dirty.clone()));
-        reg.register(make_binding(BindingLevel::AccessibilityOnly, a11y_dirty.clone()));
+        reg.register(make_binding(
+            BindingLevel::RepaintOnly,
+            repaint_dirty.clone(),
+        ));
+        reg.register(make_binding(
+            BindingLevel::AccessibilityOnly,
+            a11y_dirty.clone(),
+        ));
 
         assert!(
             !reg.flush_accessibility_dirty(),

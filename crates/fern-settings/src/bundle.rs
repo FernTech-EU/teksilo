@@ -126,10 +126,8 @@ impl SettingsBundle {
 
     /// Open every requested service against `paths`.
     pub fn open(self, paths: &AppPaths) -> Result<OpenedSettings, SettingsBundleError> {
-        let store = SettingsStore::open_with_delay(
-            paths.config_file(&self.store_name),
-            self.debounce,
-        )?;
+        let store =
+            SettingsStore::open_with_delay(paths.config_file(&self.store_name), self.debounce)?;
         let window_state = if self.window_state_enabled {
             Some(WindowStateService::open_with_delay(paths, self.debounce)?)
         } else {

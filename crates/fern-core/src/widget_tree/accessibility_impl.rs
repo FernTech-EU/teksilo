@@ -164,12 +164,11 @@ impl WidgetTree {
             // the effective primary keystroke and announce it via
             // `KeyStroke`'s `Display` impl. Falls back silently if
             // the id has no registered default.
-            if let Some(ref id) = ov.shortcut_id {
-                if let Some(eff) = self.shortcut_registry.effective(id) {
-                    if let Some(ks) = eff.primary {
-                        builder.set_keyboard_shortcut(ks.to_string());
-                    }
-                }
+            if let Some(ref id) = ov.shortcut_id
+                && let Some(eff) = self.shortcut_registry.effective(id)
+                && let Some(ks) = eff.primary
+            {
+                builder.set_keyboard_shortcut(ks.to_string());
             }
         }
 
@@ -242,11 +241,8 @@ impl WidgetTree {
         // `access_disabled(false)` override that wants to clear
         // arena-driven disabled state too — without this short-circuit,
         // `clear_disabled()` in the override layer would be re-set here.
-        let force_clear_disabled = node
-            .access_overrides
-            .as_deref()
-            .and_then(|ov| ov.disabled)
-            == Some(false);
+        let force_clear_disabled =
+            node.access_overrides.as_deref().and_then(|ov| ov.disabled) == Some(false);
         if !self.arena.is_enabled(id) && !force_clear_disabled {
             builder.set_disabled();
         }
@@ -337,12 +333,11 @@ impl WidgetTree {
             ov.apply(&mut builder);
             // Resolve `access_shortcut_id` against the live registry —
             // see the matching block in `build_accessibility_recursive`.
-            if let Some(ref sid) = ov.shortcut_id {
-                if let Some(eff) = self.shortcut_registry.effective(sid) {
-                    if let Some(ks) = eff.primary {
-                        builder.set_keyboard_shortcut(ks.to_string());
-                    }
-                }
+            if let Some(ref sid) = ov.shortcut_id
+                && let Some(eff) = self.shortcut_registry.effective(sid)
+                && let Some(ks) = eff.primary
+            {
+                builder.set_keyboard_shortcut(ks.to_string());
             }
         }
         if node.access_subtree == AccessSubtreeMode::Merge {
@@ -370,21 +365,15 @@ impl WidgetTree {
         // Mirror the framework gate at `build_accessibility_recursive`:
         // arena-driven disabled wins unless the override explicitly
         // asks for `access_disabled(false)`.
-        let force_clear_disabled = node
-            .access_overrides
-            .as_deref()
-            .and_then(|ov| ov.disabled)
-            == Some(false);
+        let force_clear_disabled =
+            node.access_overrides.as_deref().and_then(|ov| ov.disabled) == Some(false);
         let disabled_arena = !self.arena.is_enabled(id) && !force_clear_disabled;
         // Override `Some(true)` already called `set_disabled()` inside
         // the override apply; we only need to surface it here as a
         // separate signal because `AccessNodeBuilder` doesn't expose a
         // `is_disabled()` getter on the builder side.
-        let disabled_override = node
-            .access_overrides
-            .as_deref()
-            .and_then(|ov| ov.disabled)
-            == Some(true);
+        let disabled_override =
+            node.access_overrides.as_deref().and_then(|ov| ov.disabled) == Some(true);
         if disabled_arena || disabled_override {
             info = info.with_disabled(true);
         }
@@ -395,30 +384,25 @@ impl WidgetTree {
     }
 
     pub fn find_by_role(&self, role: accesskit::Role) -> Option<WidgetId> {
-        for id in self.arena.active_ids() {
-            if self.build_overridden_builder(id).role() == role {
-                return Some(id);
-            }
-        }
-        None
+        self.arena
+            .active_ids()
+            .into_iter()
+            .find(|&id| self.build_overridden_builder(id).role() == role)
     }
 
     pub fn find_by_label(&self, label: &str) -> Option<WidgetId> {
-        for id in self.arena.active_ids() {
-            if self.build_overridden_builder(id).name() == Some(label) {
-                return Some(id);
-            }
-        }
-        None
+        self.arena
+            .active_ids()
+            .into_iter()
+            .find(|&id| self.build_overridden_builder(id).name() == Some(label))
     }
 
     pub fn find_by_action(&self, action: accesskit::Action) -> Option<WidgetId> {
-        for id in self.arena.active_ids() {
-            if self.build_overridden_builder(id).actions().contains(&action) {
-                return Some(id);
-            }
-        }
-        None
+        self.arena.active_ids().into_iter().find(|&id| {
+            self.build_overridden_builder(id)
+                .actions()
+                .contains(&action)
+        })
     }
 
     /// Get the text content of a widget from its accessibility name.
@@ -553,15 +537,16 @@ struct MergeAccumulator {
 
 impl MergeAccumulator {
     fn absorb(&mut self, src: &AccessNodeBuilder) {
-        if let Some(name) = src.name() {
-            if !name.is_empty() {
-                self.label_parts.push(name.to_string());
-            }
+        if let Some(name) = src.name()
+            && !name.is_empty()
+        {
+            self.label_parts.push(name.to_string());
         }
-        if let Some(value) = src.value() {
-            if self.value.is_none() && !value.is_empty() {
-                self.value = Some(value.to_string());
-            }
+        if let Some(value) = src.value()
+            && self.value.is_none()
+            && !value.is_empty()
+        {
+            self.value = Some(value.to_string());
         }
         for &action in src.actions() {
             if !self.actions.contains(&action) {
@@ -641,6 +626,7 @@ pub(crate) mod test_helpers {
     }
 
     /// Return all NodeIds whose role matches `role`.
+    #[allow(dead_code)]
     pub(crate) fn nodes_with_role(
         update: &accesskit::TreeUpdate,
         role: accesskit::Role,
@@ -656,8 +642,8 @@ pub(crate) mod test_helpers {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::test_helpers::*;
+    use super::*;
     use crate::test_widgets::{FillWidget, StackWidget};
 
     #[derive(Debug)]
@@ -926,10 +912,7 @@ mod tests {
     use accesskit::{Action, AriaCurrent, HasPopup, Live, Orientation, Role};
 
     /// Find a node in a TreeUpdate by WidgetId.
-    fn find_node(
-        update: &accesskit::TreeUpdate,
-        id: WidgetId,
-    ) -> Option<&accesskit::Node> {
+    fn find_node(update: &accesskit::TreeUpdate, id: WidgetId) -> Option<&accesskit::Node> {
         let nid = crate::accessibility::widget_id_to_node_id(id);
         update
             .nodes
@@ -1133,7 +1116,11 @@ mod tests {
     fn access_controls_appends() {
         let mut tree = WidgetTree::new();
         let target = tree.add(FillWidget::new().label("Target"));
-        let controller = tree.add(FillWidget::new().label("Controller").access_controls(target));
+        let controller = tree.add(
+            FillWidget::new()
+                .label("Controller")
+                .access_controls(target),
+        );
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let update = tree.sync_accessibility();
         let node = find_node(&update, controller).unwrap();
@@ -1241,10 +1228,10 @@ mod tests {
         let flag = Signal::new(false);
         let flag_for_cb = flag.clone();
         let mut tree = WidgetTree::new();
-        let id = tree.add(FillWidget::new().access_action(
-            Action::ShowContextMenu,
-            move |_ctx| flag_for_cb.set(true),
-        ));
+        let id = tree.add(
+            FillWidget::new()
+                .access_action(Action::ShowContextMenu, move |_ctx| flag_for_cb.set(true)),
+        );
         tree.layout(SizeProposal::exact(50.0, 50.0));
         let info = tree.accessibility_node(id);
         assert!(info.actions().contains(&Action::ShowContextMenu));
@@ -1285,7 +1272,10 @@ mod tests {
             target_node: crate::accessibility::widget_id_to_node_id(id),
             data: None,
         });
-        assert!(click.get() && increment.get(), "both actions fired exactly once each");
+        assert!(
+            click.get() && increment.get(),
+            "both actions fired exactly once each"
+        );
     }
 
     // Test 22
@@ -1303,9 +1293,7 @@ mod tests {
     #[test]
     fn access_custom_action_uses_localized_label() {
         let mut tree = WidgetTree::new();
-        let id = tree.add(
-            FillWidget::new().access_custom_action("Reply", |_ctx| {}),
-        );
+        let id = tree.add(FillWidget::new().access_custom_action("Reply", |_ctx| {}));
         tree.layout(SizeProposal::exact(50.0, 50.0));
         let update = tree.sync_accessibility();
         let node = find_node(&update, id).unwrap();
@@ -1386,9 +1374,7 @@ mod tests {
             }
         }
         let mut tree = WidgetTree::new();
-        let id = tree.add(
-            FillWidget::new().access_label(ResolvedAtCall("Save".to_string())),
-        );
+        let id = tree.add(FillWidget::new().access_label(ResolvedAtCall("Save".to_string())));
         tree.layout(SizeProposal::exact(50.0, 50.0));
         assert_eq!(tree.accessibility_node(id).name(), Some("Save"));
     }
@@ -1598,9 +1584,7 @@ mod tests {
         // with rustc versions; we just confirm both fields are
         // pointer/byte sized.
         use std::mem::size_of;
-        assert!(
-            size_of::<Option<Box<crate::widget_builder::AccessibilityOverrides>>>() <= 16
-        );
+        assert!(size_of::<Option<Box<crate::widget_builder::AccessibilityOverrides>>>() <= 16);
         assert!(size_of::<crate::widget_builder::AccessSubtreeMode>() <= 4);
     }
 }

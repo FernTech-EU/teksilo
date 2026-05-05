@@ -39,10 +39,7 @@ struct SegmentButton {
 }
 
 impl Widget for SegmentButton {
-    fn build(
-        &mut self,
-        _ctx: &mut fern_core::build_context::BuildContext,
-    ) -> Vec<WidgetId> {
+    fn build(&mut self, _ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
         let enabled = self.enabled;
         let index = self.index;
         let selected = self.selected.clone();
@@ -83,7 +80,11 @@ impl Widget for SegmentButton {
         Vec::new()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         // The parent SegmentedControl assigns exact bounds in
         // `place_children`; `size_that_fits` is only consulted when
         // the parent uses `child_size`, which we don't. Return
@@ -333,7 +334,11 @@ impl Widget for SegmentedControl {
         self.segment_ids.clone()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
         let sc_style = ctx.theme.components.segmented_control;
         let width = proposal
@@ -361,7 +366,7 @@ impl Widget for SegmentedControl {
             return;
         }
         let sc_style = ctx.theme.components.segmented_control;
-        let visual = self.compute_visual(bounds, &ctx.theme);
+        let visual = self.compute_visual(bounds, ctx.theme);
         let inner = self.compute_inner(visual, sc_style.border_width);
         let seg_w = self.segment_width(inner);
         for (i, placement) in children.iter_mut().enumerate() {
@@ -655,7 +660,10 @@ mod tests {
         tree.layout(SizeProposal::exact(300.0, 60.0));
         let frame = tree.render();
         let accent = Theme::light_default().colors.accent.to_array();
-        let inactive = Theme::light_default().colors.surface_selected_inactive.to_array();
+        let inactive = Theme::light_default()
+            .colors
+            .surface_selected_inactive
+            .to_array();
         assert!(
             !frame.shapes.iter().any(|s| s.color == accent),
             "unfocused selected segment must not use accent color"

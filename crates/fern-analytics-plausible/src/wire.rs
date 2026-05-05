@@ -32,11 +32,7 @@ impl<'a> PlausibleEvent<'a> {
     /// `url` carries the event name in the path so each
     /// `intent.dispatched` etc. shows up as a distinct page in the
     /// Plausible dashboard.
-    pub fn from_owned(
-        owned: &'a OwnedEvent,
-        domain: &'a str,
-        synthetic_scheme: &str,
-    ) -> Self {
+    pub fn from_owned(owned: &'a OwnedEvent, domain: &'a str, synthetic_scheme: &str) -> Self {
         let url = format!("{synthetic_scheme}://{domain}/{}", owned.name);
         let mut props: BTreeMap<String, serde_json::Value> = BTreeMap::new();
         for prop in &owned.props {

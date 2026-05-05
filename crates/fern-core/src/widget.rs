@@ -694,7 +694,6 @@ impl<'ops> EventContext<'ops> {
         self
     }
 
-
     /// Attach the tree's app-state registry so handlers can look up
     /// application-scoped values (`ClipboardHandle`, `SharedTypesetter`,
     /// …). Called by the dispatcher once per event batch.
@@ -711,7 +710,9 @@ impl<'ops> EventContext<'ops> {
     /// invoked without a registry (hand-constructed `EventContext` in
     /// tests, or when no value of that type was registered).
     pub fn app_state<T: 'static>(&self) -> Option<&T> {
-        self.app_context.as_ref().and_then(|ctx| ctx.app_state::<T>())
+        self.app_context
+            .as_ref()
+            .and_then(|ctx| ctx.app_state::<T>())
     }
 
     /// Borrow the [`AppEventPoster`](crate::AppEventPoster) installed
@@ -794,10 +795,10 @@ impl<'ops> EventContext<'ops> {
     pub fn begin_key_capture(
         &mut self,
         callback: impl FnOnce(
-                crate::shortcut::KeyStroke,
-                &mut crate::shortcut::ShortcutRegistry,
-                &mut EventContext,
-            ) + 'static,
+            crate::shortcut::KeyStroke,
+            &mut crate::shortcut::ShortcutRegistry,
+            &mut EventContext,
+        ) + 'static,
     ) -> crate::shortcut::CaptureHandle {
         let slot: crate::shortcut::KeyCaptureSlot =
             std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new(callback))));
@@ -1039,11 +1040,10 @@ impl<'ops> EventContext<'ops> {
         let crate::modal::ModalContent::Deferred(builder) = request.content else {
             return None;
         };
-        let mut config =
-            crate::window::WindowConfig::new().modal(crate::window::ModalConfig {
-                parent,
-                focus_target: request.focus_target,
-            });
+        let mut config = crate::window::WindowConfig::new().modal(crate::window::ModalConfig {
+            parent,
+            focus_target: request.focus_target,
+        });
         if let Some(title) = request.title {
             config = config.title(title);
         }
@@ -1172,8 +1172,9 @@ impl<'ops> EventContext<'ops> {
 mod multi_window_tests {
     use super::*;
     use crate::window::state::WindowStateInit;
-    use crate::window::{FernWindowId, NoopWindowOps, WindowConfig, WindowOps, WindowState,
-        WindowPlacement};
+    use crate::window::{
+        FernWindowId, NoopWindowOps, WindowConfig, WindowOps, WindowPlacement, WindowState,
+    };
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -1226,11 +1227,7 @@ mod multi_window_tests {
         }
 
         fn window_state(&self, id: FernWindowId) -> Option<WindowState> {
-            self.states
-                .borrow()
-                .iter()
-                .find(|s| s.id() == id)
-                .cloned()
+            self.states.borrow().iter().find(|s| s.id() == id).cloned()
         }
 
         fn windows(&self) -> Vec<WindowState> {
@@ -1264,7 +1261,7 @@ mod multi_window_tests {
     fn window_returns_current_window_state() {
         let state = make_state(1, Some("main"));
         let mut noop = NoopWindowOps;
-        let mut ctx = EventContext::new().with_window_context(&mut noop, Some(state.clone()));
+        let ctx = EventContext::new().with_window_context(&mut noop, Some(state.clone()));
         assert_eq!(ctx.window().unwrap().id(), FernWindowId::new(1));
         assert_eq!(ctx.window().unwrap().string_id(), Some("main"));
     }
@@ -1280,12 +1277,14 @@ mod multi_window_tests {
         let mut ops = RecordingOps::default();
         let main_state = make_state(1, Some("main"));
         let returned_id = {
-            let mut ctx = EventContext::new()
-                .with_window_context(&mut ops, Some(main_state));
+            let mut ctx = EventContext::new().with_window_context(&mut ops, Some(main_state));
             ctx.open_window(WindowConfig::new().id("help").title("Help"))
         };
         assert_eq!(ops.open_calls.borrow().len(), 1);
-        assert_eq!(ops.open_calls.borrow()[0].string_id.as_deref(), Some("help"));
+        assert_eq!(
+            ops.open_calls.borrow()[0].string_id.as_deref(),
+            Some("help")
+        );
         // Recording ops allocates ids 2+; 1 was reserved for `main`
         // only in this test — Recording's counter starts from 0, so the
         // first alloc yields 1.
@@ -1307,11 +1306,13 @@ mod multi_window_tests {
         let mut ops = RecordingOps::default();
         let main_state = make_state(1, None);
         {
-            let mut ctx = EventContext::new()
-                .with_window_context(&mut ops, Some(main_state));
+            let mut ctx = EventContext::new().with_window_context(&mut ops, Some(main_state));
             ctx.focus_window(FernWindowId::new(42));
         }
-        assert_eq!(ops.focus_calls.borrow().as_slice(), &[FernWindowId::new(42)]);
+        assert_eq!(
+            ops.focus_calls.borrow().as_slice(),
+            &[FernWindowId::new(42)]
+        );
     }
 
     #[test]
@@ -1319,8 +1320,7 @@ mod multi_window_tests {
         let mut ops = RecordingOps::default();
         let main_state = make_state(1, None);
         {
-            let mut ctx = EventContext::new()
-                .with_window_context(&mut ops, Some(main_state));
+            let mut ctx = EventContext::new().with_window_context(&mut ops, Some(main_state));
             ctx.close_window_by_id(FernWindowId::new(9));
         }
         assert_eq!(ops.close_calls.borrow().as_slice(), &[FernWindowId::new(9)]);
@@ -1374,8 +1374,7 @@ mod multi_window_tests {
             on_dismiss: None,
         };
         {
-            let mut ctx = EventContext::new()
-                .with_window_context(&mut ops, Some(main_state));
+            let mut ctx = EventContext::new().with_window_context(&mut ops, Some(main_state));
             let id = ctx.open_modal(request);
             assert!(id.is_some());
         }
@@ -1400,7 +1399,9 @@ mod multi_window_tests {
         let mut ops = RecordingOps::default();
         let mut ctx = EventContext::new().with_window_context(&mut ops, None);
         let request = ModalRequest {
-            content: ModalContent::Deferred(Box::new(|_tree| crate::widget_id::WidgetId::default())),
+            content: ModalContent::Deferred(Box::new(|_tree| {
+                crate::widget_id::WidgetId::default()
+            })),
             presentation: crate::modal::ModalPresentation::NativeWindow,
             close_behavior: crate::modal::ModalCloseBehavior::default(),
             title: None,

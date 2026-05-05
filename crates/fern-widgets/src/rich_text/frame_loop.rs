@@ -37,7 +37,6 @@ pub(crate) const DEBOUNCE_WINDOW_SECS: f32 = 0.150;
 /// Run one frame-tick step. `delta` is the time since the previous
 /// tick in seconds (clamped by the tree). Returns `true` when another
 /// frame is needed (the editor has ongoing work).
-
 pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     // Step 1 (NEW for M8b): flush pending_chars BEFORE draining events.
     // Batching keystrokes into a single `insert_text` makes the
@@ -63,8 +62,8 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     // pumps are irregular the blink catches up on the next tick —
     // the visible cadence stays locked to real seconds regardless
     // of how the frame scheduler behaves.
-    let blinking_active = state.has_focus
-        && matches!(state.policy.caret_policy, CaretPolicy::Blinking);
+    let blinking_active =
+        state.has_focus && matches!(state.policy.caret_policy, CaretPolicy::Blinking);
     if blinking_active {
         let now = std::time::Instant::now();
         let interval = std::time::Duration::from_secs_f32(CARET_BLINK_INTERVAL);
@@ -234,7 +233,9 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     // it enters the auto-scroll zone, so entering the zone restarts
     // the loop from idle.
     let mut drag_active = false;
-    if let DragState::Selecting { auto_scroll_v_per_s } = state.drag_state
+    if let DragState::Selecting {
+        auto_scroll_v_per_s,
+    } = state.drag_state
         && auto_scroll_v_per_s.abs() > 0.0
     {
         drag_active = true;

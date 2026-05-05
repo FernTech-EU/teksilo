@@ -13,7 +13,7 @@ use fern_core::widget::{
 };
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{BorderRole, Color, CornerRadius, SurfaceRole};
+use fern_tokens::{BorderRole, CornerRadius, SurfaceRole};
 
 use crate::primitives::{MaxSize, Padding, RectWidget, VStack, ZStack};
 use crate::scroll_area::ScrollArea;
@@ -29,7 +29,11 @@ enum MenuEntry {
 pub struct MenuSeparator;
 
 impl Widget for MenuSeparator {
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let width = proposal.width.unwrap_or(0.0);
         Size::new(width, ctx.theme.components.menu.separator_height).into()
     }
@@ -97,7 +101,11 @@ impl Widget for KeyboardHighlightWrapper {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         // Forward the proposal to the wrapped MenuItem directly rather than
         // going through the internal ZStack. ZStack::size_that_fits always
         // queries its children with `unspecified` (correct for most uses,
@@ -274,8 +282,7 @@ impl Widget for MenuList {
         let visible_cap_id = match self.max_visible_items {
             Some(cap) if self.item_widget_ids.len() > cap => {
                 let max_height = cap as f32 * menu_style.item_height + 8.0;
-                let scrollable = ScrollArea::from_id(padding_id)
-                    .preferred_size(0.0, max_height);
+                let scrollable = ScrollArea::from_id(padding_id).preferred_size(0.0, max_height);
                 let scrollable_id = ctx.add(scrollable);
                 ctx.add(MaxSize::height(max_height).child_id(scrollable_id))
             }
@@ -340,11 +347,11 @@ impl Widget for MenuList {
                             ..
                         } => {
                             // Activate the focused item via synthetic click.
-                            if let Some(idx) = focused_index.get() {
-                                if idx < item_ids.len() {
-                                    ctx.synthetic_click(item_ids[idx]);
-                                    return EventResponse::Handled;
-                                }
+                            if let Some(idx) = focused_index.get()
+                                && idx < item_ids.len()
+                            {
+                                ctx.synthetic_click(item_ids[idx]);
+                                return EventResponse::Handled;
                             }
                             EventResponse::Ignored
                         }
@@ -354,11 +361,12 @@ impl Widget for MenuList {
                         } => {
                             // Only open submenus; for non-submenu items, let it bubble
                             // to MenuOverlayHost which navigates to the next bar menu.
-                            if let Some(idx) = focused_index.get() {
-                                if idx < sub_flags.len() && sub_flags[idx] {
-                                    ctx.synthetic_click(item_ids[idx]);
-                                    return EventResponse::Handled;
-                                }
+                            if let Some(idx) = focused_index.get()
+                                && idx < sub_flags.len()
+                                && sub_flags[idx]
+                            {
+                                ctx.synthetic_click(item_ids[idx]);
+                                return EventResponse::Handled;
                             }
                             EventResponse::Ignored
                         }
@@ -381,7 +389,11 @@ impl Widget for MenuList {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         match self.root_child_id {
             Some(id) => {
                 // Menu lists size to their content, with a minimum width
@@ -391,7 +403,8 @@ impl Widget for MenuList {
                 Size::new(child_size.width.max(120.0), child_size.height)
             }
             None => proposal.resolve(120.0, 0.0),
-        }.into()
+        }
+        .into()
     }
 
     fn place_children(
@@ -494,4 +507,3 @@ mod tests {
         assert!(h < 100.0, "small menu should size to content, got {}", h);
     }
 }
-

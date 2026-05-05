@@ -48,9 +48,11 @@ impl Widget for ShortcutsTab {
         // (registration, removal, rebind). Bridged from
         // `tree.shortcut_registry().version()`.
         let self_id = ctx.self_id();
-        self.state
-            .shortcut_version
-            .bind_to(self_id, ctx.binding_registry(), BindingLevel::Relayout);
+        self.state.shortcut_version.bind_to(
+            self_id,
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
         Vec::new()
     }
 
@@ -101,12 +103,7 @@ impl Widget for ShortcutsTab {
 
         for (i, row) in rows.iter().enumerate() {
             let y = bounds.y + (i as f32) * ROW_HEIGHT + 2.0;
-            let id_rect = Rect::new(
-                bounds.x + ROW_PADDING_X,
-                y,
-                KEY_COLUMN_WIDTH,
-                ROW_HEIGHT,
-            );
+            let id_rect = Rect::new(bounds.x + ROW_PADDING_X, y, KEY_COLUMN_WIDTH, ROW_HEIGHT);
             let key_x = bounds.x + ROW_PADDING_X + KEY_COLUMN_WIDTH + ROW_PADDING_X;
             let key_rect = Rect::new(
                 key_x,

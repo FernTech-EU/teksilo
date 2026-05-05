@@ -126,15 +126,7 @@ impl AnimationScheduler {
         now: Instant,
     ) {
         self.animate_with_options(
-            signal,
-            widget_id,
-            target,
-            duration,
-            easing,
-            None,
-            0.0,
-            None,
-            now,
+            signal, widget_id, target, duration, easing, None, 0.0, None, now,
         );
     }
 
@@ -408,8 +400,7 @@ impl AnimationScheduler {
             .iter()
             .filter(|anim| {
                 anim_widget_alive(arena, anim.widget_id)
-                    && (!anim.looping
-                        || anim_widget_visible(arena, anim.widget_id, paint_epoch))
+                    && (!anim.looping || anim_widget_visible(arena, anim.widget_id, paint_epoch))
             })
             .map(|anim| anim.next_tick)
             .min()

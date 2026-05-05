@@ -18,6 +18,7 @@ use std::rc::{Rc, Weak};
 /// `fern-data` itself (`ListModel`, `TreeModel`, etc.); the inspector
 /// uses these methods to render the Data Models tab without needing
 /// to know `T`.
+#[allow(clippy::len_without_is_empty)]
 pub trait ModelDebug: 'static {
     /// Discriminator string — `"ListModel"`, `"TreeModel"`,
     /// `"SelectionModel"`, … Shown verbatim in the inspector.

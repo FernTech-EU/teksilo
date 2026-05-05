@@ -93,18 +93,34 @@ impl Widget for Padding {
         // (e.g. a theme-derived signal) trigger a relayout when they fire.
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
-        self.top
-            .register_if_bound(self_id, registry, fern_core::binding::BindingLevel::Relayout);
-        self.right
-            .register_if_bound(self_id, registry, fern_core::binding::BindingLevel::Relayout);
-        self.bottom
-            .register_if_bound(self_id, registry, fern_core::binding::BindingLevel::Relayout);
-        self.left
-            .register_if_bound(self_id, registry, fern_core::binding::BindingLevel::Relayout);
+        self.top.register_if_bound(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::Relayout,
+        );
+        self.right.register_if_bound(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::Relayout,
+        );
+        self.bottom.register_if_bound(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::Relayout,
+        );
+        self.left.register_if_bound(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::Relayout,
+        );
         self.child_id.into_iter().collect()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let h_inset = self.horizontal_inset();
         let v_inset = self.vertical_inset();
 

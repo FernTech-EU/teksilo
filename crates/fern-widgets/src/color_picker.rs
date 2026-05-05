@@ -46,9 +46,7 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::accesskit::{Action, Live, Role};
 use fern_core::build_context::BuildContext;
 use fern_core::signal::Signal;
-use fern_core::widget::{
-    EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement,
-};
+use fern_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_i18n::{LocalizedString, resolve_message_widget};
 use fern_tokens::{Color, Orientation};
@@ -164,7 +162,10 @@ impl ColorPicker {
     /// the picker.
     pub fn nullable(value: Signal<Option<Color>>) -> Self {
         let proxy = Signal::new(value.get().unwrap_or(Color::TRANSPARENT));
-        Self::from_binding(ColorBinding::Nullable { source: value, proxy })
+        Self::from_binding(ColorBinding::Nullable {
+            source: value,
+            proxy,
+        })
     }
 
     fn from_binding(binding: ColorBinding) -> Self {
@@ -427,7 +428,10 @@ impl Widget for ColorPicker {
                 ColorSwatch::new(value.clone())
                     .size(style_snapshot.preview_height)
                     .corner_radius(style_snapshot.preview_corner_radius)
-                    .label(resolve_message_widget("color-picker-current-color-label", &[])),
+                    .label(resolve_message_widget(
+                        "color-picker-current-color-label",
+                        &[],
+                    )),
             );
         }
         if self.show_hex_input && layout != ColorPickerLayout::Compact {
@@ -444,16 +448,28 @@ impl Widget for ColorPicker {
         // `ctx.effect`).
         let rgb_row: Option<HStack> = if self.show_rgb_spinners {
             let r_spin = make_byte_spinner_from_value(
-                ctx, value.clone(), |c| c.r(), components.set_red.clone(),
-                enabled, style_snapshot.spinner_field_width,
+                ctx,
+                value.clone(),
+                |c| c.r(),
+                components.set_red.clone(),
+                enabled,
+                style_snapshot.spinner_field_width,
             );
             let g_spin = make_byte_spinner_from_value(
-                ctx, value.clone(), |c| c.g(), components.set_green.clone(),
-                enabled, style_snapshot.spinner_field_width,
+                ctx,
+                value.clone(),
+                |c| c.g(),
+                components.set_green.clone(),
+                enabled,
+                style_snapshot.spinner_field_width,
             );
             let b_spin = make_byte_spinner_from_value(
-                ctx, value.clone(), |c| c.b(), components.set_blue.clone(),
-                enabled, style_snapshot.spinner_field_width,
+                ctx,
+                value.clone(),
+                |c| c.b(),
+                components.set_blue.clone(),
+                enabled,
+                style_snapshot.spinner_field_width,
             );
             let mut row = HStack::new()
                 .spacing(style_snapshot.gap)
@@ -462,8 +478,12 @@ impl Widget for ColorPicker {
                 .child(spinner_cell("color-picker-blue-short", b_spin));
             if alpha_enabled {
                 let a_spin = make_byte_spinner_from_value(
-                    ctx, value.clone(), |c| c.a(), components.set_alpha.clone(),
-                    enabled, style_snapshot.spinner_field_width,
+                    ctx,
+                    value.clone(),
+                    |c| c.a(),
+                    components.set_alpha.clone(),
+                    enabled,
+                    style_snapshot.spinner_field_width,
                 );
                 row = row.child(spinner_cell("color-picker-alpha-short", a_spin));
             }
@@ -475,16 +495,27 @@ impl Widget for ColorPicker {
         // HSV spinners row — same pattern.
         let hsv_row: Option<HStack> = if self.show_hsv_spinners {
             let h_spin = make_hue_spinner_from_value(
-                ctx, value.clone(), components.set_hue.clone(),
-                enabled, style_snapshot.spinner_field_width,
+                ctx,
+                value.clone(),
+                components.set_hue.clone(),
+                enabled,
+                style_snapshot.spinner_field_width,
             );
             let s_spin = make_percent_spinner_from_value(
-                ctx, value.clone(), |c| c.to_hsv().1, components.set_saturation.clone(),
-                enabled, style_snapshot.spinner_field_width,
+                ctx,
+                value.clone(),
+                |c| c.to_hsv().1,
+                components.set_saturation.clone(),
+                enabled,
+                style_snapshot.spinner_field_width,
             );
             let v_spin = make_percent_spinner_from_value(
-                ctx, value.clone(), |c| c.to_hsv().2, components.set_value_hsv.clone(),
-                enabled, style_snapshot.spinner_field_width,
+                ctx,
+                value.clone(),
+                |c| c.to_hsv().2,
+                components.set_value_hsv.clone(),
+                enabled,
+                style_snapshot.spinner_field_width,
             );
             Some(
                 HStack::new()
@@ -511,28 +542,27 @@ impl Widget for ColorPicker {
             };
 
         // Swatch grid
-        let swatch_grid_widget = if self.show_swatches && !self.swatches.is_empty()
-            || self.swatches_signal.is_some()
-        {
-            let swatches_signal = self
-                .swatches_signal
-                .clone()
-                .unwrap_or_else(|| Signal::new(self.swatches.clone()));
-            let on_select: Rc<dyn Fn(Color, &mut EventContext)> = {
-                let value = value.clone();
-                Rc::new(move |c, _ctx_evt| {
-                    value.set(c);
-                })
+        let swatch_grid_widget =
+            if self.show_swatches && !self.swatches.is_empty() || self.swatches_signal.is_some() {
+                let swatches_signal = self
+                    .swatches_signal
+                    .clone()
+                    .unwrap_or_else(|| Signal::new(self.swatches.clone()));
+                let on_select: Rc<dyn Fn(Color, &mut EventContext)> = {
+                    let value = value.clone();
+                    Rc::new(move |c, _ctx_evt| {
+                        value.set(c);
+                    })
+                };
+                Some(SwatchGrid::new(
+                    swatches_signal,
+                    value.clone(),
+                    self.swatch_columns,
+                    on_select,
+                ))
+            } else {
+                None
             };
-            Some(SwatchGrid::new(
-                swatches_signal,
-                value.clone(),
-                self.swatch_columns,
-                on_select,
-            ))
-        } else {
-            None
-        };
 
         // Footer row (Cancel + Spacer + Done) — only when show_footer
         // is set. Built once per layout. The buttons fire user-supplied
@@ -543,23 +573,18 @@ impl Widget for ColorPicker {
                 .spacing(style_snapshot.gap)
                 .child(Spacer::new());
             if let Some(cb) = self.on_cancel.clone() {
-                let cancel_btn = Button::new(resolve_message_widget(
-                    "color-picker-cancel-label",
-                    &[],
-                ))
-                .style(ButtonVariant::Regular)
-                .enabled(enabled)
-                .on_activate_fn(move |ctx_evt| cb(ctx_evt));
+                let cancel_btn =
+                    Button::new(resolve_message_widget("color-picker-cancel-label", &[]))
+                        .style(ButtonVariant::Regular)
+                        .enabled(enabled)
+                        .on_activate_fn(move |ctx_evt| cb(ctx_evt));
                 row = row.child(cancel_btn);
             }
             if let Some(cb) = self.on_done.clone() {
-                let done_btn = Button::new(resolve_message_widget(
-                    "color-picker-done-label",
-                    &[],
-                ))
-                .style(ButtonVariant::Default)
-                .enabled(enabled)
-                .on_activate_fn(move |ctx_evt| cb(ctx_evt));
+                let done_btn = Button::new(resolve_message_widget("color-picker-done-label", &[]))
+                    .style(ButtonVariant::Default)
+                    .enabled(enabled)
+                    .on_activate_fn(move |ctx_evt| cb(ctx_evt));
                 row = row.child(done_btn);
             }
             Some(row)
@@ -827,4 +852,3 @@ fn spinner_cell(label_key: &str, spinner: impl Widget + 'static) -> HStack {
         .child(TextWidget::new(label))
         .child(spinner)
 }
-

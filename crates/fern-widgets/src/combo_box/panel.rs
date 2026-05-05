@@ -13,7 +13,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use fern_canvas::{Rect, Size, SizeProposal};
+use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
@@ -409,13 +409,18 @@ impl<T: Clone + PartialEq + 'static> Widget for FilteredItemList<T> {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         match self.root_child_id {
             Some(id) => ctx
                 .child_size(id, proposal)
                 .unwrap_or_else(|| proposal.resolve(120.0, 0.0)),
             None => proposal.resolve(120.0, 0.0),
-        }.into()
+        }
+        .into()
     }
 
     fn place_children(
@@ -466,11 +471,8 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
         };
         if !searchable {
             use fern_core::binding::BindingLevel;
-            self.version.bind_to(
-                ctx.self_id(),
-                ctx.binding_registry(),
-                BindingLevel::Rebuild,
-            );
+            self.version
+                .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
         }
 
         // Build the item-list portion of the panel. With `rich-text` +
@@ -551,9 +553,8 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
                         .on_submit_fn(|ctx| ctx.dismiss_top_overlay());
                     let search_id = ctx.add(search_input);
                     self.search_input_slot.set(Some(search_id));
-                    let search_wrapped = ctx.add(
-                        Padding::new(4.0, 4.0, 0.0, 4.0).child_id(search_id),
-                    );
+                    let search_wrapped =
+                        ctx.add(Padding::new(4.0, 4.0, 0.0, 4.0).child_id(search_id));
                     let col = VStack::new()
                         .spacing(0.0)
                         .add_child(search_wrapped)
@@ -620,9 +621,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
             // text field and reach this handler; we use them to walk
             // the filtered item list.
             let nav_key = match event {
-                WidgetEvent::KeyDown {
-                    key: Key::Tab, ..
-                } => {
+                WidgetEvent::KeyDown { key: Key::Tab, .. } => {
                     ctx.dismiss_top_overlay();
                     return EventResponse::Handled;
                 }
@@ -707,13 +706,18 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         match self.root_child_id {
             Some(id) => ctx
                 .child_size(id, proposal)
                 .unwrap_or_else(|| proposal.resolve(120.0, 0.0)),
             None => proposal.resolve(120.0, 0.0),
-        }.into()
+        }
+        .into()
     }
 
     fn place_children(

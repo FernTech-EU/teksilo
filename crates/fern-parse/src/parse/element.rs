@@ -75,15 +75,14 @@ pub(crate) fn parse_element(input: ParseStream) -> Result<FernElement> {
     // generic "no method named `child`" message without knowing which
     // slot to use.
     let leaf_name = type_path.segments.last().map(|s| s.ident.to_string());
-    if let Some(name) = leaf_name.as_deref() {
-        if diag::is_category_b_widget(name) {
-            if let Some(child) = body.iter().find_map(|item| match item {
-                BodyItem::Child(c) => Some(c),
-                _ => None,
-            }) {
-                return Err(diag::category_b_bare_child(name, child.head_span));
-            }
-        }
+    if let Some(name) = leaf_name.as_deref()
+        && diag::is_category_b_widget(name)
+        && let Some(child) = body.iter().find_map(|item| match item {
+            BodyItem::Child(c) => Some(c),
+            _ => None,
+        })
+    {
+        return Err(diag::category_b_bare_child(name, child.head_span));
     }
 
     Ok(FernElement {

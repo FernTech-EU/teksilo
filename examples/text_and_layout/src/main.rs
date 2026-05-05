@@ -12,9 +12,6 @@
 //! - Nested HStack-in-VStack arrangements
 //! - Composite widget rebuild on theme change
 
-use std::cell::Cell;
-use std::rc::Rc;
-
 use fern_ui::prelude::*;
 use fern_ui::tokens::{FontWeight, TextStyle};
 use fern_ui::widgets::{Button, ButtonVariant, HStack, Padding, Panel, Spacer, TextWidget, VStack};
@@ -128,9 +125,11 @@ impl Widget for RootContent {
                                     .child(build_color_box(TextRole::Error, "C")),
                             )
                             .child(
-                                TextWidget::new_literal("HStack with spacing — three colored boxes")
-                                    .style(TextStyleRole::Tiny)
-                                    .color(TextRole::Primary),
+                                TextWidget::new_literal(
+                                    "HStack with spacing — three colored boxes",
+                                )
+                                .style(TextStyleRole::Tiny)
+                                .color(TextRole::Primary),
                             )
                             .child(
                                 HStack::new()
@@ -164,7 +163,8 @@ impl Widget for RootContent {
                 .child_size(id, proposal)
                 .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
             None => proposal.resolve(0.0, 0.0),
-        }.into()
+        }
+        .into()
     }
 }
 
@@ -197,9 +197,9 @@ fn main() {
         .theme(Theme::light_default())
         .initial_window(
             WindowConfig::new()
-            .title("FernUI — Text & Layout")
-            .size(600, 500)
-            .root(|tree, _state| tree.add(RootContent::new()))
+                .title("FernUI — Text & Layout")
+                .size(600, 500)
+                .root(|tree, _state| tree.add(RootContent::new())),
         )
         .run();
 }
@@ -284,7 +284,7 @@ mod tests {
         use super::RootContent;
 
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let root = tree.add(RootContent::new());
+        let _root = tree.add(RootContent::new());
         tree.layout(SizeProposal::exact(600.0, 500.0));
         let frame_light = tree.render();
 

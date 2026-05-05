@@ -34,9 +34,8 @@
 use std::time::Duration;
 
 use fern_scene::{
-    A11yGroup, A11yNode, GroupItem, ItemId, PathItem, RectItem, Scene,
-    SceneItem, SceneItemPaintContext, SceneSelectionMode, SceneView, TextItem,
-    register_animated_item_signal,
+    A11yGroup, A11yNode, GroupItem, ItemId, PathItem, RectItem, Scene, SceneItem,
+    SceneItemPaintContext, SceneSelectionMode, SceneView, TextItem, register_animated_item_signal,
 };
 use fern_ui::canvas::{Canvas, Path, Point, Rect, StrokeStyle};
 use fern_ui::core::binding::BindingLevel;
@@ -168,15 +167,10 @@ impl SceneItem for PulsingDot {
         );
         // Kick off the loop. Idempotent — re-registering on rebuild
         // doesn't restart, the framework dedups via signal id.
-        self.phase.animate_looping(
-            1.0,
-            Duration::from_millis(1400),
-            Easing::Linear,
-            None,
-        );
+        self.phase
+            .animate_looping(1.0, Duration::from_millis(1400), Easing::Linear, None);
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // Scene-internal header
@@ -191,7 +185,8 @@ fn add_scene_header(scene: &mut Scene) {
             "fern-scene showcase — eight labelled sections, all visible at zoom 1.0",
             Rect::new(SCENE_PAD, SCENE_PAD, usable_w, 30.0),
         )
-        .color(ink()), Point::ZERO
+        .color(ink()),
+        Point::ZERO,
     );
     scene.add_item(
         TextItem::new(
@@ -219,7 +214,8 @@ fn add_section_frame(scene: &mut Scene, col: usize, row: usize, title: &str) {
             .label_color(ink())
             .fill(Color::new(0.99, 0.99, 1.00, 1.0))
             .stroke(Color::new(0.55, 0.55, 0.65, 1.0), 1.5)
-            .corner_radius(10.0), Point::ZERO
+            .corner_radius(10.0),
+        Point::ZERO,
     );
 }
 
@@ -230,7 +226,8 @@ fn add_section_caption(scene: &mut Scene, col: usize, row: usize, body: &str) {
             body,
             Rect::new(r.x + 12.0, r.y + 30.0, r.width - 24.0, 90.0),
         )
-        .color(dim_ink()), Point::ZERO
+        .color(dim_ink()),
+        Point::ZERO,
     );
 }
 
@@ -280,7 +277,8 @@ fn build_lightweight_items_section(scene: &mut Scene) {
                 RectItem::new(rect)
                     .fill(color)
                     .stroke(ink(), 1.0)
-                    .access_label(format!("tile {}", i + 1)), Point::ZERO
+                    .access_label(format!("tile {}", i + 1)),
+                Point::ZERO,
             );
         }
     }
@@ -300,14 +298,16 @@ fn build_lightweight_items_section(scene: &mut Scene) {
     scene.add_item(
         PathItem::new(zigzag, path_bounds)
             .stroke(pastel_purple(), 3.0)
-            .access_label("decorative zigzag"), Point::ZERO
+            .access_label("decorative zigzag"),
+        Point::ZERO,
     );
     scene.add_item(
         TextItem::new(
             "Stroke-only paths get per-segment hit-test.",
             Rect::new(path_x - 4.0, path_y + 60.0, 130.0, 60.0),
         )
-        .color(dim_ink()), Point::ZERO
+        .color(dim_ink()),
+        Point::ZERO,
     );
 }
 
@@ -337,7 +337,8 @@ fn build_groupitem_section(scene: &mut Scene) {
             .label_color(ink())
             .fill(Color::new(0.96, 0.96, 1.0, 1.0))
             .stroke(pastel_blue(), 2.0)
-            .corner_radius(10.0), Point::ZERO
+            .corner_radius(10.0),
+        Point::ZERO,
     );
     let items_y = inner.y + 28.0;
     for i in 0..3 {
@@ -346,21 +347,34 @@ fn build_groupitem_section(scene: &mut Scene) {
             RectItem::new(dot)
                 .fill(pastel_red())
                 .stroke(ink(), 1.0)
-                .access_label(format!("inner item {}", i + 1)), Point::ZERO
+                .access_label(format!("inner item {}", i + 1)),
+            Point::ZERO,
         );
     }
     let dot2 = Rect::new(inner.x + 10.0, items_y + 50.0, 90.0, 26.0);
-    scene.add_item(RectItem::new(dot2).fill(pastel_yellow()).stroke(ink(), 1.0), Point::ZERO);
+    scene.add_item(
+        RectItem::new(dot2).fill(pastel_yellow()).stroke(ink(), 1.0),
+        Point::ZERO,
+    );
 
     let invisible = Rect::new(r.x + 168.0, r.y + 130.0, 138.0, 130.0);
-    scene.add_item(GroupItem::new(invisible).label("Logical-only group"), Point::ZERO);
+    scene.add_item(
+        GroupItem::new(invisible).label("Logical-only group"),
+        Point::ZERO,
+    );
     scene.add_item(
         TextItem::new(
             "Same Rect as a group with NO chrome. Paints nothing, but \
              set_a11y_parent still works.",
-            Rect::new(invisible.x + 6.0, invisible.y + 6.0, invisible.width - 12.0, invisible.height - 12.0),
+            Rect::new(
+                invisible.x + 6.0,
+                invisible.y + 6.0,
+                invisible.width - 12.0,
+                invisible.height - 12.0,
+            ),
         )
-        .color(dim_ink()), Point::ZERO
+        .color(dim_ink()),
+        Point::ZERO,
     );
 }
 
@@ -400,7 +414,8 @@ fn build_zorder_section(scene: &mut Scene) {
             RectItem::new(rect)
                 .fill(*color)
                 .stroke(ink(), 1.5)
-                .access_label(format!("z-stack rect at z={}", z)), Point::ZERO
+                .access_label(format!("z-stack rect at z={}", z)),
+            Point::ZERO,
         );
         scene.set_z(id, *z as f32);
         scene.add_item(
@@ -408,7 +423,8 @@ fn build_zorder_section(scene: &mut Scene) {
                 *label,
                 Rect::new(rect.x + 8.0, rect.y + 6.0, rect.width - 16.0, 22.0),
             )
-            .color(ink()), Point::ZERO
+            .color(ink()),
+            Point::ZERO,
         );
     }
 }
@@ -426,11 +442,9 @@ fn build_card_with_button() -> impl Widget + 'static {
                 TextWidget::new_literal("Real widget machinery: focus, keyboard, a11y.")
                     .style(TextStyleRole::Body),
             )
-            .child(
-                Button::new_literal("Click me").on_activate_fn(|_ctx| {
-                    eprintln!("[scene-showcase] button clicked");
-                }),
-            ),
+            .child(Button::new_literal("Click me").on_activate_fn(|_ctx| {
+                eprintln!("[scene-showcase] button clicked");
+            })),
     )
 }
 
@@ -441,8 +455,7 @@ fn build_card_with_combo() -> impl Widget + 'static {
             .spacing(8.0)
             .child(TextWidget::new_literal("Card with ComboBox").style(TextStyleRole::BodyBold))
             .child(
-                TextWidget::new_literal("Pick a fruit from the list:")
-                    .style(TextStyleRole::Body),
+                TextWidget::new_literal("Pick a fruit from the list:").style(TextStyleRole::Body),
             )
             .child(ComboBox::new(
                 vec!["Apple", "Banana", "Cherry", "Date"],
@@ -521,12 +534,7 @@ fn build_drag_section(scene: &mut Scene) {
     let labels = ["drag me", "and me", "and me too"];
     let colors = [pastel_blue(), pastel_green(), pastel_yellow()];
     for (i, (label, color)) in labels.iter().zip(colors.iter()).enumerate() {
-        let rect = Rect::new(
-            r.x + 16.0 + i as f32 * 100.0,
-            r.y + 160.0,
-            85.0,
-            70.0,
-        );
+        let rect = Rect::new(r.x + 16.0 + i as f32 * 100.0, r.y + 160.0, 85.0, 70.0);
         // QGraphicsScene-style parent/child: the label is a child
         // of the rect. The rect is `.draggable(true)`; the label
         // isn't, but `Scene::set_item_parent` makes it cascade
@@ -536,14 +544,16 @@ fn build_drag_section(scene: &mut Scene) {
                 .fill(*color)
                 .stroke(ink(), 1.5)
                 .draggable(true)
-                .access_label(format!("draggable {}", i + 1)), Point::ZERO
+                .access_label(format!("draggable {}", i + 1)),
+            Point::ZERO,
         );
         let label_id = scene.add_item(
             TextItem::new(
                 *label,
                 Rect::new(rect.x + 8.0, rect.y + 24.0, rect.width - 16.0, 28.0),
             )
-            .color(ink()), Point::ZERO
+            .color(ink()),
+            Point::ZERO,
         );
         scene.set_item_parent(label_id, Some(parent));
     }
@@ -577,21 +587,28 @@ fn build_a11y_groups_section(scene: &mut Scene, scroll_area_id: ItemId) {
 
     // Visual hint stripes (decoration only — not in the AT tree).
     let stripe_w = (r.width - 32.0) / 3.0;
-    for (i, color) in [pastel_red(), pastel_yellow(), pastel_green()].iter().enumerate() {
+    for (i, color) in [pastel_red(), pastel_yellow(), pastel_green()]
+        .iter()
+        .enumerate()
+    {
         let stripe = Rect::new(
             r.x + 16.0 + i as f32 * stripe_w,
             r.y + 160.0,
             stripe_w - 6.0,
             44.0,
         );
-        scene.add_item(RectItem::new(stripe).fill(*color).stroke(ink(), 1.0), Point::ZERO);
+        scene.add_item(
+            RectItem::new(stripe).fill(*color).stroke(ink(), 1.0),
+            Point::ZERO,
+        );
         let label_text = ["Act I", "Act II", "Act III"][i];
         scene.add_item(
             TextItem::new(
                 label_text,
                 Rect::new(stripe.x + 8.0, stripe.y + 12.0, stripe.width - 16.0, 24.0),
             )
-            .color(ink()), Point::ZERO
+            .color(ink()),
+            Point::ZERO,
         );
     }
 
@@ -601,7 +618,8 @@ fn build_a11y_groups_section(scene: &mut Scene, scroll_area_id: ItemId) {
              the AT walker reports them under these Acts.",
             Rect::new(r.x + 12.0, r.y + 215.0, r.width - 24.0, 60.0),
         )
-        .color(dim_ink()), Point::ZERO
+        .color(dim_ink()),
+        Point::ZERO,
     );
 }
 
@@ -611,12 +629,26 @@ fn build_a11y_groups_section(scene: &mut Scene, scroll_area_id: ItemId) {
 
 fn build_inner_scene() -> impl Widget + 'static {
     let mut inner = Scene::new();
-    let palette = [pastel_red(), pastel_blue(), pastel_green(), pastel_yellow(), pastel_purple()];
+    let palette = [
+        pastel_red(),
+        pastel_blue(),
+        pastel_green(),
+        pastel_yellow(),
+        pastel_purple(),
+    ];
     for row in 0..3 {
         for col in 0..4 {
             let color = palette[(row * 4 + col) % palette.len()];
-            let dot = Rect::new(15.0 + col as f32 * 28.0, 14.0 + row as f32 * 26.0, 22.0, 22.0);
-            inner.add_item(RectItem::new(dot).fill(color).stroke(ink(), 1.0), Point::ZERO);
+            let dot = Rect::new(
+                15.0 + col as f32 * 28.0,
+                14.0 + row as f32 * 26.0,
+                22.0,
+                22.0,
+            );
+            inner.add_item(
+                RectItem::new(dot).fill(color).stroke(ink(), 1.0),
+                Point::ZERO,
+            );
         }
     }
     let mut path = Path::new();
@@ -626,8 +658,8 @@ fn build_inner_scene() -> impl Widget + 'static {
         .line_to(Point::new(26.0, 77.0))
         .close();
     inner.add_item(
-        PathItem::new(path, Rect::new(24.0, 22.0, 90.0, 60.0))
-            .stroke(connector_color(), 2.0), Point::ZERO
+        PathItem::new(path, Rect::new(24.0, 22.0, 90.0, 60.0)).stroke(connector_color(), 2.0),
+        Point::ZERO,
     );
     SceneView::new(inner)
         .nested_a11y(true)
@@ -653,9 +685,15 @@ fn build_nested_scene_section(scene: &mut Scene) {
         TextItem::new(
             "← Pan inside that inner viewport — independent of the \
              outer one. Chart-style pattern.",
-            Rect::new(inner_rect.x + inner_rect.width + 8.0, inner_rect.y, 145.0, inner_rect.height),
+            Rect::new(
+                inner_rect.x + inner_rect.width + 8.0,
+                inner_rect.y,
+                145.0,
+                inner_rect.height,
+            ),
         )
-        .color(dim_ink()), Point::ZERO
+        .color(dim_ink()),
+        Point::ZERO,
     );
 }
 
@@ -677,13 +715,11 @@ fn build_animation_section(scene: &mut Scene) {
     let r = section_rect(3, 1);
     // Three dots that all pulse — each one is its own SceneItem
     // with its own animated signal, scheduled by the framework.
-    for (i, color) in [pastel_red(), pastel_yellow(), pastel_green()].iter().enumerate() {
-        let dot = Rect::new(
-            r.x + 30.0 + i as f32 * 90.0,
-            r.y + 160.0,
-            70.0,
-            70.0,
-        );
+    for (i, color) in [pastel_red(), pastel_yellow(), pastel_green()]
+        .iter()
+        .enumerate()
+    {
+        let dot = Rect::new(r.x + 30.0 + i as f32 * 90.0, r.y + 160.0, 70.0, 70.0);
         scene.add_item(PulsingDot::new(dot, *color), Point::ZERO);
     }
     scene.add_item(
@@ -692,7 +728,8 @@ fn build_animation_section(scene: &mut Scene) {
              ticks pause; no CPU/GPU drain when not visible.",
             Rect::new(r.x + 12.0, r.y + 240.0, r.width - 24.0, 50.0),
         )
-        .color(dim_ink()), Point::ZERO
+        .color(dim_ink()),
+        Point::ZERO,
     );
 }
 
@@ -700,7 +737,11 @@ fn build_animation_section(scene: &mut Scene) {
 // Decorative connectors
 // ---------------------------------------------------------------------------
 
-fn add_section_connector(scene: &mut Scene, from_section: (usize, usize), to_section: (usize, usize)) {
+fn add_section_connector(
+    scene: &mut Scene,
+    from_section: (usize, usize),
+    to_section: (usize, usize),
+) {
     let from_rect = section_rect(from_section.0, from_section.1);
     let to_rect = section_rect(to_section.0, to_section.1);
     let from = Point::new(
@@ -722,7 +763,10 @@ fn add_section_connector(scene: &mut Scene, from_section: (usize, usize), to_sec
         (from.x.max(to.x).max(mid_x) - from.x.min(to.x).min(mid_x)).max(stroke_w) + 2.0 * pad,
         (from.y.max(to.y) - from.y.min(to.y)).max(stroke_w) + 2.0 * pad,
     );
-    scene.add_item(PathItem::new(path, bounds).stroke(connector_color(), stroke_w), Point::ZERO);
+    scene.add_item(
+        PathItem::new(path, bounds).stroke(connector_color(), stroke_w),
+        Point::ZERO,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -848,10 +892,7 @@ fn build_root() -> impl Widget + 'static {
 
     VStack::new()
         .spacing(8.0)
-        .child(
-            TextWidget::new_literal("fern-scene showcase")
-                .style(TextStyleRole::BodyBold),
-        )
+        .child(TextWidget::new_literal("fern-scene showcase").style(TextStyleRole::BodyBold))
         .child(status)
         .child(view)
 }

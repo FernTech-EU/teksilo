@@ -104,9 +104,7 @@ use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextStyle};
 
 use crate::primitives::icon_widget::IconWidget;
 use crate::primitives::text_input_field::TextInputField;
-use crate::primitives::{
-    Divider, Expand, HStack, MinSize, Padding, RectWidget, VStack, ZStack,
-};
+use crate::primitives::{Divider, Expand, HStack, MinSize, Padding, RectWidget, VStack, ZStack};
 
 use self::step_button::StepButton;
 
@@ -497,10 +495,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // Sanity-check the range once. A malformed range is a
         // programming error, not a runtime user error.
-        debug_assert!(
-            self.min <= self.max,
-            "SpinBox min must be <= max"
-        );
+        debug_assert!(self.min <= self.max, "SpinBox min must be <= max");
 
         // SpinBox reads theme tokens once for static layout params
         // (padding, focus-ring width, body typography). Colors resolve
@@ -530,9 +525,9 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         let wrap_mode = self.wrap_mode;
         let step_type = self.step_type;
         let single_step = self.single_step;
-        let page_step = self.page_step.unwrap_or_else(|| {
-            single_step.saturating_mul_u32(10)
-        });
+        let page_step = self
+            .page_step
+            .unwrap_or_else(|| single_step.saturating_mul_u32(10));
         let on_value_changed = self.on_value_changed.clone();
         let enabled = self.enabled;
         let read_only = self.read_only;
@@ -678,7 +673,11 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                 match wrap_mode {
                     WrapMode::Clamp => stepped.clamp_value(min, max),
                     WrapMode::Wrap => {
-                        if stepped > max { min } else { max }
+                        if stepped > max {
+                            min
+                        } else {
+                            max
+                        }
                     }
                 }
             } else {
@@ -701,8 +700,15 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                 }
                 let current = value_signal.get();
                 let new_value = apply_step(
-                    dir, page, step_type, wrap_mode,
-                    single_step, page_step, min, max, current,
+                    dir,
+                    page,
+                    step_type,
+                    wrap_mode,
+                    single_step,
+                    page_step,
+                    min,
+                    max,
+                    current,
                 );
                 if approx_eq(new_value, current) {
                     return None;
@@ -866,8 +872,10 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // Wrap field in vertical padding so it aligns inside the frame.
         let padded_field_id = ctx.add(
             Padding::new(
-                field_style.padding_vertical, 0.0,
-                field_style.padding_vertical, 0.0,
+                field_style.padding_vertical,
+                0.0,
+                field_style.padding_vertical,
+                0.0,
             )
             .child_id(field_id),
         );
@@ -905,9 +913,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                 let divider = Divider::vertical()
                     .thickness(1.0)
                     .color(fern_tokens::BorderRole::Default);
-                let divider_id = ctx.add(
-                    Padding::new(2.0, 0.0, 2.0, 0.0).child(divider),
-                );
+                let divider_id = ctx.add(Padding::new(2.0, 0.0, 2.0, 0.0).child(divider));
                 row = row.add_child(divider_id).add_child(buttons_id);
             }
             ctx.add(row)
@@ -946,10 +952,18 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // current theme on every pass, so theme switches refresh for
         // free.
         let border_role = self.focused.map(|f| {
-            if *f { BorderRole::Focused } else { BorderRole::Default }
+            if *f {
+                BorderRole::Focused
+            } else {
+                BorderRole::Default
+            }
         });
         let border_width_signal = self.focused.map(move |f| {
-            if *f { focus_ring_width } else { field_border_width }
+            if *f {
+                focus_ring_width
+            } else {
+                field_border_width
+            }
         });
         let bg = RectWidget::new()
             .background(SurfaceRole::Content)
@@ -958,9 +972,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             .corner_radius(CornerRadius::uniform(field_style.corner_radius));
         let bg_id = ctx.add(bg);
 
-        let zstack_id = ctx.add(
-            ZStack::new().add_child(bg_id).add_child(padded_row_id),
-        );
+        let zstack_id = ctx.add(ZStack::new().add_child(bg_id).add_child(padded_row_id));
 
         // Resolve the width policy into a concrete pixel cap (or
         // `None` for `Fill`). Char-mode measurement uses the app-
@@ -1009,9 +1021,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         //   half of the focus-state border stroke against the
         //   widget's own shape quad (visible as a ring clipped on
         //   all four sides).
-        let sized_id = ctx.add(
-            MinSize::new(min_width, field_style.height).child_id(zstack_id),
-        );
+        let sized_id = ctx.add(MinSize::new(min_width, field_style.height).child_id(zstack_id));
         // Stash the resolved cap + floor on `self` for
         // `size_that_fits` to read at layout time.
         self.pixel_cap = pixel_cap;
@@ -1054,10 +1064,22 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                     return EventResponse::Ignored;
                 };
                 match key {
-                    Key::ArrowUp => { (step_for_key)(1, false, ctx); EventResponse::Handled }
-                    Key::ArrowDown => { (step_for_key)(-1, false, ctx); EventResponse::Handled }
-                    Key::PageUp => { (step_for_key)(1, true, ctx); EventResponse::Handled }
-                    Key::PageDown => { (step_for_key)(-1, true, ctx); EventResponse::Handled }
+                    Key::ArrowUp => {
+                        (step_for_key)(1, false, ctx);
+                        EventResponse::Handled
+                    }
+                    Key::ArrowDown => {
+                        (step_for_key)(-1, false, ctx);
+                        EventResponse::Handled
+                    }
+                    Key::PageUp => {
+                        (step_for_key)(1, true, ctx);
+                        EventResponse::Handled
+                    }
+                    Key::PageDown => {
+                        (step_for_key)(-1, true, ctx);
+                        EventResponse::Handled
+                    }
                     _ => EventResponse::Ignored,
                 }
             })
@@ -1123,7 +1145,11 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         // Narrow the parent's proposal by `pixel_cap` (if any)
         // before delegating. This enforces the `.width(...)` /
         // `.width_chars(...)` caps without wrapping the subtree
@@ -1187,17 +1213,14 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         if let Some(page) = self.page_step {
             builder.set_numeric_value_jump(page.to_f64());
         } else {
-            builder.set_numeric_value_jump(
-                self.single_step.saturating_mul_u32(10).to_f64(),
-            );
+            builder.set_numeric_value_jump(self.single_step.saturating_mul_u32(10).to_f64());
         }
         // String-valued representation so screen readers can read
         // out the suffix / special-value text when applicable. The
         // suffix is elided when `special_value_text` has kicked in
         // (value == min), matching the visual rendering.
         let value = self.value.get();
-        let using_special =
-            self.special_value_text.is_some() && approx_eq(value, self.min);
+        let using_special = self.special_value_text.is_some() && approx_eq(value, self.min);
         let display = format_for_display(
             value,
             self.decimals,
@@ -1254,7 +1277,11 @@ fn build_buttons<T: SpinValue>(
 
     // Derived enabled signals: OR with the caller-wide `enabled`.
     let up_enabled = if enabled { can_up } else { Signal::new(false) };
-    let down_enabled = if enabled { can_down } else { Signal::new(false) };
+    let down_enabled = if enabled {
+        can_down
+    } else {
+        Signal::new(false)
+    };
 
     let step_for_up_tap = step.clone();
     let silent_for_up_auto = step_silent.clone();

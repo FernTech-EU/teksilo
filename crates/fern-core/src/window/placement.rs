@@ -19,10 +19,13 @@
 /// is responsible for preserving the restored rect (held by the
 /// `size` / `position` signals on `WindowState`) when crossing through
 /// `Maximized`, `Fullscreen`, or `Minimized`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, Default,
+)]
 pub enum WindowPlacement {
     /// Regular overlapping window. Uses `WindowState::size` and
     /// `WindowState::position` as the current geometry.
+    #[default]
     Floating,
     /// Maximized to fill the current monitor's work area (minus taskbar
     /// / dock / menu bar on platforms that have one).
@@ -55,12 +58,6 @@ impl WindowPlacement {
     /// neither maximized, fullscreen, nor minimized.
     pub fn is_floating(self) -> bool {
         matches!(self, WindowPlacement::Floating)
-    }
-}
-
-impl Default for WindowPlacement {
-    fn default() -> Self {
-        WindowPlacement::Floating
     }
 }
 

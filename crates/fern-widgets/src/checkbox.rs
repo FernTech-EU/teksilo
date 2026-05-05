@@ -16,9 +16,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{
-    BorderRole, CornerRadius, SurfaceRole, TextRole, TextStyleRole, VAlignment,
-};
+use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole, TextStyleRole, VAlignment};
 
 use crate::button::InteractionState;
 use crate::primitives::{
@@ -362,7 +360,9 @@ impl Widget for Checkbox {
                 .add_child(dash_id),
         );
 
-        let mut row = HStack::new().spacing(cb_style.label_gap).add_child(check_box);
+        let mut row = HStack::new()
+            .spacing(cb_style.label_gap)
+            .add_child(check_box);
         if let Some(ref label) = self.label {
             let label_widget = TextWidget::new_literal(label)
                 .style(TextStyleRole::Body)
@@ -395,9 +395,8 @@ impl Widget for Checkbox {
         }
 
         let row_id = ctx.add(row);
-        let root_id = ctx.add(
-            MinSize::new(cb_style.box_hit_area, cb_style.box_hit_area).child_id(row_id),
-        );
+        let root_id =
+            ctx.add(MinSize::new(cb_style.box_hit_area, cb_style.box_hit_area).child_id(row_id));
 
         if let Some(ref tooltip_text) = self.tooltip_text {
             let tooltip_widget = crate::tooltip::TooltipWidget::new_literal(tooltip_text);
@@ -492,7 +491,11 @@ impl Widget for Checkbox {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         if let Some(root) = self.root_child_id
             && let Some(size) = ctx.child_size(root, proposal)
         {
@@ -679,7 +682,11 @@ mod tests {
     fn disabled_has_disabled_colors() {
         let checked = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Checkbox::new(checked).label_literal("Disabled").enabled(false));
+        tree.add(
+            Checkbox::new(checked)
+                .label_literal("Disabled")
+                .enabled(false),
+        );
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let frame = tree.render();
         let disabled_fill = Theme::light_default().colors.accent_disabled.to_array();

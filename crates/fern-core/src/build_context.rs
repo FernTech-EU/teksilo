@@ -3,9 +3,9 @@
 //! Provides Signal-based APIs for creating reactive state, registering
 //! effects, and adding child widgets during the build lifecycle.
 
+use crate::binding::BindingRegistry;
 use crate::event_source::{SubscriptionHandle, SubscriptionId};
 use crate::signal::{ObserverHandle, Signal};
-use crate::binding::BindingRegistry;
 use crate::widget_id::WidgetId;
 
 /// Context available during Widget::build().
@@ -153,9 +153,7 @@ impl<'a> BuildContext<'a> {
     /// schedule a one-shot deadline wake-up without keeping the event
     /// loop in `Poll` mode. See [`WidgetTree::wake_at_handle`] for
     /// the underlying mechanism.
-    pub fn wake_at_handle(
-        &self,
-    ) -> std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>> {
+    pub fn wake_at_handle(&self) -> std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>> {
         self.tree.wake_at_handle()
     }
 
@@ -566,7 +564,7 @@ mod effect_tests {
     use crate::widget::{LayoutContext, Widget};
     use crate::widget_id::WidgetId;
     use crate::widget_tree::WidgetTree;
-    use fern_canvas::{Size, SizeProposal};
+    use fern_canvas::SizeProposal;
 
     /// A leaf widget that registers an effect on one signal to mirror its
     /// value into another. Produces no children.
@@ -583,7 +581,11 @@ mod effect_tests {
             Vec::new()
         }
 
-        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> crate::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
             proposal.resolve(0.0, 0.0).into()
         }
     }
@@ -609,7 +611,11 @@ mod effect_tests {
             Vec::new()
         }
 
-        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> crate::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
             proposal.resolve(0.0, 0.0).into()
         }
     }

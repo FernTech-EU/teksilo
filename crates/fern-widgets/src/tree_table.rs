@@ -31,12 +31,13 @@ use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, PointerButton, WidgetEvent};
 use fern_core::signal::Signal;
-use fern_core::widget::{
-    EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
-};
+use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_data::{NodeId, SelectionMode, SelectionModel, SortDirection, SortFilterTreeModel, TreeFilterMode, TreeModel};
+use fern_data::{
+    NodeId, SelectionMode, SelectionModel, SortDirection, SortFilterTreeModel, TreeFilterMode,
+    TreeModel,
+};
 use fern_i18n::LocalizedString;
 use fern_tokens::{BorderRole, SurfaceRole, TextRole, components::TableStyle};
 
@@ -303,10 +304,7 @@ impl<T: 'static> TreeTable<T> {
         self
     }
 
-    pub fn on_row_activate(
-        mut self,
-        f: impl Fn(usize, &mut EventContext) + 'static,
-    ) -> Self {
+    pub fn on_row_activate(mut self, f: impl Fn(usize, &mut EventContext) + 'static) -> Self {
         self.on_row_activate = Some(Rc::new(f));
         self
     }
@@ -393,8 +391,7 @@ impl<T: 'static> TreeTable<T> {
     }
 
     pub fn set_sort(&self, col_id: Option<&str>, dir: SortDirection) {
-        self.sort_signal
-            .set(col_id.map(|c| (c.to_string(), dir)));
+        self.sort_signal.set(col_id.map(|c| (c.to_string(), dir)));
     }
 
     pub fn set_filter(&self, col_id: &str, text: &str) {
@@ -526,12 +523,18 @@ impl<T: 'static> Widget for TreeTable<T> {
         let version = ctx.signal(0_u64);
         version.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
-        self.scroll_y
-            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Relayout);
+        self.scroll_y.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
         ctx.register_animated_signal(&self.scroll_y);
 
-        self.column_widths_signal
-            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Relayout);
+        self.column_widths_signal.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
         self.focused_cell.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
@@ -650,8 +653,7 @@ impl<T: 'static> Widget for TreeTable<T> {
             Rc::new(move |pos| editable_in_display_order.get(pos).copied().unwrap_or(false))
         };
 
-        let navigator: Rc<dyn RowNavigator> =
-            Rc::new(TreeNavigator::new(self.proxy.clone()));
+        let navigator: Rc<dyn RowNavigator> = Rc::new(TreeNavigator::new(self.proxy.clone()));
         let key_cfg = keyboard::KeyHandlerConfig {
             navigator,
             col_count: display_indices.len().max(1),
@@ -706,8 +708,7 @@ impl<T: 'static> Widget for TreeTable<T> {
                 let current_sort = active_sort
                     .as_ref()
                     .and_then(|(id, dir)| if id == &col.id { Some(*dir) } else { None });
-                let filter_zone_width =
-                    style.filter_indicator_size + style.cell_padding_horizontal;
+                let filter_zone_width = style.filter_indicator_size + style.cell_padding_horizontal;
                 let cell = HeaderCell::new(
                     col.id.clone(),
                     col.header_label.resolve_now(),
@@ -757,10 +758,9 @@ impl<T: 'static> Widget for TreeTable<T> {
                     None => continue,
                 };
                 let row_selected = match (selection_mode, &selection) {
-                    (
-                        TableSelectionMode::SingleRow | TableSelectionMode::MultiRow,
-                        Some(s),
-                    ) => s.is_selected(flat_idx),
+                    (TableSelectionMode::SingleRow | TableSelectionMode::MultiRow, Some(s)) => {
+                        s.is_selected(flat_idx)
+                    }
                     _ => false,
                 };
 
@@ -781,8 +781,7 @@ impl<T: 'static> Widget for TreeTable<T> {
                         ) => cs.is_selected(flat_idx, display_pos),
                         _ => false,
                     };
-                    let is_focused =
-                        self.focused_cell.get() == Some((flat_idx, display_pos));
+                    let is_focused = self.focused_cell.get() == Some((flat_idx, display_pos));
                     let is_editing = editing_state == Some((flat_idx, display_pos));
                     let cell_ctx = CellContext {
                         row_index: flat_idx,
@@ -797,8 +796,8 @@ impl<T: 'static> Widget for TreeTable<T> {
                     };
 
                     // Build the cell delegate widget.
-                    let inner_widget = proxy
-                        .with_entry(flat_idx, |item, _| (col.cell)(item, &cell_ctx));
+                    let inner_widget =
+                        proxy.with_entry(flat_idx, |item, _| (col.cell)(item, &cell_ctx));
                     let inner_widget = match inner_widget {
                         Some(w) => w,
                         None => continue,
@@ -836,12 +835,8 @@ impl<T: 'static> Widget for TreeTable<T> {
                         inner_id
                     };
 
-                    let cell_a11y = CellA11y::new(
-                        leading_id,
-                        flat_idx + 2,
-                        display_pos + 1,
-                        is_selected,
-                    );
+                    let cell_a11y =
+                        CellA11y::new(leading_id, flat_idx + 2, display_pos + 1, is_selected);
                     cell_ids.push(ctx.add(cell_a11y));
                 }
 
@@ -930,7 +925,11 @@ impl<T: 'static> Widget for TreeTable<T> {
         children
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let width = proposal.width.unwrap_or(400.0);
         let height = proposal.height.unwrap_or(300.0);
         self.viewport_height.set(height);
@@ -1003,18 +1002,16 @@ impl<T: 'static> Widget for TreeTable<T> {
         }
         next += row_count_visible;
 
-        if self.scrollbar_id.is_some() {
-            if let Some(child) = children.get_mut(next) {
-                if needs_scrollbar {
-                    child.origin = Point::new(
-                        bounds.x + bounds.width - SCROLLBAR_THICKNESS,
-                        body_origin_y,
-                    );
-                    child.size = Size::new(SCROLLBAR_THICKNESS, body_height);
-                } else {
-                    child.origin = bounds.origin();
-                    child.size = Size::ZERO;
-                }
+        if self.scrollbar_id.is_some()
+            && let Some(child) = children.get_mut(next)
+        {
+            if needs_scrollbar {
+                child.origin =
+                    Point::new(bounds.x + bounds.width - SCROLLBAR_THICKNESS, body_origin_y);
+                child.size = Size::new(SCROLLBAR_THICKNESS, body_height);
+            } else {
+                child.origin = bounds.origin();
+                child.size = Size::ZERO;
             }
         }
     }
@@ -1049,20 +1046,20 @@ impl<T: 'static> Widget for TreeTable<T> {
             }
         }
 
-        if let Some(ref sel) = self.selection {
-            if matches!(
+        if let Some(ref sel) = self.selection
+            && matches!(
                 self.selection_mode,
                 TableSelectionMode::SingleRow | TableSelectionMode::MultiRow
-            ) {
-                let bg = SurfaceRole::Selected.resolve(colors);
-                for row_idx in sel.selected_indices() {
-                    let y = body_origin_y + (row_idx as f32) * row_h - scroll_y;
-                    if y + row_h < body_origin_y || y > body_origin_y + body_height {
-                        continue;
-                    }
-                    let rect = Rect::new(bounds.x, y, body_width_for_paint, row_h);
-                    canvas.fill_rect(rect, bg);
+            )
+        {
+            let bg = SurfaceRole::Selected.resolve(colors);
+            for row_idx in sel.selected_indices() {
+                let y = body_origin_y + (row_idx as f32) * row_h - scroll_y;
+                if y + row_h < body_origin_y || y > body_origin_y + body_height {
+                    continue;
                 }
+                let rect = Rect::new(bounds.x, y, body_width_for_paint, row_h);
+                canvas.fill_rect(rect, bg);
             }
         }
 
@@ -1091,27 +1088,27 @@ impl<T: 'static> Widget for TreeTable<T> {
         }
 
         // Focus ring.
-        if let Some((focus_row, focus_col)) = self.focused_cell.get() {
-            if focus_col < widths.len() {
-                let mut x_off = 0.0_f32;
-                for &w in widths.iter().take(focus_col) {
-                    x_off += w;
-                }
-                let cell_w = widths[focus_col];
-                let y = body_origin_y + (focus_row as f32) * row_h - scroll_y;
-                if y + row_h >= body_origin_y && y <= body_origin_y + body_height {
-                    let inset = style.focus_ring_inset;
-                    let stroke = style.grid_line_thickness.max(1.5);
-                    let ring_color = BorderRole::Focused.resolve(colors);
-                    let rx = bounds.x + x_off + inset;
-                    let ry = y + inset;
-                    let rw = (cell_w - inset * 2.0).max(0.0);
-                    let rh = (row_h - inset * 2.0).max(0.0);
-                    canvas.fill_rect(Rect::new(rx, ry, rw, stroke), ring_color);
-                    canvas.fill_rect(Rect::new(rx, ry + rh - stroke, rw, stroke), ring_color);
-                    canvas.fill_rect(Rect::new(rx, ry, stroke, rh), ring_color);
-                    canvas.fill_rect(Rect::new(rx + rw - stroke, ry, stroke, rh), ring_color);
-                }
+        if let Some((focus_row, focus_col)) = self.focused_cell.get()
+            && focus_col < widths.len()
+        {
+            let mut x_off = 0.0_f32;
+            for &w in widths.iter().take(focus_col) {
+                x_off += w;
+            }
+            let cell_w = widths[focus_col];
+            let y = body_origin_y + (focus_row as f32) * row_h - scroll_y;
+            if y + row_h >= body_origin_y && y <= body_origin_y + body_height {
+                let inset = style.focus_ring_inset;
+                let stroke = style.grid_line_thickness.max(1.5);
+                let ring_color = BorderRole::Focused.resolve(colors);
+                let rx = bounds.x + x_off + inset;
+                let ry = y + inset;
+                let rw = (cell_w - inset * 2.0).max(0.0);
+                let rh = (row_h - inset * 2.0).max(0.0);
+                canvas.fill_rect(Rect::new(rx, ry, rw, stroke), ring_color);
+                canvas.fill_rect(Rect::new(rx, ry + rh - stroke, rw, stroke), ring_color);
+                canvas.fill_rect(Rect::new(rx, ry, stroke, rh), ring_color);
+                canvas.fill_rect(Rect::new(rx + rw - stroke, ry, stroke, rh), ring_color);
             }
         }
     }
@@ -1200,14 +1197,15 @@ impl Widget for TwistArrow {
         }
         // Add a transparent rect so the widget has a hit area sized
         // by `size_that_fits`.
-        let rect = ctx.add(
-            RectWidget::new()
-                .background(SurfaceRole::Transparent),
-        );
+        let rect = ctx.add(RectWidget::new().background(SurfaceRole::Transparent));
         vec![rect]
     }
 
-    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        _proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         Size::new(self.size, self.size).into()
     }
 
@@ -1263,7 +1261,7 @@ mod tests {
     use fern_canvas::SizeProposal;
     use fern_core::accesskit::Role;
     use fern_core::widget_tree::WidgetTree;
-    use fern_data::{TreeModel, SortFilterTreeModel, TreeFilterMode};
+    use fern_data::{SortFilterTreeModel, TreeFilterMode, TreeModel};
     use fern_tokens::Theme;
 
     fn sample_tree() -> TreeModel<&'static str> {
@@ -1423,10 +1421,16 @@ mod tests {
         }
         // ArrowRight on first row (docs, has children, collapsed) →
         // expand.
-        tree.press_key(fern_core::event::Key::ArrowRight, fern_core::event::Modifiers::NONE);
+        tree.press_key(
+            fern_core::event::Key::ArrowRight,
+            fern_core::event::Modifiers::NONE,
+        );
         assert_eq!(proxy.visible_count(), 4);
         // ArrowLeft on first row (now expanded) → collapse.
-        tree.press_key(fern_core::event::Key::ArrowLeft, fern_core::event::Modifiers::NONE);
+        tree.press_key(
+            fern_core::event::Key::ArrowLeft,
+            fern_core::event::Modifiers::NONE,
+        );
         assert_eq!(proxy.visible_count(), 2);
     }
 

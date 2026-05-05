@@ -228,6 +228,7 @@ impl AnimationSpec {
         self.reduced_motion
     }
 
+    #[allow(clippy::wrong_self_convention)]
     fn into_request(&self, target: f32) -> AnimationRequest {
         AnimationRequest {
             target,
@@ -339,7 +340,9 @@ mod tests {
     fn spec_is_clone_for_capture_into_closures() {
         // Compile-time test: AnimationSpec must be Clone so handler
         // closures can each take their own copy.
-        let s = AnimationSpec::from_motion(motion(), false).fast().standard();
+        let s = AnimationSpec::from_motion(motion(), false)
+            .fast()
+            .standard();
         let s2 = s.clone();
         let _ = (s, s2);
     }

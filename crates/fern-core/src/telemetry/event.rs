@@ -107,7 +107,9 @@ pub enum PropValue<'a> {
     F64Bucket(F64Bucket),
     Bool(bool),
     /// Type-erased enum variant — the variant's `&'static str` name.
-    Enum { variant: &'static str },
+    Enum {
+        variant: &'static str,
+    },
     /// Histogram of `(static_key, count)`. Used by `widget.census`.
     HistogramStrU32(&'a [(&'static str, u32)]),
 }
@@ -250,8 +252,14 @@ mod tests {
     #[test]
     fn event_to_owned_round_trip() {
         let props = [
-            Prop { key: "name", value: PropValue::StaticStr("app.save") },
-            Prop { key: "count", value: PropValue::U32(3) },
+            Prop {
+                key: "name",
+                value: PropValue::StaticStr("app.save"),
+            },
+            Prop {
+                key: "count",
+                value: PropValue::U32(3),
+            },
         ];
         let event = Event {
             name: "intent.dispatched",

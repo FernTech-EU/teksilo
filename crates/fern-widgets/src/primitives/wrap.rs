@@ -107,7 +107,11 @@ impl Default for Wrap {
 }
 
 impl Widget for Wrap {
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         if self.child_ids.is_empty() {
             return (proposal.resolve(0.0, 0.0)).into();
         }
@@ -206,8 +210,11 @@ impl Widget for Wrap {
         }
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
-        self.spacing
-            .register_if_bound(self_id, registry, fern_core::binding::BindingLevel::Relayout);
+        self.spacing.register_if_bound(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::Relayout,
+        );
         self.line_spacing.register_if_bound(
             self_id,
             registry,
@@ -225,7 +232,11 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
             Size::new(self.0, self.1).into()
         }
     }

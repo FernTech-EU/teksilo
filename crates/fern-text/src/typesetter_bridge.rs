@@ -1,15 +1,13 @@
 use std::collections::HashMap;
 
 use fern_canvas::GlyphQuad;
-use fern_canvas::text_backend::{
-    AtlasInfo, TextBackend, TextLayout, TextLayoutSpan, TextSpanKind,
-};
+use fern_canvas::text_backend::{AtlasInfo, TextBackend, TextLayout, TextLayoutSpan, TextSpanKind};
 use fern_tokens::TextStyle;
+use text_typeset::atlas::cache::GlyphCacheKey;
 use text_typeset::{
     DocumentFlow, FontFaceId, InlineMarkup, LaidOutSpanKind, ParagraphResult, SingleLineResult,
     TextFontService, TextFormat,
 };
-use text_typeset::atlas::cache::GlyphCacheKey;
 
 /// Which layout method produced the cache entry — separates the
 /// single-line and paragraph caches so a single-line truncated result
@@ -60,7 +58,9 @@ impl LayoutCacheKey {
         scale_factor: f32,
     ) -> Self {
         let scaled_size = style.size * scale_factor;
-        let cap = max_lines.map(|n| n.min(u32::MAX as usize) as u32).unwrap_or(u32::MAX);
+        let cap = max_lines
+            .map(|n| n.min(u32::MAX as usize) as u32)
+            .unwrap_or(u32::MAX);
         Self {
             text: text.to_string(),
             font_family: style.family.clone(),
@@ -174,26 +174,22 @@ impl TypesetterBridge {
 
         #[cfg(feature = "fonts-arabic")]
         {
-            let data =
-                include_bytes!("../fonts/NotoSansArabic-VariableFont_wdth,wght.ttf");
+            let data = include_bytes!("../fonts/NotoSansArabic-VariableFont_wdth,wght.ttf");
             let _ = self.service.register_font(data);
         }
         #[cfg(feature = "fonts-hebrew")]
         {
-            let data =
-                include_bytes!("../fonts/NotoSansHebrew-VariableFont_wdth,wght.ttf");
+            let data = include_bytes!("../fonts/NotoSansHebrew-VariableFont_wdth,wght.ttf");
             let _ = self.service.register_font(data);
         }
         #[cfg(feature = "fonts-thai")]
         {
-            let data =
-                include_bytes!("../fonts/NotoSansThai-VariableFont_wdth,wght.ttf");
+            let data = include_bytes!("../fonts/NotoSansThai-VariableFont_wdth,wght.ttf");
             let _ = self.service.register_font(data);
         }
         #[cfg(feature = "fonts-devanagari")]
         {
-            let data =
-                include_bytes!("../fonts/NotoSansDevanagari-VariableFont_wdth,wght.ttf");
+            let data = include_bytes!("../fonts/NotoSansDevanagari-VariableFont_wdth,wght.ttf");
             let _ = self.service.register_font(data);
         }
         #[cfg(feature = "fonts-cjk-sc")]
@@ -233,8 +229,7 @@ impl TypesetterBridge {
     /// Requires the `system-emoji` feature.
     #[cfg(feature = "system-emoji")]
     pub fn register_system_emoji_font(&mut self) -> Option<FontFaceId> {
-        crate::system_emoji::load_system_emoji_data()
-            .map(|data| self.service.register_font(&data))
+        crate::system_emoji::load_system_emoji_data().map(|data| self.service.register_font(&data))
     }
 
     /// Set the default font and size. Forwards to the shared
@@ -349,7 +344,8 @@ impl TypesetterBridge {
     ///
     /// Returns `0.0` when the style cannot be resolved.
     pub fn measure_line_height(&self, style: &TextStyle) -> f32 {
-        self.service.measure_line_height(&Self::to_text_format(style))
+        self.service
+            .measure_line_height(&Self::to_text_format(style))
     }
 }
 
@@ -379,7 +375,8 @@ impl TextBackend for TypesetterBridge {
         style: &TextStyle,
         max_width: Option<f32>,
     ) -> TextLayout {
-        let cache_key = LayoutCacheKey::new_single_line(text, style, max_width, self.service.scale_factor());
+        let cache_key =
+            LayoutCacheKey::new_single_line(text, style, max_width, self.service.scale_factor());
 
         if let Some(cached) = self.layout_cache.get(&cache_key) {
             return cached.clone();
@@ -387,12 +384,9 @@ impl TextBackend for TypesetterBridge {
 
         self.had_text_activity = true;
         let format = Self::to_text_format(style);
-        let result: SingleLineResult = self.label_flow.layout_single_line(
-            &mut self.service,
-            text,
-            &format,
-            max_width,
-        );
+        let result: SingleLineResult =
+            self.label_flow
+                .layout_single_line(&mut self.service, text, &format, max_width);
 
         let key = self.next_layout_key;
         self.next_layout_key += 1;
@@ -436,8 +430,13 @@ impl TextBackend for TypesetterBridge {
         max_width: f32,
         max_lines: Option<usize>,
     ) -> TextLayout {
-        let cache_key =
-            LayoutCacheKey::new_paragraph(text, style, max_width, max_lines, self.service.scale_factor());
+        let cache_key = LayoutCacheKey::new_paragraph(
+            text,
+            style,
+            max_width,
+            max_lines,
+            self.service.scale_factor(),
+        );
 
         if let Some(cached) = self.layout_cache.get(&cache_key) {
             return cached.clone();
@@ -678,7 +677,6 @@ impl TextBackend for TypesetterBridge {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -744,8 +742,7 @@ mod tests {
     #[test]
     fn arabic_text_renders_with_visible_glyphs() {
         let mut bridge = TypesetterBridge::new_with_default_font();
-        let layout =
-            bridge.layout_single_line("مرحبا", &TextStyle::default(), None);
+        let layout = bridge.layout_single_line("مرحبا", &TextStyle::default(), None);
         assert!(
             layout.width > 0.0,
             "Arabic text should produce a non-zero advance, got {}",
@@ -756,9 +753,7 @@ mod tests {
             !glyphs.is_empty(),
             "Arabic text should produce at least one glyph"
         );
-        let visible = glyphs
-            .iter()
-            .any(|g| g.atlas[2] > 0.0 && g.atlas[3] > 0.0);
+        let visible = glyphs.iter().any(|g| g.atlas[2] > 0.0 && g.atlas[3] > 0.0);
         assert!(
             visible,
             "no Arabic glyph rasterized to a visible atlas rect — \
@@ -792,7 +787,12 @@ mod tests {
             "mixed layout should contain at least the Latin glyphs plus Arabic"
         );
 
-        for (i, (pw, mg)) in pure_widths.iter().zip(mixed_glyphs.iter()).take(5).enumerate() {
+        for (i, (pw, mg)) in pure_widths
+            .iter()
+            .zip(mixed_glyphs.iter())
+            .take(5)
+            .enumerate()
+        {
             let mw = mg.screen[2];
             assert!(
                 (pw - mw).abs() < 0.5,
@@ -809,13 +809,10 @@ mod tests {
     #[test]
     fn hebrew_text_renders_with_visible_glyphs() {
         let mut bridge = TypesetterBridge::new_with_default_font();
-        let layout =
-            bridge.layout_single_line("שלום", &TextStyle::default(), None);
+        let layout = bridge.layout_single_line("שלום", &TextStyle::default(), None);
         assert!(layout.width > 0.0);
         let glyphs = bridge.ensure_glyphs(&layout);
-        let visible = glyphs
-            .iter()
-            .any(|g| g.atlas[2] > 0.0 && g.atlas[3] > 0.0);
+        let visible = glyphs.iter().any(|g| g.atlas[2] > 0.0 && g.atlas[3] > 0.0);
         assert!(
             visible,
             "no Hebrew glyph rasterized to a visible atlas rect — \

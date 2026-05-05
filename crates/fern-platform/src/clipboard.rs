@@ -202,7 +202,9 @@ mod arboard_backend {
         }
 
         fn set_text(&mut self, text: &str) -> Result<(), String> {
-            self.inner.set_text(text.to_string()).map_err(|e| e.to_string())
+            self.inner
+                .set_text(text.to_string())
+                .map_err(|e| e.to_string())
         }
 
         fn get_html(&mut self) -> Result<String, String> {

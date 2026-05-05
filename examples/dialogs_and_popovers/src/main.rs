@@ -198,7 +198,7 @@ impl OverlayDemo {
 
 impl Widget for OverlayDemo {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme_signal().get();
+        let _theme = ctx.theme_signal().get();
 
         let popover_content = VStack::new()
             .spacing(12.0)
@@ -383,7 +383,8 @@ impl Widget for OverlayDemo {
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -409,9 +410,9 @@ fn main() {
         .theme(Theme::light_default())
         .initial_window(
             WindowConfig::new()
-            .title("Dialogs and Popovers")
-            .size(980, 720)
-            .root(|tree, _state| tree.add(OverlayDemo::new()))
+                .title("Dialogs and Popovers")
+                .size(980, 720)
+                .root(|tree, _state| tree.add(OverlayDemo::new())),
         )
         .run();
 }

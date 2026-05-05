@@ -90,19 +90,23 @@ fn detect_kind(path: &str) -> Option<ResourceKind> {
 }
 
 fn validate_svg(data: &[u8], path: &str) -> std::result::Result<(), String> {
-    let text = std::str::from_utf8(data)
-        .map_err(|e| format!("{path}: not valid UTF-8: {e}"))?;
-    let doc = roxmltree::Document::parse(text)
-        .map_err(|e| format!("{path}: XML parse error: {e}"))?;
+    let text = std::str::from_utf8(data).map_err(|e| format!("{path}: not valid UTF-8: {e}"))?;
+    let doc =
+        roxmltree::Document::parse(text).map_err(|e| format!("{path}: XML parse error: {e}"))?;
     let root = doc.root_element();
     if root.tag_name().name() != "svg" {
-        return Err(format!("{path}: root element is <{}>, expected <svg>", root.tag_name().name()));
+        return Err(format!(
+            "{path}: root element is <{}>, expected <svg>",
+            root.tag_name().name()
+        ));
     }
     // Check viewBox or width/height
     if root.attribute("viewBox").is_none()
         && (root.attribute("width").is_none() || root.attribute("height").is_none())
     {
-        return Err(format!("{path}: missing viewBox and width/height attributes"));
+        return Err(format!(
+            "{path}: missing viewBox and width/height attributes"
+        ));
     }
     Ok(())
 }
@@ -143,12 +147,9 @@ fn webp_is_animated(data: &[u8]) -> bool {
         if chunk_id == b"ANIM" {
             return true;
         }
-        let chunk_size = u32::from_le_bytes([
-            data[pos + 4],
-            data[pos + 5],
-            data[pos + 6],
-            data[pos + 7],
-        ]) as usize;
+        let chunk_size =
+            u32::from_le_bytes([data[pos + 4], data[pos + 5], data[pos + 6], data[pos + 7]])
+                as usize;
         // RIFF chunks are padded to even size; use saturating add for overflow safety
         pos = pos
             .saturating_add(8)
@@ -180,7 +181,13 @@ fn emit_expr(kind: ResourceKind, rel_path: &str, animated: bool) -> TokenStream2
 }
 
 /// Generate the static declaration form: `[vis] static NAME: LazyLock<T> = ...;`
-fn emit_static(vis: &Visibility, name: &Ident, kind: ResourceKind, rel_path: &str, animated: bool) -> TokenStream2 {
+fn emit_static(
+    vis: &Visibility,
+    name: &Ident,
+    kind: ResourceKind,
+    rel_path: &str,
+    animated: bool,
+) -> TokenStream2 {
     let watch = quote! {
         const _: &[u8] = ::core::include_bytes!(::core::concat!(::core::env!("CARGO_MANIFEST_DIR"), "/", #rel_path));
     };
@@ -198,7 +205,11 @@ fn emit_static(vis: &Visibility, name: &Ident, kind: ResourceKind, rel_path: &st
 /// Paths go through `::fern_ui::canvas::` so consuming crates only need
 /// to depend on `fern-ui` (the umbrella), not on `fern-canvas` directly.
 /// This mirrors the serde pattern where `serde_derive` emits `::serde::` paths.
-fn lazy_type_and_init(kind: ResourceKind, rel_path: &str, animated: bool) -> (TokenStream2, TokenStream2) {
+fn lazy_type_and_init(
+    kind: ResourceKind,
+    rel_path: &str,
+    animated: bool,
+) -> (TokenStream2, TokenStream2) {
     match kind {
         ResourceKind::Svg => (
             quote!(::fern_ui::canvas::svg::SvgIcon),

@@ -70,7 +70,11 @@ fn date_edit_value_iso_in_at_tree() {
 #[test]
 fn date_edit_clamp_inside_range_unchanged() {
     let d = Date::constant(2026, 5, 15);
-    let clamped = clamp_date(d, Some(Date::constant(2020, 1, 1)), Some(Date::constant(2030, 12, 31)));
+    let clamped = clamp_date(
+        d,
+        Some(Date::constant(2020, 1, 1)),
+        Some(Date::constant(2030, 12, 31)),
+    );
     assert_eq!(clamped, d);
 }
 
@@ -159,8 +163,7 @@ fn date_edit_default_validation_behavior_is_auto_correct() {
     // we cover the recovery path directly above. This test asserts the
     // builder method exists and accepts both variants.
     let value2 = Signal::new(Some(Date::constant(2026, 1, 1)));
-    let _ = DateEdit::new(value2)
-        .validation_behavior(crate::date_edit::ValidationBehavior::Reject);
+    let _ = DateEdit::new(value2).validation_behavior(crate::date_edit::ValidationBehavior::Reject);
 }
 
 #[test]
@@ -171,4 +174,3 @@ fn date_edit_validation_feedback_signal_starts_pristine() {
     let feedback = editor.validation_feedback_signal();
     assert!(matches!(feedback.get(), ValidationFeedback::Pristine));
 }
-

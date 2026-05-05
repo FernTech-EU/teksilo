@@ -56,7 +56,11 @@ impl Default for FillWidget {
 }
 
 impl Widget for FillWidget {
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> crate::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> crate::widget::LayoutResponse {
         proposal.resolve(0.0, 0.0).into()
     }
 
@@ -104,7 +108,11 @@ impl StackWidget {
 }
 
 impl Widget for StackWidget {
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> crate::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> crate::widget::LayoutResponse {
         proposal.resolve(0.0, 0.0).into()
     }
 
@@ -148,7 +156,11 @@ impl InsetWidget {
 }
 
 impl Widget for InsetWidget {
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> crate::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> crate::widget::LayoutResponse {
         let total = self.inset * 2.0;
         let size = proposal.resolve(total, total);
         Size::new(size.width.max(total), size.height.max(total)).into()

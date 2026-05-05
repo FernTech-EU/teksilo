@@ -66,9 +66,9 @@
 
 mod cell;
 mod header;
-mod zoom_grid;
 #[cfg(test)]
 mod tests;
+mod zoom_grid;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -87,13 +87,11 @@ use fern_tokens::{TextRole, TextStyleRole};
 use jiff::civil::Weekday;
 
 use crate::button::{Button, ButtonVariant};
-use crate::common::datetime::month_long_key;
-use crate::common::datetime::types::{today_local, weekday_from_monday_zero, YearMonth};
-use crate::common::datetime::weekday_short_key;
 use crate::common::datetime::Date;
-use crate::primitives::{
-    Center, Divider, FixedSize, HStack, Padding, Spacer, TextWidget, VStack,
-};
+use crate::common::datetime::month_long_key;
+use crate::common::datetime::types::{YearMonth, today_local, weekday_from_monday_zero};
+use crate::common::datetime::weekday_short_key;
+use crate::primitives::{Center, Divider, FixedSize, HStack, Padding, Spacer, TextWidget, VStack};
 
 use self::cell::DayCell;
 use self::header::CalendarHeader;
@@ -353,10 +351,7 @@ impl Calendar {
 
     /// Fired when the visible month changes (navigation arrows,
     /// keyboard PageUp/Down, today jump).
-    pub fn on_month_changed(
-        mut self,
-        f: impl Fn(YearMonth, &mut EventContext) + 'static,
-    ) -> Self {
+    pub fn on_month_changed(mut self, f: impl Fn(YearMonth, &mut EventContext) + 'static) -> Self {
         self.on_month_changed = Some(Rc::new(f));
         self
     }
@@ -415,7 +410,12 @@ impl Widget for Calendar {
             ))
         } else {
             // Empty placeholder so layout shape stays consistent.
-            ctx.add(FixedSize::new().bind_width(0.0).bind_height(0.0).child(Spacer::new()))
+            ctx.add(
+                FixedSize::new()
+                    .bind_width(0.0)
+                    .bind_height(0.0)
+                    .child(Spacer::new()),
+            )
         };
 
         // ── Weekday header row ──────────────────────────────────
@@ -469,13 +469,11 @@ impl Widget for Calendar {
             zoom_cell_width,
             zoom_cell_height,
         );
-        let mode_index = self
-            .mode
-            .map(|m| match m {
-                CalendarMode::Days => 0_usize,
-                CalendarMode::Months => 1,
-                CalendarMode::Years => 2,
-            });
+        let mode_index = self.mode.map(|m| match m {
+            CalendarMode::Days => 0_usize,
+            CalendarMode::Months => 1,
+            CalendarMode::Years => 2,
+        });
         let grid_id = ctx.add(
             crate::primitives::Switcher::new(mode_index)
                 .child(day_body)
@@ -484,21 +482,22 @@ impl Widget for Calendar {
         );
 
         // ── Optional footer ─────────────────────────────────────
-        let footer_id = if self.show_today_button || matches!(self.selection, SelectionBinding::Range { .. }) {
-            Some(build_footer(
-                ctx,
-                self.show_today_button,
-                self.visible_month.clone(),
-                self.focused_date.clone(),
-                self.selection.clone(),
-                self.on_selection_changed.clone(),
-                self.on_month_changed.clone(),
-                self.range_status.clone(),
-                matches!(self.selection, SelectionBinding::Range { .. }),
-            ))
-        } else {
-            None
-        };
+        let footer_id =
+            if self.show_today_button || matches!(self.selection, SelectionBinding::Range { .. }) {
+                Some(build_footer(
+                    ctx,
+                    self.show_today_button,
+                    self.visible_month.clone(),
+                    self.focused_date.clone(),
+                    self.selection.clone(),
+                    self.on_selection_changed.clone(),
+                    self.on_month_changed.clone(),
+                    self.range_status.clone(),
+                    matches!(self.selection, SelectionBinding::Range { .. }),
+                ))
+            } else {
+                None
+            };
 
         // ── Assemble VStack ─────────────────────────────────────
         let mut col = VStack::new()
@@ -527,9 +526,7 @@ impl Widget for Calendar {
                 .background(fern_tokens::SurfaceRole::Raised)
                 .border_color(fern_tokens::BorderRole::Default)
                 .border_width(theme.shape.border_width)
-                .corner_radius(fern_tokens::CornerRadius::uniform(
-                    theme.shape.radius_popup,
-                )),
+                .corner_radius(fern_tokens::CornerRadius::uniform(theme.shape.radius_popup)),
         );
         let framed_id = ctx.add(
             crate::primitives::ZStack::new()
@@ -680,14 +677,9 @@ impl Widget for Calendar {
             focused.day()
         );
         let selection_str = match &self.selection {
-            SelectionBinding::Single(sig) => sig.get().map(|d| {
-                format!(
-                    "{:04}-{:02}-{:02}",
-                    d.year(),
-                    d.month(),
-                    d.day()
-                )
-            }),
+            SelectionBinding::Single(sig) => sig
+                .get()
+                .map(|d| format!("{:04}-{:02}-{:02}", d.year(), d.month(), d.day())),
             SelectionBinding::Range { value, .. } => value.get().map(|r| {
                 format!(
                     "{:04}-{:02}-{:02} to {:04}-{:02}-{:02}",
@@ -737,17 +729,20 @@ fn build_weekday_row(
         let dow = weekday_from_monday_zero(first_offset + i);
         let key = weekday_short_key(dow);
         let label = resolve_message_widget(key, &[]);
-        let long_label = resolve_message_widget(
-            crate::common::datetime::weekday_long_key(dow),
-            &[],
-        );
+        let long_label =
+            resolve_message_widget(crate::common::datetime::weekday_long_key(dow), &[]);
         let text = TextWidget::new_literal(label)
             .style(TextStyleRole::Body)
             .color(TextRole::Secondary)
             .single_line()
             .a11y_hidden();
         let text_id = ctx.add(text);
-        let cell = WeekdayHeaderCell::new(text_id, long_label, style.cell_size, style.weekday_row_height);
+        let cell = WeekdayHeaderCell::new(
+            text_id,
+            long_label,
+            style.cell_size,
+            style.weekday_row_height,
+        );
         row = row.add_child(ctx.add(cell));
     }
     // AT: the row containing the column headers is itself a Row.
@@ -805,12 +800,12 @@ fn build_footer(
                     }
                 }
                 cb_focused.set(today);
-                if let SelectionBinding::Single(sig) = &cb_selection {
-                    if sig.get() != Some(today) {
-                        sig.set(Some(today));
-                        if let Some(cb) = cb_on_sel.as_ref() {
-                            cb(Some(today), ctx_evt);
-                        }
+                if let SelectionBinding::Single(sig) = &cb_selection
+                    && sig.get() != Some(today)
+                {
+                    sig.set(Some(today));
+                    if let Some(cb) = cb_on_sel.as_ref() {
+                        cb(Some(today), ctx_evt);
                     }
                 }
                 ctx_evt.request_frame();
@@ -948,12 +943,14 @@ impl Widget for CalendarBody {
                     .single_line()
                     .a11y_hidden();
                 let week_text_id = ctx.add(week_text);
-                row = row.add_child(ctx.add(
-                    FixedSize::new()
-                        .bind_width(week_number_col_width)
-                        .bind_height(cell_height)
-                        .child(Center::new().child_id(week_text_id)),
-                ));
+                row = row.add_child(
+                    ctx.add(
+                        FixedSize::new()
+                            .bind_width(week_number_col_width)
+                            .bind_height(cell_height)
+                            .child(Center::new().child_id(week_text_id)),
+                    ),
+                );
             }
             for day_idx in 0..7 {
                 let day_offset = (week * 7 + day_idx) as i64;
@@ -1121,11 +1118,11 @@ fn build_keyboard_handler(
                 commit = true;
             }
             Key::Escape => {
-                if let SelectionBinding::Range { anchor, .. } = &selection {
-                    if anchor.get().is_some() {
-                        anchor.set(None);
-                        return EventResponse::Handled;
-                    }
+                if let SelectionBinding::Range { anchor, .. } = &selection
+                    && anchor.get().is_some()
+                {
+                    anchor.set(None);
+                    return EventResponse::Handled;
                 }
                 return EventResponse::Ignored;
             }
@@ -1159,12 +1156,12 @@ fn build_keyboard_handler(
                 new_visible = Some(nfm);
             }
         }
-        if let Some(nv) = new_visible {
-            if visible_month.get() != nv {
-                visible_month.set(nv);
-                if let Some(cb) = on_month_changed.as_ref() {
-                    cb(nv, ctx);
-                }
+        if let Some(nv) = new_visible
+            && visible_month.get() != nv
+        {
+            visible_month.set(nv);
+            if let Some(cb) = on_month_changed.as_ref() {
+                cb(nv, ctx);
             }
         }
         if commit {
@@ -1201,20 +1198,20 @@ pub(crate) fn is_date_disabled(
     max: Option<Date>,
     filter: Option<&DisabledDateFilter>,
 ) -> bool {
-    if let Some(min) = min {
-        if d < min {
-            return true;
-        }
+    if let Some(min) = min
+        && d < min
+    {
+        return true;
     }
-    if let Some(max) = max {
-        if d > max {
-            return true;
-        }
+    if let Some(max) = max
+        && d > max
+    {
+        return true;
     }
-    if let Some(f) = filter {
-        if f(d) {
-            return true;
-        }
+    if let Some(f) = filter
+        && f(d)
+    {
+        return true;
     }
     false
 }
@@ -1268,4 +1265,3 @@ pub(crate) fn commit_date(
         }
     }
 }
-

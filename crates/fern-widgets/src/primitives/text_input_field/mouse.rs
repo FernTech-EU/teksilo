@@ -158,10 +158,7 @@ fn hit_test(state: &SharedState, local: &Point) -> Option<usize> {
 ///
 /// `position` is in widget-local coords (already transformed by the
 /// dispatch — same coords the new factory closure receives).
-pub(crate) fn reposition_caret_for_context_menu(
-    state: &SharedState,
-    position: Point,
-) {
+pub(crate) fn reposition_caret_for_context_menu(state: &SharedState, position: Point) {
     let local = to_local(state, &position);
     let Some(hit_pos) = hit_test(state, &local) else {
         return;

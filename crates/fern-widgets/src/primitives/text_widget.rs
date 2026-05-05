@@ -3,7 +3,6 @@ use std::rc::Rc;
 
 use fern_canvas::text_backend::{HitTarget, TextLayout};
 use fern_canvas::{Canvas, EllipsisMode, Point, Rect, Size, SizeProposal, TextOverflow};
-use fern_tokens::{Color, TextStyle};
 
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::color_prop::{ColorProp, TextStyleProp};
@@ -235,7 +234,6 @@ impl TextWidget {
     }
 }
 
-
 impl Widget for TextWidget {
     fn build(
         &mut self,
@@ -297,8 +295,7 @@ impl Widget for TextWidget {
                 match event {
                     WidgetEvent::PointerMove { position } => {
                         let bounds = last_bounds_for_pointer.get();
-                        let local =
-                            Point::new(position.x - bounds.x, position.y - bounds.y);
+                        let local = Point::new(position.x - bounds.x, position.y - bounds.y);
                         let layout_ref = last_layout_for_pointer.borrow();
                         let hit = layout_ref.as_ref().and_then(|l| l.hit_test(local));
                         let new_url = match &hit {
@@ -321,14 +318,13 @@ impl Widget for TextWidget {
                                     .as_ref()
                                     .and_then(|l| {
                                         l.spans.iter().find_map(|sp| {
-                                            if let fern_canvas::text_backend::TextSpanKind::Link { url: u } = &sp.kind
+                                            if let fern_canvas::text_backend::TextSpanKind::Link {
+                                                url: u,
+                                            } = &sp.kind
                                                 && u == url
                                             {
                                                 Some(Rect::new(
-                                                    sp.rect[0],
-                                                    sp.rect[1],
-                                                    sp.rect[2],
-                                                    sp.rect[3],
+                                                    sp.rect[0], sp.rect[1], sp.rect[2], sp.rect[3],
                                                 ))
                                             } else {
                                                 None
@@ -375,7 +371,11 @@ impl Widget for TextWidget {
         Vec::new()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let text = self.text.get();
         let style = self.style.resolve(&ctx.theme.typography);
         let Some(backend) = self.text_backend.as_ref().or(ctx.text_backend) else {
@@ -439,17 +439,13 @@ impl Widget for TextWidget {
                     let layout = backend.layout_single_line(&text, &style, None);
                     return (Size::new(layout.width, layout.height)).into();
                 };
-                let truncated = fern_canvas::ellipsis::ellipsize(
-                    &text,
-                    &style,
-                    max_w,
-                    mode,
-                    &mut *backend,
-                );
+                let truncated =
+                    fern_canvas::ellipsis::ellipsize(&text, &style, max_w, mode, &mut *backend);
                 let layout = backend.layout_single_line(&truncated, &style, None);
                 Size::new(layout.width, layout.height)
             }
-        }.into()
+        }
+        .into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -479,11 +475,7 @@ impl Widget for TextWidget {
                         (bounds.width + 0.5).max(0.0),
                         self.max_lines,
                     ),
-                    _ => backend.layout_single_line_markup(
-                        &text,
-                        &style,
-                        Some(bounds.width + 0.5),
-                    ),
+                    _ => backend.layout_single_line_markup(&text, &style, Some(bounds.width + 0.5)),
                 }
             };
             let link_color = ctx.theme.colors.text_link;

@@ -54,7 +54,7 @@ mod tests;
 use std::rc::Rc;
 
 use fern_canvas::{Path, Point, Rect, SizeProposal};
-use fern_core::accessibility::{widget_id_to_node_id, AccessNodeBuilder};
+use fern_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
 use fern_core::accesskit::{Action, HasPopup, Role};
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
@@ -70,14 +70,14 @@ use jiff::civil::Weekday;
 
 use crate::built_in_button::{BuiltInButton, BuiltInButtonSize};
 use crate::calendar::Calendar;
-use crate::common::datetime::pattern::{
-    format_value, mask_for_pattern, parse_value, segment_at_position, step_date_field,
-    ParseTarget, ParsedPattern, ParsedValue, PatternToken, SegmentKind,
-};
-use crate::common::datetime::types::{today_local, YearMonth};
 use crate::common::datetime::Date;
-use crate::primitives::text_input_field::{ValidationFeedback, ValidationOutcome};
+use crate::common::datetime::pattern::{
+    ParseTarget, ParsedPattern, ParsedValue, PatternToken, SegmentKind, format_value,
+    mask_for_pattern, parse_value, segment_at_position, step_date_field,
+};
+use crate::common::datetime::types::{YearMonth, today_local};
 use crate::primitives::IconWidget;
+use crate::primitives::text_input_field::{ValidationFeedback, ValidationOutcome};
 use crate::text_input::TextInput;
 
 type OnValueChanged = Rc<dyn Fn(Option<Date>, &mut EventContext)>;
@@ -330,10 +330,10 @@ impl Widget for DateEdit {
             {
                 let src_clone = src;
                 ctx.effect(&self.value, move |v| {
-                    if let Some(d) = v {
-                        if src_clone.get() != *d {
-                            src_clone.set(*d);
-                        }
+                    if let Some(d) = v
+                        && src_clone.get() != *d
+                    {
+                        src_clone.set(*d);
                     }
                 });
             }
@@ -423,22 +423,17 @@ impl Widget for DateEdit {
                 // 2. Strict parse failed. Try clamp-recovery: extract
                 //    each segment value, clamp out-of-range values to
                 //    their valid range, and re-construct.
-                if validation_behavior == ValidationBehavior::AutoCorrect {
-                    if let Some((corrected, msg)) =
-                        try_clamp_recovery(&pattern, trimmed, min, max)
-                    {
-                        return ValidationOutcome::Corrected {
-                            corrected,
-                            message: msg,
-                        };
-                    }
+                if validation_behavior == ValidationBehavior::AutoCorrect
+                    && let Some((corrected, msg)) = try_clamp_recovery(&pattern, trimmed, min, max)
+                {
+                    return ValidationOutcome::Corrected {
+                        corrected,
+                        message: msg,
+                    };
                 }
                 // 3. Truly unparseable. Reject.
                 ValidationOutcome::Invalid {
-                    message: resolve_message_widget(
-                        "date-edit-validation-not-a-date",
-                        &[],
-                    ),
+                    message: resolve_message_widget("date-edit-validation-not-a-date", &[]),
                 }
             })
         };
@@ -517,8 +512,8 @@ impl Widget for DateEdit {
             let pattern_for_cal = pattern_rc.clone();
             let on_value_changed_for_cal = on_value_changed.clone();
             let return_focus_to = ctx.self_id();
-            let mut calendar = Calendar::single(calendar_temp.clone()).on_activate(
-                move |d, ctx_evt| {
+            let mut calendar =
+                Calendar::single(calendar_temp.clone()).on_activate(move |d, ctx_evt| {
                     let clamped = clamp_date(d, min, max);
                     value_for_cal.set(Some(clamped));
                     text_signal_for_cal.set(format_value(&pattern_for_cal, Some(clamped), None));
@@ -535,8 +530,7 @@ impl Widget for DateEdit {
                     // gone next, not at the document root).
                     ctx_evt.request_focus(return_focus_to);
                     ctx_evt.request_frame();
-                },
-            );
+                });
             if let Some(min) = min {
                 calendar = calendar.min_date(min);
             }
@@ -628,10 +622,10 @@ impl Widget for DateEdit {
                     return true;
                 }
                 for tok in &pattern_for_filter.tokens {
-                    if let PatternToken::Literal(s) = tok {
-                        if s.chars().any(|x| x == c) {
-                            return true;
-                        }
+                    if let PatternToken::Literal(s) = tok
+                        && s.chars().any(|x| x == c)
+                    {
+                        return true;
                     }
                 }
                 false
@@ -682,7 +676,11 @@ impl Widget for DateEdit {
             WidthPolicy::Default => ctx.add(text_input),
             WidthPolicy::Fill => {
                 let inner_id = ctx.add(text_input);
-                ctx.add(crate::primitives::Expand::horizontal().respect_intrinsic().child_id(inner_id))
+                ctx.add(
+                    crate::primitives::Expand::horizontal()
+                        .respect_intrinsic()
+                        .child_id(inner_id),
+                )
             }
         };
         self.root_child_id = Some(root_id);
@@ -702,8 +700,7 @@ impl Widget for DateEdit {
             let caret_setter = caret_setter_for_step.clone();
             Rc::new(move |delta: i32, ctx_evt: &mut EventContext| {
                 let caret = caret_for_step.get();
-                let Some((_, _, kind)) = segment_at_position(&pattern_for_step, caret)
-                else {
+                let Some((_, _, kind)) = segment_at_position(&pattern_for_step, caret) else {
                     return;
                 };
                 let current = value_for_step.get().unwrap_or_else(today_local);
@@ -918,9 +915,7 @@ pub(crate) fn build_date_validator(
         if trimmed.is_empty() {
             return ValidationOutcome::Valid;
         }
-        if let Some(ParsedValue::Date(d)) =
-            parse_value(&pattern, trimmed, ParseTarget::DateOnly)
-        {
+        if let Some(ParsedValue::Date(d)) = parse_value(&pattern, trimmed, ParseTarget::DateOnly) {
             let clamped = clamp_date(d, min, max);
             let formatted = format_value(&pattern, Some(clamped), None);
             if formatted == trimmed && clamped == d {
@@ -1019,12 +1014,8 @@ pub(crate) fn try_clamp_recovery(
                 if clamped != raw_v {
                     let segment_key = match kind {
                         SegmentKind::Year => "validation-segment-year",
-                        SegmentKind::Month | SegmentKind::MonthShort => {
-                            "validation-segment-month"
-                        }
-                        SegmentKind::Day | SegmentKind::DayShort => {
-                            "validation-segment-day"
-                        }
+                        SegmentKind::Month | SegmentKind::MonthShort => "validation-segment-month",
+                        SegmentKind::Day | SegmentKind::DayShort => "validation-segment-day",
                         _ => "validation-segment-value",
                     };
                     let segment_label = resolve_message_widget(segment_key, &[]);
@@ -1067,10 +1058,7 @@ pub(crate) fn try_clamp_recovery(
     let date = Date::new(y, m, d).ok()?;
     let final_date = clamp_date(date, min, max);
     if final_date != date {
-        clamp_notes.push(resolve_message_widget(
-            "validation-clamped-to-range",
-            &[],
-        ));
+        clamp_notes.push(resolve_message_widget("validation-clamped-to-range", &[]));
     }
 
     let formatted = format_value(pattern, Some(final_date), None);

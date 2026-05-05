@@ -16,9 +16,9 @@
 use fern_canvas::{AnimatedQuadClass, Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::animated_quad::{AnimatedQuadHandle, AnimatedQuadKind};
+use fern_core::binding::BindingLevel;
 use fern_core::color_prop::ColorProp;
 use fern_core::signal::{Prop, Signal};
-use fern_core::binding::BindingLevel;
 use fern_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 #[cfg(test)]
@@ -207,7 +207,11 @@ impl Widget for ProgressBar {
         vec![]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         match self.orientation {
             Orientation::Horizontal => {
                 let width = proposal.width.unwrap_or(100.0);
@@ -217,7 +221,8 @@ impl Widget for ProgressBar {
                 let height = proposal.height.unwrap_or(100.0);
                 Size::new(self.thickness, height)
             }
-        }.into()
+        }
+        .into()
     }
 
     fn place_children(

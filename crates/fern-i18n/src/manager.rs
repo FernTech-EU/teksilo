@@ -434,14 +434,19 @@ mod tests {
 
     #[test]
     fn switch_to_rtl_reports_direction_change() {
-        let cfg = I18nConfig::test_only("en-US", &[("k", "v")])
-            .with_locale("ar-SA", &[("k", "ع")]);
+        let cfg = I18nConfig::test_only("en-US", &[("k", "v")]).with_locale("ar-SA", &[("k", "ع")]);
         let mgr = I18nManager::from_config(&cfg);
-        assert_eq!(*mgr.direction_signal().get_ref(), LayoutDirection::LeftToRight);
+        assert_eq!(
+            *mgr.direction_signal().get_ref(),
+            LayoutDirection::LeftToRight
+        );
 
         let outcome = mgr.set_locale(lid("ar-SA"));
         assert!(outcome.direction_changed);
-        assert_eq!(*mgr.direction_signal().get_ref(), LayoutDirection::RightToLeft);
+        assert_eq!(
+            *mgr.direction_signal().get_ref(),
+            LayoutDirection::RightToLeft
+        );
 
         let back = mgr.set_locale(lid("en-US"));
         assert!(back.direction_changed);
@@ -449,8 +454,7 @@ mod tests {
 
     #[test]
     fn ltr_to_ltr_no_direction_change() {
-        let cfg = I18nConfig::test_only("en-US", &[("k", "v")])
-            .with_locale("fr-FR", &[("k", "v")]);
+        let cfg = I18nConfig::test_only("en-US", &[("k", "v")]).with_locale("fr-FR", &[("k", "v")]);
         let mgr = I18nManager::from_config(&cfg);
         let outcome = mgr.set_locale(lid("fr-FR"));
         assert!(!outcome.direction_changed);
@@ -458,8 +462,7 @@ mod tests {
 
     #[test]
     fn version_increments_on_locale_change() {
-        let cfg = I18nConfig::test_only("en-US", &[("k", "v")])
-            .with_locale("fr-FR", &[("k", "v")]);
+        let cfg = I18nConfig::test_only("en-US", &[("k", "v")]).with_locale("fr-FR", &[("k", "v")]);
         let mgr = I18nManager::from_config(&cfg);
         let v0 = mgr.version_signal().get();
         mgr.set_locale(lid("fr-FR"));
@@ -540,10 +543,7 @@ mod tests {
 
     #[test]
     fn reload_from_path_replaces_bundle_and_bumps_version() {
-        let dir = std::env::temp_dir().join(format!(
-            "fern-i18n-reload-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("fern-i18n-reload-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("fr-FR.ftl");
         std::fs::write(&path, "greeting = Bonjour\n").unwrap();
@@ -567,7 +567,10 @@ mod tests {
 
         // Active locale and direction must not change.
         assert_eq!(mgr.locale_signal().get().to_string(), "fr-FR");
-        assert_eq!(*mgr.direction_signal().get_ref(), LayoutDirection::LeftToRight);
+        assert_eq!(
+            *mgr.direction_signal().get_ref(),
+            LayoutDirection::LeftToRight
+        );
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&dir);
@@ -576,13 +579,10 @@ mod tests {
     #[test]
     fn widget_overrides_take_priority_over_framework_bundle() {
         // Framework bundle ships "Status" in en-US.
-        static FRAMEWORK: &[(&str, &[&str])] = &[
-            ("en-US", &["a11y-status-bar-name = Status\n"]),
-        ];
+        static FRAMEWORK: &[(&str, &[&str])] = &[("en-US", &["a11y-status-bar-name = Status\n"])];
         // App override replaces it with "System status".
-        static OVERRIDE: &[(&str, &[&str])] = &[
-            ("en-US", &["a11y-status-bar-name = System status\n"]),
-        ];
+        static OVERRIDE: &[(&str, &[&str])] =
+            &[("en-US", &["a11y-status-bar-name = System status\n"])];
 
         let cfg = I18nConfig::test_only("en-US", &[("app-k", "v")])
             .framework_locales(FRAMEWORK)
@@ -599,14 +599,14 @@ mod tests {
 
     #[test]
     fn widget_overrides_fall_through_to_framework_when_key_missing() {
-        static FRAMEWORK: &[(&str, &[&str])] = &[
-            ("en-US", &["a11y-status-bar-name = Status\na11y-dialog-name = Dialog\n"]),
-        ];
+        static FRAMEWORK: &[(&str, &[&str])] = &[(
+            "en-US",
+            &["a11y-status-bar-name = Status\na11y-dialog-name = Dialog\n"],
+        )];
         // Override only redefines one key; the other falls through to
         // the framework bundle.
-        static OVERRIDE: &[(&str, &[&str])] = &[
-            ("en-US", &["a11y-status-bar-name = System status\n"]),
-        ];
+        static OVERRIDE: &[(&str, &[&str])] =
+            &[("en-US", &["a11y-status-bar-name = System status\n"])];
 
         let cfg = I18nConfig::test_only("en-US", &[("app-k", "v")])
             .framework_locales(FRAMEWORK)
@@ -623,17 +623,14 @@ mod tests {
 
     #[test]
     fn reload_from_path_malformed_file_returns_error_and_keeps_old_bundle() {
-        let dir = std::env::temp_dir().join(format!(
-            "fern-i18n-reload-bad-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("fern-i18n-reload-bad-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("fr-FR.ftl");
         // Deliberately malformed: missing `=` on first line.
         std::fs::write(&path, "this is not a valid ftl file\n").unwrap();
 
-        let cfg = I18nConfig::test_only("en-US", &[("k", "v")])
-            .with_locale("fr-FR", &[("k", "valeur")]);
+        let cfg =
+            I18nConfig::test_only("en-US", &[("k", "v")]).with_locale("fr-FR", &[("k", "valeur")]);
         let mgr = I18nManager::from_config(&cfg);
         mgr.set_locale(lid("fr-FR"));
         let v_before = mgr.version_signal().get();

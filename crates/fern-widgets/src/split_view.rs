@@ -16,10 +16,10 @@ use std::rc::Rc;
 
 use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, PointerButton, WidgetEvent};
 use fern_core::signal::Signal;
-use fern_core::binding::BindingLevel;
 use fern_core::widget::{
     CursorIcon, EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
 };
@@ -203,8 +203,7 @@ impl Widget for SplitHandle {
                     Orientation::Vertical => position.y,
                 };
                 let divider_center = coordinate - drag_offset.get();
-                let fraction =
-                    (divider_center - sb.start - divider_thickness / 2.0) / sb.available;
+                let fraction = (divider_center - sb.start - divider_thickness / 2.0) / sb.available;
                 split.set(sb.clamp(fraction));
             }
         };
@@ -282,11 +281,7 @@ impl Widget for SplitHandle {
                 move |entered, _ctx| {
                     if !enabled {
                         interaction.set(SplitHandleState::Idle);
-                        hover_progress.animate_to(
-                            0.0,
-                            HOVER_FADE_OUT,
-                            fern_tokens::Easing::Linear,
-                        );
+                        hover_progress.animate_to(0.0, HOVER_FADE_OUT, fern_tokens::Easing::Linear);
                         return;
                     }
                     if interaction.get() == SplitHandleState::Dragging {
@@ -304,11 +299,7 @@ impl Widget for SplitHandle {
                             fern_tokens::Easing::Linear,
                         );
                     } else {
-                        hover_progress.animate_to(
-                            0.0,
-                            HOVER_FADE_OUT,
-                            fern_tokens::Easing::Linear,
-                        );
+                        hover_progress.animate_to(0.0, HOVER_FADE_OUT, fern_tokens::Easing::Linear);
                     }
                 }
             })
@@ -440,7 +431,11 @@ impl Widget for SplitHandle {
         Vec::new()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         match self.orientation {
             Orientation::Horizontal => Size::new(
                 self.divider_thickness,
@@ -450,7 +445,8 @@ impl Widget for SplitHandle {
                 proposal.width.unwrap_or(self.divider_thickness),
                 self.divider_thickness,
             ),
-        }.into()
+        }
+        .into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -718,7 +714,11 @@ impl Widget for SplitView {
         self.children()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let style = self.resolved_style(ctx.theme);
         // Query children with an unbounded primary axis to get their intrinsic
         // size — used only as a fallback when the parent doesn't constrain us.
@@ -766,7 +766,8 @@ impl Widget for SplitView {
                     proposal.height.unwrap_or(intrinsic_height).max(min_height),
                 )
             }
-        }.into()
+        }
+        .into()
     }
 
     fn place_children(
@@ -843,9 +844,14 @@ struct ClipPane {
 }
 
 impl Widget for ClipPane {
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         ctx.child_size(self.child_id, proposal)
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -885,7 +891,11 @@ mod tests {
     struct FixedLeaf(f32, f32);
 
     impl Widget for FixedLeaf {
-        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
             Size::new(self.0, self.1).into()
         }
     }

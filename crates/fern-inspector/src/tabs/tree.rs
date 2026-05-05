@@ -55,8 +55,9 @@ impl std::fmt::Debug for TreeTab {
 
 impl Widget for TreeTab {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let filter_input = Padding::symmetric(4.0, 4.0)
-            .child(TextInput::new(self.state.tree_filter.clone()).placeholder("filter type names…"));
+        let filter_input = Padding::symmetric(4.0, 4.0).child(
+            TextInput::new(self.state.tree_filter.clone()).placeholder("filter type names…"),
+        );
         // Build the ScrollArea ourselves so we can capture its
         // `scroll_y_signal` and let `TreeRows` drive auto-scroll-into-view
         // when the picker resolves to a widget that's currently off-screen.
@@ -135,11 +136,9 @@ impl Widget for TreeRows {
         let self_id = ctx.self_id();
         // Repaint on selection change; relayout on filter / open flips
         // (initial mount + filter typing).
-        self.state.selected_id.bind_to(
-            self_id,
-            ctx.binding_registry(),
-            BindingLevel::RepaintOnly,
-        );
+        self.state
+            .selected_id
+            .bind_to(self_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
         self.state
             .open
             .bind_to(self_id, ctx.binding_registry(), BindingLevel::Relayout);
@@ -201,14 +200,13 @@ impl Widget for TreeRows {
         let cur_sel = self.state.selected_id.get();
         if cur_sel != self.last_seen_selection.get() {
             self.last_seen_selection.set(cur_sel);
-            if !click_consumed {
-                if let Some(id) = cur_sel {
-                    if let Some(idx) = self.rows.borrow().iter().position(|r| r.id == id) {
-                        let target = ((idx as f32) * ROW_HEIGHT - 20.0).max(0.0);
-                        if (self.scroll_y.get() - target).abs() > 0.5 {
-                            self.scroll_y.set(target);
-                        }
-                    }
+            if !click_consumed
+                && let Some(id) = cur_sel
+                && let Some(idx) = self.rows.borrow().iter().position(|r| r.id == id)
+            {
+                let target = ((idx as f32) * ROW_HEIGHT - 20.0).max(0.0);
+                if (self.scroll_y.get() - target).abs() > 0.5 {
+                    self.scroll_y.set(target);
                 }
             }
         }

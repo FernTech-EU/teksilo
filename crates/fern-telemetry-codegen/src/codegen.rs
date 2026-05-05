@@ -190,15 +190,13 @@ pub fn enum_type_name(event_name: &str, prop_name: &str) -> String {
 
 /// `"app_started"` → `"AppStarted"`, `"intent.dispatched"` → `"IntentDispatched"`
 pub fn to_camel_case(s: &str) -> String {
-    s.split(|c: char| c == '.' || c == '_' || c == '-')
+    s.split(['.', '_', '-'])
         .filter(|p| !p.is_empty())
         .map(|part| {
             let mut chars = part.chars();
             match chars.next() {
                 None => String::new(),
-                Some(first) => {
-                    first.to_uppercase().to_string() + chars.as_str()
-                }
+                Some(first) => first.to_uppercase().to_string() + chars.as_str(),
             }
         })
         .collect()

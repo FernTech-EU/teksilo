@@ -342,7 +342,8 @@ pub struct SceneView {
     /// through it instead of falling back to insertion order.
     /// `Rc<dyn Fn>` so callers can clone the SceneView while
     /// keeping the closure shared.
-    focus_order_callback: Option<Rc<dyn Fn(&Scene, FocusDirection, Option<ItemId>) -> Option<ItemId>>>,
+    focus_order_callback:
+        Option<Rc<dyn Fn(&Scene, FocusDirection, Option<ItemId>) -> Option<ItemId>>>,
 
     /// Whether this SceneView is logically nested inside another
     /// (chart-style outer chrome + inner data scene, or a preview
@@ -387,15 +388,13 @@ pub struct SceneView {
     /// scene-coord visible region — useful for "every-N-units" tiled
     /// backgrounds (graph-paper grids, ruled lines, dot grids) so the
     /// closure only emits geometry the user can actually see.
-    background_paint:
-        Option<Rc<dyn Fn(&mut fern_canvas::Canvas, &PaintContext, Rect)>>,
+    background_paint: Option<Rc<dyn Fn(&mut fern_canvas::Canvas, &PaintContext, Rect)>>,
     /// App-supplied closure painted **after** the items walk and the
     /// marquee, but before the debug overlay. Same coordinate
     /// conventions as `background_paint`. Used for scene-coord
     /// chrome that should ride over content (rulers, snap-line
     /// indicators, drop hints).
-    foreground_paint:
-        Option<Rc<dyn Fn(&mut fern_canvas::Canvas, &PaintContext, Rect)>>,
+    foreground_paint: Option<Rc<dyn Fn(&mut fern_canvas::Canvas, &PaintContext, Rect)>>,
 
     // --- Item-coordinate paint cache ----------------------------------
     /// Per-item paint cache for items that opted into
@@ -610,10 +609,7 @@ impl SceneView {
     /// region should have a domain-specific name (e.g. "Chart
     /// data area"). Default `None` — the SceneView has no
     /// explicit AT name.
-    pub fn a11y_label(
-        mut self,
-        label: impl Into<fern_i18n::LocalizedString>,
-    ) -> Self {
+    pub fn a11y_label(mut self, label: impl Into<fern_i18n::LocalizedString>) -> Self {
         let ls: fern_i18n::LocalizedString = label.into();
         self.a11y_label = Some(ls.resolve_now());
         self
@@ -732,10 +728,15 @@ impl SceneView {
                 .iter()
                 .position(|id| *id == cur)
                 .and_then(|i| ids.get(i + 1).copied()),
-            (FocusDirection::Backward, Some(cur)) => ids
-                .iter()
-                .position(|id| *id == cur)
-                .and_then(|i| if i == 0 { None } else { ids.get(i - 1).copied() }),
+            (FocusDirection::Backward, Some(cur)) => {
+                ids.iter().position(|id| *id == cur).and_then(|i| {
+                    if i == 0 {
+                        None
+                    } else {
+                        ids.get(i - 1).copied()
+                    }
+                })
+            }
         }
     }
 
@@ -1048,8 +1049,7 @@ impl SceneView {
         // current zoom (∆pan_screen = ∆target_scene * zoom).
         let view_xform = self.view_transform();
         let bo = self.bounds_origin_signal.get();
-        let viewport_screen =
-            Rect::new(bo.x, bo.y, viewport.width, viewport.height);
+        let viewport_screen = Rect::new(bo.x, bo.y, viewport.width, viewport.height);
         let visible = match view_xform.inverse() {
             Some(inv) => inv.apply_rect(viewport_screen),
             None => return,
@@ -1138,7 +1138,8 @@ impl SceneView {
     pub fn restore_state(&self, state: crate::SceneViewState) {
         self.pan_x.set(state.pan_x);
         self.pan_y.set(state.pan_y);
-        self.zoom.set(state.zoom.clamp(self.min_zoom, self.max_zoom));
+        self.zoom
+            .set(state.zoom.clamp(self.min_zoom, self.max_zoom));
         self.rotation.set(state.rotation);
     }
 
@@ -1250,11 +1251,8 @@ impl Widget for SceneView {
         // Bind the drag-rebuild signal so the next drop triggers a
         // rebuild and the drains above run. `BindingLevel::Rebuild`
         // is the level that re-runs `build()` on signal change.
-        self.drag_dirty.bind_to(
-            ctx.self_id(),
-            ctx.binding_registry(),
-            BindingLevel::Rebuild,
-        );
+        self.drag_dirty
+            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
         // Wire the item-coordinate cache invalidation observer.
         // Cached frames are recorded in **local** coordinates, so
@@ -1272,8 +1270,7 @@ impl Widget for SceneView {
                 use crate::scene::ItemChange;
                 let mut c = cache.borrow_mut();
                 match *change {
-                    ItemChange::LocalBoundsChanged { id, .. }
-                    | ItemChange::Removed { id } => {
+                    ItemChange::LocalBoundsChanged { id, .. } | ItemChange::Removed { id } => {
                         c.evict(id);
                     }
                     _ => {}
@@ -1420,7 +1417,10 @@ impl Widget for SceneView {
                 // transform is degenerate.
                 let to_scene = |p: Point| {
                     let xform = view_xform_signal.get();
-                    xform.inverse().map(|inv| inv.apply_point(p)).unwrap_or(Point::ZERO)
+                    xform
+                        .inverse()
+                        .map(|inv| inv.apply_point(p))
+                        .unwrap_or(Point::ZERO)
                 };
 
                 // Hit-test the handler-snapshot for the topmost
@@ -1457,23 +1457,19 @@ impl Widget for SceneView {
                         let new_id = new_hit.as_ref().map(|e| e.id);
                         let prev_id = hovered_item.get();
                         if prev_id != new_id {
-                            if let Some(prev) = prev_id {
-                                if let Some(prev_entry) =
+                            if let Some(prev) = prev_id
+                                && let Some(prev_entry) =
                                     handler_snapshot.borrow().iter().find(|e| e.id == prev)
-                                {
-                                    if let Some(h) = prev_entry.handlers.as_deref() {
-                                        if let Some(cb) = h.on_hover.as_ref() {
-                                            cb(false, ctx);
-                                        }
-                                    }
-                                }
+                                && let Some(h) = prev_entry.handlers.as_deref()
+                                && let Some(cb) = h.on_hover.as_ref()
+                            {
+                                cb(false, ctx);
                             }
-                            if let Some(new_entry) = new_hit.as_ref() {
-                                if let Some(h) = new_entry.handlers.as_deref() {
-                                    if let Some(cb) = h.on_hover.as_ref() {
-                                        cb(true, ctx);
-                                    }
-                                }
+                            if let Some(new_entry) = new_hit.as_ref()
+                                && let Some(h) = new_entry.handlers.as_deref()
+                                && let Some(cb) = h.on_hover.as_ref()
+                            {
+                                cb(true, ctx);
                             }
                             hovered_item.set(new_id);
                         }
@@ -1485,9 +1481,7 @@ impl Widget for SceneView {
                             .and_then(|e| e.handlers.as_deref())
                             .and_then(|h| h.cursor);
                         let snap = bounds_snapshot.borrow();
-                        let over_draggable = snap
-                            .iter()
-                            .any(|(_, rect)| rect.contains(scene_pt));
+                        let over_draggable = snap.iter().any(|(_, rect)| rect.contains(scene_pt));
                         let cursor = if drag_target_for_cursor.get().is_some() {
                             CursorIcon::Grabbing
                         } else if let Some(c) = item_cursor {
@@ -1499,19 +1493,20 @@ impl Widget for SceneView {
                         };
                         ctx.set_cursor(cursor);
                     }
-                    Ev::PointerDown { position, button, .. } => {
+                    Ev::PointerDown {
+                        position, button, ..
+                    } => {
                         cursor_pos.set(Some(*position));
                         let scene_pt = to_scene(*position);
                         let hit = hit_handler_item(scene_pt);
                         match button {
                             PointerButton::Secondary => {
-                                if let Some(entry) = hit.as_ref() {
-                                    if let Some(h) = entry.handlers.as_deref() {
-                                        if let Some(cb) = h.on_context_menu.as_ref() {
-                                            cb(scene_pt, ctx);
-                                            return EventResponse::Handled;
-                                        }
-                                    }
+                                if let Some(entry) = hit.as_ref()
+                                    && let Some(h) = entry.handlers.as_deref()
+                                    && let Some(cb) = h.on_context_menu.as_ref()
+                                {
+                                    cb(scene_pt, ctx);
+                                    return EventResponse::Handled;
                                 }
                             }
                             PointerButton::Primary => {
@@ -1525,28 +1520,26 @@ impl Widget for SceneView {
                             _ => {}
                         }
                     }
-                    Ev::PointerUp { position, button, .. } => {
-                        if matches!(button, PointerButton::Primary) {
-                            if let Some((press_scene, item_id)) = pending_tap.take() {
-                                let scene_pt = to_scene(*position);
-                                let dx = scene_pt.x - press_scene.x;
-                                let dy = scene_pt.y - press_scene.y;
-                                if (dx * dx + dy * dy).sqrt() <= TAP_MOVEMENT_THRESHOLD {
-                                    // Genuine tap — dispatch if the
-                                    // pressed item still has a tap
-                                    // handler installed.
-                                    if let Some(entry) = handler_snapshot
-                                        .borrow()
-                                        .iter()
-                                        .find(|e| e.id == item_id)
-                                    {
-                                        if let Some(h) = entry.handlers.as_deref() {
-                                            if let Some(cb) = h.on_tap.as_ref() {
-                                                cb(scene_pt, ctx);
-                                                return EventResponse::Handled;
-                                            }
-                                        }
-                                    }
+                    Ev::PointerUp {
+                        position, button, ..
+                    } => {
+                        if matches!(button, PointerButton::Primary)
+                            && let Some((press_scene, item_id)) = pending_tap.take()
+                        {
+                            let scene_pt = to_scene(*position);
+                            let dx = scene_pt.x - press_scene.x;
+                            let dy = scene_pt.y - press_scene.y;
+                            if (dx * dx + dy * dy).sqrt() <= TAP_MOVEMENT_THRESHOLD {
+                                // Genuine tap — dispatch if the
+                                // pressed item still has a tap
+                                // handler installed.
+                                if let Some(entry) =
+                                    handler_snapshot.borrow().iter().find(|e| e.id == item_id)
+                                    && let Some(h) = entry.handlers.as_deref()
+                                    && let Some(cb) = h.on_tap.as_ref()
+                                {
+                                    cb(scene_pt, ctx);
+                                    return EventResponse::Handled;
                                 }
                             }
                         }
@@ -1554,16 +1547,13 @@ impl Widget for SceneView {
                     Ev::PointerLeave => {
                         cursor_pos.set(None);
                         // Clear any pending hover.
-                        if let Some(prev) = hovered_item.take() {
-                            if let Some(prev_entry) =
+                        if let Some(prev) = hovered_item.take()
+                            && let Some(prev_entry) =
                                 handler_snapshot.borrow().iter().find(|e| e.id == prev)
-                            {
-                                if let Some(h) = prev_entry.handlers.as_deref() {
-                                    if let Some(cb) = h.on_hover.as_ref() {
-                                        cb(false, ctx);
-                                    }
-                                }
-                            }
+                            && let Some(h) = prev_entry.handlers.as_deref()
+                            && let Some(cb) = h.on_hover.as_ref()
+                        {
+                            cb(false, ctx);
                         }
                         pending_tap.set(None);
                         ctx.set_cursor(CursorIcon::Default);
@@ -1581,315 +1571,314 @@ impl Widget for SceneView {
         // which handles them with its own handlers. Programmatic
         // pan_to / zoom_to remain callable.
         if self.interactive {
-
-        {
-            let pan_x = self.pan_x.clone();
-            let pan_y = self.pan_y.clone();
-            let zoom = self.zoom.clone();
-            let rotation = self.rotation.clone();
-            let bounds_origin_for_scroll = self.bounds_origin_signal.clone();
-            let last_viewport_for_scroll = self.last_viewport.clone();
-            let cursor_pos_for_scroll = self.cursor_pos.clone();
-            let zoom_dur = self.zoom_anim_duration;
-            // Snapshot the scene's interaction policy at build time.
-            // Subsequent `Scene::pan_axes` / `Scene::zoomable` changes
-            // take effect on the next rebuild.
-            let pan_axes = self.scene.current_pan_axes();
-            let zoomable = self.scene.is_zoomable() && !self.adopt_scene_size;
-            handlers = handlers.on_scroll(move |event, _ctx| {
-                use crate::scene::PanAxes;
-                let WidgetEvent::Scroll { delta, modifiers } = event else {
-                    return EventResponse::Ignored;
-                };
-                let (mut dx, mut dy) = match delta {
-                    ScrollDelta::Pixels { x, y } => (*x, *y),
-                    ScrollDelta::Lines { x, y } => (*x * line_height, *y * line_height),
-                };
-                // Apply the scene's pan-axes policy: zero out the
-                // restricted axis so it passes through to ancestor
-                // scrollables instead of being absorbed.
-                match pan_axes {
-                    PanAxes::Both => {}
-                    PanAxes::None => {
-                        dx = 0.0;
-                        dy = 0.0;
+            {
+                let pan_x = self.pan_x.clone();
+                let pan_y = self.pan_y.clone();
+                let zoom = self.zoom.clone();
+                let rotation = self.rotation.clone();
+                let bounds_origin_for_scroll = self.bounds_origin_signal.clone();
+                let last_viewport_for_scroll = self.last_viewport.clone();
+                let cursor_pos_for_scroll = self.cursor_pos.clone();
+                let zoom_dur = self.zoom_anim_duration;
+                // Snapshot the scene's interaction policy at build time.
+                // Subsequent `Scene::pan_axes` / `Scene::zoomable` changes
+                // take effect on the next rebuild.
+                let pan_axes = self.scene.current_pan_axes();
+                let zoomable = self.scene.is_zoomable() && !self.adopt_scene_size;
+                handlers = handlers.on_scroll(move |event, _ctx| {
+                    use crate::scene::PanAxes;
+                    let WidgetEvent::Scroll { delta, modifiers } = event else {
+                        return EventResponse::Ignored;
+                    };
+                    let (mut dx, mut dy) = match delta {
+                        ScrollDelta::Pixels { x, y } => (*x, *y),
+                        ScrollDelta::Lines { x, y } => (*x * line_height, *y * line_height),
+                    };
+                    // Apply the scene's pan-axes policy: zero out the
+                    // restricted axis so it passes through to ancestor
+                    // scrollables instead of being absorbed.
+                    match pan_axes {
+                        PanAxes::Both => {}
+                        PanAxes::None => {
+                            dx = 0.0;
+                            dy = 0.0;
+                        }
+                        PanAxes::Horizontal => {
+                            dy = 0.0;
+                        }
+                        PanAxes::Vertical => {
+                            dx = 0.0;
+                        }
                     }
-                    PanAxes::Horizontal => {
-                        dy = 0.0;
+                    // Ctrl+wheel = zoom about the viewport center.
+                    // Unmodified wheel / trackpad pan = pan the view.
+                    if modifiers.ctrl() {
+                        if !zoomable {
+                            return EventResponse::Ignored;
+                        }
+                        // Zoom magnitude scales with vertical scroll
+                        // distance. Sign convention: scroll up (negative
+                        // ScrollDelta after platform negation) → zoom in.
+                        // Pixels deltas are large; rescale so the
+                        // step size matches one wheel notch.
+                        let step_px = match delta {
+                            ScrollDelta::Pixels { y, .. } => *y / 60.0,
+                            ScrollDelta::Lines { y, .. } => *y,
+                        };
+                        if step_px == 0.0 {
+                            return EventResponse::Handled;
+                        }
+                        let factor = (1.0_f32).copysign(-step_px) * 0.0;
+                        let _ = factor;
+                        // Compute multiplicative factor: each notch = 1.1×
+                        // (or 1/1.1 for zoom-out). Using exp-form keeps
+                        // repeated notches consistent.
+                        let factor = (-step_px * 0.1).exp();
+                        let z_old = zoom.get();
+                        let r_now = rotation.get();
+                        let z_new = (z_old * factor).clamp(min_zoom, max_zoom);
+                        if (z_new - z_old).abs() < 1e-6 {
+                            return EventResponse::Handled;
+                        }
+                        let viewport_size = last_viewport_for_scroll.get();
+                        let bo = bounds_origin_for_scroll.get();
+                        // Anchor the zoom at the cursor when known
+                        // (zoom-about-pointer — the scene point under
+                        // the mouse stays put). Fall back to viewport
+                        // center if no cursor position has been seen.
+                        let anchor_screen = match cursor_pos_for_scroll.get() {
+                            Some(p) => p,
+                            None => fern_canvas::Point::new(
+                                bo.x + viewport_size.width * 0.5,
+                                bo.y + viewport_size.height * 0.5,
+                            ),
+                        };
+                        let pan_old = Vec2::new(pan_x.get(), pan_y.get());
+                        let new_pan = anchor_pan_for_pinch(
+                            anchor_screen,
+                            pan_old,
+                            z_old,
+                            r_now,
+                            z_new,
+                            r_now,
+                            bo,
+                        )
+                        .unwrap_or(pan_old);
+                        // Snap zoom + pan together. Animating the two
+                        // signals independently with EaseOut would drift
+                        // mid-tween (the anchor math is exact only at
+                        // start and end states). Snap is also the
+                        // standard wheel-zoom feel — each notch produces
+                        // an immediate, predictable step. The `zoom_dur`
+                        // capture stays for symmetry with `set_zoom` /
+                        // `zoom_to` callers.
+                        let _ = zoom_dur;
+                        zoom.set(z_new);
+                        pan_x.set(new_pan.x);
+                        pan_y.set(new_pan.y);
+                        return EventResponse::Handled;
                     }
-                    PanAxes::Vertical => {
-                        dx = 0.0;
-                    }
-                }
-                // Ctrl+wheel = zoom about the viewport center.
-                // Unmodified wheel / trackpad pan = pan the view.
-                if modifiers.ctrl() {
-                    if !zoomable {
+                    // No-op / pass-through when both axes are zeroed by
+                    // the policy.
+                    if dx == 0.0 && dy == 0.0 {
                         return EventResponse::Ignored;
                     }
-                    // Zoom magnitude scales with vertical scroll
-                    // distance. Sign convention: scroll up (negative
-                    // ScrollDelta after platform negation) → zoom in.
-                    // Pixels deltas are large; rescale so the
-                    // step size matches one wheel notch.
-                    let step_px = match delta {
-                        ScrollDelta::Pixels { y, .. } => *y / 60.0,
-                        ScrollDelta::Lines { y, .. } => *y,
-                    };
-                    if step_px == 0.0 {
-                        return EventResponse::Handled;
+                    // Convention: positive scroll delta on the y-axis
+                    // means content scrolls "up" in the viewport, which
+                    // is equivalent to panning the *view* down — i.e. the
+                    // pan offset increases. This matches `ScrollArea` and
+                    // the natural-scroll feel of trackpads.
+                    let base_x = pan_x.animation_target().unwrap_or_else(|| pan_x.get());
+                    let base_y = pan_y.animation_target().unwrap_or_else(|| pan_y.get());
+                    let target_x = base_x + dx;
+                    let target_y = base_y + dy;
+                    if prefers_reduced {
+                        pan_x.set(target_x);
+                        pan_y.set(target_y);
+                    } else {
+                        pan_x.animate_to(target_x, pan_dur, Easing::EaseOut);
+                        pan_y.animate_to(target_y, pan_dur, Easing::EaseOut);
                     }
-                    let factor = (1.0_f32).copysign(-step_px) * 0.0;
-                    let _ = factor;
-                    // Compute multiplicative factor: each notch = 1.1×
-                    // (or 1/1.1 for zoom-out). Using exp-form keeps
-                    // repeated notches consistent.
-                    let factor = (-step_px * 0.1).exp();
+                    EventResponse::Handled
+                });
+            }
+
+            {
+                let pan_x = self.pan_x.clone();
+                let pan_y = self.pan_y.clone();
+                let zoom = self.zoom.clone();
+                let rotation = self.rotation.clone();
+                let bounds_origin_for_pinch = self.bounds_origin_signal.clone();
+                let zoomable_pinch = self.scene.is_zoomable() && !self.adopt_scene_size;
+                let pan_axes_pinch = self.scene.current_pan_axes();
+                handlers = handlers.on_pinch(move |phase, _ctx| {
+                    use crate::scene::PanAxes;
+                    if !zoomable_pinch {
+                        return;
+                    }
+                    let PinchPhase::Changed {
+                        center,
+                        scale,
+                        rotation: rotation_delta,
+                    } = phase
+                    else {
+                        return;
+                    };
+                    if !scale.is_finite() || scale <= 0.0 {
+                        return;
+                    }
                     let z_old = zoom.get();
-                    let r_now = rotation.get();
-                    let z_new = (z_old * factor).clamp(min_zoom, max_zoom);
-                    if (z_new - z_old).abs() < 1e-6 {
-                        return EventResponse::Handled;
-                    }
-                    let viewport_size = last_viewport_for_scroll.get();
-                    let bo = bounds_origin_for_scroll.get();
-                    // Anchor the zoom at the cursor when known
-                    // (zoom-about-pointer — the scene point under
-                    // the mouse stays put). Fall back to viewport
-                    // center if no cursor position has been seen.
-                    let anchor_screen = match cursor_pos_for_scroll.get() {
-                        Some(p) => p,
-                        None => fern_canvas::Point::new(
-                            bo.x + viewport_size.width * 0.5,
-                            bo.y + viewport_size.height * 0.5,
-                        ),
-                    };
+                    let r_old = rotation.get();
+                    let z_new = (z_old * scale).clamp(min_zoom, max_zoom);
+                    let r_new = r_old + rotation_delta;
                     let pan_old = Vec2::new(pan_x.get(), pan_y.get());
-                    let new_pan = anchor_pan_for_pinch(
-                        anchor_screen,
-                        pan_old,
-                        z_old,
-                        r_now,
-                        z_new,
-                        r_now,
-                        bo,
-                    )
-                    .unwrap_or(pan_old);
-                    // Snap zoom + pan together. Animating the two
-                    // signals independently with EaseOut would drift
-                    // mid-tween (the anchor math is exact only at
-                    // start and end states). Snap is also the
-                    // standard wheel-zoom feel — each notch produces
-                    // an immediate, predictable step. The `zoom_dur`
-                    // capture stays for symmetry with `set_zoom` /
-                    // `zoom_to` callers.
-                    let _ = zoom_dur;
+                    let bo = bounds_origin_for_pinch.get();
+                    let new_pan =
+                        anchor_pan_for_pinch(center, pan_old, z_old, r_old, z_new, r_new, bo)
+                            .unwrap_or(pan_old);
+                    // Pinch is a continuous, user-driven gesture — set
+                    // directly so each frame's update lands without
+                    // queuing a tween. Idle gates still apply: at rest
+                    // (pinch released, no further events), no frames are
+                    // requested.
                     zoom.set(z_new);
+                    rotation.set(r_new);
+                    // Apply pan-axes policy to the pinch's pan
+                    // adjustment so a horizontal-only scene doesn't
+                    // accidentally drift on Y from the gesture math.
+                    let new_pan = match pan_axes_pinch {
+                        PanAxes::Both => new_pan,
+                        PanAxes::None => pan_old,
+                        PanAxes::Horizontal => Vec2::new(new_pan.x, pan_old.y),
+                        PanAxes::Vertical => Vec2::new(pan_old.x, new_pan.y),
+                    };
                     pan_x.set(new_pan.x);
                     pan_y.set(new_pan.y);
-                    return EventResponse::Handled;
-                }
-                // No-op / pass-through when both axes are zeroed by
-                // the policy.
-                if dx == 0.0 && dy == 0.0 {
-                    return EventResponse::Ignored;
-                }
-                // Convention: positive scroll delta on the y-axis
-                // means content scrolls "up" in the viewport, which
-                // is equivalent to panning the *view* down — i.e. the
-                // pan offset increases. This matches `ScrollArea` and
-                // the natural-scroll feel of trackpads.
-                let base_x = pan_x.animation_target().unwrap_or_else(|| pan_x.get());
-                let base_y = pan_y.animation_target().unwrap_or_else(|| pan_y.get());
-                let target_x = base_x + dx;
-                let target_y = base_y + dy;
-                if prefers_reduced {
-                    pan_x.set(target_x);
-                    pan_y.set(target_y);
-                } else {
-                    pan_x.animate_to(target_x, pan_dur, Easing::EaseOut);
-                    pan_y.animate_to(target_y, pan_dur, Easing::EaseOut);
-                }
-                EventResponse::Handled
-            });
-        }
+                });
+            }
 
-        {
-            let pan_x = self.pan_x.clone();
-            let pan_y = self.pan_y.clone();
-            let zoom = self.zoom.clone();
-            let rotation = self.rotation.clone();
-            let bounds_origin_for_pinch = self.bounds_origin_signal.clone();
-            let zoomable_pinch = self.scene.is_zoomable() && !self.adopt_scene_size;
-            let pan_axes_pinch = self.scene.current_pan_axes();
-            handlers = handlers.on_pinch(move |phase, _ctx| {
-                use crate::scene::PanAxes;
-                if !zoomable_pinch {
-                    return;
-                }
-                let PinchPhase::Changed {
-                    center,
-                    scale,
-                    rotation: rotation_delta,
-                } = phase
-                else {
-                    return;
-                };
-                if !scale.is_finite() || scale <= 0.0 {
-                    return;
-                }
-                let z_old = zoom.get();
-                let r_old = rotation.get();
-                let z_new = (z_old * scale).clamp(min_zoom, max_zoom);
-                let r_new = r_old + rotation_delta;
-                let pan_old = Vec2::new(pan_x.get(), pan_y.get());
-                let bo = bounds_origin_for_pinch.get();
-                let new_pan = anchor_pan_for_pinch(
-                    center, pan_old, z_old, r_old, z_new, r_new, bo,
-                )
-                .unwrap_or(pan_old);
-                // Pinch is a continuous, user-driven gesture — set
-                // directly so each frame's update lands without
-                // queuing a tween. Idle gates still apply: at rest
-                // (pinch released, no further events), no frames are
-                // requested.
-                zoom.set(z_new);
-                rotation.set(r_new);
-                // Apply pan-axes policy to the pinch's pan
-                // adjustment so a horizontal-only scene doesn't
-                // accidentally drift on Y from the gesture math.
-                let new_pan = match pan_axes_pinch {
-                    PanAxes::Both => new_pan,
-                    PanAxes::None => pan_old,
-                    PanAxes::Horizontal => Vec2::new(new_pan.x, pan_old.y),
-                    PanAxes::Vertical => Vec2::new(pan_old.x, new_pan.y),
-                };
-                pan_x.set(new_pan.x);
-                pan_y.set(new_pan.y);
-            });
-        }
-
-        // --- Keyboard navigation -------------------------------
-        //
-        // Default scheme:
-        // - Arrow keys: pan by ~one viewport-quarter per press. Released
-        //   here for now; held-key repeat naturally chains tweens via
-        //   `animate_to`. Apps that wire `focus_order(...)` 
-        //   can override the arrow path by handling them upstream.
-        // - `+` / `=`: zoom in by 1.25× about the viewport center.
-        // - `-`: zoom out by 0.8× about the viewport center.
-        // - `0`: reset zoom to 1.0 about the viewport center.
-        //
-        // Handler is `on_key` (focused-widget surface) — it only
-        // fires when the SceneView itself is the focus target, NOT
-        // when a heavyweight child (like a TextInput) has focus and
-        // the user is typing. This is the right default: typing
-        // letters into a card shouldn't pan the scene. Apps that
-        // want global pan/zoom shortcuts should register them
-        // through the `Shortcut`/`Action` pipeline so they work
-        // regardless of focus.
-        {
-            use fern_core::event::{EventResponse, Key, WidgetEvent};
-            let pan_x = self.pan_x.clone();
-            let pan_y = self.pan_y.clone();
-            let zoom = self.zoom.clone();
-            let pan_dur = self.pan_anim_duration;
-            let zoom_dur = self.zoom_anim_duration;
-            let min_zoom = self.min_zoom;
-            let max_zoom = self.max_zoom;
-            let viewport_size = self.last_viewport.clone();
-            let pan_x_for_xform = self.pan_x.clone();
-            let pan_y_for_xform = self.pan_y.clone();
-            let zoom_for_xform = self.zoom.clone();
-            let rotation_for_xform = self.rotation.clone();
-            let bounds_origin_for_xform = self.bounds_origin_signal.clone();
-            let pan_axes_keys = self.scene.current_pan_axes();
-            let zoomable_keys = self.scene.is_zoomable() && !self.adopt_scene_size;
-            handlers = handlers.on_key(move |event, _ctx| {
-                use crate::scene::PanAxes;
-                let WidgetEvent::KeyDown { key, .. } = event else {
-                    return EventResponse::Ignored;
-                };
-                let allow_pan_x = matches!(pan_axes_keys, PanAxes::Both | PanAxes::Horizontal);
-                let allow_pan_y = matches!(pan_axes_keys, PanAxes::Both | PanAxes::Vertical);
-                // Pan step = quarter of the smaller viewport axis,
-                // capped to a sensible minimum so unusually small
-                // viewports still feel responsive.
-                let vp = viewport_size.get();
-                let pan_step = (vp.width.min(vp.height) * 0.25).max(64.0);
-                let mut handled = true;
-                let recenter_zoom = |z_new: f32| {
-                    // Adjust pan so the viewport center stays fixed
-                    // when zoom changes. Same anchor logic as pinch
-                    // about viewport center, but always centered.
-                    let bo = bounds_origin_for_xform.get();
-                    let viewport = vp;
-                    let anchor_screen = fern_canvas::Point::new(
-                        bo.x + viewport.width * 0.5,
-                        bo.y + viewport.height * 0.5,
-                    );
-                    let z_old = zoom_for_xform.get();
-                    let r = rotation_for_xform.get();
-                    let pan_old = Vec2::new(pan_x_for_xform.get(), pan_y_for_xform.get());
-                    if let Some(new_pan) = anchor_pan_for_pinch(
-                        anchor_screen, pan_old, z_old, r, z_new, r, bo,
-                    ) {
-                        pan_x_for_xform.animate_to(new_pan.x, pan_dur, Easing::EaseOut);
-                        pan_y_for_xform.animate_to(new_pan.y, pan_dur, Easing::EaseOut);
+            // --- Keyboard navigation -------------------------------
+            //
+            // Default scheme:
+            // - Arrow keys: pan by ~one viewport-quarter per press. Released
+            //   here for now; held-key repeat naturally chains tweens via
+            //   `animate_to`. Apps that wire `focus_order(...)`
+            //   can override the arrow path by handling them upstream.
+            // - `+` / `=`: zoom in by 1.25× about the viewport center.
+            // - `-`: zoom out by 0.8× about the viewport center.
+            // - `0`: reset zoom to 1.0 about the viewport center.
+            //
+            // Handler is `on_key` (focused-widget surface) — it only
+            // fires when the SceneView itself is the focus target, NOT
+            // when a heavyweight child (like a TextInput) has focus and
+            // the user is typing. This is the right default: typing
+            // letters into a card shouldn't pan the scene. Apps that
+            // want global pan/zoom shortcuts should register them
+            // through the `Shortcut`/`Action` pipeline so they work
+            // regardless of focus.
+            {
+                use fern_core::event::{EventResponse, Key, WidgetEvent};
+                let pan_x = self.pan_x.clone();
+                let pan_y = self.pan_y.clone();
+                let zoom = self.zoom.clone();
+                let pan_dur = self.pan_anim_duration;
+                let zoom_dur = self.zoom_anim_duration;
+                let min_zoom = self.min_zoom;
+                let max_zoom = self.max_zoom;
+                let viewport_size = self.last_viewport.clone();
+                let pan_x_for_xform = self.pan_x.clone();
+                let pan_y_for_xform = self.pan_y.clone();
+                let zoom_for_xform = self.zoom.clone();
+                let rotation_for_xform = self.rotation.clone();
+                let bounds_origin_for_xform = self.bounds_origin_signal.clone();
+                let pan_axes_keys = self.scene.current_pan_axes();
+                let zoomable_keys = self.scene.is_zoomable() && !self.adopt_scene_size;
+                handlers = handlers.on_key(move |event, _ctx| {
+                    use crate::scene::PanAxes;
+                    let WidgetEvent::KeyDown { key, .. } = event else {
+                        return EventResponse::Ignored;
+                    };
+                    let allow_pan_x = matches!(pan_axes_keys, PanAxes::Both | PanAxes::Horizontal);
+                    let allow_pan_y = matches!(pan_axes_keys, PanAxes::Both | PanAxes::Vertical);
+                    // Pan step = quarter of the smaller viewport axis,
+                    // capped to a sensible minimum so unusually small
+                    // viewports still feel responsive.
+                    let vp = viewport_size.get();
+                    let pan_step = (vp.width.min(vp.height) * 0.25).max(64.0);
+                    let mut handled = true;
+                    let recenter_zoom = |z_new: f32| {
+                        // Adjust pan so the viewport center stays fixed
+                        // when zoom changes. Same anchor logic as pinch
+                        // about viewport center, but always centered.
+                        let bo = bounds_origin_for_xform.get();
+                        let viewport = vp;
+                        let anchor_screen = fern_canvas::Point::new(
+                            bo.x + viewport.width * 0.5,
+                            bo.y + viewport.height * 0.5,
+                        );
+                        let z_old = zoom_for_xform.get();
+                        let r = rotation_for_xform.get();
+                        let pan_old = Vec2::new(pan_x_for_xform.get(), pan_y_for_xform.get());
+                        if let Some(new_pan) =
+                            anchor_pan_for_pinch(anchor_screen, pan_old, z_old, r, z_new, r, bo)
+                        {
+                            pan_x_for_xform.animate_to(new_pan.x, pan_dur, Easing::EaseOut);
+                            pan_y_for_xform.animate_to(new_pan.y, pan_dur, Easing::EaseOut);
+                        }
+                    };
+                    match key {
+                        Key::ArrowLeft if allow_pan_x => {
+                            let target =
+                                pan_x.animation_target().unwrap_or_else(|| pan_x.get()) + pan_step;
+                            pan_x.animate_to(target, pan_dur, Easing::EaseOut);
+                        }
+                        Key::ArrowRight if allow_pan_x => {
+                            let target =
+                                pan_x.animation_target().unwrap_or_else(|| pan_x.get()) - pan_step;
+                            pan_x.animate_to(target, pan_dur, Easing::EaseOut);
+                        }
+                        Key::ArrowUp if allow_pan_y => {
+                            let target =
+                                pan_y.animation_target().unwrap_or_else(|| pan_y.get()) + pan_step;
+                            pan_y.animate_to(target, pan_dur, Easing::EaseOut);
+                        }
+                        Key::ArrowDown if allow_pan_y => {
+                            let target =
+                                pan_y.animation_target().unwrap_or_else(|| pan_y.get()) - pan_step;
+                            pan_y.animate_to(target, pan_dur, Easing::EaseOut);
+                        }
+                        other
+                            if zoomable_keys
+                                && (other.to_char() == Some('+')
+                                    || other.to_char() == Some('=')) =>
+                        {
+                            let z_new = (zoom.get() * 1.25).clamp(min_zoom, max_zoom);
+                            zoom.animate_to(z_new, zoom_dur, Easing::EaseOut);
+                            recenter_zoom(z_new);
+                        }
+                        other if zoomable_keys && other.to_char() == Some('-') => {
+                            let z_new = (zoom.get() * 0.8).clamp(min_zoom, max_zoom);
+                            zoom.animate_to(z_new, zoom_dur, Easing::EaseOut);
+                            recenter_zoom(z_new);
+                        }
+                        other if other.to_char() == Some('0') => {
+                            zoom.animate_to(1.0, zoom_dur, Easing::EaseOut);
+                            recenter_zoom(1.0);
+                        }
+                        _ => handled = false,
                     }
-                };
-                match key {
-                    Key::ArrowLeft if allow_pan_x => {
-                        let target = pan_x.animation_target().unwrap_or_else(|| pan_x.get())
-                            + pan_step;
-                        pan_x.animate_to(target, pan_dur, Easing::EaseOut);
+                    if handled {
+                        EventResponse::Handled
+                    } else {
+                        EventResponse::Ignored
                     }
-                    Key::ArrowRight if allow_pan_x => {
-                        let target = pan_x.animation_target().unwrap_or_else(|| pan_x.get())
-                            - pan_step;
-                        pan_x.animate_to(target, pan_dur, Easing::EaseOut);
-                    }
-                    Key::ArrowUp if allow_pan_y => {
-                        let target = pan_y.animation_target().unwrap_or_else(|| pan_y.get())
-                            + pan_step;
-                        pan_y.animate_to(target, pan_dur, Easing::EaseOut);
-                    }
-                    Key::ArrowDown if allow_pan_y => {
-                        let target = pan_y.animation_target().unwrap_or_else(|| pan_y.get())
-                            - pan_step;
-                        pan_y.animate_to(target, pan_dur, Easing::EaseOut);
-                    }
-                    other if zoomable_keys
-                        && (other.to_char() == Some('+') || other.to_char() == Some('=')) =>
-                    {
-                        let z_new = (zoom.get() * 1.25).clamp(min_zoom, max_zoom);
-                        zoom.animate_to(z_new, zoom_dur, Easing::EaseOut);
-                        recenter_zoom(z_new);
-                    }
-                    other if zoomable_keys && other.to_char() == Some('-') => {
-                        let z_new = (zoom.get() * 0.8).clamp(min_zoom, max_zoom);
-                        zoom.animate_to(z_new, zoom_dur, Easing::EaseOut);
-                        recenter_zoom(z_new);
-                    }
-                    other if other.to_char() == Some('0') => {
-                        zoom.animate_to(1.0, zoom_dur, Easing::EaseOut);
-                        recenter_zoom(1.0);
-                    }
-                    _ => handled = false,
-                }
-                if handled {
-                    EventResponse::Handled
-                } else {
-                    EventResponse::Ignored
-                }
-            });
-            // SceneView itself is focusable so it can receive these
-            // key events. Heavyweight children grab focus first when
-            // they're the click target — typing in a card stays in
-            // the card.
-            handlers = handlers.focusable(true);
-        }
-
+                });
+                // SceneView itself is focusable so it can receive these
+                // key events. Heavyweight children grab focus first when
+                // they're the click target — typing in a card stays in
+                // the card.
+                handlers = handlers.focusable(true);
+            }
         } // end of `if self.interactive`
 
         // --- Marquee box-select via on_drag --------------------
@@ -1941,10 +1930,7 @@ impl Widget for SceneView {
                 use fern_core::gesture::DragPhase;
                 match phase {
                     DragPhase::Started { position, button } => {
-                        if !matches!(
-                            button,
-                            fern_core::event::PointerButton::Primary
-                        ) {
+                        if !matches!(button, fern_core::event::PointerButton::Primary) {
                             return;
                         }
                         // Project screen press to scene coords for
@@ -2050,8 +2036,7 @@ impl Widget for SceneView {
                             Some(inv) => inv.apply_rect(screen_rect),
                             None => Rect::ZERO,
                         };
-                        pending_marquee_commit
-                            .set(Some((scene_rect, state.additive)));
+                        pending_marquee_commit.set(Some((scene_rect, state.additive)));
                         drag_dirty.set(drag_dirty.get().wrapping_add(1));
                     }
                 }
@@ -2162,9 +2147,7 @@ impl Widget for SceneView {
                 });
             }
             // Sort by z descending so hit-test picks topmost first.
-            snap.sort_by(|a, b| {
-                b.z.partial_cmp(&a.z).unwrap_or(std::cmp::Ordering::Equal)
-            });
+            snap.sort_by(|a, b| b.z.partial_cmp(&a.z).unwrap_or(std::cmp::Ordering::Equal));
         }
 
         LayoutResponse::rigid(size)
@@ -2285,8 +2268,7 @@ impl Widget for SceneView {
         // decorations) — items render under the cards.
         let region = self.visible_scene_region(bounds);
         let view_transform = self.view_transform();
-        let item_ctx =
-            crate::item::SceneItemPaintContext::new(view_transform, Some(region));
+        let item_ctx = crate::item::SceneItemPaintContext::new(view_transform, Some(region));
 
         // App-supplied background closure: paints under all items in
         // scene coords, with the visible scene region passed so the
@@ -2411,11 +2393,7 @@ impl Widget for SceneView {
                 let fill = fern_tokens::Color::new(0.40, 0.55, 0.85, 0.18);
                 let stroke = fern_tokens::Color::new(0.40, 0.55, 0.85, 0.85);
                 canvas.fill_rect(scene_rect, fill);
-                canvas.stroke_rect(
-                    scene_rect,
-                    stroke,
-                    fern_canvas::StrokeStyle::solid(1.0),
-                );
+                canvas.stroke_rect(scene_rect, stroke, fern_canvas::StrokeStyle::solid(1.0));
             }
         }
 
@@ -2486,7 +2464,7 @@ impl Widget for SceneView {
         //      Look it up directly. Used for descendants of
         //      heavyweight items.
         use crate::a11y::A11yNode;
-        use fern_core::accessibility::{synthetic_node_id, SyntheticKind};
+        use fern_core::accessibility::{SyntheticKind, synthetic_node_id};
         let owner = self.self_widget_id.get()?;
         let parent = self
             .widget_to_item
@@ -2517,7 +2495,7 @@ impl Widget for SceneView {
     fn accessibility(&self, builder: &mut fern_core::accessibility::AccessNodeBuilder) {
         use crate::a11y::A11yNode;
         use crate::scene::SceneEntryKind;
-        use fern_core::accessibility::{synthetic_node_id, SyntheticKind};
+        use fern_core::accessibility::{SyntheticKind, synthetic_node_id};
         use std::collections::{HashMap, HashSet};
 
         // SceneView itself is `Role::Pane` for a top-level scene
@@ -2639,10 +2617,7 @@ impl Widget for SceneView {
         // a malformed `set_a11y_parent(A, B); set_a11y_parent(B, A)`
         // pairing) is skipped on its second appearance.
         let mut visited: HashSet<A11yNode> = HashSet::new();
-        let roots = logical_children
-            .get(&None)
-            .cloned()
-            .unwrap_or_default();
+        let roots = logical_children.get(&None).cloned().unwrap_or_default();
         for root in roots {
             self.emit_logical_node(builder, root, None, &logical_children, &mut visited);
         }
@@ -2659,15 +2634,13 @@ impl Widget for SceneView {
         let owner = builder.owner_id();
         let resolve = |node: A11yNode| -> Option<accesskit::NodeId> {
             match node {
-                A11yNode::Item(id) => owner.map(|o| {
-                    synthetic_node_id(o, id.as_u64(), SyntheticKind::SceneItem)
-                }),
-                A11yNode::Group(id) => owner.map(|o| {
-                    synthetic_node_id(o, id.as_u64(), SyntheticKind::SceneGroup)
-                }),
-                A11yNode::Widget(id) => {
-                    Some(fern_core::accessibility::widget_id_to_node_id(id))
+                A11yNode::Item(id) => {
+                    owner.map(|o| synthetic_node_id(o, id.as_u64(), SyntheticKind::SceneItem))
                 }
+                A11yNode::Group(id) => {
+                    owner.map(|o| synthetic_node_id(o, id.as_u64(), SyntheticKind::SceneGroup))
+                }
+                A11yNode::Widget(id) => Some(fern_core::accessibility::widget_id_to_node_id(id)),
             }
         };
         for (from, kind, to) in self.scene.a11y_relations() {
@@ -2748,14 +2721,14 @@ impl SceneView {
                 }
             }
         }
-        if cfg.content_bounds {
-            if let Some(content) = self.scene_content_bounds() {
-                canvas.stroke_rect(
-                    content,
-                    content_color,
-                    fern_canvas::StrokeStyle::solid(stroke_w),
-                );
-            }
+        if cfg.content_bounds
+            && let Some(content) = self.scene_content_bounds()
+        {
+            canvas.stroke_rect(
+                content,
+                content_color,
+                fern_canvas::StrokeStyle::solid(stroke_w),
+            );
         }
         if cfg.viewport {
             canvas.stroke_rect(
@@ -2851,8 +2824,7 @@ impl SceneView {
                         );
                         return;
                     };
-                    let widget_node_id =
-                        fern_core::accessibility::widget_id_to_node_id(widget_id);
+                    let widget_node_id = fern_core::accessibility::widget_id_to_node_id(widget_id);
                     builder.attach_scene_child_under(parent, widget_node_id);
                     widget_node_id
                 } else {
@@ -2902,8 +2874,7 @@ impl SceneView {
                     );
                     return;
                 };
-                let widget_node_id =
-                    fern_core::accessibility::widget_id_to_node_id(widget_id);
+                let widget_node_id = fern_core::accessibility::widget_id_to_node_id(widget_id);
                 builder.attach_scene_child_under(parent, widget_node_id);
                 widget_node_id
             }

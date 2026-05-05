@@ -36,13 +36,21 @@ pub enum ItemChange {
     /// `set_visible` flipped IS_VISIBLE.
     VisibilityChanged { id: ItemId, visible: bool },
     /// `set_flags` / `set_flag` changed the bitset.
-    FlagsChanged { id: ItemId, old: ItemFlags, new: ItemFlags },
+    FlagsChanged {
+        id: ItemId,
+        old: ItemFlags,
+        new: ItemFlags,
+    },
     /// `set_opacity`: local opacity multiplier changed.
     OpacityChanged { id: ItemId, old: f32, new: f32 },
     /// `set_z`: paint z-order changed.
     ZChanged { id: ItemId, old: f32, new: f32 },
     /// `set_item_parent`: logical parent changed.
-    ParentChanged { id: ItemId, old: Option<ItemId>, new: Option<ItemId> },
+    ParentChanged {
+        id: ItemId,
+        old: Option<ItemId>,
+        new: Option<ItemId>,
+    },
     /// `remove`: item is gone.
     Removed { id: ItemId },
     /// `add_item` / `add_widget`: item was inserted.
@@ -128,9 +136,7 @@ pub(crate) enum SceneEntryKind {
     /// until `SceneView::build` consumes it via
     /// [`fern_core::build_context::BuildContext::add_boxed`]; `None`
     /// afterwards.
-    Widget {
-        pending: Option<Box<dyn Widget>>,
-    },
+    Widget { pending: Option<Box<dyn Widget>> },
     /// A lightweight `SceneItem` that lives in the scene
     /// permanently; painted by the SceneView's paint walk.
     Item(Box<dyn SceneItem>),
@@ -360,8 +366,11 @@ impl Scene {
             }
             self.entries[pos].local_pos = local_pos;
             self.rebucket_subtree(id);
-            self.item_change_signal
-                .set(ItemChange::LocalPosChanged { id, old, new: local_pos });
+            self.item_change_signal.set(ItemChange::LocalPosChanged {
+                id,
+                old,
+                new: local_pos,
+            });
         }
     }
 
@@ -390,8 +399,11 @@ impl Scene {
             // descendants' local frames are unchanged.
             let aabb = self.compute_scene_aabb(id).unwrap_or(Rect::ZERO);
             self.index.insert(id, aabb);
-            self.item_change_signal
-                .set(ItemChange::LocalBoundsChanged { id, old, new: local_bounds });
+            self.item_change_signal.set(ItemChange::LocalBoundsChanged {
+                id,
+                old,
+                new: local_bounds,
+            });
         }
     }
 
@@ -517,8 +529,11 @@ impl Scene {
                 return;
             }
             self.entries[pos].flags = flags;
-            self.item_change_signal
-                .set(ItemChange::FlagsChanged { id, old, new: flags });
+            self.item_change_signal.set(ItemChange::FlagsChanged {
+                id,
+                old,
+                new: flags,
+            });
         }
     }
 
@@ -795,7 +810,7 @@ impl Scene {
 
     /// Sort `ids` by z-order ascending, stable for equal values.
     /// Crate-private helper for `SceneView::paint`.
-    pub(crate) fn sort_by_z(&self, ids: &mut Vec<ItemId>) {
+    pub(crate) fn sort_by_z(&self, ids: &mut [ItemId]) {
         ids.sort_by(|a, b| {
             let za = self.z(*a).unwrap_or(0.0);
             let zb = self.z(*b).unwrap_or(0.0);
@@ -1140,10 +1155,7 @@ impl std::fmt::Debug for Scene {
 /// Half-open AABB intersection: two rects intersect iff their
 /// projections overlap on both axes.
 pub(crate) fn rects_intersect(a: Rect, b: Rect) -> bool {
-    a.x < b.x + b.width
-        && b.x < a.x + a.width
-        && a.y < b.y + b.height
-        && b.y < a.y + a.height
+    a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
 }
 
 /// AABB of the union of two rectangles.
@@ -1172,12 +1184,18 @@ fn path_aabb(path: &Path) -> Option<Rect> {
     };
     for cmd in &path.commands {
         match cmd {
-            fern_canvas::PathCommand::MoveTo(p) | fern_canvas::PathCommand::LineTo(p) => include(*p),
+            fern_canvas::PathCommand::MoveTo(p) | fern_canvas::PathCommand::LineTo(p) => {
+                include(*p)
+            }
             fern_canvas::PathCommand::QuadTo { control, to } => {
                 include(*control);
                 include(*to);
             }
-            fern_canvas::PathCommand::CubicTo { control1, control2, to } => {
+            fern_canvas::PathCommand::CubicTo {
+                control1,
+                control2,
+                to,
+            } => {
                 include(*control1);
                 include(*control2);
                 include(*to);
@@ -1213,11 +1231,7 @@ mod tests {
     }
 
     impl Widget for FillWidget {
-        fn layout_response(
-            &self,
-            _proposal: SizeProposal,
-            _ctx: &LayoutContext,
-        ) -> LayoutResponse {
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
             Size::new(0.0, 0.0).into()
         }
     }
@@ -1231,7 +1245,10 @@ mod tests {
         // scene_rect is computed from local_pos + local_bounds.
         assert_eq!(scene.scene_rect(id), Some(r));
         assert_eq!(scene.local_pos(id), Some(Point::new(10.0, 20.0)));
-        assert_eq!(scene.local_bounds(id), Some(Rect::new(0.0, 0.0, 100.0, 50.0)));
+        assert_eq!(
+            scene.local_bounds(id),
+            Some(Rect::new(0.0, 0.0, 100.0, 50.0))
+        );
         assert_eq!(scene.ids(), vec![id]);
     }
 
@@ -1242,7 +1259,10 @@ mod tests {
             RectItem::new(Rect::new(0.0, 0.0, 30.0, 40.0)).fill(Color::RED),
             Point::new(10.0, 20.0),
         );
-        assert_eq!(scene.scene_rect(id), Some(Rect::new(10.0, 20.0, 30.0, 40.0)));
+        assert_eq!(
+            scene.scene_rect(id),
+            Some(Rect::new(10.0, 20.0, 30.0, 40.0))
+        );
         assert_eq!(scene.scene_pos(id), Some(Point::new(10.0, 20.0)));
     }
 
@@ -1254,7 +1274,10 @@ mod tests {
             Point::new(0.0, 0.0),
         );
         scene.set_local_pos(id, Point::new(500.0, 500.0));
-        assert_eq!(scene.scene_rect(id), Some(Rect::new(500.0, 500.0, 10.0, 10.0)));
+        assert_eq!(
+            scene.scene_rect(id),
+            Some(Rect::new(500.0, 500.0, 10.0, 10.0))
+        );
         let near_origin = scene.items_in_rect(Rect::new(0.0, 0.0, 50.0, 50.0));
         assert!(!near_origin.contains(&id));
         let near_far = scene.items_in_rect(Rect::new(490.0, 490.0, 30.0, 30.0));
@@ -1417,14 +1440,8 @@ mod tests {
     #[test]
     fn set_visible_flag_chains_through_parent() {
         let mut scene = Scene::new();
-        let parent = scene.add_item(
-            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
-            Point::ZERO,
-        );
-        let child = scene.add_item(
-            RectItem::new(Rect::new(0.0, 0.0, 5.0, 5.0)),
-            Point::ZERO,
-        );
+        let parent = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)), Point::ZERO);
+        let child = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 5.0, 5.0)), Point::ZERO);
         scene.set_item_parent(child, Some(parent));
         assert!(scene.is_effectively_visible(child));
         scene.set_visible(parent, false);
@@ -1435,14 +1452,8 @@ mod tests {
     #[test]
     fn effective_opacity_composes_through_chain() {
         let mut scene = Scene::new();
-        let p = scene.add_item(
-            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
-            Point::ZERO,
-        );
-        let c = scene.add_item(
-            RectItem::new(Rect::new(0.0, 0.0, 5.0, 5.0)),
-            Point::ZERO,
-        );
+        let p = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)), Point::ZERO);
+        let c = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 5.0, 5.0)), Point::ZERO);
         scene.set_item_parent(c, Some(p));
         scene.set_opacity(p, 0.5);
         scene.set_opacity(c, 0.5);
@@ -1452,10 +1463,7 @@ mod tests {
     #[test]
     fn opacity_clamps_to_unit_range() {
         let mut scene = Scene::new();
-        let id = scene.add_item(
-            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
-            Point::ZERO,
-        );
+        let id = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)), Point::ZERO);
         scene.set_opacity(id, 1.5);
         assert_eq!(scene.opacity(id), Some(1.0));
         scene.set_opacity(id, -0.3);
@@ -1536,10 +1544,7 @@ mod tests {
         use std::cell::Cell;
         use std::rc::Rc;
         let mut scene = Scene::new();
-        let id = scene.add_item(
-            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
-            Point::ZERO,
-        );
+        let id = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)), Point::ZERO);
         let count = Rc::new(Cell::new(0_u32));
         let count_clone = count.clone();
         let _h = scene.item_change_signal().observe(move |c| {
@@ -1601,18 +1606,9 @@ mod tests {
     #[test]
     fn scene_remove_recursively_removes_descendants() {
         let mut scene = Scene::new();
-        let parent = scene.add_item(
-            RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)),
-            Point::ZERO,
-        );
-        let child = scene.add_item(
-            RectItem::new(Rect::new(0.0, 0.0, 20.0, 20.0)),
-            Point::ZERO,
-        );
-        let grandchild = scene.add_item(
-            RectItem::new(Rect::new(0.0, 0.0, 5.0, 5.0)),
-            Point::ZERO,
-        );
+        let parent = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)), Point::ZERO);
+        let child = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 20.0, 20.0)), Point::ZERO);
+        let grandchild = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 5.0, 5.0)), Point::ZERO);
         scene.set_item_parent(child, Some(parent));
         scene.set_item_parent(grandchild, Some(child));
         assert_eq!(scene.entries.len(), 3);
@@ -1627,14 +1623,8 @@ mod tests {
     #[test]
     fn scene_orphan_promotes_children_to_root() {
         let mut scene = Scene::new();
-        let parent = scene.add_item(
-            RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)),
-            Point::ZERO,
-        );
-        let child = scene.add_item(
-            RectItem::new(Rect::new(0.0, 0.0, 20.0, 20.0)),
-            Point::ZERO,
-        );
+        let parent = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)), Point::ZERO);
+        let child = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 20.0, 20.0)), Point::ZERO);
         scene.set_item_parent(child, Some(parent));
         scene.orphan(parent);
         // Child's parent is now None.
@@ -1662,19 +1652,25 @@ mod tests {
         );
         scene.set_item_parent(child, Some(parent));
         // Pre-orphan: child sits at scene (500, 500).
-        assert!(scene
-            .items_in_rect(Rect::new(495.0, 495.0, 20.0, 20.0))
-            .contains(&child));
+        assert!(
+            scene
+                .items_in_rect(Rect::new(495.0, 495.0, 20.0, 20.0))
+                .contains(&child)
+        );
         scene.orphan(parent);
         // Post-orphan: child sits at scene (0, 0); the index must
         // reflect that — query at the new origin must hit, query at
         // the old origin must miss.
-        assert!(scene
-            .items_in_rect(Rect::new(-5.0, -5.0, 20.0, 20.0))
-            .contains(&child));
-        assert!(!scene
-            .items_in_rect(Rect::new(495.0, 495.0, 20.0, 20.0))
-            .contains(&child));
+        assert!(
+            scene
+                .items_in_rect(Rect::new(-5.0, -5.0, 20.0, 20.0))
+                .contains(&child)
+        );
+        assert!(
+            !scene
+                .items_in_rect(Rect::new(495.0, 495.0, 20.0, 20.0))
+                .contains(&child)
+        );
     }
 
     #[test]
@@ -1703,17 +1699,27 @@ mod tests {
         let bounds = Rc::new(Cell::new(Rect::new(0.0, 0.0, 10.0, 10.0)));
         let mut scene = Scene::new();
         let id = scene.add_item_dynamic(
-            DynRect { bounds: bounds.clone() },
+            DynRect {
+                bounds: bounds.clone(),
+            },
             Point::ZERO,
         );
         // Initially items_in_rect over the small AABB hits.
-        assert!(scene.items_in_rect(Rect::new(0.0, 0.0, 50.0, 50.0)).contains(&id));
+        assert!(
+            scene
+                .items_in_rect(Rect::new(0.0, 0.0, 50.0, 50.0))
+                .contains(&id)
+        );
         // Grow the bounds via the Cell — Scene's cached entry/index
         // is stale until refresh_dynamic_bounds runs.
         bounds.set(Rect::new(0.0, 0.0, 500.0, 500.0));
         scene.refresh_dynamic_bounds();
         // After refresh, the spatial index sees the larger AABB.
-        assert!(scene.items_in_rect(Rect::new(400.0, 400.0, 10.0, 10.0)).contains(&id));
+        assert!(
+            scene
+                .items_in_rect(Rect::new(400.0, 400.0, 10.0, 10.0))
+                .contains(&id)
+        );
     }
 
     #[test]
@@ -1742,12 +1748,18 @@ mod tests {
         let bounds = Rc::new(Cell::new(Rect::new(0.0, 0.0, 10.0, 10.0)));
         let mut scene = Scene::new();
         let id = scene.add_item(
-            DynRect { bounds: bounds.clone() },
+            DynRect {
+                bounds: bounds.clone(),
+            },
             Point::ZERO,
         );
         bounds.set(Rect::new(0.0, 0.0, 500.0, 500.0));
         scene.refresh_dynamic_bounds();
         // Static entry's spatial index unchanged.
-        assert!(!scene.items_in_rect(Rect::new(400.0, 400.0, 10.0, 10.0)).contains(&id));
+        assert!(
+            !scene
+                .items_in_rect(Rect::new(400.0, 400.0, 10.0, 10.0))
+                .contains(&id)
+        );
     }
 }

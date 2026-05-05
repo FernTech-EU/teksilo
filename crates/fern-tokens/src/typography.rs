@@ -98,7 +98,14 @@ mod tests {
     #[test]
     fn letter_spacing_is_zero_everywhere() {
         let t = TypographyTokens::default();
-        for s in [&t.body, &t.body_bold, &t.small, &t.small_bold, &t.tiny, &t.mono] {
+        for s in [
+            &t.body,
+            &t.body_bold,
+            &t.small,
+            &t.small_bold,
+            &t.tiny,
+            &t.mono,
+        ] {
             assert_eq!(s.letter_spacing, 0.0);
         }
     }

@@ -149,12 +149,8 @@ impl Renderer {
         let sdf_pipeline = create_sdf_pipeline(&device, surface_format);
         let quad_pipeline = create_quad_pipeline(&device, surface_format);
         let shadow_pipeline = create_shadow_pipeline(&device, surface_format);
-        let (
-            anim_proc_pipeline,
-            anim_uniform_buffer,
-            anim_uniform_bind_group,
-            anim_uniform_layout,
-        ) = create_anim_proc_pipeline(&device, surface_format);
+        let (anim_proc_pipeline, anim_uniform_buffer, anim_uniform_bind_group, anim_uniform_layout) =
+            create_anim_proc_pipeline(&device, surface_format);
         // Reuse the quad pipeline's texture/sampler layout so bind
         // groups registered by `ImageManager` for static images work
         // equally well as the sprite animation's atlas binding.
@@ -455,10 +451,8 @@ impl Renderer {
             //   - pending_composites: blurred quads that nested scopes
             //     have queued for compositing into THIS target on its
             //     next segment
-            let mut target_stack: Vec<ActiveTarget> = vec![ActiveTarget::surface(
-                viewport_width,
-                viewport_height,
-            )];
+            let mut target_stack: Vec<ActiveTarget> =
+                vec![ActiveTarget::surface(viewport_width, viewport_height)];
 
             // Clip rect stack for nested scroll areas.
             // Each SetClip pushes a rect; the effective clip is the intersection.
@@ -521,8 +515,10 @@ impl Renderer {
                             let index_bytes = (index_count as u64) * 2;
                             $pass.set_pipeline($pipeline);
                             $pass.set_vertex_buffer(0, vb.slice(v_off..v_off + v_len));
-                            $pass
-                                .set_index_buffer(ib.slice(0..index_bytes), wgpu::IndexFormat::Uint16);
+                            $pass.set_index_buffer(
+                                ib.slice(0..index_bytes),
+                                wgpu::IndexFormat::Uint16,
+                            );
                             $pass.draw_indexed(0..index_count, 0, 0..1);
                         }
                         $batch.clear();
@@ -548,9 +544,7 @@ impl Renderer {
                         };
                         if let (Some(bind_group), Some((ib, _, _))) = (bg, $index_binding) {
                             let bytes: &[u8] = bytemuck::cast_slice(&$qb);
-                            if let Some((vb, v_off, v_len)) =
-                                $streams.quad.write($queue, bytes)
-                            {
+                            if let Some((vb, v_off, v_len)) = $streams.quad.write($queue, bytes) {
                                 let quads = ($qb.len() / 4) as u32;
                                 let index_count = quads * 6;
                                 let index_bytes = (index_count as u64) * 2;
@@ -579,9 +573,7 @@ impl Renderer {
                         && let Some((ib, _, _)) = $index_binding
                     {
                         let bytes: &[u8] = bytemuck::cast_slice(&anim_proc_batch);
-                        if let Some((vb, v_off, v_len)) =
-                            $streams.anim_proc.write($queue, bytes)
-                        {
+                        if let Some((vb, v_off, v_len)) = $streams.anim_proc.write($queue, bytes) {
                             let quads = (anim_proc_batch.len() / 4) as u32;
                             let index_count = quads * 6;
                             let index_bytes = (index_count as u64) * 2;
@@ -611,7 +603,9 @@ impl Renderer {
                 // handle vs. surface here; the resulting `target_view`
                 // lifetime ties to one of self.blur_pool / `view` arg.
                 let (target_view, load_op): (&wgpu::TextureView, wgpu::LoadOp<wgpu::Color>) = {
-                    let t = target_stack.last_mut().expect("surface target always present");
+                    let t = target_stack
+                        .last_mut()
+                        .expect("surface target always present");
                     let v: &wgpu::TextureView = match t.intermediate {
                         Some(h) => self.blur_pool.view(h),
                         None => view,
@@ -634,9 +628,8 @@ impl Renderer {
                 // we weren't drawing into THIS target. They paint first
                 // in the new segment so subsequent commands stack on
                 // top of the blurred quad.
-                let composites_to_draw: Vec<PendingComposite> = std::mem::take(
-                    &mut target_stack.last_mut().unwrap().pending_composites,
-                );
+                let composites_to_draw: Vec<PendingComposite> =
+                    std::mem::take(&mut target_stack.last_mut().unwrap().pending_composites);
 
                 {
                     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -699,617 +692,634 @@ impl Renderer {
                             break;
                         }
                         match cmd {
-                    fern_canvas::DrawCommand::Decoration(idx) => {
-                        flush_all!(
-                            pass,
-                            &self.queue,
-                            self.streams,
-                            &self.rect_pipeline,
-                            &self.sdf_pipeline,
-                            &self.quad_pipeline,
-                            &self.shadow_pipeline,
-                            rect_batch,
-                            sdf_batch,
-                            quad_batch,
-                            shadow_batch,
-                            self.atlas_texture,
-                            self.path_atlas_texture,
-                            quad_source,
-                            index_binding
-                        );
-                        quad_source = None;
-                        let Some(rect) = frame.decorations.get(*idx) else {
-                            continue;
-                        };
-                        let verts = RectVertex::from_decoration(rect, scale_factor);
-                        for v in &verts {
-                            let tp = apply_transform_pixel(v.position, &current_transform);
-                            rect_batch.push(RectVertex {
-                                position: pixel_to_ndc(tp, viewport_width, viewport_height),
-                                color: [
-                                    v.color[0],
-                                    v.color[1],
-                                    v.color[2],
-                                    v.color[3] * current_opacity,
-                                ],
-                            });
-                        }
-                    }
-                    fern_canvas::DrawCommand::Shape(idx) => {
-                        flush_all!(
-                            pass,
-                            &self.queue,
-                            self.streams,
-                            &self.rect_pipeline,
-                            &self.sdf_pipeline,
-                            &self.quad_pipeline,
-                            &self.shadow_pipeline,
-                            rect_batch,
-                            sdf_batch,
-                            quad_batch,
-                            shadow_batch,
-                            self.atlas_texture,
-                            self.path_atlas_texture,
-                            quad_source,
-                            index_binding
-                        );
-                        quad_source = None;
-                        let Some(shape) = frame.shapes.get(*idx) else {
-                            continue;
-                        };
-                        let verts = SdfVertex::from_shape_quad(shape, scale_factor);
-                        for v in &verts {
-                            let tp = apply_transform_pixel(v.position, &current_transform);
-                            sdf_batch.push(SdfVertex {
-                                position: pixel_to_ndc(tp, viewport_width, viewport_height),
-                                color: [
-                                    v.color[0],
-                                    v.color[1],
-                                    v.color[2],
-                                    v.color[3] * current_opacity,
-                                ],
-                                ..*v
-                            });
-                        }
-                    }
-                    fern_canvas::DrawCommand::Glyph(idx) => {
-                        // Only flush when the quad source changes — consecutive
-                        // glyphs batch into one draw call.
-                        if quad_source != Some(QuadSource::GlyphAtlas) {
-                            flush_all!(
-                                pass,
-                                &self.queue,
-                                self.streams,
-                                &self.rect_pipeline,
-                                &self.sdf_pipeline,
-                                &self.quad_pipeline,
-                                &self.shadow_pipeline,
-                                rect_batch,
-                                sdf_batch,
-                                quad_batch,
-                                shadow_batch,
-                                self.atlas_texture,
-                                self.path_atlas_texture,
-                                quad_source,
-                                index_binding
-                            );
-                            quad_source = Some(QuadSource::GlyphAtlas);
-                        }
-                        if let Some(atlas) = &self.atlas_texture {
-                            let Some(glyph) = frame.glyphs.get(*idx) else {
-                                continue;
-                            };
-                            let verts = QuadVertex::from_glyph_quad(
-                                glyph,
-                                scale_factor,
-                                atlas.width,
-                                atlas.height,
-                            );
-                            for v in &verts {
-                                let tp = apply_transform_pixel(v.position, &current_transform);
-                                quad_batch.push(QuadVertex {
-                                    position: pixel_to_ndc(tp, viewport_width, viewport_height),
-                                    color: [
-                                        v.color[0],
-                                        v.color[1],
-                                        v.color[2],
-                                        v.color[3] * current_opacity,
-                                    ],
-                                    ..*v
-                                });
-                            }
-                        }
-                    }
-                    fern_canvas::DrawCommand::Shadow(idx) => {
-                        flush_all!(
-                            pass,
-                            &self.queue,
-                            self.streams,
-                            &self.rect_pipeline,
-                            &self.sdf_pipeline,
-                            &self.quad_pipeline,
-                            &self.shadow_pipeline,
-                            rect_batch,
-                            sdf_batch,
-                            quad_batch,
-                            shadow_batch,
-                            self.atlas_texture,
-                            self.path_atlas_texture,
-                            quad_source,
-                            index_binding
-                        );
-                        quad_source = None;
-                        let Some(shadow) = frame.shadows.get(*idx) else {
-                            continue;
-                        };
-                        let verts = ShadowVertex::from_shadow_quad(shadow, scale_factor);
-                        for v in &verts {
-                            let tp = apply_transform_pixel(v.position, &current_transform);
-                            shadow_batch.push(ShadowVertex {
-                                position: pixel_to_ndc(tp, viewport_width, viewport_height),
-                                shadow_color: [
-                                    v.shadow_color[0],
-                                    v.shadow_color[1],
-                                    v.shadow_color[2],
-                                    v.shadow_color[3] * current_opacity,
-                                ],
-                                ..*v
-                            });
-                        }
-                    }
-                    fern_canvas::DrawCommand::Image(idx) => {
-                        // Images use per-image bind groups — flush and draw individually
-                        flush_all!(
-                            pass,
-                            &self.queue,
-                            self.streams,
-                            &self.rect_pipeline,
-                            &self.sdf_pipeline,
-                            &self.quad_pipeline,
-                            &self.shadow_pipeline,
-                            rect_batch,
-                            sdf_batch,
-                            quad_batch,
-                            shadow_batch,
-                            self.atlas_texture,
-                            self.path_atlas_texture,
-                            quad_source,
-                            index_binding
-                        );
-                        quad_source = None;
-                        let Some(image) = frame.images.get(*idx) else {
-                            continue;
-                        };
-                        self.draw_image(
-                            pass,
-                            image,
-                            scale_factor,
-                            viewport_width,
-                            viewport_height,
-                            current_opacity,
-                            &current_transform,
-                            index_binding,
-                        );
-                    }
-                    fern_canvas::DrawCommand::Path(idx) => {
-                        flush_all!(
-                            pass,
-                            &self.queue,
-                            self.streams,
-                            &self.rect_pipeline,
-                            &self.sdf_pipeline,
-                            &self.quad_pipeline,
-                            &self.shadow_pipeline,
-                            rect_batch,
-                            sdf_batch,
-                            quad_batch,
-                            shadow_batch,
-                            self.atlas_texture,
-                            self.path_atlas_texture,
-                            quad_source,
-                            index_binding
-                        );
-                        quad_source = None;
-                        if let Some(Some(region)) = path_regions.get(*idx) {
-                            quad_source = Some(QuadSource::PathAtlas);
-
-                            let Some(entry) = frame.paths.get(*idx) else {
-                                continue;
-                            };
-                            let Some(path_atlas) = self.path_atlas_texture.as_ref() else {
-                                continue;
-                            };
-                            let verts = path_quad_verts(
-                                entry,
-                                region,
-                                scale_factor,
-                                path_atlas.width,
-                                path_atlas.height,
-                                current_opacity,
-                                &current_transform,
-                            );
-                            for v in &verts {
-                                quad_batch.push(QuadVertex {
-                                    position: pixel_to_ndc(
-                                        v.position,
-                                        viewport_width,
-                                        viewport_height,
-                                    ),
-                                    ..*v
-                                });
-                            }
-                        }
-                    }
-                    // --- State changes flush all batches ---
-                    fern_canvas::DrawCommand::SetClip(rect) => {
-                        flush_all!(
-                            pass,
-                            &self.queue,
-                            self.streams,
-                            &self.rect_pipeline,
-                            &self.sdf_pipeline,
-                            &self.quad_pipeline,
-                            &self.shadow_pipeline,
-                            rect_batch,
-                            sdf_batch,
-                            quad_batch,
-                            shadow_batch,
-                            self.atlas_texture,
-                            self.path_atlas_texture,
-                            quad_source,
-                            index_binding
-                        );
-                        quad_source = None;
-                        // Apply the current transform stack to the
-                        // clip rect. Without this, a clip emitted
-                        // inside a SceneView's view-transform scope
-                        // (e.g. ScrollArea or nested SceneView as
-                        // a heavyweight scene_rect widget) would
-                        // mask the rendered content to the rect's
-                        // PRE-transform position — the contents
-                        // visually pan/zoom with the outer view but
-                        // the clip mask stays fixed in screen
-                        // space, "eating" the widget as the user
-                        // pans or zooms out.
-                        //
-                        // Rotation-free transforms (the common case
-                        // for SceneView pan + zoom) produce an
-                        // axis-aligned transformed rect; for rotated
-                        // transforms we take the AABB of the four
-                        // corners, which over-clips slightly but
-                        // remains correct for visibility.
-                        let p_tl = apply_transform_pixel(
-                            [rect.x, rect.y],
-                            &current_transform,
-                        );
-                        let p_tr = apply_transform_pixel(
-                            [rect.x + rect.width, rect.y],
-                            &current_transform,
-                        );
-                        let p_bl = apply_transform_pixel(
-                            [rect.x, rect.y + rect.height],
-                            &current_transform,
-                        );
-                        let p_br = apply_transform_pixel(
-                            [rect.x + rect.width, rect.y + rect.height],
-                            &current_transform,
-                        );
-                        let min_x = p_tl[0].min(p_tr[0]).min(p_bl[0]).min(p_br[0]);
-                        let min_y = p_tl[1].min(p_tr[1]).min(p_bl[1]).min(p_br[1]);
-                        let max_x = p_tl[0].max(p_tr[0]).max(p_bl[0]).max(p_br[0]);
-                        let max_y = p_tl[1].max(p_tr[1]).max(p_bl[1]).max(p_br[1]);
-                        let x = (min_x * scale_factor).max(0.0) as u32;
-                        let y = (min_y * scale_factor).max(0.0) as u32;
-                        let w = ((max_x - min_x) * scale_factor).ceil().max(0.0) as u32;
-                        let h = ((max_y - min_y) * scale_factor).ceil().max(0.0) as u32;
-                        // Clamp to viewport — wgpu requires x+w <= width, y+h <= height.
-                        let x = x.min(viewport_width);
-                        let y = y.min(viewport_height);
-                        let w = w.min(viewport_width.saturating_sub(x));
-                        let h = h.min(viewport_height.saturating_sub(y));
-                        let clipped = if let Some(&[cx, cy, cw, ch]) = clip_stack.last() {
-                            let ix = x.max(cx);
-                            let iy = y.max(cy);
-                            let ir = (x + w).min(cx + cw);
-                            let ib = (y + h).min(cy + ch);
-                            [ix, iy, ir.saturating_sub(ix), ib.saturating_sub(iy)]
-                        } else {
-                            [x, y, w, h]
-                        };
-                        clip_stack.push(clipped);
-                        pass.set_scissor_rect(clipped[0], clipped[1], clipped[2], clipped[3]);
-                    }
-                    fern_canvas::DrawCommand::ClearClip => {
-                        flush_all!(
-                            pass,
-                            &self.queue,
-                            self.streams,
-                            &self.rect_pipeline,
-                            &self.sdf_pipeline,
-                            &self.quad_pipeline,
-                            &self.shadow_pipeline,
-                            rect_batch,
-                            sdf_batch,
-                            quad_batch,
-                            shadow_batch,
-                            self.atlas_texture,
-                            self.path_atlas_texture,
-                            quad_source,
-                            index_binding
-                        );
-                        quad_source = None;
-                        clip_stack.pop();
-                        if let Some(&[x, y, w, h]) = clip_stack.last() {
-                            pass.set_scissor_rect(x, y, w, h);
-                        } else {
-                            pass.set_scissor_rect(0, 0, viewport_width, viewport_height);
-                        }
-                    }
-                    fern_canvas::DrawCommand::SetOpacity(opacity) => {
-                        flush_all!(
-                            pass,
-                            &self.queue,
-                            self.streams,
-                            &self.rect_pipeline,
-                            &self.sdf_pipeline,
-                            &self.quad_pipeline,
-                            &self.shadow_pipeline,
-                            rect_batch,
-                            sdf_batch,
-                            quad_batch,
-                            shadow_batch,
-                            self.atlas_texture,
-                            self.path_atlas_texture,
-                            quad_source,
-                            index_binding
-                        );
-                        quad_source = None;
-                        opacity_stack.push(current_opacity);
-                        current_opacity *= opacity;
-                    }
-                    fern_canvas::DrawCommand::RestoreOpacity => {
-                        flush_all!(
-                            pass,
-                            &self.queue,
-                            self.streams,
-                            &self.rect_pipeline,
-                            &self.sdf_pipeline,
-                            &self.quad_pipeline,
-                            &self.shadow_pipeline,
-                            rect_batch,
-                            sdf_batch,
-                            quad_batch,
-                            shadow_batch,
-                            self.atlas_texture,
-                            self.path_atlas_texture,
-                            quad_source,
-                            index_binding
-                        );
-                        quad_source = None;
-                        current_opacity = opacity_stack.pop().unwrap_or(1.0);
-                    }
-                    fern_canvas::DrawCommand::Rasterized(_) => {}
-                    fern_canvas::DrawCommand::AnimatedQuad(idx) => {
-                        let Some(draw) = frame.animated_quads.get(*idx) else {
-                            continue;
-                        };
-                        // Flush every other pipeline first so painter's
-                        // order is preserved across pipeline boundaries.
-                        flush_all!(
-                            pass,
-                            &self.queue,
-                            self.streams,
-                            &self.rect_pipeline,
-                            &self.sdf_pipeline,
-                            &self.quad_pipeline,
-                            &self.shadow_pipeline,
-                            rect_batch,
-                            sdf_batch,
-                            quad_batch,
-                            shadow_batch,
-                            self.atlas_texture,
-                            self.path_atlas_texture,
-                            quad_source,
-                            index_binding
-                        );
-                        quad_source = None;
-                        match &draw.class {
-                            fern_canvas::AnimatedQuadClass::Procedural => {
-                                let verts =
-                                    AnimQuadVertex::from_animated_quad(draw, scale_factor);
+                            fern_canvas::DrawCommand::Decoration(idx) => {
+                                flush_all!(
+                                    pass,
+                                    &self.queue,
+                                    self.streams,
+                                    &self.rect_pipeline,
+                                    &self.sdf_pipeline,
+                                    &self.quad_pipeline,
+                                    &self.shadow_pipeline,
+                                    rect_batch,
+                                    sdf_batch,
+                                    quad_batch,
+                                    shadow_batch,
+                                    self.atlas_texture,
+                                    self.path_atlas_texture,
+                                    quad_source,
+                                    index_binding
+                                );
+                                quad_source = None;
+                                let Some(rect) = frame.decorations.get(*idx) else {
+                                    continue;
+                                };
+                                let verts = RectVertex::from_decoration(rect, scale_factor);
                                 for v in &verts {
-                                    let tp =
-                                        apply_transform_pixel(v.position, &current_transform);
-                                    anim_proc_batch.push(AnimQuadVertex {
-                                        position: pixel_to_ndc(
-                                            tp,
-                                            viewport_width,
-                                            viewport_height,
-                                        ),
-                                        uv: v.uv,
-                                        slot: v.slot,
-                                        _pad: v._pad,
+                                    let tp = apply_transform_pixel(v.position, &current_transform);
+                                    rect_batch.push(RectVertex {
+                                        position: pixel_to_ndc(tp, viewport_width, viewport_height),
+                                        color: [
+                                            v.color[0],
+                                            v.color[1],
+                                            v.color[2],
+                                            v.color[3] * current_opacity,
+                                        ],
                                     });
                                 }
                             }
-                            fern_canvas::AnimatedQuadClass::Sprite { image_name } => {
-                                // Sprite quads need a per-atlas bind
-                                // group, so each draws individually —
-                                // same shape as the static Image path.
-                                // Typical scene has ~1 animated sprite
-                                // icon at a time, so batching is moot.
-                                let Some(atlas_bg) =
-                                    self.image_manager.get_bind_group(image_name)
-                                else {
+                            fern_canvas::DrawCommand::Shape(idx) => {
+                                flush_all!(
+                                    pass,
+                                    &self.queue,
+                                    self.streams,
+                                    &self.rect_pipeline,
+                                    &self.sdf_pipeline,
+                                    &self.quad_pipeline,
+                                    &self.shadow_pipeline,
+                                    rect_batch,
+                                    sdf_batch,
+                                    quad_batch,
+                                    shadow_batch,
+                                    self.atlas_texture,
+                                    self.path_atlas_texture,
+                                    quad_source,
+                                    index_binding
+                                );
+                                quad_source = None;
+                                let Some(shape) = frame.shapes.get(*idx) else {
                                     continue;
                                 };
-                                let verts =
-                                    AnimQuadVertex::from_animated_quad(draw, scale_factor);
-                                let mut ndc_verts = [AnimQuadVertex {
-                                    position: [0.0; 2],
-                                    uv: [0.0; 2],
-                                    slot: 0,
-                                    _pad: 0,
-                                }; 4];
-                                for (i, v) in verts.iter().enumerate() {
-                                    let tp =
-                                        apply_transform_pixel(v.position, &current_transform);
-                                    ndc_verts[i] = AnimQuadVertex {
-                                        position: pixel_to_ndc(
-                                            tp,
-                                            viewport_width,
-                                            viewport_height,
-                                        ),
-                                        uv: v.uv,
-                                        slot: v.slot,
-                                        _pad: v._pad,
-                                    };
-                                }
-                                let bytes: &[u8] = bytemuck::cast_slice(&ndc_verts);
-                                if let (Some((vb, v_off, v_len)), Some((ib, _, _))) = (
-                                    self.streams.anim_proc.write(&self.queue, bytes),
-                                    index_binding,
-                                ) {
-                                    let index_bytes: u64 = 6 * 2;
-                                    pass.set_pipeline(&self.anim_sprite_pipeline);
-                                    pass.set_bind_group(
-                                        0,
-                                        &self.anim_uniform_bind_group,
-                                        &[],
-                                    );
-                                    pass.set_bind_group(1, atlas_bg, &[]);
-                                    pass.set_vertex_buffer(
-                                        0,
-                                        vb.slice(v_off..v_off + v_len),
-                                    );
-                                    pass.set_index_buffer(
-                                        ib.slice(0..index_bytes),
-                                        wgpu::IndexFormat::Uint16,
-                                    );
-                                    pass.draw_indexed(0..6, 0, 0..1);
+                                let verts = SdfVertex::from_shape_quad(shape, scale_factor);
+                                for v in &verts {
+                                    let tp = apply_transform_pixel(v.position, &current_transform);
+                                    sdf_batch.push(SdfVertex {
+                                        position: pixel_to_ndc(tp, viewport_width, viewport_height),
+                                        color: [
+                                            v.color[0],
+                                            v.color[1],
+                                            v.color[2],
+                                            v.color[3] * current_opacity,
+                                        ],
+                                        ..*v
+                                    });
                                 }
                             }
-                        }
-                    }
-                    fern_canvas::DrawCommand::SetBlendMode(mode) => {
-                        blend_stack.push(current_blend);
-                        current_blend = *mode;
-                    }
-                    fern_canvas::DrawCommand::RestoreBlendMode => {
-                        current_blend = blend_stack.pop().unwrap_or(fern_canvas::BlendMode::Normal);
-                    }
-                    fern_canvas::DrawCommand::SetTransform(t) => {
-                        flush_all!(
-                            pass,
-                            &self.queue,
-                            self.streams,
-                            &self.rect_pipeline,
-                            &self.sdf_pipeline,
-                            &self.quad_pipeline,
-                            &self.shadow_pipeline,
-                            rect_batch,
-                            sdf_batch,
-                            quad_batch,
-                            shadow_batch,
-                            self.atlas_texture,
-                            self.path_atlas_texture,
-                            quad_source,
-                            index_binding
-                        );
-                        quad_source = None;
-                        // Widgets author transforms in logical pixels, but
-                        // vertices arrive pre-multiplied by scale_factor (HiDPI
-                        // device pixels). Scale the translation column so the
-                        // pivot lands at the same physical point in either
-                        // coordinate space.
-                        let device_t = Transform2D {
-                            m: [
-                                t.m[0], t.m[1], t.m[2], t.m[3],
-                                t.m[4] * scale_factor, t.m[5] * scale_factor,
-                            ],
-                        };
-                        // Compose with the current transform-stack top so a
-                        // widget's canvas-local transform respects any wrapper
-                        // transform pushed by the render walker. With an
-                        // identity stack top this is identical to the old
-                        // "absolute" semantics — backwards compatible for any
-                        // widget not under a transform scope.
-                        let stack_top = transform_stack
-                            .last()
-                            .copied()
-                            .unwrap_or(Transform2D::IDENTITY);
-                        current_transform = device_t.then(&stack_top);
-                    }
-                    fern_canvas::DrawCommand::PushTransform(t) => {
-                        flush_all!(
-                            pass,
-                            &self.queue,
-                            self.streams,
-                            &self.rect_pipeline,
-                            &self.sdf_pipeline,
-                            &self.quad_pipeline,
-                            &self.shadow_pipeline,
-                            rect_batch,
-                            sdf_batch,
-                            quad_batch,
-                            shadow_batch,
-                            self.atlas_texture,
-                            self.path_atlas_texture,
-                            quad_source,
-                            index_binding
-                        );
-                        quad_source = None;
-                        // See SetTransform: scale the translation column to
-                        // device pixels before composing.
-                        let device_t = Transform2D {
-                            m: [
-                                t.m[0], t.m[1], t.m[2], t.m[3],
-                                t.m[4] * scale_factor, t.m[5] * scale_factor,
-                            ],
-                        };
-                        let prev_top = transform_stack
-                            .last()
-                            .copied()
-                            .unwrap_or(Transform2D::IDENTITY);
-                        let new_top = device_t.then(&prev_top);
-                        transform_stack.push(new_top);
-                        current_transform = new_top;
-                    }
-                    fern_canvas::DrawCommand::PopTransform => {
-                        flush_all!(
-                            pass,
-                            &self.queue,
-                            self.streams,
-                            &self.rect_pipeline,
-                            &self.sdf_pipeline,
-                            &self.quad_pipeline,
-                            &self.shadow_pipeline,
-                            rect_batch,
-                            sdf_batch,
-                            quad_batch,
-                            shadow_batch,
-                            self.atlas_texture,
-                            self.path_atlas_texture,
-                            quad_source,
-                            index_binding
-                        );
-                        quad_source = None;
-                        if transform_stack.len() > 1 {
-                            transform_stack.pop();
-                        }
-                        current_transform = transform_stack
-                            .last()
-                            .copied()
-                            .unwrap_or(Transform2D::IDENTITY);
-                    }
-                    fern_canvas::DrawCommand::BeginBlurredSubtree { .. }
-                    | fern_canvas::DrawCommand::EndBlurredSubtree => {
-                        // Unreachable — the inner-loop guard above
-                        // breaks before we enter the match for these.
-                        unreachable!(
-                            "blur boundaries are handled at the segment level"
-                        );
-                    }
+                            fern_canvas::DrawCommand::Glyph(idx) => {
+                                // Only flush when the quad source changes — consecutive
+                                // glyphs batch into one draw call.
+                                if quad_source != Some(QuadSource::GlyphAtlas) {
+                                    flush_all!(
+                                        pass,
+                                        &self.queue,
+                                        self.streams,
+                                        &self.rect_pipeline,
+                                        &self.sdf_pipeline,
+                                        &self.quad_pipeline,
+                                        &self.shadow_pipeline,
+                                        rect_batch,
+                                        sdf_batch,
+                                        quad_batch,
+                                        shadow_batch,
+                                        self.atlas_texture,
+                                        self.path_atlas_texture,
+                                        quad_source,
+                                        index_binding
+                                    );
+                                    quad_source = Some(QuadSource::GlyphAtlas);
+                                }
+                                if let Some(atlas) = &self.atlas_texture {
+                                    let Some(glyph) = frame.glyphs.get(*idx) else {
+                                        continue;
+                                    };
+                                    let verts = QuadVertex::from_glyph_quad(
+                                        glyph,
+                                        scale_factor,
+                                        atlas.width,
+                                        atlas.height,
+                                    );
+                                    for v in &verts {
+                                        let tp =
+                                            apply_transform_pixel(v.position, &current_transform);
+                                        quad_batch.push(QuadVertex {
+                                            position: pixel_to_ndc(
+                                                tp,
+                                                viewport_width,
+                                                viewport_height,
+                                            ),
+                                            color: [
+                                                v.color[0],
+                                                v.color[1],
+                                                v.color[2],
+                                                v.color[3] * current_opacity,
+                                            ],
+                                            ..*v
+                                        });
+                                    }
+                                }
+                            }
+                            fern_canvas::DrawCommand::Shadow(idx) => {
+                                flush_all!(
+                                    pass,
+                                    &self.queue,
+                                    self.streams,
+                                    &self.rect_pipeline,
+                                    &self.sdf_pipeline,
+                                    &self.quad_pipeline,
+                                    &self.shadow_pipeline,
+                                    rect_batch,
+                                    sdf_batch,
+                                    quad_batch,
+                                    shadow_batch,
+                                    self.atlas_texture,
+                                    self.path_atlas_texture,
+                                    quad_source,
+                                    index_binding
+                                );
+                                quad_source = None;
+                                let Some(shadow) = frame.shadows.get(*idx) else {
+                                    continue;
+                                };
+                                let verts = ShadowVertex::from_shadow_quad(shadow, scale_factor);
+                                for v in &verts {
+                                    let tp = apply_transform_pixel(v.position, &current_transform);
+                                    shadow_batch.push(ShadowVertex {
+                                        position: pixel_to_ndc(tp, viewport_width, viewport_height),
+                                        shadow_color: [
+                                            v.shadow_color[0],
+                                            v.shadow_color[1],
+                                            v.shadow_color[2],
+                                            v.shadow_color[3] * current_opacity,
+                                        ],
+                                        ..*v
+                                    });
+                                }
+                            }
+                            fern_canvas::DrawCommand::Image(idx) => {
+                                // Images use per-image bind groups — flush and draw individually
+                                flush_all!(
+                                    pass,
+                                    &self.queue,
+                                    self.streams,
+                                    &self.rect_pipeline,
+                                    &self.sdf_pipeline,
+                                    &self.quad_pipeline,
+                                    &self.shadow_pipeline,
+                                    rect_batch,
+                                    sdf_batch,
+                                    quad_batch,
+                                    shadow_batch,
+                                    self.atlas_texture,
+                                    self.path_atlas_texture,
+                                    quad_source,
+                                    index_binding
+                                );
+                                quad_source = None;
+                                let Some(image) = frame.images.get(*idx) else {
+                                    continue;
+                                };
+                                self.draw_image(
+                                    pass,
+                                    image,
+                                    scale_factor,
+                                    viewport_width,
+                                    viewport_height,
+                                    current_opacity,
+                                    &current_transform,
+                                    index_binding,
+                                );
+                            }
+                            fern_canvas::DrawCommand::Path(idx) => {
+                                flush_all!(
+                                    pass,
+                                    &self.queue,
+                                    self.streams,
+                                    &self.rect_pipeline,
+                                    &self.sdf_pipeline,
+                                    &self.quad_pipeline,
+                                    &self.shadow_pipeline,
+                                    rect_batch,
+                                    sdf_batch,
+                                    quad_batch,
+                                    shadow_batch,
+                                    self.atlas_texture,
+                                    self.path_atlas_texture,
+                                    quad_source,
+                                    index_binding
+                                );
+                                quad_source = None;
+                                if let Some(Some(region)) = path_regions.get(*idx) {
+                                    quad_source = Some(QuadSource::PathAtlas);
+
+                                    let Some(entry) = frame.paths.get(*idx) else {
+                                        continue;
+                                    };
+                                    let Some(path_atlas) = self.path_atlas_texture.as_ref() else {
+                                        continue;
+                                    };
+                                    let verts = path_quad_verts(
+                                        entry,
+                                        region,
+                                        scale_factor,
+                                        path_atlas.width,
+                                        path_atlas.height,
+                                        current_opacity,
+                                        &current_transform,
+                                    );
+                                    for v in &verts {
+                                        quad_batch.push(QuadVertex {
+                                            position: pixel_to_ndc(
+                                                v.position,
+                                                viewport_width,
+                                                viewport_height,
+                                            ),
+                                            ..*v
+                                        });
+                                    }
+                                }
+                            }
+                            // --- State changes flush all batches ---
+                            fern_canvas::DrawCommand::SetClip(rect) => {
+                                flush_all!(
+                                    pass,
+                                    &self.queue,
+                                    self.streams,
+                                    &self.rect_pipeline,
+                                    &self.sdf_pipeline,
+                                    &self.quad_pipeline,
+                                    &self.shadow_pipeline,
+                                    rect_batch,
+                                    sdf_batch,
+                                    quad_batch,
+                                    shadow_batch,
+                                    self.atlas_texture,
+                                    self.path_atlas_texture,
+                                    quad_source,
+                                    index_binding
+                                );
+                                quad_source = None;
+                                // Apply the current transform stack to the
+                                // clip rect. Without this, a clip emitted
+                                // inside a SceneView's view-transform scope
+                                // (e.g. ScrollArea or nested SceneView as
+                                // a heavyweight scene_rect widget) would
+                                // mask the rendered content to the rect's
+                                // PRE-transform position — the contents
+                                // visually pan/zoom with the outer view but
+                                // the clip mask stays fixed in screen
+                                // space, "eating" the widget as the user
+                                // pans or zooms out.
+                                //
+                                // Rotation-free transforms (the common case
+                                // for SceneView pan + zoom) produce an
+                                // axis-aligned transformed rect; for rotated
+                                // transforms we take the AABB of the four
+                                // corners, which over-clips slightly but
+                                // remains correct for visibility.
+                                let p_tl =
+                                    apply_transform_pixel([rect.x, rect.y], &current_transform);
+                                let p_tr = apply_transform_pixel(
+                                    [rect.x + rect.width, rect.y],
+                                    &current_transform,
+                                );
+                                let p_bl = apply_transform_pixel(
+                                    [rect.x, rect.y + rect.height],
+                                    &current_transform,
+                                );
+                                let p_br = apply_transform_pixel(
+                                    [rect.x + rect.width, rect.y + rect.height],
+                                    &current_transform,
+                                );
+                                let min_x = p_tl[0].min(p_tr[0]).min(p_bl[0]).min(p_br[0]);
+                                let min_y = p_tl[1].min(p_tr[1]).min(p_bl[1]).min(p_br[1]);
+                                let max_x = p_tl[0].max(p_tr[0]).max(p_bl[0]).max(p_br[0]);
+                                let max_y = p_tl[1].max(p_tr[1]).max(p_bl[1]).max(p_br[1]);
+                                let x = (min_x * scale_factor).max(0.0) as u32;
+                                let y = (min_y * scale_factor).max(0.0) as u32;
+                                let w = ((max_x - min_x) * scale_factor).ceil().max(0.0) as u32;
+                                let h = ((max_y - min_y) * scale_factor).ceil().max(0.0) as u32;
+                                // Clamp to viewport — wgpu requires x+w <= width, y+h <= height.
+                                let x = x.min(viewport_width);
+                                let y = y.min(viewport_height);
+                                let w = w.min(viewport_width.saturating_sub(x));
+                                let h = h.min(viewport_height.saturating_sub(y));
+                                let clipped = if let Some(&[cx, cy, cw, ch]) = clip_stack.last() {
+                                    let ix = x.max(cx);
+                                    let iy = y.max(cy);
+                                    let ir = (x + w).min(cx + cw);
+                                    let ib = (y + h).min(cy + ch);
+                                    [ix, iy, ir.saturating_sub(ix), ib.saturating_sub(iy)]
+                                } else {
+                                    [x, y, w, h]
+                                };
+                                clip_stack.push(clipped);
+                                pass.set_scissor_rect(
+                                    clipped[0], clipped[1], clipped[2], clipped[3],
+                                );
+                            }
+                            fern_canvas::DrawCommand::ClearClip => {
+                                flush_all!(
+                                    pass,
+                                    &self.queue,
+                                    self.streams,
+                                    &self.rect_pipeline,
+                                    &self.sdf_pipeline,
+                                    &self.quad_pipeline,
+                                    &self.shadow_pipeline,
+                                    rect_batch,
+                                    sdf_batch,
+                                    quad_batch,
+                                    shadow_batch,
+                                    self.atlas_texture,
+                                    self.path_atlas_texture,
+                                    quad_source,
+                                    index_binding
+                                );
+                                quad_source = None;
+                                clip_stack.pop();
+                                if let Some(&[x, y, w, h]) = clip_stack.last() {
+                                    pass.set_scissor_rect(x, y, w, h);
+                                } else {
+                                    pass.set_scissor_rect(0, 0, viewport_width, viewport_height);
+                                }
+                            }
+                            fern_canvas::DrawCommand::SetOpacity(opacity) => {
+                                flush_all!(
+                                    pass,
+                                    &self.queue,
+                                    self.streams,
+                                    &self.rect_pipeline,
+                                    &self.sdf_pipeline,
+                                    &self.quad_pipeline,
+                                    &self.shadow_pipeline,
+                                    rect_batch,
+                                    sdf_batch,
+                                    quad_batch,
+                                    shadow_batch,
+                                    self.atlas_texture,
+                                    self.path_atlas_texture,
+                                    quad_source,
+                                    index_binding
+                                );
+                                quad_source = None;
+                                opacity_stack.push(current_opacity);
+                                current_opacity *= opacity;
+                            }
+                            fern_canvas::DrawCommand::RestoreOpacity => {
+                                flush_all!(
+                                    pass,
+                                    &self.queue,
+                                    self.streams,
+                                    &self.rect_pipeline,
+                                    &self.sdf_pipeline,
+                                    &self.quad_pipeline,
+                                    &self.shadow_pipeline,
+                                    rect_batch,
+                                    sdf_batch,
+                                    quad_batch,
+                                    shadow_batch,
+                                    self.atlas_texture,
+                                    self.path_atlas_texture,
+                                    quad_source,
+                                    index_binding
+                                );
+                                quad_source = None;
+                                current_opacity = opacity_stack.pop().unwrap_or(1.0);
+                            }
+                            fern_canvas::DrawCommand::Rasterized(_) => {}
+                            fern_canvas::DrawCommand::AnimatedQuad(idx) => {
+                                let Some(draw) = frame.animated_quads.get(*idx) else {
+                                    continue;
+                                };
+                                // Flush every other pipeline first so painter's
+                                // order is preserved across pipeline boundaries.
+                                flush_all!(
+                                    pass,
+                                    &self.queue,
+                                    self.streams,
+                                    &self.rect_pipeline,
+                                    &self.sdf_pipeline,
+                                    &self.quad_pipeline,
+                                    &self.shadow_pipeline,
+                                    rect_batch,
+                                    sdf_batch,
+                                    quad_batch,
+                                    shadow_batch,
+                                    self.atlas_texture,
+                                    self.path_atlas_texture,
+                                    quad_source,
+                                    index_binding
+                                );
+                                quad_source = None;
+                                match &draw.class {
+                                    fern_canvas::AnimatedQuadClass::Procedural => {
+                                        let verts =
+                                            AnimQuadVertex::from_animated_quad(draw, scale_factor);
+                                        for v in &verts {
+                                            let tp = apply_transform_pixel(
+                                                v.position,
+                                                &current_transform,
+                                            );
+                                            anim_proc_batch.push(AnimQuadVertex {
+                                                position: pixel_to_ndc(
+                                                    tp,
+                                                    viewport_width,
+                                                    viewport_height,
+                                                ),
+                                                uv: v.uv,
+                                                slot: v.slot,
+                                                _pad: v._pad,
+                                            });
+                                        }
+                                    }
+                                    fern_canvas::AnimatedQuadClass::Sprite { image_name } => {
+                                        // Sprite quads need a per-atlas bind
+                                        // group, so each draws individually —
+                                        // same shape as the static Image path.
+                                        // Typical scene has ~1 animated sprite
+                                        // icon at a time, so batching is moot.
+                                        let Some(atlas_bg) =
+                                            self.image_manager.get_bind_group(image_name)
+                                        else {
+                                            continue;
+                                        };
+                                        let verts =
+                                            AnimQuadVertex::from_animated_quad(draw, scale_factor);
+                                        let mut ndc_verts = [AnimQuadVertex {
+                                            position: [0.0; 2],
+                                            uv: [0.0; 2],
+                                            slot: 0,
+                                            _pad: 0,
+                                        };
+                                            4];
+                                        for (i, v) in verts.iter().enumerate() {
+                                            let tp = apply_transform_pixel(
+                                                v.position,
+                                                &current_transform,
+                                            );
+                                            ndc_verts[i] = AnimQuadVertex {
+                                                position: pixel_to_ndc(
+                                                    tp,
+                                                    viewport_width,
+                                                    viewport_height,
+                                                ),
+                                                uv: v.uv,
+                                                slot: v.slot,
+                                                _pad: v._pad,
+                                            };
+                                        }
+                                        let bytes: &[u8] = bytemuck::cast_slice(&ndc_verts);
+                                        if let (Some((vb, v_off, v_len)), Some((ib, _, _))) = (
+                                            self.streams.anim_proc.write(&self.queue, bytes),
+                                            index_binding,
+                                        ) {
+                                            let index_bytes: u64 = 6 * 2;
+                                            pass.set_pipeline(&self.anim_sprite_pipeline);
+                                            pass.set_bind_group(
+                                                0,
+                                                &self.anim_uniform_bind_group,
+                                                &[],
+                                            );
+                                            pass.set_bind_group(1, atlas_bg, &[]);
+                                            pass.set_vertex_buffer(
+                                                0,
+                                                vb.slice(v_off..v_off + v_len),
+                                            );
+                                            pass.set_index_buffer(
+                                                ib.slice(0..index_bytes),
+                                                wgpu::IndexFormat::Uint16,
+                                            );
+                                            pass.draw_indexed(0..6, 0, 0..1);
+                                        }
+                                    }
+                                }
+                            }
+                            fern_canvas::DrawCommand::SetBlendMode(mode) => {
+                                blend_stack.push(current_blend);
+                                current_blend = *mode;
+                            }
+                            fern_canvas::DrawCommand::RestoreBlendMode => {
+                                current_blend =
+                                    blend_stack.pop().unwrap_or(fern_canvas::BlendMode::Normal);
+                            }
+                            fern_canvas::DrawCommand::SetTransform(t) => {
+                                flush_all!(
+                                    pass,
+                                    &self.queue,
+                                    self.streams,
+                                    &self.rect_pipeline,
+                                    &self.sdf_pipeline,
+                                    &self.quad_pipeline,
+                                    &self.shadow_pipeline,
+                                    rect_batch,
+                                    sdf_batch,
+                                    quad_batch,
+                                    shadow_batch,
+                                    self.atlas_texture,
+                                    self.path_atlas_texture,
+                                    quad_source,
+                                    index_binding
+                                );
+                                quad_source = None;
+                                // Widgets author transforms in logical pixels, but
+                                // vertices arrive pre-multiplied by scale_factor (HiDPI
+                                // device pixels). Scale the translation column so the
+                                // pivot lands at the same physical point in either
+                                // coordinate space.
+                                let device_t = Transform2D {
+                                    m: [
+                                        t.m[0],
+                                        t.m[1],
+                                        t.m[2],
+                                        t.m[3],
+                                        t.m[4] * scale_factor,
+                                        t.m[5] * scale_factor,
+                                    ],
+                                };
+                                // Compose with the current transform-stack top so a
+                                // widget's canvas-local transform respects any wrapper
+                                // transform pushed by the render walker. With an
+                                // identity stack top this is identical to the old
+                                // "absolute" semantics — backwards compatible for any
+                                // widget not under a transform scope.
+                                let stack_top = transform_stack
+                                    .last()
+                                    .copied()
+                                    .unwrap_or(Transform2D::IDENTITY);
+                                current_transform = device_t.then(&stack_top);
+                            }
+                            fern_canvas::DrawCommand::PushTransform(t) => {
+                                flush_all!(
+                                    pass,
+                                    &self.queue,
+                                    self.streams,
+                                    &self.rect_pipeline,
+                                    &self.sdf_pipeline,
+                                    &self.quad_pipeline,
+                                    &self.shadow_pipeline,
+                                    rect_batch,
+                                    sdf_batch,
+                                    quad_batch,
+                                    shadow_batch,
+                                    self.atlas_texture,
+                                    self.path_atlas_texture,
+                                    quad_source,
+                                    index_binding
+                                );
+                                quad_source = None;
+                                // See SetTransform: scale the translation column to
+                                // device pixels before composing.
+                                let device_t = Transform2D {
+                                    m: [
+                                        t.m[0],
+                                        t.m[1],
+                                        t.m[2],
+                                        t.m[3],
+                                        t.m[4] * scale_factor,
+                                        t.m[5] * scale_factor,
+                                    ],
+                                };
+                                let prev_top = transform_stack
+                                    .last()
+                                    .copied()
+                                    .unwrap_or(Transform2D::IDENTITY);
+                                let new_top = device_t.then(&prev_top);
+                                transform_stack.push(new_top);
+                                current_transform = new_top;
+                            }
+                            fern_canvas::DrawCommand::PopTransform => {
+                                flush_all!(
+                                    pass,
+                                    &self.queue,
+                                    self.streams,
+                                    &self.rect_pipeline,
+                                    &self.sdf_pipeline,
+                                    &self.quad_pipeline,
+                                    &self.shadow_pipeline,
+                                    rect_batch,
+                                    sdf_batch,
+                                    quad_batch,
+                                    shadow_batch,
+                                    self.atlas_texture,
+                                    self.path_atlas_texture,
+                                    quad_source,
+                                    index_binding
+                                );
+                                quad_source = None;
+                                if transform_stack.len() > 1 {
+                                    transform_stack.pop();
+                                }
+                                current_transform = transform_stack
+                                    .last()
+                                    .copied()
+                                    .unwrap_or(Transform2D::IDENTITY);
+                            }
+                            fern_canvas::DrawCommand::BeginBlurredSubtree { .. }
+                            | fern_canvas::DrawCommand::EndBlurredSubtree => {
+                                // Unreachable — the inner-loop guard above
+                                // breaks before we enter the match for these.
+                                unreachable!("blur boundaries are handled at the segment level");
+                            }
                         }
                         cmd_idx += 1;
                     }
@@ -1342,14 +1352,9 @@ impl Renderer {
                 match &frame.draw_order[cmd_idx] {
                     fern_canvas::DrawCommand::BeginBlurredSubtree { bounds, radius } => {
                         // Allocate intermediate sized to bounds × scale.
-                        let device_w = (bounds.width * scale_factor)
-                            .ceil()
-                            .max(1.0) as u32;
-                        let device_h = (bounds.height * scale_factor)
-                            .ceil()
-                            .max(1.0) as u32;
-                        let intermediate =
-                            self.blur_pool.acquire(&self.device, device_w, device_h);
+                        let device_w = (bounds.width * scale_factor).ceil().max(1.0) as u32;
+                        let device_h = (bounds.height * scale_factor).ceil().max(1.0) as u32;
+                        let intermediate = self.blur_pool.acquire(&self.device, device_w, device_h);
                         let (bucket_w, bucket_h) = self.blur_pool.dimensions(intermediate);
 
                         // Push a translation so the subtree renders at
@@ -1358,7 +1363,10 @@ impl Renderer {
                         // (see SetTransform handler for the same trick).
                         let translate = Transform2D {
                             m: [
-                                1.0, 0.0, 0.0, 1.0,
+                                1.0,
+                                0.0,
+                                0.0,
+                                1.0,
                                 -bounds.x * scale_factor,
                                 -bounds.y * scale_factor,
                             ],
@@ -1429,18 +1437,16 @@ impl Renderer {
 
                         // Schedule a composite into the parent target's
                         // next segment open.
-                        target_stack
-                            .last_mut()
-                            .unwrap()
-                            .pending_composites
-                            .push(PendingComposite {
+                        target_stack.last_mut().unwrap().pending_composites.push(
+                            PendingComposite {
                                 blurred_texture: blurred.texture,
                                 used_w: blurred.used_w,
                                 used_h: blurred.used_h,
                                 bucket_w: blurred.bucket_w,
                                 bucket_h: blurred.bucket_h,
                                 bounds,
-                            });
+                            },
+                        );
                     }
                     _ => unreachable!("inner loop only breaks on Begin/End"),
                 }
@@ -1454,9 +1460,8 @@ impl Renderer {
             // The remaining surface target may still have a pending
             // composite (an outermost blur scope ending at end-of-frame
             // with no further commands). Drain it in one final pass.
-            let final_composites = std::mem::take(
-                &mut target_stack.last_mut().unwrap().pending_composites,
-            );
+            let final_composites =
+                std::mem::take(&mut target_stack.last_mut().unwrap().pending_composites);
             if !final_composites.is_empty() {
                 let surface = target_stack.last_mut().unwrap();
                 let load_op = if surface.opened {
@@ -1558,9 +1563,15 @@ impl Renderer {
         let (color, flags) = if let Some(tint) = image.tint {
             // Tint colors are sRGB-encoded (from fern_tokens::Color) — linearize
             // for the Rgba8UnormSrgb surface, same as all other vertex colors.
-            (crate::vertex::srgb_to_linear_rgba([tint[0], tint[1], tint[2], tint[3] * opacity]), 0)
+            (
+                crate::vertex::srgb_to_linear_rgba([tint[0], tint[1], tint[2], tint[3] * opacity]),
+                0,
+            )
         } else {
-            ([1.0, 1.0, 1.0, opacity], crate::vertex::QUAD_FLAG_COLOR_GLYPH)
+            (
+                [1.0, 1.0, 1.0, opacity],
+                crate::vertex::QUAD_FLAG_COLOR_GLYPH,
+            )
         };
 
         let verts = [
@@ -2045,10 +2056,34 @@ fn composite_blur_quad(
     let p_bl = pixel_to_ndc([sx, sy + sh], viewport_width, viewport_height);
 
     let verts: [QuadVertex; 4] = [
-        QuadVertex { position: p_tl, tex_coord: [0.0, 0.0],   color, flags, _pad: 0 },
-        QuadVertex { position: p_tr, tex_coord: [u_max, 0.0], color, flags, _pad: 0 },
-        QuadVertex { position: p_br, tex_coord: [u_max, v_max], color, flags, _pad: 0 },
-        QuadVertex { position: p_bl, tex_coord: [0.0, v_max], color, flags, _pad: 0 },
+        QuadVertex {
+            position: p_tl,
+            tex_coord: [0.0, 0.0],
+            color,
+            flags,
+            _pad: 0,
+        },
+        QuadVertex {
+            position: p_tr,
+            tex_coord: [u_max, 0.0],
+            color,
+            flags,
+            _pad: 0,
+        },
+        QuadVertex {
+            position: p_br,
+            tex_coord: [u_max, v_max],
+            color,
+            flags,
+            _pad: 0,
+        },
+        QuadVertex {
+            position: p_bl,
+            tex_coord: [0.0, v_max],
+            color,
+            flags,
+            _pad: 0,
+        },
     ];
 
     // Caller has already sized `quad_stream` for the worst-case quad
@@ -2056,18 +2091,29 @@ fn composite_blur_quad(
     // The index buffer's first 6 u16s = `[0, 1, 2, 0, 2, 3]` (the
     // standard quad pattern), reused here.
     let _ = device; // device is only used for bind-group creation above
-    let Some((vb, v_off, v_len)) = quad_stream.write(queue, bytemuck::cast_slice(&verts))
-    else {
+    let Some((vb, v_off, v_len)) = quad_stream.write(queue, bytemuck::cast_slice(&verts)) else {
         return;
     };
-    let Some((ib, _, _)) = index_binding else { return };
+    let Some((ib, _, _)) = index_binding else {
+        return;
+    };
     let composite_index_bytes: u64 = 6 * std::mem::size_of::<u16>() as u64;
 
     pass.set_pipeline(quad_pipeline);
     pass.set_bind_group(0, &bind_group, &[]);
-    pass.set_viewport(0.0, 0.0, viewport_width as f32, viewport_height as f32, 0.0, 1.0);
+    pass.set_viewport(
+        0.0,
+        0.0,
+        viewport_width as f32,
+        viewport_height as f32,
+        0.0,
+        1.0,
+    );
     pass.set_vertex_buffer(0, vb.slice(v_off..v_off + v_len));
-    pass.set_index_buffer(ib.slice(0..composite_index_bytes), wgpu::IndexFormat::Uint16);
+    pass.set_index_buffer(
+        ib.slice(0..composite_index_bytes),
+        wgpu::IndexFormat::Uint16,
+    );
     pass.draw_indexed(0..6, 0, 0..1);
 }
 
@@ -2523,7 +2569,7 @@ fn create_anim_sprite_pipeline(
         immediate_size: 0,
     });
 
-    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("anim_sprite_pipeline"),
         layout: Some(&pipeline_layout),
         vertex: wgpu::VertexState {
@@ -2550,9 +2596,7 @@ fn create_anim_sprite_pipeline(
         multisample: wgpu::MultisampleState::default(),
         multiview_mask: None,
         cache: None,
-    });
-
-    pipeline
+    })
 }
 
 /// Vertex buffer layout shared by both animated-quad pipelines.

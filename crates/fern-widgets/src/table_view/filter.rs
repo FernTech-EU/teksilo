@@ -43,7 +43,11 @@ impl std::fmt::Debug for FilterIndicator {
 }
 
 impl Widget for FilterIndicator {
-    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        _proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         Size::new(self.size, self.size).into()
     }
 
@@ -96,7 +100,7 @@ mod rich {
     use std::cell::Cell;
     use std::rc::Rc;
 
-    use fern_canvas::{Rect, Size, SizeProposal};
+    use fern_canvas::{Rect, SizeProposal};
     use fern_core::build_context::BuildContext;
     use fern_core::signal::Signal;
     use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
@@ -192,10 +196,15 @@ mod rich {
             vec![input_id]
         }
 
-        fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
             self.root_child_id
                 .and_then(|id| ctx.child_size(id, proposal))
-                .unwrap_or_else(|| proposal.resolve(280.0, 32.0)).into()
+                .unwrap_or_else(|| proposal.resolve(280.0, 32.0))
+                .into()
         }
 
         fn place_children(

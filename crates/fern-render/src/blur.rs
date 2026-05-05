@@ -84,6 +84,7 @@ pub(crate) struct BlurPool {
 }
 
 struct PooledTexture {
+    #[allow(dead_code)]
     texture: wgpu::Texture,
     view: wgpu::TextureView,
     width: u32,
@@ -154,6 +155,7 @@ impl BlurPool {
     }
 
     /// The format every pooled texture is created with.
+    #[allow(dead_code)]
     pub(crate) fn format(&self) -> wgpu::TextureFormat {
         self.format
     }

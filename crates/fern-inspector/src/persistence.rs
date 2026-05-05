@@ -12,9 +12,7 @@
 use fern_core::signal::Signal;
 use fern_settings::SettingsStore;
 
-use crate::state::{
-    InspectorState, MAX_PANEL_HEIGHT, MIN_PANEL_HEIGHT, NUM_TABS, OverlayMode,
-};
+use crate::state::{InspectorState, MAX_PANEL_HEIGHT, MIN_PANEL_HEIGHT, NUM_TABS, OverlayMode};
 
 const KEY_OPEN: &str = "__fern_inspector.open";
 const KEY_BOUNDS_MODE: &str = "__fern_inspector.bounds_mode";

@@ -31,9 +31,7 @@ use std::time::SystemTime;
 use fern_ui::IntentKind;
 use fern_ui::core::Action;
 use fern_ui::prelude::*;
-use fern_ui::settings::{
-    AppPaths, MruEntry, MruList, SettingsBundle, SettingsExt, SettingsKey,
-};
+use fern_ui::settings::{AppPaths, MruEntry, MruList, SettingsBundle, SettingsExt, SettingsKey};
 use fern_ui::widgets::{
     Button, ButtonVariant, HStack, Padding, Panel, Repeater, Spacer, TextWidget, VStack,
 };
@@ -96,7 +94,6 @@ const SHOW_PATHS: SettingsKey<bool> = SettingsKey::new("ui.show_paths", || true)
 const WINDOW_LABEL: &str = "main";
 const DEFAULT_SIZE: (u32, u32) = (960, 720);
 const MIN_SIZE: (u32, u32) = (480, 360);
-
 
 // ----- Typed intent catalog ----------------------------------------------
 
@@ -193,10 +190,8 @@ impl Widget for Root {
         let title = TextWidget::new_literal("Recent Projects")
             .style(theme.typography.body_bold.clone())
             .color(theme.colors.text_primary);
-        let subtitle = TextWidget::new_literal(format!(
-            "Settings stored at: {store_path}"
-        ))
-        .color(theme.colors.text_secondary);
+        let subtitle = TextWidget::new_literal(format!("Settings stored at: {store_path}"))
+            .color(theme.colors.text_secondary);
 
         let font_label = TextWidget::new_literal("")
             .color(theme.colors.text_primary)
@@ -237,28 +232,25 @@ impl Widget for Root {
                     ctx.send_intent(AppIntent::FontGrow);
                 }),
         );
-        let show_paths_btn = ctx.add(
-            Button::new_literal("Show paths")
-                .on_activate_fn(|ctx: &mut EventContext| {
-                    ctx.send_intent(AppIntent::ToggleShowPaths);
-                }),
-        );
+        let show_paths_btn = ctx.add(Button::new_literal("Show paths").on_activate_fn(
+            |ctx: &mut EventContext| {
+                ctx.send_intent(AppIntent::ToggleShowPaths);
+            },
+        ));
         ctx.visible_when(show_paths_btn, show_paths.not());
 
-        let hide_paths_btn = ctx.add(
-            Button::new_literal("Hide paths")
-                .on_activate_fn(|ctx: &mut EventContext| {
-                    ctx.send_intent(AppIntent::ToggleShowPaths);
-                }),
-        );
+        let hide_paths_btn = ctx.add(Button::new_literal("Hide paths").on_activate_fn(
+            |ctx: &mut EventContext| {
+                ctx.send_intent(AppIntent::ToggleShowPaths);
+            },
+        ));
         ctx.visible_when(hide_paths_btn, show_paths.clone());
 
-        let seed_btn = ctx.add(
-            Button::new_literal("Seed demo entries")
-                .on_activate_fn(|ctx: &mut EventContext| {
-                    ctx.send_intent(AppIntent::Seed);
-                }),
-        );
+        let seed_btn = ctx.add(Button::new_literal("Seed demo entries").on_activate_fn(
+            |ctx: &mut EventContext| {
+                ctx.send_intent(AppIntent::Seed);
+            },
+        ));
         let clear_btn = ctx.add(
             Button::new_literal("Clear recents")
                 .style(ButtonVariant::Default)
@@ -291,8 +283,7 @@ impl Widget for Root {
             } else {
                 display_name.clone()
             };
-            let row_title = TextWidget::new_literal(title_text)
-                .color(theme.colors.text_primary);
+            let row_title = TextWidget::new_literal(title_text).color(theme.colors.text_primary);
 
             let path_for_display = path_str.clone();
             let path_text_signal = show_paths_for_factory.clone().map(move |show| {
@@ -312,14 +303,14 @@ impl Widget for Root {
                 .child(path_text_widget);
 
             let path_for_open = path_str.clone();
-            let open_btn = Button::new_literal("Open")
-                .on_activate_fn(move |ctx: &mut EventContext| {
+            let open_btn =
+                Button::new_literal("Open").on_activate_fn(move |ctx: &mut EventContext| {
                     ctx.send_intent(AppIntent::OpenRecent(path_for_open.clone()));
                 });
             let path_for_pin = path_str.clone();
             let pin_label = if pinned { "Unpin" } else { "Pin" };
-            let pin_btn = Button::new_literal(pin_label)
-                .on_activate_fn(move |ctx: &mut EventContext| {
+            let pin_btn =
+                Button::new_literal(pin_label).on_activate_fn(move |ctx: &mut EventContext| {
                     ctx.send_intent(AppIntent::TogglePin(path_for_pin.clone()));
                 });
             let path_for_remove = path_str.clone();
@@ -378,7 +369,8 @@ impl Widget for Root {
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 }
 
@@ -386,14 +378,16 @@ fn main() {
     let paths = AppPaths::new("com", "FernTech", "RecentProjectsDemo")
         .or_else(|| {
             let cwd = std::env::current_dir().ok()?;
-            Some(AppPaths::for_testing(&cwd.join(".recent-projects-demo-state")))
+            Some(AppPaths::for_testing(
+                &cwd.join(".recent-projects-demo-state"),
+            ))
         })
         .expect("could not resolve a usable directory for settings");
 
     // The MruList is app-typed (the framework doesn't know about
     // RecentProject), so the app constructs and registers it.
-    let recents: MruList<RecentProject> = MruList::open(&paths, "recent_projects", 8)
-        .expect("open recent_projects.toml");
+    let recents: MruList<RecentProject> =
+        MruList::open(&paths, "recent_projects", 8).expect("open recent_projects.toml");
 
     FernAppBuilder::new()
         .theme(Theme::light_default())

@@ -483,7 +483,10 @@ mod tests {
             height: None,
         });
         let mid_size = tree.bounds(id).size();
-        assert_eq!(initial_size, mid_size, "visual-only scale must not change layout");
+        assert_eq!(
+            initial_size, mid_size,
+            "visual-only scale must not change layout"
+        );
     }
 
     #[test]

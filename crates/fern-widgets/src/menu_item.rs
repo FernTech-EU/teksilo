@@ -373,7 +373,7 @@ impl Widget for MenuItem {
         let resolved_shortcut = self.shortcut_label.clone().or_else(|| {
             self.shortcut_id.and_then(|id| {
                 ctx.effective_shortcut(id)
-                    .and_then(|eff| eff.primary.map(|ks| format_keystroke(ks)))
+                    .and_then(|eff| eff.primary.map(format_keystroke))
             })
         });
         self.resolved_shortcut = resolved_shortcut.clone();
@@ -697,7 +697,11 @@ impl Widget for MenuItem {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         match self.root_child_id {
             Some(id) => {
                 let size = ctx
@@ -716,7 +720,8 @@ impl Widget for MenuItem {
                 Size::new(width, size.height.max(32.0))
             }
             None => proposal.resolve(120.0, 32.0),
-        }.into()
+        }
+        .into()
     }
 
     fn place_children(
@@ -764,4 +769,3 @@ impl Widget for MenuItem {
         }
     }
 }
-

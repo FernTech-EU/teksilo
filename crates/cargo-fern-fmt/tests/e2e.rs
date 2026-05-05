@@ -67,7 +67,11 @@ fn check_passes_on_clean_file() {
         "fn build() {\n    fern!(VStack {\n        spacing: 8.0\n    });\n}\n",
     );
     let out = run(&["--check", "clean.rs"], tmp.path());
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 #[test]
@@ -99,7 +103,11 @@ fn formats_in_place() {
         "fn build() { fern!(VStack { spacing: 8.0 Button(\"ok\") }); }\n",
     );
     let out = run(&["f.rs"], tmp.path());
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let after = std::fs::read_to_string(&f).unwrap();
     assert!(
         after.contains("VStack {\n"),
@@ -166,7 +174,11 @@ fn preserves_file_mode() {
     std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o644)).unwrap();
 
     let out = run(&["f.rs"], tmp.path());
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     let mode = std::fs::metadata(&f).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o644, "expected 0644, got {mode:o}");
@@ -185,7 +197,11 @@ fn formats_multiple_files_recursively() {
     );
 
     let out = run(&["."], tmp.path());
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     let a = std::fs::read_to_string(tmp.path().join("sub").join("a.rs")).unwrap();
     let b = std::fs::read_to_string(tmp.path().join("b.rs")).unwrap();

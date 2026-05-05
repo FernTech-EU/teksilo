@@ -12,7 +12,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use fern_canvas::{Rect, Size, SizeProposal};
+use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::signal::Signal;
@@ -137,6 +137,7 @@ pub struct AppState {
 
     pub canvas_theme: Signal<CanvasTheme>,
     pub canvas_locale: Signal<Option<String>>,
+    #[allow(dead_code)]
     pub zoom_percent: Signal<f32>,
     pub background_mode: Signal<BackgroundMode>,
 
@@ -166,11 +167,7 @@ impl AppState {
     }
 
     /// Look up or create the `KnobValues` for `(widget_id, variant_name)`.
-    pub fn knobs_for(
-        &self,
-        widget_id: &'static str,
-        variant_name: &'static str,
-    ) -> KnobValues {
+    pub fn knobs_for(&self, widget_id: &'static str, variant_name: &'static str) -> KnobValues {
         let key = (widget_id, variant_name);
         if let Some(values) = self.knobs_cache.borrow().get(&key) {
             return values.clone();
@@ -201,7 +198,9 @@ impl AppState {
     /// Drop the cache entry for `(widget_id, variant_name)` and force
     /// the canvas to rebuild — used by the inspector's "Reset" button.
     pub fn reset_knobs(&self, widget_id: &'static str, variant_name: &'static str) {
-        self.knobs_cache.borrow_mut().remove(&(widget_id, variant_name));
+        self.knobs_cache
+            .borrow_mut()
+            .remove(&(widget_id, variant_name));
         let v = self.canvas_rebuild_tick.get();
         self.canvas_rebuild_tick.set(v.wrapping_add(1));
     }
@@ -297,12 +296,10 @@ impl Widget for PreviewerRoot {
         if state.selected_widget.get().is_none() {
             if let Some(widget_id) = self.resolve_initial_widget() {
                 state.selected_widget.set(Some(widget_id));
-                let variant = self
-                    .resolve_initial_variant(widget_id)
-                    .or_else(|| {
-                        fern_preview::find_by_id(widget_id)
-                            .and_then(|e| e.variants().first().map(|v| v.name()))
-                    });
+                let variant = self.resolve_initial_variant(widget_id).or_else(|| {
+                    fern_preview::find_by_id(widget_id)
+                        .and_then(|e| e.variants().first().map(|v| v.name()))
+                });
                 state.selected_variant.set(variant);
             } else {
                 state.select_first_registered();
@@ -354,11 +351,7 @@ impl Widget for PreviewerRoot {
         // VStack gives it all remaining vertical space below the
         // toolbar — without this the split collapses to its minimum
         // and the whole previewer renders in <360 px height.
-        let outer_split_expanded = ctx.add(
-            Expand::vertical()
-                
-                .child_id(outer_split_id),
-        );
+        let outer_split_expanded = ctx.add(Expand::vertical().child_id(outer_split_id));
 
         let root = VStack::new()
             .add_child(toolbar)
@@ -368,13 +361,18 @@ impl Widget for PreviewerRoot {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         match self.root_id {
             Some(id) => ctx
                 .child_size(id, proposal)
                 .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
             None => proposal.resolve(0.0, 0.0),
-        }.into()
+        }
+        .into()
     }
 
     fn place_children(

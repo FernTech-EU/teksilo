@@ -67,16 +67,18 @@ impl Root {
 
 impl Widget for Root {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme_signal().get();
+        let _theme = ctx.theme_signal().get();
 
         // Live readouts so the demo visibly confirms each signal.
         let font_size_text = self.values.font_size.map(|v| format!("{} pt", v));
         let gain_text = self.values.gain_db.map(|v| format!("{:.1} dB", v));
         let opacity_text = self.values.opacity.map(|v| format!("{} %", v));
-        let timeout_text = self.values.timeout.map(|v| if *v == 0 {
-            "Auto".to_string()
-        } else {
-            format!("{} s", v)
+        let timeout_text = self.values.timeout.map(|v| {
+            if *v == 0 {
+                "Auto".to_string()
+            } else {
+                format!("{} s", v)
+            }
         });
         let frequency_text = self.values.frequency.map(|v| format!("{:.2} Hz", v));
 
@@ -245,21 +247,15 @@ impl Widget for Root {
                                     )
                                     .child(
                                         Expand::horizontal().child(
-                                            SpinBox::new(
-                                                self.values.opacity.clone(),
-                                                0,
-                                                100,
-                                            )
-                                            .suffix(" %")
-                                            .fill_width()
-                                            .label("Opacity (fill)"),
+                                            SpinBox::new(self.values.opacity.clone(), 0, 100)
+                                                .suffix(" %")
+                                                .fill_width()
+                                                .label("Opacity (fill)"),
                                         ),
                                     )
-                                    .child(
-                                        TextWidget::new_literal("").bind_text(
-                                            self.values.opacity.map(|v| format!("{} %", v)),
-                                        ),
-                                    ),
+                                    .child(TextWidget::new_literal("").bind_text(
+                                        self.values.opacity.map(|v| format!("{} %", v)),
+                                    )),
                             )
                             // Reset button.
                             .child(
@@ -283,14 +279,11 @@ impl Widget for Root {
         vec![root]
     }
 
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        ctx: &LayoutContext,
-    ) -> LayoutResponse {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 }
 
@@ -302,9 +295,7 @@ fn row(
 ) -> impl Widget {
     HStack::new()
         .spacing(12.0)
-        .child(
-            MinSizeForLabel::new(TextWidget::new_literal(label)).width(220.0),
-        )
+        .child(MinSizeForLabel::new(TextWidget::new_literal(label)).width(220.0))
         .child(spin)
         .child(TextWidget::new_literal("").bind_text(readout))
 }
@@ -332,7 +323,10 @@ impl MinSizeForLabel {
 }
 impl Widget for MinSizeForLabel {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let child = self.child.take().expect("MinSizeForLabel: child already consumed");
+        let child = self
+            .child
+            .take()
+            .expect("MinSizeForLabel: child already consumed");
         let id = ctx.add_boxed(child);
         self.child_id = Some(id);
         vec![id]
@@ -371,9 +365,9 @@ fn main() {
         .theme(Theme::light_default())
         .initial_window(
             WindowConfig::new()
-            .title("FernUI — SpinBox gallery")
-            .size(720, 560)
-            .root(|tree, _state| tree.add(Root::new()))
+                .title("FernUI — SpinBox gallery")
+                .size(720, 560)
+                .root(|tree, _state| tree.add(Root::new())),
         )
         .run();
 }

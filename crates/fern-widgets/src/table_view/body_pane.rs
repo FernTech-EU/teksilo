@@ -109,8 +109,11 @@ impl<T: 'static> Widget for BodyPane<T> {
         version.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
         // Scroll position re-places rows without rebuilding (within buffer).
-        self.scroll_y
-            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Relayout);
+        self.scroll_y.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
         ctx.register_animated_signal(&self.scroll_y);
 
         // Buffer-exit detection. Bumps version → rebuild THIS pane.
@@ -203,11 +206,9 @@ impl<T: 'static> Widget for BodyPane<T> {
                 let col = &columns[col_idx];
                 let is_editing = editing_state == Some((row_idx, display_pos));
                 let is_selected = match (selection_mode, &self.selection, &self.cell_selection) {
-                    (
-                        TableSelectionMode::SingleRow | TableSelectionMode::MultiRow,
-                        Some(s),
-                        _,
-                    ) => s.is_selected(row_idx),
+                    (TableSelectionMode::SingleRow | TableSelectionMode::MultiRow, Some(s), _) => {
+                        s.is_selected(row_idx)
+                    }
                     (
                         TableSelectionMode::SingleCell | TableSelectionMode::MultiCell,
                         _,
@@ -227,9 +228,8 @@ impl<T: 'static> Widget for BodyPane<T> {
                     depth: None,
                     is_tree_column: false,
                 };
-                let cell_widget = read_item_local(&with_item_fn, row_idx, |item| {
-                    (col.cell)(item, &cell_ctx)
-                });
+                let cell_widget =
+                    read_item_local(&with_item_fn, row_idx, |item| (col.cell)(item, &cell_ctx));
                 if let Some(widget) = cell_widget {
                     let inner_id = ctx.add_boxed(widget);
                     // When the cell delegate just swapped in an editor
@@ -241,10 +241,10 @@ impl<T: 'static> Widget for BodyPane<T> {
                     // hand keyboard focus to it. Without this, F2 puts
                     // a `TextInput` on screen but the user has to
                     // click it before they can type.
-                    if is_editing {
-                        if let Some(focus_target) = ctx.first_focusable_descendant(inner_id) {
-                            ctx.focus(focus_target);
-                        }
+                    if is_editing
+                        && let Some(focus_target) = ctx.first_focusable_descendant(inner_id)
+                    {
+                        ctx.focus(focus_target);
                     }
                     let cell_a11y = CellA11y::new(
                         inner_id,
@@ -268,8 +268,8 @@ impl<T: 'static> Widget for BodyPane<T> {
                     let row_for_cell = row_idx;
                     let col_for_cell = display_pos;
                     let mode_for_cell = selection_mode;
-                    let cell_handlers = HandlerSet::new().on_pointer_event(
-                        move |event, _ctx| match event {
+                    let cell_handlers =
+                        HandlerSet::new().on_pointer_event(move |event, _ctx| match event {
                             fern_core::event::WidgetEvent::PointerDown {
                                 button: fern_core::event::PointerButton::Primary,
                                 modifiers,
@@ -299,16 +299,20 @@ impl<T: 'static> Widget for BodyPane<T> {
                                 fern_core::event::EventResponse::Ignored
                             }
                             _ => fern_core::event::EventResponse::Ignored,
-                        },
-                    );
+                        });
                     ctx.apply_handlers(cell_id, cell_handlers);
 
                     cell_ids.push(cell_id);
                 }
             }
 
-            let row_widget =
-                BodyRow::new(cell_ids, row_idx + 2, row_selected_for_a11y, self.row_height, row_widths_handle.clone());
+            let row_widget = BodyRow::new(
+                cell_ids,
+                row_idx + 2,
+                row_selected_for_a11y,
+                self.row_height,
+                row_widths_handle.clone(),
+            );
             let row_id = ctx.add(row_widget);
 
             // Selection click on the row. Skipped while a cell is in
@@ -334,9 +338,7 @@ impl<T: 'static> Widget for BodyPane<T> {
                             if editing_for_click.get().is_some() {
                                 return fern_core::event::EventResponse::Ignored;
                             }
-                            if modifiers.ctrl()
-                                && sel_for_click.mode() == SelectionMode::Multi
-                            {
+                            if modifiers.ctrl() && sel_for_click.mode() == SelectionMode::Multi {
                                 sel_for_click.toggle(row_index_for_click);
                             } else if modifiers.shift()
                                 && sel_for_click.mode() == SelectionMode::Multi
@@ -357,12 +359,11 @@ impl<T: 'static> Widget for BodyPane<T> {
                 let anchor = self.drag_anchor;
                 row_handlers = row_handlers.on_drag(move |phase, ctx| {
                     if let fern_core::gesture::DragPhase::Started { .. } = phase {
-                        let payload = fern_core::drag_payload::DragPayload::typed(
-                            RowReorderDragData {
+                        let payload =
+                            fern_core::drag_payload::DragPayload::typed(RowReorderDragData {
                                 source_row: drag_row,
                                 source_table_id: drag_table_id,
-                            },
-                        );
+                            });
                         ctx.start_drag(anchor, payload);
                     }
                 });
@@ -375,7 +376,11 @@ impl<T: 'static> Widget for BodyPane<T> {
         self.row_entries.iter().map(|(_, id)| *id).collect()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let width = proposal.width.unwrap_or(400.0);
         let height = proposal.height.unwrap_or(300.0);
         self.viewport_height.set(height);

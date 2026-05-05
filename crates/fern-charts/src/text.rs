@@ -1,10 +1,11 @@
 //! Shared text-measurement helpers.
 //!
 //! `Canvas::draw_text` truncates with "…" when the supplied rect width is
-//! too tight to fit the laid-out glyphs (it sets `max_width = rect.width
-//! + 0.5` for the text backend). Approximating widths from `chars *
-//! font_size * 0.55` consistently underestimates real-typeface widths,
-//! so axis labels like `"100"` or `"1000"` were rendering as `"…"`.
+//! too tight to fit the laid-out glyphs (it sets `max_width = rect.width +
+//! 0.5` for the text backend). Approximating widths from
+//! `chars * font_size * 0.55` consistently underestimates real-typeface
+//! widths, so axis labels like `"100"` or `"1000"` were rendering as `"…"`.
+//!
 //! These helpers go through the live text backend when one is wired and
 //! pad by 1 pixel for sub-pixel headroom.
 

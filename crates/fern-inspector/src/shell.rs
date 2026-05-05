@@ -46,7 +46,6 @@ use crate::tabs::shortcuts::ShortcutsTab;
 use crate::tabs::theme::ThemeTab;
 use crate::tabs::tree::TreeTab;
 
-
 /// Composing widget that takes ownership of wrapping a user-root id
 /// with the inspector UI. Created by the post-root hook in
 /// `state::install`.
@@ -159,16 +158,13 @@ impl Widget for InspectorShell {
         // Derived height signal — depends on BOTH `open` and
         // `panel_height` so dragging the handle OR toggling the panel
         // re-runs layout. `Signal::zip` dirties on either source.
-        let height_signal = state
-            .open
-            .zip(&state.panel_height)
-            .map(|(open, h)| {
-                if *open {
-                    *h + crate::resize_handle::HANDLE_HEIGHT
-                } else {
-                    0.0
-                }
-            });
+        let height_signal = state.open.zip(&state.panel_height).map(|(open, h)| {
+            if *open {
+                *h + crate::resize_handle::HANDLE_HEIGHT
+            } else {
+                0.0
+            }
+        });
 
         let stack = VStack::new()
             .child(Expand::new().flex(1.0).child(z))
@@ -212,7 +208,9 @@ impl Widget for InspectorShell {
 
 /// Zero-size placeholder used in Switchers when we want "nothing here".
 fn empty_filler() -> impl Widget + 'static {
-    FixedSize::new().bind_width(Signal::new(0.0_f32)).bind_height(Signal::new(0.0_f32))
+    FixedSize::new()
+        .bind_width(Signal::new(0.0_f32))
+        .bind_height(Signal::new(0.0_f32))
 }
 
 /// Build the inspector panel's content. Toolbar above a `TabWidget`
@@ -226,14 +224,38 @@ fn build_panel(state: InspectorState) -> impl Widget + 'static {
         // Tree tab is self-scrolling (it owns its own ScrollArea so it
         // can drive scroll-into-view when the picker selects a widget).
         .static_tab(ti("Tree"), fill_width(TreeTab::new(state.clone())))
-        .static_tab(ti("Properties"), fill_width(scrollable_tab(PropertiesTab::new(state.clone()))))
-        .static_tab(ti("Accessibility"), fill_width(scrollable_tab(A11yTab::new(state.clone()))))
-        .static_tab(ti("Theme"), fill_width(scrollable_tab(ThemeTab::new(state.clone()))))
-        .static_tab(ti("Locale"), fill_width(scrollable_tab(LocaleTab::new(state.clone()))))
-        .static_tab(ti("Focus"), fill_width(scrollable_tab(FocusTab::new(state.clone()))))
-        .static_tab(ti("Shortcuts"), fill_width(scrollable_tab(ShortcutsTab::new(state.clone()))))
-        .static_tab(ti("Overlays"), fill_width(scrollable_tab(OverlaysTab::new(state.clone()))))
-        .static_tab(ti("Models"), fill_width(scrollable_tab(DataModelsTab::new(state.clone()))));
+        .static_tab(
+            ti("Properties"),
+            fill_width(scrollable_tab(PropertiesTab::new(state.clone()))),
+        )
+        .static_tab(
+            ti("Accessibility"),
+            fill_width(scrollable_tab(A11yTab::new(state.clone()))),
+        )
+        .static_tab(
+            ti("Theme"),
+            fill_width(scrollable_tab(ThemeTab::new(state.clone()))),
+        )
+        .static_tab(
+            ti("Locale"),
+            fill_width(scrollable_tab(LocaleTab::new(state.clone()))),
+        )
+        .static_tab(
+            ti("Focus"),
+            fill_width(scrollable_tab(FocusTab::new(state.clone()))),
+        )
+        .static_tab(
+            ti("Shortcuts"),
+            fill_width(scrollable_tab(ShortcutsTab::new(state.clone()))),
+        )
+        .static_tab(
+            ti("Overlays"),
+            fill_width(scrollable_tab(OverlaysTab::new(state.clone()))),
+        )
+        .static_tab(
+            ti("Models"),
+            fill_width(scrollable_tab(DataModelsTab::new(state.clone()))),
+        );
 
     let toolbar = build_toolbar(state.clone());
 
@@ -299,10 +321,9 @@ fn build_toolbar(state: InspectorState) -> impl Widget + 'static {
         bounds_index,
     );
 
-    let opacity_slider =
-        FixedSize::new()
-            .bind_width(Signal::new(120.0_f32))
-            .child(Slider::new(state.overlay_opacity.clone(), 0.1, 1.0));
+    let opacity_slider = FixedSize::new()
+        .bind_width(Signal::new(120.0_f32))
+        .child(Slider::new(state.overlay_opacity.clone(), 0.1, 1.0));
 
     let open_state_for_close = state.open.clone();
     let close_button = Button::new_literal("×").on_activate_fn(move |_ctx| {

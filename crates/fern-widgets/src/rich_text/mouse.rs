@@ -163,8 +163,7 @@ pub(super) fn handle_pointer_event(
                     let intensity = ((20.0 - local.y) / 20.0).clamp(0.0, 1.0);
                     -60.0 * 60.0 * intensity
                 } else if local.y > viewport_height - 20.0 {
-                    let intensity =
-                        ((local.y - (viewport_height - 20.0)) / 20.0).clamp(0.0, 1.0);
+                    let intensity = ((local.y - (viewport_height - 20.0)) / 20.0).clamp(0.0, 1.0);
                     60.0 * 60.0 * intensity
                 } else {
                     0.0

@@ -288,12 +288,9 @@ impl InputMask {
 
     /// Strip placeholder characters from the tail of a formatted
     /// string. Returns the prefix containing only filled positions
-    /// + their preceding separators. `"12/__/____"` → `"12/"`.
-    /// `"12/30/____"` → `"12/30/"`. `"____"` → `""`.
-    pub fn strip_trailing_placeholders(
-        &self,
-        formatted: &FormattedMask,
-    ) -> String {
+    /// and their preceding separators. `"12/__/____"` → `"12/"`,
+    /// `"12/30/____"` → `"12/30/"`, `"____"` → `""`.
+    pub fn strip_trailing_placeholders(&self, formatted: &FormattedMask) -> String {
         let Some(last) = formatted.last_filled_index else {
             return String::new();
         };
@@ -380,7 +377,14 @@ mod tests {
         let m = parse("99/99/9999");
         assert_eq!(m.len(), 10);
         // Editable positions at 0,1,3,4,6,7,8,9 — separator at 2,5
-        assert!(matches!(m.get(0), Some(MaskPosition::Editable { class: MaskClass::Digit, required: true, .. })));
+        assert!(matches!(
+            m.get(0),
+            Some(MaskPosition::Editable {
+                class: MaskClass::Digit,
+                required: true,
+                ..
+            })
+        ));
         assert!(matches!(m.get(2), Some(MaskPosition::Fixed('/'))));
         assert!(matches!(m.get(5), Some(MaskPosition::Fixed('/'))));
     }
@@ -397,7 +401,11 @@ mod tests {
     fn parse_uppercase_letters() {
         let m = parse(">AA");
         match m.get(0) {
-            Some(MaskPosition::Editable { class: MaskClass::Letter, case: CaseLock::Upper, .. }) => {}
+            Some(MaskPosition::Editable {
+                class: MaskClass::Letter,
+                case: CaseLock::Upper,
+                ..
+            }) => {}
             other => panic!("expected uppercase letter at 0, got {other:?}"),
         }
     }
@@ -407,7 +415,13 @@ mod tests {
         let m = parse(r"\99");
         // `\9` is a literal '9'; the second `9` is a digit class.
         assert!(matches!(m.get(0), Some(MaskPosition::Fixed('9'))));
-        assert!(matches!(m.get(1), Some(MaskPosition::Editable { class: MaskClass::Digit, .. })));
+        assert!(matches!(
+            m.get(1),
+            Some(MaskPosition::Editable {
+                class: MaskClass::Digit,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -494,9 +508,9 @@ mod tests {
     #[test]
     fn accepts_at_position() {
         let m = parse("99/99/9999");
-        assert!(m.accepts_at(0, '5'));     // editable digit
-        assert!(!m.accepts_at(0, 'a'));    // letter at digit pos
-        assert!(!m.accepts_at(2, '/'));    // fixed: never accepts
-        assert!(!m.accepts_at(99, '5'));   // out of range
+        assert!(m.accepts_at(0, '5')); // editable digit
+        assert!(!m.accepts_at(0, 'a')); // letter at digit pos
+        assert!(!m.accepts_at(2, '/')); // fixed: never accepts
+        assert!(!m.accepts_at(99, '5')); // out of range
     }
 }

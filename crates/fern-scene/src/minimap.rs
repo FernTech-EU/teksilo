@@ -253,7 +253,10 @@ impl Widget for SceneMinimap {
     }
 
     fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
-        let w = proposal.width.unwrap_or(self.size.width).min(self.size.width);
+        let w = proposal
+            .width
+            .unwrap_or(self.size.width)
+            .min(self.size.width);
         let h = proposal
             .height
             .unwrap_or(self.size.height)
@@ -273,20 +276,15 @@ impl Widget for SceneMinimap {
         }
         // Item thumbnails.
         for (item_rect, color) in &self.items {
-            let tl = self.scene_to_minimap(
-                Point::new(item_rect.x, item_rect.y),
-                area,
-            );
+            let tl = self.scene_to_minimap(Point::new(item_rect.x, item_rect.y), area);
             let br = self.scene_to_minimap(
-                Point::new(item_rect.x + item_rect.width, item_rect.y + item_rect.height),
+                Point::new(
+                    item_rect.x + item_rect.width,
+                    item_rect.y + item_rect.height,
+                ),
                 area,
             );
-            let r = Rect::new(
-                tl.x,
-                tl.y,
-                (br.x - tl.x).max(1.0),
-                (br.y - tl.y).max(1.0),
-            );
+            let r = Rect::new(tl.x, tl.y, (br.x - tl.x).max(1.0), (br.y - tl.y).max(1.0));
             canvas.fill_rect(r, *color);
         }
         // Viewport overlay.
@@ -326,8 +324,7 @@ mod tests {
     #[test]
     fn minimap_size_override_changes_layout_response() {
         let viewport = Signal::new(Rect::new(0.0, 0.0, 100.0, 75.0));
-        let mm = SceneMinimap::new(Rect::new(0.0, 0.0, 1000.0, 750.0), viewport)
-            .size(120.0, 80.0);
+        let mm = SceneMinimap::new(Rect::new(0.0, 0.0, 1000.0, 750.0), viewport).size(120.0, 80.0);
         let theme = fern_tokens::Theme::light_default();
         let ctx = LayoutContext::for_testing(&theme);
         let lr = mm.layout_response(SizeProposal::unspecified(), &ctx);
@@ -344,8 +341,7 @@ mod tests {
         // Smoke test that the widget actually integrates — build()
         // doesn't panic, layout pass succeeds.
         let viewport = Signal::new(Rect::new(0.0, 0.0, 100.0, 75.0));
-        let mm = SceneMinimap::new(Rect::new(0.0, 0.0, 1000.0, 750.0), viewport)
-            .size(120.0, 80.0);
+        let mm = SceneMinimap::new(Rect::new(0.0, 0.0, 1000.0, 750.0), viewport).size(120.0, 80.0);
         let mut tree = WidgetTree::new();
         let id = tree.add(mm);
         tree.layout(SizeProposal::unspecified());

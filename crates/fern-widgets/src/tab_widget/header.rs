@@ -224,8 +224,7 @@ impl TabHeader {
             .unwrap_or(0.0);
         // Bounds == visual rect now (no focus-ring envelope), so
         // natural width is purely content + horizontal padding.
-        (text_width + icon_size + leading_size + trailing_size + pad_h * 2.0)
-            .max(NATURAL_MIN_WIDTH)
+        (text_width + icon_size + leading_size + trailing_size + pad_h * 2.0).max(NATURAL_MIN_WIDTH)
     }
 
     pub(crate) fn intrinsic_height(ctx: &LayoutContext) -> f32 {
@@ -353,9 +352,7 @@ impl Widget for TabHeader {
                 // surrounding tab header is in the Idle interaction
                 // state. The interaction signal flips to Hovered
                 // via the `on_hover` handler installed below.
-                let visible_when = interaction.map(|s| {
-                    matches!(*s, TabHeaderInteraction::Hovered)
-                });
+                let visible_when = interaction.map(|s| matches!(*s, TabHeaderInteraction::Hovered));
                 ctx.visible_when(close_id, visible_when);
                 row = row.add_child(close_id);
             }
@@ -484,11 +481,7 @@ impl Widget for TabHeader {
                 let selected = self.selected.clone();
                 let on_reorder_to = self.on_reorder_to.clone();
                 let header_count_signal = self.shared.header_ids.clone();
-                move |action,
-                      _node,
-                      data,
-                      _ctx: &mut EventContext|
-                      -> EventResponse {
+                move |action, _node, data, _ctx: &mut EventContext| -> EventResponse {
                     if !enabled {
                         return EventResponse::Ignored;
                     }
@@ -556,9 +549,7 @@ impl Widget for TabHeader {
                     // not a known size at handler time (no
                     // LayoutContext). 160×32 dp matches the average
                     // tab footprint and keeps the preview legible.
-                    let preview = crate::drag_preview::DragPreview::new(
-                        160.0, 32.0, preview_inner,
-                    );
+                    let preview = crate::drag_preview::DragPreview::new(160.0, 32.0, preview_inner);
                     ctx.start_drag_with_preview(self_id, payload, Box::new(preview));
                 }
             });
@@ -584,8 +575,7 @@ impl Widget for TabHeader {
         }
 
         if let Some(factory) = self.context_menu_factory.clone() {
-            handler_set =
-                handler_set.context_menu(move |pos, ctx| (factory)(pos, ctx));
+            handler_set = handler_set.context_menu(move |pos, ctx| (factory)(pos, ctx));
         }
 
         ctx.apply_self_handlers(handler_set);
@@ -600,12 +590,10 @@ impl Widget for TabHeader {
         vec![inner_id]
     }
 
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        ctx: &LayoutContext,
-    ) -> LayoutResponse {
-        let height = proposal.height.unwrap_or_else(|| Self::intrinsic_height(ctx));
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        let height = proposal
+            .height
+            .unwrap_or_else(|| Self::intrinsic_height(ctx));
         // Pinned tabs are always rendered at exactly `min_width`
         // (the bar's `pinned_tab_width`), regardless of any width
         // proposal — they're icon-only squares and shouldn't stretch.
@@ -678,18 +666,12 @@ impl Widget for TabHeader {
         let indicator_thickness = ctx.theme.components.tab.underline_active;
         if selected && self.enabled {
             let indicator = match self.orientation {
-                super::delegate::TabBarOrientation::Horizontal => Rect::new(
-                    visual.x,
-                    visual.y,
-                    visual.width,
-                    indicator_thickness,
-                ),
-                super::delegate::TabBarOrientation::Vertical => Rect::new(
-                    visual.x,
-                    visual.y,
-                    indicator_thickness,
-                    visual.height,
-                ),
+                super::delegate::TabBarOrientation::Horizontal => {
+                    Rect::new(visual.x, visual.y, visual.width, indicator_thickness)
+                }
+                super::delegate::TabBarOrientation::Vertical => {
+                    Rect::new(visual.x, visual.y, indicator_thickness, visual.height)
+                }
             };
             canvas.fill_rect(indicator, colors.accent);
         }
@@ -768,11 +750,7 @@ impl Widget for TabHeader {
     }
 }
 
-pub(crate) fn next_enabled_index(
-    enabled_tabs: &[bool],
-    current: usize,
-    direction: isize,
-) -> usize {
+pub(crate) fn next_enabled_index(enabled_tabs: &[bool], current: usize, direction: isize) -> usize {
     if enabled_tabs.is_empty() {
         return current;
     }

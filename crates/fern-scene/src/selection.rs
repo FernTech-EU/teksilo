@@ -117,7 +117,7 @@ impl SceneSelection {
     /// `clear` if it is.
     pub fn toggle(&self, id: ItemId) {
         match self.mode {
-            SceneSelectionMode::None => return,
+            SceneSelectionMode::None => (),
             SceneSelectionMode::Single => {
                 if self.is_selected(id) {
                     self.clear();

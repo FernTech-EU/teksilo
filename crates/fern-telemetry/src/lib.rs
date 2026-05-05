@@ -34,8 +34,8 @@ pub mod scopes;
 pub mod stub;
 
 pub use bundle::{
-    DataResidencyRegion, OpenedTelemetry, PrivacyPolicy, TelemetryBundle,
-    TelemetryBundleError, TelemetryMode,
+    DataResidencyRegion, OpenedTelemetry, PrivacyPolicy, TelemetryBundle, TelemetryBundleError,
+    TelemetryMode,
 };
 pub use consent::{ConsentFile, ConsentStore, PersistedConsentState};
 pub use dynamic_reporter::DynamicReporter;

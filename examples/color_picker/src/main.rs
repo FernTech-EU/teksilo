@@ -88,9 +88,7 @@ impl Widget for Root {
                 "With alpha enabled",
                 HStack::new()
                     .spacing(20.0)
-                    .child(
-                        ColorPicker::new(self.alpha_color.clone()).alpha_enabled(true),
-                    )
+                    .child(ColorPicker::new(self.alpha_color.clone()).alpha_enabled(true))
                     .child(live_preview(self.alpha_color.clone())),
             ))
             // Section 3 — Compact layout.
@@ -123,10 +121,7 @@ impl Widget for Root {
                 "HexColorInput bound to a live Panel background",
                 HStack::new()
                     .spacing(12.0)
-                    .child(
-                        HexColorInput::new(self.hex_only_color.clone())
-                            .label("Background"),
-                    )
+                    .child(HexColorInput::new(self.hex_only_color.clone()).label("Background"))
                     .child(live_preview(self.hex_only_color.clone())),
             ))
             // Section 8 — ColorEdit row.
@@ -135,9 +130,7 @@ impl Widget for Root {
                 HStack::new()
                     .spacing(12.0)
                     .child(ColorEdit::new(self.edit_color_a.clone()))
-                    .child(
-                        ColorEdit::new(self.edit_color_b.clone()).alpha_enabled(true),
-                    )
+                    .child(ColorEdit::new(self.edit_color_b.clone()).alpha_enabled(true))
                     .child(
                         ColorEdit::nullable(self.edit_color_c.clone())
                             .picker_layout(ColorPickerLayout::Standard),
@@ -151,10 +144,7 @@ impl Widget for Root {
                     .enabled(false),
             ));
 
-        let root = ctx.add(
-            ScrollArea::new()
-                .child(Padding::uniform(20.0).child(content)),
-        );
+        let root = ctx.add(ScrollArea::new().child(Padding::uniform(20.0).child(content)));
         self.root_child_id = Some(root);
         vec![root]
     }

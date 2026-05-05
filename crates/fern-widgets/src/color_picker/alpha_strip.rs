@@ -15,8 +15,8 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use fern_canvas::{Canvas, Paint, Point, Rect, Size, SizeProposal};
 use fern_canvas::paint::GradientStop;
+use fern_canvas::{Canvas, Paint, Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::accesskit::{Action, Role};
 use fern_core::build_context::BuildContext;
@@ -91,10 +91,16 @@ impl Widget for AlphaStrip {
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
         // Color drives the gradient colour; alpha drives the thumb position.
-        self.current_color
-            .bind_to(self_id, registry, fern_core::binding::BindingLevel::RepaintOnly);
-        self.alpha
-            .bind_to(self_id, registry, fern_core::binding::BindingLevel::RepaintOnly);
+        self.current_color.bind_to(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::RepaintOnly,
+        );
+        self.alpha.bind_to(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::RepaintOnly,
+        );
 
         let enabled = self.enabled;
         let cached_bounds = self.cached_bounds.clone();
@@ -105,24 +111,24 @@ impl Widget for AlphaStrip {
         let apply: Rc<dyn Fn(f32, f32)> = {
             let set_alpha = set_alpha.clone();
             Rc::new(move |x: f32, y: f32| {
-            let bounds = cached_bounds.get();
-            let t = match orientation {
-                Orientation::Vertical => {
-                    if bounds.height <= 0.0 {
-                        return;
+                let bounds = cached_bounds.get();
+                let t = match orientation {
+                    Orientation::Vertical => {
+                        if bounds.height <= 0.0 {
+                            return;
+                        }
+                        ((y - bounds.y) / bounds.height).clamp(0.0, 1.0)
                     }
-                    ((y - bounds.y) / bounds.height).clamp(0.0, 1.0)
-                }
-                Orientation::Horizontal => {
-                    if bounds.width <= 0.0 {
-                        return;
+                    Orientation::Horizontal => {
+                        if bounds.width <= 0.0 {
+                            return;
+                        }
+                        ((x - bounds.x) / bounds.width).clamp(0.0, 1.0)
                     }
-                    ((x - bounds.x) / bounds.width).clamp(0.0, 1.0)
-                }
-            };
-            // Visual: top/leading = transparent (alpha 0), bottom/trailing = opaque (alpha 1).
-            (set_alpha)(t.clamp(0.0, 1.0));
-        })
+                };
+                // Visual: top/leading = transparent (alpha 0), bottom/trailing = opaque (alpha 1).
+                (set_alpha)(t.clamp(0.0, 1.0));
+            })
         };
 
         let mut handlers = HandlerSet::new()
@@ -208,7 +214,11 @@ impl Widget for AlphaStrip {
         {
             let focus_origin = self.focus_origin.clone();
             handlers = handlers.on_focus(move |gained, _ctx| {
-                focus_origin.set(if gained { Some(FocusOrigin::Keyboard) } else { None });
+                focus_origin.set(if gained {
+                    Some(FocusOrigin::Keyboard)
+                } else {
+                    None
+                });
             });
         }
 
@@ -275,14 +285,8 @@ impl Widget for AlphaStrip {
         let opaque = self.current_color.get().with_alpha(1.0);
         let transparent = opaque.with_alpha(0.0);
         let (start, end) = match self.orientation {
-            Orientation::Vertical => (
-                Point::new(0.0, 0.0),
-                Point::new(0.0, bounds.height),
-            ),
-            Orientation::Horizontal => (
-                Point::new(0.0, 0.0),
-                Point::new(bounds.width, 0.0),
-            ),
+            Orientation::Vertical => (Point::new(0.0, 0.0), Point::new(0.0, bounds.height)),
+            Orientation::Horizontal => (Point::new(0.0, 0.0), Point::new(bounds.width, 0.0)),
         };
         canvas.fill_rounded_rect(
             bounds,

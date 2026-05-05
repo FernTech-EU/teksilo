@@ -314,7 +314,13 @@ impl PathAtlas {
             survivors.sort_by_key(|(_, r, _)| std::cmp::Reverse(r.h));
             for (key, old_region, pixels) in survivors {
                 if let Some(new_region) = self.try_allocate(old_region.w, old_region.h) {
-                    self.blit(new_region.x, new_region.y, new_region.w, new_region.h, &pixels);
+                    self.blit(
+                        new_region.x,
+                        new_region.y,
+                        new_region.w,
+                        new_region.h,
+                        &pixels,
+                    );
                     self.cache.insert(
                         key,
                         AtlasRegion {
@@ -701,29 +707,48 @@ mod tests {
         let mut p1 = Path::new();
         p1.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
         p1.commands.push(PathCommand::LineTo(Point::new(40.0, 0.0)));
-        p1.commands.push(PathCommand::LineTo(Point::new(40.0, 40.0)));
+        p1.commands
+            .push(PathCommand::LineTo(Point::new(40.0, 40.0)));
         p1.commands.push(PathCommand::Close);
 
         let mut p2 = Path::new();
         p2.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
         p2.commands.push(PathCommand::LineTo(Point::new(50.0, 0.0)));
-        p2.commands.push(PathCommand::LineTo(Point::new(50.0, 50.0)));
+        p2.commands
+            .push(PathCommand::LineTo(Point::new(50.0, 50.0)));
         p2.commands.push(PathCommand::Close);
 
         let style = StrokeStyle::solid(0.0);
         let r1 = atlas
-            .lookup_or_rasterize(&p1, [1.0, 0.0, 0.0, 1.0], &style, [0.0, 0.0, 40.0, 40.0], 1.0)
+            .lookup_or_rasterize(
+                &p1,
+                [1.0, 0.0, 0.0, 1.0],
+                &style,
+                [0.0, 0.0, 40.0, 40.0],
+                1.0,
+            )
             .expect("p1 fits");
 
         // p2 doesn't fit in the remaining space → eviction triggers.
         // After the fix, p1 (current-frame) survives and gets repacked.
-        let _r2 =
-            atlas.lookup_or_rasterize(&p2, [0.0, 1.0, 0.0, 1.0], &style, [0.0, 0.0, 50.0, 50.0], 1.0);
+        let _r2 = atlas.lookup_or_rasterize(
+            &p2,
+            [0.0, 1.0, 0.0, 1.0],
+            &style,
+            [0.0, 0.0, 50.0, 50.0],
+            1.0,
+        );
 
         // Looking up p1 again must still hit cache (with possibly a new
         // region, but stable across the lookup).
         let r1b = atlas
-            .lookup_or_rasterize(&p1, [1.0, 0.0, 0.0, 1.0], &style, [0.0, 0.0, 40.0, 40.0], 1.0)
+            .lookup_or_rasterize(
+                &p1,
+                [1.0, 0.0, 0.0, 1.0],
+                &style,
+                [0.0, 0.0, 40.0, 40.0],
+                1.0,
+            )
             .expect("p1 still cached after eviction");
         // The repacked region may have moved, but lookup_or_rasterize
         // must return a non-None region for p1 — i.e. it wasn't lost.
@@ -759,29 +784,49 @@ mod tests {
         let mut p1 = Path::new();
         p1.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
         p1.commands.push(PathCommand::LineTo(Point::new(50.0, 0.0)));
-        p1.commands.push(PathCommand::LineTo(Point::new(50.0, 50.0)));
+        p1.commands
+            .push(PathCommand::LineTo(Point::new(50.0, 50.0)));
         p1.commands.push(PathCommand::Close);
 
         let mut p2 = Path::new();
         p2.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
         p2.commands.push(PathCommand::LineTo(Point::new(60.0, 0.0)));
-        p2.commands.push(PathCommand::LineTo(Point::new(60.0, 60.0)));
+        p2.commands
+            .push(PathCommand::LineTo(Point::new(60.0, 60.0)));
         p2.commands.push(PathCommand::Close);
 
         let style = StrokeStyle::solid(0.0);
         let r1 = atlas
-            .lookup_or_rasterize(&p1, [1.0, 0.0, 0.0, 1.0], &style, [0.0, 0.0, 50.0, 50.0], 1.0)
+            .lookup_or_rasterize(
+                &p1,
+                [1.0, 0.0, 0.0, 1.0],
+                &style,
+                [0.0, 0.0, 50.0, 50.0],
+                1.0,
+            )
             .expect("p1 fits");
 
         // p2 doesn't fit alongside p1 in 64×64 → atlas should grow,
         // not evict. After growth, p1's region must still be at the
         // same coordinates we got back the first time.
         let _r2 = atlas
-            .lookup_or_rasterize(&p2, [0.0, 1.0, 0.0, 1.0], &style, [0.0, 0.0, 60.0, 60.0], 1.0)
+            .lookup_or_rasterize(
+                &p2,
+                [0.0, 1.0, 0.0, 1.0],
+                &style,
+                [0.0, 0.0, 60.0, 60.0],
+                1.0,
+            )
             .expect("p2 fits after grow");
 
         let r1_after = atlas
-            .lookup_or_rasterize(&p1, [1.0, 0.0, 0.0, 1.0], &style, [0.0, 0.0, 50.0, 50.0], 1.0)
+            .lookup_or_rasterize(
+                &p1,
+                [1.0, 0.0, 0.0, 1.0],
+                &style,
+                [0.0, 0.0, 50.0, 50.0],
+                1.0,
+            )
             .expect("p1 still cached");
         assert_eq!(r1.x, r1_after.x, "p1 must not move when atlas grows");
         assert_eq!(r1.y, r1_after.y, "p1 must not move when atlas grows");

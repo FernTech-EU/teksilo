@@ -3,6 +3,7 @@
 //! Provides reactive collection types (`ListModel<T>`, `TreeModel<T>`) and
 //! change notification enums (`DataChange`, `TreeChange`) for data-driven
 //! widgets like `ListView`, `TreeView`, and `Repeater`.
+#![allow(clippy::type_complexity)]
 
 pub mod data_change;
 #[cfg(debug_assertions)]

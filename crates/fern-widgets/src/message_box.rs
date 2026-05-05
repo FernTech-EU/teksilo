@@ -172,8 +172,14 @@ impl StandardButton {
     /// want to inspect a `MessageBoxButton`'s role.
     pub fn role(self) -> ButtonRole {
         match self {
-            Self::Ok | Self::Yes | Self::YesToAll | Self::Save | Self::SaveAll
-            | Self::Apply | Self::Retry | Self::Open => ButtonRole::Accept,
+            Self::Ok
+            | Self::Yes
+            | Self::YesToAll
+            | Self::Save
+            | Self::SaveAll
+            | Self::Apply
+            | Self::Retry
+            | Self::Open => ButtonRole::Accept,
             Self::Cancel | Self::Close | Self::No | Self::NoToAll | Self::Abort => {
                 ButtonRole::Reject
             }
@@ -468,7 +474,7 @@ impl State {
         if let Some(btn) = buttons.iter().find(|b| b.role() == ButtonRole::Reject) {
             return Some(*btn);
         }
-        if buttons.iter().any(|b| *b == StandardButton::Cancel) {
+        if buttons.contains(&StandardButton::Cancel) {
             return Some(StandardButton::Cancel);
         }
         buttons.last().copied()
@@ -683,10 +689,7 @@ impl MessageBox {
 
     /// Register the result callback, invoked exactly once when a
     /// button fires (either by click or by Enter/Escape shortcut).
-    pub fn on_result(
-        mut self,
-        f: impl Fn(MessageBoxResult, &mut EventContext) + 'static,
-    ) -> Self {
+    pub fn on_result(mut self, f: impl Fn(MessageBoxResult, &mut EventContext) + 'static) -> Self {
         self.on_result = Some(Box::new(f));
         self
     }
@@ -706,10 +709,10 @@ impl MessageBox {
         let mut inner = Some(self);
         ctx.present_modal(
             ModalRequest::deferred(move |tree| {
-                let mb = inner.take().expect("MessageBox present closure called twice");
-                tree.add(
-                    ModalContainer::new(mb).title_literal(dialog_title.clone()),
-                )
+                let mb = inner
+                    .take()
+                    .expect("MessageBox present closure called twice");
+                tree.add(ModalContainer::new(mb).title_literal(dialog_title.clone()))
             })
             .presentation(ModalPresentation::Auto)
             .close_behavior(close_behavior)
@@ -799,7 +802,7 @@ impl Widget for MessageBox {
 
         let detailed_child: Option<Box<dyn Widget>> = self.detailed_text.clone().map(|text| {
             let expanded = ctx.signal(false);
-            let label: LocalizedString = fern_i18n::tr_widget!(messagebox_show_details()).into();
+            let label: LocalizedString = fern_i18n::tr_widget!(messagebox_show_details());
             let body = TextWidget::new_literal(text)
                 .style(theme.typography.small.clone())
                 .color(theme.colors.text_secondary);
@@ -891,7 +894,11 @@ impl Widget for MessageBox {
         vec![root]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         // Enforce a 460×140 floor without clamping the forwarded
         // proposal: the overlay's intrinsic-measurement pass calls us
         // with (None, None), and a Spacer-bearing VStack child would
@@ -973,8 +980,8 @@ impl EventContextMessageBoxExt for EventContext<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fern_core::event::WidgetEvent;
     use fern_core::ModalContent;
+    use fern_core::event::WidgetEvent;
     use fern_core::widget_tree::WidgetTree;
     use fern_tokens::Theme;
 
@@ -1029,7 +1036,9 @@ mod tests {
         use crate::button::Button as Btn;
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let mb_cell: Rc<RefCell<Option<MessageBox>>> = Rc::new(RefCell::new(Some(
-            MessageBox::critical_literal("Fatal").text_literal("Boom").buttons(MessageBoxButtons::Ok),
+            MessageBox::critical_literal("Fatal")
+                .text_literal("Boom")
+                .buttons(MessageBoxButtons::Ok),
         )));
         let mb_for_closure = mb_cell.clone();
         let trigger = tree.add(Btn::new_literal("Open").on_activate_fn(move |ctx| {

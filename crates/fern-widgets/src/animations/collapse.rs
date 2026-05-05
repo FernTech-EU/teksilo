@@ -123,7 +123,11 @@ impl Widget for Collapse {
         vec![child_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let Some(child_id) = self.child_id else {
             return (proposal.resolve(0.0, 0.0)).into();
         };
@@ -131,9 +135,7 @@ impl Widget for Collapse {
         // We never propose a clipped height — that would let text
         // wrap or images letterbox to the in-flight animated value
         // and re-enter a layout feedback loop.
-        let natural = ctx
-            .child_size(child_id, proposal)
-            .unwrap_or(Size::ZERO);
+        let natural = ctx.child_size(child_id, proposal).unwrap_or(Size::ZERO);
         self.natural_size.set(natural);
 
         let progress = self
@@ -209,10 +211,8 @@ mod tests {
     fn starts_collapsed_when_signal_is_false() {
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let id = tree.add(
-            Collapse::new(expanded.clone())
-                .child(TextWidget::new_literal("hidden content")),
-        );
+        let id = tree
+            .add(Collapse::new(expanded.clone()).child(TextWidget::new_literal("hidden content")));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -228,10 +228,8 @@ mod tests {
     fn starts_expanded_when_signal_is_true() {
         let expanded = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let id = tree.add(
-            Collapse::new(expanded.clone())
-                .child(TextWidget::new_literal("visible content")),
-        );
+        let id = tree
+            .add(Collapse::new(expanded.clone()).child(TextWidget::new_literal("visible content")));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -284,10 +282,8 @@ mod tests {
         // sentinel).
         let expanded = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let root = tree.add(
-            Collapse::new(expanded.clone())
-                .child(TextWidget::new_literal("content")),
-        );
+        let root =
+            tree.add(Collapse::new(expanded.clone()).child(TextWidget::new_literal("content")));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -324,10 +320,8 @@ mod tests {
     fn collapse_height_monotonically_decreases() {
         let expanded = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let root = tree.add(
-            Collapse::new(expanded.clone())
-                .child(TextWidget::new_literal("content")),
-        );
+        let root =
+            tree.add(Collapse::new(expanded.clone()).child(TextWidget::new_literal("content")));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -366,10 +360,7 @@ mod tests {
     fn animation_is_active_mid_tween() {
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(
-            Collapse::new(expanded.clone())
-                .child(TextWidget::new_literal("content")),
-        );
+        tree.add(Collapse::new(expanded.clone()).child(TextWidget::new_literal("content")));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,

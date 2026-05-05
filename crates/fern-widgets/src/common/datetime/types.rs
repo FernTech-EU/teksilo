@@ -99,4 +99,3 @@ pub fn weekday_from_monday_zero(offset: i8) -> Weekday {
 pub fn today_local() -> Date {
     jiff::Zoned::now().date()
 }
-

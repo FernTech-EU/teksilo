@@ -197,14 +197,10 @@ impl TitleBar {
         self.close_action = Some(Rc::new(action));
         self
     }
-
 }
 
 impl Widget for TitleBar {
-    fn build(
-        &mut self,
-        ctx: &mut fern_core::build_context::BuildContext,
-    ) -> Vec<WidgetId> {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
         let leading_inset = self.host.reserved_leading_inset();
         let trailing_inset = self.host.reserved_trailing_inset();
         let renders_controls = self.host.renders_custom_controls();
@@ -291,7 +287,11 @@ impl Widget for TitleBar {
         vec![root]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         // Always claim the full width offered by the parent and the
         // configured fixed height. Ignoring the child HStack's natural
         // width is intentional: when the title bar is laid out by a
@@ -375,9 +375,7 @@ impl Widget for TitleBar {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::Banner);
-        builder.set_name(
-            fern_i18n::tr_widget!(a11y_title_bar_name()).resolve_now(),
-        );
+        builder.set_name(fern_i18n::tr_widget!(a11y_title_bar_name()).resolve_now());
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -445,7 +443,10 @@ mod tests {
     /// Build a tree where the title bar is wrapped in the same VStack +
     /// Expand body shape the demo uses. Returns the laid-out tree plus the
     /// title-bar widget id.
-    fn build_realistic_tree(host: Rc<TestHost>, bar_setup: impl FnOnce(TitleBar) -> TitleBar) -> (WidgetTree, WidgetId) {
+    fn build_realistic_tree(
+        host: Rc<TestHost>,
+        bar_setup: impl FnOnce(TitleBar) -> TitleBar,
+    ) -> (WidgetTree, WidgetId) {
         use crate::primitives::{Expand, VStack};
 
         let bar_widget =
@@ -476,7 +477,11 @@ mod tests {
     fn locate_control_buttons(tree: &WidgetTree, bar: WidgetId) -> [WidgetId; 3] {
         // bar -> [HStack root]
         let bar_kids = tree.children(bar);
-        assert_eq!(bar_kids.len(), 1, "TitleBar should have a single root: {bar_kids:?}");
+        assert_eq!(
+            bar_kids.len(),
+            1,
+            "TitleBar should have a single root: {bar_kids:?}"
+        );
         let row = bar_kids[0];
 
         // row -> [DragRegion (spacer), WindowControls]
@@ -620,10 +625,16 @@ mod tests {
 
         let [_min, maximize, _close] = locate_control_buttons(&tree, bar);
         tree.click(maximize);
-        assert_eq!(state.placement().get(), fern_core::WindowPlacement::Maximized);
+        assert_eq!(
+            state.placement().get(),
+            fern_core::WindowPlacement::Maximized
+        );
 
         tree.click(maximize);
-        assert_eq!(state.placement().get(), fern_core::WindowPlacement::Floating);
+        assert_eq!(
+            state.placement().get(),
+            fern_core::WindowPlacement::Floating
+        );
     }
 
     /// Locate the `DragRegion` widget id by walking the title-bar subtree.

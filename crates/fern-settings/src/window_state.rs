@@ -66,11 +66,7 @@ impl PerWindowState {
     /// fallbacks like `(1920, 1080)` — the result still improves on
     /// re-using stale coordinates from a monitor that's no longer
     /// connected.
-    pub fn sanitize(
-        &self,
-        min_size: (u32, u32),
-        work_area: (u32, u32),
-    ) -> PerWindowState {
+    pub fn sanitize(&self, min_size: (u32, u32), work_area: (u32, u32)) -> PerWindowState {
         let (min_w, min_h) = min_size;
         let (max_w, max_h) = work_area;
 
@@ -182,7 +178,12 @@ fn migrate_v1_to_v2(mut raw: toml::Value) -> Result<toml::Value, String> {
             entry_table.insert(
                 "placement".into(),
                 toml::Value::String(
-                    if was_maximized { "Maximized" } else { "Floating" }.into(),
+                    if was_maximized {
+                        "Maximized"
+                    } else {
+                        "Floating"
+                    }
+                    .into(),
                 ),
             );
         }
@@ -210,15 +211,8 @@ impl WindowStateService {
         Self::open_with_delay(paths, DEFAULT_DEBOUNCE)
     }
 
-    pub fn open_with_delay(
-        paths: &AppPaths,
-        delay: Duration,
-    ) -> Result<Self, SettingsFileError> {
-        let file = SettingsFile::load(
-            paths.data_file("window_state"),
-            delay,
-            &make_migrator(),
-        )?;
+    pub fn open_with_delay(paths: &AppPaths, delay: Duration) -> Result<Self, SettingsFileError> {
+        let file = SettingsFile::load(paths.data_file("window_state"), delay, &make_migrator())?;
         Ok(Self { file })
     }
 

@@ -23,8 +23,8 @@ use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{TextRole, TextStyleRole};
 
-use super::text_input_field::ValidationFeedback;
 use super::TextWidget;
+use super::text_input_field::ValidationFeedback;
 
 /// Inline validation-feedback strip. See module docs.
 pub struct ValidationStrip {
@@ -111,9 +111,7 @@ impl Widget for ValidationStrip {
             return Size::ZERO.into();
         }
         match self.root_id {
-            Some(id) => ctx
-                .child_size(id, proposal)
-                .unwrap_or_else(|| Size::ZERO),
+            Some(id) => ctx.child_size(id, proposal).unwrap_or(Size::ZERO),
             None => Size::ZERO,
         }
         .into()

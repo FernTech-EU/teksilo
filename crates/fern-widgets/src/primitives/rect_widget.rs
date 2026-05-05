@@ -1,4 +1,4 @@
-use fern_canvas::{Canvas, Rect, Size, SizeProposal};
+use fern_canvas::{Canvas, Rect, SizeProposal};
 use fern_tokens::{Color, CornerRadius};
 
 use fern_core::accessibility::AccessNodeBuilder;
@@ -116,7 +116,11 @@ impl Widget for RectWidget {
         Vec::new()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         // RectWidget has no intrinsic content — it accepts whatever space is offered.
         // With an exact proposal it fills the space; with unspecified it reports 0x0.
         proposal.resolve(0.0, 0.0).into()

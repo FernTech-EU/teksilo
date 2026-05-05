@@ -62,10 +62,7 @@ impl WidgetTree {
     /// flushed, and again after overlay / tooltip activation so that
     /// widgets transitioning from dormant → active in the same
     /// layout pass get rebuilt *this* frame rather than the next.
-    pub(super) fn process_pending_rebuilds(
-        &mut self,
-        ops: &mut dyn crate::window::WindowOps,
-    ) {
+    pub(super) fn process_pending_rebuilds(&mut self, ops: &mut dyn crate::window::WindowOps) {
         // Defer *selected* rebuilds during the gesture-arena latch
         // window: from `PointerDown` (which stores the press position
         // in the captured widget's arena) until either `PointerUp` or
@@ -93,20 +90,19 @@ impl WidgetTree {
             self.revalidate_interaction_state(&mut *ops);
             return;
         }
-        let captured_ancestors: Option<Vec<WidgetId>> =
-            if self.active_drag.is_none() {
-                self.pointer_captured_by.map(|cap| {
-                    let mut ids = vec![cap];
-                    let mut cur = self.arena.parent(cap);
-                    while let Some(id) = cur {
-                        ids.push(id);
-                        cur = self.arena.parent(id);
-                    }
-                    ids
-                })
-            } else {
-                None
-            };
+        let captured_ancestors: Option<Vec<WidgetId>> = if self.active_drag.is_none() {
+            self.pointer_captured_by.map(|cap| {
+                let mut ids = vec![cap];
+                let mut cur = self.arena.parent(cap);
+                while let Some(id) = cur {
+                    ids.push(id);
+                    cur = self.arena.parent(id);
+                }
+                ids
+            })
+        } else {
+            None
+        };
         let to_rebuild: Vec<WidgetId> = match &captured_ancestors {
             Some(chain) => to_rebuild_all
                 .into_iter()
@@ -282,8 +278,8 @@ impl WidgetTree {
                 self.overlay_manager
                     .set_content_bounds(overlay_id, intrinsic);
                 let anchor_bounds = |id: WidgetId| -> Option<Rect> {
-            self.arena.is_active(id).then(|| self.arena.bounds(id))
-        };
+                    self.arena.is_active(id).then(|| self.arena.bounds(id))
+                };
                 self.overlay_manager
                     .position_overlays(anchor_bounds, viewport);
             }
@@ -360,6 +356,7 @@ impl WidgetTree {
 }
 
 /// Recursive layout pass operating on the arena directly (avoids borrow conflicts).
+#[allow(clippy::too_many_arguments)]
 fn layout_widget_recursive(
     arena: &mut WidgetArena,
     id: WidgetId,
@@ -474,14 +471,19 @@ mod tests {
     }
 
     impl Widget for ShrinkWrapContainer {
-        fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> crate::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
             let child_size = ctx
                 .child_size(self.child, SizeProposal::unspecified())
                 .unwrap_or(Size::ZERO);
             Size::new(
                 child_size.width + self.inset * 2.0,
                 child_size.height + self.inset * 2.0,
-            ).into()
+            )
+            .into()
         }
 
         fn place_children(

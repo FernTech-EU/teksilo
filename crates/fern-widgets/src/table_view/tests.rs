@@ -20,9 +20,7 @@ use fern_core::widget_tree::WidgetTree;
 use fern_data::{ListModel, SelectionMode, SelectionModel};
 use fern_tokens::Theme;
 
-use super::{
-    CellContext, Column, ColumnWidth, SortDirection, TableSelectionMode, TableView,
-};
+use super::{CellContext, Column, ColumnWidth, SortDirection, TableSelectionMode, TableView};
 use crate::primitives::TextWidget;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -99,7 +97,11 @@ fn fixed_plus_flex_split_pane_minus_scrollbar() {
     let id_cell = tree.bounds(row_ids[0]);
     let name_cell = tree.bounds(row_ids[1]);
     assert!((id_cell.width - 60.0).abs() < 0.5);
-    assert!((name_cell.width - 328.0).abs() < 0.5, "got {}", name_cell.width);
+    assert!(
+        (name_cell.width - 328.0).abs() < 0.5,
+        "got {}",
+        name_cell.width
+    );
     assert!((id_cell.x).abs() < 0.5);
     assert!((name_cell.x - 60.0).abs() < 0.5);
 }
@@ -122,7 +124,11 @@ fn no_scrollbar_when_content_fits() {
     let row_ids = first_visible_row_cells(&tree, table);
     let name_cell = tree.bounds(row_ids[1]);
     // name column gets full leftover (400 - 60 = 340) without scrollbar.
-    assert!((name_cell.width - 340.0).abs() < 0.5, "got {}", name_cell.width);
+    assert!(
+        (name_cell.width - 340.0).abs() < 0.5,
+        "got {}",
+        name_cell.width
+    );
 }
 
 // ── Virtualization ─────────────────────────────────────────────────────────
@@ -139,7 +145,10 @@ fn virtualizes_visible_window() {
     let (tree, table, _) = build_table(1000);
     let row_count = count_role(&tree, table, Role::Row);
     assert!(row_count >= 10, "got {row_count} rows");
-    assert!(row_count <= 50, "got {row_count} rows (expected virtualized)");
+    assert!(
+        row_count <= 50,
+        "got {row_count} rows (expected virtualized)"
+    );
     assert!(
         row_count < 1000,
         "TableView must virtualize, not materialise all rows"
@@ -358,7 +367,10 @@ fn cells_carry_role_cell_under_row() {
             walker.push(c);
         }
     }
-    assert!(saw_body_row, "expected at least one body Role::Row in the tree");
+    assert!(
+        saw_body_row,
+        "expected at least one body Role::Row in the tree"
+    );
 }
 
 // ── Header / Sort / Resize (Phase 3) ───────────────────────────────────────
@@ -447,9 +459,15 @@ fn sort_cycle_none_asc_desc_none() {
         s.set(next);
     };
     cycle(&signal, "id");
-    assert_eq!(signal.get(), Some(("id".to_string(), SortDirection::Ascending)));
+    assert_eq!(
+        signal.get(),
+        Some(("id".to_string(), SortDirection::Ascending))
+    );
     cycle(&signal, "id");
-    assert_eq!(signal.get(), Some(("id".to_string(), SortDirection::Descending)));
+    assert_eq!(
+        signal.get(),
+        Some(("id".to_string(), SortDirection::Descending))
+    );
     cycle(&signal, "id");
     assert_eq!(signal.get(), None);
 }
@@ -469,7 +487,10 @@ fn switching_sort_columns_resets_to_ascending() {
         _ => unreachable!(),
     };
     signal.set(next);
-    assert_eq!(signal.get(), Some(("name".to_string(), SortDirection::Ascending)));
+    assert_eq!(
+        signal.get(),
+        Some(("name".to_string(), SortDirection::Ascending))
+    );
 }
 
 #[test]
@@ -488,7 +509,11 @@ fn set_column_width_pins_column() {
     });
     let row_cells = first_visible_row_cells(&tree, table);
     let id_cell = tree.bounds(row_cells[0]);
-    assert!((id_cell.width - 120.0).abs() < 0.5, "got width {}", id_cell.width);
+    assert!(
+        (id_cell.width - 120.0).abs() < 0.5,
+        "got width {}",
+        id_cell.width
+    );
 }
 
 #[test]
@@ -517,7 +542,7 @@ fn header_row_carries_role_row_with_index_one() {
                 .into_iter()
                 .map(|c| tree.accessibility_node(c).role())
                 .collect();
-            if kids.iter().any(|r| *r == Role::ColumnHeader) {
+            if kids.contains(&Role::ColumnHeader) {
                 found = true;
                 break;
             }
@@ -526,7 +551,10 @@ fn header_row_carries_role_row_with_index_one() {
             q.push(c);
         }
     }
-    assert!(found, "expected one Role::Row whose children are ColumnHeaders");
+    assert!(
+        found,
+        "expected one Role::Row whose children are ColumnHeaders"
+    );
 }
 
 // ── Reorder + pinned-side (Phase 4) ────────────────────────────────────────
@@ -572,7 +600,11 @@ fn pinned_leading_moves_to_front() {
     let first = tree.bounds(row_cells[0]); // name
     let second = tree.bounds(row_cells[1]); // id (pinned trailing)
     assert!(first.x < second.x);
-    assert!((second.width - 60.0).abs() < 0.5, "id width pinned at 60 — got {}", second.width);
+    assert!(
+        (second.width - 60.0).abs() < 0.5,
+        "id width pinned at 60 — got {}",
+        second.width
+    );
 }
 
 #[test]
@@ -616,8 +648,16 @@ fn set_column_order_reorders_display() {
     let first = tree.bounds(row_cells[0]); // extra
     let second = tree.bounds(row_cells[1]); // id
     let third = tree.bounds(row_cells[2]); // name
-    assert!((first.width - 40.0).abs() < 0.5, "extra width 40 — got {}", first.width);
-    assert!((second.width - 60.0).abs() < 0.5, "id width 60 — got {}", second.width);
+    assert!(
+        (first.width - 40.0).abs() < 0.5,
+        "extra width 40 — got {}",
+        first.width
+    );
+    assert!(
+        (second.width - 60.0).abs() < 0.5,
+        "id width 60 — got {}",
+        second.width
+    );
     assert!(third.width > 100.0, "name fills the rest");
     // x-axis ordering preserved.
     assert!(first.x < second.x);
@@ -654,18 +694,12 @@ fn cycle_pinning_back_to_none_via_signal_clear() {
         let tv = any.downcast_ref::<TableView<Row>>().unwrap();
         tv.set_column_pinning("id", super::PinnedSide::Leading);
         assert_eq!(
-            tv.column_pinning_signal()
-                .get()
-                .get("id")
-                .copied(),
+            tv.column_pinning_signal().get().get("id").copied(),
             Some(super::PinnedSide::Leading)
         );
         // Clear it.
         tv.set_column_pinning("id", super::PinnedSide::None);
-        assert_eq!(
-            tv.column_pinning_signal().get().get("id").copied(),
-            None
-        );
+        assert_eq!(tv.column_pinning_signal().get().get("id").copied(), None);
     }
 }
 
@@ -714,7 +748,11 @@ fn unknown_column_id_in_order_signal_is_ignored() {
         let tv = any.downcast_ref::<TableView<Row>>().unwrap();
         // Include a phantom id; the ColumnSolver should still produce
         // widths for the two real columns.
-        tv.set_column_order(vec!["nope".to_string(), "name".to_string(), "id".to_string()]);
+        tv.set_column_order(vec![
+            "nope".to_string(),
+            "name".to_string(),
+            "id".to_string(),
+        ]);
     }
     let mut tree = tree;
     tree.layout(SizeProposal {
@@ -1077,8 +1115,8 @@ fn escape_ends_edit_before_clearing_focus() {
     assert_eq!(tv.editing_cell_signal().get(), None);
     assert_eq!(tv.focused_cell_signal().get(), Some((1, 0)));
     // Second Escape clears focus.
-    drop(tv);
-    drop(any);
+    let _ = tv;
+    let _ = any;
     tree.press_key(Key::Escape, Modifiers::NONE);
     let any = tree.widget_as_any(table).unwrap();
     let tv = any.downcast_ref::<TableView<Row>>().unwrap();
@@ -1091,7 +1129,10 @@ fn filters_signal_is_writable() {
     let any = tree.widget_as_any(table).unwrap();
     let tv = any.downcast_ref::<TableView<Row>>().unwrap();
     tv.set_filter("name", "abc");
-    assert_eq!(tv.filters_signal().get().get("name").cloned(), Some("abc".to_string()));
+    assert_eq!(
+        tv.filters_signal().get().get("name").cloned(),
+        Some("abc".to_string())
+    );
     tv.set_filter("name", "");
     assert_eq!(tv.filters_signal().get().get("name"), None);
     tv.set_filter("name", "x");
@@ -1169,11 +1210,11 @@ fn empty_view_renders_when_no_rows() {
     let mut walker = vec![_table];
     while let Some(id) = walker.pop() {
         let info = tree.accessibility_node(id);
-        if let Some(name) = info.name() {
-            if name == "nothing here" {
-                found = true;
-                break;
-            }
+        if let Some(name) = info.name()
+            && name == "nothing here"
+        {
+            found = true;
+            break;
         }
         for c in tree.children(id) {
             walker.push(c);
@@ -1463,9 +1504,9 @@ fn header_resize_works_when_table_is_nested_in_panel() {
     // Mirrors the real data-grid layout: VStack → Panel → TableView.
     // The original regression test put the table at root and missed
     // any coordinate-system bug introduced by nesting.
+    use crate::{Panel, VStack};
     use fern_canvas::Point;
     use fern_core::event::{Modifiers, PointerButton, WidgetEvent};
-    use crate::{Panel, VStack};
 
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
     let table = TableView::new(rows(5))
@@ -1572,9 +1613,9 @@ fn header_resizing_works_in_full_data_grid_layout() {
     // + multiple flex columns + filterable name column + scrollable
     // body. Asserts that grabbing the trailing edge of "name" actually
     // commits a width override.
+    use crate::{Panel, VStack};
     use fern_canvas::Point;
     use fern_core::event::{Modifiers, PointerButton, WidgetEvent};
-    use crate::{Panel, VStack};
 
     fn id_c() -> Column<Row> {
         Column::<Row>::new("id", "ID", |r, _: &CellContext| {
@@ -1652,7 +1693,7 @@ fn header_resizing_works_in_full_data_grid_layout() {
         tv.column_widths_signal().get()
     };
     assert!(
-        widths.get("name").is_some(),
+        widths.contains_key("name"),
         "drag-resize on a filterable column inside a Panel must commit a width override"
     );
 }
@@ -1746,4 +1787,3 @@ fn count_role(tree: &WidgetTree, root: WidgetId, role: Role) -> usize {
     }
     n
 }
-

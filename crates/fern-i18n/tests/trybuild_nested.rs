@@ -9,8 +9,8 @@ fn ui_nested() {
     // Point the proc macro at the nested fixture for every test case
     // in this binary. Must be set before trybuild spawns child cargo
     // processes, which inherit the parent env.
-    let fixture_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/nested_fixture");
+    let fixture_dir =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/nested_fixture");
     // SAFETY: single-threaded test entry; no other thread observes env.
     unsafe {
         // Clear the file-mode override so `FERN_I18N_SOURCE_DIR`

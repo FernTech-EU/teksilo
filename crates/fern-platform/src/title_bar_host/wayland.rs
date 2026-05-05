@@ -5,7 +5,9 @@
 use std::sync::Arc;
 
 use fern_canvas::{Point, Size};
-use fern_core::{HitRegions, PlatformError, PlatformTitleBarHost, ResizeEdge, TitleBarHostCallbacks};
+use fern_core::{
+    HitRegions, PlatformError, PlatformTitleBarHost, ResizeEdge, TitleBarHostCallbacks,
+};
 use winit::dpi::LogicalPosition;
 use winit::window::Window;
 

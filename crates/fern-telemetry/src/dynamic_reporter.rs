@@ -15,9 +15,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use fern_core::Signal;
-use fern_core::telemetry::{
-    ConsentScope, Event, RemoteDataExport, TelemetryError, UsageReporter,
-};
+use fern_core::telemetry::{ConsentScope, Event, RemoteDataExport, TelemetryError, UsageReporter};
 
 use crate::bundle::TelemetryMode;
 use crate::consent::ConsentStore;
@@ -194,10 +192,9 @@ impl UsageReporter for DynamicReporter {
         // because the adapter outlives `&self`.
         match self.active_mode() {
             TelemetryMode::Anonymous => self.anonymous.as_deref().and_then(|a| a.install_id()),
-            TelemetryMode::Pseudonymous => self
-                .pseudonymous
-                .as_deref()
-                .and_then(|a| a.install_id()),
+            TelemetryMode::Pseudonymous => {
+                self.pseudonymous.as_deref().and_then(|a| a.install_id())
+            }
         }
     }
 
@@ -211,10 +208,9 @@ impl UsageReporter for DynamicReporter {
     fn endpoint(&self) -> &str {
         match self.active_mode() {
             TelemetryMode::Anonymous => self.anonymous.as_deref().map_or("", |a| a.endpoint()),
-            TelemetryMode::Pseudonymous => self
-                .pseudonymous
-                .as_deref()
-                .map_or("", |a| a.endpoint()),
+            TelemetryMode::Pseudonymous => {
+                self.pseudonymous.as_deref().map_or("", |a| a.endpoint())
+            }
         }
     }
 
@@ -267,7 +263,9 @@ mod tests {
         (dyn_r, consent, dir)
     }
 
-    fn make_event(name: &'static str) -> (Event<'static>, [fern_core::telemetry::Prop<'static>; 0]) {
+    fn make_event(
+        name: &'static str,
+    ) -> (Event<'static>, [fern_core::telemetry::Prop<'static>; 0]) {
         let props: [fern_core::telemetry::Prop<'static>; 0] = [];
         // The borrow checker requires the props slice to outlive Event;
         // tests construct fresh each time so we return both.

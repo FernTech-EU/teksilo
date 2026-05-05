@@ -139,6 +139,7 @@ struct AnimatedQuadEntry {
     /// Phase-continuous pause support, mirroring `AnimationScheduler`.
     /// Set when the window goes inactive; on resume, the elapsed
     /// paused duration is added to `started_at` so `t` doesn't jump.
+    #[allow(dead_code)]
     paused_at: Option<Instant>,
 }
 
@@ -222,7 +223,8 @@ impl AnimatedQuadRegistry {
         );
         self.owners.entry(owner).or_default().push(slot);
         if (slot as usize) >= self.scratch.len() {
-            self.scratch.resize((slot as usize) + 1, AnimParams::default());
+            self.scratch
+                .resize((slot as usize) + 1, AnimParams::default());
         }
         AnimatedQuadHandle { slot }
     }
@@ -437,7 +439,9 @@ fn compute_params(entry: &AnimatedQuadEntry, now: Instant, theme: &Theme) -> Ani
             ..
         } => {
             let t = looping_phase(entry.started_at, now, *period, Easing::Linear);
-            let frame_index = (t * *frame_count as f32).floor().min((*frame_count - 1) as f32);
+            let frame_index = (t * *frame_count as f32)
+                .floor()
+                .min((*frame_count - 1) as f32);
             let tint_rgba = tint
                 .as_ref()
                 .map(|c| color_to_rgba(&c.resolve(theme)))
@@ -588,7 +592,10 @@ mod tests {
         // verify it's unchanged.
         let params = reg.tick(start + Duration::from_millis(50), &arena, 5, &theme);
         let p = params[h.slot() as usize];
-        assert_eq!(p.phase, 0.0, "offscreen widget must not have its phase updated");
+        assert_eq!(
+            p.phase, 0.0,
+            "offscreen widget must not have its phase updated"
+        );
     }
 
     #[test]

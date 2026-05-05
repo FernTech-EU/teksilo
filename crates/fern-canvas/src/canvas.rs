@@ -597,12 +597,14 @@ impl Canvas {
         if self.frame.pending_images.iter().any(|p| p.name == name) {
             return;
         }
-        self.frame.pending_images.push(crate::render_frame::PendingImage {
-            name,
-            width,
-            height,
-            pixels,
-        });
+        self.frame
+            .pending_images
+            .push(crate::render_frame::PendingImage {
+                name,
+                width,
+                height,
+                pixels,
+            });
     }
 
     // --- Paragraph drawing ---
@@ -1273,7 +1275,13 @@ mod tests {
     #[test]
     fn draw_underline_produces_decoration() {
         let mut canvas = Canvas::new();
-        canvas.draw_underline(Rect::new(0.0, 0.0, 100.0, 20.0), 14.0, 2.0, Color::BLACK, 1.0);
+        canvas.draw_underline(
+            Rect::new(0.0, 0.0, 100.0, 20.0),
+            14.0,
+            2.0,
+            Color::BLACK,
+            1.0,
+        );
         let frame = canvas.into_render_frame();
         assert_eq!(frame.decorations.len(), 1);
     }

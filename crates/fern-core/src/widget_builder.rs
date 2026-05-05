@@ -248,7 +248,6 @@ impl AccessibilityOverrides {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // HandlerSet — temporary storage before arena insertion
 // ---------------------------------------------------------------------------
@@ -277,8 +276,7 @@ impl AccessibilityOverrides {
 ///   walking up the parent chain looking for the next ancestor with a
 ///   factory. This lets a widget conditionally suppress its own menu
 ///   without uninstalling the factory.
-pub type ContextMenuFactory =
-    Box<dyn Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>>>;
+pub type ContextMenuFactory = Box<dyn Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>>>;
 
 pub struct HandlerSet {
     pub(crate) handlers: EventHandlers,
@@ -348,20 +346,14 @@ impl HandlerSet {
     /// Use [`accept_tap_buttons`](Self::accept_tap_buttons) to widen
     /// the set if you need right-click, middle-click, or auxiliary
     /// buttons to fire this handler.
-    pub fn on_tap(
-        mut self,
-        f: impl FnMut(&TapEvent, &mut EventContext) + 'static,
-    ) -> Self {
+    pub fn on_tap(mut self, f: impl FnMut(&TapEvent, &mut EventContext) + 'static) -> Self {
         self.handlers.on_tap = Some(Box::new(f));
         self
     }
 
     /// Set the on_double_tap handler. See [`on_tap`](Self::on_tap) for
     /// the callback contract.
-    pub fn on_double_tap(
-        mut self,
-        f: impl FnMut(&TapEvent, &mut EventContext) + 'static,
-    ) -> Self {
+    pub fn on_double_tap(mut self, f: impl FnMut(&TapEvent, &mut EventContext) + 'static) -> Self {
         self.handlers.on_double_tap = Some(Box::new(f));
         self
     }
@@ -370,10 +362,7 @@ impl HandlerSet {
     /// recognizer's window (same 300 ms / 10 px defaults as double tap).
     /// Runs independently of `on_double_tap` via cooperative gesture
     /// recognizers (`GestureRecognizer::resets_on_peer_recognition`).
-    pub fn on_triple_tap(
-        mut self,
-        f: impl FnMut(&TapEvent, &mut EventContext) + 'static,
-    ) -> Self {
+    pub fn on_triple_tap(mut self, f: impl FnMut(&TapEvent, &mut EventContext) + 'static) -> Self {
         self.handlers.on_triple_tap = Some(Box::new(f));
         self
     }
@@ -382,10 +371,7 @@ impl HandlerSet {
     /// [`TapEvent`](crate::gesture::TapEvent) whose modifiers are
     /// captured from the held `Down` (since long-press recognises on a
     /// timer before any `Up`).
-    pub fn on_long_press(
-        mut self,
-        f: impl FnMut(&TapEvent, &mut EventContext) + 'static,
-    ) -> Self {
+    pub fn on_long_press(mut self, f: impl FnMut(&TapEvent, &mut EventContext) + 'static) -> Self {
         self.handlers.on_long_press = Some(Box::new(f));
         self
     }
@@ -517,12 +503,12 @@ impl HandlerSet {
     pub fn on_access_action_request(
         mut self,
         f: impl FnMut(
-                accesskit::Action,
-                accesskit::NodeId,
-                Option<accesskit::ActionData>,
-                &mut EventContext,
-            ) -> EventResponse
-            + 'static,
+            accesskit::Action,
+            accesskit::NodeId,
+            Option<accesskit::ActionData>,
+            &mut EventContext,
+        ) -> EventResponse
+        + 'static,
     ) -> Self {
         self.handlers.on_access_action_request = Some(Box::new(f));
         self
@@ -681,39 +667,27 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// Take the handler set out, leaving defaults.
     #[allow(dead_code)] // V2 API: used during widget insertion to extract handlers
     pub(crate) fn take_handler_set(&mut self) -> HandlerSet {
-        std::mem::replace(&mut self.handler_set, HandlerSet::new())
+        std::mem::take(&mut self.handler_set)
     }
 
     // -- Gesture handlers --
 
-    pub fn on_tap(
-        mut self,
-        f: impl FnMut(&TapEvent, &mut EventContext) + 'static,
-    ) -> Self {
+    pub fn on_tap(mut self, f: impl FnMut(&TapEvent, &mut EventContext) + 'static) -> Self {
         self.handler_set.handlers.on_tap = Some(Box::new(f));
         self
     }
 
-    pub fn on_double_tap(
-        mut self,
-        f: impl FnMut(&TapEvent, &mut EventContext) + 'static,
-    ) -> Self {
+    pub fn on_double_tap(mut self, f: impl FnMut(&TapEvent, &mut EventContext) + 'static) -> Self {
         self.handler_set.handlers.on_double_tap = Some(Box::new(f));
         self
     }
 
-    pub fn on_triple_tap(
-        mut self,
-        f: impl FnMut(&TapEvent, &mut EventContext) + 'static,
-    ) -> Self {
+    pub fn on_triple_tap(mut self, f: impl FnMut(&TapEvent, &mut EventContext) + 'static) -> Self {
         self.handler_set.handlers.on_triple_tap = Some(Box::new(f));
         self
     }
 
-    pub fn on_long_press(
-        mut self,
-        f: impl FnMut(&TapEvent, &mut EventContext) + 'static,
-    ) -> Self {
+    pub fn on_long_press(mut self, f: impl FnMut(&TapEvent, &mut EventContext) + 'static) -> Self {
         self.handler_set.handlers.on_long_press = Some(Box::new(f));
         self
     }
@@ -842,12 +816,12 @@ impl<W: Widget> WidgetWithHandlers<W> {
     pub fn on_access_action_request(
         mut self,
         f: impl FnMut(
-                accesskit::Action,
-                accesskit::NodeId,
-                Option<accesskit::ActionData>,
-                &mut EventContext,
-            ) -> EventResponse
-            + 'static,
+            accesskit::Action,
+            accesskit::NodeId,
+            Option<accesskit::ActionData>,
+            &mut EventContext,
+        ) -> EventResponse
+        + 'static,
     ) -> Self {
         self.handler_set.handlers.on_access_action_request = Some(Box::new(f));
         self
@@ -1168,10 +1142,7 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// for the same action re-advertises it with the override-installed
     /// callback.
     pub fn access_remove_action(mut self, action: accesskit::Action) -> Self {
-        self.handler_set
-            .access_mut()
-            .removed_actions
-            .push(action);
+        self.handler_set.access_mut().removed_actions.push(action);
         self
     }
 
@@ -1180,11 +1151,7 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// verbatim by AT software (e.g. VoiceOver's Actions rotor).
     /// Accepts `tr!(...)` via the `LocalizedString -> String`
     /// conversion in `fern-i18n`.
-    pub fn access_custom_action<F>(
-        mut self,
-        label: impl Into<String>,
-        handler: F,
-    ) -> Self
+    pub fn access_custom_action<F>(mut self, label: impl Into<String>, handler: F) -> Self
     where
         F: FnMut(&mut EventContext) + 'static,
     {
@@ -1240,7 +1207,7 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
         proposal: fern_canvas::SizeProposal,
         ctx: &crate::widget::LayoutContext,
     ) -> crate::widget::LayoutResponse {
-        self.widget.layout_response(proposal, ctx).into()
+        self.widget.layout_response(proposal, ctx)
     }
 
     fn place_children(
@@ -1282,105 +1249,6 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
 
     fn take_handler_set(&mut self) -> Option<HandlerSet> {
         Some(self.take_handler_set())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::widget::WidgetPlacement;
-    use crate::widget_id::WidgetId;
-    use crate::widget_tree::WidgetTree;
-
-    #[derive(Debug)]
-    struct CompositeLeaf {
-        child_id: Option<WidgetId>,
-    }
-
-    impl CompositeLeaf {
-        fn new() -> Self {
-            Self { child_id: None }
-        }
-    }
-
-    impl Widget for CompositeLeaf {
-        fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
-            let child = ctx.add(crate::test_widgets::FillWidget::new());
-            self.child_id = Some(child);
-            vec![child]
-        }
-
-        fn layout_response(
-            &self,
-            proposal: fern_canvas::SizeProposal,
-            _ctx: &crate::widget::LayoutContext,
-        ) -> crate::widget::LayoutResponse {
-            proposal.resolve(120.0, 40.0).into()
-        }
-
-        fn place_children(
-            &self,
-            bounds: fern_canvas::Rect,
-            _proposal: fern_canvas::SizeProposal,
-            children: &mut [WidgetPlacement],
-            _ctx: &crate::widget::LayoutContext,
-        ) {
-            for child in children.iter_mut() {
-                child.origin = bounds.origin();
-                child.size = bounds.size();
-            }
-        }
-
-        fn children(&self) -> Vec<WidgetId> {
-            self.child_id.into_iter().collect()
-        }
-    }
-
-    #[test]
-    fn external_handlers_survive_rebuild() {
-        // Regression check: handlers attached externally via the
-        // `WidgetBuilder` builder (e.g. `MyCompositeWidget::new().on_tap(...)`)
-        // must continue to fire after the widget rebuilds in place.
-        // My handler-clearing fix in `rebuild_single_widget` wiped
-        // `node.handlers` to stop accumulation of `apply_self_handlers`
-        // calls across rebuilds — but the extracted-once-at-insertion
-        // HandlerSet is gone by rebuild time and would be lost.
-        use std::cell::Cell;
-        use std::rc::Rc;
-
-        let tap_count = Rc::new(Cell::new(0_u32));
-        let tc = tap_count.clone();
-
-        let mut tree = WidgetTree::new();
-        let id = tree.add(
-            CompositeLeaf::new().on_tap(move |_pos, _ctx| {
-                tc.set(tc.get() + 1);
-            }),
-        );
-        tree.layout(fern_canvas::SizeProposal::exact(200.0, 100.0));
-
-        // Trip a rebuild of the composite — its child gets torn down &
-        // rebuilt; node.handlers gets cleared and reset.
-        tree.arena_mark_needs_rebuild_for_testing(id);
-        tree.layout(fern_canvas::SizeProposal::exact(200.0, 100.0));
-
-        // Click through the composite; the externally-attached on_tap
-        // must still be wired up.
-        tree.click(id);
-        assert_eq!(
-            tap_count.get(),
-            1,
-            "externally-attached on_tap must survive a rebuild"
-        );
-    }
-
-    #[test]
-    fn wrapped_composite_widget_still_builds_children() {
-        let mut tree = WidgetTree::new();
-        let root = tree.add(CompositeLeaf::new().on_tap(|_pos, _ctx| {}));
-        tree.layout(fern_canvas::SizeProposal::exact(200.0, 100.0));
-
-        assert_eq!(tree.children(root).len(), 1);
     }
 }
 
@@ -1427,28 +1295,19 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
 
     /// Restrict (or extend) the set of pointer buttons that fire
     /// `on_double_tap`. Default [`ButtonMask::PRIMARY`].
-    fn accept_double_tap_buttons(
-        self,
-        mask: impl Into<ButtonMask>,
-    ) -> WidgetWithHandlers<Self> {
+    fn accept_double_tap_buttons(self, mask: impl Into<ButtonMask>) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).accept_double_tap_buttons(mask)
     }
 
     /// Restrict (or extend) the set of pointer buttons that fire
     /// `on_triple_tap`. Default [`ButtonMask::PRIMARY`].
-    fn accept_triple_tap_buttons(
-        self,
-        mask: impl Into<ButtonMask>,
-    ) -> WidgetWithHandlers<Self> {
+    fn accept_triple_tap_buttons(self, mask: impl Into<ButtonMask>) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).accept_triple_tap_buttons(mask)
     }
 
     /// Restrict (or extend) the set of pointer buttons that fire
     /// `on_long_press`. Default [`ButtonMask::PRIMARY`].
-    fn accept_long_press_buttons(
-        self,
-        mask: impl Into<ButtonMask>,
-    ) -> WidgetWithHandlers<Self> {
+    fn accept_long_press_buttons(self, mask: impl Into<ButtonMask>) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).accept_long_press_buttons(mask)
     }
 
@@ -1578,10 +1437,7 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         WidgetWithHandlers::new(self).on_drag_hover(f)
     }
 
-    fn on_drag_leave(
-        self,
-        f: impl FnMut(&mut EventContext) + 'static,
-    ) -> WidgetWithHandlers<Self> {
+    fn on_drag_leave(self, f: impl FnMut(&mut EventContext) + 'static) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).on_drag_leave(f)
     }
 
@@ -1618,10 +1474,7 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         WidgetWithHandlers::new(self).access_label(label)
     }
 
-    fn access_description(
-        self,
-        description: impl Into<String>,
-    ) -> WidgetWithHandlers<Self> {
+    fn access_description(self, description: impl Into<String>) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).access_description(description)
     }
 
@@ -1687,10 +1540,7 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         WidgetWithHandlers::new(self).access_current(current)
     }
 
-    fn access_shortcut_literal(
-        self,
-        shortcut: impl Into<String>,
-    ) -> WidgetWithHandlers<Self> {
+    fn access_shortcut_literal(self, shortcut: impl Into<String>) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).access_shortcut_literal(shortcut)
     }
 
@@ -1702,10 +1552,7 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         WidgetWithHandlers::new(self).access_has_popup(kind)
     }
 
-    fn access_orientation(
-        self,
-        orientation: accesskit::Orientation,
-    ) -> WidgetWithHandlers<Self> {
+    fn access_orientation(self, orientation: accesskit::Orientation) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).access_orientation(orientation)
     }
 
@@ -1733,11 +1580,7 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         WidgetWithHandlers::new(self).access_numeric_step(step)
     }
 
-    fn access_action<F>(
-        self,
-        action: accesskit::Action,
-        handler: F,
-    ) -> WidgetWithHandlers<Self>
+    fn access_action<F>(self, action: accesskit::Action, handler: F) -> WidgetWithHandlers<Self>
     where
         F: FnMut(&mut EventContext) + 'static,
     {
@@ -1781,3 +1624,100 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
 
 // Blanket implementation for all Widget types.
 impl<W: Widget + Sized + 'static> WidgetBuilder for W {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::widget::WidgetPlacement;
+    use crate::widget_id::WidgetId;
+    use crate::widget_tree::WidgetTree;
+
+    #[derive(Debug)]
+    struct CompositeLeaf {
+        child_id: Option<WidgetId>,
+    }
+
+    impl CompositeLeaf {
+        fn new() -> Self {
+            Self { child_id: None }
+        }
+    }
+
+    impl Widget for CompositeLeaf {
+        fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+            let child = ctx.add(crate::test_widgets::FillWidget::new());
+            self.child_id = Some(child);
+            vec![child]
+        }
+
+        fn layout_response(
+            &self,
+            proposal: fern_canvas::SizeProposal,
+            _ctx: &crate::widget::LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(120.0, 40.0).into()
+        }
+
+        fn place_children(
+            &self,
+            bounds: fern_canvas::Rect,
+            _proposal: fern_canvas::SizeProposal,
+            children: &mut [WidgetPlacement],
+            _ctx: &crate::widget::LayoutContext,
+        ) {
+            for child in children.iter_mut() {
+                child.origin = bounds.origin();
+                child.size = bounds.size();
+            }
+        }
+
+        fn children(&self) -> Vec<WidgetId> {
+            self.child_id.into_iter().collect()
+        }
+    }
+
+    #[test]
+    fn external_handlers_survive_rebuild() {
+        // Regression check: handlers attached externally via the
+        // `WidgetBuilder` builder (e.g. `MyCompositeWidget::new().on_tap(...)`)
+        // must continue to fire after the widget rebuilds in place.
+        // My handler-clearing fix in `rebuild_single_widget` wiped
+        // `node.handlers` to stop accumulation of `apply_self_handlers`
+        // calls across rebuilds — but the extracted-once-at-insertion
+        // HandlerSet is gone by rebuild time and would be lost.
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let tap_count = Rc::new(Cell::new(0_u32));
+        let tc = tap_count.clone();
+
+        let mut tree = WidgetTree::new();
+        let id = tree.add(CompositeLeaf::new().on_tap(move |_pos, _ctx| {
+            tc.set(tc.get() + 1);
+        }));
+        tree.layout(fern_canvas::SizeProposal::exact(200.0, 100.0));
+
+        // Trip a rebuild of the composite — its child gets torn down &
+        // rebuilt; node.handlers gets cleared and reset.
+        tree.arena_mark_needs_rebuild_for_testing(id);
+        tree.layout(fern_canvas::SizeProposal::exact(200.0, 100.0));
+
+        // Click through the composite; the externally-attached on_tap
+        // must still be wired up.
+        tree.click(id);
+        assert_eq!(
+            tap_count.get(),
+            1,
+            "externally-attached on_tap must survive a rebuild"
+        );
+    }
+
+    #[test]
+    fn wrapped_composite_widget_still_builds_children() {
+        let mut tree = WidgetTree::new();
+        let root = tree.add(CompositeLeaf::new().on_tap(|_pos, _ctx| {}));
+        tree.layout(fern_canvas::SizeProposal::exact(200.0, 100.0));
+
+        assert_eq!(tree.children(root).len(), 1);
+    }
+}

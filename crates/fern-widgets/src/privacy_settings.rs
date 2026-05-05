@@ -165,8 +165,7 @@ impl Widget for PrivacySettings {
         // still embed the widget without panicking.
         let Some(telemetry) = ctx.try_telemetry().cloned() else {
             let placeholder = ctx.add(VStack::new().spacing(8.0).child(
-                TextWidget::new(tr_widget!(privacy_not_configured()))
-                    .style(TextStyleRole::Body),
+                TextWidget::new(tr_widget!(privacy_not_configured())).style(TextStyleRole::Body),
             ));
             self.root_id = Some(placeholder);
             return vec![placeholder];
@@ -183,11 +182,7 @@ impl Widget for PrivacySettings {
         // `BindingLevel::Rebuild` so the accordion's snapshot
         // refreshes without user interaction.
         let revision_signal = telemetry.reporter.recent_log_revision();
-        revision_signal.bind_to(
-            ctx.self_id(),
-            ctx.binding_registry(),
-            BindingLevel::Rebuild,
-        );
+        revision_signal.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
         let state = consent_signal.get();
         let supported = telemetry.reporter.supported_scopes();
@@ -208,9 +203,9 @@ impl Widget for PrivacySettings {
             .child(self.build_notice(&telemetry, &processor, &endpoint, pseudonymous))
             .child(build_scope_panel(&telemetry, &state, supported))
             .child(build_accept_reject(&telemetry, &endpoint))
-            .child_opt((self.show_identity_row && pseudonymous).then(|| {
-                build_identity_row(&telemetry)
-            }))
+            .child_opt(
+                (self.show_identity_row && pseudonymous).then(|| build_identity_row(&telemetry)),
+            )
             .child_opt(
                 (self.show_inspect && !self.compact)
                     .then(|| build_inspect_accordion(&telemetry, self.inspect_event_count)),
@@ -226,10 +221,15 @@ impl Widget for PrivacySettings {
         vec![id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         self.root_id
             .and_then(|c| ctx.child_size(c, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -286,15 +286,12 @@ impl PrivacySettings {
             .spacing(6.0)
             .child(TextWidget::new(processor_line).style(TextStyleRole::Body))
             .child(
-                TextWidget::new(tr_widget!(privacy_notice_purposes()))
-                    .style(TextStyleRole::Body),
+                TextWidget::new(tr_widget!(privacy_notice_purposes())).style(TextStyleRole::Body),
             )
             .child(TextWidget::new(lawful_basis).style(TextStyleRole::Body))
             .child(
-                TextWidget::new(tr_widget!(privacy_notice_retention(
-                    days = retention_days
-                )))
-                .style(TextStyleRole::Body),
+                TextWidget::new(tr_widget!(privacy_notice_retention(days = retention_days)))
+                    .style(TextStyleRole::Body),
             )
             .child(
                 TextWidget::new(tr_widget!(privacy_notice_withdrawal_right()))
@@ -318,8 +315,7 @@ fn build_scope_panel(
     supported: ConsentScope,
 ) -> Panel {
     let mut column = VStack::new().spacing(8.0).child(
-        TextWidget::new(tr_widget!(privacy_scope_section_heading()))
-            .style(TextStyleRole::BodyBold),
+        TextWidget::new(tr_widget!(privacy_scope_section_heading())).style(TextStyleRole::BodyBold),
     );
 
     if supported.anonymous_metrics {
@@ -550,9 +546,7 @@ fn build_identity_row(telemetry: &OpenedTelemetry) -> Panel {
                                 ));
                             }
                             MessageBox::information(tr_widget!(privacy_fetch_success_title()))
-                                .text(tr_widget!(privacy_fetch_success_text(
-                                    count = event_count
-                                )))
+                                .text(tr_widget!(privacy_fetch_success_text(count = event_count)))
                                 .informative_text_literal(details)
                                 .detailed_text_literal(json)
                                 .buttons(MessageBoxButtons::Ok)
@@ -731,9 +725,9 @@ fn build_inspect_accordion(telemetry: &OpenedTelemetry, n: usize) -> Accordion {
     let count_i64 = count as i64;
 
     let body = if count == 0 {
-        VStack::new().spacing(6.0).child(
-            TextWidget::new(tr_widget!(privacy_inspect_empty())).style(TextStyleRole::Small),
-        )
+        VStack::new()
+            .spacing(6.0)
+            .child(TextWidget::new(tr_widget!(privacy_inspect_empty())).style(TextStyleRole::Small))
     } else {
         let mut col = VStack::new().spacing(4.0).child(
             TextWidget::new(tr_widget!(privacy_inspect_summary(count = count_i64)))

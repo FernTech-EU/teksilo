@@ -16,11 +16,9 @@ use fern_core::build_context::BuildContext;
 use fern_core::widget::CursorIcon;
 use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
-use fern_widgets::primitives::{Padding, ZStack};
-use fern_widgets::{
-    Expand, HStack, MaxSize, MinSize, RectWidget, ScrollArea, TextWidget, VStack,
-};
 use fern_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
+use fern_widgets::primitives::{Padding, ZStack};
+use fern_widgets::{Expand, HStack, MaxSize, MinSize, RectWidget, ScrollArea, TextWidget, VStack};
 
 use crate::app_state::AppState;
 
@@ -31,11 +29,7 @@ pub fn build_navigator(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
     let scroll_id = ctx.add(scroll);
     // The list scroll area must fill the remaining height below the
     // header — otherwise the VStack collapses to header height.
-    let scroll_expanded = ctx.add(
-        Expand::vertical()
-            
-            .child_id(scroll_id),
-    );
+    let scroll_expanded = ctx.add(Expand::vertical().child_id(scroll_id));
 
     let column = VStack::new().add_child(header).add_child(scroll_expanded);
     let bg = RectWidget::new()
@@ -119,8 +113,7 @@ fn build_entry_row(
         .style(TextStyleRole::Body)
         .color(TextRole::Primary)
         .single_line();
-    let header_row =
-        Padding::new(4.0, 12.0, 4.0, 16.0).child(widget_label);
+    let header_row = Padding::new(4.0, 12.0, 4.0, 16.0).child(widget_label);
 
     // Highlight when this widget is the selected one.
     let widget_id_sig = state.selected_widget.clone();
@@ -204,4 +197,3 @@ fn build_variant_row(
         .cursor(CursorIcon::Pointer);
     ctx.add(clickable)
 }
-

@@ -68,12 +68,9 @@ impl SegmentKind {
     pub fn max_digits(self) -> usize {
         match self {
             Self::Year => 4,
-            Self::Month
-            | Self::Day
-            | Self::Hour24
-            | Self::Hour12
-            | Self::Minute
-            | Self::Second => 2,
+            Self::Month | Self::Day | Self::Hour24 | Self::Hour12 | Self::Minute | Self::Second => {
+                2
+            }
             Self::MonthShort
             | Self::DayShort
             | Self::Hour24Short
@@ -230,7 +227,11 @@ pub fn segment_value_for_time(t: Time, kind: SegmentKind) -> Option<i32> {
         SegmentKind::Minute | SegmentKind::MinuteShort => t.minute() as i32,
         SegmentKind::Second | SegmentKind::SecondShort => t.second() as i32,
         SegmentKind::Period => {
-            if t.hour() < 12 { 0 } else { 1 }
+            if t.hour() < 12 {
+                0
+            } else {
+                1
+            }
         }
         _ => return None,
     })
@@ -492,7 +493,22 @@ pub fn mask_for_pattern(pattern: &ParsedPattern) -> String {
                     // Mask grammar metacharacters need escaping in
                     // literal positions; everything else passes
                     // through unchanged.
-                    if matches!(c, '9' | '0' | 'A' | 'a' | 'N' | 'n' | 'X' | 'x' | 'H' | 'h' | '>' | '<' | '!' | '\\') {
+                    if matches!(
+                        c,
+                        '9' | '0'
+                            | 'A'
+                            | 'a'
+                            | 'N'
+                            | 'n'
+                            | 'X'
+                            | 'x'
+                            | 'H'
+                            | 'h'
+                            | '>'
+                            | '<'
+                            | '!'
+                            | '\\'
+                    ) {
                         out.push('\\');
                     }
                     out.push(c);
@@ -950,13 +966,28 @@ mod tests {
     fn segment_at_position_inside_segments() {
         let pat = ParsedPattern::parse("%Y-%m-%d").unwrap();
         // caret 0..4 → Year
-        assert_eq!(segment_at_position(&pat, 0).map(|s| s.2), Some(SegmentKind::Year));
-        assert_eq!(segment_at_position(&pat, 3).map(|s| s.2), Some(SegmentKind::Year));
+        assert_eq!(
+            segment_at_position(&pat, 0).map(|s| s.2),
+            Some(SegmentKind::Year)
+        );
+        assert_eq!(
+            segment_at_position(&pat, 3).map(|s| s.2),
+            Some(SegmentKind::Year)
+        );
         // caret 5..7 → Month
-        assert_eq!(segment_at_position(&pat, 5).map(|s| s.2), Some(SegmentKind::Month));
-        assert_eq!(segment_at_position(&pat, 6).map(|s| s.2), Some(SegmentKind::Month));
+        assert_eq!(
+            segment_at_position(&pat, 5).map(|s| s.2),
+            Some(SegmentKind::Month)
+        );
+        assert_eq!(
+            segment_at_position(&pat, 6).map(|s| s.2),
+            Some(SegmentKind::Month)
+        );
         // caret 8..10 → Day
-        assert_eq!(segment_at_position(&pat, 9).map(|s| s.2), Some(SegmentKind::Day));
+        assert_eq!(
+            segment_at_position(&pat, 9).map(|s| s.2),
+            Some(SegmentKind::Day)
+        );
     }
 
     #[test]
@@ -964,11 +995,20 @@ mod tests {
         let pat = ParsedPattern::parse("%Y-%m-%d").unwrap();
         // caret 4 sits on the boundary at end of Year / start of `-`.
         // Snaps to Year (preceding segment).
-        assert_eq!(segment_at_position(&pat, 4).map(|s| s.2), Some(SegmentKind::Year));
+        assert_eq!(
+            segment_at_position(&pat, 4).map(|s| s.2),
+            Some(SegmentKind::Year)
+        );
         // caret 7 = end of Month, sits on boundary with `-`.
-        assert_eq!(segment_at_position(&pat, 7).map(|s| s.2), Some(SegmentKind::Month));
+        assert_eq!(
+            segment_at_position(&pat, 7).map(|s| s.2),
+            Some(SegmentKind::Month)
+        );
         // caret 10 = end of Day (text end). Snaps to Day.
-        assert_eq!(segment_at_position(&pat, 10).map(|s| s.2), Some(SegmentKind::Day));
+        assert_eq!(
+            segment_at_position(&pat, 10).map(|s| s.2),
+            Some(SegmentKind::Day)
+        );
     }
 
     // ── step_date_field ─────────────────────────────────────────────
@@ -976,42 +1016,66 @@ mod tests {
     #[test]
     fn step_year_basic_increment() {
         let d = Date::new(2026, 5, 15).unwrap();
-        assert_eq!(step_date_field(d, SegmentKind::Year, 1), Date::new(2027, 5, 15).unwrap());
-        assert_eq!(step_date_field(d, SegmentKind::Year, -10), Date::new(2016, 5, 15).unwrap());
+        assert_eq!(
+            step_date_field(d, SegmentKind::Year, 1),
+            Date::new(2027, 5, 15).unwrap()
+        );
+        assert_eq!(
+            step_date_field(d, SegmentKind::Year, -10),
+            Date::new(2016, 5, 15).unwrap()
+        );
     }
 
     #[test]
     fn step_year_clamps_feb_29() {
         let leap = Date::new(2024, 2, 29).unwrap();
         // Stepping to 2025 (non-leap) clamps day to 28.
-        assert_eq!(step_date_field(leap, SegmentKind::Year, 1), Date::new(2025, 2, 28).unwrap());
+        assert_eq!(
+            step_date_field(leap, SegmentKind::Year, 1),
+            Date::new(2025, 2, 28).unwrap()
+        );
     }
 
     #[test]
     fn step_month_wraps_within_year() {
         // Dec → Jan stays in same year (display-segment wrap).
         let d = Date::new(2026, 12, 5).unwrap();
-        assert_eq!(step_date_field(d, SegmentKind::Month, 1), Date::new(2026, 1, 5).unwrap());
+        assert_eq!(
+            step_date_field(d, SegmentKind::Month, 1),
+            Date::new(2026, 1, 5).unwrap()
+        );
         // Jan → Dec
         let d = Date::new(2026, 1, 5).unwrap();
-        assert_eq!(step_date_field(d, SegmentKind::Month, -1), Date::new(2026, 12, 5).unwrap());
+        assert_eq!(
+            step_date_field(d, SegmentKind::Month, -1),
+            Date::new(2026, 12, 5).unwrap()
+        );
     }
 
     #[test]
     fn step_month_clamps_day() {
         // Mar 31 → Feb (28 in 2026)
         let d = Date::new(2026, 3, 31).unwrap();
-        assert_eq!(step_date_field(d, SegmentKind::Month, -1), Date::new(2026, 2, 28).unwrap());
+        assert_eq!(
+            step_date_field(d, SegmentKind::Month, -1),
+            Date::new(2026, 2, 28).unwrap()
+        );
     }
 
     #[test]
     fn step_day_wraps_within_month() {
         // 31 + 1 in March → 1 (same month, not April).
         let d = Date::new(2026, 3, 31).unwrap();
-        assert_eq!(step_date_field(d, SegmentKind::Day, 1), Date::new(2026, 3, 1).unwrap());
+        assert_eq!(
+            step_date_field(d, SegmentKind::Day, 1),
+            Date::new(2026, 3, 1).unwrap()
+        );
         // 1 - 1 in March → 31
         let d = Date::new(2026, 3, 1).unwrap();
-        assert_eq!(step_date_field(d, SegmentKind::Day, -1), Date::new(2026, 3, 31).unwrap());
+        assert_eq!(
+            step_date_field(d, SegmentKind::Day, -1),
+            Date::new(2026, 3, 31).unwrap()
+        );
     }
 
     // ── step_time_field ─────────────────────────────────────────────
@@ -1019,23 +1083,38 @@ mod tests {
     #[test]
     fn step_hour_wraps_24h() {
         let t = Time::new(23, 30, 0, 0).unwrap();
-        assert_eq!(step_time_field(t, SegmentKind::Hour24, 1), Time::new(0, 30, 0, 0).unwrap());
+        assert_eq!(
+            step_time_field(t, SegmentKind::Hour24, 1),
+            Time::new(0, 30, 0, 0).unwrap()
+        );
         let t = Time::new(0, 30, 0, 0).unwrap();
-        assert_eq!(step_time_field(t, SegmentKind::Hour24, -1), Time::new(23, 30, 0, 0).unwrap());
+        assert_eq!(
+            step_time_field(t, SegmentKind::Hour24, -1),
+            Time::new(23, 30, 0, 0).unwrap()
+        );
     }
 
     #[test]
     fn step_minute_wraps_60() {
         let t = Time::new(10, 59, 0, 0).unwrap();
-        assert_eq!(step_time_field(t, SegmentKind::Minute, 1), Time::new(10, 0, 0, 0).unwrap());
+        assert_eq!(
+            step_time_field(t, SegmentKind::Minute, 1),
+            Time::new(10, 0, 0, 0).unwrap()
+        );
     }
 
     #[test]
     fn step_period_toggles_am_pm() {
         let am = Time::new(9, 0, 0, 0).unwrap();
-        assert_eq!(step_time_field(am, SegmentKind::Period, 1), Time::new(21, 0, 0, 0).unwrap());
+        assert_eq!(
+            step_time_field(am, SegmentKind::Period, 1),
+            Time::new(21, 0, 0, 0).unwrap()
+        );
         let pm = Time::new(15, 30, 0, 0).unwrap();
-        assert_eq!(step_time_field(pm, SegmentKind::Period, -1), Time::new(3, 30, 0, 0).unwrap());
+        assert_eq!(
+            step_time_field(pm, SegmentKind::Period, -1),
+            Time::new(3, 30, 0, 0).unwrap()
+        );
         // Zero delta is a no-op
         assert_eq!(step_time_field(am, SegmentKind::Period, 0), am);
     }

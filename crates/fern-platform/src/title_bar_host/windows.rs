@@ -60,9 +60,9 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use fern_canvas::{Point, Rect, Size};
 use fern_core::signal::Signal;
@@ -77,22 +77,22 @@ use winit::window::Window;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::DwmExtendFrameIntoClientArea;
 use windows::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, MonitorFromWindow, ScreenToClient, HMONITOR, MONITORINFO,
-    MONITOR_DEFAULTTONEAREST,
+    GetMonitorInfoW, HMONITOR, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+    ScreenToClient,
 };
 use windows::Win32::UI::Controls::{HOVER_DEFAULT, MARGINS};
 use windows::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    TrackMouseEvent, TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT,
+    TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT, TrackMouseEvent,
 };
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClientRect, IsZoomed, SendMessageW, SetWindowPos, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT,
-    HTCAPTION, HTCLIENT, HTCLOSE, HTLEFT, HTMAXBUTTON, HTMINBUTTON, HTRIGHT, HTTOP, HTTOPLEFT,
-    HTTOPRIGHT, NCCALCSIZE_PARAMS, SC_KEYMENU, SM_CXFRAME, SM_CXPADDEDBORDER, SM_CYFRAME,
-    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WM_DPICHANGED,
-    WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE,
-    WM_NCMOUSEMOVE, WM_NCPAINT, WM_SYSCOMMAND,
+    GetClientRect, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTCLOSE, HTLEFT,
+    HTMAXBUTTON, HTMINBUTTON, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, IsZoomed, NCCALCSIZE_PARAMS,
+    SC_KEYMENU, SM_CXFRAME, SM_CXPADDEDBORDER, SM_CYFRAME, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SendMessageW, SetWindowPos, WM_DPICHANGED, WM_NCACTIVATE,
+    WM_NCCALCSIZE, WM_NCHITTEST, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE,
+    WM_NCPAINT, WM_SYSCOMMAND,
 };
 
 use super::edge_to_direction;
@@ -162,9 +162,8 @@ impl WindowsHost {
             cyBottomHeight: 0,
         };
         unsafe {
-            DwmExtendFrameIntoClientArea(hwnd, &margins).map_err(|e| {
-                PlatformError::Os(format!("DwmExtendFrameIntoClientArea: {e}"))
-            })?;
+            DwmExtendFrameIntoClientArea(hwnd, &margins)
+                .map_err(|e| PlatformError::Os(format!("DwmExtendFrameIntoClientArea: {e}")))?;
         }
 
         // Step 2: install the subclass FIRST, before triggering the
@@ -183,13 +182,10 @@ impl WindowsHost {
         });
         let raw_ptr = Rc::as_ptr(&data) as usize;
 
-        let installed = unsafe {
-            SetWindowSubclass(hwnd, Some(fern_titlebar_proc), subclass_id, raw_ptr)
-        };
+        let installed =
+            unsafe { SetWindowSubclass(hwnd, Some(fern_titlebar_proc), subclass_id, raw_ptr) };
         if !installed.as_bool() {
-            return Err(PlatformError::Os(
-                "SetWindowSubclass returned FALSE".into(),
-            ));
+            return Err(PlatformError::Os("SetWindowSubclass returned FALSE".into()));
         }
 
         // Step 3: now force the frame recompute. The first
@@ -215,7 +211,6 @@ impl WindowsHost {
             data,
         })
     }
-
 }
 
 impl Drop for WindowsHost {
@@ -225,8 +220,7 @@ impl Drop for WindowsHost {
         // on the same thread, and any subsequent `WM_NC*` for this
         // HWND reaches `DefWindowProc` directly.
         unsafe {
-            let _ =
-                RemoveWindowSubclass(self.hwnd, Some(fern_titlebar_proc), self.subclass_id);
+            let _ = RemoveWindowSubclass(self.hwnd, Some(fern_titlebar_proc), self.subclass_id);
         }
     }
 }
@@ -341,12 +335,7 @@ fn extract_hwnd(window: &Arc<Window>) -> Result<HWND, PlatformError> {
 /// tree's logical pixels to the wndproc's physical pixels.
 fn scale_hit_regions(src: &HitRegions, scale: f32) -> HitRegions {
     let scale_rect = |r: Rect| -> Rect {
-        Rect::new(
-            r.x * scale,
-            r.y * scale,
-            r.width * scale,
-            r.height * scale,
-        )
+        Rect::new(r.x * scale, r.y * scale, r.width * scale, r.height * scale)
     };
     HitRegions {
         minimize: src.minimize.map(scale_rect),
@@ -455,7 +444,9 @@ unsafe extern "system" fn fern_titlebar_proc(
                         hwndTrack: hwnd,
                         dwHoverTime: HOVER_DEFAULT,
                     };
-                    unsafe { let _ = TrackMouseEvent(&mut tme); }
+                    unsafe {
+                        let _ = TrackMouseEvent(&mut tme);
+                    }
                 }
                 data.last_hover.set(target);
             }
@@ -573,8 +564,7 @@ fn handle_nchittest(hwnd: HWND, lparam: LPARAM, data: &SubclassData) -> LRESULT 
 
     let dpi = unsafe { GetDpiForWindow(hwnd) };
     let resize = unsafe {
-        GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi)
-            + GetSystemMetricsForDpi(SM_CXFRAME, dpi)
+        GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi) + GetSystemMetricsForDpi(SM_CXFRAME, dpi)
     };
 
     let mut rect = RECT::default();

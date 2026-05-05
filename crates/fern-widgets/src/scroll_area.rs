@@ -4,10 +4,10 @@ use std::time::Duration;
 
 use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, ScrollDelta, WidgetEvent};
 use fern_core::signal::Signal;
-use fern_core::binding::BindingLevel;
 use fern_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
@@ -524,7 +524,11 @@ impl Widget for ScrollArea {
         ids
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         // Use preferred_size if set; otherwise use content width but a fixed
         // default height.  A scroll area's HEIGHT should come from its parent,
         // not from its content — otherwise it grows to fit everything and no
@@ -591,8 +595,16 @@ impl Widget for ScrollArea {
             )
             .unwrap_or(Size::new(vp_w1, bounds.height));
 
-        let show_v_1 = resolve_show(self.vertical_policy, has_v, content_size_1.height > bounds.height + 0.5);
-        let show_h_1 = resolve_show(self.horizontal_policy, has_h, content_size_1.width > vp_w1 + 0.5);
+        let show_v_1 = resolve_show(
+            self.vertical_policy,
+            has_v,
+            content_size_1.height > bounds.height + 0.5,
+        );
+        let show_h_1 = resolve_show(
+            self.horizontal_policy,
+            has_h,
+            content_size_1.width > vp_w1 + 0.5,
+        );
 
         // Compute actual reservations from pass-1 results.
         let v_res = match self.scroll_bar_style {
@@ -628,7 +640,11 @@ impl Widget for ScrollArea {
             let sh2 = resolve_show(self.horizontal_policy, has_h, cs2.width > vp_w2 + 0.5);
             (vp_w2, cs2, sh2)
         } else {
-            ((bounds.width - new_v_res).max(0.0), content_size_1, show_h_1)
+            (
+                (bounds.width - new_v_res).max(0.0),
+                content_size_1,
+                show_h_1,
+            )
         };
 
         let v_reserved = new_v_res;
@@ -689,7 +705,10 @@ impl Widget for ScrollArea {
                     bounds.right() - sb_thickness
                 };
                 let sb_h = if h_reserved > 0.0
-                    || (matches!(self.scroll_bar_style, ScrollBarMode::Overlay | ScrollBarMode::Thin) && show_h)
+                    || (matches!(
+                        self.scroll_bar_style,
+                        ScrollBarMode::Overlay | ScrollBarMode::Thin
+                    ) && show_h)
                 {
                     bounds.height - sb_thickness
                 } else {
@@ -714,7 +733,10 @@ impl Widget for ScrollArea {
                     bounds.x
                 };
                 let sb_w = if v_reserved > 0.0
-                    || (matches!(self.scroll_bar_style, ScrollBarMode::Overlay | ScrollBarMode::Thin) && show_v)
+                    || (matches!(
+                        self.scroll_bar_style,
+                        ScrollBarMode::Overlay | ScrollBarMode::Thin
+                    ) && show_v)
                 {
                     bounds.width - sb_thickness
                 } else {
@@ -802,11 +824,16 @@ mod tests {
     }
 
     impl Widget for TallLeaf {
-        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
             Size::new(
                 proposal.width.unwrap_or(self.width),
                 proposal.height.unwrap_or(self.height),
-            ).into()
+            )
+            .into()
         }
     }
 
@@ -1001,7 +1028,11 @@ mod tests {
         }
     }
     impl Widget for WideLeaf {
-        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
             Size::new(self.width, self.height).into()
         }
     }
@@ -1385,12 +1416,11 @@ mod tests {
     #[test]
     fn preferred_size_overrides_default() {
         let mut tree = WidgetTree::new();
-        let scroll =
-            tree.add(
-                ScrollArea::new()
-                    .child(TallLeaf::new(200.0, 500.0))
-                    .preferred_size(500.0, 400.0),
-            );
+        let scroll = tree.add(
+            ScrollArea::new()
+                .child(TallLeaf::new(200.0, 500.0))
+                .preferred_size(500.0, 400.0),
+        );
         // With unconstrained proposal, should use preferred size
         tree.layout(SizeProposal {
             width: None,
@@ -1412,12 +1442,11 @@ mod tests {
     #[test]
     fn constrained_proposal_overrides_preferred_size() {
         let mut tree = WidgetTree::new();
-        let scroll =
-            tree.add(
-                ScrollArea::new()
-                    .child(TallLeaf::new(200.0, 500.0))
-                    .preferred_size(500.0, 400.0),
-            );
+        let scroll = tree.add(
+            ScrollArea::new()
+                .child(TallLeaf::new(200.0, 500.0))
+                .preferred_size(500.0, 400.0),
+        );
         // With constrained proposal, the proposal wins
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let bounds = tree.bounds(scroll);
@@ -1490,10 +1519,15 @@ mod tests {
             self.scroll_id = Some(id);
             vec![id]
         }
-        fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
             self.scroll_id
                 .and_then(|id| ctx.child_size(id, proposal))
-                .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+                .into()
         }
         fn place_children(
             &self,
@@ -1607,8 +1641,7 @@ mod tests {
         let viewport_top = scroll_bounds.y;
         let viewport_bottom = scroll_bounds.bottom();
         assert!(
-            target_after.y >= viewport_top - 0.5
-                && target_after.bottom() <= viewport_bottom + 0.5,
+            target_after.y >= viewport_top - 0.5 && target_after.bottom() <= viewport_bottom + 0.5,
             "Target should be inside viewport after focus, got y={}..{} (viewport={}..{})",
             target_after.y,
             target_after.bottom(),

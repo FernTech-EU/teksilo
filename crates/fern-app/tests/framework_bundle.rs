@@ -56,7 +56,6 @@ fn status_bar_a11y_name_resolves_via_framework_bundle() {
 fn snackbar_a11y_name_resolves_via_framework_bundle() {
     use fern_canvas::SizeProposal;
     use fern_core::widget::{LayoutContext, Widget};
-    use fern_canvas::Size;
 
     #[derive(Debug)]
     struct Noop;
@@ -79,9 +78,9 @@ fn snackbar_a11y_name_resolves_via_framework_bundle() {
         )
         .build_headless();
 
+    app.tree.add(Snackbar::new_literal("Trigger").content(Noop));
     app.tree
-        .add(Snackbar::new_literal("Trigger").content(Noop));
-    app.tree.layout(fern_canvas::SizeProposal::exact(400.0, 300.0));
+        .layout(fern_canvas::SizeProposal::exact(400.0, 300.0));
 
     // Snackbar's a11y name is `a11y-snackbar-name` → "Snackbar".
     // We can't reach the surface widget directly without triggering the

@@ -105,10 +105,8 @@ mod tests {
 
     #[test]
     fn cli_widget_arg_round_trips_through_registry() {
-        let opts = fern_preview_ui::PreviewerOptions::from_iter([
-            "--widget=slider",
-            "--variant=max",
-        ]);
+        let opts =
+            fern_preview_ui::PreviewerOptions::from_iter(["--widget=slider", "--variant=max"]);
         assert_eq!(opts.initial_widget.as_deref(), Some("slider"));
         assert_eq!(opts.initial_variant.as_deref(), Some("max"));
     }
@@ -168,8 +166,7 @@ mod tests {
                 // rest from being checked — the failure list at the
                 // end is more useful than a single first-failure stack.
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let knobs =
-                        fern_preview::KnobValues::from_spec(&entry.knobs(), None);
+                    let knobs = fern_preview::KnobValues::from_spec(&entry.knobs(), None);
                     let widget = entry.build(variant.name(), &knobs);
                     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
                     let _ = tree.add_boxed(widget);
@@ -249,10 +246,9 @@ mod tests {
             if let Some(target) = opt
                 .as_ref()
                 .and_then(|n| names_for_reverse.iter().position(|m| m == n))
+                && idx_for_reverse.get() != target
             {
-                if idx_for_reverse.get() != target {
-                    idx_for_reverse.set(target);
-                }
+                idx_for_reverse.set(target);
             }
         });
 

@@ -90,12 +90,7 @@ impl Widget for FocusTab {
         for (i, row) in rows.iter().enumerate() {
             let y = bounds.y + (i as f32) * ROW_HEIGHT + 2.0;
             let x = bounds.x + ROW_PADDING_X + (row.depth as f32) * ROW_INDENT_PX;
-            let text_rect = Rect::new(
-                x,
-                y,
-                (bounds.width - (x - bounds.x)).max(0.0),
-                ROW_HEIGHT,
-            );
+            let text_rect = Rect::new(x, y, (bounds.width - (x - bounds.x)).max(0.0), ROW_HEIGHT);
             let color = if row.is_focused { primary } else { secondary };
             canvas.draw_text(&row.label, text_rect, style, color);
         }
@@ -118,11 +113,7 @@ fn collect_focus_chain(arena: &WidgetArena, focused: WidgetId, out: &mut Vec<Foc
         if let Some(node) = arena.get(*id) {
             out.push(FocusRow {
                 depth: depth as u32,
-                label: format!(
-                    "{} ({:?})",
-                    last_segment(node.widget.type_name()),
-                    id
-                ),
+                label: format!("{} ({:?})", last_segment(node.widget.type_name()), id),
                 is_focused: *id == focused,
             });
         }

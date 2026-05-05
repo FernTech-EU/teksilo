@@ -12,15 +12,15 @@
 
 use std::borrow::Cow;
 
+use fern_canvas::svg::SvgIcon;
 use fern_canvas::{
     AnimatedIcon, AnimatedQuadClass, Canvas, Path, PathCommand, Point, RasterIcon, Rect, Size,
     SizeProposal,
 };
-use fern_canvas::svg::SvgIcon;
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::animated_quad::{AnimatedQuadHandle, AnimatedQuadKind};
 use fern_core::color_prop::ColorProp;
-use fern_core::signal::{Prop, Signal};
+use fern_core::signal::Signal;
 use fern_core::widget::{LayoutContext, PaintContext, Widget};
 use fern_tokens::{Color, Easing, TextRole};
 
@@ -229,7 +229,11 @@ impl IconWidget {
                 let mode = IconMode::Tintable;
                 let upload_pixels = prepare_pixels(&icon, mode);
                 Self {
-                    source: IconSource::Raster { name, icon, upload_pixels },
+                    source: IconSource::Raster {
+                        name,
+                        icon,
+                        upload_pixels,
+                    },
                     design_size: size,
                     display_size: size,
                     color: ColorProp::TextRole(TextRole::Primary),
@@ -278,7 +282,11 @@ impl IconWidget {
                 let name = auto_name("webp", data.as_ptr() as usize);
                 let upload_pixels = prepare_pixels(&icon, mode);
                 Self {
-                    source: IconSource::Raster { name, icon, upload_pixels },
+                    source: IconSource::Raster {
+                        name,
+                        icon,
+                        upload_pixels,
+                    },
                     design_size: size,
                     display_size: size,
                     color: ColorProp::TextRole(TextRole::Primary),
@@ -300,7 +308,11 @@ impl IconWidget {
         let mode = IconMode::Tintable;
         let upload_pixels = prepare_pixels(icon, mode);
         Self {
-            source: IconSource::Raster { name, icon: icon.clone(), upload_pixels },
+            source: IconSource::Raster {
+                name,
+                icon: icon.clone(),
+                upload_pixels,
+            },
             design_size: size,
             display_size: size,
             color: ColorProp::TextRole(TextRole::Primary),
@@ -342,7 +354,11 @@ impl IconWidget {
         }
         self.mode = mode;
         match &mut self.source {
-            IconSource::Raster { icon, upload_pixels, .. } => {
+            IconSource::Raster {
+                icon,
+                upload_pixels,
+                ..
+            } => {
                 *upload_pixels = prepare_pixels(icon, mode);
             }
             IconSource::Animated {
@@ -488,12 +504,7 @@ impl IconWidget {
         color: Color,
     ) {
         if !canvas.has_pending_image(name) {
-            canvas.ensure_image_registered(
-                name,
-                width,
-                height,
-                Cow::Owned(upload_pixels.to_vec()),
-            );
+            canvas.ensure_image_registered(name, width, height, Cow::Owned(upload_pixels.to_vec()));
         }
         match self.mode {
             IconMode::Tintable => canvas.draw_tinted_image(bounds, name, color),
@@ -601,7 +612,11 @@ impl Widget for IconWidget {
         Vec::new()
     }
 
-    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        _proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         Size::new(self.display_size, self.display_size).into()
     }
 
@@ -617,8 +632,20 @@ impl Widget for IconWidget {
                     }
                 }
             }
-            IconSource::Raster { name, icon, upload_pixels } => {
-                self.paint_raster(bounds, canvas, name, icon.width(), icon.height(), upload_pixels, color);
+            IconSource::Raster {
+                name,
+                icon,
+                upload_pixels,
+            } => {
+                self.paint_raster(
+                    bounds,
+                    canvas,
+                    name,
+                    icon.width(),
+                    icon.height(),
+                    upload_pixels,
+                    color,
+                );
             }
             IconSource::Animated {
                 name,
@@ -661,7 +688,15 @@ impl Widget for IconWidget {
                 let frame_name = format!("{name}_f{idx}");
                 let frame = &icon.frames()[idx];
                 let pixels = &frame_upload_pixels[idx];
-                self.paint_raster(bounds, canvas, &frame_name, frame.width(), frame.height(), pixels, color);
+                self.paint_raster(
+                    bounds,
+                    canvas,
+                    &frame_name,
+                    frame.width(),
+                    frame.height(),
+                    pixels,
+                    color,
+                );
             }
         }
     }
@@ -820,7 +855,10 @@ mod tests {
         tree.layout(SizeProposal::exact(24.0, 24.0));
         let frame = tree.render();
         // Raster icon should produce an image draw command
-        assert!(!frame.images.is_empty(), "raster icon should render an image");
+        assert!(
+            !frame.images.is_empty(),
+            "raster icon should render an image"
+        );
     }
 
     #[test]
@@ -834,7 +872,10 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(24.0, 24.0));
         let frame = tree.render();
-        assert!(frame.images[0].tint.is_some(), "tintable icon should have tint");
+        assert!(
+            frame.images[0].tint.is_some(),
+            "tintable icon should have tint"
+        );
     }
 
     #[test]
@@ -844,6 +885,9 @@ mod tests {
         tree.add(IconWidget::from_raster(&icon, 24.0).mode(IconMode::FullColor));
         tree.layout(SizeProposal::exact(24.0, 24.0));
         let frame = tree.render();
-        assert!(frame.images[0].tint.is_none(), "full-color icon should not have tint");
+        assert!(
+            frame.images[0].tint.is_none(),
+            "full-color icon should not have tint"
+        );
     }
 }

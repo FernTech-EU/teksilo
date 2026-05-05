@@ -5,15 +5,14 @@
 
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::binding::BindingLevel;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::focus::FocusOrigin;
 use fern_core::signal::Signal;
-use fern_core::binding::BindingLevel;
 use fern_core::widget::{CursorIcon, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius};
-
 
 /// An animated toggle switch bound to a `Signal<bool>`.
 pub struct Toggle {
@@ -190,7 +189,11 @@ impl Widget for Toggle {
         vec![] // leaf widget — no children
     }
 
-    fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        _proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let style = ctx.theme.components.toggle;
         // Reserve a 24 dp hit-area row but draw the track centered within it.
         let row_h = style.track_height.max(24.0);
@@ -205,7 +208,8 @@ impl Widget for Toggle {
             Size::new(style.track_width + style.label_gap + label_w, row_h)
         } else {
             Size::new(style.track_width, row_h)
-        }.into()
+        }
+        .into()
     }
 
     fn place_children(

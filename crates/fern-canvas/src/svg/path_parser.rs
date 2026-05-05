@@ -199,11 +199,7 @@ impl<'a> PathDataParser<'a> {
                     Point::new(self.cx + x, self.cy + y),
                 )
             } else {
-                (
-                    Point::new(x1, y1),
-                    Point::new(x2, y2),
-                    Point::new(x, y),
-                )
+                (Point::new(x1, y1), Point::new(x2, y2), Point::new(x, y))
             };
             self.commands.push(PathCommand::CubicTo {
                 control1: c1,
@@ -393,7 +389,9 @@ impl<'a> PathDataParser<'a> {
     fn read_number(&mut self) -> Result<f32, SvgParseError> {
         self.skip_wsp_comma();
         let start = self.pos;
-        if self.pos < self.input.len() && (self.input[self.pos] == b'-' || self.input[self.pos] == b'+') {
+        if self.pos < self.input.len()
+            && (self.input[self.pos] == b'-' || self.input[self.pos] == b'+')
+        {
             self.pos += 1;
         }
         let mut has_digits = false;
@@ -409,7 +407,9 @@ impl<'a> PathDataParser<'a> {
             }
         }
         // Scientific notation
-        if self.pos < self.input.len() && (self.input[self.pos] == b'e' || self.input[self.pos] == b'E') {
+        if self.pos < self.input.len()
+            && (self.input[self.pos] == b'e' || self.input[self.pos] == b'E')
+        {
             self.pos += 1;
             if self.pos < self.input.len()
                 && (self.input[self.pos] == b'-' || self.input[self.pos] == b'+')
@@ -456,6 +456,7 @@ impl<'a> PathDataParser<'a> {
 
 // --- SVG arc endpoint → cubic Bézier conversion (SVG spec §F.6) ---
 
+#[allow(clippy::too_many_arguments)]
 fn arc_to_cubics(
     x1: f32,
     y1: f32,
@@ -505,11 +506,7 @@ fn arc_to_cubics(
     // Step 3: Compute center point (cx', cy')
     let num = (rx2 * ry2 - rx2 * y1p2 - ry2 * x1p2).max(0.0);
     let den = rx2 * y1p2 + ry2 * x1p2;
-    let sq = if den > 0.0 {
-        (num / den).sqrt()
-    } else {
-        0.0
-    };
+    let sq = if den > 0.0 { (num / den).sqrt() } else { 0.0 };
     let sign = if large_arc == sweep { -1.0 } else { 1.0 };
     let cxp = sign * sq * (rx * y1p / ry);
     let cyp = sign * sq * -(ry * x1p / rx);
@@ -573,6 +570,7 @@ fn arc_to_cubics(
 
 /// Approximate a single arc segment (<=90°) with a cubic Bézier.
 /// Returns (c1x, c1y, c2x, c2y, ex, ey) in original coordinates.
+#[allow(clippy::too_many_arguments)]
 fn arc_segment_to_cubic(
     rx: f32,
     ry: f32,
@@ -583,8 +581,8 @@ fn arc_segment_to_cubic(
     theta: f32,
     d_theta: f32,
 ) -> (f32, f32, f32, f32, f32, f32) {
-    let alpha = (d_theta / 2.0).sin() * ((4.0 + 3.0 * (d_theta / 2.0).tan().powi(2)).sqrt() - 1.0)
-        / 3.0;
+    let alpha =
+        (d_theta / 2.0).sin() * ((4.0 + 3.0 * (d_theta / 2.0).tan().powi(2)).sqrt() - 1.0) / 3.0;
 
     let cos1 = theta.cos();
     let sin1 = theta.sin();

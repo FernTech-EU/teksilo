@@ -70,20 +70,18 @@ use jiff::civil::Weekday;
 use crate::built_in_button::{BuiltInButton, BuiltInButtonSize};
 use crate::calendar::Calendar;
 use crate::common::datetime::pattern::{
-    format_value, mask_for_pattern, parse_value, segment_at_position, step_date_field,
-    step_time_field, ParseTarget, ParsedPattern, ParsedValue,
+    ParseTarget, ParsedPattern, ParsedValue, format_value, mask_for_pattern, parse_value,
+    segment_at_position, step_date_field, step_time_field,
 };
 use crate::common::datetime::types::today_local;
 use crate::common::datetime::{Date, DateTime, Time};
-use crate::date_edit::{
-    build_date_validator, calendar_glyph_icon, clamp_date, ValidationBehavior,
-};
+use crate::date_edit::{ValidationBehavior, build_date_validator, calendar_glyph_icon, clamp_date};
 use crate::primitives::text_input_field::{TextInputField, ValidationFeedback};
 use crate::primitives::{
     Center, FixedSize, HStack, IconWidget, MinSize, Padding, RectWidget, TextWidget, VStack, ZStack,
 };
 use crate::time_edit::{
-    build_time_validator, clamp_time, time_pattern_for, SecondsMode, TimeFormat,
+    SecondsMode, TimeFormat, build_time_validator, clamp_time, time_pattern_for,
 };
 
 type OnValueChanged = Rc<dyn Fn(Option<DateTime>, &mut EventContext)>;
@@ -320,10 +318,10 @@ impl Widget for DateTimeEdit {
             {
                 let src_clone = src;
                 ctx.effect(&self.value, move |v| {
-                    if let Some(dt) = v {
-                        if src_clone.get() != *dt {
-                            src_clone.set(*dt);
-                        }
+                    if let Some(dt) = v
+                        && src_clone.get() != *dt
+                    {
+                        src_clone.set(*dt);
                     }
                 });
             }
@@ -415,7 +413,7 @@ impl Widget for DateTimeEdit {
             ctx,
             date_pattern_rc.clone(),
             &date_mask,
-            field_style.clone(),
+            field_style,
             date_min,
             date_max,
         );
@@ -423,7 +421,7 @@ impl Widget for DateTimeEdit {
             ctx,
             time_pattern_rc.clone(),
             &time_mask,
-            field_style.clone(),
+            field_style,
             time_min,
             time_max,
         );
@@ -443,19 +441,18 @@ impl Widget for DateTimeEdit {
                         .child(Center::new().child(dot)),
                 )
             }
-            Some(s) if s.is_empty() => {
-                ctx.add(FixedSize::new().bind_width(0.0_f32).bind_height(field_style.height))
-            }
+            Some(s) if s.is_empty() => ctx.add(
+                FixedSize::new()
+                    .bind_width(0.0_f32)
+                    .bind_height(field_style.height),
+            ),
             Some(s) => {
                 let text = TextWidget::new_literal(s)
                     .style(fern_tokens::TextStyleRole::Body)
                     .color(fern_tokens::TextRole::Secondary)
                     .single_line()
                     .a11y_hidden();
-                ctx.add(
-                    Padding::new(0.0, 6.0, 0.0, 6.0)
-                        .child(Center::new().child(text)),
-                )
+                ctx.add(Padding::new(0.0, 6.0, 0.0, 6.0).child(Center::new().child(text)))
             }
         };
 
@@ -482,8 +479,8 @@ impl Widget for DateTimeEdit {
             let time_part = self.time_part.clone();
             let on_changed = self.on_value_changed.clone();
             let return_focus_to = ctx.self_id();
-            let mut calendar = Calendar::single(calendar_temp.clone()).on_activate(
-                move |d, ctx_evt| {
+            let mut calendar =
+                Calendar::single(calendar_temp.clone()).on_activate(move |d, ctx_evt| {
                     let clamped = clamp_date(d, date_min, date_max);
                     date_part.set(Some(clamped));
                     date_text.set(format_value(&date_pattern, Some(clamped), None));
@@ -501,8 +498,7 @@ impl Widget for DateTimeEdit {
                     ctx_evt.dismiss_all_overlays();
                     ctx_evt.request_focus(return_focus_to);
                     ctx_evt.request_frame();
-                },
-            );
+                });
             if let Some(min) = date_min {
                 calendar = calendar.min_date(min);
             }
@@ -524,32 +520,34 @@ impl Widget for DateTimeEdit {
                     popover_open.set(false);
                 })
             };
-            let trigger_btn = BuiltInButton::new(
-                calendar_glyph_icon(date_style.calendar_icon_size),
-            )
-            .size(BuiltInButtonSize::Default)
-            .enabled(enabled && !read_only)
-            .tooltip(resolve_message_widget("date-time-edit-trigger-tooltip", &[]))
-            .on_activate_fn(move |ctx_evt: &mut EventContext| {
-                if popover_open.get() {
-                    popover_open.set(false);
-                    ctx_evt.dismiss_all_overlays();
-                } else {
-                    popover_open.set(true);
-                    ctx_evt.activate(cal_id);
-                    ctx_evt.show_overlay(OverlayRequest {
-                        content_id: cal_id,
-                        anchor: self_ref,
-                        placement: OverlayPlacement::BelowPreferred,
-                        dismiss: DismissBehavior::EscapeOrClickOutside,
-                        layer: OverlayLayer::InTree,
-                        parent_overlay: None,
-                        on_dismiss: Some(dismiss_cb.clone()),
-                        fade_duration: None,
+            let trigger_btn =
+                BuiltInButton::new(calendar_glyph_icon(date_style.calendar_icon_size))
+                    .size(BuiltInButtonSize::Default)
+                    .enabled(enabled && !read_only)
+                    .tooltip(resolve_message_widget(
+                        "date-time-edit-trigger-tooltip",
+                        &[],
+                    ))
+                    .on_activate_fn(move |ctx_evt: &mut EventContext| {
+                        if popover_open.get() {
+                            popover_open.set(false);
+                            ctx_evt.dismiss_all_overlays();
+                        } else {
+                            popover_open.set(true);
+                            ctx_evt.activate(cal_id);
+                            ctx_evt.show_overlay(OverlayRequest {
+                                content_id: cal_id,
+                                anchor: self_ref,
+                                placement: OverlayPlacement::BelowPreferred,
+                                dismiss: DismissBehavior::EscapeOrClickOutside,
+                                layer: OverlayLayer::InTree,
+                                parent_overlay: None,
+                                on_dismiss: Some(dismiss_cb.clone()),
+                                fade_duration: None,
+                            });
+                            ctx_evt.request_focus(cal_id);
+                        }
                     });
-                    ctx_evt.request_focus(cal_id);
-                }
-            });
             Some(ctx.add(trigger_btn))
         } else {
             None
@@ -566,36 +564,44 @@ impl Widget for DateTimeEdit {
         }
         let inline_row_id = ctx.add(row);
         let row_id = ctx.add(
-            Padding::new(0.0, field_style.padding_horizontal, 0.0, field_style.padding_horizontal)
-                .child_id(inline_row_id),
+            Padding::new(
+                0.0,
+                field_style.padding_horizontal,
+                0.0,
+                field_style.padding_horizontal,
+            )
+            .child_id(inline_row_id),
         );
 
         // ── Frame: bg + border driven by focus + validation ───
         let feedback_for_border = self.feedback.clone();
         let focused_for_border = self.focused.clone();
-        let border_role = focused_for_border
-            .clone()
-            .zip(&feedback_for_border)
-            .map(|(focused, fb)| match fb {
-                ValidationFeedback::Invalid { .. } => BorderRole::Error,
-                ValidationFeedback::Corrected { .. } if !*focused => BorderRole::Focused,
-                _ => {
-                    if *focused {
-                        BorderRole::Focused
-                    } else {
-                        BorderRole::Default
+        let border_role =
+            focused_for_border
+                .clone()
+                .zip(&feedback_for_border)
+                .map(|(focused, fb)| match fb {
+                    ValidationFeedback::Invalid { .. } => BorderRole::Error,
+                    ValidationFeedback::Corrected { .. } if !*focused => BorderRole::Focused,
+                    _ => {
+                        if *focused {
+                            BorderRole::Focused
+                        } else {
+                            BorderRole::Default
+                        }
                     }
-                }
-            });
-        let border_width_signal = focused_for_border.clone().zip(&feedback_for_border).map(
-            move |(focused, fb)| {
-                if *focused || matches!(fb, ValidationFeedback::Invalid { .. }) {
-                    focus_ring_width
-                } else {
-                    field_style.border_width
-                }
-            },
-        );
+                });
+        let border_width_signal =
+            focused_for_border
+                .clone()
+                .zip(&feedback_for_border)
+                .map(move |(focused, fb)| {
+                    if *focused || matches!(fb, ValidationFeedback::Invalid { .. }) {
+                        focus_ring_width
+                    } else {
+                        field_style.border_width
+                    }
+                });
         let bg = RectWidget::new()
             .background(SurfaceRole::Content)
             .border_color(border_role)
@@ -606,7 +612,9 @@ impl Widget for DateTimeEdit {
         let sized_id = ctx.add(MinSize::new(0.0, field_style.height).child_id(framed_id));
 
         // ── Inline validation strip below the frame ───────────
-        let strip_id = ctx.add(crate::primitives::ValidationStrip::new(self.feedback.clone()));
+        let strip_id = ctx.add(crate::primitives::ValidationStrip::new(
+            self.feedback.clone(),
+        ));
         let root_with_strip = ctx.add(
             VStack::new()
                 .spacing(field_style.validation_strip_gap)
@@ -704,10 +712,8 @@ impl Widget for DateTimeEdit {
                 if !self.placeholder.is_empty() {
                     builder.set_placeholder(self.placeholder.clone());
                 } else {
-                    builder.set_placeholder(resolve_message_widget(
-                        "date-time-edit-placeholder",
-                        &[],
-                    ));
+                    builder
+                        .set_placeholder(resolve_message_widget("date-time-edit-placeholder", &[]));
                 }
             }
         }
@@ -746,12 +752,8 @@ impl DateTimeEdit {
         min: Option<Date>,
         max: Option<Date>,
     ) -> WidgetId {
-        let validator = build_date_validator(
-            pattern_rc.clone(),
-            min,
-            max,
-            self.validation_behavior,
-        );
+        let validator =
+            build_date_validator(pattern_rc.clone(), min, max, self.validation_behavior);
 
         let outer_value = self.value.clone();
         let on_changed = self.on_value_changed.clone();
@@ -795,10 +797,10 @@ impl DateTimeEdit {
             })
         };
 
-        let field_id = self.build_field(
+        self.build_field(
             ctx,
             text_signal.clone(),
-            field_style.clone(),
+            field_style,
             mask_string,
             validator,
             self.placeholder.clone(),
@@ -813,8 +815,7 @@ impl DateTimeEdit {
                 max,
                 merge: Rc::new(merge_into_outer),
             },
-        );
-        field_id
+        )
     }
 
     fn build_time_half(
@@ -826,12 +827,8 @@ impl DateTimeEdit {
         min: Option<Time>,
         max: Option<Time>,
     ) -> WidgetId {
-        let validator = build_time_validator(
-            pattern_rc.clone(),
-            min,
-            max,
-            self.validation_behavior,
-        );
+        let validator =
+            build_time_validator(pattern_rc.clone(), min, max, self.validation_behavior);
 
         let outer_value = self.value.clone();
         let on_changed = self.on_value_changed.clone();
@@ -878,7 +875,7 @@ impl DateTimeEdit {
         self.build_field(
             ctx,
             text_signal.clone(),
-            field_style.clone(),
+            field_style,
             mask_string,
             validator,
             String::new(),
@@ -940,10 +937,10 @@ impl DateTimeEdit {
                     return true;
                 }
                 for tok in &pattern_for_filter.tokens {
-                    if let crate::common::datetime::pattern::PatternToken::Literal(s) = tok {
-                        if s.chars().any(|x| x == c) {
-                            return true;
-                        }
+                    if let crate::common::datetime::pattern::PatternToken::Literal(s) = tok
+                        && s.chars().any(|x| x == c)
+                    {
+                        return true;
                     }
                 }
                 false
@@ -996,13 +993,12 @@ impl DateTimeEdit {
         // wraps in `Expand::horizontal()` (zero-basis flex=1) so the
         // time half absorbs the unified frame's leftover width.
         let is_time = matches!(kind, DateTimeHalfKind::Time { .. });
-        let sized_field_id = if is_time
-            && self.time_width_policy == crate::date_edit::WidthPolicy::Fill
-        {
-            ctx.add(crate::primitives::Expand::horizontal().child_id(padded_field_id))
-        } else {
-            padded_field_id
-        };
+        let sized_field_id =
+            if is_time && self.time_width_policy == crate::date_edit::WidthPolicy::Fill {
+                ctx.add(crate::primitives::Expand::horizontal().child_id(padded_field_id))
+            } else {
+                padded_field_id
+            };
 
         // ── Segment-stepping (Up/Down/PageUp/PageDown on focused
         //    segment) ─────────────────────────────────────────
@@ -1019,8 +1015,7 @@ impl DateTimeEdit {
                 let caret_setter = caret_setter.clone();
                 Rc::new(move |delta: i32, ctx_evt: &mut EventContext| {
                     let pos = caret.get();
-                    let Some((_, _, kind_seg)) = segment_at_position(&pattern, pos)
-                    else {
+                    let Some((_, _, kind_seg)) = segment_at_position(&pattern, pos) else {
                         return;
                     };
                     let current = date_signal.get().unwrap_or_else(today_local);
@@ -1045,8 +1040,7 @@ impl DateTimeEdit {
                 let caret_setter = caret_setter.clone();
                 Rc::new(move |delta: i32, ctx_evt: &mut EventContext| {
                     let pos = caret.get();
-                    let Some((_, _, kind_seg)) = segment_at_position(&pattern, pos)
-                    else {
+                    let Some((_, _, kind_seg)) = segment_at_position(&pattern, pos) else {
                         return;
                     };
                     let current = time_signal.get().unwrap_or_else(Time::midnight);
@@ -1065,13 +1059,13 @@ impl DateTimeEdit {
         let read_only = self.read_only;
         let step_for_key = segment_step.clone();
         ctx.add(
-            ZStack::new().add_child(sized_field_id).on_key_preview(
-                move |event, ctx_evt| {
+            ZStack::new()
+                .add_child(sized_field_id)
+                .on_key_preview(move |event, ctx_evt| {
                     if !enabled || read_only {
                         return EventResponse::Ignored;
                     }
-                    let WidgetEvent::KeyDown { key, modifiers, .. } = event
-                    else {
+                    let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
                         return EventResponse::Ignored;
                     };
                     let mult = if modifiers.shift() { 10 } else { 1 };
@@ -1084,8 +1078,7 @@ impl DateTimeEdit {
                     };
                     step_for_key(delta, ctx_evt);
                     EventResponse::Handled
-                },
-            ),
+                }),
         )
     }
 }
@@ -1132,7 +1125,11 @@ pub(crate) fn compose_feedback(
     a: &ValidationFeedback,
     b: &ValidationFeedback,
 ) -> ValidationFeedback {
-    if rank(a) >= rank(b) { a.clone() } else { b.clone() }
+    if rank(a) >= rank(b) {
+        a.clone()
+    } else {
+        b.clone()
+    }
 }
 
 /// Painted middle-dot glyph used as the visual separator between the

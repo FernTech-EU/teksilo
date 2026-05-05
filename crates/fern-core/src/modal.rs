@@ -14,22 +14,17 @@ pub enum ModalPresentation {
 }
 
 /// How a presented modal can be closed by framework-managed interactions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ModalCloseBehavior {
     /// Close when clicking outside the modal surface.
     ClickOutside,
     /// Close when pressing Escape.
     EscapeKey,
     /// Close on either Escape or an outside click.
+    #[default]
     EscapeOrClickOutside,
     /// Only close through explicit application logic.
     Manual,
-}
-
-impl Default for ModalCloseBehavior {
-    fn default() -> Self {
-        Self::EscapeOrClickOutside
-    }
 }
 
 /// Builder used to create modal content in a target widget tree later.
@@ -152,7 +147,10 @@ impl std::fmt::Debug for ModalRequest {
             .field("title", &self.title)
             .field("size", &self.size)
             .field("focus_target", &self.focus_target)
-            .field("on_dismiss", &self.on_dismiss.as_ref().map(|_| "<callback>"))
+            .field(
+                "on_dismiss",
+                &self.on_dismiss.as_ref().map(|_| "<callback>"),
+            )
             .finish()
     }
 }

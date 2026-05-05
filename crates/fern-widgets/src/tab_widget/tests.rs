@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use fern_canvas::{Size, SizeProposal};
 use fern_core::accesskit;
-use fern_core::event::{Key, Modifiers, WidgetEvent};
+use fern_core::event::{Key, Modifiers};
 use fern_core::signal::Signal;
 use fern_core::widget::{LayoutContext, LayoutResponse, Widget};
 use fern_core::widget_id::WidgetId;
@@ -21,11 +21,7 @@ use crate::tab_widget::{
 struct FixedLeaf(f32, f32);
 
 impl Widget for FixedLeaf {
-    fn layout_response(
-        &self,
-        _proposal: SizeProposal,
-        _ctx: &LayoutContext,
-    ) -> LayoutResponse {
+    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
         Size::new(self.0, self.1).into()
     }
 }
@@ -41,11 +37,7 @@ impl Widget for BuildCountingLeaf {
         Vec::new()
     }
 
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        _ctx: &LayoutContext,
-    ) -> LayoutResponse {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
         proposal.resolve(120.0, 48.0).into()
     }
 }
@@ -87,8 +79,14 @@ fn static_only_widget_builds_without_panic() {
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
     tree.add(
         TabWidget::new(selected.clone())
-            .static_tab(TabInfo::new().title(label("Overview")), FixedLeaf(120.0, 48.0))
-            .static_tab(TabInfo::new().title(label("Details")), FixedLeaf(140.0, 52.0))
+            .static_tab(
+                TabInfo::new().title(label("Overview")),
+                FixedLeaf(120.0, 48.0),
+            )
+            .static_tab(
+                TabInfo::new().title(label("Details")),
+                FixedLeaf(140.0, 52.0),
+            )
             .show_scroll_arrows(false)
             .show_overflow_dropdown(false),
     );
@@ -133,12 +131,16 @@ fn static_tabs_dormancy_preserved_across_switches() {
             .static_tab_with_id(
                 id_first,
                 TabInfo::new().title(label("First")),
-                BuildCountingLeaf { build_count: first_builds.clone() },
+                BuildCountingLeaf {
+                    build_count: first_builds.clone(),
+                },
             )
             .static_tab_with_id(
                 id_second,
                 TabInfo::new().title(label("Second")),
-                BuildCountingLeaf { build_count: second_builds.clone() },
+                BuildCountingLeaf {
+                    build_count: second_builds.clone(),
+                },
             )
             .show_scroll_arrows(false)
             .show_overflow_dropdown(false),
@@ -180,7 +182,9 @@ fn static_tab_pane_survives_dynamic_model_push() {
         TabWidget::new(selected.clone())
             .static_tab(
                 TabInfo::new().title(label("Welcome")),
-                BuildCountingLeaf { build_count: static_builds.clone() },
+                BuildCountingLeaf {
+                    build_count: static_builds.clone(),
+                },
             )
             .dynamic_tab::<()>("doc", |_h, _s| {
                 Box::new(FixedLeaf(120.0, 48.0)) as Box<dyn Widget>
@@ -237,8 +241,11 @@ fn static_tab_id_survives_rebuild() {
 
     // The pre-registered widget is reachable via the AT tree.
     let update = tree.sync_accessibility();
-    let panel_count_before =
-        update.nodes.iter().filter(|(_, n)| n.role() == accesskit::Role::TabPanel).count();
+    let panel_count_before = update
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.role() == accesskit::Role::TabPanel)
+        .count();
     assert_eq!(panel_count_before, 1, "exactly one tab panel");
 
     // Trigger a rebuild via dynamic_model.push.
@@ -299,11 +306,7 @@ fn bar_trailing_slot_survives_rebuild() {
     #[derive(Debug)]
     struct MarkerLeaf;
     impl Widget for MarkerLeaf {
-        fn layout_response(
-            &self,
-            _proposal: SizeProposal,
-            _ctx: &LayoutContext,
-        ) -> LayoutResponse {
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
             Size::new(48.0, 24.0).into()
         }
         fn accessibility(&self, b: &mut fern_core::accessibility::AccessNodeBuilder) {
@@ -315,7 +318,9 @@ fn bar_trailing_slot_survives_rebuild() {
     tree.add(
         TabWidget::new(selected.clone())
             .static_tab(TabInfo::new().title(label("A")), FixedLeaf(120.0, 48.0))
-            .dynamic_tab::<()>("doc", |_h, _s| Box::new(FixedLeaf(120.0, 48.0)) as Box<dyn Widget>)
+            .dynamic_tab::<()>("doc", |_h, _s| {
+                Box::new(FixedLeaf(120.0, 48.0)) as Box<dyn Widget>
+            })
             .dynamic_model(model.clone())
             .bar_trailing_slot(MarkerLeaf)
             .show_scroll_arrows(false)
@@ -325,11 +330,15 @@ fn bar_trailing_slot_survives_rebuild() {
 
     let marker_present = |tree: &mut WidgetTree| -> bool {
         let update = tree.sync_accessibility();
-        update.nodes.iter().any(|(_, n)| {
-            n.role() == accesskit::Role::Button && n.label() == Some("MARKER_SLOT")
-        })
+        update
+            .nodes
+            .iter()
+            .any(|(_, n)| n.role() == accesskit::Role::Button && n.label() == Some("MARKER_SLOT"))
     };
-    assert!(marker_present(&mut tree), "marker slot present after first build");
+    assert!(
+        marker_present(&mut tree),
+        "marker slot present after first build"
+    );
 
     // Force a rebuild via dynamic_model push.
     model.push(TabHandle::dynamic(
@@ -522,8 +531,7 @@ fn locale_change_retitles_live_tabs() {
     // process-thread-local i18n manager, switches it, and verifies
     // the AT label changes accordingly.
     use fern_i18n::{
-        I18nConfig, I18nManager, LanguageIdentifier, LocalizedString, localized,
-        resolve_message,
+        I18nConfig, I18nManager, LanguageIdentifier, LocalizedString, localized, resolve_message,
         thread_local::{clear, install},
     };
 
@@ -534,16 +542,12 @@ fn locale_change_retitles_live_tabs() {
     install(mgr.clone());
 
     let selected: Signal<Option<TabId>> = Signal::new(None);
-    let title: LocalizedString =
-        localized(|| resolve_message("tab-greeting", &[]));
+    let title: LocalizedString = localized(|| resolve_message("tab-greeting", &[]));
 
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
     tree.add(
         TabWidget::new(selected.clone())
-            .static_tab(
-                TabInfo::new().title(title),
-                FixedLeaf(120.0, 48.0),
-            )
+            .static_tab(TabInfo::new().title(title), FixedLeaf(120.0, 48.0))
             .show_scroll_arrows(false)
             .show_overflow_dropdown(false),
     );
@@ -578,10 +582,9 @@ fn locale_change_retitles_live_tabs() {
 #[should_panic(expected = "is reserved by the framework for static tabs")]
 fn dynamic_tab_kind_must_not_be_static_kind_at_registration() {
     let selected: Signal<Option<TabId>> = Signal::new(None);
-    let _ = TabWidget::new(selected).dynamic_tab::<()>(
-        crate::tab_widget::STATIC_KIND,
-        |_h, _s| Box::new(FixedLeaf(120.0, 48.0)) as Box<dyn Widget>,
-    );
+    let _ = TabWidget::new(selected).dynamic_tab::<()>(crate::tab_widget::STATIC_KIND, |_h, _s| {
+        Box::new(FixedLeaf(120.0, 48.0)) as Box<dyn Widget>
+    });
 }
 
 #[test]
@@ -623,7 +626,9 @@ fn cross_boundary_default_reorder_silently_dropped() {
                 TabInfo::new().title(label("S")),
                 FixedLeaf(120.0, 48.0),
             )
-            .dynamic_tab::<()>("doc", |_h, _s| Box::new(FixedLeaf(120.0, 48.0)) as Box<dyn Widget>)
+            .dynamic_tab::<()>("doc", |_h, _s| {
+                Box::new(FixedLeaf(120.0, 48.0)) as Box<dyn Widget>
+            })
             .dynamic_model(model.clone())
             .reorderable(true)
             .show_scroll_arrows(false)
@@ -673,7 +678,9 @@ fn on_pin_toggle_handler_fires_with_tab_id() {
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
     let widget_id = tree.add(
         TabWidget::new(selected)
-            .dynamic_tab::<()>("doc", |_h, _s| Box::new(FixedLeaf(120.0, 48.0)) as Box<dyn Widget>)
+            .dynamic_tab::<()>("doc", |_h, _s| {
+                Box::new(FixedLeaf(120.0, 48.0)) as Box<dyn Widget>
+            })
             .dynamic_model(model)
             .on_pin_toggle(move |id, pinned| cap.set(Some((id, pinned))))
             .show_scroll_arrows(false)
@@ -687,7 +694,11 @@ fn on_pin_toggle_handler_fires_with_tab_id() {
     // installed reaches a stable state. Setting `captured` is
     // exercised in bar-level DnD tests.
     let _ = widget_id;
-    assert_eq!(captured.get(), None, "no drag yet — handler should not have fired");
+    assert_eq!(
+        captured.get(),
+        None,
+        "no drag yet — handler should not have fired"
+    );
 }
 
 #[test]
@@ -705,7 +716,9 @@ fn empty_model_after_close_drains_selection() {
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
     let widget_id = tree.add(
         TabWidget::new(selected.clone())
-            .dynamic_tab::<()>("doc", |_h, _s| Box::new(FixedLeaf(120.0, 48.0)) as Box<dyn Widget>)
+            .dynamic_tab::<()>("doc", |_h, _s| {
+                Box::new(FixedLeaf(120.0, 48.0)) as Box<dyn Widget>
+            })
             .dynamic_model(model.clone())
             .show_scroll_arrows(false)
             .show_overflow_dropdown(false),
@@ -792,12 +805,20 @@ fn new_dynamic_handle<S: 'static>(kind: &'static str, title: &str, state: S) -> 
 fn dynamic_tab_factory_dispatches_on_kind() {
     let selected: Signal<Option<TabId>> = Signal::new(None);
     let model: ListModel<TabHandle> = ListModel::from_vec(vec![
-        new_dynamic_handle("plain-text-doc", "Notes", DocState {
-            initial_text: "hi".to_string(),
-        }),
-        new_dynamic_handle("image", "Logo", ImageState {
-            url: "logo.png".to_string(),
-        }),
+        new_dynamic_handle(
+            "plain-text-doc",
+            "Notes",
+            DocState {
+                initial_text: "hi".to_string(),
+            },
+        ),
+        new_dynamic_handle(
+            "image",
+            "Logo",
+            ImageState {
+                url: "logo.png".to_string(),
+            },
+        ),
     ]);
 
     let doc_calls = Rc::new(Cell::new(0));
@@ -851,7 +872,9 @@ fn dynamic_model_push_triggers_rebuild_with_new_tab() {
         new_id,
         "plain-text-doc",
         TabInfo::new().title(label("New")).closable(true),
-        DocState { initial_text: "x".into() },
+        DocState {
+            initial_text: "x".into(),
+        },
     ));
     tree.layout(SizeProposal::exact(640.0, 320.0));
 
@@ -867,8 +890,18 @@ fn dynamic_default_close_removes_from_model() {
     let id_a = TabId::fresh();
     let id_b = TabId::fresh();
     let model: ListModel<TabHandle> = ListModel::from_vec(vec![
-        TabHandle::dynamic(id_a, "doc", TabInfo::new().title(label("A")).closable(true), ()),
-        TabHandle::dynamic(id_b, "doc", TabInfo::new().title(label("B")).closable(true), ()),
+        TabHandle::dynamic(
+            id_a,
+            "doc",
+            TabInfo::new().title(label("A")).closable(true),
+            (),
+        ),
+        TabHandle::dynamic(
+            id_b,
+            "doc",
+            TabInfo::new().title(label("B")).closable(true),
+            (),
+        ),
     ]);
     let model_for_assert = model.clone();
 
@@ -893,7 +926,11 @@ fn dynamic_default_close_removes_from_model() {
     hover_and_click_close(&mut tree, header_a);
     tree.layout(SizeProposal::exact(640.0, 320.0));
 
-    assert_eq!(model_for_assert.len(), 1, "tab A should be removed by default close");
+    assert_eq!(
+        model_for_assert.len(),
+        1,
+        "tab A should be removed by default close"
+    );
     // Selection moved to the surviving tab.
     assert_eq!(selected.get(), Some(id_b));
 }
@@ -972,8 +1009,18 @@ fn explicit_on_close_receives_tab_id() {
     let id_a = TabId::fresh();
     let id_b = TabId::fresh();
     let model: ListModel<TabHandle> = ListModel::from_vec(vec![
-        TabHandle::dynamic(id_a, "doc", TabInfo::new().title(label("A")).closable(true), ()),
-        TabHandle::dynamic(id_b, "doc", TabInfo::new().title(label("B")).closable(true), ()),
+        TabHandle::dynamic(
+            id_a,
+            "doc",
+            TabInfo::new().title(label("A")).closable(true),
+            (),
+        ),
+        TabHandle::dynamic(
+            id_b,
+            "doc",
+            TabInfo::new().title(label("B")).closable(true),
+            (),
+        ),
     ]);
 
     let captured: Rc<Cell<Option<TabId>>> = Rc::new(Cell::new(None));
@@ -997,7 +1044,11 @@ fn explicit_on_close_receives_tab_id() {
     let headers = tree.children(header_row);
     hover_and_click_close(&mut tree, headers[1]);
 
-    assert_eq!(captured.get(), Some(id_b), "explicit on_close should fire with the closed tab's id");
+    assert_eq!(
+        captured.get(),
+        Some(id_b),
+        "explicit on_close should fire with the closed tab's id"
+    );
 }
 
 #[test]
@@ -1009,7 +1060,9 @@ fn payload_kind_mismatch_panics_with_clear_message() {
         id,
         "image",
         TabInfo::new().title(label("Wrong")),
-        DocState { initial_text: "doc-state-payload".into() }, // wrong kind!
+        DocState {
+            initial_text: "doc-state-payload".into(),
+        }, // wrong kind!
     )]);
 
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
@@ -1037,13 +1090,18 @@ fn static_then_dynamic_renders_in_order() {
         dyn_id,
         "doc",
         TabInfo::new().title(label("Doc1")).closable(true),
-        DocState { initial_text: "x".into() },
+        DocState {
+            initial_text: "x".into(),
+        },
     )]);
 
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
     let widget_id = tree.add(
         TabWidget::new(selected)
-            .static_tab(TabInfo::new().title(label("Welcome")).pinned(true), FixedLeaf(120.0, 48.0))
+            .static_tab(
+                TabInfo::new().title(label("Welcome")).pinned(true),
+                FixedLeaf(120.0, 48.0),
+            )
             .dynamic_tab::<DocState>("doc", |_h, _s| {
                 Box::new(FixedLeaf(120.0, 48.0)) as Box<dyn Widget>
             })
@@ -1073,7 +1131,10 @@ fn static_then_dynamic_renders_in_order() {
         })
         .max()
         .unwrap_or(0);
-    assert_eq!(pinned_strip_count, 1, "expected the pinned static tab in the leading strip");
+    assert_eq!(
+        pinned_strip_count, 1,
+        "expected the pinned static tab in the leading strip"
+    );
 
     let header_row = data_source_header_row(&tree, bar);
     assert_eq!(
@@ -1095,12 +1156,8 @@ fn tab_bar_shared_sizing_divides_viewport_equally() {
         TabHandle::dynamic(TabId::fresh(), "doc", TabInfo::new().title(label("D")), ()),
         TabHandle::dynamic(TabId::fresh(), "doc", TabInfo::new().title(label("E")), ()),
     ]);
-    let delegate = TabDelegate::new(|_, h: &TabHandle| {
-        h.info
-            .title
-            .clone()
-            .unwrap_or_else(|| label(""))
-    });
+    let delegate =
+        TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
     let bar_id = tree.add(
         TabBar::horizontal(model, delegate, selected, |_, h: &TabHandle| h.id)
@@ -1118,9 +1175,15 @@ fn tab_bar_shared_sizing_divides_viewport_equally() {
     let widths: Vec<f32> = headers.iter().map(|&h| tree.bounds(h).width).collect();
     let target = widths[0];
     for w in &widths {
-        assert!((w - target).abs() < 0.5, "widths drift in Shared mode: {widths:?}");
+        assert!(
+            (w - target).abs() < 0.5,
+            "widths drift in Shared mode: {widths:?}"
+        );
     }
-    assert!((target - 200.0).abs() < 1.0, "expected ~200 dp per tab, got {target}");
+    assert!(
+        (target - 200.0).abs() < 1.0,
+        "expected ~200 dp per tab, got {target}"
+    );
 }
 
 #[test]
@@ -1140,10 +1203,9 @@ fn pinned_tab_renders_in_leading_strip() {
             (),
         ),
     ]);
-    let delegate = TabDelegate::new(|_, h: &TabHandle| {
-        h.info.title.clone().unwrap_or_else(|| label(""))
-    })
-    .pinned(|_, h: &TabHandle| h.info.pinned);
+    let delegate =
+        TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")))
+            .pinned(|_, h: &TabHandle| h.info.pinned);
 
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
     let bar_id = tree.add(
@@ -1155,7 +1217,11 @@ fn pinned_tab_renders_in_leading_strip() {
     tree.layout(SizeProposal::exact(800.0, 60.0));
 
     let header_row = data_source_header_row(&tree, bar_id);
-    assert_eq!(tree.children(header_row).len(), 1, "only the unpinned tab is in the scroll row");
+    assert_eq!(
+        tree.children(header_row).len(),
+        1,
+        "only the unpinned tab is in the scroll row"
+    );
 }
 
 // ─── helpers ────────────────────────────────────────────────────────
@@ -1172,13 +1238,12 @@ fn find_close_button(tree: &WidgetTree, header: WidgetId) -> WidgetId {
             return;
         }
         let info = tree.accessibility_node(id);
-        if info.role() == accesskit::Role::Button {
-            if let Some(name) = info.name() {
-                if name.contains("Close") {
-                    *out = Some(id);
-                    return;
-                }
-            }
+        if info.role() == accesskit::Role::Button
+            && let Some(name) = info.name()
+            && name.contains("Close")
+        {
+            *out = Some(id);
+            return;
         }
         for child in tree.children(id) {
             walk(tree, child, out);
@@ -1212,9 +1277,8 @@ fn vertical_bar_lays_out_pills_top_to_bottom() {
         TabHandle::dynamic(TabId::fresh(), "doc", TabInfo::new().title(label("B")), ()),
         TabHandle::dynamic(TabId::fresh(), "doc", TabInfo::new().title(label("C")), ()),
     ]);
-    let delegate = TabDelegate::new(|_, h: &TabHandle| {
-        h.info.title.clone().unwrap_or_else(|| label(""))
-    });
+    let delegate =
+        TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
 
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
     let bar_id = tree.add(
@@ -1246,9 +1310,8 @@ fn vertical_shared_sizing_uses_intrinsic_pill_height() {
         TabHandle::dynamic(TabId::fresh(), "doc", TabInfo::new().title(label("C")), ()),
         TabHandle::dynamic(TabId::fresh(), "doc", TabInfo::new().title(label("D")), ()),
     ]);
-    let delegate = TabDelegate::new(|_, h: &TabHandle| {
-        h.info.title.clone().unwrap_or_else(|| label(""))
-    });
+    let delegate =
+        TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
     let theme = Theme::light_default();
     let intrinsic = theme.components.tab.editor_tab_height;
     let mut tree = WidgetTree::new().with_theme(theme);
@@ -1357,10 +1420,7 @@ fn enabled_reorderable_tabs_advertise_move_custom_actions() {
 
     // Middle tab: both directions advertised.
     let mid_actions = tabs[1].1.custom_actions();
-    let descs: Vec<&str> = mid_actions
-        .iter()
-        .map(|a| a.description.as_ref())
-        .collect();
+    let descs: Vec<&str> = mid_actions.iter().map(|a| a.description.as_ref()).collect();
     assert_eq!(
         descs,
         vec!["Move Left", "Move Right"],
@@ -1415,9 +1475,8 @@ fn tab_bar_internal_bridge_sets_selected_id_when_initial_is_none() {
         TabHandle::dynamic(id_a, "doc", TabInfo::new().title(label("A")), ()),
         TabHandle::dynamic(id_b, "doc", TabInfo::new().title(label("B")), ()),
     ]);
-    let delegate = TabDelegate::new(|_, h: &TabHandle| {
-        h.info.title.clone().unwrap_or_else(|| label(""))
-    });
+    let delegate =
+        TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
     tree.add(
         TabBar::horizontal(model, delegate, selected.clone(), |_, h: &TabHandle| h.id)
@@ -1445,14 +1504,18 @@ fn tab_bar_internal_bridge_drops_selection_when_target_id_disappears() {
         TabHandle::dynamic(id_a, "doc", TabInfo::new().title(label("A")), ()),
         TabHandle::dynamic(id_b, "doc", TabInfo::new().title(label("B")), ()),
     ]);
-    let delegate = TabDelegate::new(|_, h: &TabHandle| {
-        h.info.title.clone().unwrap_or_else(|| label(""))
-    });
+    let delegate =
+        TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
     tree.add(
-        TabBar::horizontal(model.clone(), delegate, selected.clone(), |_, h: &TabHandle| h.id)
-            .show_scroll_arrows(false)
-            .show_overflow_dropdown(false),
+        TabBar::horizontal(
+            model.clone(),
+            delegate,
+            selected.clone(),
+            |_, h: &TabHandle| h.id,
+        )
+        .show_scroll_arrows(false)
+        .show_overflow_dropdown(false),
     );
     tree.layout(SizeProposal::exact(800.0, 60.0));
     assert_eq!(selected.get(), Some(id_b));
@@ -1478,14 +1541,18 @@ fn tab_bar_drains_selection_to_none_when_model_emptied() {
         TabInfo::new().title(label("A")),
         (),
     )]);
-    let delegate = TabDelegate::new(|_, h: &TabHandle| {
-        h.info.title.clone().unwrap_or_else(|| label(""))
-    });
+    let delegate =
+        TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
     tree.add(
-        TabBar::horizontal(model.clone(), delegate, selected.clone(), |_, h: &TabHandle| h.id)
-            .show_scroll_arrows(false)
-            .show_overflow_dropdown(false),
+        TabBar::horizontal(
+            model.clone(),
+            delegate,
+            selected.clone(),
+            |_, h: &TabHandle| h.id,
+        )
+        .show_scroll_arrows(false)
+        .show_overflow_dropdown(false),
     );
     tree.layout(SizeProposal::exact(800.0, 60.0));
 

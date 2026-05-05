@@ -119,7 +119,12 @@ fn build_menu(state: SharedState, policy: PolicyBundle) -> MenuList {
     let mut list = MenuList::new();
 
     let has_selection = state.borrow().cursor.has_selection();
-    let doc_non_empty = !state.borrow().document.to_plain_text().unwrap_or_default().is_empty();
+    let doc_non_empty = !state
+        .borrow()
+        .document
+        .to_plain_text()
+        .unwrap_or_default()
+        .is_empty();
 
     // --- Cut -----------------------------------------------------
     if policy.clipboard_policy.allows_cut() {
@@ -259,10 +264,7 @@ pub(super) fn resolve_factory(
 /// locally so the rich-text module doesn't have to thread the public
 /// alias through every signature.
 pub(super) type RichTextContextMenuFactory = Box<
-    dyn Fn(
-        fern_canvas::Point,
-        &mut fern_core::widget::EventContext,
-    ) -> Option<Box<dyn Widget>>,
+    dyn Fn(fern_canvas::Point, &mut fern_core::widget::EventContext) -> Option<Box<dyn Widget>>,
 >;
 
 /// Keep the `Rc` re-export so callers that need the shared-state

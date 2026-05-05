@@ -36,7 +36,7 @@
 
 use std::sync::OnceLock;
 
-use fern_canvas::{Path, Rect, Size, SizeProposal};
+use fern_canvas::{Path, Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
@@ -194,8 +194,7 @@ impl BuiltInButton {
 
     /// Add button (plus icon). Adds a new entry.
     pub fn add() -> Self {
-        Self::new((BuiltInIcons::global().add)())
-            .tooltip(fern_i18n::tr_widget!(a11y_builtin_add()))
+        Self::new((BuiltInIcons::global().add)()).tooltip(fern_i18n::tr_widget!(a11y_builtin_add()))
     }
 
     /// Visibility toggle (eye / eye-off). Toggles password visibility.
@@ -302,12 +301,10 @@ impl fern_core::widget::Widget for BuiltInButton {
         let icon_content_id = if let Some(ref toggled) = self.toggled {
             // Toggle mode: Switcher with two icons driven by the bool signal
             let toggled_index = toggled.map(|v| if *v { 1 } else { 0 });
-            let primary_icon = std::mem::replace(
-                &mut self.icon,
-                IconWidget::from_path(Path::new(), 0.0),
-            )
-            .icon_size(ib_style.icon_size)
-            .bind_color(icon_role.clone());
+            let primary_icon =
+                std::mem::replace(&mut self.icon, IconWidget::from_path(Path::new(), 0.0))
+                    .icon_size(ib_style.icon_size)
+                    .bind_color(icon_role.clone());
             let alt_icon = self
                 .toggled_icon
                 .take()
@@ -321,12 +318,9 @@ impl fern_core::widget::Widget for BuiltInButton {
             )
         } else {
             // Normal mode: single icon
-            let icon = std::mem::replace(
-                &mut self.icon,
-                IconWidget::from_path(Path::new(), 0.0),
-            )
-            .icon_size(ib_style.icon_size)
-            .bind_color(icon_role);
+            let icon = std::mem::replace(&mut self.icon, IconWidget::from_path(Path::new(), 0.0))
+                .icon_size(ib_style.icon_size)
+                .bind_color(icon_role);
             ctx.add(icon)
         };
 
@@ -486,13 +480,18 @@ impl fern_core::widget::Widget for BuiltInButton {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         match self.root_child_id {
             Some(root_id) => ctx
                 .child_size(root_id, proposal)
                 .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
             None => proposal.resolve(0.0, 0.0),
-        }.into()
+        }
+        .into()
     }
 
     fn place_children(
@@ -643,4 +642,3 @@ fn default_eye_off_icon() -> IconWidget {
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
-

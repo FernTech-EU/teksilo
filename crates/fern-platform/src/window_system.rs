@@ -72,10 +72,7 @@ pub fn supports_native_modal_windows() -> bool {
 /// front (making it visible), which conflicts with AccessKit's
 /// requirement that its adapter be created while the window is still
 /// hidden.
-pub fn attach_child_window(
-    parent: &winit::window::Window,
-    child: &winit::window::Window,
-) {
+pub fn attach_child_window(parent: &winit::window::Window, child: &winit::window::Window) {
     #[cfg(target_os = "macos")]
     {
         use objc2::rc::Retained;

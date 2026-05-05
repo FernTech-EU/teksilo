@@ -14,9 +14,9 @@ use fern_canvas::{Point, Rect, Size, SizeProposal};
 
 use fern_core::DropFeedback;
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::binding::BindingLevel;
 use fern_core::drag_payload::DragPayload;
 use fern_core::signal::Signal;
-use fern_core::binding::BindingLevel;
 use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
@@ -331,8 +331,11 @@ impl<T: 'static> Widget for ListView<T> {
 
         // Bind scroll_y at Relayout so place_children runs on every scroll
         // position change (repositions items) without a full rebuild.
-        self.scroll_y
-            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Relayout);
+        self.scroll_y.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
 
         // Register animated signal for smooth scrolling
         ctx.register_animated_signal(&self.scroll_y);
@@ -592,22 +595,22 @@ impl<T: 'static> Widget for ListView<T> {
                 };
 
                 // Check if this is an intra-widget reorder
-                if let Some(drag_data) = payload.take_typed::<ListViewDragData>() {
-                    if drag_data.source_model_id == my_model_id {
-                        let from = drag_data.source_index;
-                        // Adjust target index: if dragging down, the removal shifts indices
-                        let adjusted_to = if from < to_index {
-                            to_index.saturating_sub(1)
-                        } else {
-                            to_index
-                        };
-                        if from != adjusted_to {
-                            if let Some(ref mf) = move_for_drop {
-                                mf(from, adjusted_to);
-                            }
-                        }
-                        return true;
+                if let Some(drag_data) = payload.take_typed::<ListViewDragData>()
+                    && drag_data.source_model_id == my_model_id
+                {
+                    let from = drag_data.source_index;
+                    // Adjust target index: if dragging down, the removal shifts indices
+                    let adjusted_to = if from < to_index {
+                        to_index.saturating_sub(1)
+                    } else {
+                        to_index
+                    };
+                    if from != adjusted_to
+                        && let Some(ref mf) = move_for_drop
+                    {
+                        mf(from, adjusted_to);
                     }
+                    return true;
                 }
 
                 // Inter-widget drop
@@ -674,8 +677,7 @@ impl<T: 'static> Widget for ListView<T> {
             {
                 let inner_id = ctx.add_boxed(widget);
                 let child_id = ctx.add(crate::list_item_a11y::ListItemWrapper::new(
-                    inner_id,
-                    selected,
+                    inner_id, selected,
                 ));
 
                 // Selection click handling: plain click selects,
@@ -783,7 +785,11 @@ impl<T: 'static> Widget for ListView<T> {
         children
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         // The viewport takes whatever the parent offers.
         let width = proposal.width.unwrap_or(300.0);
         let height = proposal.height.unwrap_or(200.0);
@@ -821,8 +827,7 @@ impl<T: 'static> Widget for ListView<T> {
 
         let scroll_y = self.scroll_y.get();
         let row_step = self.item_height + self.spacing;
-        let needs_internal_scrollbar =
-            self.show_scrollbar && total_height > viewport_height + 0.5;
+        let needs_internal_scrollbar = self.show_scrollbar && total_height > viewport_height + 0.5;
         let content_width = if needs_internal_scrollbar {
             (bounds.width - SCROLLBAR_THICKNESS).max(0.0)
         } else {
@@ -842,16 +847,16 @@ impl<T: 'static> Widget for ListView<T> {
         }
 
         // Place scrollbar (last child) — only when the ListView owns one.
-        if self.show_scrollbar {
-            if let Some(sb_child) = children.last_mut() {
-                if needs_internal_scrollbar {
-                    sb_child.origin =
-                        Point::new(bounds.x + bounds.width - SCROLLBAR_THICKNESS, bounds.y);
-                    sb_child.size = Size::new(SCROLLBAR_THICKNESS, bounds.height);
-                } else {
-                    sb_child.origin = bounds.origin();
-                    sb_child.size = Size::ZERO;
-                }
+        if self.show_scrollbar
+            && let Some(sb_child) = children.last_mut()
+        {
+            if needs_internal_scrollbar {
+                sb_child.origin =
+                    Point::new(bounds.x + bounds.width - SCROLLBAR_THICKNESS, bounds.y);
+                sb_child.size = Size::new(SCROLLBAR_THICKNESS, bounds.height);
+            } else {
+                sb_child.origin = bounds.origin();
+                sb_child.size = Size::ZERO;
             }
         }
     }
@@ -902,7 +907,11 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
             Size::new(self.0, self.1).into()
         }
     }
@@ -1514,7 +1523,7 @@ mod tests {
         let selected_rebuilds: Rc<std::cell::RefCell<Vec<Vec<usize>>>> =
             Rc::new(std::cell::RefCell::new(Vec::new()));
         let current_pass: Rc<Cell<Vec<usize>>> = Rc::new(Cell::new(Vec::new()));
-        let sr = selected_rebuilds.clone();
+        let _sr = selected_rebuilds.clone();
         let cp = current_pass.clone();
 
         let mut tree = WidgetTree::new();
@@ -1547,7 +1556,11 @@ mod tests {
         selected_rebuilds.borrow_mut().push(current_pass.take());
 
         let passes = selected_rebuilds.borrow().clone();
-        assert_eq!(passes[0], Vec::<usize>::new(), "initial build: nothing selected");
+        assert_eq!(
+            passes[0],
+            Vec::<usize>::new(),
+            "initial build: nothing selected"
+        );
         assert_eq!(
             passes[1],
             vec![2],
@@ -1727,9 +1740,8 @@ mod tests {
 
         drag_item(&mut tree, Point::new(50.0, 15.0), Point::new(50.0, 105.0));
 
-        let feedback = with_list_view::<usize, _>(&tree, lv_id, |lv| {
-            lv.drop_feedback_signal().get()
-        });
+        let feedback =
+            with_list_view::<usize, _>(&tree, lv_id, |lv| lv.drop_feedback_signal().get());
         assert!(
             feedback.is_none(),
             "drop_feedback must be cleared by on_drag_leave after drop, got {:?}",
@@ -1802,9 +1814,7 @@ mod tests {
         for _ in 0..8 {
             tree.layout(SizeProposal::exact(400.0, 300.0));
         }
-        let scroll_y = with_list_view::<usize, _>(&tree, _lv_id, |lv| {
-            lv.scroll_y_signal().get()
-        });
+        let scroll_y = with_list_view::<usize, _>(&tree, _lv_id, |lv| lv.scroll_y_signal().get());
         assert!(
             scroll_y > 5.0,
             "Edge auto-scroll should have advanced scroll_y; got {scroll_y}"

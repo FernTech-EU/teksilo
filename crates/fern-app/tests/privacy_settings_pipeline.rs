@@ -60,7 +60,7 @@ fn widget_builds_with_pseudonymous_only() {
         .telemetry(
             TelemetryBundle::new(1)
                 .with_pseudonymous(
-                    Rc::new(StubReporter::pseudonymous("uuid-test")) as Rc<dyn UsageReporter>,
+                    Rc::new(StubReporter::pseudonymous("uuid-test")) as Rc<dyn UsageReporter>
                 )
                 .with_default_mode(TelemetryMode::Pseudonymous)
                 .with_debounce(Duration::ZERO),
@@ -81,7 +81,7 @@ fn widget_builds_with_both_modes_and_compact() {
             TelemetryBundle::new(1)
                 .with_anonymous(Rc::new(StubReporter::anonymous()) as Rc<dyn UsageReporter>)
                 .with_pseudonymous(
-                    Rc::new(StubReporter::pseudonymous("uuid-mix")) as Rc<dyn UsageReporter>,
+                    Rc::new(StubReporter::pseudonymous("uuid-mix")) as Rc<dyn UsageReporter>
                 )
                 .with_default_mode(TelemetryMode::Anonymous)
                 .with_debounce(Duration::ZERO),

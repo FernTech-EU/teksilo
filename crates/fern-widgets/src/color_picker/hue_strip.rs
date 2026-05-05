@@ -104,7 +104,11 @@ impl Widget for HueStrip {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
-        self.hue.bind_to(self_id, registry, fern_core::binding::BindingLevel::RepaintOnly);
+        self.hue.bind_to(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::RepaintOnly,
+        );
 
         let enabled = self.enabled;
         let cached_bounds = self.cached_bounds.clone();
@@ -115,26 +119,26 @@ impl Widget for HueStrip {
         let apply: Rc<dyn Fn(f32, f32)> = {
             let set_hue = set_hue.clone();
             Rc::new(move |x: f32, y: f32| {
-            let bounds = cached_bounds.get();
-            let t = match orientation {
-                Orientation::Vertical => {
-                    if bounds.height <= 0.0 {
-                        return;
+                let bounds = cached_bounds.get();
+                let t = match orientation {
+                    Orientation::Vertical => {
+                        if bounds.height <= 0.0 {
+                            return;
+                        }
+                        ((y - bounds.y) / bounds.height).clamp(0.0, 1.0)
                     }
-                    ((y - bounds.y) / bounds.height).clamp(0.0, 1.0)
-                }
-                Orientation::Horizontal => {
-                    if bounds.width <= 0.0 {
-                        return;
+                    Orientation::Horizontal => {
+                        if bounds.width <= 0.0 {
+                            return;
+                        }
+                        ((x - bounds.x) / bounds.width).clamp(0.0, 1.0)
                     }
-                    ((x - bounds.x) / bounds.width).clamp(0.0, 1.0)
-                }
-            };
-            // Map 0..1 to 0..360 — clamp to 359.999 so wrap doesn't flip
-            // an end-of-strip click back to red-at-the-start.
-            let h = (t * 360.0).min(359.999);
-            (set_hue)(h);
-        })
+                };
+                // Map 0..1 to 0..360 — clamp to 359.999 so wrap doesn't flip
+                // an end-of-strip click back to red-at-the-start.
+                let h = (t * 360.0).min(359.999);
+                (set_hue)(h);
+            })
         };
 
         let mut handlers = HandlerSet::new()
@@ -224,7 +228,11 @@ impl Widget for HueStrip {
         {
             let focus_origin = self.focus_origin.clone();
             handlers = handlers.on_focus(move |gained, _ctx| {
-                focus_origin.set(if gained { Some(FocusOrigin::Keyboard) } else { None });
+                focus_origin.set(if gained {
+                    Some(FocusOrigin::Keyboard)
+                } else {
+                    None
+                });
             });
         }
 
@@ -295,12 +303,7 @@ impl Widget for HueStrip {
         canvas.draw_image(bounds, texture_name);
 
         // Border frame.
-        canvas.stroke_rounded_rect(
-            bounds,
-            radius,
-            ctx.theme.colors.border,
-            1.0,
-        );
+        canvas.stroke_rounded_rect(bounds, radius, ctx.theme.colors.border, 1.0);
 
         // Thumb at the current hue position.
         let t = (self.hue.get() / 360.0).clamp(0.0, 1.0);
@@ -308,14 +311,10 @@ impl Widget for HueStrip {
         let thumb_h = style.strip_thumb_height;
         let thumb_radius = CornerRadius::uniform(style.strip_thumb_corner_radius);
         let (cx, cy) = match self.orientation {
-            Orientation::Vertical => (
-                bounds.x + bounds.width * 0.5,
-                bounds.y + bounds.height * t,
-            ),
-            Orientation::Horizontal => (
-                bounds.x + bounds.width * t,
-                bounds.y + bounds.height * 0.5,
-            ),
+            Orientation::Vertical => (bounds.x + bounds.width * 0.5, bounds.y + bounds.height * t),
+            Orientation::Horizontal => {
+                (bounds.x + bounds.width * t, bounds.y + bounds.height * 0.5)
+            }
         };
         let thumb_rect = match self.orientation {
             Orientation::Vertical => Rect::new(

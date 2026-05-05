@@ -14,7 +14,11 @@ fn tick(tree: &mut WidgetTree) {
     tree.layout(SizeProposal::exact(300.0, 60.0));
 }
 
-fn setup_int(initial: i32, min: i32, max: i32) -> (WidgetTree, Signal<i32>, fern_core::widget_id::WidgetId) {
+fn setup_int(
+    initial: i32,
+    min: i32,
+    max: i32,
+) -> (WidgetTree, Signal<i32>, fern_core::widget_id::WidgetId) {
     let value = Signal::new(initial);
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
     let id = tree.add(SpinBox::new(value.clone(), min, max));
@@ -139,10 +143,7 @@ fn clamp_mode_blocks_below_min() {
 fn wrap_mode_wraps_past_max() {
     let value = Signal::new(9_i32);
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-    let id = tree.add(
-        SpinBox::new(value.clone(), 0, 9)
-            .wrap_mode(WrapMode::Wrap),
-    );
+    let id = tree.add(SpinBox::new(value.clone(), 0, 9).wrap_mode(WrapMode::Wrap));
     tree.layout(SizeProposal::exact(300.0, 60.0));
     tick(&mut tree);
     focus_field(&mut tree, id);
@@ -155,10 +156,7 @@ fn wrap_mode_wraps_past_max() {
 fn wrap_mode_wraps_past_min() {
     let value = Signal::new(0_i32);
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-    let id = tree.add(
-        SpinBox::new(value.clone(), 0, 9)
-            .wrap_mode(WrapMode::Wrap),
-    );
+    let id = tree.add(SpinBox::new(value.clone(), 0, 9).wrap_mode(WrapMode::Wrap));
     tree.layout(SizeProposal::exact(300.0, 60.0));
     tick(&mut tree);
     focus_field(&mut tree, id);
@@ -321,10 +319,8 @@ fn on_value_changed_fires_on_step() {
     let fired = Rc::new(Cell::new(0_i32));
     let c = fired.clone();
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-    let id = tree.add(
-        SpinBox::new(value.clone(), 0, 100)
-            .on_value_changed(move |v, _ctx| c.set(v)),
-    );
+    let id =
+        tree.add(SpinBox::new(value.clone(), 0, 100).on_value_changed(move |v, _ctx| c.set(v)));
     tree.layout(SizeProposal::exact(300.0, 60.0));
     tick(&mut tree);
     focus_field(&mut tree, id);
@@ -342,10 +338,7 @@ fn hidden_buttons_still_step_via_keyboard() {
     use super::ButtonLayout;
     let value = Signal::new(10_i32);
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-    let id = tree.add(
-        SpinBox::new(value.clone(), 0, 100)
-            .button_layout(ButtonLayout::Hidden),
-    );
+    let id = tree.add(SpinBox::new(value.clone(), 0, 100).button_layout(ButtonLayout::Hidden));
     tree.layout(SizeProposal::exact(300.0, 60.0));
     tick(&mut tree);
     focus_field(&mut tree, id);

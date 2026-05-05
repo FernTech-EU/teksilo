@@ -160,9 +160,7 @@ fn worker_loop(rx: Receiver<PoolMsg>) {
             }
             Ok(PoolMsg::Schedule { id, payload }) => {
                 let delay = state.delays.get(&id).copied().unwrap_or(Duration::ZERO);
-                state
-                    .pending
-                    .insert(id, (Instant::now() + delay, payload));
+                state.pending.insert(id, (Instant::now() + delay, payload));
             }
             Ok(PoolMsg::FlushNow { id, ack }) => {
                 let result = match state.pending.remove(&id) {
@@ -175,15 +173,14 @@ fn worker_loop(rx: Receiver<PoolMsg>) {
                 let _ = ack.send(result);
             }
             Ok(PoolMsg::Unregister { id, ack }) => {
-                if let Some((_, payload)) = state.pending.remove(&id) {
-                    if let Some(path) = state.paths.get(&id) {
-                        if let Err(e) = write_atomic(path, &payload) {
-                            eprintln!(
-                                "fern-settings: final flush of {} failed: {e}",
-                                path.display(),
-                            );
-                        }
-                    }
+                if let Some((_, payload)) = state.pending.remove(&id)
+                    && let Some(path) = state.paths.get(&id)
+                    && let Err(e) = write_atomic(path, &payload)
+                {
+                    eprintln!(
+                        "fern-settings: final flush of {} failed: {e}",
+                        path.display(),
+                    );
                 }
                 state.delays.remove(&id);
                 state.paths.remove(&id);
@@ -200,15 +197,11 @@ fn worker_loop(rx: Receiver<PoolMsg>) {
                     .filter_map(|(id, (d, _))| if *d <= now { Some(*id) } else { None })
                     .collect();
                 for id in due {
-                    if let Some((_, payload)) = state.pending.remove(&id) {
-                        if let Some(path) = state.paths.get(&id) {
-                            if let Err(e) = write_atomic(path, &payload) {
-                                eprintln!(
-                                    "fern-settings: write to {} failed: {e}",
-                                    path.display(),
-                                );
-                            }
-                        }
+                    if let Some((_, payload)) = state.pending.remove(&id)
+                        && let Some(path) = state.paths.get(&id)
+                        && let Err(e) = write_atomic(path, &payload)
+                    {
+                        eprintln!("fern-settings: write to {} failed: {e}", path.display(),);
                     }
                 }
             }
@@ -407,10 +400,8 @@ mod tests {
         // means it either has the old or new contents, never partial.)
         let deadline = std::time::Instant::now() + Duration::from_millis(3000);
         loop {
-            if path.exists() {
-                if read(&path) == "second = 2\n" {
-                    break;
-                }
+            if path.exists() && read(&path) == "second = 2\n" {
+                break;
             }
             assert!(
                 std::time::Instant::now() < deadline,

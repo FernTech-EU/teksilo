@@ -88,11 +88,9 @@ impl Widget for Badge {
             .corner_radius(CornerRadius::uniform(badge_style.corner_radius));
 
         let text_id = ctx.add(text_widget);
-        let padding = Padding::symmetric(
-            badge_style.padding_vertical,
-            badge_style.padding_horizontal,
-        )
-        .child_id(text_id);
+        let padding =
+            Padding::symmetric(badge_style.padding_vertical, badge_style.padding_horizontal)
+                .child_id(text_id);
         let padding_id = ctx.add(padding);
         let bg_id = ctx.add(bg_rect);
 
@@ -101,7 +99,11 @@ impl Widget for Badge {
         vec![root]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         if let Some(root) = self.root_child_id
             && let Some(size) = ctx.child_size(root, proposal)
         {

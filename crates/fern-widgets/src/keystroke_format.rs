@@ -146,8 +146,14 @@ mod tests {
         // English source confirms the bundle keys exist and the match
         // arms cover the named-key variants.
         assert_eq!(format_keystroke(KeyStroke::ctrl(Key::Enter)), "Ctrl+Enter");
-        assert_eq!(format_keystroke(KeyStroke::new(Key::Escape, Modifiers::NONE)), "Esc");
-        assert_eq!(format_keystroke(KeyStroke::ctrl(Key::ArrowLeft)), "Ctrl+Left");
+        assert_eq!(
+            format_keystroke(KeyStroke::new(Key::Escape, Modifiers::NONE)),
+            "Esc"
+        );
+        assert_eq!(
+            format_keystroke(KeyStroke::ctrl(Key::ArrowLeft)),
+            "Ctrl+Left"
+        );
         assert_eq!(
             format_keystroke(KeyStroke::new(Key::Tab, Modifiers::SHIFT)),
             "Shift+Tab"
@@ -162,10 +168,7 @@ mod tests {
             "\u{2318}S"
         );
         assert_eq!(
-            format_keystroke(KeyStroke::new(
-                Key::Z,
-                Modifiers::SHIFT | Modifiers::SUPER
-            )),
+            format_keystroke(KeyStroke::new(Key::Z, Modifiers::SHIFT | Modifiers::SUPER)),
             "\u{21E7}\u{2318}Z"
         );
     }

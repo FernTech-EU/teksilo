@@ -67,7 +67,12 @@ pub fn carve_plot_area(p: &CarveParams) -> PlotArea {
             }
             LegendPosition::Bottom => {
                 let h = p.legend_size + p.style.legend_to_plot_gap;
-                legend = Rect::new(rect.x, rect.bottom() - p.legend_size, rect.width, p.legend_size);
+                legend = Rect::new(
+                    rect.x,
+                    rect.bottom() - p.legend_size,
+                    rect.width,
+                    p.legend_size,
+                );
                 rect = Rect::new(rect.x, rect.y, rect.width, (rect.height - h).max(0.0));
             }
             LegendPosition::Leading => {
@@ -77,7 +82,12 @@ pub fn carve_plot_area(p: &CarveParams) -> PlotArea {
             }
             LegendPosition::Trailing => {
                 let w = p.legend_size + p.style.legend_to_plot_gap;
-                legend = Rect::new(rect.right() - p.legend_size, rect.y, p.legend_size, rect.height);
+                legend = Rect::new(
+                    rect.right() - p.legend_size,
+                    rect.y,
+                    p.legend_size,
+                    rect.height,
+                );
                 rect = Rect::new(rect.x, rect.y, (rect.width - w).max(0.0), rect.height);
             }
         }
@@ -119,8 +129,7 @@ pub fn carve_plot_area(p: &CarveParams) -> PlotArea {
         rect.y + p.style.plot_padding_top,
         (rect.width - y_band_w - p.style.plot_padding_leading - p.style.plot_padding_right)
             .max(0.0),
-        (rect.height - x_band_h - p.style.plot_padding_top - p.style.plot_padding_bottom)
-            .max(0.0),
+        (rect.height - x_band_h - p.style.plot_padding_top - p.style.plot_padding_bottom).max(0.0),
     );
 
     PlotArea { plot, legend }

@@ -246,27 +246,22 @@ impl WindowManager {
             .with_visible(false); // Must be invisible for AccessKit adapter creation
 
         if let Some((min_w, min_h)) = config.min_size {
-            window_attrs = window_attrs
-                .with_min_inner_size(winit::dpi::LogicalSize::new(min_w, min_h));
+            window_attrs =
+                window_attrs.with_min_inner_size(winit::dpi::LogicalSize::new(min_w, min_h));
         }
         if let Some((max_w, max_h)) = config.max_size {
-            window_attrs = window_attrs
-                .with_max_inner_size(winit::dpi::LogicalSize::new(max_w, max_h));
+            window_attrs =
+                window_attrs.with_max_inner_size(winit::dpi::LogicalSize::new(max_w, max_h));
         }
         if let Some((x, y)) = config.position {
-            window_attrs =
-                window_attrs.with_position(winit::dpi::LogicalPosition::new(x, y));
+            window_attrs = window_attrs.with_position(winit::dpi::LogicalPosition::new(x, y));
         }
         if matches!(config.decorations, DecorationsMode::None) {
             window_attrs = window_attrs.with_decorations(false);
         }
         if let Some(icon) = &config.icon {
             if icon.is_valid() {
-                match winit::window::Icon::from_rgba(
-                    icon.rgba.clone(),
-                    icon.width,
-                    icon.height,
-                ) {
+                match winit::window::Icon::from_rgba(icon.rgba.clone(), icon.width, icon.height) {
                     Ok(platform_icon) => {
                         window_attrs = window_attrs.with_window_icon(Some(platform_icon));
                     }
@@ -354,8 +349,7 @@ impl WindowManager {
             && let Some(parent_winit) = self.winit_id_for_fern(parent_id)
             && let Some(parent_managed) = self.windows.get(&parent_winit)
             && let Ok(parent_handle) = parent_managed.platform_window.window().window_handle()
-            && let winit::raw_window_handle::RawWindowHandle::Win32(win32) =
-                parent_handle.as_raw()
+            && let winit::raw_window_handle::RawWindowHandle::Win32(win32) = parent_handle.as_raw()
         {
             use winit::platform::windows::WindowAttributesExtWindows;
             window_attrs = window_attrs.with_owner_window(win32.hwnd.get());
@@ -369,8 +363,7 @@ impl WindowManager {
         {
             // SAFETY: the parent window is managed by the WindowManager
             // and remains alive for the lifetime of the child.
-            window_attrs =
-                unsafe { window_attrs.with_parent_window(Some(parent_handle.as_raw())) };
+            window_attrs = unsafe { window_attrs.with_parent_window(Some(parent_handle.as_raw())) };
         }
 
         let window = target.create_window(window_attrs).unwrap();
@@ -462,10 +455,7 @@ impl WindowManager {
                     ..TitleBarHostCallbacks::noop()
                 },
             };
-            match create_title_bar_host(pw.window_arc(), callbacks) {
-                Ok(host) => Some(host),
-                Err(_) => None,
-            }
+            create_title_bar_host(pw.window_arc(), callbacks).ok()
         } else {
             None
         };
@@ -523,7 +513,11 @@ impl WindowManager {
                 let (w, h, pixels) = {
                     let bridge = typesetter.bridge().borrow();
                     let service = bridge.service();
-                    (service.atlas_width(), service.atlas_height(), service.atlas_pixels().to_vec())
+                    (
+                        service.atlas_width(),
+                        service.atlas_height(),
+                        service.atlas_pixels().to_vec(),
+                    )
                 };
                 if w > 0 && h > 0 {
                     pw.renderer_mut().upload_atlas(w, h, &pixels);
@@ -587,11 +581,9 @@ impl WindowManager {
         // this window opted in by carrying a stable id. The handles
         // outlive the function via `ManagedWindow._persist_handles`.
         let persist_handles = match (&persist_service, &config.string_id) {
-            (Some(svc), Some(label)) => crate::window_persist::install_persist_observers(
-                &state,
-                svc.clone(),
-                label.clone(),
-            ),
+            (Some(svc), Some(label)) => {
+                crate::window_persist::install_persist_observers(&state, svc.clone(), label.clone())
+            }
             _ => Vec::new(),
         };
 
@@ -635,17 +627,17 @@ impl WindowManager {
                 handle.purge_window(fern_id);
             }
         }
-        if let Some(winit_id) = self.fern_to_winit.remove(&fern_id) {
-            if let Some(managed) = self.windows.remove(&winit_id) {
-                if let Some(sid) = managed.string_id.as_deref() {
-                    self.string_to_id.remove(sid);
-                }
-                // Unblock parent if this was a modal
-                if managed.modal {
-                    if let Some(parent_id) = managed.parent {
-                        self.modal_blocked.remove(&parent_id);
-                    }
-                }
+        if let Some(winit_id) = self.fern_to_winit.remove(&fern_id)
+            && let Some(managed) = self.windows.remove(&winit_id)
+        {
+            if let Some(sid) = managed.string_id.as_deref() {
+                self.string_to_id.remove(sid);
+            }
+            // Unblock parent if this was a modal
+            if managed.modal
+                && let Some(parent_id) = managed.parent
+            {
+                self.modal_blocked.remove(&parent_id);
             }
         }
         // Also remove any modal children blocking this window
@@ -771,11 +763,7 @@ impl WindowManager {
 
     /// Re-insert a `ManagedWindow` previously extracted via
     /// [`take_managed`](Self::take_managed).
-    pub(crate) fn reinsert_managed(
-        &mut self,
-        id: winit::window::WindowId,
-        managed: ManagedWindow,
-    ) {
+    pub(crate) fn reinsert_managed(&mut self, id: winit::window::WindowId, managed: ManagedWindow) {
         self.windows.insert(id, managed);
     }
 
@@ -900,6 +888,7 @@ impl WindowManager {
     }
 
     /// Mutably iterate over all managed windows.
+    #[allow(dead_code)]
     pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut ManagedWindow> {
         self.windows.values_mut()
     }
@@ -914,10 +903,7 @@ impl WindowManager {
     /// platform supports it. Returns `None` for windows that use native
     /// decorations or run on a window system without custom chrome support
     /// (currently X11).
-    pub fn title_bar_host(
-        &self,
-        fern_id: FernWindowId,
-    ) -> Option<Rc<dyn PlatformTitleBarHost>> {
+    pub fn title_bar_host(&self, fern_id: FernWindowId) -> Option<Rc<dyn PlatformTitleBarHost>> {
         let winit_id = self.fern_to_winit.get(&fern_id).copied()?;
         self.windows
             .get(&winit_id)
@@ -989,9 +975,9 @@ impl WindowManager {
         for loc_str in requests {
             match loc_str.parse::<fern_i18n::LanguageIdentifier>() {
                 Ok(loc) => self.set_locale(loc),
-                Err(e) => eprintln!(
-                    "fern-app: invalid locale `{loc_str}` requested by handler: {e}"
-                ),
+                Err(e) => {
+                    eprintln!("fern-app: invalid locale `{loc_str}` requested by handler: {e}")
+                }
             }
         }
     }
@@ -1131,10 +1117,10 @@ impl fern_core::WindowOps for WindowOpsImpl<'_> {
     }
 
     fn focus_window(&mut self, id: FernWindowId) {
-        if let Some(winit_id) = self.wm.fern_to_winit_map().get(&id).copied() {
-            if let Some(managed) = self.wm.windows_map().get(&winit_id) {
-                managed.platform_window.window().focus_window();
-            }
+        if let Some(winit_id) = self.wm.fern_to_winit_map().get(&id).copied()
+            && let Some(managed) = self.wm.windows_map().get(&winit_id)
+        {
+            managed.platform_window.window().focus_window();
         }
     }
 
@@ -1150,4 +1136,3 @@ impl fern_core::WindowOps for WindowOpsImpl<'_> {
         fern_core::raw_handle::ParentHandle::from_window(arc.as_ref())
     }
 }
-

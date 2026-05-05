@@ -46,10 +46,8 @@ pub(super) fn build_default_item(
     let row_id = ctx.add(row);
 
     let menu_style = theme.components.menu;
-    let pad_v =
-        ((menu_style.item_height - theme.typography.body.size).max(0.0) * 0.5).max(0.0);
-    let padding =
-        Padding::symmetric(pad_v, menu_style.item_padding_horizontal).child_id(row_id);
+    let pad_v = ((menu_style.item_height - theme.typography.body.size).max(0.0) * 0.5).max(0.0);
+    let padding = Padding::symmetric(pad_v, menu_style.item_padding_horizontal).child_id(row_id);
     ctx.add(padding)
 }
 
@@ -143,7 +141,11 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let min_h = ctx.theme.components.menu.item_height;
         // Forward the width proposal so each row stretches the full panel
         // width instead of collapsing to its text's intrinsic width —

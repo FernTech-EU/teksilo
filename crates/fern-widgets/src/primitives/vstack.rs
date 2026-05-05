@@ -210,8 +210,11 @@ impl Widget for VStack {
         }
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
-        self.spacing
-            .register_if_bound(self_id, registry, fern_core::binding::BindingLevel::Relayout);
+        self.spacing.register_if_bound(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::Relayout,
+        );
         self.child_ids.clone()
     }
 }
@@ -225,7 +228,11 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
             Size::new(self.0, self.1).into()
         }
     }
@@ -258,11 +265,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let tab_bar = tree.add(FixedLeaf(120.0, 32.0));
         let content = tree.add(FixedLeaf(120.0, 200.0));
-        let filled = tree.add(
-            Expand::vertical()
-                .respect_intrinsic()
-                .child_id(content),
-        );
+        let filled = tree.add(Expand::vertical().respect_intrinsic().child_id(content));
         let inner = tree.add(VStack::new().add_child(tab_bar).add_child(filled));
 
         // Outer VStack with another sibling underneath. Height is

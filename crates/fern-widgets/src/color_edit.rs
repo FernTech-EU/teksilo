@@ -31,9 +31,7 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::overlay::{DismissBehavior, OverlayPlacement};
 use fern_core::signal::Signal;
-use fern_core::widget::{
-    LayoutContext, LayoutResponse, Widget, WidgetPlacement,
-};
+use fern_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
 use fern_i18n::{LocalizedString, resolve_message_widget};
@@ -114,7 +112,10 @@ impl ColorEdit {
 
     pub fn nullable(value: Signal<Option<Color>>) -> Self {
         let proxy = Signal::new(value.get().unwrap_or(Color::TRANSPARENT));
-        Self::from_binding(ColorBinding::Nullable { source: value, proxy })
+        Self::from_binding(ColorBinding::Nullable {
+            source: value,
+            proxy,
+        })
     }
 
     fn from_binding(binding: ColorBinding) -> Self {
@@ -329,10 +330,7 @@ impl Widget for ColorEdit {
                 source.map(move |opt| match opt {
                     Some(c) if show_hex => c.to_hex_upper(alpha),
                     Some(_) => String::new(),
-                    None => resolve_message_widget(
-                        "color-edit-trigger-empty-placeholder",
-                        &[],
-                    ),
+                    None => resolve_message_widget("color-edit-trigger-empty-placeholder", &[]),
                 })
             }
         };
@@ -351,9 +349,7 @@ impl Widget for ColorEdit {
         };
         let mut trigger = trigger.enabled(self.enabled).leading(swatch);
         if self.show_chevron {
-            trigger = trigger.trailing(
-                IconWidget::chevron_down(12.0).access_hidden(true),
-            );
+            trigger = trigger.trailing(IconWidget::chevron_down(12.0).access_hidden(true));
         }
 
         // ── Wrap in PopoverButton ──
@@ -427,4 +423,3 @@ impl Widget for ColorEdit {
         // here would create a duplicate AT element above the trigger.
     }
 }
-

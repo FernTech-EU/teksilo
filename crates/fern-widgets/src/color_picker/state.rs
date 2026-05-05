@@ -70,7 +70,7 @@ pub(crate) struct ColorComponents {
 impl ColorComponents {
     pub(crate) fn new(ctx: &mut BuildContext, value: Signal<Color>) -> Self {
         let initial = value.get();
-        let (init_h, init_s, init_v) = initial.to_hsv();
+        let (init_h, init_s, _init_v) = initial.to_hsv();
         let last_hue_cell = Rc::new(Cell::new(if init_s > 1e-6 { init_h } else { 0.0 }));
 
         // Update last_hue_cell whenever the bound color has a real hue.
@@ -148,7 +148,11 @@ impl ColorComponents {
             Rc::new(move |s: f32| {
                 let c = v.get();
                 let (cur_h, _s, val) = c.to_hsv();
-                let h = if c.to_hsv().1 > 1e-6 { cur_h } else { cell.get() };
+                let h = if c.to_hsv().1 > 1e-6 {
+                    cur_h
+                } else {
+                    cell.get()
+                };
                 v.set(Color::from_hsva(h, s.clamp(0.0, 1.0), val, c.a()));
             }) as Rc<dyn Fn(f32)>
         };

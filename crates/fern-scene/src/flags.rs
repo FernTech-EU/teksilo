@@ -113,7 +113,9 @@ impl ItemFlags {
 impl Default for ItemFlags {
     /// `IS_VISIBLE | IS_ENABLED | IS_SELECTABLE`.
     fn default() -> Self {
-        Self::IS_VISIBLE.with(Self::IS_ENABLED).with(Self::IS_SELECTABLE)
+        Self::IS_VISIBLE
+            .with(Self::IS_ENABLED)
+            .with(Self::IS_SELECTABLE)
     }
 }
 

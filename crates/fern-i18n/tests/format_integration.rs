@@ -38,9 +38,18 @@ fn install_en_fr() -> Rc<I18nManager> {
                 "cart-total",
                 "Total: { NUMBER($price, style: \"currency\", currency: \"USD\") }",
             ),
-            ("percent-done", "{ NUMBER($ratio, style: \"percent\") } complete"),
-            ("last-saved", "Last saved on { DATETIME($ts, dateStyle: \"long\") }"),
-            ("cart-summary", "{ $count } items at { NUMBER($price) } each"),
+            (
+                "percent-done",
+                "{ NUMBER($ratio, style: \"percent\") } complete",
+            ),
+            (
+                "last-saved",
+                "Last saved on { DATETIME($ts, dateStyle: \"long\") }",
+            ),
+            (
+                "cart-summary",
+                "{ $count } items at { NUMBER($price) } each",
+            ),
         ],
     )
     .with_locale(
@@ -51,9 +60,18 @@ fn install_en_fr() -> Rc<I18nManager> {
                 "cart-total",
                 "Total : { NUMBER($price, style: \"currency\", currency: \"EUR\") }",
             ),
-            ("percent-done", "{ NUMBER($ratio, style: \"percent\") } terminé"),
-            ("last-saved", "Enregistré le { DATETIME($ts, dateStyle: \"long\") }"),
-            ("cart-summary", "{ $count } articles à { NUMBER($price) } chacun"),
+            (
+                "percent-done",
+                "{ NUMBER($ratio, style: \"percent\") } terminé",
+            ),
+            (
+                "last-saved",
+                "Enregistré le { DATETIME($ts, dateStyle: \"long\") }",
+            ),
+            (
+                "cart-summary",
+                "{ $count } articles à { NUMBER($price) } chacun",
+            ),
         ],
     );
     let mgr = I18nManager::from_config(&cfg);
@@ -94,10 +112,7 @@ fn bundle_currency_appends_iso_code() {
     // value with locale grouping and appends the ISO-4217 code.
     let mgr = install_en_fr();
     let s = mgr.resolve_app("cart-total", &[("price", 42.5_f64.into())]);
-    assert!(
-        s.contains("USD"),
-        "expected USD suffix in en-US; got `{s}`"
-    );
+    assert!(s.contains("USD"), "expected USD suffix in en-US; got `{s}`");
     fern_i18n::thread_local::clear();
 }
 
@@ -106,10 +121,7 @@ fn bundle_percent_appends_percent_sign() {
     let mgr = install_en_fr();
     let s = mgr.resolve_app("percent-done", &[("ratio", 0.125_f64.into())]);
     // Percent multiplies by 100 and appends `%`.
-    assert!(
-        s.contains("12.5%"),
-        "expected `12.5%` (en-US); got `{s}`"
-    );
+    assert!(s.contains("12.5%"), "expected `12.5%` (en-US); got `{s}`");
     fern_i18n::thread_local::clear();
 }
 
@@ -131,10 +143,7 @@ fn bundle_datetime_via_fern_datetime_arg() {
     let fr = mgr.resolve_app("last-saved", &[("ts", fdt)]);
     assert!(fr.contains("2026"), "expected year in `{fr}`");
     // fr-FR Long date uses the lowercased month name "mai".
-    assert!(
-        fr.contains("mai"),
-        "expected French month `mai` in `{fr}`"
-    );
+    assert!(fr.contains("mai"), "expected French month `mai` in `{fr}`");
 
     fern_i18n::thread_local::clear();
 }
@@ -263,10 +272,7 @@ fn tr_signal_reacts_to_locale_change() {
 
     let label = tr_signal!(cart_summary(count = count, price = price));
     let en = label.get();
-    assert!(
-        en.contains("items"),
-        "expected en-US wording; got `{en}`"
-    );
+    assert!(en.contains("items"), "expected en-US wording; got `{en}`");
 
     mgr.set_locale(lid("fr-FR"));
     let fr = label.get();

@@ -223,8 +223,7 @@ fn prop_to_kv(p: &OwnedProp) -> KeyValue<'_> {
             // Histograms collapse to a JSON-encoded string; OTel
             // collectors can drop them straight into structured-log
             // sinks, and dashboards can re-parse client-side.
-            let json = serde_json::to_string(entries)
-                .unwrap_or_else(|_| "[]".into());
+            let json = serde_json::to_string(entries).unwrap_or_else(|_| "[]".into());
             AnyValue::String(Cow::Owned(json))
         }
     };
@@ -268,9 +267,7 @@ mod tests {
             .as_array()
             .unwrap();
         assert!(
-            !attrs
-                .iter()
-                .any(|a| a["key"] == "service.instance.id"),
+            !attrs.iter().any(|a| a["key"] == "service.instance.id"),
             "anonymous batch must NOT carry service.instance.id"
         );
     }
@@ -299,8 +296,7 @@ mod tests {
             service_version: "1.0".into(),
         };
         let body = b.build_body(&[ev("intent.save", None)]);
-        let attrs = body["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]
-            ["attributes"]
+        let attrs = body["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]["attributes"]
             .as_array()
             .unwrap();
         let prop_name = attrs
@@ -323,8 +319,7 @@ mod tests {
             service_version: "1.0".into(),
         };
         let body = b.build_body(&[ev("intent.dispatched", None)]);
-        let body_field = &body["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]
-            ["body"];
+        let body_field = &body["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]["body"];
         assert_eq!(body_field["stringValue"], "intent.dispatched");
     }
 

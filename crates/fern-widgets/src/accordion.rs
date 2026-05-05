@@ -31,15 +31,23 @@ struct AccordionRegion {
 
 impl AccordionRegion {
     fn new(name: String, child: WidgetId) -> Self {
-        Self { name, child: Some(child) }
+        Self {
+            name,
+            child: Some(child),
+        }
     }
 }
 
 impl Widget for AccordionRegion {
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         self.child
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -172,8 +180,7 @@ impl Widget for Accordion {
 
         // Header: title + spacer + chevron icon
         // Use two chevrons with visible_when so the icon updates reactively
-        let chevron_down_id =
-            ctx.add(IconWidget::chevron_down(16.0).bind_color(header_fg.clone()));
+        let chevron_down_id = ctx.add(IconWidget::chevron_down(16.0).bind_color(header_fg.clone()));
         let chevron_right_id =
             ctx.add(IconWidget::chevron_right(16.0).bind_color(header_fg.clone()));
         ctx.visible_when(chevron_down_id, expanded.clone());
@@ -212,8 +219,7 @@ impl Widget for Accordion {
                 BorderRole::Transparent
             }
         });
-        let focus_border_width =
-            kb_focused.map(move |f| if *f { focus_ring_width } else { 0.0 });
+        let focus_border_width = kb_focused.map(move |f| if *f { focus_ring_width } else { 0.0 });
         let focus_rect_id = ctx.add(
             crate::primitives::RectWidget::new()
                 .bind_border_color(focus_border_role)
@@ -226,9 +232,7 @@ impl Widget for Accordion {
                 .add_child(header),
         );
 
-        let mut vstack = VStack::new()
-            .spacing(2.0)
-            .add_child(header_with_ring);
+        let mut vstack = VStack::new().spacing(2.0).add_child(header_with_ring);
         if let Some(content_id) = self.content_id {
             // Wrap content in AccordionRegion (Role::Region) so AT can navigate
             // to the content via the header's aria-controls relationship.
@@ -293,7 +297,11 @@ impl Widget for Accordion {
         vec![root]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         if let Some(root) = self.root_child_id
             && let Some(size) = ctx.child_size(root, proposal)
         {
@@ -388,15 +396,13 @@ mod tests {
         // Simulates an external mutation: app code sets `expanded` to
         // true without going through the accordion's tap handler. The
         // `Collapse` observer should still kick off the height tween.
-        use std::time::Duration;
         use crate::primitives::TextWidget;
+        use std::time::Duration;
 
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let content = tree.add(TextWidget::new_literal("Some content"));
-        let acc = tree.add(
-            Accordion::new_literal("Section", expanded.clone()).content_id(content),
-        );
+        let acc = tree.add(Accordion::new_literal("Section", expanded.clone()).content_id(content));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -421,15 +427,13 @@ mod tests {
 
     #[test]
     fn double_toggle_round_trips_height() {
-        use std::time::Duration;
         use crate::primitives::TextWidget;
+        use std::time::Duration;
 
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let content = tree.add(TextWidget::new_literal("Some content"));
-        let acc = tree.add(
-            Accordion::new_literal("Section", expanded.clone()).content_id(content),
-        );
+        let acc = tree.add(Accordion::new_literal("Section", expanded.clone()).content_id(content));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -464,8 +468,8 @@ mod tests {
 
     #[test]
     fn content_dormant_when_collapsed() {
-        use std::time::Duration;
         use crate::primitives::TextWidget;
+        use std::time::Duration;
 
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());

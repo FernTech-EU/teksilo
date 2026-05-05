@@ -276,8 +276,8 @@ impl Memoizable for IcuNumberFormatter {
         } else {
             GroupingStrategy::Never
         });
-        let inner = DecimalFormatter::try_new((&icu_locale).into(), decimal_opts)
-            .map_err(|_| ())?;
+        let inner =
+            DecimalFormatter::try_new((&icu_locale).into(), decimal_opts).map_err(|_| ())?;
         Ok(Self { inner, opts })
     }
 }
@@ -290,20 +290,12 @@ struct IcuDateTimeFormatter {
 
 impl IcuDateTimeFormatter {
     fn format_civil(&self, dt: &jiff::civil::DateTime) -> String {
-        let date = match IcuDate::try_new_iso(
-            dt.year() as i32,
-            dt.month() as u8,
-            dt.day() as u8,
-        ) {
+        let date = match IcuDate::try_new_iso(dt.year() as i32, dt.month() as u8, dt.day() as u8) {
             Ok(d) => d.to_any(),
             Err(_) => return String::new(),
         };
-        let time = match IcuTime::try_new(
-            dt.hour() as u8,
-            dt.minute() as u8,
-            dt.second() as u8,
-            0,
-        ) {
+        let time = match IcuTime::try_new(dt.hour() as u8, dt.minute() as u8, dt.second() as u8, 0)
+        {
             Ok(t) => t,
             Err(_) => return String::new(),
         };
@@ -348,8 +340,7 @@ impl Memoizable for IcuDateTimeFormatter {
         }
 
         let field_set = builder.build_composite_datetime().map_err(|_| ())?;
-        let inner = DateTimeFormatter::try_new((&icu_locale).into(), field_set)
-            .map_err(|_| ())?;
+        let inner = DateTimeFormatter::try_new((&icu_locale).into(), field_set).map_err(|_| ())?;
         Ok(Self { inner })
     }
 }
@@ -426,13 +417,11 @@ impl FluentType for FernDateTime {
             opts.date_style = Some(DateStyle::Medium);
         }
         let inner = self.inner.clone();
-        let result = intls.with_try_get::<IcuDateTimeFormatter, _, _>(
-            (opts,),
-            move |fmt| match &inner {
+        let result =
+            intls.with_try_get::<IcuDateTimeFormatter, _, _>((opts,), move |fmt| match &inner {
                 FernDateTimeInner::Civil(dt) => fmt.format_civil(dt),
                 FernDateTimeInner::Zoned(z) => fmt.format_zoned(z),
-            },
-        );
+            });
         Cow::Owned(result.unwrap_or_default())
     }
 
@@ -687,11 +676,7 @@ fn render_civil(
     }
 }
 
-fn render_zoned(
-    value: &jiff::Zoned,
-    lang: &LanguageIdentifier,
-    opts: &DateTimeOptions,
-) -> String {
+fn render_zoned(value: &jiff::Zoned, lang: &LanguageIdentifier, opts: &DateTimeOptions) -> String {
     match cached_datetime_formatter(lang, opts) {
         Some(fmt) => fmt.format_zoned(value),
         None => value.to_string(),
@@ -761,10 +746,7 @@ fn format_datetime_signal_civil(
     }
 }
 
-fn format_datetime_signal_zoned(
-    prop: Prop<jiff::Zoned>,
-    opts: DateTimeOptions,
-) -> Signal<String> {
+fn format_datetime_signal_zoned(prop: Prop<jiff::Zoned>, opts: DateTimeOptions) -> Signal<String> {
     let locale = locale_signal_or_default();
     let version = current_version_signal();
 

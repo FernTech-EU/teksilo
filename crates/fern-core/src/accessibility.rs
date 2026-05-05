@@ -452,11 +452,7 @@ impl AccessNodeBuilder {
     ///
     /// Cannot be used to mutate widget-derived NodeIds — those live
     /// in the global TreeUpdate and are owned by other widgets.
-    pub fn with_collected_node<F: FnOnce(&mut Node)>(
-        &mut self,
-        node_id: NodeId,
-        f: F,
-    ) -> bool {
+    pub fn with_collected_node<F: FnOnce(&mut Node)>(&mut self, node_id: NodeId, f: F) -> bool {
         for (id, node) in self.children_collected.iter_mut() {
             if *id == node_id {
                 f(node);
@@ -819,11 +815,7 @@ impl AccessNodeBuilder {
     /// `(NodeId, character_index)` pairs where the character index
     /// is an index into the target TextRun's `character_lengths`
     /// (NOT a document-absolute offset — per AccessKit's contract).
-    pub fn set_text_selection_to(
-        &mut self,
-        anchor: (NodeId, usize),
-        focus: (NodeId, usize),
-    ) {
+    pub fn set_text_selection_to(&mut self, anchor: (NodeId, usize), focus: (NodeId, usize)) {
         self.pending_explicit_selection = Some((
             TextPosition {
                 node: anchor.0,
@@ -985,7 +977,11 @@ mod tests {
         // bit 63.
         let wid = fake_widget(1);
         let nid = widget_id_to_node_id(wid);
-        assert_eq!(nid.0 & SYNTHETIC_BIT, 0, "widget NodeId must have bit 63 clear");
+        assert_eq!(
+            nid.0 & SYNTHETIC_BIT,
+            0,
+            "widget NodeId must have bit 63 clear"
+        );
         assert!(!is_synthetic(nid));
     }
 
@@ -1013,7 +1009,10 @@ mod tests {
         let wid = fake_widget(42);
         let p = synthetic_node_id(wid, 17, SyntheticKind::Paragraph);
         let r = synthetic_node_id(wid, 17, SyntheticKind::TextRun);
-        assert_ne!(p, r, "paragraph and text-run kinds must produce distinct NodeIds");
+        assert_ne!(
+            p, r,
+            "paragraph and text-run kinds must produce distinct NodeIds"
+        );
     }
 
     #[test]
@@ -1074,16 +1073,8 @@ mod tests {
         // Emit a paragraph + run so set_text_selection_to has a
         // real synthetic NodeId to target.
         let para = builder.push_paragraph_child(1);
-        let run = builder.push_text_run_child(
-            para,
-            2,
-            0,
-            "ab".to_string(),
-            vec![1, 1],
-            None,
-            None,
-            None,
-        );
+        let run =
+            builder.push_text_run_child(para, 2, 0, "ab".to_string(), vec![1, 1], None, None, None);
         // Both a self-targeted AND an explicit selection are
         // staged — the explicit one must win.
         builder.set_text_selection_on_self(0, 0);

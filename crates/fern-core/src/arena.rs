@@ -181,8 +181,7 @@ pub struct WidgetNode {
     /// (`actions`, `custom_actions` inside this struct) are dispatched
     /// by `event_dispatch_impl.rs` when handling
     /// `WidgetEvent::AccessAction`.
-    pub(crate) access_overrides:
-        Option<Box<crate::widget_builder::AccessibilityOverrides>>,
+    pub(crate) access_overrides: Option<Box<crate::widget_builder::AccessibilityOverrides>>,
     /// Subtree visibility / merge mode (`access_exclude_subtree` /
     /// `access_merge_subtree`). Mirrored from the wrapper's
     /// `HandlerSet`.
@@ -198,10 +197,7 @@ impl std::fmt::Debug for WidgetNode {
             .field("activation", &self.activation)
             .field("dirty", &self.dirty)
             .field("bounds", &self.bounds)
-            .field(
-                "has_gesture_arena",
-                &self.handlers.gesture_arena.is_some(),
-            )
+            .field("has_gesture_arena", &self.handlers.gesture_arena.is_some())
             .field("has_theme_override", &self.theme_override.is_some())
             .field("has_visible_state", &self.visible_state.is_some())
             .field("has_enabled_state", &self.enabled_state.is_some())

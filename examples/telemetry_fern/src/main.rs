@@ -69,11 +69,11 @@ struct DemoRoot;
 impl Widget for DemoRoot {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         for name in ["app.demo.click", "app.demo.save", "app.demo.about"] {
-            ctx.register_action(
-                Action::new(name).on_invoke(|intent: &fern_ui::core::Intent, _ctx| {
+            ctx.register_action(Action::new(name).on_invoke(
+                |intent: &fern_ui::core::Intent, _ctx| {
                     println!("intent dispatched: {}", intent.name);
-                }),
-            );
+                },
+            ));
         }
 
         let click_btn = Button::new_literal("Fire 'click' intent")
@@ -123,17 +123,18 @@ impl Widget for DemoRoot {
         children
             .first()
             .and_then(|c| ctx.child_size(*c, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 }
 
 const EVENT_SCHEMA_VERSION: u32 = 1;
 
 fn main() {
-    let endpoint = std::env::var("FERN_ENDPOINT")
-        .unwrap_or_else(|_| "http://127.0.0.1:50051".into());
-    let product_id = std::env::var("FERN_PRODUCT_ID")
-        .unwrap_or_else(|_| "telemetry-fern-demo".into());
+    let endpoint =
+        std::env::var("FERN_ENDPOINT").unwrap_or_else(|_| "http://127.0.0.1:50051".into());
+    let product_id =
+        std::env::var("FERN_PRODUCT_ID").unwrap_or_else(|_| "telemetry-fern-demo".into());
     let token = std::env::var("FERN_TOKEN").ok();
 
     // Optional TLS — set FERN_TLS_CA to enable.
@@ -149,7 +150,9 @@ fn main() {
     });
 
     // Optional pseudonymous mode — set FERN_INSTALL_ID to enable.
-    let install_id = std::env::var("FERN_INSTALL_ID").ok().filter(|s| !s.is_empty());
+    let install_id = std::env::var("FERN_INSTALL_ID")
+        .ok()
+        .filter(|s| !s.is_empty());
     let mode = if install_id.is_some() {
         TelemetryMode::Pseudonymous
     } else {
@@ -190,7 +193,14 @@ fn main() {
     if let Some(uuid) = &install_id {
         println!("→ install_id: {uuid}");
     }
-    println!("→ token:      {}", if token.is_some() { "set" } else { "(none — server should be in unauth mode)" });
+    println!(
+        "→ token:      {}",
+        if token.is_some() {
+            "set"
+        } else {
+            "(none — server should be in unauth mode)"
+        }
+    );
 
     FernAppBuilder::new()
         .application("eu", "FernTech", "telemetry-fern-demo")

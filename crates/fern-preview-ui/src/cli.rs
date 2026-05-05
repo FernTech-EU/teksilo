@@ -69,6 +69,7 @@ impl PreviewerOptions {
 
     /// Parse from any iterator of `String`-like tokens. Used by tests
     /// and by `from_args`.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_iter<I, S>(iter: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -105,9 +106,7 @@ impl PreviewerOptions {
                     });
                     opts.window_size = (w, h);
                 } else {
-                    eprintln!(
-                        "fern-previewer: --window must be WIDTHxHEIGHT (e.g. 1600x900)"
-                    );
+                    eprintln!("fern-previewer: --window must be WIDTHxHEIGHT (e.g. 1600x900)");
                     std::process::exit(2);
                 }
             } else if let Some(value) = arg.strip_prefix("--title=") {
@@ -245,8 +244,7 @@ mod tests {
 
     #[test]
     fn parses_widget_and_variant_args() {
-        let opts =
-            PreviewerOptions::from_iter(["--widget=button", "--variant=disabled"]);
+        let opts = PreviewerOptions::from_iter(["--widget=button", "--variant=disabled"]);
         assert_eq!(opts.initial_widget.as_deref(), Some("button"));
         assert_eq!(opts.initial_variant.as_deref(), Some("disabled"));
     }

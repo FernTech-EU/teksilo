@@ -121,9 +121,8 @@ impl GridHashIndex {
         } else {
             ((r.bottom() - f32::EPSILON) / cs).floor() as i32
         };
-        let mut out = Vec::with_capacity(
-            ((max_x - min_x + 1).max(1) * (max_y - min_y + 1).max(1)) as usize,
-        );
+        let mut out =
+            Vec::with_capacity(((max_x - min_x + 1).max(1) * (max_y - min_y + 1).max(1)) as usize);
         for x in min_x..=max_x {
             for y in min_y..=max_y {
                 out.push((x, y));
@@ -221,7 +220,11 @@ mod tests {
         g.remove(id(1));
         assert!(!g.contains(id(1)));
         assert_eq!(g.len(), 0);
-        assert_eq!(g.cell_count(), 0, "all buckets should drop with the only item");
+        assert_eq!(
+            g.cell_count(),
+            0,
+            "all buckets should drop with the only item"
+        );
     }
 
     #[test]
@@ -276,7 +279,9 @@ mod tests {
         // RNG dep.
         let mut state: u64 = 0xDEAD_BEEF;
         let mut next = || {
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             (state >> 33) as u32
         };
         for n in 0..200 {
@@ -382,9 +387,6 @@ mod tests {
     }
 
     fn rects_intersect(a: Rect, b: Rect) -> bool {
-        a.x < b.x + b.width
-            && b.x < a.x + a.width
-            && a.y < b.y + b.height
-            && b.y < a.y + a.height
+        a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
     }
 }

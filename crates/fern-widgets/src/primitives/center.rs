@@ -1,4 +1,4 @@
-use fern_canvas::{Point, Rect, Size, SizeProposal};
+use fern_canvas::{Point, Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
@@ -49,7 +49,11 @@ impl Widget for Center {
         self.child_id.into_iter().collect()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         // Claim all offered space.
         proposal.resolve(0.0, 0.0).into()
     }
@@ -86,12 +90,17 @@ impl Widget for Center {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fern_canvas::Size;
     use fern_core::widget_tree::WidgetTree;
 
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
             Size::new(self.0, self.1).into()
         }
     }

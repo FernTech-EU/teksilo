@@ -107,8 +107,7 @@ fn active_tab_has_controls_pointing_into_tree() {
     let (mut tree, _) = make_tree(3);
     let update = tree.sync_accessibility();
     let tab_ids = nodes_with_role(&update, accesskit::Role::Tab);
-    let emitted: std::collections::HashSet<_> =
-        update.nodes.iter().map(|(id, _)| *id).collect();
+    let emitted: std::collections::HashSet<_> = update.nodes.iter().map(|(id, _)| *id).collect();
     let first_tab_node = update
         .nodes
         .iter()
@@ -127,8 +126,18 @@ fn active_tab_has_controls_pointing_into_tree() {
 fn dynamic_model_tab_count_is_reflected() {
     let selected: Signal<Option<TabId>> = Signal::new(None);
     let model: ListModel<TabHandle> = ListModel::from_vec(vec![
-        TabHandle::dynamic(TabId::fresh(), "doc", TabInfo::new().title(fern_i18n::LocalizedString::literal("A")), ()),
-        TabHandle::dynamic(TabId::fresh(), "doc", TabInfo::new().title(fern_i18n::LocalizedString::literal("B")), ()),
+        TabHandle::dynamic(
+            TabId::fresh(),
+            "doc",
+            TabInfo::new().title(fern_i18n::LocalizedString::literal("A")),
+            (),
+        ),
+        TabHandle::dynamic(
+            TabId::fresh(),
+            "doc",
+            TabInfo::new().title(fern_i18n::LocalizedString::literal("B")),
+            (),
+        ),
     ]);
 
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());

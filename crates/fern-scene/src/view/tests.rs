@@ -11,11 +11,7 @@ impl FillWidget {
 }
 
 impl Widget for FillWidget {
-    fn layout_response(
-        &self,
-        _proposal: SizeProposal,
-        _ctx: &LayoutContext,
-    ) -> LayoutResponse {
+    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
         Size::new(0.0, 0.0).into()
     }
 }
@@ -471,10 +467,7 @@ fn off_screen_items_are_culled_to_zero_size() {
     // paint walks short-circuit on it.
     let mut scene = Scene::new();
     let inside = scene.add_widget(FillWidget::new(), Rect::new(50.0, 50.0, 100.0, 100.0));
-    let outside = scene.add_widget(
-        FillWidget::new(),
-        Rect::new(5_000.0, 5_000.0, 100.0, 100.0),
-    );
+    let outside = scene.add_widget(FillWidget::new(), Rect::new(5_000.0, 5_000.0, 100.0, 100.0));
 
     let mut tree = WidgetTree::new();
     let view_id = tree.add(SceneView::new(scene));
@@ -503,8 +496,7 @@ fn pan_brings_culled_items_back_into_view() {
     // the view to cover them and they should pop back to full
     // size on the next layout.
     let mut scene = Scene::new();
-    let far_right =
-        scene.add_widget(FillWidget::new(), Rect::new(2_000.0, 50.0, 100.0, 100.0));
+    let far_right = scene.add_widget(FillWidget::new(), Rect::new(2_000.0, 50.0, 100.0, 100.0));
 
     let mut tree = WidgetTree::new();
     let view_id = tree.add(SceneView::new(scene));
@@ -597,8 +589,7 @@ fn non_root_scene_view_places_children_at_scene_coords_and_culls_correctly() {
 
     let mut scene = Scene::new();
     let inside = scene.add_widget(FillWidget::new(), Rect::new(10.0, 20.0, 100.0, 50.0));
-    let outside =
-        scene.add_widget(FillWidget::new(), Rect::new(5_000.0, 5_000.0, 50.0, 50.0));
+    let outside = scene.add_widget(FillWidget::new(), Rect::new(5_000.0, 5_000.0, 50.0, 50.0));
 
     let mut tree = WidgetTree::new();
     let view = SceneView::new(scene);
@@ -633,9 +624,7 @@ fn non_root_scene_view_places_children_at_scene_coords_and_culls_correctly() {
     );
     // Visual position via view_transform = bounds.origin + scene_rect.origin
     // (zoom = 1, pan = 0, rotation = 0).
-    let visual_origin = view
-        .view_transform()
-        .apply_point(Point::new(10.0, 20.0));
+    let visual_origin = view.view_transform().apply_point(Point::new(10.0, 20.0));
     assert!(
         (visual_origin.x - 50.0).abs() < 1e-3,
         "visual x = bounds.x + scene.x = 40 + 10 = 50 (got {})",
@@ -693,9 +682,7 @@ fn non_root_pinch_keeps_scene_under_gesture_center_invariant() {
         .expect("downcast");
     // After zoom, scene (150, 100) must still project to
     // screen (200, 150).
-    let projected = view
-        .view_transform()
-        .apply_point(Point::new(150.0, 100.0));
+    let projected = view.view_transform().apply_point(Point::new(150.0, 100.0));
     assert!(
         (projected.x - 200.0).abs() < 1e-2,
         "projected x = {}, expected 200",
@@ -756,10 +743,12 @@ fn scene_view_paints_visible_lightweight_items() {
 
     let mut scene = Scene::new();
     let _on_screen = scene.add_item(
-        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).fill(Color::RED), Point::ZERO
+        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).fill(Color::RED),
+        Point::ZERO,
     );
     let _off_screen = scene.add_item(
-        RectItem::new(Rect::new(5_000.0, 5_000.0, 20.0, 20.0)).fill(Color::BLUE), Point::ZERO
+        RectItem::new(Rect::new(5_000.0, 5_000.0, 20.0, 20.0)).fill(Color::BLUE),
+        Point::ZERO,
     );
 
     let mut tree = WidgetTree::new();
@@ -786,10 +775,12 @@ fn scene_view_culls_all_off_screen_lightweight_items() {
 
     let mut scene = Scene::new();
     scene.add_item(
-        RectItem::new(Rect::new(5_000.0, 5_000.0, 20.0, 20.0)).fill(Color::RED), Point::ZERO
+        RectItem::new(Rect::new(5_000.0, 5_000.0, 20.0, 20.0)).fill(Color::RED),
+        Point::ZERO,
     );
     scene.add_item(
-        RectItem::new(Rect::new(-5_000.0, -5_000.0, 20.0, 20.0)).fill(Color::BLUE), Point::ZERO
+        RectItem::new(Rect::new(-5_000.0, -5_000.0, 20.0, 20.0)).fill(Color::BLUE),
+        Point::ZERO,
     );
 
     let mut tree = WidgetTree::new();
@@ -845,17 +836,19 @@ fn scene_view_emits_synthetic_at_node_per_visible_item() {
     // Off-screen items (subject to the off-screen-mode policy)
     // should be excluded from the tree.
     use crate::items::RectItem;
-    use fern_core::accessibility::{is_synthetic, synthetic_node_id, SyntheticKind};
+    use fern_core::accessibility::{SyntheticKind, is_synthetic, synthetic_node_id};
     use fern_tokens::Color;
 
     let mut scene = Scene::new();
     let on_screen = scene.add_item(
         RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0))
             .fill(Color::RED)
-            .access_label("nearby"), Point::ZERO
+            .access_label("nearby"),
+        Point::ZERO,
     );
     let _far_off = scene.add_item(
-        RectItem::new(Rect::new(50_000.0, 50_000.0, 20.0, 20.0)).fill(Color::BLUE), Point::ZERO
+        RectItem::new(Rect::new(50_000.0, 50_000.0, 20.0, 20.0)).fill(Color::BLUE),
+        Point::ZERO,
     );
 
     let mut tree = WidgetTree::new();
@@ -865,16 +858,14 @@ fn scene_view_emits_synthetic_at_node_per_visible_item() {
     // Compute the synthetic NodeId we expect for the on-screen
     // item. The walker derives `synthetic_node_id(view_id,
     // item_id.as_u64(), SyntheticKind::SceneItem)`.
-    let expected_id =
-        synthetic_node_id(view_id, on_screen.as_u64(), SyntheticKind::SceneItem);
+    let expected_id = synthetic_node_id(view_id, on_screen.as_u64(), SyntheticKind::SceneItem);
     assert!(is_synthetic(expected_id), "must have bit-63 set");
 
     // Build the AT tree update and verify our synthetic NodeId
     // appears (and the off-screen item's would-be id does not).
     let update = tree.sync_accessibility();
-    let nodes_have_id = |needle: accesskit::NodeId| {
-        update.nodes.iter().any(|(id, _)| *id == needle)
-    };
+    let nodes_have_id =
+        |needle: accesskit::NodeId| update.nodes.iter().any(|(id, _)| *id == needle);
     assert!(
         nodes_have_id(expected_id),
         "on-screen item must appear in the AT tree update"
@@ -966,18 +957,21 @@ fn a11y_off_screen_mode_viewport_only_excludes_grown_items() {
     let mut scene = Scene::new();
     // In-viewport item: definitely AT-visible.
     scene.add_item(
-        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).fill(Color::RED), Point::ZERO
+        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).fill(Color::RED),
+        Point::ZERO,
     );
     // Item just past the right edge of the 400x300 viewport.
     // Default mode would include it (within 1× viewport
     // margin), but ViewportOnly should not.
     scene.add_item(
-        RectItem::new(Rect::new(450.0, 100.0, 20.0, 20.0)).fill(Color::BLUE), Point::ZERO
+        RectItem::new(Rect::new(450.0, 100.0, 20.0, 20.0)).fill(Color::BLUE),
+        Point::ZERO,
     );
 
     let mut tree = WidgetTree::new();
-    let view_id =
-        tree.add(SceneView::new(scene).a11y_off_screen_mode(crate::a11y::A11yOffScreenMode::ViewportOnly));
+    let _view_id = tree.add(
+        SceneView::new(scene).a11y_off_screen_mode(crate::a11y::A11yOffScreenMode::ViewportOnly),
+    );
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let update = tree.sync_accessibility();
     let synthetic_count = update
@@ -1006,14 +1000,13 @@ fn set_a11y_parent_reparents_item_under_group() {
     // emitted under the group, NOT under the SceneView root.
     use crate::a11y::{A11yGroup, A11yNode};
     use crate::items::RectItem;
-    use fern_core::accessibility::{
-        is_synthetic, synthetic_node_id, SyntheticKind,
-    };
+    use fern_core::accessibility::{SyntheticKind, is_synthetic, synthetic_node_id};
 
     let mut scene = Scene::new();
     let act1 = scene.add_a11y_group(A11yGroup::builder().label("Act 1"));
     let card = scene.add_item(
-        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).access_label("Scene A"), Point::ZERO
+        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).access_label("Scene A"),
+        Point::ZERO,
     );
     scene.set_a11y_parent(A11yNode::Item(card), Some(A11yNode::Group(act1)));
 
@@ -1023,14 +1016,10 @@ fn set_a11y_parent_reparents_item_under_group() {
     let update = tree.sync_accessibility();
 
     // Group node and item node both exist as synthetic nodes.
-    let group_node_id =
-        synthetic_node_id(view_id, act1.as_u64(), SyntheticKind::SceneGroup);
-    let item_node_id =
-        synthetic_node_id(view_id, card.as_u64(), SyntheticKind::SceneItem);
+    let group_node_id = synthetic_node_id(view_id, act1.as_u64(), SyntheticKind::SceneGroup);
+    let item_node_id = synthetic_node_id(view_id, card.as_u64(), SyntheticKind::SceneItem);
 
-    let find_node = |needle: accesskit::NodeId| {
-        update.nodes.iter().find(|(id, _)| *id == needle)
-    };
+    let find_node = |needle: accesskit::NodeId| update.nodes.iter().find(|(id, _)| *id == needle);
     let group_node = find_node(group_node_id).expect("group node exists");
     let item_node = find_node(item_node_id).expect("item node exists");
     assert!(is_synthetic(group_node.0));
@@ -1043,8 +1032,7 @@ fn set_a11y_parent_reparents_item_under_group() {
         group_node.1.children().contains(&item_node_id),
         "item must be a child of its declared logical parent group"
     );
-    let scene_view_node_id =
-        fern_core::accessibility::widget_id_to_node_id(view_id);
+    let scene_view_node_id = fern_core::accessibility::widget_id_to_node_id(view_id);
     let scene_view_node = find_node(scene_view_node_id).expect("scene view node");
     assert!(
         !scene_view_node.1.children().contains(&item_node_id),
@@ -1062,12 +1050,15 @@ fn nested_groups_emit_in_logical_dfs_order() {
     // contains A; A's contains B; B's contains its item.
     use crate::a11y::{A11yGroup, A11yNode};
     use crate::items::RectItem;
-    use fern_core::accessibility::{synthetic_node_id, SyntheticKind};
+    use fern_core::accessibility::{SyntheticKind, synthetic_node_id};
 
     let mut scene = Scene::new();
     let outer = scene.add_a11y_group(A11yGroup::builder().label("Outer"));
     let inner = scene.add_a11y_group(A11yGroup::builder().label("Inner"));
-    let item = scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)), Point::ZERO);
+    let item = scene.add_item(
+        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)),
+        Point::ZERO,
+    );
     scene.set_a11y_parent(A11yNode::Group(inner), Some(A11yNode::Group(outer)));
     scene.set_a11y_parent(A11yNode::Item(item), Some(A11yNode::Group(inner)));
 
@@ -1076,12 +1067,9 @@ fn nested_groups_emit_in_logical_dfs_order() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let update = tree.sync_accessibility();
 
-    let outer_id =
-        synthetic_node_id(view_id, outer.as_u64(), SyntheticKind::SceneGroup);
-    let inner_id =
-        synthetic_node_id(view_id, inner.as_u64(), SyntheticKind::SceneGroup);
-    let item_id_synth =
-        synthetic_node_id(view_id, item.as_u64(), SyntheticKind::SceneItem);
+    let outer_id = synthetic_node_id(view_id, outer.as_u64(), SyntheticKind::SceneGroup);
+    let inner_id = synthetic_node_id(view_id, inner.as_u64(), SyntheticKind::SceneGroup);
+    let item_id_synth = synthetic_node_id(view_id, item.as_u64(), SyntheticKind::SceneItem);
 
     let find = |needle: accesskit::NodeId| {
         update
@@ -1105,11 +1093,17 @@ fn add_a11y_relation_writes_into_accesskit_arrays() {
     // FlowTo entry on A's AccessKit Node.
     use crate::a11y::{A11yNode, A11yRelation};
     use crate::items::RectItem;
-    use fern_core::accessibility::{synthetic_node_id, SyntheticKind};
+    use fern_core::accessibility::{SyntheticKind, synthetic_node_id};
 
     let mut scene = Scene::new();
-    let a = scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)), Point::ZERO);
-    let b = scene.add_item(RectItem::new(Rect::new(40.0, 10.0, 20.0, 20.0)), Point::ZERO);
+    let a = scene.add_item(
+        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)),
+        Point::ZERO,
+    );
+    let b = scene.add_item(
+        RectItem::new(Rect::new(40.0, 10.0, 20.0, 20.0)),
+        Point::ZERO,
+    );
     scene.add_a11y_relation(A11yNode::Item(a), A11yRelation::FlowTo, A11yNode::Item(b));
 
     let mut tree = WidgetTree::new();
@@ -1136,10 +1130,13 @@ fn add_a11y_relation_writes_into_accesskit_arrays() {
 fn set_a11y_live_marks_node_as_live_region() {
     use crate::a11y::A11yNode;
     use crate::items::RectItem;
-    use fern_core::accessibility::{synthetic_node_id, SyntheticKind};
+    use fern_core::accessibility::{SyntheticKind, synthetic_node_id};
 
     let mut scene = Scene::new();
-    let item = scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)), Point::ZERO);
+    let item = scene.add_item(
+        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)),
+        Point::ZERO,
+    );
     scene.set_a11y_live(A11yNode::Item(item), accesskit::Live::Polite);
 
     let mut tree = WidgetTree::new();
@@ -1161,10 +1158,13 @@ fn set_a11y_live_marks_node_as_live_region() {
 fn set_a11y_landmark_overrides_role() {
     use crate::a11y::A11yNode;
     use crate::items::RectItem;
-    use fern_core::accessibility::{synthetic_node_id, SyntheticKind};
+    use fern_core::accessibility::{SyntheticKind, synthetic_node_id};
 
     let mut scene = Scene::new();
-    let item = scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)), Point::ZERO);
+    let item = scene.add_item(
+        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)),
+        Point::ZERO,
+    );
     // RectItem default role is GraphicsObject. Landmark override
     // should re-set it to Region.
     scene.set_a11y_landmark(A11yNode::Item(item), accesskit::Role::Region);
@@ -1246,17 +1246,10 @@ struct LabelledFill {
     label: &'static str,
 }
 impl Widget for LabelledFill {
-    fn layout_response(
-        &self,
-        _proposal: SizeProposal,
-        _ctx: &LayoutContext,
-    ) -> LayoutResponse {
+    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
         Size::new(20.0, 20.0).into()
     }
-    fn accessibility(
-        &self,
-        builder: &mut fern_core::accessibility::AccessNodeBuilder,
-    ) {
+    fn accessibility(&self, builder: &mut fern_core::accessibility::AccessNodeBuilder) {
         builder.set_role(accesskit::Role::Button);
         builder.set_name(self.label);
     }
@@ -1271,7 +1264,10 @@ fn cooperative_default_emits_items_at_root_when_unparented() {
     use fern_core::accessibility::{is_synthetic, widget_id_to_node_id};
 
     let mut scene = Scene::new();
-    scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)), Point::ZERO);
+    scene.add_item(
+        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)),
+        Point::ZERO,
+    );
 
     let mut tree = WidgetTree::new();
     let view_id = tree.add(SceneView::new(scene));
@@ -1302,14 +1298,18 @@ fn strictly_parallel_suppresses_unparented_items() {
 
     let mut scene = Scene::new();
     let g = scene.add_a11y_group(A11yGroup::builder().label("G"));
-    let placed = scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)), Point::ZERO);
-    let _orphan = scene.add_item(RectItem::new(Rect::new(40.0, 10.0, 20.0, 20.0)), Point::ZERO);
+    let placed = scene.add_item(
+        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)),
+        Point::ZERO,
+    );
+    let _orphan = scene.add_item(
+        RectItem::new(Rect::new(40.0, 10.0, 20.0, 20.0)),
+        Point::ZERO,
+    );
     scene.set_a11y_parent(A11yNode::Item(placed), Some(A11yNode::Group(g)));
 
     let mut tree = WidgetTree::new();
-    let view_id = tree.add(
-        SceneView::new(scene).a11y_mode(A11yMode::StrictlyParallel),
-    );
+    let view_id = tree.add(SceneView::new(scene).a11y_mode(A11yMode::StrictlyParallel));
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let update = tree.sync_accessibility();
 
@@ -1349,9 +1349,7 @@ fn auto_graft_widget_appears_under_declared_logical_group() {
     // `NodeId` must appear in the group's children list AND
     // must NOT appear in SceneView's own children list.
     use crate::a11y::{A11yGroup, A11yNode};
-    use fern_core::accessibility::{
-        synthetic_node_id, widget_id_to_node_id, SyntheticKind,
-    };
+    use fern_core::accessibility::{SyntheticKind, synthetic_node_id, widget_id_to_node_id};
 
     let mut scene = Scene::new();
     let act_one = scene.add_a11y_group(A11yGroup::builder().label("Act 1"));
@@ -1361,10 +1359,7 @@ fn auto_graft_widget_appears_under_declared_logical_group() {
     );
     // Declare the parent up-front via ItemId — works for both
     // lightweight and heavyweight scene entries.
-    scene.set_a11y_parent(
-        A11yNode::Item(card_item_id),
-        Some(A11yNode::Group(act_one)),
-    );
+    scene.set_a11y_parent(A11yNode::Item(card_item_id), Some(A11yNode::Group(act_one)));
 
     let mut tree = WidgetTree::new();
     let view_id = tree.add(SceneView::new(scene));
@@ -1376,17 +1371,10 @@ fn auto_graft_widget_appears_under_declared_logical_group() {
 
     let update = tree.sync_accessibility();
     let view_node_id = widget_id_to_node_id(view_id);
-    let group_node_id =
-        synthetic_node_id(view_id, act_one.as_u64(), SyntheticKind::SceneGroup);
+    let group_node_id = synthetic_node_id(view_id, act_one.as_u64(), SyntheticKind::SceneGroup);
     let widget_node_id = widget_id_to_node_id(card_widget_id);
 
-    let find = |id: accesskit::NodeId| {
-        update
-            .nodes
-            .iter()
-            .find(|(n, _)| *n == id)
-            .map(|(_, n)| n)
-    };
+    let find = |id: accesskit::NodeId| update.nodes.iter().find(|(n, _)| *n == id).map(|(_, n)| n);
     let scene_view = find(view_node_id).expect("scene view node");
     let group = find(group_node_id).expect("group node");
     let _widget_node = find(widget_node_id).expect("widget node still emitted");
@@ -1419,8 +1407,7 @@ fn auto_graft_redirect_hook_default_is_none() {
     // Use any non-existent widget id; the hook must still
     // return None.
     assert!(
-        Widget::a11y_redirect_descendant(view, view_widget_id, view_widget_id)
-            .is_none(),
+        Widget::a11y_redirect_descendant(view, view_widget_id, view_widget_id).is_none(),
         "redirect hook returns None when no declaration is in place"
     );
 }
@@ -1442,19 +1429,12 @@ impl PlainContainer {
     }
 }
 impl Widget for PlainContainer {
-    fn build(
-        &mut self,
-        ctx: &mut fern_core::build_context::BuildContext,
-    ) -> Vec<WidgetId> {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
         let id = ctx.add(LabelledFill { label: "inner" });
         self.inner_id = Some(id);
         vec![id]
     }
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        _ctx: &LayoutContext,
-    ) -> LayoutResponse {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
         proposal.resolve(40.0, 40.0).into()
     }
     fn place_children(
@@ -1493,18 +1473,13 @@ fn auto_graft_deep_descendant_under_scene_view_group() {
     // own AccessKit Node still emits via the recursive walk
     // and lands in `nodes`.
     use crate::a11y::{A11yGroup, A11yNode};
-    use fern_core::accessibility::{
-        synthetic_node_id, widget_id_to_node_id, SyntheticKind,
-    };
+    use fern_core::accessibility::{SyntheticKind, synthetic_node_id, widget_id_to_node_id};
 
     // Stage 1: add a PlainContainer scene-entry, layout once
     // to learn the inner widget's allocated `WidgetId`.
     let mut scene = Scene::new();
     let group = scene.add_a11y_group(A11yGroup::builder().label("Tools"));
-    scene.add_widget(
-        PlainContainer::new(),
-        Rect::new(10.0, 10.0, 40.0, 40.0),
-    );
+    scene.add_widget(PlainContainer::new(), Rect::new(10.0, 10.0, 40.0, 40.0));
     let mut tree = WidgetTree::new();
     let view_id = tree.add(SceneView::new(scene));
     tree.layout(SizeProposal::exact(400.0, 300.0));
@@ -1519,10 +1494,9 @@ fn auto_graft_deep_descendant_under_scene_view_group() {
         .widget_as_any_mut(view_id)
         .and_then(|a| a.downcast_mut::<SceneView>())
         .expect("downcast SceneView mut");
-    scene_view.scene_mut().set_a11y_parent(
-        A11yNode::Widget(inner_id),
-        Some(A11yNode::Group(group)),
-    );
+    scene_view
+        .scene_mut()
+        .set_a11y_parent(A11yNode::Widget(inner_id), Some(A11yNode::Group(group)));
 
     // Stage 3: re-layout (so AT walker sees the new
     // declaration via the next sync_accessibility) and verify.
@@ -1531,18 +1505,11 @@ fn auto_graft_deep_descendant_under_scene_view_group() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let update = tree.sync_accessibility();
 
-    let group_node_id =
-        synthetic_node_id(view_id, group.as_u64(), SyntheticKind::SceneGroup);
+    let group_node_id = synthetic_node_id(view_id, group.as_u64(), SyntheticKind::SceneGroup);
     let inner_node_id = widget_id_to_node_id(inner_id);
     let container_node_id = widget_id_to_node_id(container_id);
 
-    let find = |id: accesskit::NodeId| {
-        update
-            .nodes
-            .iter()
-            .find(|(n, _)| *n == id)
-            .map(|(_, n)| n)
-    };
+    let find = |id: accesskit::NodeId| update.nodes.iter().find(|(n, _)| *n == id).map(|(_, n)| n);
     let group_node = find(group_node_id).expect("group emitted");
     let container_node = find(container_node_id).expect("container emitted");
     let _inner_node = find(inner_node_id).expect("inner widget still emitted");
@@ -1578,10 +1545,7 @@ fn auto_graft_deep_descendant_no_op_without_optin_ancestor() {
     use fern_core::accessibility::widget_id_to_node_id;
 
     let mut scene = Scene::new();
-    scene.add_widget(
-        PlainContainer::new(),
-        Rect::new(10.0, 10.0, 40.0, 40.0),
-    );
+    scene.add_widget(PlainContainer::new(), Rect::new(10.0, 10.0, 40.0, 40.0));
     let mut tree = WidgetTree::new();
     let view_id = tree.add(SceneView::new(scene));
     tree.layout(SizeProposal::exact(400.0, 300.0));
@@ -1616,16 +1580,11 @@ fn ancestor_chain_walk_skips_optout_intermediate() {
     // that we explicitly target the intermediate's opt-out
     // behaviour.
     use crate::a11y::{A11yGroup, A11yNode};
-    use fern_core::accessibility::{
-        synthetic_node_id, widget_id_to_node_id, SyntheticKind,
-    };
+    use fern_core::accessibility::{SyntheticKind, synthetic_node_id, widget_id_to_node_id};
 
     let mut scene = Scene::new();
     let group = scene.add_a11y_group(A11yGroup::builder().label("G"));
-    scene.add_widget(
-        PlainContainer::new(),
-        Rect::new(10.0, 10.0, 40.0, 40.0),
-    );
+    scene.add_widget(PlainContainer::new(), Rect::new(10.0, 10.0, 40.0, 40.0));
     let mut tree = WidgetTree::new();
     let view_id = tree.add(SceneView::new(scene));
     tree.layout(SizeProposal::exact(400.0, 300.0));
@@ -1642,10 +1601,9 @@ fn ancestor_chain_walk_skips_optout_intermediate() {
         .widget_as_any_mut(view_id)
         .and_then(|a| a.downcast_mut::<SceneView>())
         .unwrap();
-    scene_view.scene_mut().set_a11y_parent(
-        A11yNode::Widget(inner_id),
-        Some(A11yNode::Group(group)),
-    );
+    scene_view
+        .scene_mut()
+        .set_a11y_parent(A11yNode::Widget(inner_id), Some(A11yNode::Group(group)));
 
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let update = tree.sync_accessibility();
@@ -1654,16 +1612,14 @@ fn ancestor_chain_walk_skips_optout_intermediate() {
         .nodes
         .iter()
         .find(|(id, _)| {
-            *id == synthetic_node_id(
-                view_id,
-                group.as_u64(),
-                SyntheticKind::SceneGroup,
-            )
+            *id == synthetic_node_id(view_id, group.as_u64(), SyntheticKind::SceneGroup)
         })
         .map(|(_, n)| n)
         .unwrap();
     assert!(
-        group_node.children().contains(&widget_id_to_node_id(inner_id)),
+        group_node
+            .children()
+            .contains(&widget_id_to_node_id(inner_id)),
         "ancestor walk must reach SceneView past the opt-out \
          intermediate"
     );
@@ -1674,10 +1630,7 @@ fn ancestor_chain_walk_skips_optout_intermediate() {
 #[test]
 fn interactive_default_is_true() {
     let view = SceneView::new(Scene::new());
-    assert!(
-        view.interactive,
-        "SceneView::interactive defaults to true"
-    );
+    assert!(view.interactive, "SceneView::interactive defaults to true");
 }
 
 #[test]
@@ -1807,10 +1760,10 @@ fn text_item_with_signal_text_repaints_on_signal_change() {
 
     let mut scene = Scene::new();
     let label_text = Signal::new(String::from("0.0"));
-    scene.add_item(TextItem::with_signal_text(
-        label_text.clone(),
-        Rect::new(0.0, 0.0, 50.0, 20.0),
-    ), Point::ZERO);
+    scene.add_item(
+        TextItem::with_signal_text(label_text.clone(), Rect::new(0.0, 0.0, 50.0, 20.0)),
+        Point::ZERO,
+    );
 
     let mut tree = WidgetTree::new();
     let _view_id = tree.add(SceneView::new(scene));
@@ -1839,7 +1792,10 @@ fn text_item_label_returns_static_text_for_static_items() {
     // returns it via `label()` when no override is set.
     use crate::items::TextItem;
     let item = TextItem::new("Hello", Rect::new(0.0, 0.0, 50.0, 20.0));
-    assert_eq!(crate::item::SceneItem::label(&item).as_deref(), Some("Hello"));
+    assert_eq!(
+        crate::item::SceneItem::label(&item).as_deref(),
+        Some("Hello")
+    );
 }
 
 #[test]
@@ -1848,11 +1804,16 @@ fn text_item_label_returns_signal_snapshot_for_bound_items() {
     use crate::items::TextItem;
     use fern_core::signal::Signal;
     let signal = Signal::new(String::from("initial"));
-    let item =
-        TextItem::with_signal_text(signal.clone(), Rect::new(0.0, 0.0, 50.0, 20.0));
-    assert_eq!(crate::item::SceneItem::label(&item).as_deref(), Some("initial"));
+    let item = TextItem::with_signal_text(signal.clone(), Rect::new(0.0, 0.0, 50.0, 20.0));
+    assert_eq!(
+        crate::item::SceneItem::label(&item).as_deref(),
+        Some("initial")
+    );
     signal.set(String::from("updated"));
-    assert_eq!(crate::item::SceneItem::label(&item).as_deref(), Some("updated"));
+    assert_eq!(
+        crate::item::SceneItem::label(&item).as_deref(),
+        Some("updated")
+    );
 }
 
 #[test]
@@ -1868,16 +1829,15 @@ fn nested_scene_chart_pattern_smoke() {
     inner_scene.add_widget(FillWidget::new(), Rect::new(0.0, 0.0, 10.0, 10.0));
     let inner = SceneView::new(inner_scene);
     let inner_pan_x = inner.pan_x_signal();
-    let axis_label_text: Signal<String> =
-        inner_pan_x.map(|px| format!("x = {:.1}", px));
+    let axis_label_text: Signal<String> = inner_pan_x.map(|px| format!("x = {:.1}", px));
 
     // Outer chrome scene.
     let mut outer_scene = Scene::new();
     outer_scene.add_widget(inner, Rect::new(40.0, 0.0, 360.0, 280.0));
-    outer_scene.add_item(TextItem::with_signal_text(
-        axis_label_text.clone(),
-        Rect::new(0.0, 290.0, 80.0, 10.0),
-    ), Point::ZERO);
+    outer_scene.add_item(
+        TextItem::with_signal_text(axis_label_text.clone(), Rect::new(0.0, 290.0, 80.0, 10.0)),
+        Point::ZERO,
+    );
     let outer = SceneView::new(outer_scene).interactive(false);
 
     let mut tree = WidgetTree::new();
@@ -1919,14 +1879,15 @@ fn nested_scene_view_geometry_after_paint() {
 
     // Inner: one small RectItem at scene-coord (10, 10).
     let mut inner_scene = Scene::new();
-    inner_scene
-        .add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).fill(Color::RED), Point::ZERO);
+    inner_scene.add_item(
+        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).fill(Color::RED),
+        Point::ZERO,
+    );
     let inner = SceneView::new(inner_scene).default_size(50.0, 40.0);
 
     // Outer holds the inner at scene-coord (200, 150, 50, 40).
     let mut outer_scene = Scene::new();
-    let inner_id =
-        outer_scene.add_widget(inner, Rect::new(200.0, 150.0, 50.0, 40.0));
+    let inner_id = outer_scene.add_widget(inner, Rect::new(200.0, 150.0, 50.0, 40.0));
     let outer = SceneView::new(outer_scene);
 
     let mut tree = WidgetTree::new();
@@ -1992,8 +1953,8 @@ fn selection_default_is_none_mode() {
 
 #[test]
 fn selection_mode_builder_sets_multi() {
-    let view = SceneView::new(Scene::new())
-        .selection_mode(crate::selection::SceneSelectionMode::Multi);
+    let view =
+        SceneView::new(Scene::new()).selection_mode(crate::selection::SceneSelectionMode::Multi);
     assert_eq!(
         view.selection().mode(),
         crate::selection::SceneSelectionMode::Multi
@@ -2008,15 +1969,13 @@ fn marquee_drag_ends_with_pending_commit() {
 
     let mut scene = Scene::new();
     scene.add_item(
-        RectItem::new(Rect::new(50.0, 50.0, 20.0, 20.0))
-            .fill(fern_tokens::Color::RED), Point::ZERO
+        RectItem::new(Rect::new(50.0, 50.0, 20.0, 20.0)).fill(fern_tokens::Color::RED),
+        Point::ZERO,
     );
 
     let mut tree = WidgetTree::new();
-    let view_id = tree.add(
-        SceneView::new(scene)
-            .selection_mode(crate::selection::SceneSelectionMode::Multi),
-    );
+    let view_id =
+        tree.add(SceneView::new(scene).selection_mode(crate::selection::SceneSelectionMode::Multi));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     tree.pointer_move(Point::new(40.0, 40.0));
@@ -2060,15 +2019,13 @@ fn marquee_drag_recognizes_started_phase() {
 
     let mut scene = Scene::new();
     scene.add_item(
-        RectItem::new(Rect::new(50.0, 50.0, 20.0, 20.0))
-            .fill(fern_tokens::Color::RED), Point::ZERO
+        RectItem::new(Rect::new(50.0, 50.0, 20.0, 20.0)).fill(fern_tokens::Color::RED),
+        Point::ZERO,
     );
 
     let mut tree = WidgetTree::new();
-    let view_id = tree.add(
-        SceneView::new(scene)
-            .selection_mode(crate::selection::SceneSelectionMode::Multi),
-    );
+    let view_id =
+        tree.add(SceneView::new(scene).selection_mode(crate::selection::SceneSelectionMode::Multi));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     // Hover so pointer-over state is set, then PointerDown,
@@ -2102,19 +2059,17 @@ fn marquee_drag_records_pending_commit() {
 
     let mut scene = Scene::new();
     let inside = scene.add_item(
-        RectItem::new(Rect::new(50.0, 50.0, 20.0, 20.0))
-            .fill(fern_tokens::Color::RED), Point::ZERO
+        RectItem::new(Rect::new(50.0, 50.0, 20.0, 20.0)).fill(fern_tokens::Color::RED),
+        Point::ZERO,
     );
     let outside = scene.add_item(
-        RectItem::new(Rect::new(500.0, 500.0, 20.0, 20.0))
-            .fill(fern_tokens::Color::BLUE), Point::ZERO
+        RectItem::new(Rect::new(500.0, 500.0, 20.0, 20.0)).fill(fern_tokens::Color::BLUE),
+        Point::ZERO,
     );
 
     let mut tree = WidgetTree::new();
-    let view_id = tree.add(
-        SceneView::new(scene)
-            .selection_mode(crate::selection::SceneSelectionMode::Multi),
-    );
+    let view_id =
+        tree.add(SceneView::new(scene).selection_mode(crate::selection::SceneSelectionMode::Multi));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     // Drive pointer-down → move → up at coordinates that
@@ -2165,14 +2120,13 @@ fn drag_to_move_translates_lightweight_item() {
     let item_id = scene.add_item(
         RectItem::new(Rect::new(50.0, 50.0, 30.0, 30.0))
             .fill(fern_tokens::Color::RED)
-            .draggable(true), Point::ZERO
+            .draggable(true),
+        Point::ZERO,
     );
 
     let mut tree = WidgetTree::new();
-    let view_id = tree.add(
-        SceneView::new(scene)
-            .selection_mode(crate::selection::SceneSelectionMode::Multi),
-    );
+    let view_id =
+        tree.add(SceneView::new(scene).selection_mode(crate::selection::SceneSelectionMode::Multi));
     // First layout populates the lightweight bounds snapshot.
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
@@ -2205,7 +2159,11 @@ fn drag_to_move_translates_lightweight_item() {
             drag.is_some() || pending_move.is_some(),
             "expected drag_target or pending_move set; \
              snap={:?} drag={:?} marquee={:?} pending_move={:?} pending_marq={:?}",
-            snap, drag, marq, pending_move, pending_marq
+            snap,
+            drag,
+            marq,
+            pending_move,
+            pending_marq
         );
     }
 
@@ -2218,10 +2176,7 @@ fn drag_to_move_translates_lightweight_item() {
     assert!(flushed, "drag-to-move should post a pending commit");
 
     // The item bounds now reflect the drag delta (+40 on each axis).
-    let new_rect = view
-        .scene()
-        .scene_rect(item_id)
-        .expect("item still exists");
+    let new_rect = view.scene().scene_rect(item_id).expect("item still exists");
     assert!(
         (new_rect.x - 90.0).abs() < 1e-3,
         "item x moved by drag delta (expected 90, got {})",
@@ -2257,14 +2212,13 @@ fn drag_to_move_persists_via_rebuild_signal_no_snap_back() {
     let item_id = scene.add_item(
         RectItem::new(Rect::new(50.0, 50.0, 30.0, 30.0))
             .fill(fern_tokens::Color::RED)
-            .draggable(true), Point::ZERO
+            .draggable(true),
+        Point::ZERO,
     );
 
     let mut tree = WidgetTree::new();
-    let view_id = tree.add(
-        SceneView::new(scene)
-            .selection_mode(crate::selection::SceneSelectionMode::Multi),
-    );
+    let view_id =
+        tree.add(SceneView::new(scene).selection_mode(crate::selection::SceneSelectionMode::Multi));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     // -- First drag: (60, 60) → (100, 100) → release.
@@ -2291,10 +2245,7 @@ fn drag_to_move_persists_via_rebuild_signal_no_snap_back() {
             view.pending_item_move.get().is_some(),
             "drag end must post pending_item_move"
         );
-        assert!(
-            view.drag_dirty.get() > 0,
-            "drag end must bump drag_dirty"
-        );
+        assert!(view.drag_dirty.get() > 0, "drag end must bump drag_dirty");
     }
 
     // Real apps' layout cycle runs after event dispatch, where
@@ -2303,10 +2254,7 @@ fn drag_to_move_persists_via_rebuild_signal_no_snap_back() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     let view = view_handle(&tree, view_id);
-    let after_first = view
-        .scene()
-        .scene_rect(item_id)
-        .expect("item still exists");
+    let after_first = view.scene().scene_rect(item_id).expect("item still exists");
     assert!(
         (after_first.x - 90.0).abs() < 1e-3,
         "first drag must persist (expected x=90, got {})",
@@ -2338,10 +2286,7 @@ fn drag_to_move_persists_via_rebuild_signal_no_snap_back() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     let view = view_handle(&tree, view_id);
-    let after_second = view
-        .scene()
-        .scene_rect(item_id)
-        .expect("item still exists");
+    let after_second = view.scene().scene_rect(item_id).expect("item still exists");
     // Each drag delta is +40 on each axis. Two drags from
     // (50, 50) → (90, 90) → (130, 130).
     assert!(
@@ -2371,19 +2316,18 @@ fn drag_cascades_to_declared_descendants() {
     let parent_rect = scene.add_item(
         RectItem::new(Rect::new(50.0, 50.0, 80.0, 60.0))
             .fill(fern_tokens::Color::RED)
-            .draggable(true), Point::ZERO
+            .draggable(true),
+        Point::ZERO,
     );
-    let label = scene.add_item(TextItem::new(
-        "child",
-        Rect::new(58.0, 70.0, 64.0, 20.0),
-    ), Point::ZERO);
+    let label = scene.add_item(
+        TextItem::new("child", Rect::new(58.0, 70.0, 64.0, 20.0)),
+        Point::ZERO,
+    );
     scene.set_item_parent(label, Some(parent_rect));
 
     let mut tree = WidgetTree::new();
-    let view_id = tree.add(
-        SceneView::new(scene)
-            .selection_mode(crate::selection::SceneSelectionMode::Multi),
-    );
+    let view_id =
+        tree.add(SceneView::new(scene).selection_mode(crate::selection::SceneSelectionMode::Multi));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     // Drag the parent (60, 60) → (100, 100) — delta = +40 x +40.
@@ -2408,10 +2352,7 @@ fn drag_cascades_to_declared_descendants() {
         .scene()
         .scene_rect(parent_rect)
         .expect("parent still exists");
-    let label_after = view
-        .scene()
-        .scene_rect(label)
-        .expect("label still exists");
+    let label_after = view.scene().scene_rect(label).expect("label still exists");
 
     // Parent moved (50,50) → (90,90).
     assert!(
@@ -2444,19 +2385,18 @@ fn parent_child_drag_persists_across_two_drags() {
     let parent_rect = scene.add_item(
         RectItem::new(Rect::new(50.0, 50.0, 80.0, 60.0))
             .fill(fern_tokens::Color::RED)
-            .draggable(true), Point::ZERO
+            .draggable(true),
+        Point::ZERO,
     );
-    let label = scene.add_item(TextItem::new(
-        "child",
-        Rect::new(58.0, 70.0, 64.0, 20.0),
-    ), Point::ZERO);
+    let label = scene.add_item(
+        TextItem::new("child", Rect::new(58.0, 70.0, 64.0, 20.0)),
+        Point::ZERO,
+    );
     scene.set_item_parent(label, Some(parent_rect));
 
     let mut tree = WidgetTree::new();
-    let view_id = tree.add(
-        SceneView::new(scene)
-            .selection_mode(crate::selection::SceneSelectionMode::Multi),
-    );
+    let view_id =
+        tree.add(SceneView::new(scene).selection_mode(crate::selection::SceneSelectionMode::Multi));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     // -- Drag 1: press at (60,60), release at (100,100). Δ = +40,+40.
@@ -2519,10 +2459,10 @@ fn looping_item_animation_survives_drag_end_rebuild() {
     // and the items' `register_bindings` must re-register and
     // re-arm `animate_looping` so the loop resumes on the next
     // pending-pickup pass.
+    use crate::SceneItem;
     use crate::animation::register_animated_item_signal;
     use crate::item::SceneItemPaintContext;
     use crate::items::RectItem;
-    use crate::SceneItem;
     use fern_canvas::Point;
     use fern_core::binding::BindingLevel;
     use fern_core::build_context::BuildContext;
@@ -2546,12 +2486,8 @@ fn looping_item_animation_survives_drag_end_rebuild() {
             register_animated_item_signal(ctx, &self.phase);
             self.phase
                 .bind_to(view_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
-            self.phase.animate_looping(
-                1.0,
-                Duration::from_millis(200),
-                Easing::Linear,
-                None,
-            );
+            self.phase
+                .animate_looping(1.0, Duration::from_millis(200), Easing::Linear, None);
         }
     }
 
@@ -2563,22 +2499,24 @@ fn looping_item_animation_survives_drag_end_rebuild() {
     // Five loopers — same shape as the showcase's PulsingDot row.
     let phases: Vec<Signal<f32>> = (0..5).map(|_| Signal::new_animated(0.0)).collect();
     for (i, p) in phases.iter().enumerate() {
-        scene.add_item(Looper {
-            bounds: Rect::new(200.0 + i as f32 * 30.0, 50.0, 20.0, 20.0),
-            phase: p.clone(),
-        }, Point::ZERO);
+        scene.add_item(
+            Looper {
+                bounds: Rect::new(200.0 + i as f32 * 30.0, 50.0, 20.0, 20.0),
+                phase: p.clone(),
+            },
+            Point::ZERO,
+        );
     }
     let drag_rect = scene.add_item(
         RectItem::new(Rect::new(10.0, 10.0, 30.0, 30.0))
             .fill(fern_tokens::Color::RED)
-            .draggable(true), Point::ZERO
+            .draggable(true),
+        Point::ZERO,
     );
 
     let mut tree = WidgetTree::new();
-    let _view_id = tree.add(
-        SceneView::new(scene)
-            .selection_mode(crate::selection::SceneSelectionMode::Multi),
-    );
+    let _view_id =
+        tree.add(SceneView::new(scene).selection_mode(crate::selection::SceneSelectionMode::Multi));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     // Animation should be ticking before any drag.
@@ -2652,15 +2590,13 @@ fn drag_in_empty_area_starts_marquee_not_move() {
 
     let mut scene = Scene::new();
     let item_id = scene.add_item(
-        RectItem::new(Rect::new(100.0, 100.0, 30.0, 30.0))
-            .fill(fern_tokens::Color::RED), Point::ZERO
+        RectItem::new(Rect::new(100.0, 100.0, 30.0, 30.0)).fill(fern_tokens::Color::RED),
+        Point::ZERO,
     );
 
     let mut tree = WidgetTree::new();
-    let view_id = tree.add(
-        SceneView::new(scene)
-            .selection_mode(crate::selection::SceneSelectionMode::Multi),
-    );
+    let view_id =
+        tree.add(SceneView::new(scene).selection_mode(crate::selection::SceneSelectionMode::Multi));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     // Press at (10, 10) — empty area. Drag to (200, 200) —
@@ -2702,12 +2638,12 @@ fn z_order_paints_higher_z_after_lower() {
 
     let mut scene = Scene::new();
     let a = scene.add_item(
-        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0))
-            .fill(fern_tokens::Color::RED), Point::ZERO
+        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).fill(fern_tokens::Color::RED),
+        Point::ZERO,
     );
     let b = scene.add_item(
-        RectItem::new(Rect::new(15.0, 15.0, 20.0, 20.0))
-            .fill(fern_tokens::Color::BLUE), Point::ZERO
+        RectItem::new(Rect::new(15.0, 15.0, 20.0, 20.0)).fill(fern_tokens::Color::BLUE),
+        Point::ZERO,
     );
     // Reverse paint order via z: A on top by default (later
     // insertion = on top), but we set B's z higher so B paints
@@ -2749,7 +2685,10 @@ fn z_order_paints_higher_z_after_lower() {
     // scene-transform push emits SetTransform commands too, so
     // they're interleaved with decorations in `draw_order`).
     assert!(
-        frame.draw_order.iter().any(|cmd| matches!(cmd, DrawCommand::Decoration(_))),
+        frame
+            .draw_order
+            .iter()
+            .any(|cmd| matches!(cmd, DrawCommand::Decoration(_))),
         "expected at least one Decoration in draw_order"
     );
 }
@@ -2761,12 +2700,12 @@ fn z_order_default_zero_preserves_insertion_order() {
 
     let mut scene = Scene::new();
     scene.add_item(
-        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0))
-            .fill(fern_tokens::Color::RED), Point::ZERO
+        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).fill(fern_tokens::Color::RED),
+        Point::ZERO,
     );
     scene.add_item(
-        RectItem::new(Rect::new(15.0, 15.0, 20.0, 20.0))
-            .fill(fern_tokens::Color::BLUE), Point::ZERO
+        RectItem::new(Rect::new(15.0, 15.0, 20.0, 20.0)).fill(fern_tokens::Color::BLUE),
+        Point::ZERO,
     );
 
     let mut tree = WidgetTree::new();
@@ -2827,20 +2766,18 @@ fn marquee_does_not_unmount_heavyweight_children() {
     use fern_canvas::Point;
 
     let mut scene = Scene::new();
-    let widget_item =
-        scene.add_widget(FillWidget::new(), Rect::new(50.0, 50.0, 80.0, 60.0));
+    let widget_item = scene.add_widget(FillWidget::new(), Rect::new(50.0, 50.0, 80.0, 60.0));
 
     let mut tree = WidgetTree::new();
-    let view_id = tree.add(
-        SceneView::new(scene)
-            .selection_mode(crate::selection::SceneSelectionMode::Multi),
-    );
+    let view_id =
+        tree.add(SceneView::new(scene).selection_mode(crate::selection::SceneSelectionMode::Multi));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     // Confirm the widget is in the arena before any drag.
     let view = view_handle(&tree, view_id);
-    let materialised_id =
-        view.widget_id_for(widget_item).expect("widget materialised");
+    let materialised_id = view
+        .widget_id_for(widget_item)
+        .expect("widget materialised");
     assert!(tree.children(view_id).contains(&materialised_id));
 
     // Drag a marquee in empty space (above the widget).
@@ -2991,9 +2928,7 @@ fn fit_to_selection_uses_selected_ids() {
     let _b = scene.add_item(rect_item_at(900.0, 900.0), Point::ZERO);
 
     let mut tree = WidgetTree::new();
-    let view_id = tree.add(
-        SceneView::new(scene).selection_mode(crate::SceneSelectionMode::Multi),
-    );
+    let view_id = tree.add(SceneView::new(scene).selection_mode(crate::SceneSelectionMode::Multi));
     tree.layout(SizeProposal::exact(800.0, 600.0));
     let view = view_handle(&tree, view_id);
 
@@ -3031,23 +2966,21 @@ fn focus_order_callback_can_skip_items() {
     let _skip2 = scene.add_item(rect_item_at(40.0, 0.0), Point::ZERO);
     let keep3 = scene.add_item(rect_item_at(60.0, 0.0), Point::ZERO);
 
-    let allowed = vec![keep1, keep3];
-    let view = SceneView::new(scene).focus_order(move |_scene, dir, current| {
-        match current {
-            None => match dir {
-                FocusDirection::Forward => allowed.first().copied(),
-                FocusDirection::Backward => allowed.last().copied(),
-            },
-            Some(cur) => {
-                let pos = allowed.iter().position(|id| *id == cur)?;
-                match dir {
-                    FocusDirection::Forward => allowed.get(pos + 1).copied(),
-                    FocusDirection::Backward => {
-                        if pos == 0 {
-                            None
-                        } else {
-                            allowed.get(pos - 1).copied()
-                        }
+    let allowed = [keep1, keep3];
+    let view = SceneView::new(scene).focus_order(move |_scene, dir, current| match current {
+        None => match dir {
+            FocusDirection::Forward => allowed.first().copied(),
+            FocusDirection::Backward => allowed.last().copied(),
+        },
+        Some(cur) => {
+            let pos = allowed.iter().position(|id| *id == cur)?;
+            match dir {
+                FocusDirection::Forward => allowed.get(pos + 1).copied(),
+                FocusDirection::Backward => {
+                    if pos == 0 {
+                        None
+                    } else {
+                        allowed.get(pos - 1).copied()
                     }
                 }
             }
@@ -3196,7 +3129,8 @@ fn a11y_bounds_default_to_screen_projection() {
 
     let mut scene = Scene::new();
     scene.add_item(
-        RectItem::new(Rect::new(100.0, 50.0, 20.0, 20.0)).fill(Color::RED), Point::ZERO
+        RectItem::new(Rect::new(100.0, 50.0, 20.0, 20.0)).fill(Color::RED),
+        Point::ZERO,
     );
 
     let mut tree = WidgetTree::new();
@@ -3218,7 +3152,10 @@ fn a11y_bounds_default_to_screen_projection() {
     // Default Screen mode: bounds reflect 2x scale.
     let bounds = item_node.bounds().expect("item bounds set");
     let width = bounds.x1 - bounds.x0;
-    assert!((width - 40.0).abs() < 0.5, "screen width should reflect zoom");
+    assert!(
+        (width - 40.0).abs() < 0.5,
+        "screen width should reflect zoom"
+    );
 }
 
 #[test]
@@ -3229,13 +3166,12 @@ fn a11y_bounds_scene_mode_reports_raw_scene_coords() {
 
     let mut scene = Scene::new();
     scene.add_item(
-        RectItem::new(Rect::new(100.0, 50.0, 20.0, 20.0)).fill(Color::RED), Point::ZERO
+        RectItem::new(Rect::new(100.0, 50.0, 20.0, 20.0)).fill(Color::RED),
+        Point::ZERO,
     );
 
     let mut tree = WidgetTree::new();
-    let view_id = tree.add(
-        SceneView::new(scene).a11y_bounds_space(crate::A11yBoundsSpace::Scene),
-    );
+    let view_id = tree.add(SceneView::new(scene).a11y_bounds_space(crate::A11yBoundsSpace::Scene));
     tree.layout(SizeProposal::exact(800.0, 600.0));
     let view = view_handle(&tree, view_id);
     view.set_zoom(2.0);
@@ -3251,7 +3187,10 @@ fn a11y_bounds_scene_mode_reports_raw_scene_coords() {
     // Scene mode: bounds match the raw scene rect, ignoring zoom.
     let bounds = item_node.bounds().expect("item bounds set");
     let width = bounds.x1 - bounds.x0;
-    assert!((width - 20.0).abs() < 0.5, "scene-mode width must equal raw scene width");
+    assert!(
+        (width - 20.0).abs() < 0.5,
+        "scene-mode width must equal raw scene width"
+    );
     assert!((bounds.x0 - 100.0).abs() < 0.5);
     assert!((bounds.y0 - 50.0).abs() < 0.5);
 }
@@ -3259,9 +3198,15 @@ fn a11y_bounds_scene_mode_reports_raw_scene_coords() {
 #[test]
 fn current_a11y_bounds_space_accessor_reflects_setting() {
     let view = SceneView::new(Scene::new());
-    assert_eq!(view.current_a11y_bounds_space(), crate::A11yBoundsSpace::Screen);
+    assert_eq!(
+        view.current_a11y_bounds_space(),
+        crate::A11yBoundsSpace::Screen
+    );
     let view = view.a11y_bounds_space(crate::A11yBoundsSpace::Scene);
-    assert_eq!(view.current_a11y_bounds_space(), crate::A11yBoundsSpace::Scene);
+    assert_eq!(
+        view.current_a11y_bounds_space(),
+        crate::A11yBoundsSpace::Scene
+    );
 }
 
 // -- Debug overlays ------------------------------------------------
@@ -3344,8 +3289,16 @@ fn adopt_scene_size_returns_scene_extent_from_layout_response() {
     // Propose nothing; the view must size itself to the scene.
     tree.layout(SizeProposal::unspecified());
     let bounds = tree.bounds(view_id);
-    assert!((bounds.width - 200.0).abs() < 1e-3, "width = {}", bounds.width);
-    assert!((bounds.height - 150.0).abs() < 1e-3, "height = {}", bounds.height);
+    assert!(
+        (bounds.width - 200.0).abs() < 1e-3,
+        "width = {}",
+        bounds.width
+    );
+    assert!(
+        (bounds.height - 150.0).abs() < 1e-3,
+        "height = {}",
+        bounds.height
+    );
 }
 
 #[test]
@@ -3398,8 +3351,7 @@ fn on_tap_fires_when_item_clicked() {
     use std::rc::Rc;
     let mut scene = Scene::new();
     let id = scene.add_item(
-        RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0))
-            .fill(fern_tokens::Color::RED),
+        RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)).fill(fern_tokens::Color::RED),
         fern_canvas::Point::new(20.0, 20.0),
     );
     let count = Rc::new(Cell::new(0_u32));
@@ -3431,15 +3383,17 @@ fn on_context_menu_fires_on_secondary_button() {
     use std::rc::Rc;
     let mut scene = Scene::new();
     let id = scene.add_item(
-        RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0))
-            .fill(fern_tokens::Color::RED),
+        RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)).fill(fern_tokens::Color::RED),
         fern_canvas::Point::new(20.0, 20.0),
     );
     let fired = Rc::new(Cell::new(false));
     let fired_clone = fired.clone();
-    scene.handlers_mut(id).unwrap().on_context_menu(move |_pt, _ctx| {
-        fired_clone.set(true);
-    });
+    scene
+        .handlers_mut(id)
+        .unwrap()
+        .on_context_menu(move |_pt, _ctx| {
+            fired_clone.set(true);
+        });
     let mut tree = WidgetTree::new();
     tree.add(SceneView::new(scene));
     tree.layout(SizeProposal::exact(400.0, 300.0));
@@ -3486,7 +3440,10 @@ fn drag_mode_no_drag_disables_marquee_and_drag_to_move() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let view = view_handle(&tree, view_id);
     // local_pos unchanged.
-    assert_eq!(view.scene().local_pos(id), Some(fern_canvas::Point::new(10.0, 10.0)));
+    assert_eq!(
+        view.scene().local_pos(id),
+        Some(fern_canvas::Point::new(10.0, 10.0))
+    );
 }
 
 #[test]
@@ -3540,7 +3497,11 @@ fn background_runs_before_items() {
             decos.push(frame.decorations[*idx].color);
         }
     }
-    assert!(decos.len() >= 2, "expected ≥2 Decoration entries, got {}", decos.len());
+    assert!(
+        decos.len() >= 2,
+        "expected ≥2 Decoration entries, got {}",
+        decos.len()
+    );
     assert_eq!(decos[0], bg_color.to_array(), "background must paint first");
     assert!(decos.iter().any(|c| *c == item_color.to_array()));
 }
@@ -3573,7 +3534,11 @@ fn foreground_runs_after_items() {
             decos.push(frame.decorations[*idx].color);
         }
     }
-    assert!(decos.len() >= 2, "expected ≥2 Decoration entries, got {}", decos.len());
+    assert!(
+        decos.len() >= 2,
+        "expected ≥2 Decoration entries, got {}",
+        decos.len()
+    );
     // Last Decoration must be the foreground marker — items
     // (and the marquee/debug overlay, which are absent here) all
     // paint before it.
@@ -3590,10 +3555,7 @@ fn background_receives_visible_scene_region() {
     let captured_w = captured.clone();
 
     let mut scene = Scene::new();
-    scene.add_item(
-        RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
-        Point::ZERO,
-    );
+    scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)), Point::ZERO);
 
     let mut tree = WidgetTree::new();
     let _id = tree.add(SceneView::new(scene).background(move |_c, _ctx, region| {
@@ -3832,13 +3794,13 @@ fn cache_evicts_on_item_change_signal() {
     // Scene mutator would require `&mut Scene`, which we don't
     // have through `view_handle` — the observer doesn't care
     // about the source.
-    view.scene().item_change_signal().set(
-        crate::scene::ItemChange::LocalBoundsChanged {
+    view.scene()
+        .item_change_signal()
+        .set(crate::scene::ItemChange::LocalBoundsChanged {
             id,
             old: Rect::ZERO,
             new: Rect::new(0.0, 0.0, 1.0, 1.0),
-        },
-    );
+        });
     assert!(
         !view.item_cache.borrow().contains(id),
         "LocalBoundsChanged via item_change_signal must evict cache entry"

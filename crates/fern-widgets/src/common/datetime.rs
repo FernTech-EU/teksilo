@@ -17,8 +17,8 @@ pub use self::locale::{
 };
 pub use self::month_names::{month_long_key, month_short_key};
 pub use self::pattern::{
-    format_value, parse_value, segment_at_position, segments_layout, step_date_field,
-    step_time_field, ParsedPattern, PatternError, PatternToken, SegmentKind,
+    ParsedPattern, PatternError, PatternToken, SegmentKind, format_value, parse_value,
+    segment_at_position, segments_layout, step_date_field, step_time_field,
 };
 pub use self::types::{Date, DateTime, Time, Weekday, YearMonth};
 pub use self::weekday_names::{weekday_long_key, weekday_narrow_key, weekday_short_key};

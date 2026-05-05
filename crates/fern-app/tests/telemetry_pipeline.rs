@@ -8,18 +8,16 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use fern_app::FernAppBuilder;
-use fern_canvas::{Size, SizeProposal};
+use fern_canvas::SizeProposal;
+use fern_core::BuildContext;
 use fern_core::action::Action;
 use fern_core::event::{Key, Modifiers, WidgetEvent};
 use fern_core::intent::Intent;
 use fern_core::shortcut::{KeyStroke, Shortcut};
 use fern_core::widget::{LayoutContext, Widget};
 use fern_core::widget_id::WidgetId;
-use fern_core::BuildContext;
 use fern_settings::{AppPaths, SettingsBundle};
-use fern_telemetry::{
-    ConsentScope, StubReporter, TelemetryBundle, TelemetryMode, UsageReporter,
-};
+use fern_telemetry::{ConsentScope, StubReporter, TelemetryBundle, TelemetryMode, UsageReporter};
 use tempfile::tempdir;
 
 /// Probe widget that registers a global shortcut + matching action so
@@ -36,13 +34,19 @@ impl Widget for ProbeWidget {
                 .primary(KeyStroke::ctrl(Key::B))
                 .build(),
         );
-        ctx.register_action(Action::new("test.fire").on_invoke(|_intent: &Intent, _ctx| {
-            // No-op; we only care that the dispatch path ran.
-        }));
+        ctx.register_action(
+            Action::new("test.fire").on_invoke(|_intent: &Intent, _ctx| {
+                // No-op; we only care that the dispatch path ran.
+            }),
+        );
         Vec::new()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         proposal.resolve(0.0, 0.0).into()
     }
 }

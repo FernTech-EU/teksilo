@@ -408,9 +408,18 @@ mod tests {
         for color in &[Color::RED, Color::GREEN, Color::BLUE] {
             let (h, s, v) = color.to_hsv();
             let back = Color::from_hsv(h, s, v);
-            assert!((back.r() - color.r()).abs() < 0.01, "r mismatch for {color:?}");
-            assert!((back.g() - color.g()).abs() < 0.01, "g mismatch for {color:?}");
-            assert!((back.b() - color.b()).abs() < 0.01, "b mismatch for {color:?}");
+            assert!(
+                (back.r() - color.r()).abs() < 0.01,
+                "r mismatch for {color:?}"
+            );
+            assert!(
+                (back.g() - color.g()).abs() < 0.01,
+                "g mismatch for {color:?}"
+            );
+            assert!(
+                (back.b() - color.b()).abs() < 0.01,
+                "b mismatch for {color:?}"
+            );
         }
     }
 

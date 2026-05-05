@@ -24,19 +24,23 @@ pub struct Issue {
 
 impl Issue {
     fn error(location: impl Into<String>, message: impl Into<String>) -> Self {
-        Self { severity: Severity::Error, location: location.into(), message: message.into() }
+        Self {
+            severity: Severity::Error,
+            location: location.into(),
+            message: message.into(),
+        }
     }
     fn warning(location: impl Into<String>, message: impl Into<String>) -> Self {
-        Self { severity: Severity::Warning, location: location.into(), message: message.into() }
+        Self {
+            severity: Severity::Warning,
+            location: location.into(),
+            message: message.into(),
+        }
     }
 }
 
 /// Run all checks. Returns list of issues. Caller decides exit code.
-pub fn run_checks(
-    schema: &Schema,
-    src_roots: &[&Path],
-    fail_on_warnings: bool,
-) -> Vec<Issue> {
+pub fn run_checks(schema: &Schema, src_roots: &[&Path], _fail_on_warnings: bool) -> Vec<Issue> {
     let mut issues: Vec<Issue> = Vec::new();
 
     check_schema_structure(schema, &mut issues);
@@ -57,11 +61,7 @@ pub fn run_checks(
         check_undeclared_emits(schema, &source_hits, &mut issues);
     }
 
-    if fail_on_warnings {
-        issues
-    } else {
-        issues
-    }
+    issues
 }
 
 // ----- structural checks ------------------------------------------------
@@ -72,10 +72,7 @@ fn check_schema_structure(schema: &Schema, issues: &mut Vec<Issue>) {
         // Duplicate event names.
         if let Some(prev) = seen.insert(event.name.as_str(), 1) {
             let _ = prev;
-            issues.push(Issue::error(
-                &event.name,
-                "duplicate event name",
-            ));
+            issues.push(Issue::error(&event.name, "duplicate event name"));
         }
         check_event_fields(event, issues);
     }
@@ -109,14 +106,21 @@ fn check_event_fields(event: &EventDef, issues: &mut Vec<Issue>) {
     // Prop checks.
     let mut prop_seen: HashMap<&str, usize> = HashMap::new();
     for prop in &event.props {
-        if !prop_seen.insert(prop.name.as_str(), 1).is_none() {
+        if prop_seen.insert(prop.name.as_str(), 1).is_some() {
             issues.push(Issue::error(
                 &event.name,
                 format!("duplicate prop name `{}`", prop.name),
             ));
         }
-        const VALID_TYPES: &[&str] =
-            &["dev_static", "bounded_str", "u32", "i64", "bool", "f64_bucket", "enum"];
+        const VALID_TYPES: &[&str] = &[
+            "dev_static",
+            "bounded_str",
+            "u32",
+            "i64",
+            "bool",
+            "f64_bucket",
+            "enum",
+        ];
         if !VALID_TYPES.contains(&prop.ty.as_str()) {
             issues.push(Issue::error(
                 &event.name,
@@ -131,7 +135,10 @@ fn check_event_fields(event: &EventDef, issues: &mut Vec<Issue>) {
         if prop.ty == "enum" && prop.values.is_empty() {
             issues.push(Issue::error(
                 &event.name,
-                format!("prop `{}`: type `enum` requires a non-empty `values` list", prop.name),
+                format!(
+                    "prop `{}`: type `enum` requires a non-empty `values` list",
+                    prop.name
+                ),
             ));
         }
     }
@@ -196,15 +203,17 @@ fn scan_source_files(src_roots: &[&Path], emit_names: &[String], _schema: &Schem
 }
 
 fn walk_dir(root: &Path, visitor: &mut impl FnMut(&Path, &str)) {
-    let Ok(entries) = std::fs::read_dir(root) else { return };
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
             walk_dir(&path, visitor);
-        } else if path.extension().map(|e| e == "rs").unwrap_or(false) {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                visitor(&path, &content);
-            }
+        } else if path.extension().map(|e| e == "rs").unwrap_or(false)
+            && let Ok(content) = std::fs::read_to_string(&path)
+        {
+            visitor(&path, &content);
         }
     }
 }
@@ -227,8 +236,11 @@ fn check_unused_events(schema: &Schema, hits: &HitMap, issues: &mut Vec<Issue>) 
 
 fn check_undeclared_emits(schema: &Schema, hits: &HitMap, _issues: &mut Vec<Issue>) {
     // Build a set of all declared event fn names.
-    let declared: std::collections::HashSet<String> =
-        schema.events.iter().map(|e| emit_fn_name(&e.name)).collect();
+    let declared: std::collections::HashSet<String> = schema
+        .events
+        .iter()
+        .map(|e| emit_fn_name(&e.name))
+        .collect();
 
     // Check each source root for emit_* calls not in declared set.
     // We already have the hits map for declared ones. For undeclared,
@@ -349,6 +361,10 @@ events:
 "#;
         let schema = parse_schema(yaml).unwrap();
         let issues = run_checks(&schema, &[], false);
-        assert!(issues.iter().any(|i| i.severity == Severity::Error && i.message.contains("unknown category")));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.severity == Severity::Error && i.message.contains("unknown category"))
+        );
     }
 }

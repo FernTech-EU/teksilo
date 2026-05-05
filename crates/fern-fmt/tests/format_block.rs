@@ -4,7 +4,7 @@
 //! checks the output. Idempotence is exercised by every test:
 //! `format(format(x)) == format(x)`.
 
-use fern_fmt::{format_block, FmtConfig};
+use fern_fmt::{FmtConfig, format_block};
 
 fn fmt(s: &str) -> String {
     let cfg = FmtConfig::default();
@@ -73,7 +73,10 @@ fn line_comment_between_items() {
 #[test]
 fn block_comment_between_items() {
     let out = fmt("VStack {\n    spacing: 8.0\n    /* note */\n    Button(\"ok\")\n}");
-    assert!(out.contains("/* note */"), "expected block comment preserved, got:\n{out}");
+    assert!(
+        out.contains("/* note */"),
+        "expected block comment preserved, got:\n{out}"
+    );
 }
 
 #[test]
@@ -199,15 +202,13 @@ fn else_if_chain_preserves_innermost_close() {
 
 #[test]
 fn match_canonical_indent_is_stable() {
-    let canonical =
-        "Holder {\n    match state {\n        State::A => OneArm,\n        State::B(x) => TwoArm(x.clone()),\n    }\n}";
+    let canonical = "Holder {\n    match state {\n        State::A => OneArm,\n        State::B(x) => TwoArm(x.clone()),\n    }\n}";
     assert_eq!(fmt(canonical), canonical);
 }
 
 #[test]
 fn if_else_canonical_indent_is_stable() {
-    let canonical =
-        "Holder {\n    if cond {\n        YesBanner\n    } else {\n        NoBanner(\"hi\")\n    }\n}";
+    let canonical = "Holder {\n    if cond {\n        YesBanner\n    } else {\n        NoBanner(\"hi\")\n    }\n}";
     assert_eq!(fmt(canonical), canonical);
 }
 
@@ -219,7 +220,6 @@ fn for_canonical_indent_is_stable() {
 
 #[test]
 fn closure_canonical_indent_is_stable() {
-    let canonical =
-        "Button {\n    on_activate: |ctx| {\n        ctx.send(X);\n    }\n}";
+    let canonical = "Button {\n    on_activate: |ctx| {\n        ctx.send(X);\n    }\n}";
     assert_eq!(fmt(canonical), canonical);
 }

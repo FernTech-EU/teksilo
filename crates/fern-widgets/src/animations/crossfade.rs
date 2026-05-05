@@ -33,7 +33,7 @@
 
 use std::time::Duration;
 
-use fern_canvas::{Rect, Size, SizeProposal};
+use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
@@ -57,10 +57,7 @@ impl<K: Eq + Clone + 'static> Crossfade<K> {
     /// constructs the widget for a given key value. Builders can be
     /// invoked multiple times across the widget's lifetime as the
     /// user transitions through keys.
-    pub fn new(
-        key_signal: Signal<K>,
-        builder: impl Fn(&K) -> Box<dyn Widget> + 'static,
-    ) -> Self {
+    pub fn new(key_signal: Signal<K>, builder: impl Fn(&K) -> Box<dyn Widget> + 'static) -> Self {
         Self {
             key_signal,
             builder: Box::new(builder),
@@ -91,9 +88,7 @@ impl<K: Eq + Clone + 'static> Widget for Crossfade<K> {
         let prev_key = self.last_key.take();
         let key_changed = prev_key.as_ref().is_some_and(|p| p != &current_key);
 
-        let duration = self
-            .duration
-            .unwrap_or(ctx.theme().motion.duration_normal);
+        let duration = self.duration.unwrap_or(ctx.theme().motion.duration_normal);
         let easing = ctx.theme().motion.easing_standard;
         let reduced = ctx.prefers_reduced_motion();
 
@@ -148,10 +143,15 @@ impl<K: Eq + Clone + 'static> Widget for Crossfade<K> {
         vec![root]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -180,6 +180,7 @@ impl<K: Eq + Clone + 'static> Widget for Crossfade<K> {
 mod tests {
     use super::*;
     use crate::primitives::TextWidget;
+    use fern_canvas::Size;
     use fern_core::widget_tree::WidgetTree;
     use fern_tokens::Theme;
 
@@ -248,10 +249,7 @@ mod tests {
         // < 0.5 (outgoing approaching 0). Just sanity-check both are
         // strictly between 0 and 1.
         for o in &ops {
-            assert!(
-                *o >= 0.0 && *o <= 1.0,
-                "opacity must be in [0, 1], got {o}"
-            );
+            assert!(*o >= 0.0 && *o <= 1.0, "opacity must be in [0, 1], got {o}");
         }
     }
 
@@ -268,7 +266,11 @@ mod tests {
         #[derive(Debug)]
         struct Sized(f32);
         impl Widget for Sized {
-            fn layout_response(&self, _p: SizeProposal, _c: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            fn layout_response(
+                &self,
+                _p: SizeProposal,
+                _c: &LayoutContext,
+            ) -> fern_core::widget::LayoutResponse {
                 Size::new(40.0, self.0).into()
             }
         }

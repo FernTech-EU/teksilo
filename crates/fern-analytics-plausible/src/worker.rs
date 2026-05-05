@@ -76,9 +76,7 @@ fn worker_loop(
         let wait = if queue.is_empty() {
             config.flush_interval
         } else {
-            let until_flush = config
-                .flush_interval
-                .saturating_sub(last_flush.elapsed());
+            let until_flush = config.flush_interval.saturating_sub(last_flush.elapsed());
             until_flush.min(current_backoff)
         };
 
@@ -142,7 +140,8 @@ fn drain(
             to_requeue.push(owned);
             continue;
         }
-        let event = PlausibleEvent::from_owned(&owned, &config.domain, &config.synthetic_url_scheme);
+        let event =
+            PlausibleEvent::from_owned(&owned, &config.domain, &config.synthetic_url_scheme);
         match send_event(agent, config, &event) {
             SendOutcome::Accepted => {
                 stats.accepted.fetch_add(1, Ordering::Relaxed);

@@ -11,12 +11,12 @@ use fern_core::widget_tree::WidgetTree;
 use fern_tokens::{Color, Theme};
 
 use super::*;
+use crate::color_picker::alpha_strip::AlphaStrip;
+use crate::color_picker::hsv_canvas::HsvCanvas;
+use crate::color_picker::hue_strip::HueStrip;
 use crate::color_picker::state::ColorComponents;
 use crate::color_picker::swatch::ColorSwatch;
 use crate::color_picker::swatch_grid::SwatchGrid;
-use crate::color_picker::hue_strip::HueStrip;
-use crate::color_picker::alpha_strip::AlphaStrip;
-use crate::color_picker::hsv_canvas::HsvCanvas;
 
 #[test]
 fn builds_with_default_options() {
@@ -142,11 +142,7 @@ fn color_components_red_setter_writes_back() {
             *self.captured.borrow_mut() = Some(c.set_red.clone());
             Vec::new()
         }
-        fn layout_response(
-            &self,
-            proposal: SizeProposal,
-            _ctx: &LayoutContext,
-        ) -> LayoutResponse {
+        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
             proposal.resolve(0.0, 0.0).into()
         }
         fn place_children(
@@ -243,8 +239,7 @@ fn swatch_emits_color_well_with_color_value() {
 fn swatch_grid_emits_grid_role() {
     let swatches = Signal::new(vec![Color::RED, Color::GREEN, Color::BLUE]);
     let selected = Signal::new(Color::RED);
-    let on_select: Rc<dyn Fn(Color, &mut fern_core::widget::EventContext)> =
-        Rc::new(|_, _| {});
+    let on_select: Rc<dyn Fn(Color, &mut fern_core::widget::EventContext)> = Rc::new(|_, _| {});
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
     let id = tree.add(SwatchGrid::new(swatches, selected, 6, on_select));
     tree.layout(SizeProposal::exact(400.0, 200.0));
@@ -362,7 +357,10 @@ fn color_edit_clicking_trigger_opens_popover() {
     tree.click(trigger);
     tree.layout(SizeProposal::exact(800.0, 600.0));
     let after = tree.accessibility_node(trigger);
-    assert!(after.is_expanded(), "click opens popover (set_expanded=true)");
+    assert!(
+        after.is_expanded(),
+        "click opens popover (set_expanded=true)"
+    );
 }
 
 #[test]

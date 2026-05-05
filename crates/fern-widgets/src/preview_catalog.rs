@@ -30,20 +30,19 @@
 use fern_core::signal::Signal;
 use fern_core::widget::Widget;
 use fern_preview::{
-    register_widget_catalog_at, KnobOverrides, KnobSpec, KnobValues, PreviewVariant, WidgetCatalog,
+    KnobOverrides, KnobSpec, KnobValues, PreviewVariant, WidgetCatalog, register_widget_catalog_at,
 };
 use fern_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::primitives::{
-    Center, FixedSize, HStack, IconWidget, MaxSize, Padding, RectWidget, Spacer, TextWidget,
-    VStack,
+    Center, FixedSize, HStack, IconWidget, MaxSize, Padding, RectWidget, Spacer, TextWidget, VStack,
 };
 use crate::{
     Accordion, Avatar, AvatarPresence, AvatarShape, AvatarSize, Badge, Breadcrumb, BreadcrumbItem,
     BuiltInButton, BuiltInButtonSize, Button, ButtonVariant, Card, Checkbox, ComboBox, GroupBox,
     GroupHeader, Link, ListView, MenuItem, MenuList, Panel, ProgressBar, RadioButton, RadioGroup,
     ScrollArea, SegmentedControl, Slider, Snackbar, SplitButton, SplitView, StatusBar, TabWidget,
-    Toggle, Toolbar, ToolBox, TreeView,
+    Toggle, ToolBox, Toolbar, TreeView,
 };
 
 // ---------------------------------------------------------------------------
@@ -82,10 +81,7 @@ impl WidgetCatalog for Button {
                     .choice("variant", 2)
                     .text("label", "More…"),
             ),
-            PreviewVariant::knobs(
-                "disabled",
-                KnobOverrides::new().bool_("enabled", false),
-            ),
+            PreviewVariant::knobs("disabled", KnobOverrides::new().bool_("enabled", false)),
             PreviewVariant::knobs(
                 "with-tooltip",
                 KnobOverrides::new()
@@ -137,21 +133,14 @@ impl WidgetCatalog for Checkbox {
         vec![
             PreviewVariant::defaults("unchecked"),
             PreviewVariant::knobs("checked", KnobOverrides::new().bool_("checked", true)),
-            PreviewVariant::knobs(
-                "disabled",
-                KnobOverrides::new().bool_("enabled", false),
-            ),
+            PreviewVariant::knobs("disabled", KnobOverrides::new().bool_("enabled", false)),
         ]
     }
     fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
         let label = knobs.text("label").get();
         let checked = knobs.bool_("checked");
         let enabled = knobs.bool_("enabled").get();
-        Box::new(
-            Checkbox::new(checked)
-                .label_literal(label)
-                .enabled(enabled),
-        )
+        Box::new(Checkbox::new(checked).label_literal(label).enabled(enabled))
     }
 }
 register_widget_catalog_at!("crates/fern-widgets/src/checkbox.rs", Checkbox);
@@ -185,14 +174,8 @@ impl WidgetCatalog for RadioButton {
         vec![
             PreviewVariant::defaults("unselected"),
             PreviewVariant::knobs("selected", KnobOverrides::new().choice("selected", 0)),
-            PreviewVariant::knobs(
-                "disabled",
-                KnobOverrides::new().bool_("enabled", false),
-            ),
-            PreviewVariant::knobs(
-                "no-label",
-                KnobOverrides::new().opt_text("label", None),
-            ),
+            PreviewVariant::knobs("disabled", KnobOverrides::new().bool_("enabled", false)),
+            PreviewVariant::knobs("no-label", KnobOverrides::new().opt_text("label", None)),
         ]
     }
     fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
@@ -234,21 +217,14 @@ impl WidgetCatalog for Toggle {
         vec![
             PreviewVariant::defaults("off"),
             PreviewVariant::knobs("on", KnobOverrides::new().bool_("on", true)),
-            PreviewVariant::knobs(
-                "disabled",
-                KnobOverrides::new().bool_("enabled", false),
-            ),
+            PreviewVariant::knobs("disabled", KnobOverrides::new().bool_("enabled", false)),
         ]
     }
     fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
         let on = knobs.bool_("on");
         let label = knobs.text("label").get();
         let enabled = knobs.bool_("enabled").get();
-        Box::new(
-            Toggle::new(on)
-                .label_literal(label)
-                .enabled(enabled),
-        )
+        Box::new(Toggle::new(on).label_literal(label).enabled(enabled))
     }
 }
 register_widget_catalog_at!("crates/fern-widgets/src/toggle.rs", Toggle);
@@ -282,18 +258,10 @@ impl WidgetCatalog for Slider {
             PreviewVariant::knobs("max", KnobOverrides::new().f32_("value", 1.0)),
             PreviewVariant::knobs(
                 "stepped",
-                KnobOverrides::new()
-                    .f32_("value", 0.5)
-                    .f32_("step", 0.1),
+                KnobOverrides::new().f32_("value", 0.5).f32_("step", 0.1),
             ),
-            PreviewVariant::knobs(
-                "vertical",
-                KnobOverrides::new().choice("orientation", 1),
-            ),
-            PreviewVariant::knobs(
-                "disabled",
-                KnobOverrides::new().bool_("enabled", false),
-            ),
+            PreviewVariant::knobs("vertical", KnobOverrides::new().choice("orientation", 1)),
+            PreviewVariant::knobs("disabled", KnobOverrides::new().bool_("enabled", false)),
             PreviewVariant::knobs(
                 "with-label",
                 KnobOverrides::new().opt_text("label", Some("Volume")),
@@ -359,10 +327,7 @@ impl WidgetCatalog for ProgressBar {
                 "indeterminate",
                 KnobOverrides::new().bool_("indeterminate", true),
             ),
-            PreviewVariant::knobs(
-                "vertical",
-                KnobOverrides::new().choice("orientation", 1),
-            ),
+            PreviewVariant::knobs("vertical", KnobOverrides::new().choice("orientation", 1)),
             PreviewVariant::knobs(
                 "with-label",
                 KnobOverrides::new()
@@ -421,14 +386,8 @@ impl WidgetCatalog for Badge {
     fn variants() -> Vec<PreviewVariant> {
         vec![
             PreviewVariant::defaults("accent"),
-            PreviewVariant::knobs(
-                "long",
-                KnobOverrides::new().text("label", "EXPERIMENTAL"),
-            ),
-            PreviewVariant::knobs(
-                "short",
-                KnobOverrides::new().text("label", "•"),
-            ),
+            PreviewVariant::knobs("long", KnobOverrides::new().text("label", "EXPERIMENTAL")),
+            PreviewVariant::knobs("short", KnobOverrides::new().text("label", "•")),
             PreviewVariant::knobs(
                 "success",
                 KnobOverrides::new()
@@ -491,12 +450,7 @@ impl WidgetCatalog for Avatar {
                 &["Small (24)", "Medium (32)", "Large (48)", "XLarge (64)"],
                 1,
             )
-            .choice(
-                "shape",
-                "Shape",
-                &["Circle", "RoundedSquare", "Square"],
-                0,
-            )
+            .choice("shape", "Shape", &["Circle", "RoundedSquare", "Square"], 0)
             .choice(
                 "presence",
                 "Presence",
@@ -538,32 +492,16 @@ impl WidgetCatalog for Avatar {
             ),
             PreviewVariant::knobs(
                 "rounded-square",
-                KnobOverrides::new().choice("shape", 1).text("name", "Project X"),
+                KnobOverrides::new()
+                    .choice("shape", 1)
+                    .text("name", "Project X"),
             ),
-            PreviewVariant::knobs(
-                "online",
-                KnobOverrides::new().choice("presence", 1),
-            ),
-            PreviewVariant::knobs(
-                "away",
-                KnobOverrides::new().choice("presence", 3),
-            ),
-            PreviewVariant::knobs(
-                "busy",
-                KnobOverrides::new().choice("presence", 4),
-            ),
-            PreviewVariant::knobs(
-                "with-ring",
-                KnobOverrides::new().bool_("border", true),
-            ),
-            PreviewVariant::knobs(
-                "clickable",
-                KnobOverrides::new().bool_("clickable", true),
-            ),
-            PreviewVariant::knobs(
-                "single-letter",
-                KnobOverrides::new().text("name", "Cher"),
-            ),
+            PreviewVariant::knobs("online", KnobOverrides::new().choice("presence", 1)),
+            PreviewVariant::knobs("away", KnobOverrides::new().choice("presence", 3)),
+            PreviewVariant::knobs("busy", KnobOverrides::new().choice("presence", 4)),
+            PreviewVariant::knobs("with-ring", KnobOverrides::new().bool_("border", true)),
+            PreviewVariant::knobs("clickable", KnobOverrides::new().bool_("clickable", true)),
+            PreviewVariant::knobs("single-letter", KnobOverrides::new().text("name", "Cher")),
             PreviewVariant::knobs(
                 "email-derived",
                 KnobOverrides::new().text("name", "jane.doe@example.com"),
@@ -645,17 +583,11 @@ impl WidgetCatalog for Link {
     fn variants() -> Vec<PreviewVariant> {
         vec![
             PreviewVariant::defaults("default"),
-            PreviewVariant::knobs(
-                "disabled",
-                KnobOverrides::new().bool_("enabled", false),
-            ),
+            PreviewVariant::knobs("disabled", KnobOverrides::new().bool_("enabled", false)),
         ]
     }
     fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
-        Box::new(
-            Link::new_literal(knobs.text("label").get())
-                .enabled(knobs.bool_("enabled").get()),
-        )
+        Box::new(Link::new_literal(knobs.text("label").get()).enabled(knobs.bool_("enabled").get()))
     }
 }
 register_widget_catalog_at!("crates/fern-widgets/src/link.rs", Link);
@@ -683,10 +615,7 @@ impl WidgetCatalog for SegmentedControl {
         vec![
             PreviewVariant::defaults("default"),
             PreviewVariant::knobs("middle", KnobOverrides::new().choice("selected", 1)),
-            PreviewVariant::knobs(
-                "disabled",
-                KnobOverrides::new().bool_("enabled", false),
-            ),
+            PreviewVariant::knobs("disabled", KnobOverrides::new().bool_("enabled", false)),
         ]
     }
     fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
@@ -697,7 +626,10 @@ impl WidgetCatalog for SegmentedControl {
         )
     }
 }
-register_widget_catalog_at!("crates/fern-widgets/src/segmented_control.rs", SegmentedControl);
+register_widget_catalog_at!(
+    "crates/fern-widgets/src/segmented_control.rs",
+    SegmentedControl
+);
 
 // ---------------------------------------------------------------------------
 // ComboBox
@@ -723,14 +655,8 @@ impl WidgetCatalog for ComboBox<String> {
     fn variants() -> Vec<PreviewVariant> {
         vec![
             PreviewVariant::defaults("with-selection"),
-            PreviewVariant::knobs(
-                "empty",
-                KnobOverrides::new().opt_text("selected", None),
-            ),
-            PreviewVariant::knobs(
-                "disabled",
-                KnobOverrides::new().bool_("enabled", false),
-            ),
+            PreviewVariant::knobs("empty", KnobOverrides::new().opt_text("selected", None)),
+            PreviewVariant::knobs("disabled", KnobOverrides::new().bool_("enabled", false)),
         ]
     }
     fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
@@ -781,14 +707,8 @@ impl WidgetCatalog for crate::primitives::Divider {
     fn variants() -> Vec<PreviewVariant> {
         vec![
             PreviewVariant::defaults("horizontal"),
-            PreviewVariant::knobs(
-                "vertical",
-                KnobOverrides::new().choice("orientation", 1),
-            ),
-            PreviewVariant::knobs(
-                "thick",
-                KnobOverrides::new().f32_("thickness", 4.0),
-            ),
+            PreviewVariant::knobs("vertical", KnobOverrides::new().choice("orientation", 1)),
+            PreviewVariant::knobs("thick", KnobOverrides::new().f32_("thickness", 4.0)),
             PreviewVariant::knobs(
                 "strong",
                 KnobOverrides::new().border_role("color", BorderRole::DividerStrong),
@@ -812,9 +732,17 @@ impl WidgetCatalog for crate::primitives::Divider {
         // Wrap a vertical divider in a fixed-height block so it has
         // something to draw across; horizontal in a fixed width.
         let wrapped: Box<dyn Widget> = if orient == 1 {
-            Box::new(crate::primitives::FixedSize::new().bind_height(120.0_f32).child(d))
+            Box::new(
+                crate::primitives::FixedSize::new()
+                    .bind_height(120.0_f32)
+                    .child(d),
+            )
         } else {
-            Box::new(crate::primitives::FixedSize::new().bind_width(220.0_f32).child(d))
+            Box::new(
+                crate::primitives::FixedSize::new()
+                    .bind_width(220.0_f32)
+                    .child(d),
+            )
         };
         wrapped
     }
@@ -877,7 +805,7 @@ impl WidgetCatalog for IconWidget {
                 let r = (size / 2.0) - 2.0;
                 let c = Point::new(size / 2.0, size / 2.0);
                 // Approximate a circle with cubic-bezier arcs (4 quadrants).
-                let k = 0.552_284_75 * r;
+                let k = 0.552_284_8 * r;
                 path.move_to(Point::new(c.x + r, c.y));
                 path.cubic_to(
                     Point::new(c.x + r, c.y + k),
@@ -912,7 +840,10 @@ impl WidgetCatalog for IconWidget {
         Box::new(IconWidget::from_path(path, size).color(role))
     }
 }
-register_widget_catalog_at!("crates/fern-widgets/src/primitives/icon_widget.rs", IconWidget);
+register_widget_catalog_at!(
+    "crates/fern-widgets/src/primitives/icon_widget.rs",
+    IconWidget
+);
 
 // =========================================================================
 // Tier B — composites with fixture variants
@@ -934,13 +865,23 @@ fn sample_text(label: &str) -> TextWidget {
 }
 
 impl WidgetCatalog for Card {
-    fn id() -> &'static str { "card" }
-    fn group() -> &'static str { "Containers" }
-    fn display_name() -> &'static str { "Card" }
+    fn id() -> &'static str {
+        "card"
+    }
+    fn group() -> &'static str {
+        "Containers"
+    }
+    fn display_name() -> &'static str {
+        "Card"
+    }
     fn knobs() -> KnobSpec {
         KnobSpec::new()
             .text("title", "Title", "Card title")
-            .text("body", "Body", "Card body text. Cards group related controls into a labelled rectangular region.")
+            .text(
+                "body",
+                "Body",
+                "Card body text. Cards group related controls into a labelled rectangular region.",
+            )
             .bool_("show_header", "Show header", true)
             .bool_("show_footer", "Show footer", false)
             .surface_role("background", "Background", SurfaceRole::Main)
@@ -1003,9 +944,15 @@ register_widget_catalog_at!("crates/fern-widgets/src/card.rs", Card);
 // ---------------------------------------------------------------------------
 
 impl WidgetCatalog for Panel {
-    fn id() -> &'static str { "panel" }
-    fn group() -> &'static str { "Containers" }
-    fn display_name() -> &'static str { "Panel" }
+    fn id() -> &'static str {
+        "panel"
+    }
+    fn group() -> &'static str {
+        "Containers"
+    }
+    fn display_name() -> &'static str {
+        "Panel"
+    }
     fn knobs() -> KnobSpec {
         KnobSpec::new()
             .surface_role("background", "Background", SurfaceRole::Raised)
@@ -1031,14 +978,8 @@ impl WidgetCatalog for Panel {
                     .surface_role("background", SurfaceRole::Sunken)
                     .text("content", "Sunken panel"),
             ),
-            PreviewVariant::knobs(
-                "no-border",
-                KnobOverrides::new().f32_("border_width", 0.0),
-            ),
-            PreviewVariant::knobs(
-                "rounded",
-                KnobOverrides::new().f32_("corner_radius", 16.0),
-            ),
+            PreviewVariant::knobs("no-border", KnobOverrides::new().f32_("border_width", 0.0)),
+            PreviewVariant::knobs("rounded", KnobOverrides::new().f32_("corner_radius", 16.0)),
         ]
     }
     fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
@@ -1060,31 +1001,36 @@ register_widget_catalog_at!("crates/fern-widgets/src/panel.rs", Panel);
 // ---------------------------------------------------------------------------
 
 impl WidgetCatalog for GroupBox {
-    fn id() -> &'static str { "group_box" }
-    fn group() -> &'static str { "Containers" }
-    fn display_name() -> &'static str { "GroupBox" }
+    fn id() -> &'static str {
+        "group_box"
+    }
+    fn group() -> &'static str {
+        "Containers"
+    }
+    fn display_name() -> &'static str {
+        "GroupBox"
+    }
     fn knobs() -> KnobSpec {
         KnobSpec::new().text("title", "Title", "Notifications")
     }
     fn variants() -> Vec<PreviewVariant> {
         vec![
             PreviewVariant::defaults("default"),
-            PreviewVariant::knobs(
-                "alt-title",
-                KnobOverrides::new().text("title", "Privacy"),
-            ),
+            PreviewVariant::knobs("alt-title", KnobOverrides::new().text("title", "Privacy")),
         ]
     }
     fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
         Box::new(
-            GroupBox::new(fern_i18n::LocalizedString::literal(knobs.text("title").get()))
-                .child(
-                    VStack::new()
-                        .spacing(8.0)
-                        .child(Checkbox::new(Signal::new(true)).label_literal("Sounds"))
-                        .child(Checkbox::new(Signal::new(false)).label_literal("Badges"))
-                        .child(Checkbox::new(Signal::new(true)).label_literal("Banners")),
-                ),
+            GroupBox::new(fern_i18n::LocalizedString::literal(
+                knobs.text("title").get(),
+            ))
+            .child(
+                VStack::new()
+                    .spacing(8.0)
+                    .child(Checkbox::new(Signal::new(true)).label_literal("Sounds"))
+                    .child(Checkbox::new(Signal::new(false)).label_literal("Badges"))
+                    .child(Checkbox::new(Signal::new(true)).label_literal("Banners")),
+            ),
         )
     }
 }
@@ -1095,9 +1041,15 @@ register_widget_catalog_at!("crates/fern-widgets/src/group_box.rs", GroupBox);
 // ---------------------------------------------------------------------------
 
 impl WidgetCatalog for GroupHeader {
-    fn id() -> &'static str { "group_header" }
-    fn group() -> &'static str { "Containers" }
-    fn display_name() -> &'static str { "GroupHeader" }
+    fn id() -> &'static str {
+        "group_header"
+    }
+    fn group() -> &'static str {
+        "Containers"
+    }
+    fn display_name() -> &'static str {
+        "GroupHeader"
+    }
     fn knobs() -> KnobSpec {
         KnobSpec::new().text("label", "Label", "Section title")
     }
@@ -1117,9 +1069,15 @@ register_widget_catalog_at!("crates/fern-widgets/src/group_header.rs", GroupHead
 // ---------------------------------------------------------------------------
 
 impl WidgetCatalog for BuiltInButton {
-    fn id() -> &'static str { "built_in_button" }
-    fn group() -> &'static str { "Controls" }
-    fn display_name() -> &'static str { "BuiltInButton" }
+    fn id() -> &'static str {
+        "built_in_button"
+    }
+    fn group() -> &'static str {
+        "Controls"
+    }
+    fn display_name() -> &'static str {
+        "BuiltInButton"
+    }
     fn variants() -> Vec<PreviewVariant> {
         fn build_browse() -> Box<dyn Widget> {
             Box::new(BuiltInButton::browse().size(BuiltInButtonSize::Default))
@@ -1158,9 +1116,15 @@ register_widget_catalog_at!("crates/fern-widgets/src/built_in_button.rs", BuiltI
 /// the popup body reads from a `message` knob, wrapped in a `Panel`
 /// for readability when the popup opens.
 impl WidgetCatalog for Snackbar {
-    fn id() -> &'static str { "snackbar" }
-    fn group() -> &'static str { "Feedback" }
-    fn display_name() -> &'static str { "Snackbar" }
+    fn id() -> &'static str {
+        "snackbar"
+    }
+    fn group() -> &'static str {
+        "Feedback"
+    }
+    fn display_name() -> &'static str {
+        "Snackbar"
+    }
     fn knobs() -> KnobSpec {
         KnobSpec::new()
             .text("trigger_label", "Trigger label", "Show notification")
@@ -1205,17 +1169,31 @@ register_widget_catalog_at!("crates/fern-widgets/src/snackbar.rs", Snackbar);
 // ---------------------------------------------------------------------------
 
 impl WidgetCatalog for Breadcrumb {
-    fn id() -> &'static str { "breadcrumb" }
-    fn group() -> &'static str { "Containers" }
-    fn display_name() -> &'static str { "Breadcrumb" }
+    fn id() -> &'static str {
+        "breadcrumb"
+    }
+    fn group() -> &'static str {
+        "Containers"
+    }
+    fn display_name() -> &'static str {
+        "Breadcrumb"
+    }
     fn variants() -> Vec<PreviewVariant> {
         fn build_path() -> Box<dyn Widget> {
             Box::new(
                 Breadcrumb::new()
-                    .item(BreadcrumbItem::new(fern_i18n::LocalizedString::literal("Home")))
-                    .item(BreadcrumbItem::new(fern_i18n::LocalizedString::literal("Projects")))
-                    .item(BreadcrumbItem::new(fern_i18n::LocalizedString::literal("FernUI")))
-                    .item(BreadcrumbItem::new(fern_i18n::LocalizedString::literal("crates"))),
+                    .item(BreadcrumbItem::new(fern_i18n::LocalizedString::literal(
+                        "Home",
+                    )))
+                    .item(BreadcrumbItem::new(fern_i18n::LocalizedString::literal(
+                        "Projects",
+                    )))
+                    .item(BreadcrumbItem::new(fern_i18n::LocalizedString::literal(
+                        "FernUI",
+                    )))
+                    .item(BreadcrumbItem::new(fern_i18n::LocalizedString::literal(
+                        "crates",
+                    ))),
             )
         }
         vec![PreviewVariant::scenario("path", build_path)]
@@ -1231,9 +1209,15 @@ register_widget_catalog_at!("crates/fern-widgets/src/breadcrumb.rs", Breadcrumb)
 // ---------------------------------------------------------------------------
 
 impl WidgetCatalog for Toolbar {
-    fn id() -> &'static str { "toolbar" }
-    fn group() -> &'static str { "Chrome" }
-    fn display_name() -> &'static str { "Toolbar" }
+    fn id() -> &'static str {
+        "toolbar"
+    }
+    fn group() -> &'static str {
+        "Chrome"
+    }
+    fn display_name() -> &'static str {
+        "Toolbar"
+    }
     fn variants() -> Vec<PreviewVariant> {
         fn build_default() -> Box<dyn Widget> {
             Box::new(
@@ -1256,9 +1240,15 @@ register_widget_catalog_at!("crates/fern-widgets/src/toolbar.rs", Toolbar);
 // ---------------------------------------------------------------------------
 
 impl WidgetCatalog for StatusBar {
-    fn id() -> &'static str { "status_bar" }
-    fn group() -> &'static str { "Chrome" }
-    fn display_name() -> &'static str { "StatusBar" }
+    fn id() -> &'static str {
+        "status_bar"
+    }
+    fn group() -> &'static str {
+        "Chrome"
+    }
+    fn display_name() -> &'static str {
+        "StatusBar"
+    }
     fn variants() -> Vec<PreviewVariant> {
         fn build_default() -> Box<dyn Widget> {
             Box::new(
@@ -1289,9 +1279,15 @@ register_widget_catalog_at!("crates/fern-widgets/src/status_bar.rs", StatusBar);
 // ---------------------------------------------------------------------------
 
 impl WidgetCatalog for Accordion {
-    fn id() -> &'static str { "accordion" }
-    fn group() -> &'static str { "Containers" }
-    fn display_name() -> &'static str { "Accordion" }
+    fn id() -> &'static str {
+        "accordion"
+    }
+    fn group() -> &'static str {
+        "Containers"
+    }
+    fn display_name() -> &'static str {
+        "Accordion"
+    }
     fn knobs() -> KnobSpec {
         KnobSpec::new()
             .text("title", "Title", "Advanced")
@@ -1316,9 +1312,7 @@ impl WidgetCatalog for Accordion {
         // the header in the canvas mutates the signal, the inspector
         // toggle reflects it.
         let expanded = knobs.bool_("expanded");
-        Box::new(
-            Accordion::new_literal(title, expanded).content(sample_text(&body)),
-        )
+        Box::new(Accordion::new_literal(title, expanded).content(sample_text(&body)))
     }
 }
 register_widget_catalog_at!("crates/fern-widgets/src/accordion.rs", Accordion);
@@ -1328,9 +1322,15 @@ register_widget_catalog_at!("crates/fern-widgets/src/accordion.rs", Accordion);
 // ---------------------------------------------------------------------------
 
 impl WidgetCatalog for RadioGroup {
-    fn id() -> &'static str { "radio_group" }
-    fn group() -> &'static str { "Controls" }
-    fn display_name() -> &'static str { "RadioGroup" }
+    fn id() -> &'static str {
+        "radio_group"
+    }
+    fn group() -> &'static str {
+        "Controls"
+    }
+    fn display_name() -> &'static str {
+        "RadioGroup"
+    }
     fn variants() -> Vec<PreviewVariant> {
         fn build_default() -> Box<dyn Widget> {
             let selected = Signal::new(0_usize);
@@ -1354,9 +1354,15 @@ register_widget_catalog_at!("crates/fern-widgets/src/radio_group.rs", RadioGroup
 // ---------------------------------------------------------------------------
 
 impl WidgetCatalog for SplitButton {
-    fn id() -> &'static str { "split_button" }
-    fn group() -> &'static str { "Controls" }
-    fn display_name() -> &'static str { "SplitButton" }
+    fn id() -> &'static str {
+        "split_button"
+    }
+    fn group() -> &'static str {
+        "Controls"
+    }
+    fn display_name() -> &'static str {
+        "SplitButton"
+    }
     fn variants() -> Vec<PreviewVariant> {
         fn build_default() -> Box<dyn Widget> {
             Box::new(
@@ -1383,9 +1389,15 @@ register_widget_catalog_at!("crates/fern-widgets/src/split_button.rs", SplitButt
 // ---------------------------------------------------------------------------
 
 impl WidgetCatalog for ListView<String> {
-    fn id() -> &'static str { "list_view" }
-    fn group() -> &'static str { "Data" }
-    fn display_name() -> &'static str { "ListView" }
+    fn id() -> &'static str {
+        "list_view"
+    }
+    fn group() -> &'static str {
+        "Data"
+    }
+    fn display_name() -> &'static str {
+        "ListView"
+    }
     fn variants() -> Vec<PreviewVariant> {
         fn build_short() -> Box<dyn Widget> {
             let model = fern_data::ListModel::from_vec(vec![
@@ -1424,9 +1436,15 @@ register_widget_catalog_at!("crates/fern-widgets/src/list_view.rs", ListView<Str
 // ---------------------------------------------------------------------------
 
 impl WidgetCatalog for TreeView<String> {
-    fn id() -> &'static str { "tree_view" }
-    fn group() -> &'static str { "Data" }
-    fn display_name() -> &'static str { "TreeView" }
+    fn id() -> &'static str {
+        "tree_view"
+    }
+    fn group() -> &'static str {
+        "Data"
+    }
+    fn display_name() -> &'static str {
+        "TreeView"
+    }
     fn variants() -> Vec<PreviewVariant> {
         fn build_default() -> Box<dyn Widget> {
             let model = fern_data::TreeModel::<String>::new();
@@ -1466,9 +1484,15 @@ register_widget_catalog_at!("crates/fern-widgets/src/tree_view.rs", TreeView<Str
 // ---------------------------------------------------------------------------
 
 impl WidgetCatalog for MenuList {
-    fn id() -> &'static str { "menu_list" }
-    fn group() -> &'static str { "Menus" }
-    fn display_name() -> &'static str { "MenuList" }
+    fn id() -> &'static str {
+        "menu_list"
+    }
+    fn group() -> &'static str {
+        "Menus"
+    }
+    fn display_name() -> &'static str {
+        "MenuList"
+    }
     fn variants() -> Vec<PreviewVariant> {
         fn build_default() -> Box<dyn Widget> {
             Box::new(
@@ -1493,9 +1517,15 @@ register_widget_catalog_at!("crates/fern-widgets/src/menu_list.rs", MenuList);
 // ---------------------------------------------------------------------------
 
 impl WidgetCatalog for ScrollArea {
-    fn id() -> &'static str { "scroll_area" }
-    fn group() -> &'static str { "Data" }
-    fn display_name() -> &'static str { "ScrollArea" }
+    fn id() -> &'static str {
+        "scroll_area"
+    }
+    fn group() -> &'static str {
+        "Data"
+    }
+    fn display_name() -> &'static str {
+        "ScrollArea"
+    }
     fn variants() -> Vec<PreviewVariant> {
         fn build_long_content() -> Box<dyn Widget> {
             let mut col = VStack::new().spacing(4.0);
@@ -1528,9 +1558,15 @@ register_widget_catalog_at!("crates/fern-widgets/src/scroll_area.rs", ScrollArea
 // ---------------------------------------------------------------------------
 
 impl WidgetCatalog for SplitView {
-    fn id() -> &'static str { "split_view" }
-    fn group() -> &'static str { "Containers" }
-    fn display_name() -> &'static str { "SplitView" }
+    fn id() -> &'static str {
+        "split_view"
+    }
+    fn group() -> &'static str {
+        "Containers"
+    }
+    fn display_name() -> &'static str {
+        "SplitView"
+    }
     fn variants() -> Vec<PreviewVariant> {
         fn build_horizontal() -> Box<dyn Widget> {
             let split = Signal::new(0.4_f32);
@@ -1562,9 +1598,15 @@ register_widget_catalog_at!("crates/fern-widgets/src/split_view.rs", SplitView);
 // ---------------------------------------------------------------------------
 
 impl WidgetCatalog for TabWidget {
-    fn id() -> &'static str { "tab_widget" }
-    fn group() -> &'static str { "Containers" }
-    fn display_name() -> &'static str { "TabWidget" }
+    fn id() -> &'static str {
+        "tab_widget"
+    }
+    fn group() -> &'static str {
+        "Containers"
+    }
+    fn display_name() -> &'static str {
+        "TabWidget"
+    }
     fn variants() -> Vec<PreviewVariant> {
         fn build_three_tabs() -> Box<dyn Widget> {
             use crate::tab_widget::{TabId, TabInfo};
@@ -1606,9 +1648,15 @@ register_widget_catalog_at!("crates/fern-widgets/src/tab_widget.rs", TabWidget);
 // ---------------------------------------------------------------------------
 
 impl WidgetCatalog for ToolBox {
-    fn id() -> &'static str { "tool_box" }
-    fn group() -> &'static str { "Containers" }
-    fn display_name() -> &'static str { "ToolBox" }
+    fn id() -> &'static str {
+        "tool_box"
+    }
+    fn group() -> &'static str {
+        "Containers"
+    }
+    fn display_name() -> &'static str {
+        "ToolBox"
+    }
     fn variants() -> Vec<PreviewVariant> {
         fn build_three_items() -> Box<dyn Widget> {
             let selected = Signal::new(0_usize);
@@ -1618,9 +1666,18 @@ impl WidgetCatalog for ToolBox {
                     .bind_height(280.0_f32)
                     .child(
                         ToolBox::new(selected)
-                            .item_literal("General", Padding::uniform(12.0).child(sample_text("General settings")))
-                            .item_literal("Editor", Padding::uniform(12.0).child(sample_text("Editor settings")))
-                            .item_literal("Keymap", Padding::uniform(12.0).child(sample_text("Keymap settings"))),
+                            .item_literal(
+                                "General",
+                                Padding::uniform(12.0).child(sample_text("General settings")),
+                            )
+                            .item_literal(
+                                "Editor",
+                                Padding::uniform(12.0).child(sample_text("Editor settings")),
+                            )
+                            .item_literal(
+                                "Keymap",
+                                Padding::uniform(12.0).child(sample_text("Keymap settings")),
+                            ),
                     ),
             )
         }
@@ -1637,9 +1694,15 @@ register_widget_catalog_at!("crates/fern-widgets/src/tool_box.rs", ToolBox);
 // ---------------------------------------------------------------------------
 
 impl WidgetCatalog for crate::Repeater<String> {
-    fn id() -> &'static str { "repeater" }
-    fn group() -> &'static str { "Data" }
-    fn display_name() -> &'static str { "Repeater" }
+    fn id() -> &'static str {
+        "repeater"
+    }
+    fn group() -> &'static str {
+        "Data"
+    }
+    fn display_name() -> &'static str {
+        "Repeater"
+    }
     fn variants() -> Vec<PreviewVariant> {
         fn build_default() -> Box<dyn Widget> {
             let model = fern_data::ListModel::from_vec(vec![
@@ -1667,7 +1730,10 @@ impl WidgetCatalog for crate::Repeater<String> {
         scenario_for::<Self>(variant)
     }
 }
-register_widget_catalog_at!("crates/fern-widgets/src/repeater.rs", crate::Repeater<String>);
+register_widget_catalog_at!(
+    "crates/fern-widgets/src/repeater.rs",
+    crate::Repeater<String>
+);
 
 // =========================================================================
 // Helpers
@@ -1679,7 +1745,10 @@ register_widget_catalog_at!("crates/fern-widgets/src/repeater.rs", crate::Repeat
 /// first declared variant when `name` is unknown.
 fn scenario_for<W: WidgetCatalog>(name: &str) -> Box<dyn Widget> {
     let variants = W::variants();
-    let chosen = variants.iter().find(|v| v.name() == name).or_else(|| variants.first());
+    let chosen = variants
+        .iter()
+        .find(|v| v.name() == name)
+        .or_else(|| variants.first());
     match chosen {
         Some(PreviewVariant::Scenario { builder, .. }) => builder(),
         _ => Box::new(
@@ -1743,10 +1812,7 @@ mod color_family {
             scenario_for::<Self>(variant)
         }
     }
-    register_widget_catalog_at!(
-        "crates/fern-widgets/src/hex_color_input.rs",
-        HexColorInput
-    );
+    register_widget_catalog_at!("crates/fern-widgets/src/hex_color_input.rs", HexColorInput);
 
     impl WidgetCatalog for ColorPicker {
         fn id() -> &'static str {
@@ -1844,4 +1910,3 @@ mod color_family {
     }
     register_widget_catalog_at!("crates/fern-widgets/src/color_edit.rs", ColorEdit);
 }
-

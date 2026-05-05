@@ -303,7 +303,8 @@ impl WindowState {
     }
 
     pub fn set_position_from_os(&self, position: (i32, i32)) {
-        self.inner.with_os_guard(|| self.inner.position.set(position));
+        self.inner
+            .with_os_guard(|| self.inner.position.set(position));
     }
 
     pub fn set_focused_from_os(&self, focused: bool) {
@@ -362,7 +363,10 @@ mod tests {
         let state = WindowState::new(init(1));
         state.placement().set(WindowPlacement::Fullscreen);
         let cmds = state.drain_os_commands();
-        assert_eq!(cmds, vec![WindowCommand::SetPlacement(WindowPlacement::Fullscreen)]);
+        assert_eq!(
+            cmds,
+            vec![WindowCommand::SetPlacement(WindowPlacement::Fullscreen)]
+        );
     }
 
     #[test]

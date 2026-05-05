@@ -27,9 +27,7 @@ fn click_passes_through_inspector_shell_to_user_button() {
 
     let clicked = Rc::new(Cell::new(false));
     let c = clicked.clone();
-    let button = tree.add(
-        Button::new_literal("Click Me").on_activate_fn(move |_| c.set(true)),
-    );
+    let button = tree.add(Button::new_literal("Click Me").on_activate_fn(move |_| c.set(true)));
 
     let state = InspectorState::new(false);
     let shell_id = tree.add(InspectorShell::new(button, state.clone()));
@@ -236,7 +234,10 @@ fn tab_content_fills_panel_width() {
     let shell_kids = tree.children(shell_id);
     let panel_slot_id = *tree.children(shell_kids[0]).last().unwrap();
     let (deepest, deepest_bounds, _) = deepest_full_height_descendant(&tree, panel_slot_id, 0);
-    eprintln!("deepest panel descendant {:?} bounds {:?}", deepest, deepest_bounds);
+    eprintln!(
+        "deepest panel descendant {:?} bounds {:?}",
+        deepest, deepest_bounds
+    );
 
     // Inspect the panel-content area: walk all panel descendants and
     // verify *some* widget reaches the full window width. If everything
@@ -272,12 +273,12 @@ fn tab_content_fills_panel_width() {
         depth: u32,
     ) -> Option<(WidgetId, fern_canvas::Rect, u32)> {
         let b = tree.bounds(id);
-        let mut best = (b.height > 100.0).then(|| (id, b, depth));
+        let mut best = (b.height > 100.0).then_some((id, b, depth));
         for k in tree.children(id) {
-            if let Some(nested) = deepest_tall(tree, k, depth + 1) {
-                if best.as_ref().is_none_or(|(_, _, d)| nested.2 > *d) {
-                    best = Some(nested);
-                }
+            if let Some(nested) = deepest_tall(tree, k, depth + 1)
+                && best.as_ref().is_none_or(|(_, _, d)| nested.2 > *d)
+            {
+                best = Some(nested);
             }
         }
         best
@@ -386,10 +387,7 @@ fn tree_tab_renders_rows_for_user_root() {
     // TreeRows reports its bounds height as `rows.len() * ROW_HEIGHT`.
     // A height of 0 means push_subtree found nothing in the user-root
     // subtree — the symptom the user reported.
-    fn find_tree_rows_height(
-        tree: &WidgetTree,
-        id: WidgetId,
-    ) -> Option<(WidgetId, f32)> {
+    fn find_tree_rows_height(tree: &WidgetTree, id: WidgetId) -> Option<(WidgetId, f32)> {
         let kids = tree.children(id);
         if kids.is_empty() {
             let h = tree.bounds(id).height;
@@ -422,9 +420,7 @@ fn click_at_window_center_reaches_button_bounds() {
 
     let clicked = Rc::new(Cell::new(false));
     let c = clicked.clone();
-    let button = tree.add(
-        Button::new_literal("Click Me").on_activate_fn(move |_| c.set(true)),
-    );
+    let button = tree.add(Button::new_literal("Click Me").on_activate_fn(move |_| c.set(true)));
 
     let state = InspectorState::new(false);
     let shell_id = tree.add(InspectorShell::new(button, state.clone()));

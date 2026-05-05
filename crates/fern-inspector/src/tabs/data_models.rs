@@ -60,9 +60,11 @@ impl Widget for DataModelsTab {
         // Repaint on selection change; relayout when the panel opens
         // (initial mount).
         let self_id = ctx.self_id();
-        self.state
-            .selected_model_index
-            .bind_to(self_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
+        self.state.selected_model_index.bind_to(
+            self_id,
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
         self.state
             .open
             .bind_to(self_id, ctx.binding_registry(), BindingLevel::Relayout);
@@ -119,10 +121,10 @@ impl Widget for DataModelsTab {
             .get()
             .filter(|i| *i < snapshot.len())
             .or_else(|| snapshot.len().checked_sub(1));
-        if let Some(idx) = chosen {
-            if let Some((_, model)) = snapshot.get(idx) {
-                model.debug_dump(&mut dump);
-            }
+        if let Some(idx) = chosen
+            && let Some((_, model)) = snapshot.get(idx)
+        {
+            model.debug_dump(&mut dump);
         }
 
         let row_count = rows.len().max(1);
@@ -203,7 +205,12 @@ impl Widget for DataModelsTab {
             }
             canvas.draw_text(
                 &row.name,
-                Rect::new(bounds.x + ROW_PADDING_X, y + 2.0, NAME_COL_WIDTH, ROW_HEIGHT),
+                Rect::new(
+                    bounds.x + ROW_PADDING_X,
+                    y + 2.0,
+                    NAME_COL_WIDTH,
+                    ROW_HEIGHT,
+                ),
                 style,
                 primary,
             );

@@ -31,9 +31,7 @@
 use std::rc::Rc;
 
 use fern_canvas::{Point, Rect, Size, SizeProposal};
-use fern_core::widget::{
-    LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
-};
+use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_core::{PlatformTitleBarHost, ResizeEdge};
 
@@ -96,10 +94,7 @@ impl WindowFrame {
 }
 
 impl Widget for WindowFrame {
-    fn build(
-        &mut self,
-        ctx: &mut fern_core::build_context::BuildContext,
-    ) -> Vec<WidgetId> {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
         // Resolve the optional content child first so it sits at index 0
         // in the children list — `place_children` relies on the order
         // matching
@@ -163,27 +158,28 @@ impl Widget for WindowFrame {
         if let Some(c) = self.content_id {
             ids.push(c);
         }
-        for s in &self.strip_ids {
-            if let Some(s) = s {
-                ids.push(*s);
-            }
+        for s in self.strip_ids.iter().flatten() {
+            ids.push(*s);
         }
-        for c in &self.corner_ids {
-            if let Some(c) = c {
-                ids.push(*c);
-            }
+        for c in self.corner_ids.iter().flatten() {
+            ids.push(*c);
         }
         ids
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         // Always claim every pixel offered. The frame is meant to wrap a
         // window's full client area — anything smaller would leave bare
         // space at the edges.
         Size::new(
             proposal.width.unwrap_or(0.0),
             proposal.height.unwrap_or(0.0),
-        ).into()
+        )
+        .into()
     }
 
     fn place_children(
@@ -265,15 +261,11 @@ impl Widget for WindowFrame {
         if let Some(c) = self.content_id {
             ids.push(c);
         }
-        for s in &self.strip_ids {
-            if let Some(s) = s {
-                ids.push(*s);
-            }
+        for s in self.strip_ids.iter().flatten() {
+            ids.push(*s);
         }
-        for c in &self.corner_ids {
-            if let Some(c) = c {
-                ids.push(*c);
-            }
+        for c in self.corner_ids.iter().flatten() {
+            ids.push(*c);
         }
         ids
     }
@@ -331,11 +323,16 @@ mod tests {
     #[derive(Debug)]
     struct ContentLeaf;
     impl Widget for ContentLeaf {
-        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
             Size::new(
                 proposal.width.unwrap_or(0.0),
                 proposal.height.unwrap_or(0.0),
-            ).into()
+            )
+            .into()
         }
     }
 
@@ -343,11 +340,7 @@ mod tests {
     fn frame_content_fills_full_window_no_visible_padding() {
         let host: Rc<dyn PlatformTitleBarHost> = Rc::new(TestHost::default());
         let mut tree = WidgetTree::new();
-        let frame = tree.add(
-            WindowFrame::new(host)
-                .thickness(6.0)
-                .content(ContentLeaf),
-        );
+        let frame = tree.add(WindowFrame::new(host).thickness(6.0).content(ContentLeaf));
         tree.layout(SizeProposal::exact(900.0, 600.0));
 
         // The frame itself fills the window.

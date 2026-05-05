@@ -119,9 +119,9 @@ impl FormLayout {
     /// Add a full-width row spanning both columns.
     pub fn full_width(mut self, widget: impl Widget + 'static) -> Self {
         self.pending_rows
-            .push(PendingFormRow::FullWidth(PendingChild::Deferred(
-                Box::new(widget),
-            )));
+            .push(PendingFormRow::FullWidth(PendingChild::Deferred(Box::new(
+                widget,
+            ))));
         self
     }
 
@@ -151,20 +151,17 @@ impl FormLayout {
     fn compute_label_width(&self, ctx: &LayoutContext) -> f32 {
         let mut max_w = 0.0_f32;
         for row in &self.rows {
-            if let FormRow::Pair(label_id, _) = row {
-                if let Some(s) = ctx.child_size(*label_id, SizeProposal::unspecified()) {
-                    max_w = max_w.max(s.width);
-                }
+            if let FormRow::Pair(label_id, _) = row
+                && let Some(s) = ctx.child_size(*label_id, SizeProposal::unspecified())
+            {
+                max_w = max_w.max(s.width);
             }
         }
         max_w
     }
 }
 
-fn resolve_pending(
-    p: PendingChild,
-    ctx: &mut fern_core::build_context::BuildContext,
-) -> WidgetId {
+fn resolve_pending(p: PendingChild, ctx: &mut fern_core::build_context::BuildContext) -> WidgetId {
     match p {
         PendingChild::Id(id) => id,
         PendingChild::Deferred(w) => ctx.add_boxed(w),
@@ -198,7 +195,11 @@ impl Widget for FormLayout {
         self.all_child_ids()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         if self.rows.is_empty() {
             return (proposal.resolve(0.0, 0.0)).into();
         }
@@ -248,12 +249,8 @@ impl Widget for FormLayout {
         for row in &self.rows {
             let row_h = match row {
                 FormRow::Pair(label_id, field_id) => {
-                    let lh = ctx
-                        .child_size(*label_id, label_proposal)
-                        .map(|s| s.height);
-                    let fh = ctx
-                        .child_size(*field_id, field_proposal)
-                        .map(|s| s.height);
+                    let lh = ctx.child_size(*label_id, label_proposal).map(|s| s.height);
+                    let fh = ctx.child_size(*field_id, field_proposal).map(|s| s.height);
                     match (lh, fh) {
                         (Some(l), Some(f)) => l.max(f),
                         (Some(l), None) => l,
@@ -293,15 +290,9 @@ impl Widget for FormLayout {
 
         let rtl = ctx.is_rtl();
         let (label_x, field_x) = if rtl {
-            (
-                bounds.x + field_col_width + self.label_gap,
-                bounds.x,
-            )
+            (bounds.x + field_col_width + self.label_gap, bounds.x)
         } else {
-            (
-                bounds.x,
-                bounds.x + label_col_width + self.label_gap,
-            )
+            (bounds.x, bounds.x + label_col_width + self.label_gap)
         };
 
         let label_proposal = SizeProposal::with_width(label_col_width);
@@ -322,8 +313,8 @@ impl Widget for FormLayout {
                     } else {
                         child_idx
                     };
-                    let field_active =
-                        field_check_idx < children.len() && children[field_check_idx].id == *field_id;
+                    let field_active = field_check_idx < children.len()
+                        && children[field_check_idx].id == *field_id;
 
                     if !label_active && !field_active {
                         continue; // entire row dormant
@@ -415,7 +406,11 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
             Size::new(self.0, self.1).into()
         }
     }
@@ -444,11 +439,7 @@ mod tests {
         let f1 = tree.add(FixedLeaf(100.0, 20.0));
         let l2 = tree.add(FixedLeaf(100.0, 20.0)); // wider label
         let f2 = tree.add(FixedLeaf(80.0, 20.0));
-        let _form = tree.add(
-            FormLayout::new()
-                .line_ids(l1, f1)
-                .line_ids(l2, f2),
-        );
+        let _form = tree.add(FormLayout::new().line_ids(l1, f1).line_ids(l2, f2));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         // Label column = 100 (widest label). Both fields start at x=100.
@@ -626,11 +617,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let l1 = tree.add(FixedLeaf(80.0, 20.0));
         let f1 = tree.add(FixedLeaf(200.0, 20.0));
-        let form = tree.add(
-            FormLayout::new()
-                .label_gap(10.0)
-                .line_ids(l1, f1),
-        );
+        let form = tree.add(FormLayout::new().label_gap(10.0).line_ids(l1, f1));
         tree.layout(SizeProposal {
             width: None,
             height: Some(200.0),

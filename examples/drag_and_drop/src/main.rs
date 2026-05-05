@@ -26,29 +26,29 @@ fn main() {
         .theme(Theme::light_default())
         .initial_window(
             WindowConfig::new()
-            .title("FernUI — Drag and Drop")
-            .size(960, 640)
-            .root(|tree, _state| {
-            let songs = ListModel::from_vec(
-            [
-            "Hyperballad",
-            "Unravel",
-            "Black Cow",
-            "Chan Chan",
-            "The Chauffeur",
-            "Teardrop",
-            "Bachelorette",
-            "Lamento Borincano",
-            "Space Oddity",
-            "Paranoid Android",
-            ]
-            .into_iter()
-            .map(String::from)
-            .collect(),
-            );
-            let folders = build_folder_tree();
-            tree.add(Root::new(songs, folders))
-            })
+                .title("FernUI — Drag and Drop")
+                .size(960, 640)
+                .root(|tree, _state| {
+                    let songs = ListModel::from_vec(
+                        [
+                            "Hyperballad",
+                            "Unravel",
+                            "Black Cow",
+                            "Chan Chan",
+                            "The Chauffeur",
+                            "Teardrop",
+                            "Bachelorette",
+                            "Lamento Borincano",
+                            "Space Oddity",
+                            "Paranoid Android",
+                        ]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
+                    );
+                    let folders = build_folder_tree();
+                    tree.add(Root::new(songs, folders))
+                }),
         )
         .run();
 }
@@ -238,17 +238,9 @@ impl Widget for Root {
             Panel::new().child(
                 HStack::new()
                     .spacing(0.0)
-                    .child(
-                        Expand::horizontal()
-                            
-                            .child(self.build_songs_panel(&theme)),
-                    )
+                    .child(Expand::horizontal().child(self.build_songs_panel(&theme)))
                     .child(Divider::vertical())
-                    .child(
-                        Expand::horizontal()
-                            
-                            .child(self.build_folders_panel(&theme)),
-                    ),
+                    .child(Expand::horizontal().child(self.build_folders_panel(&theme))),
             ),
         );
         self.root_child_id = Some(root);
@@ -262,7 +254,8 @@ impl Widget for Root {
     ) -> LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(

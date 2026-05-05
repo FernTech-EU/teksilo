@@ -45,9 +45,8 @@ use fern_ui::widgets::{
     EventContextMessageBoxExt, Expand, FixedSize, Grid, GroupBox, GroupHeader, HStack,
     IconLocation, IconWidget, ImageFit, ImageWidget, Link, MaxSize, MenuItem, MenuList, MessageBox,
     MessageBoxButtons, Padding, Panel, ProgressBar, RadioButton, ScrollArea, SegmentedControl,
-    Slider, Spacer, SplitButton, SplitView, StandardButton, StatusBar, TabId, TabInfo,
-    TabWidget, TextInput, TextWidget, Toggle, ToolBox, ToolBoxItem, Toolbar, TrackSize, VStack,
-    Wrap,
+    Slider, Spacer, SplitButton, SplitView, StandardButton, StatusBar, TabId, TabInfo, TabWidget,
+    TextInput, TextWidget, Toggle, ToolBox, ToolBoxItem, Toolbar, TrackSize, VStack, Wrap,
 };
 
 /// `fern!`-DSL-friendly helper: a free fn returns a `TabInfo` that
@@ -139,7 +138,7 @@ impl Signals {
 // ---------------------------------------------------------------------------
 
 fn surface_swatch(
-    theme: &Theme,
+    _theme: &Theme,
     bg: impl Into<ColorProp>,
     name: &str,
     text_role: &str,
@@ -170,7 +169,7 @@ fn surface_swatch(
 }
 
 fn text_sample(
-    theme: &Theme,
+    _theme: &Theme,
     name: &str,
     color: impl Into<ColorProp>,
     description: &str,
@@ -195,7 +194,7 @@ fn text_sample(
         )
 }
 
-fn editor_line(theme: &Theme, line_no: &str, code: &str) -> HStack {
+fn editor_line(_theme: &Theme, line_no: &str, code: &str) -> HStack {
     HStack::new()
         .spacing(12.0)
         .child(
@@ -213,7 +212,7 @@ fn editor_line(theme: &Theme, line_no: &str, code: &str) -> HStack {
 }
 
 fn editor_swatch(
-    theme: &Theme,
+    _theme: &Theme,
     bg: impl Into<ColorProp>,
     name: &str,
     sample_color: impl Into<ColorProp>,
@@ -438,8 +437,8 @@ impl Widget for WidgetCatalog {
                         Button::new_literal("Toggle Dark Mode") {
                             style: ButtonVariant::Regular
                             on_activate_fn: |ctx| {
-                                    ctx.send_intent(CatalogIntent::ToggleDarkMode);
-                                }
+                                ctx.send_intent(CatalogIntent::ToggleDarkMode);
+                            }
                         }
                     }
                 }
@@ -789,7 +788,7 @@ impl WidgetCatalog {
     fn primitives_builder(
         &self,
         ctx: &mut BuildContext,
-        theme: &Theme,
+        _theme: &Theme,
         _sigs: &Signals,
     ) -> WidgetId {
         let div_row = ctx.add(
@@ -858,7 +857,7 @@ impl WidgetCatalog {
         )
     }
 
-    fn layout_builder(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
+    fn layout_builder(&self, ctx: &mut BuildContext, _theme: &Theme, _sigs: &Signals) -> WidgetId {
         ctx.add(
             VStack::new()
                 .spacing(8.0)
@@ -910,7 +909,7 @@ impl WidgetCatalog {
         )
     }
 
-    fn controls_builder(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
+    fn controls_builder(&self, ctx: &mut BuildContext, _theme: &Theme, sigs: &Signals) -> WidgetId {
         let buttons_row = ctx.add(
             HStack::new()
                 .spacing(8.0)
@@ -1268,7 +1267,7 @@ impl WidgetCatalog {
         )
     }
 
-    fn display_builder(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
+    fn display_builder(&self, ctx: &mut BuildContext, _theme: &Theme, _sigs: &Signals) -> WidgetId {
         let pb_vert = ctx.add(
             ProgressBar::new(0.7)
                 .orientation(Orientation::Vertical)
@@ -1473,7 +1472,7 @@ impl WidgetCatalog {
     fn text_overflow_builder(
         &self,
         ctx: &mut BuildContext,
-        theme: &Theme,
+        _theme: &Theme,
         _sigs: &Signals,
     ) -> WidgetId {
         const LOREM: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing \
@@ -1556,7 +1555,7 @@ impl WidgetCatalog {
     fn containers_builder(
         &self,
         ctx: &mut BuildContext,
-        theme: &Theme,
+        _theme: &Theme,
         sigs: &Signals,
     ) -> WidgetId {
         let acc_content1 = ctx.add(
@@ -1702,7 +1701,7 @@ impl WidgetCatalog {
         )
     }
 
-    fn nav_builder(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
+    fn nav_builder(&self, ctx: &mut BuildContext, _theme: &Theme, sigs: &Signals) -> WidgetId {
         let tabs = ctx.add(
             TabWidget::new(sigs.tabs_selected.clone())
                 .static_tab(
@@ -1836,7 +1835,7 @@ impl WidgetCatalog {
     fn rich_tooltips_builder(
         &self,
         ctx: &mut BuildContext,
-        theme: &Theme,
+        _theme: &Theme,
         _sigs: &Signals,
     ) -> WidgetId {
         ctx.add(
@@ -1956,7 +1955,7 @@ impl WidgetCatalog {
         )
     }
 
-    fn menus_builder(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
+    fn menus_builder(&self, ctx: &mut BuildContext, _theme: &Theme, sigs: &Signals) -> WidgetId {
         ctx.add(
             VStack::new()
                 .spacing(8.0)
@@ -2020,7 +2019,7 @@ impl WidgetCatalog {
         )
     }
 
-    fn image_builder(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
+    fn image_builder(&self, ctx: &mut BuildContext, _theme: &Theme, _sigs: &Signals) -> WidgetId {
         let tree_img = fern_ui::res!("resources/icons/tree.webp");
         ctx.add(
             VStack::new()
@@ -2044,7 +2043,7 @@ impl WidgetCatalog {
         )
     }
 
-    fn builtin_builder(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
+    fn builtin_builder(&self, ctx: &mut BuildContext, _theme: &Theme, sigs: &Signals) -> WidgetId {
         let vis_label = sigs.visibility_signal.map(|v| {
             if *v {
                 "Visible".to_string()
@@ -2143,7 +2142,7 @@ impl WidgetCatalog {
     fn text_input_builder(
         &self,
         ctx: &mut BuildContext,
-        theme: &Theme,
+        _theme: &Theme,
         sigs: &Signals,
     ) -> WidgetId {
         ctx.add(
@@ -2196,11 +2195,11 @@ impl WidgetCatalog {
                 }
                 Grid {
                     columns: vec![
-                            TrackSize::Fractional(1.0),
-                            TrackSize::Fractional(1.0),
-                            TrackSize::Fractional(1.0),
-                            TrackSize::Fractional(1.0),
-                        ]
+                        TrackSize::Fractional(1.0),
+                        TrackSize::Fractional(1.0),
+                        TrackSize::Fractional(1.0),
+                        TrackSize::Fractional(1.0),
+                    ]
                     column_gap: 12.0
                     row_gap: 12.0
                     rows: vec![TrackSize::Auto, TrackSize::Auto]
@@ -2317,11 +2316,11 @@ impl WidgetCatalog {
                 }
                 Grid {
                     columns: vec![
-                            TrackSize::Fractional(1.0),
-                            TrackSize::Fractional(1.0),
-                            TrackSize::Fractional(1.0),
-                            TrackSize::Fractional(1.0),
-                        ]
+                        TrackSize::Fractional(1.0),
+                        TrackSize::Fractional(1.0),
+                        TrackSize::Fractional(1.0),
+                        TrackSize::Fractional(1.0),
+                    ]
                     column_gap: 12.0
                     row_gap: 12.0
                     rows: vec![TrackSize::Auto, TrackSize::Auto]
@@ -2336,7 +2335,7 @@ impl WidgetCatalog {
         )
     }
 
-    fn primitives_fern(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
+    fn primitives_fern(&self, ctx: &mut BuildContext, _theme: &Theme, _sigs: &Signals) -> WidgetId {
         fern!(ctx => VStack {
                 spacing: 8.0
                 TextWidget::new_literal("Primitives") {
@@ -2400,7 +2399,7 @@ impl WidgetCatalog {
         )
     }
 
-    fn layout_fern(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
+    fn layout_fern(&self, ctx: &mut BuildContext, _theme: &Theme, _sigs: &Signals) -> WidgetId {
         fern!(ctx => VStack {
                 spacing: 8.0
                 TextWidget::new_literal("Layout Primitives") {
@@ -2413,10 +2412,10 @@ impl WidgetCatalog {
                 }
                 Grid {
                     columns: vec![
-                            TrackSize::Fixed(80.0),
-                            TrackSize::Fractional(1.0),
-                            TrackSize::Fractional(2.0),
-                        ]
+                        TrackSize::Fixed(80.0),
+                        TrackSize::Fractional(1.0),
+                        TrackSize::Fractional(2.0),
+                    ]
                     rows: vec![TrackSize::Auto, TrackSize::Auto]
                     column_gap: 8.0
                     row_gap: 8.0
@@ -2447,7 +2446,7 @@ impl WidgetCatalog {
         )
     }
 
-    fn controls_fern(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
+    fn controls_fern(&self, ctx: &mut BuildContext, _theme: &Theme, sigs: &Signals) -> WidgetId {
         let save_icon = fern_ui::res!("resources/icons/save.svg");
         let home_icon = fern_ui::res!("resources/icons/home.svg");
         let star_icon = fern_ui::res!("resources/icons/star.png");
@@ -2589,10 +2588,10 @@ impl WidgetCatalog {
                 Divider
                 Grid {
                     columns: vec![
-                            TrackSize::Fractional(1.0),
-                            TrackSize::Fractional(1.0),
-                            TrackSize::Fractional(1.0),
-                        ]
+                        TrackSize::Fractional(1.0),
+                        TrackSize::Fractional(1.0),
+                        TrackSize::Fractional(1.0),
+                    ]
                     column_gap: 16.0
                     rows: vec![TrackSize::Auto]
                     VStack {
@@ -2717,7 +2716,7 @@ impl WidgetCatalog {
         )
     }
 
-    fn display_fern(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
+    fn display_fern(&self, ctx: &mut BuildContext, _theme: &Theme, _sigs: &Signals) -> WidgetId {
         fern!(ctx => VStack {
                 spacing: 8.0
                 TextWidget::new_literal("Display Widgets") {
@@ -2793,7 +2792,7 @@ impl WidgetCatalog {
     fn text_overflow_fern(
         &self,
         ctx: &mut BuildContext,
-        theme: &Theme,
+        _theme: &Theme,
         _sigs: &Signals,
     ) -> WidgetId {
         const LOREM: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing \
@@ -2869,7 +2868,7 @@ impl WidgetCatalog {
         )
     }
 
-    fn containers_fern(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
+    fn containers_fern(&self, ctx: &mut BuildContext, _theme: &Theme, sigs: &Signals) -> WidgetId {
         fern!(ctx => VStack {
                 spacing: 8.0
                 TextWidget::new_literal("Containers") {
@@ -2915,12 +2914,12 @@ impl WidgetCatalog {
                     color: TextRole::Secondary
                 }
                 let disabled_tool_box_item = ToolBoxItem::new_literal(
-                        "Build tasks (disabled)",
-                        Panel::new().padding(12.0).child(
-                            TextWidget::new_literal("Disabled item — never activates."),
-                        ),
-                    )
-                    .enabled(false);
+                    "Build tasks (disabled)",
+                    Panel::new().padding(12.0).child(
+                        TextWidget::new_literal("Disabled item — never activates."),
+                    ),
+                )
+                .enabled(false);
                 ToolBox(sigs.tool_box_selected.clone()) {
                     item_literal: "Outline", Panel {
                         padding: 12.0
@@ -2976,7 +2975,7 @@ impl WidgetCatalog {
         )
     }
 
-    fn nav_fern(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
+    fn nav_fern(&self, ctx: &mut BuildContext, _theme: &Theme, sigs: &Signals) -> WidgetId {
         fern!(ctx => VStack {
                 spacing: 8.0
                 TextWidget::new_literal("Navigation") {
@@ -2999,9 +2998,9 @@ impl WidgetCatalog {
                                     color: TextRole::Primary
                                 }
                                 TextWidget::new_literal("TabWidget is a retained container with dormant panes: \
-                                                 only the active tab is built, inactive panes keep \
-                                                 their state but don't receive layout or paint until \
-                                                 they're re-activated.") {
+                                                             only the active tab is built, inactive panes keep \
+                                                             their state but don't receive layout or paint until \
+                                                             they're re-activated.") {
                                     style: TextStyleRole::Body
                                     color: TextRole::Primary
                                 }
@@ -3022,8 +3021,8 @@ impl WidgetCatalog {
                                     color: TextRole::Primary
                                 }
                                 TextWidget::new_literal("Press Tab to move focus into the tab strip, then \
-                                                 Arrow Left / Arrow Right to switch between tabs. \
-                                                 Disabled tabs are skipped by keyboard navigation.") {
+                                                             Arrow Left / Arrow Right to switch between tabs. \
+                                                             Disabled tabs are skipped by keyboard navigation.") {
                                     style: TextStyleRole::Body
                                     color: TextRole::Primary
                                 }
@@ -3038,9 +3037,9 @@ impl WidgetCatalog {
                                     color: TextRole::Primary
                                 }
                                 TextWidget::new_literal("Int UI tabs: flat headers, no rounded corners, no \
-                                                 borders. The selected tab is marked only by a 3 dp \
-                                                 accent underline at its bottom edge, which \
-                                                 overpaints the tab bar's own 1 dp separator.") {
+                                                             borders. The selected tab is marked only by a 3 dp \
+                                                             accent underline at its bottom edge, which \
+                                                             overpaints the tab bar's own 1 dp separator.") {
                                     style: TextStyleRole::Body
                                     color: TextRole::Primary
                                 }
@@ -3048,10 +3047,8 @@ impl WidgetCatalog {
                         }
                         static_tab: tab_info_disabled("Disabled"), Panel {
                             padding: 16.0
-                            TextWidget::new_literal(
-                                "Disabled panes are still listed in the tab bar but \
-                                 cannot be activated by click or keyboard."
-                            ) {
+                            TextWidget::new_literal("Disabled panes are still listed in the tab bar but \
+                                             cannot be activated by click or keyboard.") {
                                 style: TextStyleRole::Body
                                 color: TextRole::Primary
                             }
@@ -3083,7 +3080,7 @@ impl WidgetCatalog {
     fn rich_tooltips_fern(
         &self,
         ctx: &mut BuildContext,
-        theme: &Theme,
+        _theme: &Theme,
         _sigs: &Signals,
     ) -> WidgetId {
         fern!(ctx => VStack {
@@ -3093,7 +3090,7 @@ impl WidgetCatalog {
                     color: TextRole::Primary
                 }
                 TextWidget::new_literal("Hover the buttons below. Inline `[label](:key)` links \
-                                 open nested tooltips; `https://` links open in the browser.") {
+                                             open nested tooltips; `https://` links open in the browser.") {
                     style: TextStyleRole::Small
                     color: TextRole::Secondary
                 }
@@ -3134,66 +3131,66 @@ impl WidgetCatalog {
                     Button::new_literal("Information") {
                         style: ButtonVariant::Regular
                         on_activate_fn: |ctx| {
-                                ctx.present_message_box(
-                                    MessageBox::information_literal("Build complete")
-                                        .text_literal("13 files compiled in 2.4 s.")
-                                        .buttons(MessageBoxButtons::Ok),
-                                );
-                            }
+                            ctx.present_message_box(
+                                MessageBox::information_literal("Build complete")
+                                    .text_literal("13 files compiled in 2.4 s.")
+                                    .buttons(MessageBoxButtons::Ok),
+                            );
+                        }
                     }
                     Button::new_literal("Question") {
                         style: ButtonVariant::Regular
                         on_activate_fn: |ctx| {
-                                ctx.present_message_box(
-                                    MessageBox::question_literal("Enable analytics?")
-                                        .text_literal("Send anonymous usage data to help improve FernUI.")
-                                        .buttons(MessageBoxButtons::YesNo)
-                                        .default_button(StandardButton::No),
-                                );
-                            }
+                            ctx.present_message_box(
+                                MessageBox::question_literal("Enable analytics?")
+                                    .text_literal("Send anonymous usage data to help improve FernUI.")
+                                    .buttons(MessageBoxButtons::YesNo)
+                                    .default_button(StandardButton::No),
+                            );
+                        }
                     }
                     Button::new_literal("Warning") {
                         style: ButtonVariant::Regular
                         on_activate_fn: |ctx| {
-                                ctx.present_message_box(
-                                    MessageBox::warning_literal("Unsaved changes")
-                                        .text_literal("report.skrib has unsaved changes.")
-                                        .informative_text_literal("Save before closing?")
-                                        .buttons(MessageBoxButtons::SaveDiscardCancel)
-                                        .default_button(StandardButton::Save)
-                                        .escape_button(StandardButton::Cancel),
-                                );
-                            }
+                            ctx.present_message_box(
+                                MessageBox::warning_literal("Unsaved changes")
+                                    .text_literal("report.skrib has unsaved changes.")
+                                    .informative_text_literal("Save before closing?")
+                                    .buttons(MessageBoxButtons::SaveDiscardCancel)
+                                    .default_button(StandardButton::Save)
+                                    .escape_button(StandardButton::Cancel),
+                            );
+                        }
                     }
                     Button::new_literal("Critical") {
                         style: ButtonVariant::Regular
                         on_activate_fn: |ctx| {
-                                ctx.present_message_box(
-                                    MessageBox::critical_literal("Could not open file")
-                                        .text_literal("Insufficient permissions.")
-                                        .detailed_text_literal("open() returned EACCES (errno 13).")
-                                        .buttons(MessageBoxButtons::RetryIgnoreAbort)
-                                        .default_button(StandardButton::Retry),
-                                );
-                            }
+                            ctx.present_message_box(
+                                MessageBox::critical_literal("Could not open file")
+                                    .text_literal("Insufficient permissions.")
+                                    .detailed_text_literal("open() returned EACCES (errno 13).")
+                                    .buttons(MessageBoxButtons::RetryIgnoreAbort)
+                                    .default_button(StandardButton::Retry),
+                            );
+                        }
                     }
                     Button::new_literal("With 'Don't show again'") {
                         style: ButtonVariant::Regular
                         on_activate_fn: |ctx| {
-                                ctx.present_message_box(
-                                    MessageBox::information_literal("Welcome")
-                                        .text_literal("First-time message.")
-                                        .show_again_checkbox_literal("Don't show this again")
-                                        .buttons(MessageBoxButtons::Ok),
-                                );
-                            }
+                            ctx.present_message_box(
+                                MessageBox::information_literal("Welcome")
+                                    .text_literal("First-time message.")
+                                    .show_again_checkbox_literal("Don't show this again")
+                                    .buttons(MessageBoxButtons::Ok),
+                            );
+                        }
                     }
                 }
             }
         )
     }
 
-    fn menus_fern(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
+    fn menus_fern(&self, ctx: &mut BuildContext, _theme: &Theme, sigs: &Signals) -> WidgetId {
         fern!(ctx => VStack {
                 spacing: 8.0
                 TextWidget::new_literal("Menus & Dropdowns") {
@@ -3219,13 +3216,13 @@ impl WidgetCatalog {
                     corner_radius: 8.0
                     padding: 16.0
                     context_menu: |_pos, _ctx| Some(Box::new(
-                            MenuList::new()
-                                .item(MenuItem::new_literal("Cut").on_activate_fn(|_| println!("Cut")).shortcut_label("Ctrl+X"))
-                                .item(MenuItem::new_literal("Copy").on_activate_fn(|_| println!("Copy")).shortcut_label("Ctrl+C"))
-                                .item(MenuItem::new_literal("Paste").on_activate_fn(|_| println!("Paste")).shortcut_label("Ctrl+V"))
-                                .separator()
-                                .item(MenuItem::new_literal("Disabled item").enabled(false))
-                        ))
+                        MenuList::new()
+                            .item(MenuItem::new_literal("Cut").on_activate_fn(|_| println!("Cut")).shortcut_label("Ctrl+X"))
+                            .item(MenuItem::new_literal("Copy").on_activate_fn(|_| println!("Copy")).shortcut_label("Ctrl+C"))
+                            .item(MenuItem::new_literal("Paste").on_activate_fn(|_| println!("Paste")).shortcut_label("Ctrl+V"))
+                            .separator()
+                            .item(MenuItem::new_literal("Disabled item").enabled(false))
+                    ))
                     TextWidget::new_literal("Right-click here for a context menu") {
                         style: TextStyleRole::Body
                         color: TextRole::Primary
@@ -3235,7 +3232,7 @@ impl WidgetCatalog {
         )
     }
 
-    fn image_fern(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
+    fn image_fern(&self, ctx: &mut BuildContext, _theme: &Theme, _sigs: &Signals) -> WidgetId {
         let tree_img = fern_ui::res!("resources/icons/tree.webp");
 
         fern!(ctx => VStack {
@@ -3257,7 +3254,7 @@ impl WidgetCatalog {
         )
     }
 
-    fn builtin_fern(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
+    fn builtin_fern(&self, ctx: &mut BuildContext, _theme: &Theme, sigs: &Signals) -> WidgetId {
         let vis_label = sigs.visibility_signal.map(|v| {
             if *v {
                 "Visible".to_string()
@@ -3353,7 +3350,7 @@ impl WidgetCatalog {
         )
     }
 
-    fn text_input_fern(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
+    fn text_input_fern(&self, ctx: &mut BuildContext, _theme: &Theme, sigs: &Signals) -> WidgetId {
         fern!(ctx => VStack {
                 spacing: 8.0
                 TextWidget::new_literal("Text Input") {

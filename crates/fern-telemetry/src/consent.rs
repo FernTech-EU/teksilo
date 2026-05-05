@@ -19,7 +19,9 @@ use std::time::{Duration, SystemTime};
 
 use fern_core::Signal;
 use fern_core::telemetry::{ConsentScope, ConsentState};
-use fern_settings::{AppPaths, Migrator, SettingsFile, SettingsFileError, SettingsStore, Versioned};
+use fern_settings::{
+    AppPaths, Migrator, SettingsFile, SettingsFileError, SettingsStore, Versioned,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::scopes::{
@@ -164,11 +166,7 @@ impl ConsentStore {
         current_endpoint: &str,
     ) -> Result<Self, SettingsFileError> {
         let migrator = Migrator::<ConsentFile>::new();
-        let file = SettingsFile::load(
-            paths.config_file("telemetry-consent"),
-            delay,
-            &migrator,
-        )?;
+        let file = SettingsFile::load(paths.config_file("telemetry-consent"), delay, &migrator)?;
 
         // Re-prompt rule. Schema bump or endpoint change resets state.
         let snap = file.snapshot();
@@ -315,10 +313,7 @@ impl ConsentStore {
     /// `Denied` or `Unknown`** — the widget must call `grant()`
     /// first to install a base scope. Returns `Ok(true)` when the
     /// closure was invoked and the new scope persisted.
-    pub fn set_scope(
-        &self,
-        f: impl FnOnce(&mut ConsentScope),
-    ) -> Result<bool, SettingsFileError> {
+    pub fn set_scope(&self, f: impl FnOnce(&mut ConsentScope)) -> Result<bool, SettingsFileError> {
         let mut current = self.state.get();
         let ConsentState::Granted(ref mut scope) = current else {
             return Ok(false);
@@ -362,11 +357,7 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
-    fn open(
-        dir: &std::path::Path,
-        schema: u32,
-        endpoint: &str,
-    ) -> ConsentStore {
+    fn open(dir: &std::path::Path, schema: u32, endpoint: &str) -> ConsentStore {
         let paths = AppPaths::for_testing(dir);
         ConsentStore::open(&paths, Duration::ZERO, schema, endpoint).unwrap()
     }
@@ -453,11 +444,8 @@ mod tests {
         use fern_settings::SettingsStore;
         let dir = tempdir().unwrap();
         let paths = AppPaths::for_testing(dir.path());
-        let store = SettingsStore::open_with_delay(
-            paths.config_file("general"),
-            Duration::ZERO,
-        )
-        .unwrap();
+        let store =
+            SettingsStore::open_with_delay(paths.config_file("general"), Duration::ZERO).unwrap();
         let consent = ConsentStore::open(&paths, Duration::ZERO, 1, "stub://")
             .unwrap()
             .with_settings_mirror(store.clone());
@@ -465,17 +453,13 @@ mod tests {
         // Initial mirror is all-off (matches Unknown state).
         assert!(!store.signal_for(&TELEMETRY_ANONYMOUS_METRICS).get());
 
-        consent
-            .grant(ConsentScope::all(), "stub://")
-            .unwrap();
+        consent.grant(ConsentScope::all(), "stub://").unwrap();
 
         assert!(store.signal_for(&TELEMETRY_ANONYMOUS_METRICS).get());
         assert!(store.signal_for(&TELEMETRY_CRASH_REPORTS).get());
         assert!(store.signal_for(&TELEMETRY_FEATURE_FLAGS).get());
 
-        consent
-            .set_scope(|s| s.crash_reports = false)
-            .unwrap();
+        consent.set_scope(|s| s.crash_reports = false).unwrap();
         assert!(!store.signal_for(&TELEMETRY_CRASH_REPORTS).get());
 
         consent.deny().unwrap();

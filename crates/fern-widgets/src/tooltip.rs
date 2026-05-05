@@ -10,11 +10,11 @@ pub mod registry;
 pub mod rich;
 
 pub use attach::{
-    attach_rich_tooltip, attach_rich_tooltip_content, attach_rich_tooltip_source,
-    RichTooltipSource, DEFAULT_RICH_TOOLTIP_DELAY,
+    DEFAULT_RICH_TOOLTIP_DELAY, RichTooltipSource, attach_rich_tooltip,
+    attach_rich_tooltip_content, attach_rich_tooltip_source,
 };
 pub use registry::{
-    install_tooltip_registry, with_tooltip_registry, TooltipContent, TooltipRegistry,
+    TooltipContent, TooltipRegistry, install_tooltip_registry, with_tooltip_registry,
 };
 pub use rich::RichTooltipWidget;
 
@@ -49,20 +49,24 @@ impl TooltipWidget {
 }
 
 impl Widget for TooltipWidget {
-    fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        _proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let style = ctx.theme.components.tooltip;
         let pad_h = style.padding_horizontal;
         let pad_v = style.padding_vertical;
         if let Some(backend) = ctx.text_backend {
             let mut backend = backend.borrow_mut();
-            let layout =
-                backend.layout_single_line(&self.text, &ctx.theme.typography.small, None);
+            let layout = backend.layout_single_line(&self.text, &ctx.theme.typography.small, None);
             Size::new(layout.width + pad_h * 2.0, layout.height + pad_v * 2.0)
         } else {
             let text_width = self.text.len() as f32 * 7.0;
             let text_height = ctx.theme.typography.small.size;
             Size::new(text_width + pad_h * 2.0, text_height + pad_v * 2.0)
-        }.into()
+        }
+        .into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {

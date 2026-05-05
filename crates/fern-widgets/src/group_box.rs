@@ -86,7 +86,11 @@ impl Widget for GroupBox {
         // tracks the unchecked state) without triggering a relayout.
         if let Some(ref checked) = self.checked {
             let self_id = ctx.self_id();
-            checked.bind_to(self_id, ctx.binding_registry(), BindingLevel::AccessibilityOnly);
+            checked.bind_to(
+                self_id,
+                ctx.binding_registry(),
+                BindingLevel::AccessibilityOnly,
+            );
         }
 
         let theme_signal = ctx.theme_signal();
@@ -148,7 +152,11 @@ impl Widget for GroupBox {
         vec![root]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         if let Some(root) = self.root_child_id
             && let Some(size) = ctx.child_size(root, proposal)
         {
@@ -184,4 +192,3 @@ impl Widget for GroupBox {
         self.root_child_id.into_iter().collect()
     }
 }
-

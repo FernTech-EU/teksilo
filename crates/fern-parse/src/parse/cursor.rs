@@ -37,13 +37,13 @@ pub(crate) fn peek_element_start(input: ParseStream) -> bool {
     // enum-variant shape.
     if fork.peek(Token![::]) {
         let path_fork = input.fork();
-        if let Ok(path) = path_fork.parse::<Path>() {
-            if ends_in_variant_shape(&path) {
-                // `Type::Variant { ... }` is still element syntax
-                // (fern body block); bare `Type::Variant` or
-                // `Type::Variant(args)` is an expression.
-                return path_fork.peek(token::Brace);
-            }
+        if let Ok(path) = path_fork.parse::<Path>()
+            && ends_in_variant_shape(&path)
+        {
+            // `Type::Variant { ... }` is still element syntax
+            // (fern body block); bare `Type::Variant` or
+            // `Type::Variant(args)` is an expression.
+            return path_fork.peek(token::Brace);
         }
         return true;
     }

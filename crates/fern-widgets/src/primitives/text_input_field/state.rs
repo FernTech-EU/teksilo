@@ -224,7 +224,7 @@ impl TextInputState {
     /// character. `None` admits every character; inverted so callers
     /// can write `if !st.char_filter_admits(c) { skip }`.
     pub fn char_filter_admits(&self, c: char) -> bool {
-        self.char_filter.as_ref().map_or(true, |f| f(c))
+        self.char_filter.as_ref().is_none_or(|f| f(c))
     }
 
     /// Drain the local event queue. Returns `true` if any events

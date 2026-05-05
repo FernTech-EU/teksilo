@@ -22,8 +22,8 @@
 //! `WindowStateService` is registered. Modal dialogs and ephemeral
 //! popovers are thus naturally excluded — they don't carry stable ids.
 
-use fern_core::{Signal, WindowConfig, WindowState};
 use fern_core::ObserverHandle;
+use fern_core::{Signal, WindowConfig, WindowState};
 use fern_settings::{PerWindowState, WindowStateService};
 
 /// Default minimum sanitize size when the config doesn't supply one.

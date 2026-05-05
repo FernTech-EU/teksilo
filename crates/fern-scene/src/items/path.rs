@@ -193,8 +193,7 @@ mod tests {
         path.move_to(Point::new(0.0, 0.0))
             .line_to(Point::new(100.0, 0.0))
             .line_to(Point::new(100.0, 50.0));
-        let item =
-            PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 50.0)).stroke(Color::BLACK, 1.5);
+        let item = PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 50.0)).stroke(Color::BLACK, 1.5);
         assert_eq!(item.local_bounds(), Rect::new(0.0, 0.0, 100.0, 50.0));
     }
 
@@ -203,8 +202,7 @@ mod tests {
         let mut path = Path::new();
         path.move_to(Point::new(0.0, 0.0))
             .line_to(Point::new(100.0, 100.0));
-        let item =
-            PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 100.0)).stroke(Color::BLACK, 2.0);
+        let item = PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 100.0)).stroke(Color::BLACK, 2.0);
 
         assert!(item.shape_contains(Point::new(50.0, 50.0)));
         assert!(item.shape_contains(Point::new(52.0, 50.0)));
@@ -232,8 +230,7 @@ mod tests {
             .line_to(Point::new(100.0, 0.0))
             .line_to(Point::new(50.0, 100.0))
             .close();
-        let item =
-            PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 100.0)).stroke(Color::BLACK, 2.0);
+        let item = PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 100.0)).stroke(Color::BLACK, 2.0);
         assert!(item.shape_contains(Point::new(25.0, 50.0)));
     }
 
@@ -242,8 +239,7 @@ mod tests {
         let mut path = Path::new();
         path.move_to(Point::new(0.0, 0.0))
             .quad_to(Point::new(50.0, 100.0), Point::new(100.0, 0.0));
-        let item =
-            PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 100.0)).stroke(Color::BLACK, 2.0);
+        let item = PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 100.0)).stroke(Color::BLACK, 2.0);
         assert!(item.shape_contains(Point::new(50.0, 99.0)));
     }
 }

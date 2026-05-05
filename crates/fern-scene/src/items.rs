@@ -97,10 +97,7 @@ macro_rules! item_a11y_builders {
         /// anything convertible into [`LocalizedString`] — most
         /// commonly `tr!(...)` for translated labels, or any plain
         /// string (which auto-converts via `From<String>`).
-        pub fn access_label(
-            mut self,
-            label: impl Into<fern_i18n::LocalizedString>,
-        ) -> Self {
+        pub fn access_label(mut self, label: impl Into<fern_i18n::LocalizedString>) -> Self {
             let ls: fern_i18n::LocalizedString = label.into();
             self.a11y.label = Some(ls.resolve_now());
             self
@@ -128,10 +125,7 @@ macro_rules! item_a11y_builders {
 
         /// Untranslated twin of [`access_description`](Self::access_description).
         #[doc(hidden)]
-        pub fn access_description_literal(
-            self,
-            description: impl Into<String>,
-        ) -> Self {
+        pub fn access_description_literal(self, description: impl Into<String>) -> Self {
             self.access_description(fern_i18n::LocalizedString::literal(description))
         }
 
@@ -150,10 +144,7 @@ macro_rules! item_a11y_builders {
         /// Set the AT subtree mode. `Merge` collapses descendants
         /// into this item's AT node; `Exclude` prunes them; the
         /// default `Inherit` lets them emit normally.
-        pub fn access_subtree(
-            mut self,
-            mode: $crate::items::AccessSubtreeMode,
-        ) -> Self {
+        pub fn access_subtree(mut self, mode: $crate::items::AccessSubtreeMode) -> Self {
             self.a11y.subtree_mode = mode;
             self
         }

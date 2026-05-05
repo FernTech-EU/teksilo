@@ -8,7 +8,7 @@ use fern_core::widget_id::WidgetId;
 
 use crate::Panel;
 use crate::primitives::HStack;
-use fern_tokens::{SurfaceRole};
+use fern_tokens::SurfaceRole;
 
 /// A status bar for displaying information at the bottom of a window.
 pub struct StatusBar {
@@ -85,7 +85,11 @@ impl Widget for StatusBar {
         vec![root]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         if let Some(root) = self.root_child_id
             && let Some(size) = ctx.child_size(root, proposal)
         {

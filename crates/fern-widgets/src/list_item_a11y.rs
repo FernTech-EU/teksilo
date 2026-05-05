@@ -3,7 +3,7 @@
 //! Wraps a delegate-created widget with the correct AccessKit role
 //! and positional properties (position_in_set, size_of_set, level, expanded).
 
-use fern_canvas::{Rect, Size, SizeProposal};
+use fern_canvas::{Rect, SizeProposal};
 
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
@@ -27,9 +27,14 @@ impl ListItemWrapper {
 }
 
 impl Widget for ListItemWrapper {
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         ctx.child_size(self.child, proposal)
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -59,8 +64,8 @@ impl Widget for ListItemWrapper {
 #[derive(Debug)]
 pub(crate) struct TreeItemWrapper {
     child: WidgetId,
-    level: usize,           // 1-based
-    position: usize,        // 1-based within sibling group
+    level: usize,    // 1-based
+    position: usize, // 1-based within sibling group
     total_siblings: usize,
     expanded: Option<bool>, // None if leaf
     selected: bool,
@@ -87,9 +92,14 @@ impl TreeItemWrapper {
 }
 
 impl Widget for TreeItemWrapper {
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         ctx.child_size(self.child, proposal)
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(

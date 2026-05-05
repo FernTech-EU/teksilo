@@ -23,7 +23,7 @@ use fern_core::build_context::BuildContext;
 use fern_core::widget_id::WidgetId;
 
 use crate::tooltip::registry::TooltipContent;
-use crate::tooltip::rich::{RichTooltipWidget, DWELL_PROMOTION};
+use crate::tooltip::rich::{DWELL_PROMOTION, RichTooltipWidget};
 
 /// Default hover-to-show delay for rich tooltips — matches the plain
 /// tooltip delay used by Button, Link, and MenuItem today.
@@ -71,13 +71,7 @@ pub fn attach_rich_tooltip(
     // widget reads from `paint()` to drive its dwell indicator.
     let sink = tooltip.shown_at_sink();
     let tooltip_id = ctx.add(tooltip);
-    ctx.attach_tooltip_with_sticky_sink(
-        anchor_id,
-        tooltip_id,
-        delay,
-        Some(DWELL_PROMOTION),
-        sink,
-    );
+    ctx.attach_tooltip_with_sticky_sink(anchor_id, tooltip_id, delay, Some(DWELL_PROMOTION), sink);
     tooltip_id
 }
 
@@ -94,13 +88,7 @@ pub fn attach_rich_tooltip_content(
     let tooltip = RichTooltipWidget::new(content);
     let sink = tooltip.shown_at_sink();
     let tooltip_id = ctx.add(tooltip);
-    ctx.attach_tooltip_with_sticky_sink(
-        anchor_id,
-        tooltip_id,
-        delay,
-        Some(DWELL_PROMOTION),
-        sink,
-    );
+    ctx.attach_tooltip_with_sticky_sink(anchor_id, tooltip_id, delay, Some(DWELL_PROMOTION), sink);
     tooltip_id
 }
 
@@ -117,9 +105,7 @@ pub fn attach_rich_tooltip_source(
 ) -> WidgetId {
     match source {
         RichTooltipSource::Key(k) => attach_rich_tooltip(ctx, anchor_id, k, delay),
-        RichTooltipSource::Content(c) => {
-            attach_rich_tooltip_content(ctx, anchor_id, c, delay)
-        }
+        RichTooltipSource::Content(c) => attach_rich_tooltip_content(ctx, anchor_id, c, delay),
     }
 }
 
@@ -128,7 +114,7 @@ mod tests {
     use super::*;
     use crate::button::Button;
     use crate::tooltip::registry::{
-        _reset_tooltip_registry, install_tooltip_registry, TooltipContent,
+        _reset_tooltip_registry, TooltipContent, install_tooltip_registry,
     };
     use fern_canvas::{MockTextBackend, SizeProposal};
     use fern_core::widget_tree::WidgetTree;
@@ -149,8 +135,7 @@ mod tests {
         )]);
 
         let mut tree = tree_with_backend();
-        let btn =
-            tree.add(Button::new_literal("Save As").rich_tooltip("save-as"));
+        let btn = tree.add(Button::new_literal("Save As").rich_tooltip("save-as"));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         // No tooltip visible before hover.
@@ -213,9 +198,7 @@ mod tests {
         )]);
 
         let mut tree = tree_with_backend();
-        let btn = tree.add(
-            Button::new_literal("Focus me").rich_tooltip("focus-key"),
-        );
+        let btn = tree.add(Button::new_literal("Focus me").rich_tooltip("focus-key"));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         assert!(tree.active_overlays().is_empty());
@@ -241,9 +224,7 @@ mod tests {
         )]);
 
         let mut tree = tree_with_backend();
-        let btn = tree.add(
-            Button::new_literal("Anchor").rich_tooltip("leave-key"),
-        );
+        let btn = tree.add(Button::new_literal("Anchor").rich_tooltip("leave-key"));
         let other = tree.add(Button::new_literal("Elsewhere"));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
@@ -267,10 +248,8 @@ mod tests {
         _reset_tooltip_registry();
         // No install_tooltip_registry — we rely on inline content.
         let mut tree = tree_with_backend();
-        let content = TooltipContent::new(
-            "inline-only",
-            LocalizedString::literal("Inline content"),
-        );
+        let content =
+            TooltipContent::new("inline-only", LocalizedString::literal("Inline content"));
         let btn = tree.add(Button::new_literal("Go").rich_tooltip_content(content));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         tree.pointer_move(tree.bounds(btn).center());

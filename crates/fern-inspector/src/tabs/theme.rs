@@ -40,39 +40,69 @@ type ColorAccess = (
 
 const SHOWN_COLORS: &[ColorAccess] = &[
     ("accent", |t| t.accent, |t, c| t.accent = c),
-    ("accent_hover", |t| t.accent_hover, |t, c| t.accent_hover = c),
-    ("surface_main", |t| t.surface_main, |t, c| t.surface_main = c),
-    ("surface_content", |t| t.surface_content, |t, c| {
-        t.surface_content = c
-    }),
-    ("surface_hover", |t| t.surface_hover, |t, c| {
-        t.surface_hover = c
-    }),
-    ("surface_selected", |t| t.surface_selected, |t, c| {
-        t.surface_selected = c
-    }),
-    ("text_primary", |t| t.text_primary, |t, c| t.text_primary = c),
-    ("text_secondary", |t| t.text_secondary, |t, c| {
-        t.text_secondary = c
-    }),
-    ("text_disabled", |t| t.text_disabled, |t, c| {
-        t.text_disabled = c
-    }),
+    (
+        "accent_hover",
+        |t| t.accent_hover,
+        |t, c| t.accent_hover = c,
+    ),
+    (
+        "surface_main",
+        |t| t.surface_main,
+        |t, c| t.surface_main = c,
+    ),
+    (
+        "surface_content",
+        |t| t.surface_content,
+        |t, c| t.surface_content = c,
+    ),
+    (
+        "surface_hover",
+        |t| t.surface_hover,
+        |t, c| t.surface_hover = c,
+    ),
+    (
+        "surface_selected",
+        |t| t.surface_selected,
+        |t, c| t.surface_selected = c,
+    ),
+    (
+        "text_primary",
+        |t| t.text_primary,
+        |t, c| t.text_primary = c,
+    ),
+    (
+        "text_secondary",
+        |t| t.text_secondary,
+        |t, c| t.text_secondary = c,
+    ),
+    (
+        "text_disabled",
+        |t| t.text_disabled,
+        |t, c| t.text_disabled = c,
+    ),
     ("text_link", |t| t.text_link, |t, c| t.text_link = c),
     ("border", |t| t.border, |t, c| t.border = c),
-    ("border_focused", |t| t.border_focused, |t, c| {
-        t.border_focused = c
-    }),
+    (
+        "border_focused",
+        |t| t.border_focused,
+        |t, c| t.border_focused = c,
+    ),
     ("focus_ring", |t| t.focus_ring, |t, c| t.focus_ring = c),
-    ("status_error_fg", |t| t.status_error_fg, |t, c| {
-        t.status_error_fg = c
-    }),
-    ("status_warning_fg", |t| t.status_warning_fg, |t, c| {
-        t.status_warning_fg = c
-    }),
-    ("status_success_fg", |t| t.status_success_fg, |t, c| {
-        t.status_success_fg = c
-    }),
+    (
+        "status_error_fg",
+        |t| t.status_error_fg,
+        |t, c| t.status_error_fg = c,
+    ),
+    (
+        "status_warning_fg",
+        |t| t.status_warning_fg,
+        |t, c| t.status_warning_fg = c,
+    ),
+    (
+        "status_success_fg",
+        |t| t.status_success_fg,
+        |t, c| t.status_success_fg = c,
+    ),
 ];
 
 pub(crate) struct ThemeTab {
@@ -127,8 +157,8 @@ impl Widget for ThemeTab {
         }
 
         // Preset buttons.
-        let light_btn = Button::new_literal("Light")
-            .on_activate_fn(|c| c.set_theme(Theme::light_default()));
+        let light_btn =
+            Button::new_literal("Light").on_activate_fn(|c| c.set_theme(Theme::light_default()));
         let dark_btn =
             Button::new_literal("Dark").on_activate_fn(|c| c.set_theme(Theme::dark_default()));
 

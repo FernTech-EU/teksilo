@@ -169,8 +169,7 @@ impl Parse for TrCall {
         let content;
         syn::parenthesized!(content in input);
 
-        let args_punct: Punctuated<TrArg, Token![,]> =
-            Punctuated::parse_terminated(&content)?;
+        let args_punct: Punctuated<TrArg, Token![,]> = Punctuated::parse_terminated(&content)?;
 
         Ok(TrCall {
             key_path,
@@ -216,11 +215,11 @@ impl SourceInfo {
 }
 
 /// Resolve the `.ftl` source location for the crate currently being
-/// compiled. Precedence: `FERN_I18N_SOURCE_DIR` > `FERN_I18N_SOURCE_PATH`
-/// > auto-detect `locales/en-US/` directory > fallback to the single
-/// `locales/en-US.ftl` file. The env vars let tests point the macro at
-/// a fixture without touching the consuming crate's layout (used by
-/// `tests/trybuild.rs`).
+/// compiled. Precedence (highest first): `FERN_I18N_SOURCE_DIR`,
+/// `FERN_I18N_SOURCE_PATH`, auto-detect `locales/en-US/` directory,
+/// then fallback to the single `locales/en-US.ftl` file. The env vars
+/// let tests point the macro at a fixture without touching the
+/// consuming crate's layout (used by `tests/trybuild.rs`).
 fn resolve_source() -> std::result::Result<SourceInfo, String> {
     let manifest = std::env::var("CARGO_MANIFEST_DIR")
         .map_err(|_| "CARGO_MANIFEST_DIR is not set".to_string())?;
@@ -317,9 +316,8 @@ fn parse_ftl_file(
     let contents = std::fs::read_to_string(path)
         .map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;
 
-    let resource = parse(contents.as_str()).map_err(|(_, errs)| {
-        format!("Fluent parse errors in `{}`: {:?}", path.display(), errs)
-    })?;
+    let resource = parse(contents.as_str())
+        .map_err(|(_, errs)| format!("Fluent parse errors in `{}`: {:?}", path.display(), errs))?;
 
     for entry in &resource.body {
         if let ast::Entry::Message(msg) = entry {
@@ -409,16 +407,12 @@ fn load_key_map_from_dir(root: &std::path::Path) -> std::result::Result<KeyMap, 
     }
 
     let mut ftl_files: Vec<PathBuf> = Vec::new();
-    collect_ftl_files(root, &mut ftl_files).map_err(|e| {
-        format!("failed to walk `{}`: {e}", root.display())
-    })?;
+    collect_ftl_files(root, &mut ftl_files)
+        .map_err(|e| format!("failed to walk `{}`: {e}", root.display()))?;
     ftl_files.sort();
 
     if ftl_files.is_empty() {
-        return Err(format!(
-            "no `.ftl` files found under `{}`",
-            root.display()
-        ));
+        return Err(format!("no `.ftl` files found under `{}`", root.display()));
     }
 
     let mut messages: HashMap<String, MessageInfo> = HashMap::new();
@@ -438,19 +432,14 @@ fn load_key_map_from_dir(root: &std::path::Path) -> std::result::Result<KeyMap, 
 }
 
 /// Recursively collect every `.ftl` file under `dir`.
-fn collect_ftl_files(
-    dir: &std::path::Path,
-    out: &mut Vec<PathBuf>,
-) -> std::io::Result<()> {
+fn collect_ftl_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
         let file_type = entry.file_type()?;
         if file_type.is_dir() {
             collect_ftl_files(&path, out)?;
-        } else if file_type.is_file()
-            && path.extension().and_then(|e| e.to_str()) == Some("ftl")
-        {
+        } else if file_type.is_file() && path.extension().and_then(|e| e.to_str()) == Some("ftl") {
             out.push(path);
         }
     }
@@ -484,9 +473,9 @@ fn build_fallback_and_collect_vars(
             }
             ast::PatternElement::Placeable { expression } => {
                 let simple_var = match expression {
-                    ast::Expression::Inline(
-                        ast::InlineExpression::VariableReference { id },
-                    ) => Some(id.name.to_string()),
+                    ast::Expression::Inline(ast::InlineExpression::VariableReference { id }) => {
+                        Some(id.name.to_string())
+                    }
                     _ => None,
                 };
                 if let Some(var) = simple_var {
@@ -577,9 +566,7 @@ fn walk_inline_for_vars(inline: &ast::InlineExpression<&str>, out: &mut Vec<Stri
 /// | `auth_login::title`                    | `auth-login__title`                    |
 /// | `auth::login::title`                   | `auth__login__title`                   |
 /// | `settings::display::resolution_label`  | `settings__display__resolution-label`  |
-fn path_to_fluent_key(
-    segments: &[Ident],
-) -> std::result::Result<String, syn::Error> {
+fn path_to_fluent_key(segments: &[Ident]) -> std::result::Result<String, syn::Error> {
     let mut normalized: Vec<String> = Vec::with_capacity(segments.len());
     for seg in segments {
         let s = seg.to_string();
@@ -648,9 +635,7 @@ fn levenshtein(a: &str, b: &str) -> usize {
         curr[0] = i;
         for j in 1..=n {
             let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
-            curr[j] = (curr[j - 1] + 1)
-                .min(prev[j] + 1)
-                .min(prev[j - 1] + cost);
+            curr[j] = (curr[j - 1] + 1).min(prev[j] + 1).min(prev[j - 1] + cost);
         }
         std::mem::swap(&mut prev, &mut curr);
     }
@@ -713,16 +698,13 @@ fn tr_impl(input: TokenStream, kind: SourceKind, signal: bool) -> TokenStream {
         };
 
     // 2. Validate argument names.
-    let provided_names: Vec<String> =
-        call.args.iter().map(|a| a.name.to_string()).collect();
+    let provided_names: Vec<String> = call.args.iter().map(|a| a.name.to_string()).collect();
 
     for expected in &expected_args {
         if !provided_names.iter().any(|p| p == expected) {
             return syn::Error::new(
                 call.path_span(),
-                format!(
-                    "fern-i18n: missing argument `{expected}` for key `{fluent_key}`"
-                ),
+                format!("fern-i18n: missing argument `{expected}` for key `{fluent_key}`"),
             )
             .to_compile_error()
             .into();
@@ -760,8 +742,7 @@ fn tr_impl(input: TokenStream, kind: SourceKind, signal: bool) -> TokenStream {
         .watched_files
         .iter()
         .map(|p| {
-            let lit =
-                proc_macro2::Literal::string(&p.to_string_lossy());
+            let lit = proc_macro2::Literal::string(&p.to_string_lossy());
             quote! {
                 const _: &[u8] = ::core::include_bytes!(#lit);
             }
@@ -830,10 +811,8 @@ fn tr_impl(input: TokenStream, kind: SourceKind, signal: bool) -> TokenStream {
                         });
                     }
                     FallbackPart::Var(var_name) => {
-                        let ident = proc_macro2::Ident::new(
-                            &var_name,
-                            proc_macro2::Span::call_site(),
-                        );
+                        let ident =
+                            proc_macro2::Ident::new(&var_name, proc_macro2::Span::call_site());
                         let value_expr = if signal {
                             quote! { &#ident.get() }
                         } else {

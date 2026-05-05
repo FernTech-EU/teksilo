@@ -23,7 +23,6 @@ pub use cli::PreviewerOptions;
 
 use fern_app::{FernAppBuilder, ThemeMode};
 use fern_core::WindowConfig;
-use fern_tokens::Theme;
 
 /// Launch the previewer window with the given options. Blocks until
 /// the window is closed.

@@ -8,9 +8,7 @@ use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use fern_core::telemetry::{
-    ConsentScope, Event, RemoteDataExport, TelemetryError, UsageReporter,
-};
+use fern_core::telemetry::{ConsentScope, Event, RemoteDataExport, TelemetryError, UsageReporter};
 use fern_telemetry::{EventQueue, InMemoryEventQueue, PersistentEventQueue};
 
 use crate::config::PlausibleConfig;
@@ -273,7 +271,9 @@ impl PlausibleAdapterBuilder {
                 );
                 Arc::new(q)
             }
-            (None, None) => Arc::new(InMemoryEventQueue::with_capacity(self.config.max_queue_size)),
+            (None, None) => Arc::new(InMemoryEventQueue::with_capacity(
+                self.config.max_queue_size,
+            )),
         };
         let stats = Arc::new(WorkerStats::default());
         let (tx, handle) = spawn_worker(self.config.clone(), queue, stats.clone());

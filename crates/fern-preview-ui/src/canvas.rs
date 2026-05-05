@@ -17,18 +17,18 @@
 //! * Wraps the widget in a background rect and a footer strip showing
 //!   bounds + last frame time.
 
-use fern_canvas::{Rect, Size, SizeProposal};
+use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::signal::Signal;
 use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
+use fern_tokens::{SurfaceRole, TextRole, TextStyleRole};
+use fern_widgets::primitives::ZStack;
 use fern_widgets::{
     Center, Divider, Expand, HStack, MaxSize, RectWidget, Spacer, TextWidget, VStack,
 };
-use fern_widgets::primitives::ZStack;
-use fern_tokens::{SurfaceRole, TextRole, TextStyleRole};
 
 use crate::app_state::{AppState, BackgroundMode};
 
@@ -132,9 +132,7 @@ impl Widget for PreviewCanvas {
         // its own — important because ZStack with all-fill children
         // reports 0×0 intrinsic, which would propagate up and starve
         // the layout otherwise.
-        let stage_expanded = ctx.add(
-            Expand::new().child_id(stage_id),
-        );
+        let stage_expanded = ctx.add(Expand::new().child_id(stage_id));
 
         // Footer strip: thin divider + size readout.
         let divider = ctx.add(MaxSize::new(f32::INFINITY, 1.0).child(Divider::horizontal()));
@@ -150,11 +148,15 @@ impl Widget for PreviewCanvas {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let size = match self.root_id {
-            Some(id) => ctx.child_size(id, proposal).unwrap_or_else(|| {
-                proposal.resolve(0.0, 0.0)
-            }),
+            Some(id) => ctx
+                .child_size(id, proposal)
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
             None => proposal.resolve(0.0, 0.0),
         };
         // Update the readout signal — the footer label re-renders.
@@ -253,4 +255,3 @@ fn placeholder_message(text: &str) -> Box<dyn Widget> {
         ),
     )
 }
-

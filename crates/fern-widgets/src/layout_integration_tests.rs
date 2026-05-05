@@ -11,7 +11,11 @@ use crate::primitives::{
 #[derive(Debug)]
 struct FixedLeaf(f32, f32);
 impl Widget for FixedLeaf {
-    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        _proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         Size::new(self.0, self.1).into()
     }
 }

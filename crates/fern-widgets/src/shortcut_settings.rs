@@ -129,18 +129,11 @@ impl Widget for ShortcutSettings {
         );
         // Rebuild when capture state changes — the "Press…" hint
         // jumps between rows.
-        self.capturing.bind_to(
-            ctx.self_id(),
-            ctx.binding_registry(),
-            BindingLevel::Rebuild,
-        );
+        self.capturing
+            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
         // Rebuild when the filter signal changes.
         if let Some(filter) = &self.filter {
-            filter.bind_to(
-                ctx.self_id(),
-                ctx.binding_registry(),
-                BindingLevel::Rebuild,
-            );
+            filter.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
         }
 
         let filter_needle = self
@@ -171,7 +164,10 @@ impl Widget for ShortcutSettings {
                 secondary: eff.secondary,
                 enabled: eff.enabled,
                 category: eff.shortcut.category,
-                has_override: ctx.shortcut_registry().override_for(eff.shortcut.id).is_some(),
+                has_override: ctx
+                    .shortcut_registry()
+                    .override_for(eff.shortcut.id)
+                    .is_some(),
             })
             .filter(matches_filter)
             .collect();
@@ -195,10 +191,15 @@ impl Widget for ShortcutSettings {
         vec![root]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -262,10 +263,15 @@ impl Widget for LiveStatusText {
         vec![id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         self.child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -302,7 +308,10 @@ struct ShortcutRowData {
     has_override: bool,
 }
 
-fn category_header(theme: &fern_tokens::Theme, category: Option<&'static str>) -> impl Widget + 'static {
+fn category_header(
+    theme: &fern_tokens::Theme,
+    category: Option<&'static str>,
+) -> impl Widget + 'static {
     let label = category.unwrap_or("General");
     TextWidget::new_literal(label)
         .style(TextStyleRole::BodyBold)
@@ -444,17 +453,15 @@ fn handle_capture_event(
     // always exactly one effective binding per chord.
     if let Some(conflict_id) = reg.find_conflict(ks, Some(id)) {
         let cid = conflict_id.to_string();
-        let conflict_slot = reg
-            .effective(&cid)
-            .and_then(|eff| {
-                if eff.primary == Some(ks) {
-                    Some(SlotKind::Primary)
-                } else if eff.secondary == Some(ks) {
-                    Some(SlotKind::Secondary)
-                } else {
-                    None
-                }
-            });
+        let conflict_slot = reg.effective(&cid).and_then(|eff| {
+            if eff.primary == Some(ks) {
+                Some(SlotKind::Primary)
+            } else if eff.secondary == Some(ks) {
+                Some(SlotKind::Secondary)
+            } else {
+                None
+            }
+        });
         match conflict_slot {
             Some(SlotKind::Primary) => reg.rebind_primary(cid, None),
             Some(SlotKind::Secondary) => reg.rebind_secondary(cid, None),

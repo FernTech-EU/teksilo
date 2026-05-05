@@ -42,11 +42,7 @@ pub(crate) fn spawn_worker(
     (tx, handle)
 }
 
-fn worker_loop(
-    rx: mpsc::Receiver<WorkerCommand>,
-    config: OtlpConfig,
-    stats: Arc<WorkerStats>,
-) {
+fn worker_loop(rx: mpsc::Receiver<WorkerCommand>, config: OtlpConfig, stats: Arc<WorkerStats>) {
     let mut buffer: VecDeque<OwnedEvent> = VecDeque::new();
     let agent = build_agent(config.request_timeout);
     let builder = WireBuilder {
@@ -166,9 +162,7 @@ fn drain(
 
     match outcome {
         SendOutcome::Accepted => {
-            stats
-                .accepted
-                .fetch_add(events.len(), Ordering::Relaxed);
+            stats.accepted.fetch_add(events.len(), Ordering::Relaxed);
             *current_backoff = config.initial_backoff;
             stats.queued.store(buffer.len(), Ordering::Relaxed);
             Ok(())
@@ -184,9 +178,7 @@ fn drain(
             Err(why)
         }
         SendOutcome::Drop(why) => {
-            stats
-                .dropped
-                .fetch_add(events.len(), Ordering::Relaxed);
+            stats.dropped.fetch_add(events.len(), Ordering::Relaxed);
             stats.queued.store(buffer.len(), Ordering::Relaxed);
             Err(why)
         }

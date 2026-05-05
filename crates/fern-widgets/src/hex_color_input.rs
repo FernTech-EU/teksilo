@@ -50,9 +50,7 @@ use fern_core::widget_id::WidgetId;
 use fern_i18n::{LocalizedString, resolve_message_widget};
 use fern_tokens::Color;
 
-use crate::primitives::text_input_field::{
-    ValidationFeedback, ValidationOutcome, ValidatorFn,
-};
+use crate::primitives::text_input_field::{ValidationFeedback, ValidationOutcome, ValidatorFn};
 use crate::text_input::TextInput;
 
 type OnValueChanged = Rc<dyn Fn(Option<Color>, &mut fern_core::widget::EventContext)>;
@@ -196,7 +194,8 @@ impl HexColorInput {
         // Re-seed text in the new shape so the widget renders consistently
         // before build() runs.
         if let Some(c) = self.value.current() {
-            self.text_signal.set(format_hex(c, self.alpha_enabled, self.uppercase));
+            self.text_signal
+                .set(format_hex(c, self.alpha_enabled, self.uppercase));
         }
         self
     }
@@ -214,7 +213,8 @@ impl HexColorInput {
     pub fn uppercase(mut self, upper: bool) -> Self {
         self.uppercase = upper;
         if let Some(c) = self.value.current() {
-            self.text_signal.set(format_hex(c, self.alpha_enabled, self.uppercase));
+            self.text_signal
+                .set(format_hex(c, self.alpha_enabled, self.uppercase));
         }
         self
     }
@@ -404,7 +404,11 @@ impl Widget for HexColorInput {
         // Build the inner TextInput composite. The validator + char
         // filter + mask cooperate: char filter strips garbage as the
         // user types, mask enforces shape, validator runs on commit.
-        let mask_string = if alpha_enabled { r"\#hhhhhhhh" } else { r"\#hhhhhh" };
+        let mask_string = if alpha_enabled {
+            r"\#hhhhhhhh"
+        } else {
+            r"\#hhhhhh"
+        };
 
         let mut text_input = TextInput::new(self.text_signal.clone())
             .placeholder(placeholder)

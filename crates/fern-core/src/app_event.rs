@@ -36,10 +36,7 @@ pub enum AppEvent {
     /// `I18nConfig::runtime_override(locale, path)` changed on disk.
     /// The fern-app handler calls `I18nManager::reload_from_path` and
     /// bumps the translation version signal. Architecture §12.6.
-    I18nReload {
-        locale: String,
-        path: PathBuf,
-    },
+    I18nReload { locale: String, path: PathBuf },
 }
 
 impl std::fmt::Debug for AppEvent {

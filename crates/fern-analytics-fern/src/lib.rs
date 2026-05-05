@@ -31,9 +31,7 @@ use std::sync::atomic::Ordering;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use fern_core::telemetry::{
-    ConsentScope, Event, RemoteDataExport, TelemetryError, UsageReporter,
-};
+use fern_core::telemetry::{ConsentScope, Event, RemoteDataExport, TelemetryError, UsageReporter};
 use fern_telemetry::{EventQueue, InMemoryEventQueue, PersistentEventQueue};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
@@ -111,9 +109,7 @@ impl UsageReporter for FernAdapter {
         // thread indefinitely. 4× request_timeout matches the
         // Plausible adapter; aligns with the worst-case retry
         // tail of one in-flight RPC.
-        let bounded = async {
-            tokio::time::timeout(self.config.request_timeout * 4, rx).await
-        };
+        let bounded = async { tokio::time::timeout(self.config.request_timeout * 4, rx).await };
         match self.runtime.block_on(bounded) {
             Ok(Ok(Ok(()))) => Ok(()),
             Ok(Ok(Err(e))) => Err(TelemetryError::Other(e)),
@@ -163,29 +159,27 @@ impl UsageReporter for FernAdapter {
         let install_id_for_export = install_id.clone();
         let endpoint_for_export = endpoint.clone();
 
-        let result: Result<RemoteDataExport, TelemetryError> = self
-            .runtime
-            .block_on(async move {
-                worker::fetch_via_grpc(
-                    &endpoint,
-                    &product_id,
-                    &install_id,
-                    bearer.as_deref(),
-                    tls.as_ref(),
-                    timeout,
-                )
-                .await
-                .map_err(TelemetryError::Other)
-                .map(|events| RemoteDataExport {
-                    install_id: install_id_for_export,
-                    fetched_at: std::time::SystemTime::now(),
-                    adapter: "fern-collector",
-                    endpoint: endpoint_for_export,
-                    schema_version,
-                    events,
-                    server_metadata: Default::default(),
-                })
-            });
+        let result: Result<RemoteDataExport, TelemetryError> = self.runtime.block_on(async move {
+            worker::fetch_via_grpc(
+                &endpoint,
+                &product_id,
+                &install_id,
+                bearer.as_deref(),
+                tls.as_ref(),
+                timeout,
+            )
+            .await
+            .map_err(TelemetryError::Other)
+            .map(|events| RemoteDataExport {
+                install_id: install_id_for_export,
+                fetched_at: std::time::SystemTime::now(),
+                adapter: "fern-collector",
+                endpoint: endpoint_for_export,
+                schema_version,
+                events,
+                server_metadata: Default::default(),
+            })
+        });
         result
     }
 
@@ -392,9 +386,9 @@ impl FernAdapterBuilder {
                 )
                 .expect("FernAdapterBuilder::persistent_queue_path: open redb"),
             ),
-            (None, None) => {
-                Arc::new(InMemoryEventQueue::with_capacity(self.config.max_queue_size))
-            }
+            (None, None) => Arc::new(InMemoryEventQueue::with_capacity(
+                self.config.max_queue_size,
+            )),
         };
 
         let runtime = self.runtime.unwrap_or_else(|| {
@@ -409,8 +403,7 @@ impl FernAdapterBuilder {
         });
 
         let stats = Arc::new(WorkerStats::default());
-        let (tx, handle) =
-            spawn_worker(self.config.clone(), queue, runtime.clone(), stats.clone());
+        let (tx, handle) = spawn_worker(self.config.clone(), queue, runtime.clone(), stats.clone());
 
         FernAdapter {
             config: self.config,

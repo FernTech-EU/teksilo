@@ -72,10 +72,7 @@ impl InstallId {
     /// (≥13 months). The caller MUST call `erase_remote_data()` before
     /// rotation if a rotation is expected — once the local UUID is
     /// gone, the user loses the only handle to their server data.
-    pub fn open_or_create(
-        paths: &AppPaths,
-        delay: Duration,
-    ) -> Result<Self, SettingsFileError> {
+    pub fn open_or_create(paths: &AppPaths, delay: Duration) -> Result<Self, SettingsFileError> {
         Self::open_with_clock(paths, delay, SystemTime::now())
     }
 
@@ -87,11 +84,7 @@ impl InstallId {
         now: SystemTime,
     ) -> Result<Self, SettingsFileError> {
         let migrator = Migrator::<InstallIdFile>::new();
-        let file = SettingsFile::load(
-            paths.config_file("telemetry-install-id"),
-            delay,
-            &migrator,
-        )?;
+        let file = SettingsFile::load(paths.config_file("telemetry-install-id"), delay, &migrator)?;
 
         let snap = file.snapshot();
         let needs_rotation = snap.uuid.is_empty()
@@ -183,7 +176,6 @@ mod tests {
     fn second_open_returns_same_uuid() {
         let dir = tempdir().unwrap();
         let first = open(dir.path()).get();
-        first.clone();
         let second = open(dir.path()).get();
         assert_eq!(first, second, "UUID should persist across reopens");
     }

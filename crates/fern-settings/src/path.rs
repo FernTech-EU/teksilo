@@ -92,7 +92,10 @@ mod tests {
 
         assert_eq!(paths.config_dir(), dir.path());
         assert_eq!(paths.data_dir(), dir.path());
-        assert_eq!(paths.config_file("recents"), dir.path().join("recents.toml"));
+        assert_eq!(
+            paths.config_file("recents"),
+            dir.path().join("recents.toml")
+        );
         assert_eq!(paths.data_file("cache"), dir.path().join("cache.toml"));
     }
 

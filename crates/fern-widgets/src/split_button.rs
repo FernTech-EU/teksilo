@@ -25,7 +25,7 @@
 
 use std::rc::Rc;
 
-use fern_canvas::{Rect, Size, SizeProposal};
+use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
@@ -41,8 +41,7 @@ use crate::button::{ButtonVariant, InteractionState};
 use crate::menu_item::MenuItem;
 use crate::menu_list::MenuList;
 use crate::primitives::{
-    Center, FixedSize, HStack, IconWidget, MinSize, Padding, RectWidget, TextWidget,
-    ZStack,
+    Center, FixedSize, HStack, IconWidget, MinSize, Padding, RectWidget, TextWidget, ZStack,
 };
 
 /// One row of the SplitButton's dropdown: either a real MenuItem or a
@@ -252,7 +251,12 @@ fn resolve_border_role(style: ButtonVariant, state: InteractionState) -> BorderR
 /// Border width for the SplitButton frame: thickens to the theme's
 /// `focus_ring_width` on focus, rests at the variant's normal
 /// width otherwise.
-fn resolve_border_width(style: ButtonVariant, state: InteractionState, normal_bw: f32, focus_bw: f32) -> f32 {
+fn resolve_border_width(
+    style: ButtonVariant,
+    state: InteractionState,
+    normal_bw: f32,
+    focus_bw: f32,
+) -> f32 {
     if state == InteractionState::Focused {
         return focus_bw;
     }
@@ -544,8 +548,8 @@ impl Widget for SplitButton {
         // Border width reacts to focus state — thickens to the
         // accent `focus_ring_width` on focus, matching the Int UI
         // convention applied uniformly across all input widgets.
-        let border_width = interaction
-            .map(move |s| resolve_border_width(style, *s, normal_bw, focus_bw));
+        let border_width =
+            interaction.map(move |s| resolve_border_width(style, *s, normal_bw, focus_bw));
 
         // ---- Shared frame (single RectWidget behind the row) ----
         let bg_rect = RectWidget::new()
@@ -559,9 +563,7 @@ impl Widget for SplitButton {
 
         // Enforce an overall minimum size: main min_width + divider + chevron.
         let total_min_width = sb_style.min_width + sb_style.divider_width + sb_style.chevron_width;
-        let root_id = ctx.add(
-            MinSize::new(total_min_width, sb_style.height).child_id(frame_id),
-        );
+        let root_id = ctx.add(MinSize::new(total_min_width, sb_style.height).child_id(frame_id));
         self.root_child_id = Some(root_id);
 
         // ---- Self handlers: the SplitButton is the single focus stop.
@@ -639,13 +641,18 @@ impl Widget for SplitButton {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         match self.root_child_id {
             Some(id) => ctx
                 .child_size(id, proposal)
                 .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
             None => proposal.resolve(0.0, 0.0),
-        }.into()
+        }
+        .into()
     }
 
     fn place_children(
@@ -683,4 +690,3 @@ impl Widget for SplitButton {
         }
     }
 }
-

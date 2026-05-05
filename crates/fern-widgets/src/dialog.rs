@@ -104,17 +104,21 @@ impl Widget for ModalContainer {
             // own visible title. This lets dialogs announce their
             // real name without forcing callers to duplicate the
             // string at both the content and the container level.
-            if self.title.is_none() {
-                if let Some(hint) = content.accessible_title_hint() {
-                    self.title = Some(hint);
-                }
+            if self.title.is_none()
+                && let Some(hint) = content.accessible_title_hint()
+            {
+                self.title = Some(hint);
             }
             self.content_id = Some(ctx.add_boxed(content));
         }
         self.children()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let pad = self.resolved_padding(ctx.theme);
         let min_w = self.resolved_min_width(ctx.theme);
         let inset = pad * 2.0;
@@ -331,10 +335,15 @@ impl Widget for DialogContent {
         vec![root]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -633,10 +642,15 @@ impl Widget for Dialog {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(140.0, 40.0)).into()
+            .unwrap_or_else(|| proposal.resolve(140.0, 40.0))
+            .into()
     }
 
     fn place_children(
@@ -664,15 +678,19 @@ impl Widget for Dialog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fern_core::{ModalContent, ModalPresentation};
     use fern_core::widget_tree::WidgetTree;
+    use fern_core::{ModalContent, ModalPresentation};
     use fern_tokens::Theme;
 
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
 
     impl Widget for FixedLeaf {
-        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
             Size::new(self.0, self.1).into()
         }
     }
@@ -684,7 +702,12 @@ mod tests {
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(trigger),
+            target_node: fern_core::accessibility::root_node_id(),
+            data: None,
+        });
 
         let requests = tree.drain_pending_modal_requests();
         assert_eq!(requests.len(), 1);
@@ -693,7 +716,10 @@ mod tests {
             requests[0].request.close_behavior,
             ModalCloseBehavior::EscapeOrClickOutside,
         );
-        assert!(matches!(requests[0].request.content, ModalContent::Deferred(_)));
+        assert!(matches!(
+            requests[0].request.content,
+            ModalContent::Deferred(_)
+        ));
     }
 
     #[test]
@@ -703,12 +729,19 @@ mod tests {
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(trigger),
+            target_node: fern_core::accessibility::root_node_id(),
+            data: None,
+        });
 
         let request = tree.drain_pending_modal_requests().pop().unwrap().request;
         let content_id = match request.content {
             ModalContent::Deferred(builder) => builder(&mut tree),
-            ModalContent::ExistingWidget(_) => unreachable!("dialog now always uses deferred content"),
+            ModalContent::ExistingWidget(_) => {
+                unreachable!("dialog now always uses deferred content")
+            }
         };
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -801,7 +834,12 @@ mod tests {
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(trigger),
+            target_node: fern_core::accessibility::root_node_id(),
+            data: None,
+        });
 
         assert_eq!(tree.drain_pending_modal_requests().len(), 1);
     }
@@ -819,14 +857,21 @@ mod tests {
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(trigger),
+            target_node: fern_core::accessibility::root_node_id(),
+            data: None,
+        });
 
         let request = tree.drain_pending_modal_requests().pop().unwrap().request;
         match request.content {
             ModalContent::Deferred(builder) => {
                 builder(&mut tree);
             }
-            ModalContent::ExistingWidget(_) => unreachable!("dialog now always uses deferred content"),
+            ModalContent::ExistingWidget(_) => {
+                unreachable!("dialog now always uses deferred content")
+            }
         }
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -845,7 +890,12 @@ mod tests {
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(trigger),
+            target_node: fern_core::accessibility::root_node_id(),
+            data: None,
+        });
 
         let requests = tree.drain_pending_modal_requests();
         assert_eq!(requests.len(), 1);
@@ -863,11 +913,19 @@ mod tests {
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(trigger),
+            target_node: fern_core::accessibility::root_node_id(),
+            data: None,
+        });
 
         let requests = tree.drain_pending_modal_requests();
         assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].request.close_behavior, ModalCloseBehavior::Manual);
+        assert_eq!(
+            requests[0].request.close_behavior,
+            ModalCloseBehavior::Manual
+        );
     }
 
     #[test]

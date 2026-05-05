@@ -216,12 +216,18 @@ impl std::fmt::Debug for ActiveOverlay {
             .field("parent_overlay", &self.parent_overlay)
             .field("bounds", &self.bounds)
             .field("focus_restore", &self.focus_restore)
-            .field("pointer_leave_started_real", &self.pointer_leave_started_real)
+            .field(
+                "pointer_leave_started_real",
+                &self.pointer_leave_started_real,
+            )
             .field("pointer_leave_started_sim", &self.pointer_leave_started_sim)
             .field("auto_dismiss_after", &self.auto_dismiss_after)
             .field("shown_at_real", &self.shown_at_real)
             .field("shown_at_sim", &self.shown_at_sim)
-            .field("on_dismiss", &self.on_dismiss.as_ref().map(|_| "<callback>"))
+            .field(
+                "on_dismiss",
+                &self.on_dismiss.as_ref().map(|_| "<callback>"),
+            )
             .field("fading", &self.fade.is_some())
             .finish()
     }
@@ -324,12 +330,7 @@ impl OverlayManager {
     /// framework also applies the same signal to `content_id` via
     /// `set_opacity` (so the rendering walker emits the per-frame
     /// opacity scope) and kicks off the 0→1 fade-in tween.
-    pub(crate) fn attach_fade(
-        &mut self,
-        id: OverlayId,
-        opacity: Signal<f32>,
-        duration: Duration,
-    ) {
+    pub(crate) fn attach_fade(&mut self, id: OverlayId, opacity: Signal<f32>, duration: Duration) {
         if let Some(overlay) = self.stack.iter_mut().find(|o| o.id == id) {
             overlay.fade = Some(OverlayFadeState {
                 opacity,
@@ -754,10 +755,7 @@ impl OverlayManager {
     /// any of the dismissed overlays opened. Aligns the click-outside
     /// path with the Esc / ArrowLeft-cascade paths, both of which
     /// already restore focus from the dismissed overlay.
-    pub fn handle_click_outside(
-        &mut self,
-        point: Point,
-    ) -> (Vec<WidgetId>, Option<WidgetId>) {
+    pub fn handle_click_outside(&mut self, point: Point) -> (Vec<WidgetId>, Option<WidgetId>) {
         if self.stack.is_empty() {
             return (Vec::new(), None);
         }
@@ -877,9 +875,7 @@ impl OverlayManager {
                     };
                     // Clamp horizontally so the content stays in view
                     // when the anchor is near the leading/trailing edge.
-                    let x = (anchor.x + offset.x)
-                        .min(vw - content_size.width)
-                        .max(0.0);
+                    let x = (anchor.x + offset.x).min(vw - content_size.width).max(0.0);
                     Rect::new(x, y, content_size.width, content_size.height)
                 }
                 OverlayPlacement::Centered => Rect::new(
@@ -1094,8 +1090,7 @@ mod tests {
         mgr.set_content_bounds(id, Size::new(100.0, 50.0));
         mgr.set_top_focus_restore(trigger);
 
-        let (dismissed, focus_restore) =
-            mgr.handle_click_outside(Point::new(500.0, 500.0));
+        let (dismissed, focus_restore) = mgr.handle_click_outside(Point::new(500.0, 500.0));
         assert_eq!(dismissed.len(), 1);
         assert_eq!(focus_restore, Some(trigger));
     }
@@ -1135,8 +1130,7 @@ mod tests {
         mgr.set_content_bounds(b, Size::new(100.0, 50.0));
         mgr.set_top_focus_restore(inside_a);
 
-        let (_, focus_restore) =
-            mgr.handle_click_outside(Point::new(500.0, 500.0));
+        let (_, focus_restore) = mgr.handle_click_outside(Point::new(500.0, 500.0));
         assert_eq!(focus_restore, Some(pre_overlay_focus));
     }
 

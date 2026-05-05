@@ -25,6 +25,4 @@ pub use event::{
     Event, EventCategory, F64Bucket, IntentSource, OwnedEvent, OwnedProp, OwnedPropValue, Prop,
     PropValue, RemoteDataExport, RemoteEvent, RemoteValue,
 };
-pub use reporter::{
-    ConsentScope, ConsentState, TelemetryContext, TelemetryError, UsageReporter,
-};
+pub use reporter::{ConsentScope, ConsentState, TelemetryContext, TelemetryError, UsageReporter};

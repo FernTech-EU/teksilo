@@ -221,7 +221,10 @@ impl FileDialogRequest {
                         f.label
                     ));
                 }
-                if ext.chars().any(|c| c.is_whitespace() || c == '/' || c == '\\') {
+                if ext
+                    .chars()
+                    .any(|c| c.is_whitespace() || c == '/' || c == '\\')
+                {
                     return Err(format!(
                         "filter {:?} extension {ext:?} contains whitespace or path separator",
                         f.label
@@ -518,10 +521,9 @@ fn submit_via_ctx(
     mut request: FileDialogRequest,
     on_result: impl FnOnce(FileDialogResult, &mut EventContext) + 'static,
 ) -> Result<RequestId, String> {
-    let window_id = ctx
-        .window()
-        .map(|w| w.id())
-        .ok_or_else(|| "EventContext has no window — file dialog needs a parent window".to_string())?;
+    let window_id = ctx.window().map(|w| w.id()).ok_or_else(|| {
+        "EventContext has no window — file dialog needs a parent window".to_string()
+    })?;
 
     // macOS focus-to-front: a non-bundled binary may launch the
     // panel behind another app. Focusing the parent first reliably
@@ -529,10 +531,10 @@ fn submit_via_ctx(
     #[cfg(target_os = "macos")]
     ctx.focus_window(window_id);
 
-    if request.parent.is_none() {
-        if let Some(parent) = ctx.parent_window_handle() {
-            request = request.with_parent(parent);
-        }
+    if request.parent.is_none()
+        && let Some(parent) = ctx.parent_window_handle()
+    {
+        request = request.with_parent(parent);
     }
 
     let handle = ctx
@@ -802,10 +804,20 @@ mod tests {
         let poster: Arc<dyn AppEventPoster> = cap.clone();
 
         let _ = handle
-            .submit(fern_id(1), FileDialogRequest::pick_file(), poster.clone(), |_, _| {})
+            .submit(
+                fern_id(1),
+                FileDialogRequest::pick_file(),
+                poster.clone(),
+                |_, _| {},
+            )
             .unwrap();
         let _ = handle
-            .submit(fern_id(1), FileDialogRequest::pick_file(), poster.clone(), |_, _| {})
+            .submit(
+                fern_id(1),
+                FileDialogRequest::pick_file(),
+                poster.clone(),
+                |_, _| {},
+            )
             .unwrap();
 
         // Two callbacks pending; two payloads posted.
@@ -831,10 +843,20 @@ mod tests {
         let poster: Arc<dyn AppEventPoster> = cap.clone();
 
         let _ = handle
-            .submit(fern_id(7), FileDialogRequest::pick_file(), poster.clone(), |_, _| {})
+            .submit(
+                fern_id(7),
+                FileDialogRequest::pick_file(),
+                poster.clone(),
+                |_, _| {},
+            )
             .unwrap();
         let _ = handle
-            .submit(fern_id(8), FileDialogRequest::pick_file(), poster.clone(), |_, _| {})
+            .submit(
+                fern_id(8),
+                FileDialogRequest::pick_file(),
+                poster.clone(),
+                |_, _| {},
+            )
             .unwrap();
         assert_eq!(handle.pending_count(), 2);
 

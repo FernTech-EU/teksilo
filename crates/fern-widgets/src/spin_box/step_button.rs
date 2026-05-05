@@ -22,7 +22,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use fern_canvas::{Rect, Size, SizeProposal};
+use fern_canvas::{Rect, SizeProposal};
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, PointerButton, WidgetEvent};
 use fern_core::signal::Signal;
@@ -194,7 +194,11 @@ impl Widget for StepButton {
             let wake_for_tick = wake_at.clone();
             let tick = ctx.frame_tick();
             ctx.effect(&tick, move |_delta| {
-                if let RepeatState::Held { next_fire, interval } = state_for_tick.get() {
+                if let RepeatState::Held {
+                    next_fire,
+                    interval,
+                } = state_for_tick.get()
+                {
                     let now = Instant::now();
                     if now >= next_fire {
                         auto_fn();
@@ -269,9 +273,7 @@ impl Widget for StepButton {
                         }
                         EventResponse::Handled
                     }
-                    WidgetEvent::PointerUp { button, .. }
-                        if *button == PointerButton::Primary =>
-                    {
+                    WidgetEvent::PointerUp { button, .. } if *button == PointerButton::Primary => {
                         repeat_for_pointer.set(RepeatState::Idle);
                         // Resting state depends on whether the
                         // pointer is still over the button.
@@ -309,10 +311,15 @@ impl Widget for StepButton {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(self.width, self.height)).into()
+            .unwrap_or_else(|| proposal.resolve(self.width, self.height))
+            .into()
     }
 
     fn place_children(
@@ -361,4 +368,3 @@ fn resolve_icon_role(_state: InteractionState, enabled: bool) -> TextRole {
         TextRole::Disabled
     }
 }
-

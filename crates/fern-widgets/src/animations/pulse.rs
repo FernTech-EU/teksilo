@@ -30,7 +30,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use fern_canvas::{Point, Rect, Size, SizeProposal};
+use fern_canvas::{Point, Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::widget::{LayoutContext, PendingChild, Widget, WidgetPlacement};
@@ -147,10 +147,15 @@ impl Widget for Pulse {
         vec![child_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         self.child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -187,9 +192,7 @@ mod tests {
         // First layout pass, before any frame tick: opacity should be
         // the midpoint between min and max.
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(
-            Pulse::opacity(0.2, 1.0).child(TextWidget::new_literal("●")),
-        );
+        tree.add(Pulse::opacity(0.2, 1.0).child(TextWidget::new_literal("●")));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let frame = tree.render();
         let ops: Vec<f32> = frame
@@ -214,9 +217,7 @@ mod tests {
     fn pulse_pins_to_midpoint_under_reduced_motion() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.set_accessibility_preferences(false, true, 1.0);
-        tree.add(
-            Pulse::opacity(0.0, 1.0).child(TextWidget::new_literal("●")),
-        );
+        tree.add(Pulse::opacity(0.0, 1.0).child(TextWidget::new_literal("●")));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let frame = tree.render();
         let ops: Vec<f32> = frame
@@ -242,9 +243,7 @@ mod tests {
     #[test]
     fn pulse_does_not_change_layout() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let id = tree.add(
-            Pulse::opacity(0.0, 1.0).child(TextWidget::new_literal("hello")),
-        );
+        let id = tree.add(Pulse::opacity(0.0, 1.0).child(TextWidget::new_literal("hello")));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -262,9 +261,7 @@ mod tests {
     fn pulse_clamps_inverted_min_max() {
         // Pulse::opacity(0.9, 0.1) should still produce a valid range.
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(
-            Pulse::opacity(0.9, 0.1).child(TextWidget::new_literal("●")),
-        );
+        tree.add(Pulse::opacity(0.9, 0.1).child(TextWidget::new_literal("●")));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let _ = tree.render();
         // Just confirm it didn't panic and produced a frame.

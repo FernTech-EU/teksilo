@@ -22,9 +22,7 @@
 
 use std::ops::Range;
 
-use fern_parse::{
-    BodyItem, FernElement, FernElse, FernFor, FernIf, FernMatch, FernRoot, PropArg,
-};
+use fern_parse::{BodyItem, FernElement, FernElse, FernFor, FernIf, FernMatch, FernRoot, PropArg};
 use proc_macro2::TokenStream;
 use quote::ToTokens;
 
@@ -485,8 +483,7 @@ fn body_item_to_tokens(item: &BodyItem, ts: &mut TokenStream) {
         BodyItem::Escape { expr, span } => {
             use proc_macro2::{Ident, TokenTree};
             ts.extend(std::iter::once(TokenTree::Ident(Ident::new(
-                "__escape",
-                *span,
+                "__escape", *span,
             ))));
             expr.to_tokens(ts);
         }
@@ -502,8 +499,7 @@ fn body_item_to_tokens(item: &BodyItem, ts: &mut TokenStream) {
         BodyItem::Spread { expr, span } => {
             use proc_macro2::{Ident, TokenTree};
             ts.extend(std::iter::once(TokenTree::Ident(Ident::new(
-                "__spread",
-                *span,
+                "__spread", *span,
             ))));
             expr.to_tokens(ts);
         }

@@ -210,8 +210,7 @@ pub(crate) fn _reset_tooltip_registry() {
         // point (tests run serially per thread local).
         #[allow(invalid_reference_casting)]
         unsafe {
-            let ptr = cell as *const OnceCell<TooltipRegistry>
-                as *mut OnceCell<TooltipRegistry>;
+            let ptr = cell as *const OnceCell<TooltipRegistry> as *mut OnceCell<TooltipRegistry>;
             std::ptr::write(ptr, new_cell);
         }
     });
@@ -224,7 +223,10 @@ mod tests {
     #[test]
     fn parse_url_recognizes_colon_prefix() {
         assert_eq!(TooltipRegistry::parse_url(":foo"), Some("foo"));
-        assert_eq!(TooltipRegistry::parse_url(":autosave-details"), Some("autosave-details"));
+        assert_eq!(
+            TooltipRegistry::parse_url(":autosave-details"),
+            Some("autosave-details")
+        );
     }
 
     #[test]
@@ -283,14 +285,13 @@ mod tests {
     #[test]
     fn resolve_url_returns_content_for_registered_key() {
         _reset_tooltip_registry();
-        install_tooltip_registry(vec![
-            TooltipContent::new("docs", LocalizedString::literal("Documentation")),
-        ]);
+        install_tooltip_registry(vec![TooltipContent::new(
+            "docs",
+            LocalizedString::literal("Documentation"),
+        )]);
 
-        let body = with_tooltip_registry(|r| {
-            r.resolve_url(":docs").map(|c| c.text.resolve_now())
-        })
-        .flatten();
+        let body = with_tooltip_registry(|r| r.resolve_url(":docs").map(|c| c.text.resolve_now()))
+            .flatten();
         assert_eq!(body.as_deref(), Some("Documentation"));
 
         let missing = with_tooltip_registry(|r| r.resolve_url(":nope").is_some());

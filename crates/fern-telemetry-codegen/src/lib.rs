@@ -73,8 +73,7 @@ pub fn include_telemetry_schema(input: TokenStream) -> TokenStream {
             return error(Span::call_site(), "CARGO_MANIFEST_DIR is not set").into();
         }
     };
-    let full_path =
-        std::path::PathBuf::from(&manifest_dir).join(&relative_path);
+    let full_path = std::path::PathBuf::from(&manifest_dir).join(&relative_path);
 
     // Read the file.
     let content = match std::fs::read_to_string(&full_path) {

@@ -1,6 +1,6 @@
 //! Smoke tests against fern! blocks lifted from the workspace examples.
 
-use fern_fmt::{format_block, FmtConfig};
+use fern_fmt::{FmtConfig, format_block};
 
 fn fmt(s: &str) -> String {
     let cfg = FmtConfig::default();
@@ -40,10 +40,7 @@ fn widget_catalog_with_closure_in_property() {
     assert_eq!(out, twice, "not idempotent. once:\n{out}\ntwice:\n{twice}");
     // Closure should be preserved through reformatting.
     assert!(out.contains("on_activate_fn:"), "got:\n{out}");
-    assert!(
-        out.contains("CatalogIntent::ToggleDarkMode"),
-        "got:\n{out}"
-    );
+    assert!(out.contains("CatalogIntent::ToggleDarkMode"), "got:\n{out}");
 }
 
 #[test]

@@ -83,7 +83,10 @@ impl std::fmt::Debug for WindowConfig {
             .field("skip_taskbar", &self.skip_taskbar)
             .field("icon", &self.icon.as_ref().map(|i| (i.width, i.height)))
             .field("modal", &self.modal)
-            .field("root_builder", &self.root_builder.as_ref().map(|_| "<closure>"))
+            .field(
+                "root_builder",
+                &self.root_builder.as_ref().map(|_| "<closure>"),
+            )
             .field(
                 "post_root_builder",
                 &self.post_root_builder.as_ref().map(|_| "<closure>"),

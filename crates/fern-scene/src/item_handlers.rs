@@ -130,10 +130,7 @@ impl SceneItemHandlerSet {
     /// [`LocalizedString`](fern_i18n::LocalizedString) — most commonly
     /// `tr!(...)` for translated copy. Plain strings auto-convert.
     /// The text is resolved eagerly at builder time.
-    pub fn tooltip(
-        &mut self,
-        t: impl Into<fern_i18n::LocalizedString>,
-    ) -> &mut Self {
+    pub fn tooltip(&mut self, t: impl Into<fern_i18n::LocalizedString>) -> &mut Self {
         let ls: fern_i18n::LocalizedString = t.into();
         self.tooltip = Some(ls.resolve_now());
         self
@@ -160,7 +157,10 @@ impl std::fmt::Debug for SceneItemHandlerSet {
             .field("on_tap", &self.on_tap.as_ref().map(|_| "..."))
             .field("on_double_tap", &self.on_double_tap.as_ref().map(|_| "..."))
             .field("on_hover", &self.on_hover.as_ref().map(|_| "..."))
-            .field("on_context_menu", &self.on_context_menu.as_ref().map(|_| "..."))
+            .field(
+                "on_context_menu",
+                &self.on_context_menu.as_ref().map(|_| "..."),
+            )
             .field("cursor", &self.cursor)
             .field("tooltip", &self.tooltip)
             .field("accepts_drops", &self.accepts_drops)

@@ -412,7 +412,10 @@ pub enum DrawCommand {
     /// matching [`DrawCommand::EndBlurredSubtree`] runs a dual-Kawase
     /// blur chain at the requested `radius` and composites the result
     /// back into the parent pass at `bounds`.
-    BeginBlurredSubtree { bounds: Rect, radius: f32 },
+    BeginBlurredSubtree {
+        bounds: Rect,
+        radius: f32,
+    },
     /// End an offscreen-rendered, blurred subtree. Must be paired with
     /// a preceding [`DrawCommand::BeginBlurredSubtree`].
     EndBlurredSubtree,

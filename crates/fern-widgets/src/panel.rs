@@ -13,9 +13,9 @@ use fern_core::color_prop::ColorProp;
 use fern_core::signal::Prop;
 use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
-use fern_tokens::CornerRadius;
 #[cfg(test)]
 use fern_tokens::Color;
+use fern_tokens::CornerRadius;
 
 /// A themed container with background, border, corner radius, and padding.
 #[derive(Debug)]
@@ -128,24 +128,48 @@ impl Widget for Panel {
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
         if let Some(p) = &self.background {
-            p.register_if_bound(self_id, registry, fern_core::binding::BindingLevel::RepaintOnly);
+            p.register_if_bound(
+                self_id,
+                registry,
+                fern_core::binding::BindingLevel::RepaintOnly,
+            );
         }
         if let Some(p) = &self.border_color {
-            p.register_if_bound(self_id, registry, fern_core::binding::BindingLevel::RepaintOnly);
+            p.register_if_bound(
+                self_id,
+                registry,
+                fern_core::binding::BindingLevel::RepaintOnly,
+            );
         }
         if let Some(p) = &self.border_width {
-            p.register_if_bound(self_id, registry, fern_core::binding::BindingLevel::RepaintOnly);
+            p.register_if_bound(
+                self_id,
+                registry,
+                fern_core::binding::BindingLevel::RepaintOnly,
+            );
         }
         if let Some(p) = &self.corner_radius {
-            p.register_if_bound(self_id, registry, fern_core::binding::BindingLevel::RepaintOnly);
+            p.register_if_bound(
+                self_id,
+                registry,
+                fern_core::binding::BindingLevel::RepaintOnly,
+            );
         }
         if let Some(p) = &self.padding {
-            p.register_if_bound(self_id, registry, fern_core::binding::BindingLevel::Relayout);
+            p.register_if_bound(
+                self_id,
+                registry,
+                fern_core::binding::BindingLevel::Relayout,
+            );
         }
         self.child_id.into_iter().collect()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let pad = self.resolve_padding(ctx.theme);
         let inset = pad * 2.0;
 
@@ -226,7 +250,11 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
             Size::new(self.0, self.1).into()
         }
     }

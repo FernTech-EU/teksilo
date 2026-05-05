@@ -121,7 +121,11 @@ impl Widget for MasonryLayout {
         self.child_ids.clone()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         if self.child_ids.is_empty() {
             return (proposal.resolve(0.0, 0.0)).into();
         }
@@ -176,11 +180,7 @@ impl Widget for MasonryLayout {
         // Column X origins (mirrored for RTL).
         let col_x: Vec<f32> = (0..self.column_count)
             .map(|i| {
-                let physical_col = if rtl {
-                    self.column_count - 1 - i
-                } else {
-                    i
-                };
+                let physical_col = if rtl { self.column_count - 1 - i } else { i };
                 bounds.x + physical_col as f32 * (col_width + self.column_spacing)
             })
             .collect();
@@ -224,7 +224,11 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
             Size::new(self.0, self.1).into()
         }
     }
@@ -329,12 +333,7 @@ mod tests {
         let a = tree.add(FixedLeaf(50.0, 100.0));
         let b = tree.add(FixedLeaf(50.0, 30.0));
         let c = tree.add(FixedLeaf(50.0, 30.0));
-        let m = tree.add(
-            MasonryLayout::new(2)
-                .add_child(a)
-                .add_child(b)
-                .add_child(c),
-        );
+        let m = tree.add(MasonryLayout::new(2).add_child(a).add_child(b).add_child(c));
         tree.layout(SizeProposal {
             width: Some(200.0),
             height: None,
@@ -374,12 +373,7 @@ mod tests {
         let a = tree.add(FixedLeaf(50.0, 40.0));
         let b = tree.add(FixedLeaf(50.0, 30.0));
         let c = tree.add(FixedLeaf(50.0, 20.0));
-        let _m = tree.add(
-            MasonryLayout::new(2)
-                .add_child(a)
-                .add_child(b)
-                .add_child(c),
-        );
+        let _m = tree.add(MasonryLayout::new(2).add_child(a).add_child(b).add_child(c));
         tree.layout(SizeProposal::exact(200.0, 200.0));
 
         // a → col 0, b → col 1, c → col 1 (shorter at 30 vs 40)
@@ -429,12 +423,7 @@ mod tests {
         let a = tree.add(FixedLeaf(50.0, 40.0));
         let b = tree.add(FixedLeaf(50.0, 30.0));
         let c = tree.add(FixedLeaf(50.0, 20.0));
-        let _m = tree.add(
-            MasonryLayout::new(3)
-                .add_child(a)
-                .add_child(b)
-                .add_child(c),
-        );
+        let _m = tree.add(MasonryLayout::new(3).add_child(a).add_child(b).add_child(c));
         // 3 cols in 300px: col_width = 100
         tree.layout(SizeProposal::exact(300.0, 200.0));
 

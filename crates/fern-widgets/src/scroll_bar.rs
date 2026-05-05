@@ -289,10 +289,7 @@ impl ScrollBar {
 }
 
 impl Widget for ScrollBar {
-    fn build(
-        &mut self,
-        ctx: &mut fern_core::build_context::BuildContext,
-    ) -> Vec<WidgetId> {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
         self.scroll_position
@@ -424,13 +421,11 @@ impl Widget for ScrollBar {
                     DragPhase::Started {
                         position,
                         button: PointerButton::Primary,
-                    } => {
-                        if thumb_rect().contains(position) {
-                            dragging.set(true);
-                            set_active(&active, &inactive, true);
-                            drag_start_pointer.set(axis_value(position));
-                            drag_start_scroll.set(scroll_position.get());
-                        }
+                    } if thumb_rect().contains(position) => {
+                        dragging.set(true);
+                        set_active(&active, &inactive, true);
+                        drag_start_pointer.set(axis_value(position));
+                        drag_start_scroll.set(scroll_position.get());
                     }
                     DragPhase::Moved { position, .. } if dragging.get() => {
                         let current = axis_value(position);
@@ -602,7 +597,8 @@ impl Widget for ScrollBar {
             ScrollBarOrientation::Horizontal => {
                 Size::new(proposal.width.unwrap_or(100.0), self.thickness)
             }
-        }.into()
+        }
+        .into()
     }
 
     fn place_children(
@@ -693,10 +689,7 @@ impl std::fmt::Debug for ThinIndicatorPainter {
 }
 
 impl Widget for ThinIndicatorPainter {
-    fn build(
-        &mut self,
-        ctx: &mut fern_core::build_context::BuildContext,
-    ) -> Vec<WidgetId> {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
         let id = ctx.self_id();
         let registry = ctx.binding_registry();
         self.scroll_position
@@ -743,7 +736,9 @@ impl Widget for ThinIndicatorPainter {
             ScrollBarOrientation::Horizontal => bounds.width,
         };
         let ratio = self.viewport_ratio.get().clamp(0.0, 1.0);
-        let thumb_len = (track_len * ratio).max(self.min_thumb_length).min(track_len);
+        let thumb_len = (track_len * ratio)
+            .max(self.min_thumb_length)
+            .min(track_len);
         let pos = self.scroll_position.get();
         let scroll_ratio = (pos / max).clamp(0.0, 1.0);
         let offset = scroll_ratio * (track_len - thumb_len);
@@ -792,10 +787,7 @@ impl std::fmt::Debug for FullBarPainter {
 }
 
 impl Widget for FullBarPainter {
-    fn build(
-        &mut self,
-        ctx: &mut fern_core::build_context::BuildContext,
-    ) -> Vec<WidgetId> {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
         let id = ctx.self_id();
         let registry = ctx.binding_registry();
         self.scroll_position
@@ -804,7 +796,8 @@ impl Widget for FullBarPainter {
             .bind_to(id, registry, BindingLevel::RepaintOnly);
         self.viewport_ratio
             .bind_to(id, registry, BindingLevel::RepaintOnly);
-        self.hovered.bind_to(id, registry, BindingLevel::RepaintOnly);
+        self.hovered
+            .bind_to(id, registry, BindingLevel::RepaintOnly);
         self.dragging
             .bind_to(id, registry, BindingLevel::RepaintOnly);
         Vec::new()
@@ -836,7 +829,9 @@ impl Widget for FullBarPainter {
             ScrollBarOrientation::Vertical => bounds.height,
             ScrollBarOrientation::Horizontal => bounds.width,
         };
-        let thumb_len = (track_len * ratio).max(self.min_thumb_length).min(track_len);
+        let thumb_len = (track_len * ratio)
+            .max(self.min_thumb_length)
+            .min(track_len);
         let pos = self.scroll_position.get();
         let scroll_ratio = (pos / max).clamp(0.0, 1.0);
         let offset = scroll_ratio * (track_len - thumb_len);
@@ -1106,7 +1101,10 @@ mod tests {
         // content is first, v-scrollbar second).
         let sb_id = tree.children(root)[1];
         let sb_bounds = tree.bounds(sb_id);
-        assert!(sb_bounds.width > 0.0, "scrollbar should have non-zero width");
+        assert!(
+            sb_bounds.width > 0.0,
+            "scrollbar should have non-zero width"
+        );
         assert!(
             sb_bounds.height > 0.0,
             "scrollbar should have non-zero height"

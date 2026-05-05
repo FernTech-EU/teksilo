@@ -60,12 +60,18 @@ fn main() {
     run(config);
 }
 
-fn skip_cargo_subcommand<'a>(args: &'a [String]) -> &'a [String] {
+fn skip_cargo_subcommand(args: &[String]) -> &[String] {
     // `cargo fern-telemetry-lint` → argv[0]=binary, argv[1]="fern-telemetry-lint"
-    if args.get(1).map(|s| s == "fern-telemetry-lint").unwrap_or(false) {
+    if args
+        .get(1)
+        .map(|s| s == "fern-telemetry-lint")
+        .unwrap_or(false)
+    {
         &args[2..]
+    } else if args.len() > 1 {
+        &args[1..]
     } else {
-        if args.len() > 1 { &args[1..] } else { &[] }
+        &[]
     }
 }
 
@@ -160,7 +166,11 @@ fn run(config: Config) {
         if config.json_output {
             println!(
                 "{{\"severity\":\"{}\",\"location\":\"{}\",\"message\":\"{}\"}}",
-                if issue.severity == checks::Severity::Error { "error" } else { "warning" },
+                if issue.severity == checks::Severity::Error {
+                    "error"
+                } else {
+                    "warning"
+                },
                 issue.location,
                 issue.message.replace('"', "\\\""),
             );
@@ -193,7 +203,9 @@ fn run(config: Config) {
 
 fn emit_error_line(json: bool, location: &str, message: &str) {
     if json {
-        println!("{{\"severity\":\"error\",\"location\":\"{location}\",\"message\":\"{message}\"}}");
+        println!(
+            "{{\"severity\":\"error\",\"location\":\"{location}\",\"message\":\"{message}\"}}"
+        );
     } else {
         eprintln!("\x1b[31merror\x1b[0m [{location}]: {message}");
     }

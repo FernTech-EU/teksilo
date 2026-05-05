@@ -106,14 +106,13 @@ fn extract_variant_name(variant: &Variant) -> syn::Result<String> {
         if !attr.path().is_ident("name") {
             continue;
         }
-        if let Meta::NameValue(nv) = &attr.meta {
-            if let syn::Expr::Lit(syn::ExprLit {
+        if let Meta::NameValue(nv) = &attr.meta
+            && let syn::Expr::Lit(syn::ExprLit {
                 lit: syn::Lit::Str(s),
                 ..
             }) = &nv.value
-            {
-                return Ok(s.value());
-            }
+        {
+            return Ok(s.value());
         }
         return Err(syn::Error::new_spanned(
             attr,

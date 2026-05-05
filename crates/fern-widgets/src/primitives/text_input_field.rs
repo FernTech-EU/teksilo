@@ -62,7 +62,9 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::EventResponse;
 use fern_core::signal::{Prop, Signal};
-use fern_core::widget::{CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::widget::{
+    CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
+};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_text::text_document::{SelectionType, TextDocument};
@@ -353,10 +355,7 @@ impl TextInputField {
     /// **Does not run per-keystroke** — that's [`char_filter`](Self::char_filter)'s
     /// job. Mixing per-keystroke text rewriting with validation
     /// produces caret-jump bugs and is explicitly out of scope.
-    pub fn validator(
-        mut self,
-        f: impl Fn(&str) -> ValidationOutcome + 'static,
-    ) -> Self {
+    pub fn validator(mut self, f: impl Fn(&str) -> ValidationOutcome + 'static) -> Self {
         self.validator = Some(Rc::new(f));
         self
     }
@@ -406,10 +405,8 @@ impl TextInputField {
         std::rc::Rc::new(move |position: usize| {
             if let Some(state) = slot.borrow().as_ref() {
                 let st = state.borrow();
-                st.cursor.set_position(
-                    position,
-                    fern_text::text_document::MoveMode::MoveAnchor,
-                );
+                st.cursor
+                    .set_position(position, fern_text::text_document::MoveMode::MoveAnchor);
                 let actual = st.cursor.position();
                 if st.cursor_position.get() != actual {
                     st.cursor_position.set(actual);
@@ -436,10 +433,10 @@ impl Widget for TextInputField {
         // Auto-derive placeholder from mask when none was explicitly
         // set: an empty masked field paints `__/__/____` rather than
         // a blank surface, giving the user a self-documenting template.
-        if self.placeholder.is_empty() {
-            if let Some(ref m) = self.mask {
-                self.placeholder = m.empty_template(mask_placeholder_char);
-            }
+        if self.placeholder.is_empty()
+            && let Some(ref m) = self.mask
+        {
+            self.placeholder = m.empty_template(mask_placeholder_char);
         }
 
         // Cache mask-aware natural width. When a mask is set, the
@@ -670,7 +667,8 @@ impl Widget for TextInputField {
             let mut st = self.state().borrow_mut();
             st.engine.set_text_color(colors.text_primary.to_array());
             st.engine.set_cursor_color(colors.text_primary.to_array());
-            st.engine.set_selection_color(colors.selection_bg_active.to_array());
+            st.engine
+                .set_selection_color(colors.selection_bg_active.to_array());
         }
         {
             let state = self.state().clone();
@@ -704,11 +702,10 @@ impl Widget for TextInputField {
         // reactive effect below re-lays the engine out each time
         // the signal fires.
         let text_area_height = self.text_height.unwrap_or(DEFAULT_TEXT_HEIGHT).max(1.0);
-        let needs_suffix_engine =
-            matches!(self.suffix, Prop::Bound(_)) || {
-                let st = self.state().borrow();
-                !st.suffix.is_empty()
-            };
+        let needs_suffix_engine = matches!(self.suffix, Prop::Bound(_)) || {
+            let st = self.state().borrow();
+            !st.suffix.is_empty()
+        };
         if needs_suffix_engine {
             let mut suffix_engine = if let Some(shared) = ctx.app_state::<SharedTypesetter>() {
                 RichTextEngine::from_shared(shared.clone())
@@ -939,7 +936,11 @@ impl Widget for TextInputField {
         Vec::new()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         // Default unwrap is the cached natural width (mask-aware when
         // a mask is set; 200 dp fallback otherwise). Composing widgets
         // that wrap us in a constraint pass `Some(width)` and we use
@@ -964,7 +965,9 @@ impl Widget for TextInputField {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
-        let Some(state) = self.state.as_ref() else { return };
+        let Some(state) = self.state.as_ref() else {
+            return;
+        };
         let mut st = state.borrow_mut();
 
         st.viewport_origin = Point::new(bounds.x, bounds.y);
@@ -1003,7 +1006,7 @@ impl Widget for TextInputField {
         canvas.set_clip(text_clip);
 
         {
-            let state_ref: &mut TextInputState = &mut *st;
+            let state_ref: &mut TextInputState = &mut st;
             let TextInputState {
                 ref mut engine,
                 ref document,
@@ -1048,7 +1051,9 @@ impl Widget for TextInputField {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         use fern_core::accesskit::{Action, Role};
 
-        let Some(state) = self.state.as_ref() else { return };
+        let Some(state) = self.state.as_ref() else {
+            return;
+        };
         let st = state.borrow();
 
         builder.set_role(Role::TextInput);
@@ -1164,15 +1169,16 @@ fn relayout_suffix(state: &SharedState, new_text: &str) {
 /// needed. Kept inline (rather than reusing `paint_frame`) to avoid
 /// the `TextDocument` / `ImageCache` parameters `paint_frame`
 /// requires for inline images the suffix never contains.
-fn paint_suffix_glyphs(
-    canvas: &mut Canvas,
-    frame: &fern_text::RenderFrame,
-    origin: Point,
-) {
+fn paint_suffix_glyphs(canvas: &mut Canvas, frame: &fern_text::RenderFrame, origin: Point) {
     use fern_canvas::GlyphQuad as CanvasGlyphQuad;
     for g in frame.glyphs.iter() {
         let quad = CanvasGlyphQuad {
-            screen: [g.screen[0] + origin.x, g.screen[1] + origin.y, g.screen[2], g.screen[3]],
+            screen: [
+                g.screen[0] + origin.x,
+                g.screen[1] + origin.y,
+                g.screen[2],
+                g.screen[3],
+            ],
             atlas: g.atlas,
             color: g.color,
             is_color: g.is_color,
@@ -1268,8 +1274,14 @@ fn handle_access_action(
     match (action, data) {
         (Action::SetTextSelection, Some(ActionData::SetTextSelection(sel))) => {
             let st = state.borrow();
-            st.cursor.set_position(sel.anchor.character_index, fern_text::text_document::MoveMode::MoveAnchor);
-            st.cursor.set_position(sel.focus.character_index, fern_text::text_document::MoveMode::KeepAnchor);
+            st.cursor.set_position(
+                sel.anchor.character_index,
+                fern_text::text_document::MoveMode::MoveAnchor,
+            );
+            st.cursor.set_position(
+                sel.focus.character_index,
+                fern_text::text_document::MoveMode::KeepAnchor,
+            );
             drop(st);
             sync_cursor_signals(state);
             ctx.request_frame();
@@ -1300,7 +1312,8 @@ fn compute_word_starts(text: &str) -> Vec<u8> {
     let mut in_word = false;
     for (char_index, ch) in text.chars().enumerate() {
         let is_word_char = ch.is_alphanumeric() || ch == '_';
-        if is_word_char && !in_word
+        if is_word_char
+            && !in_word
             && let Ok(idx) = u8::try_from(char_index)
         {
             starts.push(idx);
@@ -1317,11 +1330,7 @@ fn compute_word_starts(text: &str) -> Vec<u8> {
 fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
     let st = state.borrow();
     let has_selection = st.cursor.has_selection();
-    let doc_non_empty = !st
-        .document
-        .to_plain_text()
-        .unwrap_or_default()
-        .is_empty();
+    let doc_non_empty = !st.document.to_plain_text().unwrap_or_default().is_empty();
     drop(st);
 
     let state_cut = state.clone();
@@ -1436,7 +1445,7 @@ fn run_validator_and_apply(
 ///
 /// Per-class worst-case glyph (Inter and most UI sans-serifs):
 /// - `Digit` → `0` (tabular figures are constant-width, but `0` is
-///    representative for fonts that aren't)
+///   representative for fonts that aren't)
 /// - `Letter` / `Alphanumeric` / `Any` → `M` (widest cap glyph)
 /// - `HexDigit` → `0`
 fn worst_case_template(mask: &InputMask) -> String {

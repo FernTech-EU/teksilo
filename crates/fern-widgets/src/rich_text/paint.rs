@@ -55,7 +55,14 @@ pub fn paint_frame(canvas: &mut Canvas, params: PaintParams<'_>) {
 
     paint_backgrounds(canvas, &frame.decorations, offset_x, offset_y);
     paint_glyphs(canvas, &frame.glyphs, offset_x, offset_y);
-    paint_images(canvas, &frame.images, document, image_cache, offset_x, offset_y);
+    paint_images(
+        canvas,
+        &frame.images,
+        document,
+        image_cache,
+        offset_x,
+        offset_y,
+    );
     paint_foreground(canvas, &frame.decorations, offset_x, offset_y, draw_caret);
 }
 
@@ -129,21 +136,14 @@ fn paint_foreground(
         let color = Color::from_rgba(deco.color[0], deco.color[1], deco.color[2], deco.color[3]);
 
         match deco.kind {
-            DecorationKind::Cursor => {
-                if draw_caret {
-                    canvas.fill_rect(rect, color);
-                }
+            DecorationKind::Cursor if draw_caret => {
+                canvas.fill_rect(rect, color);
             }
             DecorationKind::Underline | DecorationKind::Overline | DecorationKind::Strikeout => {
                 let y_mid = rect.y + rect.height * 0.5;
                 let start = Point::new(rect.x, y_mid);
                 let end = Point::new(rect.x + rect.width, y_mid);
-                canvas.draw_line(
-                    start,
-                    end,
-                    color,
-                    StrokeStyle::solid(rect.height.max(1.0)),
-                );
+                canvas.draw_line(start, end, color, StrokeStyle::solid(rect.height.max(1.0)));
             }
             _ => {}
         }
@@ -160,8 +160,23 @@ fn stroked_rect(canvas: &mut Canvas, rect: fern_canvas::Rect, color: Color) {
     let y0 = rect.y;
     let x1 = x0 + rect.width;
     let y1 = y0 + rect.height;
-    canvas.draw_line(Point::new(x0, y0), Point::new(x1, y0), color, stroke.clone());
-    canvas.draw_line(Point::new(x1, y0), Point::new(x1, y1), color, stroke.clone());
-    canvas.draw_line(Point::new(x1, y1), Point::new(x0, y1), color, stroke.clone());
+    canvas.draw_line(
+        Point::new(x0, y0),
+        Point::new(x1, y0),
+        color,
+        stroke.clone(),
+    );
+    canvas.draw_line(
+        Point::new(x1, y0),
+        Point::new(x1, y1),
+        color,
+        stroke.clone(),
+    );
+    canvas.draw_line(
+        Point::new(x1, y1),
+        Point::new(x0, y1),
+        color,
+        stroke.clone(),
+    );
     canvas.draw_line(Point::new(x0, y1), Point::new(x0, y0), color, stroke);
 }

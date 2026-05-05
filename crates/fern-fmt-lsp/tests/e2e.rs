@@ -69,12 +69,14 @@ fn full_session_initialize_format_shutdown() {
     stdin.write_all(frame(&did_open).as_bytes()).unwrap();
 
     // 4. textDocument/formatting
-    let fmt_req =
-        r#"{"jsonrpc":"2.0","id":2,"method":"textDocument/formatting","params":{"textDocument":{"uri":"file:///t.rs"},"options":{"tabSize":4,"insertSpaces":true}}}"#;
+    let fmt_req = r#"{"jsonrpc":"2.0","id":2,"method":"textDocument/formatting","params":{"textDocument":{"uri":"file:///t.rs"},"options":{"tabSize":4,"insertSpaces":true}}}"#;
     stdin.write_all(frame(fmt_req).as_bytes()).unwrap();
 
     let resp = read_one_message(&mut reader);
-    assert!(resp.contains("\"id\":2"), "expected formatting reply, got: {resp}");
+    assert!(
+        resp.contains("\"id\":2"),
+        "expected formatting reply, got: {resp}"
+    );
     assert!(
         resp.contains("VStack {"),
         "expected formatted body in newText, got: {resp}"

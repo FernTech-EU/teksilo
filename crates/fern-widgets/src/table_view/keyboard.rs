@@ -46,9 +46,7 @@ pub(crate) struct KeyHandlerConfig {
     pub display_col_editable: Rc<dyn Fn(usize) -> bool>,
     /// Optional: user callback fired when an edit trigger matches.
     #[allow(clippy::type_complexity)]
-    pub on_cell_edit_request: Option<
-        Rc<dyn Fn(usize, &str, &mut fern_core::widget::EventContext)>,
-    >,
+    pub on_cell_edit_request: Option<Rc<dyn Fn(usize, &str, &mut fern_core::widget::EventContext)>>,
     /// Optional: row-activate (Enter) callback.
     #[allow(clippy::type_complexity)]
     pub on_row_activate: Option<Rc<dyn Fn(usize, &mut fern_core::widget::EventContext)>>,
@@ -75,12 +73,10 @@ pub(crate) fn build_key_handler(
         // Tree-aware ArrowLeft / ArrowRight (Phase 7 — flat impls are
         // no-ops, so this is safe to evaluate eagerly).
         let on_tree_column = col == 0; // tree column is leftmost in
-                                       // current TreeTable scope
-        if matches!(key, Key::ArrowLeft) && on_tree_column {
-            if cfg.navigator.is_expanded(row) {
-                cfg.navigator.toggle_expanded(row);
-                return EventResponse::Handled;
-            }
+        // current TreeTable scope
+        if matches!(key, Key::ArrowLeft) && on_tree_column && cfg.navigator.is_expanded(row) {
+            cfg.navigator.toggle_expanded(row);
+            return EventResponse::Handled;
         }
         if matches!(key, Key::ArrowRight)
             && on_tree_column
@@ -125,8 +121,7 @@ pub(crate) fn build_key_handler(
                 Some((r, col))
             }
             Key::PageDown => {
-                let new_y =
-                    (cfg.scroll_y.get() + viewport_h).min(cfg.max_scroll_y.get());
+                let new_y = (cfg.scroll_y.get() + viewport_h).min(cfg.max_scroll_y.get());
                 cfg.scroll_y.set(new_y);
                 let r = (row + rows_per_page).min(row_count - 1);
                 Some((r, col))
@@ -167,10 +162,11 @@ pub(crate) fn build_key_handler(
                 }
                 return EventResponse::Handled;
             }
-            Key::F2 if matches!(
-                cfg.edit_trigger,
-                EditTrigger::F2 | EditTrigger::F2OrType | EditTrigger::F2OrTypeOrDoubleClick
-            ) && (cfg.display_col_editable)(col) =>
+            Key::F2
+                if matches!(
+                    cfg.edit_trigger,
+                    EditTrigger::F2 | EditTrigger::F2OrType | EditTrigger::F2OrTypeOrDoubleClick
+                ) && (cfg.display_col_editable)(col) =>
             {
                 if let Some(col_id) = (cfg.display_col_to_id)(col) {
                     cfg.editing_cell.set(Some((row, col)));
@@ -254,8 +250,7 @@ fn toggle_selection(cfg: &KeyHandlerConfig, row: usize, col: usize) {
         }
         TableSelectionMode::SingleCell | TableSelectionMode::MultiCell => {
             if let Some(ref cs) = cfg.cell_selection {
-                if cs.is_selected(row, col) && cfg.selection_mode == TableSelectionMode::MultiCell
-                {
+                if cs.is_selected(row, col) && cfg.selection_mode == TableSelectionMode::MultiCell {
                     cs.toggle(row, col);
                 } else {
                     cs.select(row, col);
@@ -266,12 +261,7 @@ fn toggle_selection(cfg: &KeyHandlerConfig, row: usize, col: usize) {
     }
 }
 
-fn apply_selection_extension(
-    cfg: &KeyHandlerConfig,
-    row: usize,
-    col: usize,
-    shift: bool,
-) {
+fn apply_selection_extension(cfg: &KeyHandlerConfig, row: usize, col: usize, shift: bool) {
     match cfg.selection_mode {
         TableSelectionMode::MultiRow => {
             if let Some(ref s) = cfg.selection {

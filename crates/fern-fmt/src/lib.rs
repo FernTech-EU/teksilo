@@ -62,7 +62,10 @@ impl std::error::Error for FmtError {}
 /// it to the formatter's output.
 pub fn format_block(source: &str, _config: &FmtConfig) -> Result<String, FmtError> {
     let tokens = TokenStream::from_str(source).map_err(|e| {
-        FmtError::Parse(syn::Error::new(proc_macro2::Span::call_site(), e.to_string()))
+        FmtError::Parse(syn::Error::new(
+            proc_macro2::Span::call_site(),
+            e.to_string(),
+        ))
     })?;
     let root = fern_parse::parse_root(tokens.clone()).map_err(FmtError::Parse)?;
     let trivia = trivia::scan(source, &tokens);

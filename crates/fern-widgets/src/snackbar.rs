@@ -85,7 +85,11 @@ impl Widget for SnackbarSurface {
         self.children()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let style = ctx.theme.components.notification;
         let inset_x = style.padding_horizontal * 2.0;
         let inset_y = style.padding_vertical * 2.0;
@@ -415,10 +419,15 @@ impl Widget for Snackbar {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(140.0, 40.0)).into()
+            .unwrap_or_else(|| proposal.resolve(140.0, 40.0))
+            .into()
     }
 
     fn place_children(
@@ -458,7 +467,11 @@ mod tests {
     struct FixedLeaf(f32, f32);
 
     impl Widget for FixedLeaf {
-        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
             Size::new(self.0, self.1).into()
         }
     }
@@ -470,7 +483,12 @@ mod tests {
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Show snackbar").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(trigger),
+            target_node: fern_core::accessibility::root_node_id(),
+            data: None,
+        });
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         assert_eq!(tree.active_overlays().len(), 1);
@@ -492,7 +510,12 @@ mod tests {
         tree.layout(SizeProposal::exact(640.0, 480.0));
 
         let trigger = tree.find_by_label("Show snackbar").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(trigger),
+            target_node: fern_core::accessibility::root_node_id(),
+            data: None,
+        });
 
         assert_eq!(tree.active_overlays().len(), 1);
     }
@@ -508,7 +531,12 @@ mod tests {
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Show snackbar").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(trigger),
+            target_node: fern_core::accessibility::root_node_id(),
+            data: None,
+        });
         assert_eq!(tree.active_overlays().len(), 1);
 
         tree.advance_time(Duration::from_millis(200));

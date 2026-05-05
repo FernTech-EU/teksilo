@@ -6,13 +6,14 @@
 use crate::Color;
 
 /// The user's preferred color scheme as reported by the OS.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ColorSchemePreference {
     /// The OS reports a light theme preference.
     Light,
     /// The OS reports a dark theme preference.
     Dark,
     /// No preference reported (treat as light).
+    #[default]
     NoPreference,
 }
 
@@ -20,12 +21,6 @@ impl ColorSchemePreference {
     /// Whether the preference is dark.
     pub fn is_dark(self) -> bool {
         self == Self::Dark
-    }
-}
-
-impl Default for ColorSchemePreference {
-    fn default() -> Self {
-        Self::NoPreference
     }
 }
 

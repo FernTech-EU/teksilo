@@ -86,7 +86,8 @@ impl Widget for SplitViewDemo {
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -142,9 +143,9 @@ fn main() {
         .theme(Theme::light_default())
         .initial_window(
             WindowConfig::new()
-            .title("SplitView")
-            .size(980, 760)
-            .root(|tree, _state| tree.add(SplitViewDemo::new()))
+                .title("SplitView")
+                .size(980, 760)
+                .root(|tree, _state| tree.add(SplitViewDemo::new())),
         )
         .run();
 }

@@ -11,13 +11,9 @@
 use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 
-use fern_core::telemetry::{
-    ConsentScope, ConsentState, Event, EventCategory, TelemetryError,
-};
+use fern_core::telemetry::{ConsentScope, ConsentState, Event, EventCategory, TelemetryError};
 use fern_settings::{AppPaths, SettingsStore};
-use fern_telemetry::{
-    StubReporter, TelemetryBundle, TelemetryExt, TelemetryMode, UsageReporter,
-};
+use fern_telemetry::{StubReporter, TelemetryBundle, TelemetryExt, TelemetryMode, UsageReporter};
 use tempfile::tempdir;
 
 fn make_settings(paths: &AppPaths) -> SettingsStore {
@@ -148,7 +144,10 @@ fn schema_version_bump_triggers_reprompt() {
             .unwrap();
         opened
             .consent
-            .grant(ConsentScope::anonymous_metrics_only(), opened.reporter.endpoint())
+            .grant(
+                ConsentScope::anonymous_metrics_only(),
+                opened.reporter.endpoint(),
+            )
             .unwrap();
         opened.consent.flush_now().unwrap();
     }
@@ -220,10 +219,7 @@ fn opened_telemetry_is_clone() {
         .unwrap();
     let clone1 = opened.clone();
     let clone2 = opened.clone();
-    assert_eq!(
-        clone1.event_schema_version,
-        clone2.event_schema_version
-    );
+    assert_eq!(clone1.event_schema_version, clone2.event_schema_version);
 }
 
 #[test]

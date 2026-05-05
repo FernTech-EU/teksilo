@@ -48,6 +48,7 @@ impl std::fmt::Debug for Action {
 
 impl Action {
     /// Start building an [`Action`] bound to the given intent name.
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(intent: &'static str) -> ActionBuilder {
         ActionBuilder {
             intent,
@@ -84,10 +85,7 @@ impl ActionBuilder {
     /// Register a handler that consumes the intent. The handler's
     /// return value is ignored; the framework treats every invocation
     /// as [`IntentResponse::Handled`].
-    pub fn on_invoke(
-        mut self,
-        mut f: impl FnMut(&Intent, &mut EventContext) + 'static,
-    ) -> Action {
+    pub fn on_invoke(mut self, mut f: impl FnMut(&Intent, &mut EventContext) + 'static) -> Action {
         self.handler = Some(Box::new(move |intent, ctx| {
             f(intent, ctx);
             IntentResponse::Handled

@@ -163,9 +163,10 @@ where
 
     fn read_from_disk(path: &Path, migrator: &Migrator<T>) -> Result<T, SettingsFileError> {
         let raw_text = fs::read_to_string(path)?;
-        let raw_value: toml::Value =
-            toml::from_str(&raw_text).map_err(SettingsFileError::Parse)?;
-        let mut value = migrator.run(raw_value).map_err(SettingsFileError::Migrate)?;
+        let raw_value: toml::Value = toml::from_str(&raw_text).map_err(SettingsFileError::Parse)?;
+        let mut value = migrator
+            .run(raw_value)
+            .map_err(SettingsFileError::Migrate)?;
         value.set_version(T::CURRENT_VERSION);
         Ok(value)
     }
@@ -208,7 +209,10 @@ where
 
     /// Synchronously write any pending payload to disk.
     pub fn flush_now(&self) -> Result<(), SettingsFileError> {
-        self.inner.writer.flush_now().map_err(SettingsFileError::Flush)
+        self.inner
+            .writer
+            .flush_now()
+            .map_err(SettingsFileError::Flush)
     }
 
     /// The path being written to.

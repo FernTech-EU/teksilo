@@ -427,11 +427,7 @@ impl ColorTokens {
             // Editor foreground is intentionally dimmer than label foreground
             // for reading-session ergonomics, matching IntelliJ's convention
             // that the editor scheme and the UI theme have distinct foregrounds.
-            tokens.editor_fg = if is_dark {
-                fg.darken(0.15)
-            } else {
-                fg
-            };
+            tokens.editor_fg = if is_dark { fg.darken(0.15) } else { fg };
             tokens.editor_caret = tokens.editor_fg;
             tokens.editor_gutter_fg = if is_dark {
                 fg.darken(0.55)

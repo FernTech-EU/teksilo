@@ -62,7 +62,7 @@ fn main() {
     process::exit(outcome.exit_code());
 }
 
-fn skip_cargo_subcommand<'a>(args: &'a [String]) -> &'a [String] {
+fn skip_cargo_subcommand(args: &[String]) -> &[String] {
     // Invoked as `cargo fern-fmt`: argv[0]=binary, argv[1]="fern-fmt"
     if args.get(1).map(|s| s == "fern-fmt").unwrap_or(false) {
         &args[2..]
@@ -85,8 +85,7 @@ pub(crate) struct Config {
 impl Config {
     fn parse(args: &[String]) -> Result<Self, String> {
         let mut cfg = Config::default();
-        let mut iter = args.iter();
-        while let Some(arg) = iter.next() {
+        for arg in args {
             match arg.as_str() {
                 "--help" | "-h" => cfg.help = true,
                 "--version" | "-V" => cfg.version = true,

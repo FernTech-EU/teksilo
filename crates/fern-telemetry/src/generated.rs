@@ -10,9 +10,7 @@
 
 use std::time::SystemTime;
 
-use fern_core::telemetry::{
-    Event, EventCategory, IntentSource, Prop, PropValue, UsageReporter,
-};
+use fern_core::telemetry::{Event, EventCategory, IntentSource, Prop, PropValue, UsageReporter};
 
 /// The current event-schema version. Bumped when the framework adds,
 /// removes, or changes the shape of any event. The bump triggers a
@@ -54,6 +52,7 @@ pub fn emit_intent_dispatched(
 
 /// Emit `lifecycle.app_started`. Called once at boot, after the first
 /// window opens, by `FernAppBuilder::install_telemetry`.
+#[allow(clippy::too_many_arguments)]
 pub fn emit_lifecycle_app_started(
     reporter: &dyn UsageReporter,
     install_id: Option<&str>,
@@ -76,7 +75,9 @@ pub fn emit_lifecycle_app_started(
         },
         Prop {
             key: "os",
-            value: PropValue::Enum { variant: os.as_str() },
+            value: PropValue::Enum {
+                variant: os.as_str(),
+            },
         },
         Prop {
             key: "arch",
@@ -190,7 +191,11 @@ pub fn emit_window_lifecycle(
             variant: kind.as_str(),
         },
     }];
-    let name = if opened { "window.opened" } else { "window.closed" };
+    let name = if opened {
+        "window.opened"
+    } else {
+        "window.closed"
+    };
     let event = Event {
         name,
         category: EventCategory::Lifecycle,

@@ -13,13 +13,13 @@
 use std::rc::Rc;
 
 use fern_canvas::{Rect, Size, SizeProposal};
+use fern_core::PlatformTitleBarHost;
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, PointerButton, WidgetEvent};
 use fern_core::gesture::DragPhase;
 use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_core::PlatformTitleBarHost;
 
 pub struct DragRegion {
     host: Rc<dyn PlatformTitleBarHost>,
@@ -62,10 +62,7 @@ impl DragRegion {
 }
 
 impl Widget for DragRegion {
-    fn build(
-        &mut self,
-        ctx: &mut fern_core::build_context::BuildContext,
-    ) -> Vec<WidgetId> {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
         if let Some(pending) = self.pending_child.take() {
             self.child_id = Some(match pending {
                 PendingChild::Id(id) => id,

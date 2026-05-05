@@ -36,7 +36,7 @@ pub trait TelemetryExt {
     /// matching the current mode). Panics if no telemetry bundle was
     /// registered.
     fn usage_reporter(&self) -> &DynamicReporter {
-        &*self.telemetry().reporter
+        &self.telemetry().reporter
     }
 
     fn try_telemetry(&self) -> Option<&OpenedTelemetry>;

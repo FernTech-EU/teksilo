@@ -49,8 +49,8 @@ mod tests;
 
 use self::panel::DropdownPanel;
 use self::state::{
-    ComboBoxState, DEFAULT_MAX_VISIBLE_ITEMS, ItemSource, resolve_bg_role,
-    resolve_border_role, resolve_index, resolve_text_role,
+    ComboBoxState, DEFAULT_MAX_VISIBLE_ITEMS, ItemSource, resolve_bg_role, resolve_border_role,
+    resolve_index, resolve_text_role,
 };
 
 /// A dropdown selection widget.
@@ -180,11 +180,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     /// Backed by a reactive [`ListModel<T>`]. Inserts, removes, and reorders
     /// propagate into the dropdown automatically. If the currently-selected
     /// value disappears from the model, `selected` becomes `None`.
-    pub fn from_model<F>(
-        model: ListModel<T>,
-        selected: Signal<Option<T>>,
-        item_label: F,
-    ) -> Self
+    pub fn from_model<F>(model: ListModel<T>, selected: Signal<Option<T>>, item_label: F) -> Self
     where
         F: Fn(&T) -> String + 'static,
     {
@@ -192,11 +188,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     }
 
     /// Backed by a custom [`ListDataSource`] — for external or paged data.
-    pub fn from_source<S, F>(
-        source: S,
-        selected: Signal<Option<T>>,
-        item_label: F,
-    ) -> Self
+    pub fn from_source<S, F>(source: S, selected: Signal<Option<T>>, item_label: F) -> Self
     where
         S: ListDataSource<Item = T> + 'static,
         F: Fn(&T) -> String + 'static,
@@ -238,10 +230,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     /// label may be announced twice — one from the wrapper, one from the
     /// inner text. Wrap primary text nodes in `.a11y_hidden()` to avoid
     /// duplication, and reserve visible widgets for presentation only.
-    pub fn render_item(
-        mut self,
-        f: impl Fn(&T, bool) -> Box<dyn Widget> + 'static,
-    ) -> Self {
+    pub fn render_item(mut self, f: impl Fn(&T, bool) -> Box<dyn Widget> + 'static) -> Self {
         self.render_item = Some(Rc::new(f));
         self
     }
@@ -459,9 +448,8 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
 
         let visual_zstack = ZStack::new().add_child(bg_id).add_child(padding_id);
         let visual_id = ctx.add(visual_zstack);
-        let root_id = ctx.add(
-            crate::primitives::MinSize::new(0.0, combo_style.height).child_id(visual_id),
-        );
+        let root_id =
+            ctx.add(crate::primitives::MinSize::new(0.0, combo_style.height).child_id(visual_id));
         self.root_child_id = Some(root_id);
 
         // Pre-create the dropdown panel (dormant until opened). On
@@ -650,9 +638,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                         // Consuming the event suppresses the framework's
                         // built-in cycle so nothing else stole focus while
                         // the overlay tore down.
-                        WidgetEvent::KeyDown {
-                            key: Key::Tab, ..
-                        } => {
+                        WidgetEvent::KeyDown { key: Key::Tab, .. } => {
                             if interaction.get() == ComboBoxState::Open {
                                 interaction.set(ComboBoxState::Focused);
                                 ctx.dismiss_all_overlays();
@@ -708,18 +694,14 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                             pick_at(target);
                             EventResponse::Handled
                         }
-                        WidgetEvent::KeyDown {
-                            key: Key::Home, ..
-                        } => {
+                        WidgetEvent::KeyDown { key: Key::Home, .. } => {
                             if source.len() == 0 {
                                 return EventResponse::Handled;
                             }
                             pick_at(0);
                             EventResponse::Handled
                         }
-                        WidgetEvent::KeyDown {
-                            key: Key::End, ..
-                        } => {
+                        WidgetEvent::KeyDown { key: Key::End, .. } => {
                             let n = source.len();
                             if n == 0 {
                                 return EventResponse::Handled;
@@ -733,8 +715,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                         // convention and also gets the visible range to
                         // follow via `register_scroll_into_view`.
                         WidgetEvent::KeyDown {
-                            key: Key::PageDown,
-                            ..
+                            key: Key::PageDown, ..
                         } => {
                             let n = source.len();
                             if n == 0 {
@@ -821,7 +802,11 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         match self.root_child_id {
             Some(id) => {
                 let child_size = ctx
@@ -830,7 +815,8 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                 Size::new(child_size.width.max(120.0), child_size.height.max(36.0))
             }
             None => proposal.resolve(120.0, 36.0),
-        }.into()
+        }
+        .into()
     }
 
     fn place_children(
@@ -876,10 +862,10 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         // Only set aria-controls when the popup is open — the listbox node is
         // absent from the tree when closed, and pointing at a missing node
         // causes AT crashes (VoiceOver unwrap in linked_ui_elements).
-        if self.interaction.get() == ComboBoxState::Open {
-            if let Some(popup_id) = self.dropdown_content_id {
-                builder.push_controlled(widget_id_to_node_id(popup_id));
-            }
+        if self.interaction.get() == ComboBoxState::Open
+            && let Some(popup_id) = self.dropdown_content_id
+        {
+            builder.push_controlled(widget_id_to_node_id(popup_id));
         }
 
         // ARIA combobox pattern: when the popup is a filtered list, mark

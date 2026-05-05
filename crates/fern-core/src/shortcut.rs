@@ -29,16 +29,7 @@ use std::fmt;
 // ---------------------------------------------------------------------------
 
 /// A single keyboard chord: a key plus its modifiers.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct KeyStroke {
     pub key: Key,
     pub modifiers: Modifiers,
@@ -107,8 +98,7 @@ pub type ShortcutOnActivate = Box<dyn FnMut(KeyStroke, &mut EventContext) -> Int
 /// Receives the captured keystroke, mutable access to the registry
 /// (for rebinds), and a mutable [`EventContext`] (so the handler can
 /// emit commands, send intents, dismiss overlays, etc.).
-pub type KeyCaptureCallback =
-    Box<dyn FnOnce(KeyStroke, &mut ShortcutRegistry, &mut EventContext)>;
+pub type KeyCaptureCallback = Box<dyn FnOnce(KeyStroke, &mut ShortcutRegistry, &mut EventContext)>;
 
 /// Shared cell behind [`CaptureHandle`] and the tree's active capture
 /// slot. `None` once the capture has fired or been cancelled.
@@ -246,6 +236,7 @@ impl fmt::Debug for Shortcut {
 
 impl Shortcut {
     /// Start building a shortcut with a stable id.
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(id: &'static str) -> ShortcutBuilder {
         ShortcutBuilder {
             inner: Shortcut {
@@ -411,16 +402,7 @@ impl ShortcutBuilder {
 /// re-registration with a different default flows through
 /// automatically). `Bound(ks)` locks the slot to a specific chord,
 /// and `Unbound` locks the slot to *no* chord.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SlotOverride {
     /// User hasn't touched this slot; use the shortcut's current
     /// declared default.
@@ -452,16 +434,7 @@ impl SlotOverride {
 /// Per-shortcut user override (populated by the settings UI and
 /// persisted to disk). Per-slot semantics: each field records either
 /// a user edit or a delegation to the shortcut's declared default.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct KeyStrokeOverride {
     pub primary: SlotOverride,
     pub secondary: SlotOverride,
@@ -589,11 +562,7 @@ impl ShortcutRegistry {
     /// [`ShortcutRegistry::unregister_all_for_owner`] to remove this
     /// registration. Preserves user overrides identically to
     /// [`ShortcutRegistry::register`].
-    pub fn register_owned(
-        &mut self,
-        shortcut: Shortcut,
-        owner: WidgetId,
-    ) -> Option<Shortcut> {
+    pub fn register_owned(&mut self, shortcut: Shortcut, owner: WidgetId) -> Option<Shortcut> {
         let id = shortcut.id;
         let previous = self.defaults.insert(id, shortcut);
         self.detach_owner_index(id);
@@ -898,7 +867,9 @@ mod tests {
         let s = Shortcut::new("bar").scope_to(id).build();
         assert_eq!(s.scope, ShortcutScope::Scoped(id));
 
-        let e = Shortcut::new("baz").scope(ShortcutScope::Scoped(id)).build();
+        let e = Shortcut::new("baz")
+            .scope(ShortcutScope::Scoped(id))
+            .build();
         assert_eq!(e.scope, ShortcutScope::Scoped(id));
 
         let back = Shortcut::new("qux").scope_to(id).global().build();
@@ -987,10 +958,7 @@ mod tests {
                 .primary(KeyStroke::ctrl(Key::B))
                 .build(),
         );
-        reg.rebind_primary(
-            "editor.format.bold",
-            Some(KeyStroke::ctrl_shift(Key::B)),
-        );
+        reg.rebind_primary("editor.format.bold", Some(KeyStroke::ctrl_shift(Key::B)));
 
         reg.unregister("editor.format.bold");
         assert!(reg.effective("editor.format.bold").is_none());
@@ -1148,9 +1116,7 @@ mod tests {
     #[test]
     fn shortcut_is_enabled_follows_signal() {
         let enabled = Signal::new(false);
-        let s = Shortcut::new("foo")
-            .enabled_when(enabled.clone())
-            .build();
+        let s = Shortcut::new("foo").enabled_when(enabled.clone()).build();
         assert!(!s.is_enabled());
         enabled.set(true);
         assert!(s.is_enabled());
@@ -1290,27 +1256,13 @@ mod tests {
     #[test]
     fn find_conflict_skips_excluded_id_and_respects_overrides() {
         let mut reg = ShortcutRegistry::new();
-        reg.register(
-            Shortcut::new("a")
-                .primary(KeyStroke::ctrl(Key::X))
-                .build(),
-        );
-        reg.register(
-            Shortcut::new("b")
-                .primary(KeyStroke::ctrl(Key::Y))
-                .build(),
-        );
+        reg.register(Shortcut::new("a").primary(KeyStroke::ctrl(Key::X)).build());
+        reg.register(Shortcut::new("b").primary(KeyStroke::ctrl(Key::Y)).build());
 
         // Ctrl+X is bound to "a"; looking for it while excluding "a"
         // returns None, including it returns Some("a").
-        assert_eq!(
-            reg.find_conflict(KeyStroke::ctrl(Key::X), Some("a")),
-            None
-        );
-        assert_eq!(
-            reg.find_conflict(KeyStroke::ctrl(Key::X), None),
-            Some("a")
-        );
+        assert_eq!(reg.find_conflict(KeyStroke::ctrl(Key::X), Some("a")), None);
+        assert_eq!(reg.find_conflict(KeyStroke::ctrl(Key::X), None), Some("a"));
         // Ctrl+Z is bound to nothing.
         assert_eq!(reg.find_conflict(KeyStroke::ctrl(Key::Z), None), None);
 

@@ -2,11 +2,17 @@
 
 use crate::manifest::{EventDef, PropDef, Schema};
 
-static VALID_CATEGORIES: &[&str] =
-    &["intent", "lifecycle", "navigation", "census", "custom"];
+static VALID_CATEGORIES: &[&str] = &["intent", "lifecycle", "navigation", "census", "custom"];
 
-static VALID_PROP_TYPES: &[&str] =
-    &["dev_static", "bounded_str", "u32", "i64", "bool", "f64_bucket", "enum"];
+static VALID_PROP_TYPES: &[&str] = &[
+    "dev_static",
+    "bounded_str",
+    "u32",
+    "i64",
+    "bool",
+    "f64_bucket",
+    "enum",
+];
 
 /// Validate the schema and return accumulated warnings (expired events).
 /// Returns `Err` on hard failures (duplicates, unknown types, missing
@@ -45,15 +51,11 @@ fn validate_event(event: &EventDef, warnings: &mut Vec<String>) -> Result<(), St
         ));
     }
     if event.description.trim().is_empty() {
-        return Err(format!(
-            "event `{}`: `description` is required",
-            event.name
-        ));
+        return Err(format!("event `{}`: `description` is required", event.name));
     }
 
     // Check for duplicate prop names within the event.
-    let mut prop_names: std::collections::HashSet<&str> =
-        std::collections::HashSet::new();
+    let mut prop_names: std::collections::HashSet<&str> = std::collections::HashSet::new();
     for prop in &event.props {
         if !prop_names.insert(prop.name.as_str()) {
             return Err(format!(
@@ -144,6 +146,22 @@ fn unix_secs_to_date(secs: u64) -> String {
     format!("{year:04}-{month:02}-{day:02}")
 }
 
+/// Gregorian calendar decomposition.
+/// Algorithm: http://howardhinnant.github.io/date_algorithms.html
+fn days_to_ymd(days: i64) -> (i64, i64, i64) {
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,7 +240,11 @@ events:
         type: enum
 "#;
         let schema = parse_schema(yaml).unwrap();
-        assert!(validate(&schema).unwrap_err().contains("requires a non-empty"));
+        assert!(
+            validate(&schema)
+                .unwrap_err()
+                .contains("requires a non-empty")
+        );
     }
 
     #[test]
@@ -257,20 +279,4 @@ events:
         assert_eq!(parts.len(), 3);
         assert_eq!(parts[0].len(), 4);
     }
-}
-
-/// Gregorian calendar decomposition.
-/// Algorithm: http://howardhinnant.github.io/date_algorithms.html
-fn days_to_ymd(days: i64) -> (i64, i64, i64) {
-    let z = days + 719468;
-    let era = if z >= 0 { z } else { z - 146096 } / 146097;
-    let doe = z - era * 146097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    (y, m, d)
 }

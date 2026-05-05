@@ -214,10 +214,7 @@ impl WidgetTree {
         );
     }
 
-    pub(super) fn process_delayed_overlays_real(
-        &mut self,
-        ops: &mut dyn crate::window::WindowOps,
-    ) {
+    pub(super) fn process_delayed_overlays_real(&mut self, ops: &mut dyn crate::window::WindowOps) {
         let real_now = std::time::Instant::now();
         self.process_delayed_overlays_impl(
             |p| real_now.saturating_duration_since(p.real_requested_at),
@@ -252,10 +249,10 @@ impl WidgetTree {
                 self.overlay_manager.set_top_focus_restore(focus_id);
             }
             self.arena.mark_needs_paint(content_id);
-            if let Some(focus_target) = pending.focus_target {
-                if self.arena.is_active(focus_target) {
-                    self.focus_ops(focus_target, &mut *ops);
-                }
+            if let Some(focus_target) = pending.focus_target
+                && self.arena.is_active(focus_target)
+            {
+                self.focus_ops(focus_target, &mut *ops);
             }
         }
     }
@@ -280,7 +277,10 @@ impl WidgetTree {
 
         while let Some(overlay_id) = current {
             let overlay = self.overlay_manager.overlay(overlay_id)?;
-            if matches!(overlay.placement, crate::overlay::OverlayPlacement::Centered) {
+            if matches!(
+                overlay.placement,
+                crate::overlay::OverlayPlacement::Centered
+            ) {
                 return Some(overlay_id);
             }
             current = overlay.parent_overlay;
@@ -317,10 +317,10 @@ impl WidgetTree {
                 .overlay_manager
                 .dismiss_descendants_of(parent_overlay, preserve_overlay);
             self.dormant_dismissed_content(&dismissed, &mut *ops);
-            if let Some(restore_id) = focus_restore {
-                if self.arena.is_active(restore_id) {
-                    self.focus_ops(restore_id, &mut *ops);
-                }
+            if let Some(restore_id) = focus_restore
+                && self.arena.is_active(restore_id)
+            {
+                self.focus_ops(restore_id, &mut *ops);
             }
             return;
         }
@@ -349,10 +349,10 @@ impl WidgetTree {
             let (dismissed, focus_restore) =
                 self.overlay_manager.dismiss_with_focus_restore(overlay_id);
             self.dormant_dismissed_content(&dismissed, &mut *ops);
-            if let Some(restore_id) = focus_restore {
-                if self.arena.is_active(restore_id) {
-                    self.focus_ops(restore_id, &mut *ops);
-                }
+            if let Some(restore_id) = focus_restore
+                && self.arena.is_active(restore_id)
+            {
+                self.focus_ops(restore_id, &mut *ops);
             }
         }
     }
@@ -366,12 +366,14 @@ impl WidgetTree {
             return false;
         };
 
-        let (dismissed, focus_restore) = self.overlay_manager.dismiss_with_focus_restore(modal_overlay);
+        let (dismissed, focus_restore) = self
+            .overlay_manager
+            .dismiss_with_focus_restore(modal_overlay);
         self.dormant_dismissed_content(&dismissed, &mut *ops);
-        if let Some(restore_id) = focus_restore {
-            if self.arena.is_active(restore_id) {
-                self.focus_ops(restore_id, &mut *ops);
-            }
+        if let Some(restore_id) = focus_restore
+            && self.arena.is_active(restore_id)
+        {
+            self.focus_ops(restore_id, &mut *ops);
         }
         true
     }
@@ -626,8 +628,7 @@ impl WidgetTree {
                 // Round up to the next step boundary so each
                 // wake-up lands on a 500 ms / 1 s / 1.5 s / 2 s mark.
                 let steps_passed = (elapsed.as_millis() / dwell_step.as_millis()) as u32;
-                let next_step_at =
-                    shown_at + dwell_step * (steps_passed + 1);
+                let next_step_at = shown_at + dwell_step * (steps_passed + 1);
                 Some(next_step_at.min(shown_at + sticky_after))
             })
             .min();
@@ -753,7 +754,8 @@ impl WidgetTree {
             epsilon: 0.0,
             max_duration: None,
         });
-        self.overlay_manager.attach_fade(overlay_id, opacity, duration);
+        self.overlay_manager
+            .attach_fade(overlay_id, opacity, duration);
     }
 
     /// Dismiss an overlay programmatically. Uses
@@ -787,11 +789,7 @@ impl WidgetTree {
         // their `is_sticky` flag and stale `overlay_id`, and the
         // next hover would never re-show them.
         for &id in content_ids {
-            if let Some(entry) = self
-                .tooltips
-                .iter_mut()
-                .find(|e| e.content_id == id)
-            {
+            if let Some(entry) = self.tooltips.iter_mut().find(|e| e.content_id == id) {
                 entry.overlay_id = None;
                 entry.is_sticky = false;
                 entry.hover_start = None;
@@ -1184,7 +1182,10 @@ mod tests {
             fade_duration: Some(std::time::Duration::from_millis(100)),
         });
         tree.dismiss_overlay(id);
-        assert!(tree.is_visible(content), "content stays active during fade-out");
+        assert!(
+            tree.is_visible(content),
+            "content stays active during fade-out"
+        );
 
         tree.advance_time(std::time::Duration::from_millis(150));
         assert!(

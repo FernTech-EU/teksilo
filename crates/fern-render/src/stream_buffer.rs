@@ -77,11 +77,7 @@ impl StreamBuffer {
     ///
     /// Panics if `data.len() + write_offset > capacity_bytes`; the caller
     /// must size the buffer correctly up-front via `ensure_capacity`.
-    pub fn write(
-        &self,
-        queue: &wgpu::Queue,
-        data: &[u8],
-    ) -> Option<(&wgpu::Buffer, u64, u64)> {
+    pub fn write(&self, queue: &wgpu::Queue, data: &[u8]) -> Option<(&wgpu::Buffer, u64, u64)> {
         let buf = self.buffer.as_ref()?;
         let offset = self.write_offset.get();
         let len = data.len() as u64;

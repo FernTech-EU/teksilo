@@ -103,14 +103,9 @@ impl WidgetTree {
 
     /// Set focus — the dispatch-path variant that threads `ops` through
     /// to any on_focus_lost / on_focus_gained handlers.
-    pub fn focus_ops(
-        &mut self,
-        id: WidgetId,
-        ops: &mut dyn crate::window::WindowOps,
-    ) {
+    pub fn focus_ops(&mut self, id: WidgetId, ops: &mut dyn crate::window::WindowOps) {
         self.focus_with_origin_ops(id, crate::focus::FocusOrigin::Programmatic, ops);
     }
-
 
     /// Get the currently focused widget.
     pub fn focused(&self) -> Option<WidgetId> {
@@ -157,10 +152,11 @@ impl WidgetTree {
             return None;
         }
         if let Some(node) = self.arena.get(id) {
-            if let Some(target) = node.widget.initial_focus_hint() {
-                if self.arena.is_active(target) && self.is_descendant_of(target, id) {
-                    return Some(target);
-                }
+            if let Some(target) = node.widget.initial_focus_hint()
+                && self.arena.is_active(target)
+                && self.is_descendant_of(target, id)
+            {
+                return Some(target);
             }
             for &child in &node.children {
                 if let Some(found) = self.widget_initial_focus_hint(child) {
@@ -178,11 +174,7 @@ impl WidgetTree {
 
     /// Cycle focus to the next/previous focusable widget (Tab/Shift-Tab).
     /// Traverses in document order (depth-first tree traversal).
-    pub(super) fn cycle_focus(
-        &mut self,
-        reverse: bool,
-        ops: &mut dyn crate::window::WindowOps,
-    ) {
+    pub(super) fn cycle_focus(&mut self, reverse: bool, ops: &mut dyn crate::window::WindowOps) {
         let mut focusable = Vec::new();
         if let Some(modal_overlay) = self.overlay_manager.topmost_centered() {
             self.collect_focusable_tree_order(modal_overlay.content_id, &mut focusable);
@@ -409,7 +401,11 @@ mod tests {
         let a = tree.add(FillWidget::new().focusable());
         let _not_focusable = tree.add(FillWidget::new());
         let b = tree.add(FillWidget::new().focusable());
-        let root = tree.add(crate::test_widgets::StackWidget::new().add_child(a).add_child(b));
+        let root = tree.add(
+            crate::test_widgets::StackWidget::new()
+                .add_child(a)
+                .add_child(b),
+        );
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         assert_eq!(tree.first_focusable_descendant(root), Some(a));
@@ -592,11 +588,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let leaf = tree.add(FillWidget::new().focusable());
         let mid = tree.add(StackWidget::new().add_child(leaf));
-        let _outer = tree.add(
-            StackWidget::new()
-                .add_child(mid)
-                .focus_within(halo.clone()),
-        );
+        let _outer = tree.add(StackWidget::new().add_child(mid).focus_within(halo.clone()));
 
         tree.layout(SizeProposal::exact(100.0, 50.0));
         assert!(!halo.get(), "no focus yet → signal is false");
@@ -615,8 +607,7 @@ mod tests {
         let halo = Signal::new(false);
 
         let mut tree = WidgetTree::new();
-        let widget = tree
-            .add(FillWidget::new().focusable().focus_within(halo.clone()));
+        let widget = tree.add(FillWidget::new().focusable().focus_within(halo.clone()));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         tree.focus(widget);
 
@@ -640,10 +631,16 @@ mod tests {
         let mut tree = WidgetTree::new();
         let leaf_a = tree.add(FillWidget::new().focusable());
         let leaf_b = tree.add(FillWidget::new().focusable());
-        let mid_a = tree
-            .add(StackWidget::new().add_child(leaf_a).focus_within(sig_a.clone()));
-        let mid_b = tree
-            .add(StackWidget::new().add_child(leaf_b).focus_within(sig_b.clone()));
+        let mid_a = tree.add(
+            StackWidget::new()
+                .add_child(leaf_a)
+                .focus_within(sig_a.clone()),
+        );
+        let mid_b = tree.add(
+            StackWidget::new()
+                .add_child(leaf_b)
+                .focus_within(sig_b.clone()),
+        );
         let _root = tree.add(StackWidget::new().add_child(mid_a).add_child(mid_b));
 
         tree.layout(SizeProposal::exact(100.0, 50.0));

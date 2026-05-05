@@ -196,7 +196,7 @@ impl A11yGroup {
 /// (Layers → Components). Apps in this category typically declare
 /// every AT edge anyway, so the default visual-emission becomes
 /// noise.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum A11yMode {
     /// **Default.** Visual is the AT structure unless overridden.
     /// Items inside the off-screen-mode policy emit as direct AT
@@ -205,6 +205,7 @@ pub enum A11yMode {
     /// emit through the arena walker as natural descendants of
     /// `SceneView`. The logical-tree machinery layers on
     /// top.
+    #[default]
     Cooperative,
 
     /// AT structure is purely declared. Items are emitted **only**
@@ -243,11 +244,12 @@ pub enum A11yMode {
 /// pan/zoom (Scene mode in a viewport-aware app). Default is
 /// `Screen` — change only when you've confirmed your AT users
 /// genuinely want the alternative.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum A11yBoundsSpace {
     /// Screen-projected bounds — `view_transform * bounds_in_scene`.
     /// The framework default; matches the convention used by every
     /// other widget in the framework.
+    #[default]
     Screen,
     /// Raw scene-coordinate bounds, with no view-transform applied.
     /// Apps with a logical fixed coordinate system (CAD canvases,
@@ -255,18 +257,6 @@ pub enum A11yBoundsSpace {
     /// about "where in the design" an item sits, independent of
     /// the current pan/zoom.
     Scene,
-}
-
-impl Default for A11yBoundsSpace {
-    fn default() -> Self {
-        Self::Screen
-    }
-}
-
-impl Default for A11yMode {
-    fn default() -> Self {
-        A11yMode::Cooperative
-    }
 }
 
 /// Off-screen visibility policy for the AT walker. Decides which
@@ -348,8 +338,7 @@ mod tests {
     #[test]
     fn all_items_returns_none() {
         assert_eq!(
-            A11yOffScreenMode::AllItems
-                .at_visible_region(Rect::new(0.0, 0.0, 100.0, 100.0)),
+            A11yOffScreenMode::AllItems.at_visible_region(Rect::new(0.0, 0.0, 100.0, 100.0)),
             None
         );
     }

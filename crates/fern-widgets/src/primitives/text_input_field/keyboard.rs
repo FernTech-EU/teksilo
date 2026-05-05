@@ -173,13 +173,24 @@ pub(crate) fn handle_key(
                         if !clean.is_empty() {
                             // Max-length enforcement: compute remaining capacity.
                             if let Some(max) = st.max_length {
-                                let current_len = st.document.to_plain_text().unwrap_or_default().chars().count();
+                                let current_len = st
+                                    .document
+                                    .to_plain_text()
+                                    .unwrap_or_default()
+                                    .chars()
+                                    .count();
                                 let sel_len = if st.cursor.has_selection() {
-                                    st.cursor.selected_text().ok().unwrap_or_default().chars().count()
+                                    st.cursor
+                                        .selected_text()
+                                        .ok()
+                                        .unwrap_or_default()
+                                        .chars()
+                                        .count()
                                 } else {
                                     0
                                 };
-                                let remaining = max.saturating_sub(current_len.saturating_sub(sel_len));
+                                let remaining =
+                                    max.saturating_sub(current_len.saturating_sub(sel_len));
                                 if remaining == 0 {
                                     return EventResponse::Handled;
                                 }
@@ -216,11 +227,7 @@ pub(crate) fn handle_key(
 }
 
 /// Batch pending characters from an IME commit.
-fn push_pending_chars(
-    state: &SharedState,
-    ctx: &mut EventContext,
-    text: &str,
-) -> EventResponse {
+fn push_pending_chars(state: &SharedState, ctx: &mut EventContext, text: &str) -> EventResponse {
     let read_only = state.borrow().read_only;
     if read_only {
         return EventResponse::Handled;
@@ -241,9 +248,19 @@ fn push_pending_chars(
         let mut st = state.borrow_mut();
         // Max-length enforcement.
         if let Some(max) = st.max_length {
-            let current_len = st.document.to_plain_text().unwrap_or_default().chars().count();
+            let current_len = st
+                .document
+                .to_plain_text()
+                .unwrap_or_default()
+                .chars()
+                .count();
             let sel_len = if st.cursor.has_selection() {
-                st.cursor.selected_text().ok().unwrap_or_default().chars().count()
+                st.cursor
+                    .selected_text()
+                    .ok()
+                    .unwrap_or_default()
+                    .chars()
+                    .count()
             } else {
                 0
             };
@@ -308,9 +325,20 @@ pub(crate) fn clipboard_paste(state: &mut TextInputState, ctx: &EventContext) {
     }
     // Max-length enforcement.
     if let Some(max) = state.max_length {
-        let current_len = state.document.to_plain_text().unwrap_or_default().chars().count();
+        let current_len = state
+            .document
+            .to_plain_text()
+            .unwrap_or_default()
+            .chars()
+            .count();
         let sel_len = if state.cursor.has_selection() {
-            state.cursor.selected_text().ok().unwrap_or_default().chars().count()
+            state
+                .cursor
+                .selected_text()
+                .ok()
+                .unwrap_or_default()
+                .chars()
+                .count()
         } else {
             0
         };
@@ -326,4 +354,3 @@ pub(crate) fn clipboard_paste(state: &mut TextInputState, ctx: &EventContext) {
     state.cursor.clear_selection();
     state.pending_text_changed = true;
 }
-

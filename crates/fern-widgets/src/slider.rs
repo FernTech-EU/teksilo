@@ -190,10 +190,10 @@ impl Widget for Slider {
                 };
                 let t = ((pos - start - thumb_radius) / usable).clamp(0.0, 1.0);
                 let mut val = min + t * (max - min);
-                if let Some(s) = step {
-                    if s > 0.0 {
-                        val = ((val - min) / s).round() * s + min;
-                    }
+                if let Some(s) = step
+                    && s > 0.0
+                {
+                    val = ((val - min) / s).round() * s + min;
                 }
                 value.set(val.clamp(min, max));
             }
@@ -329,7 +329,11 @@ impl Widget for Slider {
         Vec::new()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let style = ctx.theme.components.slider;
         let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
         // Reserve the focus-ring envelope around the thumb plus a dp of slack
@@ -345,7 +349,8 @@ impl Widget for Slider {
                 let height = proposal.height.unwrap_or(200.0);
                 Size::new(cross, height)
             }
-        }.into()
+        }
+        .into()
     }
 
     fn place_children(
@@ -467,7 +472,7 @@ impl Widget for Slider {
         // "step by N" when the user holds an arrow key. If the caller
         // didn't configure an explicit step, fall back to 1% of the
         // range — same heuristic the keyboard handler uses.
-        let step = self.step.unwrap_or_else(|| (self.max - self.min) * 0.01);
+        let step = self.step.unwrap_or((self.max - self.min) * 0.01);
         builder.set_numeric_value_step(step as f64);
         let orientation = match self.orientation {
             Orientation::Horizontal => fern_core::accesskit::Orientation::Horizontal,

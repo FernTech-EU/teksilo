@@ -12,8 +12,8 @@
 use fern_ui::core::WidgetPlacement;
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Calendar, DateEdit, DateRange, DateRangeEdit, DateTimeEdit, GroupHeader, HStack, Panel, Padding,
-    SecondsMode, TextWidget, TimeEdit, TimeFormat, VStack,
+    Calendar, DateEdit, DateRange, DateRangeEdit, DateTimeEdit, GroupHeader, HStack, Padding,
+    Panel, SecondsMode, TextWidget, TimeEdit, TimeFormat, VStack,
 };
 use jiff::civil::{Date, DateTime, Time};
 
@@ -97,8 +97,7 @@ impl Widget for Root {
         });
 
         // Section: Calendar (single)
-        let calendar_single = Calendar::single(self.selected_date.clone())
-            .show_today_button(true);
+        let calendar_single = Calendar::single(self.selected_date.clone()).show_today_button(true);
         let calendar_single_id = ctx.add(calendar_single);
         let single_status_id = ctx.add(
             TextWidget::new_literal("")
@@ -107,8 +106,7 @@ impl Widget for Root {
         );
 
         // Section: Calendar (range)
-        let calendar_range = Calendar::range(self.selected_range.clone())
-            .show_today_button(true);
+        let calendar_range = Calendar::range(self.selected_range.clone()).show_today_button(true);
         let calendar_range_id = ctx.add(calendar_range);
         let range_status_id = ctx.add(
             TextWidget::new_literal("")
@@ -131,14 +129,22 @@ impl Widget for Root {
         // Section: TimeEdit (24h)
         let time_24h = TimeEdit::new(self.edit_time_24h.clone()).format(TimeFormat::Hour24);
         let time_24h_id = ctx.add(time_24h);
-        let time24_status_id = ctx.add(TextWidget::new_literal("").bind_text(time24_text).single_line());
+        let time24_status_id = ctx.add(
+            TextWidget::new_literal("")
+                .bind_text(time24_text)
+                .single_line(),
+        );
 
         // Section: TimeEdit (12h with seconds)
         let time_12h = TimeEdit::new(self.edit_time_12h.clone())
             .format(TimeFormat::Hour12)
             .seconds(SecondsMode::Editable);
         let time_12h_id = ctx.add(time_12h);
-        let time12_status_id = ctx.add(TextWidget::new_literal("").bind_text(time12_text).single_line());
+        let time12_status_id = ctx.add(
+            TextWidget::new_literal("")
+                .bind_text(time12_text)
+                .single_line(),
+        );
 
         // Section: DateTimeEdit
         let dt_edit = DateTimeEdit::new(self.edit_dt.clone()).format_pattern_separator();
@@ -164,8 +170,11 @@ impl Widget for Root {
             .placeholder_start("Start")
             .placeholder_end("End");
         let range_edit_id = ctx.add(range_edit);
-        let range_edit_status_id =
-            ctx.add(TextWidget::new_literal("").bind_text(range_edit_text).single_line());
+        let range_edit_status_id = ctx.add(
+            TextWidget::new_literal("")
+                .bind_text(range_edit_text)
+                .single_line(),
+        );
 
         // Assemble two columns.
         let cols = HStack::new()
@@ -231,22 +240,14 @@ impl Widget for Root {
             ),
         );
 
-        let root_widget = Padding::uniform(16.0).child(
-            VStack::new()
-                .spacing(16.0)
-                .child(cols)
-                .child(editors),
-        );
+        let root_widget =
+            Padding::uniform(16.0).child(VStack::new().spacing(16.0).child(cols).child(editors));
         let root_id = ctx.add(root_widget);
         self.root_child_id = Some(root_id);
         vec![root_id]
     }
 
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        ctx: &LayoutContext,
-    ) -> LayoutResponse {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
             .unwrap_or_else(|| proposal.resolve(0.0, 0.0))

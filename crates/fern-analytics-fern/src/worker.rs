@@ -89,26 +89,14 @@ async fn worker_loop(
                 queue.push(ev);
                 stats.queued.store(queue.len(), Ordering::Relaxed);
                 if queue.len() >= config.max_batch_size {
-                    let _ = drain_once(
-                        &config,
-                        &queue,
-                        &mut channel,
-                        &mut next_batch_id,
-                        &stats,
-                    )
-                    .await;
+                    let _ =
+                        drain_once(&config, &queue, &mut channel, &mut next_batch_id, &stats).await;
                     last_flush = Instant::now();
                 }
             }
             Ok(Some(WorkerCommand::Flush(reply))) => {
-                let result = drain_all(
-                    &config,
-                    &queue,
-                    &mut channel,
-                    &mut next_batch_id,
-                    &stats,
-                )
-                .await;
+                let result =
+                    drain_all(&config, &queue, &mut channel, &mut next_batch_id, &stats).await;
                 let _ = reply.send(result);
                 last_flush = Instant::now();
             }
@@ -117,26 +105,13 @@ async fn worker_loop(
                 stats.queued.store(0, Ordering::Relaxed);
             }
             Ok(Some(WorkerCommand::Shutdown)) | Ok(None) => {
-                let _ = drain_all(
-                    &config,
-                    &queue,
-                    &mut channel,
-                    &mut next_batch_id,
-                    &stats,
-                )
-                .await;
+                let _ = drain_all(&config, &queue, &mut channel, &mut next_batch_id, &stats).await;
                 break;
             }
             Err(_elapsed) => {
                 if !queue.is_empty() {
-                    let _ = drain_once(
-                        &config,
-                        &queue,
-                        &mut channel,
-                        &mut next_batch_id,
-                        &stats,
-                    )
-                    .await;
+                    let _ =
+                        drain_once(&config, &queue, &mut channel, &mut next_batch_id, &stats).await;
                     last_flush = Instant::now();
                 }
             }
@@ -359,8 +334,8 @@ fn owned_to_proto_prop(p: &OwnedProp) -> proto::Prop {
             min_x100: b.min_x100,
             max_x100: b.max_x100,
         })),
-        OwnedPropValue::HistogramStrU32(entries) => {
-            Some(proto::prop::Value::HistogramStrU32(proto::HistogramStrU32 {
+        OwnedPropValue::HistogramStrU32(entries) => Some(proto::prop::Value::HistogramStrU32(
+            proto::HistogramStrU32 {
                 entries: entries
                     .iter()
                     .map(|(k, v)| proto::HistogramEntry {
@@ -368,8 +343,8 @@ fn owned_to_proto_prop(p: &OwnedProp) -> proto::Prop {
                         count: *v,
                     })
                     .collect(),
-            }))
-        }
+            },
+        )),
     };
     proto::Prop {
         key: p.key.clone(),

@@ -83,7 +83,11 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
         Vec::new()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         let series_vec = self.series.get();
         if series_vec.is_empty() {
             return (Size::ZERO).into();
@@ -120,7 +124,8 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
                     proposal.height.unwrap_or(total_h),
                 )
             }
-        }.into()
+        }
+        .into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -276,9 +281,7 @@ pub(crate) fn legend_main_axis_size<T: Clone + 'static>(
 
 /// Pick the appropriate orientation for an embedded legend given its
 /// position around the plot.
-pub(crate) fn orientation_for_position(
-    pos: crate::layout::LegendPosition,
-) -> LegendOrientation {
+pub(crate) fn orientation_for_position(pos: crate::layout::LegendPosition) -> LegendOrientation {
     use crate::layout::LegendPosition;
     match pos {
         LegendPosition::Top | LegendPosition::Bottom => LegendOrientation::Horizontal,
@@ -456,6 +459,10 @@ mod tests {
         tree.layout(SizeProposal::unspecified());
         let b = tree.bounds(id);
         // Vertical has 3 rows of swatches → height ≥ 3 * swatch size.
-        assert!(b.height >= 30.0, "vertical should stack rows: got {}", b.height);
+        assert!(
+            b.height >= 30.0,
+            "vertical should stack rows: got {}",
+            b.height
+        );
     }
 }

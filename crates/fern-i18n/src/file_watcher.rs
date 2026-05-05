@@ -28,8 +28,7 @@ use unic_langid::LanguageIdentifier;
 /// file changes. Implementations must be thread-safe; fern-app's
 /// implementation posts the reload request through the winit
 /// `EventLoopProxy`, which internally routes back to the UI thread.
-pub type ReloadSink =
-    Arc<dyn Fn(LanguageIdentifier, PathBuf) + Send + Sync + 'static>;
+pub type ReloadSink = Arc<dyn Fn(LanguageIdentifier, PathBuf) + Send + Sync + 'static>;
 
 /// Active hot-reload watcher. One per `FernAppBuilder::run` invocation.
 ///
@@ -141,19 +140,13 @@ mod tests {
 
     #[test]
     fn construction_with_real_file_succeeds() {
-        let dir = std::env::temp_dir().join(format!(
-            "fern-i18n-watcher-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("fern-i18n-watcher-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("fr-FR.ftl");
         std::fs::write(&path, "k = v\n").unwrap();
 
         let sink: ReloadSink = Arc::new(|_loc, _path| {});
-        let watcher = FtlFileWatcher::new(
-            vec![("fr-FR".parse().unwrap(), path.clone())],
-            sink,
-        );
+        let watcher = FtlFileWatcher::new(vec![("fr-FR".parse().unwrap(), path.clone())], sink);
         assert!(watcher.is_ok());
 
         let _ = std::fs::remove_file(&path);

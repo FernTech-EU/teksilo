@@ -13,8 +13,10 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use fern_core::Signal;
+use fern_text::text_document::{
+    DocumentEvent, DocumentFragment, Subscription, TextCursor, TextDocument,
+};
 use fern_text::{RichTextEngine, WrapMode};
-use fern_text::text_document::{DocumentEvent, DocumentFragment, Subscription, TextCursor, TextDocument};
 
 use super::image_cache::ImageCache;
 use super::policy::{CaretPolicy, PolicyBundle};
@@ -117,7 +119,6 @@ pub(crate) struct EditorState {
     pub image_cache: ImageCache,
 
     // --- M8b editor preset state (unused by read-only preset) ----------
-
     /// Accumulates typed characters within a single frame, flushed as
     /// one `cursor.insert_text(batch)` at the start of the next
     /// `frame_loop::tick`. Batching matches the godot reference
@@ -196,9 +197,7 @@ pub(crate) struct EditorState {
     /// re-walking the document tree. Invalidated from
     /// `drain_events` when a `ContentsChanged` or `FormatChanged`
     /// event arrives.
-    pub accessibility_flow_snapshot: RefCell<
-        Option<fern_text::text_document::FlowSnapshot>,
-    >,
+    pub accessibility_flow_snapshot: RefCell<Option<fern_text::text_document::FlowSnapshot>>,
 
     /// Per-synthetic-NodeId lookup table populated during the
     /// accessibility walk. Maps each emitted `Role::TextRun` NodeId
@@ -208,9 +207,8 @@ pub(crate) struct EditorState {
     /// `SetTextSelection` requests (which reference TextRun NodeIds
     /// and in-run character indices) back into document-absolute
     /// cursor positions.
-    pub synthetic_to_element: RefCell<
-        std::collections::HashMap<fern_core::accesskit::NodeId, SyntheticElementRef>,
-    >,
+    pub synthetic_to_element:
+        RefCell<std::collections::HashMap<fern_core::accesskit::NodeId, SyntheticElementRef>>,
 
     /// Callback invoked on a Primary-click whose hit lands on a
     /// `HitRegion::Link`. Installed via
@@ -219,13 +217,11 @@ pub(crate) struct EditorState {
     /// of the state borrow to invoke — running the callback itself
     /// with `state.borrow()` held would deadlock if the handler calls
     /// back into the widget's API.
-    pub on_link_activated:
-        Option<std::rc::Rc<dyn Fn(&str, &mut fern_core::widget::EventContext)>>,
+    pub on_link_activated: Option<std::rc::Rc<dyn Fn(&str, &mut fern_core::widget::EventContext)>>,
     /// Callback invoked on a Primary-click whose hit lands on a
     /// `HitRegion::Image`. Same Rc / borrow-release convention as
     /// [`on_link_activated`](Self::on_link_activated).
-    pub on_image_activated:
-        Option<std::rc::Rc<dyn Fn(&str, &mut fern_core::widget::EventContext)>>,
+    pub on_image_activated: Option<std::rc::Rc<dyn Fn(&str, &mut fern_core::widget::EventContext)>>,
 
     /// `(table_id, row, column, rows, columns)` remembered from the
     /// Ctrl+A ladder's level-1 call. After `select(BlockUnderCursor)`

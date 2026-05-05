@@ -25,13 +25,13 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use fern_canvas::{Canvas, Paint, Point, Rect, Size, SizeProposal};
 use fern_canvas::paint::GradientStop;
+use fern_canvas::{Canvas, Paint, Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::accesskit::Role;
 use fern_core::build_context::BuildContext;
-use fern_core::gesture::DragPhase;
 use fern_core::event::PointerButton;
+use fern_core::gesture::DragPhase;
 use fern_core::signal::Signal;
 use fern_core::widget::{
     CursorIcon, LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement,
@@ -87,9 +87,21 @@ impl Widget for HsvCanvas {
         let registry = ctx.binding_registry();
         // Bind for repaint when any of the HSV channels move; layout
         // is fixed, so RepaintOnly is the right level.
-        self.hue.bind_to(self_id, registry, fern_core::binding::BindingLevel::RepaintOnly);
-        self.saturation.bind_to(self_id, registry, fern_core::binding::BindingLevel::RepaintOnly);
-        self.value_hsv.bind_to(self_id, registry, fern_core::binding::BindingLevel::RepaintOnly);
+        self.hue.bind_to(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::RepaintOnly,
+        );
+        self.saturation.bind_to(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::RepaintOnly,
+        );
+        self.value_hsv.bind_to(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::RepaintOnly,
+        );
 
         let enabled = self.enabled;
         let cached_bounds = self.cached_bounds.clone();

@@ -178,11 +178,7 @@ impl Widget for Link {
                 .bind_border_width(focus_border_width)
                 .corner_radius(CornerRadius::uniform(link_corner_radius)),
         );
-        let root_id = ctx.add(
-            ZStack::new()
-                .add_child(focus_rect_id)
-                .add_child(content_id),
-        );
+        let root_id = ctx.add(ZStack::new().add_child(focus_rect_id).add_child(content_id));
 
         if let Some(source) = self.rich_tooltip_source.take() {
             crate::tooltip::attach_rich_tooltip_source(
@@ -289,7 +285,11 @@ impl Widget for Link {
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         if let Some(root) = self.root_child_id
             && let Some(size) = ctx.child_size(root, proposal)
         {
@@ -329,4 +329,3 @@ impl Widget for Link {
         self.root_child_id.into_iter().collect()
     }
 }
-

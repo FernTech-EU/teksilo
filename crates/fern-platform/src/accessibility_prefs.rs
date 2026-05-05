@@ -73,31 +73,31 @@ mod platform {
         }
 
         // High contrast fallback: check GTK theme name for "HighContrast"
-        if !prefs.high_contrast {
-            if let Some(theme) = read_gsettings("org.gnome.desktop.interface", "gtk-theme") {
-                prefs.high_contrast = theme.contains("HighContrast");
-            }
+        if !prefs.high_contrast
+            && let Some(theme) = read_gsettings("org.gnome.desktop.interface", "gtk-theme")
+        {
+            prefs.high_contrast = theme.contains("HighContrast");
         }
 
         // High contrast fallback: GNOME a11y interface flag
-        if !prefs.high_contrast {
-            if let Some(val) = read_gsettings("org.gnome.desktop.a11y.interface", "high-contrast") {
-                prefs.high_contrast = val == "true";
-            }
+        if !prefs.high_contrast
+            && let Some(val) = read_gsettings("org.gnome.desktop.a11y.interface", "high-contrast")
+        {
+            prefs.high_contrast = val == "true";
         }
 
         // Reduced motion fallback: GNOME enable-animations (false → reduced motion)
-        if !prefs.reduced_motion {
-            if let Some(val) = read_gsettings("org.gnome.desktop.interface", "enable-animations") {
-                prefs.reduced_motion = val == "false";
-            }
+        if !prefs.reduced_motion
+            && let Some(val) = read_gsettings("org.gnome.desktop.interface", "enable-animations")
+        {
+            prefs.reduced_motion = val == "false";
         }
 
         // Text scaling (not in the portal, must use gsettings)
-        if let Some(val) = read_gsettings("org.gnome.desktop.interface", "text-scaling-factor") {
-            if let Ok(scale) = val.parse::<f64>() {
-                prefs.text_scale_factor = scale;
-            }
+        if let Some(val) = read_gsettings("org.gnome.desktop.interface", "text-scaling-factor")
+            && let Ok(scale) = val.parse::<f64>()
+        {
+            prefs.text_scale_factor = scale;
         }
 
         prefs
@@ -219,8 +219,10 @@ mod tests {
 
     #[test]
     fn large_text_threshold() {
-        let mut prefs = AccessibilityPreferences::default();
-        prefs.text_scale_factor = 1.25;
+        let mut prefs = AccessibilityPreferences {
+            text_scale_factor: 1.25,
+            ..AccessibilityPreferences::default()
+        };
         assert!(prefs.prefers_large_text());
 
         prefs.text_scale_factor = 1.0;

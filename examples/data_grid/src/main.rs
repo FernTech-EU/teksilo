@@ -46,16 +46,20 @@ struct Employee {
 fn make_data(n: u32) -> Vec<Employee> {
     let roles = ["Admin", "Editor", "Viewer", "Owner"];
     let names = [
-        "Avery", "Blake", "Casey", "Drew", "Elliot", "Finn", "Gray", "Harper", "Indigo",
-        "Jordan", "Kai", "Logan", "Morgan", "Nico",
+        "Avery", "Blake", "Casey", "Drew", "Elliot", "Finn", "Gray", "Harper", "Indigo", "Jordan",
+        "Kai", "Logan", "Morgan", "Nico",
     ];
     (0..n)
         .map(|i| Employee {
             id: i + 1,
-            name: format!("{} {}", names[(i as usize) % names.len()], (i as usize) % 100),
+            name: format!(
+                "{} {}",
+                names[(i as usize) % names.len()],
+                (i as usize) % 100
+            ),
             email: format!("user{i}@example.com"),
             role: roles[(i as usize) % roles.len()],
-            salary: 35_000 + (i as u32 * 137) % 100_000,
+            salary: 35_000 + (i * 137) % 100_000,
             active: i % 3 != 0,
         })
         .collect()
@@ -139,7 +143,7 @@ fn main() {
         .with_comparator("id", |a: &Employee, b: &Employee| a.id.cmp(&b.id))
         .with_comparator("name", |a, b| a.name.cmp(&b.name))
         .with_comparator("email", |a, b| a.email.cmp(&b.email))
-        .with_comparator("role", |a, b| a.role.cmp(&b.role))
+        .with_comparator("role", |a, b| a.role.cmp(b.role))
         .with_comparator("salary", |a, b| a.salary.cmp(&b.salary))
         .with_predicate("name", |t| {
             let needle = t.to_lowercase();
@@ -158,58 +162,52 @@ fn main() {
 
     FernAppBuilder::new()
         .theme(Theme::light_default())
-        .initial_window(
-            WindowConfig::new()
-                .title("Data Grid")
-                .size(1100, 640)
-                .root(move |tree, _| {
-                    let table = TableView::from_source(proxy.clone())
-                        .add_column(id_column())
-                        .add_column(name_column())
-                        .add_column(email_column())
-                        .add_column(role_column())
-                        .add_column(salary_column())
-                        .add_column(active_column())
-                        .row_height(28.0)
-                        .alternating_rows(true)
-                        .grid_lines(GridLines::Horizontal)
-                        .selection_mode(TableSelectionMode::MultiRow)
-                        .selection(selection.clone())
-                        // Press F2 (or start typing a letter) on the
-                        // focused name cell to swap in a TextInput.
-                        .edit_trigger(EditTrigger::F2OrType);
+        .initial_window(WindowConfig::new().title("Data Grid").size(1100, 640).root(
+            move |tree, _| {
+                let table = TableView::from_source(proxy.clone())
+                    .add_column(id_column())
+                    .add_column(name_column())
+                    .add_column(email_column())
+                    .add_column(role_column())
+                    .add_column(salary_column())
+                    .add_column(active_column())
+                    .row_height(28.0)
+                    .alternating_rows(true)
+                    .grid_lines(GridLines::Horizontal)
+                    .selection_mode(TableSelectionMode::MultiRow)
+                    .selection(selection.clone())
+                    // Press F2 (or start typing a letter) on the
+                    // focused name cell to swap in a TextInput.
+                    .edit_trigger(EditTrigger::F2OrType);
 
-                    // Wire the proxy's sort + filter from the table's signals.
-                    proxy.bind_sort_signal(table.sort_signal().clone());
-                    proxy.bind_filters_signal(table.filters_signal().clone());
+                // Wire the proxy's sort + filter from the table's signals.
+                proxy.bind_sort_signal(table.sort_signal().clone());
+                proxy.bind_filters_signal(table.filters_signal().clone());
 
-                    // Default sort: ascending by id.
-                    table.set_sort(Some("id"), SortDirection::Ascending);
+                // Default sort: ascending by id.
+                table.set_sort(Some("id"), SortDirection::Ascending);
 
-                    let table_id = tree.add(table);
+                let table_id = tree.add(table);
 
-                    // Status bar showing row count + selection count.
-                    let status = TextWidget::new_literal(format!(
-                        "{} rows  ·  selection: {}",
-                        proxy.len(),
-                        selection.count()
-                    ));
-                    let toolbar = HStack::new()
-                        .spacing(8.0)
-                        .child(Button::new_literal("Reset filters"))
-                        .child(Button::new_literal("Reset sort"))
-                        .child(Spacer::new())
-                        .child(status);
+                // Status bar showing row count + selection count.
+                let status = TextWidget::new_literal(format!(
+                    "{} rows  ·  selection: {}",
+                    proxy.len(),
+                    selection.count()
+                ));
+                let toolbar = HStack::new()
+                    .spacing(8.0)
+                    .child(Button::new_literal("Reset filters"))
+                    .child(Button::new_literal("Reset sort"))
+                    .child(Spacer::new())
+                    .child(status);
 
-                    let layout = VStack::new()
-                        .spacing(6.0)
-                        .child(Padding::symmetric(6.0_f32, 12.0_f32).child(toolbar))
-                        .child(
-                            Panel::new()
-                                .child_id(table_id),
-                        );
-                    tree.add(layout)
-                }),
-        )
+                let layout = VStack::new()
+                    .spacing(6.0)
+                    .child(Padding::symmetric(6.0_f32, 12.0_f32).child(toolbar))
+                    .child(Panel::new().child_id(table_id));
+                tree.add(layout)
+            },
+        ))
         .run();
 }

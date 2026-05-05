@@ -54,19 +54,17 @@ mod platform {
                 // do it under `ThemeMode::Native` for the full
                 // colour palette.
                 let path = dirs_kdeglobals();
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    if let Some(scheme) = ini_value(&content, "General", "ColorScheme") {
-                        if scheme.to_lowercase().contains("dark") {
-                            return ColorSchemePreference::Dark;
-                        }
-                        return ColorSchemePreference::Light;
+                if let Ok(content) = std::fs::read_to_string(&path)
+                    && let Some(scheme) = ini_value(&content, "General", "ColorScheme")
+                {
+                    if scheme.to_lowercase().contains("dark") {
+                        return ColorSchemePreference::Dark;
                     }
+                    return ColorSchemePreference::Light;
                 }
             }
             Desktop::Cinnamon => {
-                if let Some(name) =
-                    read_gsettings("org.cinnamon.desktop.interface", "gtk-theme")
-                {
+                if let Some(name) = read_gsettings("org.cinnamon.desktop.interface", "gtk-theme") {
                     if name.to_lowercase().contains("dark") {
                         return ColorSchemePreference::Dark;
                     }
@@ -74,9 +72,7 @@ mod platform {
                 }
             }
             Desktop::Gnome | Desktop::Other(_) => {
-                if let Some(name) =
-                    read_gsettings("org.gnome.desktop.interface", "gtk-theme")
-                {
+                if let Some(name) = read_gsettings("org.gnome.desktop.interface", "gtk-theme") {
                     if name.to_lowercase().contains("dark") {
                         return ColorSchemePreference::Dark;
                     }
@@ -112,10 +108,10 @@ mod platform {
         }
 
         // Fallback: GNOME 47 named accent
-        if colors.accent.is_none() {
-            if let Some(name) = read_gsettings("org.gnome.desktop.interface", "accent-color") {
-                colors.accent = gnome_named_accent(&name);
-            }
+        if colors.accent.is_none()
+            && let Some(name) = read_gsettings("org.gnome.desktop.interface", "accent-color")
+        {
+            colors.accent = gnome_named_accent(&name);
         }
 
         // Read surface/selection colors from GTK CSS
@@ -151,13 +147,13 @@ mod platform {
         };
 
         // Infer dark/light from color scheme name if portal didn't provide it
-        if colors.color_scheme == ColorSchemePreference::NoPreference {
-            if let Some(scheme) = ini_value(&content, "General", "ColorScheme") {
-                if scheme.to_lowercase().contains("dark") {
-                    colors.color_scheme = ColorSchemePreference::Dark;
-                } else {
-                    colors.color_scheme = ColorSchemePreference::Light;
-                }
+        if colors.color_scheme == ColorSchemePreference::NoPreference
+            && let Some(scheme) = ini_value(&content, "General", "ColorScheme")
+        {
+            if scheme.to_lowercase().contains("dark") {
+                colors.color_scheme = ColorSchemePreference::Dark;
+            } else {
+                colors.color_scheme = ColorSchemePreference::Light;
             }
         }
 
@@ -200,12 +196,11 @@ mod platform {
                 in_section = trimmed == section_header;
                 continue;
             }
-            if in_section {
-                if let Some((k, v)) = trimmed.split_once('=') {
-                    if k.trim() == key {
-                        return Some(v.trim());
-                    }
-                }
+            if in_section
+                && let Some((k, v)) = trimmed.split_once('=')
+                && k.trim() == key
+            {
+                return Some(v.trim());
             }
         }
         None
@@ -312,10 +307,10 @@ mod platform {
         }
 
         // Derive accent from selection color if not already set
-        if colors.accent.is_none() {
-            if let Some(sel) = resolve(&["theme_selected_bg_color"]) {
-                colors.accent = Some(sel);
-            }
+        if colors.accent.is_none()
+            && let Some(sel) = resolve(&["theme_selected_bg_color"])
+        {
+            colors.accent = Some(sel);
         }
     }
 
