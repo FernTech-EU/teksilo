@@ -884,19 +884,23 @@ the full ~2300-test workspace suite staying green:
 In [crates/fern-platform/src/title_bar_host/windows.rs](../../crates/fern-platform/src/title_bar_host/windows.rs)
 (replaces the M1 stub):
 
-- **`WindowsHost::new`**:
+- **`WindowsHost::new`** (order matters):
   - Extracts the HWND via `winit::raw_window_handle::HasWindowHandle`
     (Win32 variant). Mirrors the macOS NSView/NSWindow pattern.
   - `DwmExtendFrameIntoClientArea(hwnd, MARGINS{cyTopHeight: 1, ..})`
     — the 1-pixel top inset preserves Win11 rounded corners.
-  - `SetWindowPos(.., SWP_FRAMECHANGED | SWP_NO{MOVE,SIZE,ZORDER,ACTIVATE})`
-    forces a frame recompute so our subclass sees the first
-    `WM_NCCALCSIZE`.
   - `SetWindowSubclass` with a unique id from a static `AtomicUsize`
-    counter. The proc receives a `*const SubclassData` raw pointer
-    via `dwRefData`; the `Rc<SubclassData>` on the host keeps the
+    counter — installed **before** the frame-recompute below. The
+    proc receives a `*const SubclassData` raw pointer via
+    `dwRefData`; the `Rc<SubclassData>` on the host keeps the
     allocation alive, and `RemoveWindowSubclass` in `Drop` stops the
     proc before the Rc drops.
+  - `SetWindowPos(.., SWP_FRAMECHANGED | SWP_NO{MOVE,SIZE,ZORDER,ACTIVATE})`
+    forces the first `WM_NCCALCSIZE`. Doing this **after** subclass
+    install means our handler runs from the very first frame (if the
+    order is reversed, winit's default proc handles the first
+    `WM_NCCALCSIZE`, the OS leaves the native frame in place, and the
+    custom chrome only kicks in on the next resize).
 
 - **Subclass proc handles**:
   - `WM_NCCALCSIZE` — zero non-client insets when floating; restore
@@ -907,6 +911,10 @@ In [crates/fern-platform/src/title_bar_host/windows.rs](../../crates/fern-platfo
     the Win11 snap-layout flyout), then `HTCAPTION` for drag rects,
     falling through to `HTCLIENT`. Reads the shared `Mutex<HitRegions>`
     via `try_lock` to dodge deadlocks on re-entry from `SendMessage`.
+  - `WM_NCLBUTTONDOWN` over a button — return 0 to swallow the press,
+    preventing `DefSubclassProc`'s built-in modal press-tracking loop
+    from consuming the matching `WM_NCLBUTTONUP` (without this the
+    user has to double-click before any handler runs).
   - `WM_NCLBUTTONUP` over a button — posts `TitleBarSyntheticEvent`.
   - `WM_NCMOUSEMOVE` / `WM_NCMOUSELEAVE` — posts
     `TitleBarHoverEvent` and arms `TrackMouseEvent(TME_NONCLIENT |
@@ -924,6 +932,22 @@ In [crates/fern-platform/src/title_bar_host/windows.rs](../../crates/fern-platfo
 
 ### Caveats & non-blocking known gaps
 
+- **Maximize/restore glyph fallback.** Both Switcher children
+  currently render the same `□` (U+25A1) — the semantically nicer
+  glyphs (`❐` U+2750 Dingbats, `⧉` U+29C9 Math Symbols, `▭` U+25AD
+  Geometric Shapes, `🗗` U+1F5D7 Misc Symbols) all render as missing
+  on Windows because text-typeset's font fallback chain doesn't hit
+  Segoe UI Symbol / Segoe MDL2 Assets. State is still distinguished
+  by the OS window itself, the action toggling correctly, and the
+  reactive a11y name. Future fix: custom rect-primitive icons drawn
+  directly instead of TextWidget glyphs.
+- **`maximize_id` in `HitRegions` points to the Switcher**, not
+  either of its glyph-button children. The inactive Switcher child
+  is dormant and reports `Rect::ZERO`; only the Switcher container
+  itself is laid out across the floating ↔ maximized swap. The
+  synthetic-tap path dispatches at the Switcher's bounds-center and
+  the normal hit-test routing delivers the click to whichever child
+  is currently visible.
 - **`PaintContext::scale_factor` is still hardcoded to `1.0`** at
   [rendering_impl.rs:249](../../crates/fern-core/src/widget_tree/rendering_impl.rs).
   This is dead code — no widget reads it — so it doesn't block the

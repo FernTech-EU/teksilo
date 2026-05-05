@@ -199,13 +199,15 @@ user clicks maximize ─► ControlButton on_tap fires:
                                   (re-entrancy guarded — observers don't echo)
                                                     │
                                                     ▼
-                       placement signal flips → Switcher swaps glyph:
-                                         □ (U+25A1) ↔ ❐ (U+2750)
+                       placement signal flips → Switcher swaps glyph
+                                  (currently both children render □ — see below)
 ```
 
 OS-initiated maximizes (macOS green-light zoom, Windows drag-to-top snap, Wayland `xdg_toplevel.state` changes) all flow through the same `WindowEvent::Resized` arm, so the placement signal is always consistent with the OS. Applications can subscribe to drive their own iconography from the same signal.
 
 > **macOS caveat.** `NSWindow.isZoomed` tracks traffic-light zoom only. Native fullscreen (green light + Option, or `-[NSWindow toggleFullScreen:]`) puts the window on its own Space and leaves `isZoomed` false. The title bar isn't visible during fullscreen anyway, so we don't track that state.
+
+> **Glyph fallback.** Both Switcher children currently use `□` (U+25A1, Geometric Shapes). The semantically nicer "two stacked squares" glyphs (`❐` U+2750 Dingbats, `⧉` U+29C9 Math Symbols, `🗗` U+1F5D7 Symbols and Pictographs) and even neighbouring Geometric Shapes glyphs like `▭` U+25AD all render as missing on Windows because text-typeset's font fallback chain only reliably hits `□` from Segoe UI's basic geometric coverage (same root cause as the close button using U+00D7 instead of U+2715). State is still distinguished by the OS window itself, the action toggling correctly via `WindowState::placement`, and the reactive a11y name (`Maximize` / `Restore` via `tr_widget!`). A future pass can swap to custom rect-primitive icons to restore the visual delta.
 
 ---
 
@@ -237,6 +239,7 @@ The Windows host extends the DWM-drawn frame into the client area with a 1-pixel
 
 - `WM_NCCALCSIZE` — zero non-client insets so the client area covers the full window. When `IsZoomed` is true, restore the system `SM_CXFRAME + SM_CXPADDEDBORDER` insets and clamp to the monitor work area so the maximized window doesn't cover the taskbar.
 - `WM_NCHITTEST` — return `HTLEFT` / `HTTOP` / corner codes for the outer N pixels (so the OS handles the resize loop natively, with the right cursor and snap behavior), `HTCAPTION` for the widget's drag region, and `HTMINBUTTON` / `HTMAXBUTTON` / `HTCLOSE` for the control-button rects. Returning `HTMAXBUTTON` is what makes Win11 show the snap-layout flyout on hover.
+- `WM_NCLBUTTONDOWN` over a button hit code — return 0 to prevent `DefSubclassProc` from entering its built-in press-tracking modal loop, which would otherwise consume the matching `WM_NCLBUTTONUP` itself (user-visible symptom: the button appears to need a double-click).
 - `WM_NCLBUTTONUP` over a button hit code — post a [`TitleBarSyntheticEvent`](../crates/fern-core/src/window_chrome.rs) through `AppEventProxy::send_external_boxed`. The fern-app dispatcher resolves the matching `WidgetId` via `host.title_bar_widget_id(target)` and calls `WidgetTree::synthesise_tap` to run the button's `on_tap` handler. `close_action` overrides fire here.
 - `WM_NCMOUSEMOVE` / `WM_NCMOUSELEAVE` — post `TitleBarHoverEvent` for the same reason. The host writes the matching `Signal<bool>` (registered by `WindowControls` via `host.register_hover_signal(...)` at build time); an effect inside `ControlButton` maps the bool to its visual `bg_signal`, so OS-driven hover renders identically to widget-tree hover.
 - `WM_DPICHANGED` — re-call `DwmExtendFrameIntoClientArea` so rounded corners survive a DPI change (winit handles the resize but doesn't re-extend). Falls through to `DefSubclassProc` for the rest.
@@ -257,7 +260,7 @@ pub struct HitRegions {
 }
 ```
 
-The `Vec<Rect>` for drag lets apps split the drag band around a centered search field or title pill without losing draggability. The `*_id` companions are the routing target for synthetic-tap forwarding.
+The `Vec<Rect>` for drag lets apps split the drag band around a centered search field or title pill without losing draggability. The `*_id` companions are the routing target for synthetic-tap forwarding. `maximize_id` specifically points to the **Switcher** wrapping the two glyph buttons (not to either glyph child): the inactive Switcher child is dormant and reports `Rect::ZERO`, but the Switcher container itself is always laid out by the parent HStack, so its bounds are stable across the floating ↔ maximized swap. `WidgetTree::synthesise_tap` dispatches the click at the Switcher's bounds-center, and the normal hit-test routing then delivers it to whichever child is currently visible.
 
 ---
 
