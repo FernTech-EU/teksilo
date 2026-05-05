@@ -1,15 +1,15 @@
 //! SearchField — a [`TextInput`](crate::text_input::TextInput) preset
 //! configured for search workflows: leading magnifier glyph, default-on
-//! clear-X, optional suggestion popup with keyboard navigation, and the
-//! ARIA combobox-with-listbox accessibility pattern.
+//! clear-X, and an optional inline suggestions popup with keyboard
+//! navigation and the ARIA combobox-with-listbox accessibility pattern.
 //!
 //! ```ignore
 //! let query = ctx.signal(String::new());
 //! SearchField::new(query.clone())
 //!     .placeholder("Search documents")
 //!     .with_suggestions(|prefix| {
-//!         CITIES.iter()
-//!             .filter(|c| c.to_lowercase().starts_with(&prefix.to_lowercase()))
+//!         FRUITS.iter()
+//!             .filter(|f| f.to_lowercase().starts_with(&prefix.to_lowercase()))
 //!             .map(|s| s.to_string())
 //!             .collect()
 //!     })
@@ -17,16 +17,35 @@
 //!     .on_submit_fn(|ctx| ctx.send_intent(AppIntent::Search))
 //! ```
 //!
+//! ## Design — comparison with searchable [`ComboBox`](crate::combo_box::ComboBox)
+//!
+//! A searchable `ComboBox` and a `SearchField` are visually similar
+//! but semantically different:
+//!
+//! - **ComboBox** is a *value picker* — the bound state is the
+//!   selected item from a known list. The text input is a transient
+//!   filter, embedded inside the dropdown popup; the closed combo
+//!   shows the selected value, not the user's query.
+//! - **SearchField** is a *query input* — the bound state is the
+//!   query string itself. The text input is always visible at the
+//!   top level; suggestions are completion hints, not the source of
+//!   truth. The bound `Signal<String>` keeps whatever the user
+//!   typed, even if no suggestion matches.
+//!
+//! The two share the same dropdown-of-options machinery in spirit;
+//! a future refactor could lift a common `OverlayList<T>` primitive
+//! out of both. For now they're separate so each can keep a small
+//! API surface tuned to its semantics.
+//!
 //! ## Accessibility
 //!
-//! The field is `Role::SearchInput` with `HasPopup::Listbox`. When the
-//! popup is open it advertises `set_expanded(true)` and
-//! `set_controls(listbox_id)`; the highlighted suggestion is published
-//! via `set_active_descendant(option_id)` so screen readers can read
-//! out the currently-focused option without focus actually leaving the
-//! input. The popup itself is `Role::ListBox`; each row is
-//! `Role::ListBoxOption` with `set_pos_in_set` / `set_size_of_set` /
-//! `set_selected`.
+//! The field is `Role::SearchInput` with `HasPopup::Listbox` and
+//! `AutoComplete::List`. When the popup is open it advertises
+//! `set_expanded(true)` and `set_controls(listbox_id)` (mapped to
+//! `accesskit::NodeId` via `widget_id_to_node_id`). Each row is
+//! `Role::ListBoxOption` with `set_selected(is_highlighted)`,
+//! `set_position_in_set(idx + 1)`, and `set_size_of_set(total)` so
+//! screen readers can announce "Apple, 1 of 5".
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -35,9 +54,6 @@ use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
-use fern_core::overlay::{
-    DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
-};
 use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::{HandlerSet, WidgetBuilder};
@@ -54,9 +70,6 @@ const SEARCH_GLYPH_SIZE: f32 = 14.0;
 /// Reserved width for the magnifier slot — pushes the icon center
 /// inward so it doesn't sit flush against the field's leading edge.
 const SEARCH_GLYPH_SLOT_WIDTH: f32 = 22.0;
-/// Extra dead space between the magnifier slot and the text column.
-const SEARCH_GLYPH_TRAILING_GAP: f32 = 2.0;
-/// Default cap on the number of suggestions rendered in the popup.
 const DEFAULT_MAX_SUGGESTIONS: usize = 8;
 const SUGGESTION_ROW_HEIGHT: f32 = 26.0;
 const SUGGESTION_ROW_PADDING_X: f32 = 10.0;
@@ -65,9 +78,6 @@ type SuggestionProvider = Rc<dyn Fn(&str) -> Vec<String>>;
 type OnSelect = Rc<dyn Fn(&str, &mut EventContext)>;
 type OnSubmit = Rc<dyn Fn(&mut EventContext)>;
 
-/// Build the leading-slot icon: a magnifier glyph centered inside a
-/// fixed-width "slot" wider than the icon itself, so it doesn't sit
-/// flush against the field's leading edge.
 fn search_glyph() -> impl Widget + 'static {
     let icon = (BuiltInIcons::global().search)()
         .icon_size(SEARCH_GLYPH_SIZE)
@@ -77,7 +87,7 @@ fn search_glyph() -> impl Widget + 'static {
         .child(Center::new().child(icon))
 }
 
-/// A search input with optional suggestion popup.
+/// A search input with optional inline suggestions popup.
 pub struct SearchField {
     text: Signal<String>,
     placeholder: Option<String>,
@@ -91,15 +101,20 @@ pub struct SearchField {
     /// Build state — populated in `build()`.
     root_child_id: Option<WidgetId>,
     /// Slot the SuggestionPanel writes its inner ListBox WidgetId into,
-    /// so SearchField's `accessibility()` can publish `set_controls`
-    /// pointing at it (ARIA `aria-controls`).
+    /// so SearchField's `accessibility()` can publish `set_controls`.
     listbox_id_slot: Rc<Cell<Option<WidgetId>>>,
-    open: Signal<bool>,
+    /// Tracks whether any descendant of this SearchField currently has
+    /// focus — used to drive popup visibility. The framework writes
+    /// this signal when focus enters or leaves the subtree.
+    focus_within: Signal<bool>,
+    /// User-visible popup-open state — read by `accessibility()`.
+    /// `RefCell<Option<...>>` because the derived signal is built
+    /// during the first `build()` call and can't be created in `new()`
+    /// (the upstream signals don't exist yet).
+    is_open: std::cell::RefCell<Option<Signal<bool>>>,
 }
 
 impl SearchField {
-    /// Construct a `SearchField` bound to `text`. Placeholder defaults
-    /// to the localized "Search" string; override with [`Self::placeholder`].
     pub fn new(text: Signal<String>) -> Self {
         Self {
             text,
@@ -113,80 +128,67 @@ impl SearchField {
             on_submit: None,
             root_child_id: None,
             listbox_id_slot: Rc::new(Cell::new(None)),
-            open: Signal::new(false),
+            focus_within: Signal::new(false),
+            is_open: std::cell::RefCell::new(None),
         }
     }
 
-    /// Override the placeholder text shown when the field is empty.
     pub fn placeholder(mut self, text: impl Into<String>) -> Self {
         self.placeholder = Some(text.into());
         self
     }
 
-    /// Accessible name for the search field.
     pub fn label(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
         self
     }
 
-    /// Disable / re-enable the field.
     pub fn enabled(mut self, on: bool) -> Self {
         self.enabled = on;
         self
     }
 
-    /// Closure invoked on Enter — typical search-trigger hook. Fires
-    /// for "raw" Enter (no suggestion highlighted). When a suggestion
-    /// is highlighted, [`Self::on_select`] fires instead.
     pub fn on_submit_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.on_submit = Some(Rc::new(f));
         self
     }
 
     /// Provider that returns suggestions for the current query string.
-    /// When set, the search field shows a popup of matching entries
-    /// once the user types at least [`Self::min_chars`] characters.
-    /// The provider is called on every text change — keep it cheap or
-    /// memoize externally.
+    /// When set, the popup appears below the field as soon as the
+    /// user types at least [`Self::min_chars`] characters and the
+    /// provider returns a non-empty list.
     pub fn with_suggestions(mut self, f: impl Fn(&str) -> Vec<String> + 'static) -> Self {
         self.suggestion_provider = Some(Rc::new(f));
         self
     }
 
-    /// Cap on the number of suggestions rendered in the popup. Default 8.
     pub fn max_suggestions(mut self, n: usize) -> Self {
         self.max_suggestions = n.max(1);
         self
     }
 
-    /// Minimum number of characters required before suggestions are
-    /// shown. Default 1; set to 0 to show suggestions immediately on
-    /// focus.
     pub fn min_chars(mut self, n: usize) -> Self {
         self.min_chars = n;
         self
     }
 
-    /// Closure invoked when the user picks a suggestion (Enter on a
-    /// highlighted row, or click). The bound text signal is updated
-    /// with the selection before this callback fires.
     pub fn on_select(mut self, f: impl Fn(&str, &mut EventContext) + 'static) -> Self {
         self.on_select = Some(Rc::new(f));
         self
     }
 
-    /// Drop down to a plain [`TextInput`] preset for callers that
-    /// need options the wrapper doesn't surface. The returned input
-    /// already has the magnifier in the leading slot and the clear
-    /// button enabled — but no suggestion popup.
+    /// Drop down to a plain [`TextInput`] preset — no suggestions
+    /// popup. Already configured with the magnifier in the leading
+    /// slot and the clear button enabled.
     pub fn into_input(self) -> TextInput {
         self.build_text_input()
     }
 
     fn build_text_input(&self) -> TextInput {
-        let placeholder = self.placeholder.clone().unwrap_or_else(|| {
-            fern_i18n::tr_widget!(a11y_builtin_search()).resolve_now()
-        });
+        let placeholder = self
+            .placeholder
+            .clone()
+            .unwrap_or_else(|| fern_i18n::tr_widget!(a11y_builtin_search()).resolve_now());
         let mut input = TextInput::new(self.text.clone())
             .placeholder(placeholder)
             .show_clear_button(true)
@@ -211,24 +213,25 @@ impl std::fmt::Debug for SearchField {
 
 impl Widget for SearchField {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        // Reset open state on rebuild.
-        self.open.set(false);
-
-        // Reactive suggestions list + highlighted index.
+        // ── Reactive state ──────────────────────────────────────────
+        // Suggestions list — recomputed on every text change.
         let suggestions: Signal<Vec<String>> = ctx.signal(Vec::new());
+        // Currently highlighted row inside the popup. Driven by
+        // ArrowUp / ArrowDown and by hover.
         let highlighted: Signal<Option<usize>> = ctx.signal::<Option<usize>>(None);
+        // "User pressed Escape" / "User picked a suggestion" flag —
+        // suppresses the popup until the user starts typing again or
+        // refocuses the field. Reset on focus-gain and on any
+        // non-Escape KeyDown.
+        let dismissed: Signal<bool> = ctx.signal(false);
 
-        // Build the inner TextInput. We capture submit + key behavior
-        // via the host TextInput's hooks; navigation keys (Arrow Up /
-        // Down, Escape, Enter when popup open) are intercepted at the
-        // SearchField root via `on_key_preview` so they never reach
-        // the TextInput's caret machinery.
+        // ── TextInput with submit hook ──────────────────────────────
         let on_submit = self.on_submit.clone();
         let on_select = self.on_select.clone();
         let text_signal = self.text.clone();
         let highlighted_for_submit = highlighted.clone();
         let suggestions_for_submit = suggestions.clone();
-        let open_for_submit = self.open.clone();
+        let dismissed_for_submit = dismissed.clone();
 
         let mut input = self.build_text_input();
         input = input.on_submit_fn(move |ctx| {
@@ -240,39 +243,22 @@ impl Widget for SearchField {
                     if let Some(handler) = &on_select {
                         handler(&value, ctx);
                     }
-                    open_for_submit.set(false);
+                    dismissed_for_submit.set(true);
                     return;
                 }
             }
             if let Some(handler) = &on_submit {
                 handler(ctx);
             }
-            open_for_submit.set(false);
+            dismissed_for_submit.set(true);
         });
-
         let input_id = ctx.add(input);
-        let self_id = ctx.self_id();
 
-        // Pre-create the suggestions panel (dormant until opened). It
-        // binds to the suggestions signal at `BindingLevel::Rebuild`
-        // so its row list refreshes whenever the suggestions Vec
-        // changes — same pattern as `Repeater`.
-        let panel = SuggestionPanel {
-            text: self.text.clone(),
-            suggestions: suggestions.clone(),
-            highlighted: highlighted.clone(),
-            on_select: self.on_select.clone(),
-            open_signal: self.open.clone(),
-            listbox_id_slot: self.listbox_id_slot.clone(),
-            root_child_id: None,
-        };
-        let panel_id = ctx.add(panel);
-        ctx.set_dormant(panel_id);
-
-        // Recompute suggestions on every text change. Effects can't
-        // open / dismiss the overlay (no EventContext), so the open /
-        // close decision happens in the keyboard / focus handlers
-        // below; here we only mutate the suggestions Vec.
+        // ── Suggestions provider effect ─────────────────────────────
+        // Recomputes the list on every text change. The popup's
+        // visibility is driven by a separate derived signal further
+        // down, so this effect only mutates `suggestions` /
+        // `highlighted`.
         if let Some(provider) = self.suggestion_provider.clone() {
             let suggestions = suggestions.clone();
             let highlighted = highlighted.clone();
@@ -294,39 +280,74 @@ impl Widget for SearchField {
             });
         }
 
-        // Compose the visible root: a thin transparent container around
-        // the TextInput. The panel sits at arena root (dormant) and is
-        // surfaced as an overlay on demand.
-        let visible_root = ctx.add(MinSize::new(0.0, 0.0).child_id(input_id));
+        // Resetting `dismissed` when focus enters the subtree gives
+        // users a clean second pass: pick a suggestion → popup hides;
+        // come back to the field → popup re-opens if there's still a
+        // matching list.
+        let dismissed_for_focus = dismissed.clone();
+        ctx.effect(&self.focus_within, move |gained| {
+            if *gained {
+                dismissed_for_focus.set(false);
+            }
+        });
+
+        // ── Derived popup-open signal ───────────────────────────────
+        // Visible iff focus is in the subtree, suggestions exist, and
+        // the user hasn't explicitly dismissed via Escape / select.
+        // Three-way zip: (focus, dismissed, suggestions). Each
+        // upstream root is registered in the binding registry so the
+        // panel's `visible_when` re-evaluates on any change.
+        let is_open_derived = self
+            .focus_within
+            .zip(&dismissed)
+            .zip(&suggestions)
+            .map(|((focus, dismissed), list)| *focus && !*dismissed && !list.is_empty());
+        // Stash the derived signal so `accessibility()` can read its
+        // value for `set_expanded`. Cleared and rebuilt on every
+        // `build()` call so the upstream signal graph stays fresh.
+        *self.is_open.borrow_mut() = Some(is_open_derived.clone());
+
+        // ── Suggestions panel (in-tree sibling, not overlay) ────────
+        let panel = SuggestionPanel {
+            text: self.text.clone(),
+            suggestions: suggestions.clone(),
+            highlighted: highlighted.clone(),
+            on_select: self.on_select.clone(),
+            dismissed: dismissed.clone(),
+            listbox_id_slot: self.listbox_id_slot.clone(),
+            root_child_id: None,
+        };
+        let panel_id = ctx.add(panel);
+        ctx.visible_when(panel_id, is_open_derived);
+
+        // ── Compose ─────────────────────────────────────────────────
+        let column = ctx.add(VStack::new().spacing(2.0).add_child(input_id).add_child(panel_id));
+        let visible_root = ctx.add(MinSize::new(0.0, 0.0).child_id(column));
         self.root_child_id = Some(visible_root);
 
-        // Attached handlers — preview keys before TextInput sees them,
-        // and observe focus to auto-open on focus-gain when there's
-        // already non-empty matching text. The SearchField itself is
-        // not focusable; the TextInput is the focus target.
+        // ── Handlers ───────────────────────────────────────────────
         let suggestions_for_keys = suggestions.clone();
         let highlighted_for_keys = highlighted.clone();
-        let open_for_keys = self.open.clone();
+        let dismissed_for_keys = dismissed.clone();
 
         let handlers = HandlerSet::new()
-            .on_key_preview(move |event, ctx| -> EventResponse {
+            // `focus_within` is the parent-side mirror: framework
+            // sets it true when any descendant (the TextInput) has
+            // focus. Strict-ancestors-only — the descendant itself
+            // still sees its own focus normally.
+            .focus_within(self.focus_within.clone())
+            .on_key_preview(move |event, _ctx| -> EventResponse {
                 match event {
                     WidgetEvent::KeyDown {
-                        key: Key::ArrowDown, ..
+                        key: Key::ArrowDown,
+                        ..
                     } => {
                         let list_len = suggestions_for_keys.get().len();
                         if list_len == 0 {
                             return EventResponse::Ignored;
                         }
-                        if !open_for_keys.get() {
-                            open_for_keys.set(true);
-                            present_overlay(
-                                ctx,
-                                self_id,
-                                panel_id,
-                                open_for_keys.clone(),
-                            );
-                        }
+                        // Re-open if user previously dismissed.
+                        dismissed_for_keys.set(false);
                         let next = match highlighted_for_keys.get() {
                             None => 0,
                             Some(i) if i + 1 >= list_len => 0,
@@ -335,20 +356,14 @@ impl Widget for SearchField {
                         highlighted_for_keys.set(Some(next));
                         EventResponse::Handled
                     }
-                    WidgetEvent::KeyDown { key: Key::ArrowUp, .. } => {
+                    WidgetEvent::KeyDown {
+                        key: Key::ArrowUp, ..
+                    } => {
                         let list_len = suggestions_for_keys.get().len();
                         if list_len == 0 {
                             return EventResponse::Ignored;
                         }
-                        if !open_for_keys.get() {
-                            open_for_keys.set(true);
-                            present_overlay(
-                                ctx,
-                                self_id,
-                                panel_id,
-                                open_for_keys.clone(),
-                            );
-                        }
+                        dismissed_for_keys.set(false);
                         let prev = match highlighted_for_keys.get() {
                             None => list_len - 1,
                             Some(0) => list_len - 1,
@@ -359,28 +374,20 @@ impl Widget for SearchField {
                     }
                     WidgetEvent::KeyDown {
                         key: Key::Escape, ..
-                    } if open_for_keys.get() => {
-                        open_for_keys.set(false);
-                        ctx.dismiss_top_overlay();
+                    } => {
+                        dismissed_for_keys.set(true);
+                        highlighted_for_keys.set(None);
                         EventResponse::Handled
                     }
-                    _ => EventResponse::Ignored,
-                }
-            })
-            // Auto-show on focus-gain when the field has matching
-            // suggestions for the current text. Click-outside
-            // dismissal goes through the overlay manager.
-            .on_focus({
-                let open = self.open.clone();
-                let suggestions_for_focus = suggestions.clone();
-                move |gained, ctx| {
-                    if gained && !open.get() && !suggestions_for_focus.get().is_empty() {
-                        open.set(true);
-                        present_overlay(ctx, self_id, panel_id, open.clone());
-                    } else if !gained && open.get() {
-                        open.set(false);
-                        ctx.dismiss_top_overlay();
+                    WidgetEvent::KeyDown { .. } => {
+                        // Any other key — character input, Backspace,
+                        // Delete, etc — clears the dismissed flag so
+                        // the popup can re-appear after the user
+                        // resumes typing.
+                        dismissed_for_keys.set(false);
+                        EventResponse::Ignored
                     }
+                    _ => EventResponse::Ignored,
                 }
             });
 
@@ -415,20 +422,15 @@ impl Widget for SearchField {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         use fern_core::accessibility::widget_id_to_node_id;
-        // ARIA combobox-with-listbox surface: the SearchField's a11y
-        // node owns the role + popup state; the inner TextInput keeps
-        // its caret + value semantics.
         builder.set_role(fern_core::accesskit::Role::SearchInput);
         builder.set_has_popup(fern_core::accesskit::HasPopup::Listbox);
-        // `aria-autocomplete=list`: the popup contains a list of
-        // candidate completions but does not insert text inline.
         builder.set_auto_complete(fern_core::accesskit::AutoComplete::List);
-        if self.open.get() {
-            builder.set_expanded(true);
+        if let Some(sig) = self.is_open.borrow().as_ref() {
+            if sig.get() {
+                builder.set_expanded(true);
+            }
         }
         if let Some(listbox_id) = self.listbox_id_slot.get() {
-            // The listbox lives in an overlay (not a descendant of
-            // this widget), so `aria-controls` is the right relation.
             builder.push_controlled(widget_id_to_node_id(listbox_id));
         }
     }
@@ -438,40 +440,14 @@ impl Widget for SearchField {
     }
 }
 
-fn present_overlay(
-    ctx: &mut EventContext,
-    anchor: WidgetId,
-    panel_id: WidgetId,
-    open_signal: Signal<bool>,
-) {
-    let dismiss: OverlayDismissCallback = {
-        let open = open_signal.clone();
-        Rc::new(move || open.set(false))
-    };
-    ctx.activate(panel_id);
-    ctx.show_overlay(OverlayRequest {
-        content_id: panel_id,
-        anchor,
-        placement: OverlayPlacement::BelowPreferred,
-        dismiss: DismissBehavior::EscapeOrClickOutside,
-        layer: OverlayLayer::InTree,
-        parent_overlay: None,
-        on_dismiss: Some(dismiss),
-        fade_duration: None,
-    });
-}
-
-// ── SuggestionPanel — the listbox content rendered in the overlay ─
+// ── SuggestionPanel — the in-tree listbox rendered below the field ─
 
 struct SuggestionPanel {
     text: Signal<String>,
     suggestions: Signal<Vec<String>>,
     highlighted: Signal<Option<usize>>,
     on_select: Option<OnSelect>,
-    open_signal: Signal<bool>,
-    /// Stash slot the SearchField uses to learn this panel's listbox
-    /// child id, so it can populate `set_controls(listbox_id)` on the
-    /// SearchField's a11y node.
+    dismissed: Signal<bool>,
     listbox_id_slot: Rc<Cell<Option<WidgetId>>>,
     root_child_id: Option<WidgetId>,
 }
@@ -485,10 +461,9 @@ impl std::fmt::Debug for SuggestionPanel {
 impl Widget for SuggestionPanel {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         use fern_core::binding::BindingLevel;
-        // Bind the panel to the suggestions signal at `Rebuild` so it
-        // re-runs `build()` whenever the Vec changes — same pattern
-        // as `Repeater`. Without this the panel materializes once
-        // with the initial empty Vec and never refreshes.
+        // Bind the panel to `suggestions` at `Rebuild` so its row
+        // list refreshes whenever the Vec changes — same pattern
+        // `Repeater` uses for ListModel-backed dynamic content.
         self.suggestions
             .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
@@ -496,7 +471,7 @@ impl Widget for SuggestionPanel {
         let highlighted = self.highlighted.clone();
         let on_select = self.on_select.clone();
         let text = self.text.clone();
-        let open = self.open_signal.clone();
+        let dismissed = self.dismissed.clone();
 
         let list = suggestions.get();
         let total = list.len();
@@ -525,7 +500,7 @@ impl Widget for SuggestionPanel {
             let on_select_for_tap = on_select.clone();
             let text_for_tap = text.clone();
             let highlighted_for_hover = highlighted.clone();
-            let open_for_tap = open.clone();
+            let dismissed_for_tap = dismissed.clone();
             let row = ctx.add(
                 SuggestionRow {
                     label: value.clone(),
@@ -539,8 +514,7 @@ impl Widget for SuggestionPanel {
                     if let Some(handler) = &on_select_for_tap {
                         handler(&value_for_tap, ctx);
                     }
-                    open_for_tap.set(false);
-                    ctx.dismiss_top_overlay();
+                    dismissed_for_tap.set(true);
                 })
                 .on_hover(move |entered, _| {
                     if entered {
@@ -552,7 +526,7 @@ impl Widget for SuggestionPanel {
             column = column.add_child(row);
         }
 
-        // Listbox surface — themed background + soft border.
+        // Listbox surface — themed background + border.
         let listbox_inner = ctx.add(column);
         let bg_rect = ctx.add(
             RectWidget::new()
@@ -564,12 +538,9 @@ impl Widget for SuggestionPanel {
         let padded = ctx.add(Padding::uniform(4.0).child_id(listbox_inner));
         let bordered = ctx.add(ZStack::new().add_child(bg_rect).add_child(padded));
 
-        let listbox = ctx.add(SuggestionListBox {
-            inner: bordered,
-            count: total,
-        });
-        // Publish the listbox's WidgetId so SearchField's
-        // `accessibility()` can wire `aria-controls`.
+        let listbox = ctx.add(SuggestionListBox { inner: bordered });
+        // Publish the listbox WidgetId so SearchField's a11y can wire
+        // `aria-controls`.
         self.listbox_id_slot.set(Some(listbox));
 
         self.root_child_id = Some(listbox);
@@ -613,7 +584,6 @@ impl Widget for SuggestionPanel {
 
 struct SuggestionListBox {
     inner: WidgetId,
-    count: usize,
 }
 
 impl std::fmt::Debug for SuggestionListBox {
@@ -647,10 +617,7 @@ impl Widget for SuggestionListBox {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        // ARIA Listbox role; size_of_set goes onto each option, not
-        // the container, but writing it here too is harmless.
         builder.set_role(fern_core::accesskit::Role::ListBox);
-        let _ = self.count;
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -658,9 +625,9 @@ impl Widget for SuggestionListBox {
     }
 }
 
-// ── Per-row a11y wrapper: Role::ListBoxOption with set_selected and
-//    pos_in_set / size_of_set. Also bridges tap / hover handlers
-//    onto the styled inner ZStack via WidgetBuilder. ─────────────
+// ── Per-row a11y wrapper: Role::ListBoxOption with ARIA position
+//    metadata. Bridges tap / hover handlers onto the styled inner
+//    ZStack via WidgetBuilder. ─────────────────────────────────────
 
 struct SuggestionRow {
     label: String,
@@ -688,7 +655,6 @@ impl Widget for SuggestionRow {
         let inner = ctx
             .child_size(self.inner_id, proposal)
             .unwrap_or_else(|| proposal.resolve(0.0, SUGGESTION_ROW_HEIGHT));
-        // Force a minimum row height so single-line rows don't squish.
         let height = inner.height.max(SUGGESTION_ROW_HEIGHT);
         let width = proposal.width.unwrap_or(inner.width).max(inner.width);
         fern_canvas::Size::new(width, height).into()
@@ -712,9 +678,6 @@ impl Widget for SuggestionRow {
         builder.set_name(&self.label);
         let is_selected = self.selected_signal.get() == Some(self.index);
         builder.set_selected(is_selected);
-        // pos_in_set / size_of_set are 1-based per ARIA. AccessKit's
-        // `set_position_in_set` / `set_size_of_set` accept usize via
-        // the inner builder.
         builder.inner_mut().set_position_in_set(self.index + 1);
         builder.inner_mut().set_size_of_set(self.total);
     }
@@ -762,12 +725,6 @@ mod tests {
         });
         let info = tree.accessibility_node(id);
         assert_eq!(info.role(), fern_core::accesskit::Role::SearchInput);
-        // `has_popup`, `aria_controls`, and `auto_complete` go through
-        // the platform AT tree (accesskit) — `AccessibilityInfo` is a
-        // framework-internal view that doesn't expose them. The
-        // accessibility() implementation above writes them directly to
-        // the AccessKit node; the tree-walker test in fern-core covers
-        // their round-trip.
     }
 
     #[test]
