@@ -413,7 +413,7 @@ impl FernAppHandler {
                             config = config.title(title);
                         }
                         if let Some((width, height)) = size {
-                            config = config.size(width, height);
+                            config = config.size(width, height).min_size(width, height);
                         }
                         self.wm.create_window(
                             config.root(move |tree, _state| builder(tree)),

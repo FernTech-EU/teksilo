@@ -702,16 +702,19 @@ impl MessageBox {
             ModalCloseBehavior::EscapeOrClickOutside
         };
 
+        let dialog_title = self.title.clone();
         let mut inner = Some(self);
         ctx.present_modal(
             ModalRequest::deferred(move |tree| {
                 let mb = inner.take().expect("MessageBox present closure called twice");
-                tree.add(ModalContainer::new(mb))
+                tree.add(
+                    ModalContainer::new(mb).title_literal(dialog_title.clone()),
+                )
             })
             .presentation(ModalPresentation::Auto)
             .close_behavior(close_behavior)
             .title(title)
-            .size(460, 240),
+            .size(460, 140),
         );
     }
 
@@ -889,9 +892,18 @@ impl Widget for MessageBox {
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
-        self.root_child_id
+        // Enforce a 460×140 floor without clamping the forwarded
+        // proposal: the overlay's intrinsic-measurement pass calls us
+        // with (None, None), and a Spacer-bearing VStack child would
+        // otherwise collapse to the proposal height. Letting the child
+        // see the unmodified proposal lets it report its real natural
+        // size — required so the overlay grows when the "Show details"
+        // accordion expands.
+        let child = self
+            .root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(280.0, 160.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0));
+        Size::new(child.width.max(460.0), child.height.max(140.0)).into()
     }
 
     fn place_children(
