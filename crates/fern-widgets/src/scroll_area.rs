@@ -13,7 +13,7 @@ use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::Easing;
 
-use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
+use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
 
 /// How the scroll bar is displayed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -27,6 +27,11 @@ pub enum ScrollBarMode {
     /// the content area by the scroll bar's width. Always visible and
     /// interactive.
     Permanent,
+    /// Floats over the content like `Overlay`, but only the thin resting
+    /// indicator is painted — never the full track + thumb. A passive
+    /// scroll-position display for minimal UIs; drag / track-click /
+    /// keyboard interaction still works against the full slot bounds.
+    Thin,
 }
 
 /// Controls when a scroll bar is shown for a given axis.
@@ -279,37 +284,37 @@ impl Widget for ScrollArea {
         ids.push(content_id);
 
         // Scrollbar visual tuning depends on mode
-        let is_overlay = self.scroll_bar_style == ScrollBarMode::Overlay;
-        let thickness = self.scroll_bar_thickness; // full thickness for both modes
-        let track = !is_overlay; // Permanent shows track always; overlay shows on hover
+        let visual = match self.scroll_bar_style {
+            ScrollBarMode::Permanent => ScrollBarVisual::Permanent,
+            ScrollBarMode::Overlay => ScrollBarVisual::Overlay,
+            ScrollBarMode::Thin => ScrollBarVisual::Thin,
+        };
+        let thickness = self.scroll_bar_thickness; // full thickness for all modes
+        let track = visual == ScrollBarVisual::Permanent;
 
         // Create vertical scrollbar
-        let mut v_scrollbar = ScrollBar::new(
+        let v_scrollbar = ScrollBar::new(
             ScrollBarOrientation::Vertical,
             self.scroll_y.clone(),
             self.max_scroll_y.clone(),
             self.viewport_ratio_y.clone(),
         )
         .thickness(thickness)
-        .show_track(track);
-        if is_overlay {
-            v_scrollbar = v_scrollbar.overlay_mode(true);
-        }
+        .show_track(track)
+        .visual(visual);
         let v_id = ctx.add(v_scrollbar);
         ids.push(v_id);
 
         // Create horizontal scrollbar
-        let mut h_scrollbar = ScrollBar::new(
+        let h_scrollbar = ScrollBar::new(
             ScrollBarOrientation::Horizontal,
             self.scroll_x.clone(),
             self.max_scroll_x.clone(),
             self.viewport_ratio_x.clone(),
         )
         .thickness(thickness)
-        .show_track(track);
-        if is_overlay {
-            h_scrollbar = h_scrollbar.overlay_mode(true);
-        }
+        .show_track(track)
+        .visual(visual);
         let h_id = ctx.add(h_scrollbar);
         ids.push(h_id);
 
@@ -684,7 +689,7 @@ impl Widget for ScrollArea {
                     bounds.right() - sb_thickness
                 };
                 let sb_h = if h_reserved > 0.0
-                    || (self.scroll_bar_style == ScrollBarMode::Overlay && show_h)
+                    || (matches!(self.scroll_bar_style, ScrollBarMode::Overlay | ScrollBarMode::Thin) && show_h)
                 {
                     bounds.height - sb_thickness
                 } else {
@@ -709,7 +714,7 @@ impl Widget for ScrollArea {
                     bounds.x
                 };
                 let sb_w = if v_reserved > 0.0
-                    || (self.scroll_bar_style == ScrollBarMode::Overlay && show_v)
+                    || (matches!(self.scroll_bar_style, ScrollBarMode::Overlay | ScrollBarMode::Thin) && show_v)
                 {
                     bounds.width - sb_thickness
                 } else {

@@ -21,6 +21,28 @@ pub enum ScrollBarOrientation {
     Horizontal,
 }
 
+/// Visual style of the scroll bar.
+///
+/// Controls what `ScrollBar` paints; orthogonal to interaction (drag,
+/// track click, keyboard) and to the parent's layout policy
+/// (`ScrollArea::ScrollBarMode` reserves or floats over content).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScrollBarVisual {
+    /// Full track + thumb, always visible. The classic always-on
+    /// scroll bar; reserves layout space when used inside a parent
+    /// that honours its full thickness.
+    #[default]
+    Permanent,
+    /// Thin resting indicator at idle, cross-fades to the full track
+    /// + thumb on hover or drag. macOS / Ubuntu overlay style.
+    Overlay,
+    /// Thin resting indicator only — never reveals the full bar.
+    /// A passive scroll-position display for minimal UIs;
+    /// interaction (drag, track click, keyboard) still works against
+    /// the full slot bounds even though only the thin strip is painted.
+    Thin,
+}
+
 /// A standalone Level 2 scroll bar widget.
 ///
 /// The ScrollBar reads and writes a shared `Signal<f32>` for the scroll
@@ -77,11 +99,14 @@ pub struct ScrollBar {
     min_thumb_length: f32,
     /// Pixels to scroll per keyboard step.
     step_size: f32,
-    /// Whether to paint the track background (false for overlay-style scrollbars).
+    /// Whether to paint the track background. Forced to `false` when
+    /// `visual` is `Overlay` or `Thin` (those modes manage their own
+    /// painting).
     show_track: bool,
-    /// Ubuntu-style overlay mode: thin indicator at rest, full-size on hover.
-    overlay_mode: bool,
-    /// Thickness of the thin resting indicator in overlay mode.
+    /// Visual style: full bar, hover-fading overlay, or thin only.
+    visual: ScrollBarVisual,
+    /// Thickness of the thin resting indicator (used in `Overlay` and
+    /// `Thin` visuals).
     resting_thickness: f32,
 }
 
@@ -91,7 +116,7 @@ impl std::fmt::Debug for ScrollBar {
             .field("orientation", &self.orientation)
             .field("hovered", &self.hovered.get())
             .field("dragging", &self.dragging.get())
-            .field("overlay_mode", &self.overlay_mode)
+            .field("visual", &self.visual)
             .finish()
     }
 }
@@ -139,7 +164,7 @@ impl ScrollBar {
             min_thumb_length: 24.0,
             step_size: 40.0,
             show_track: true,
-            overlay_mode: false,
+            visual: ScrollBarVisual::Permanent,
             resting_thickness: 4.0,
         }
     }
@@ -169,17 +194,18 @@ impl ScrollBar {
         self
     }
 
-    /// Enable Ubuntu-style overlay mode: thin indicator at rest, full-size
-    /// scrollbar with track on hover.
-    pub fn overlay_mode(mut self, enabled: bool) -> Self {
-        self.overlay_mode = enabled;
-        if enabled {
-            self.show_track = false; // track only shown on hover
+    /// Set the visual style. `Overlay` and `Thin` force `show_track`
+    /// to `false`; those modes paint their own visuals.
+    pub fn visual(mut self, visual: ScrollBarVisual) -> Self {
+        self.visual = visual;
+        if visual != ScrollBarVisual::Permanent {
+            self.show_track = false;
         }
         self
     }
 
-    /// Set the resting indicator thickness for overlay mode (default 3px).
+    /// Set the resting indicator thickness for `Overlay` and `Thin`
+    /// visuals (default 4 px).
     pub fn resting_thickness(mut self, thickness: f32) -> Self {
         self.resting_thickness = thickness;
         self
@@ -213,6 +239,37 @@ impl ScrollBar {
         let ratio = (pos / max).clamp(0.0, 1.0);
         let available = self.track_length() - self.thumb_length();
         ratio * available
+    }
+
+    /// Build a `ThinIndicatorPainter` carrying this scrollbar's shared
+    /// signals and geometry config. Used by the `Overlay` and `Thin`
+    /// branches of `build()`.
+    fn make_thin_painter(&self) -> ThinIndicatorPainter {
+        ThinIndicatorPainter {
+            orientation: self.orientation,
+            thickness: self.thickness,
+            resting_thickness: self.resting_thickness,
+            min_thumb_length: self.min_thumb_length,
+            scroll_position: self.scroll_position.clone(),
+            max_scroll: self.max_scroll.clone(),
+            viewport_ratio: self.viewport_ratio.clone(),
+        }
+    }
+
+    /// Build a `FullBarPainter` carrying this scrollbar's shared
+    /// signals and geometry config. Used by the `Overlay` branch of
+    /// `build()`.
+    fn make_full_painter(&self) -> FullBarPainter {
+        FullBarPainter {
+            orientation: self.orientation,
+            thickness: self.thickness,
+            min_thumb_length: self.min_thumb_length,
+            scroll_position: self.scroll_position.clone(),
+            max_scroll: self.max_scroll.clone(),
+            viewport_ratio: self.viewport_ratio.clone(),
+            hovered: self.hovered.clone(),
+            dragging: self.dragging.clone(),
+        }
     }
 
     /// The thumb rect in absolute coordinates.
@@ -502,38 +559,36 @@ impl Widget for ScrollBar {
 
         ctx.apply_self_handlers(handlers);
 
-        // In overlay mode, both painters are mounted simultaneously
-        // (each in its own `Fade`) and persist across hover toggles.
-        // `Fade` retargets the existing opacity tween from its current
-        // value on each `visible` flip, so rapid hover/un-hover events
-        // smoothly redirect mid-flight instead of snapping.
-        //
-        // Order: thin first (paints below), full second (paints on top
-        // during the cross-fade).
-        if self.overlay_mode {
-            let thin = ThinIndicatorPainter {
-                orientation: self.orientation,
-                thickness: self.thickness,
-                resting_thickness: self.resting_thickness,
-                min_thumb_length: self.min_thumb_length,
-                scroll_position: self.scroll_position.clone(),
-                max_scroll: self.max_scroll.clone(),
-                viewport_ratio: self.viewport_ratio.clone(),
-            };
-            let full = FullBarPainter {
-                orientation: self.orientation,
-                thickness: self.thickness,
-                min_thumb_length: self.min_thumb_length,
-                scroll_position: self.scroll_position.clone(),
-                max_scroll: self.max_scroll.clone(),
-                viewport_ratio: self.viewport_ratio.clone(),
-                hovered: self.hovered.clone(),
-                dragging: self.dragging.clone(),
-            };
-            let thin_id = ctx.add(Fade::new(self.inactive.clone()).child(thin));
-            let full_id = ctx.add(Fade::new(self.active.clone()).child(full));
-            self.overlay_children = vec![thin_id, full_id];
-            return self.overlay_children.clone();
+        // Dispatch on the visual style. `Permanent` keeps painting
+        // inline (`paint()` below); the other two delegate to painter
+        // children so visibility transitions stay layout-stable.
+        match self.visual {
+            ScrollBarVisual::Permanent => {}
+            ScrollBarVisual::Overlay => {
+                // Both painters mounted simultaneously, each in its
+                // own `Fade`. Persistent across hover toggles —
+                // `Fade` retargets the in-flight opacity tween from
+                // its current value, so rapid hover/un-hover smoothly
+                // redirects mid-flight instead of snapping.
+                //
+                // Order: thin first (paints below), full second
+                // (paints on top during the cross-fade).
+                let thin = self.make_thin_painter();
+                let full = self.make_full_painter();
+                let thin_id = ctx.add(Fade::new(self.inactive.clone()).child(thin));
+                let full_id = ctx.add(Fade::new(self.active.clone()).child(full));
+                self.overlay_children = vec![thin_id, full_id];
+                return self.overlay_children.clone();
+            }
+            ScrollBarVisual::Thin => {
+                // Thin indicator only — no fade, no full bar.
+                // Interaction (drag, track click, keyboard) still runs
+                // on the parent against the full slot bounds.
+                let thin = self.make_thin_painter();
+                let thin_id = ctx.add(thin);
+                self.overlay_children = vec![thin_id];
+                return self.overlay_children.clone();
+            }
         }
 
         Vec::new()
@@ -575,8 +630,8 @@ impl Widget for ScrollBar {
         // `self.thumb_rect()`, which reads `cached_bounds`).
         self.cached_bounds.set(bounds);
 
-        if self.overlay_mode {
-            // Overlay mode: the Crossfade child owns all painting.
+        if self.visual != ScrollBarVisual::Permanent {
+            // Overlay and Thin visuals paint via their painter children.
             return;
         }
 

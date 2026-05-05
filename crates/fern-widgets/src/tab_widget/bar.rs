@@ -819,7 +819,7 @@ impl<T: 'static> Widget for TabBar<T> {
         let scroll = match self.orientation {
             TabBarOrientation::Horizontal => ScrollArea::new()
                 .child(row)
-                .scroll_bar_style(ScrollBarMode::Overlay)
+                .scroll_bar_style(ScrollBarMode::Thin)
                 .vertical_scroll_bar_policy(ScrollBarPolicy::AlwaysOff)
                 .horizontal_scroll_bar_policy(ScrollBarPolicy::AsNeeded)
                 .widget_resizable(true)
