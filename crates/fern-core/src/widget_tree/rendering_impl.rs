@@ -326,6 +326,31 @@ fn paint_widget_cached(
         );
     }
 
+    // Post-order `after_paint` hook. Fires after every descendant has
+    // painted and committed its bounds, so a parent can read those
+    // bounds via `WidgetTreeView::bounds(child_id)`. Gated on
+    // `wants_after_paint()` to avoid a virtual call per widget per
+    // frame for the 99% of widgets that don't aggregate. The arena
+    // mutable borrow from the recursive child loop has dropped by
+    // this point, so an immutable reborrow is safe.
+    {
+        let arena_ref: &WidgetArena = &*arena;
+        if let Some(node) = arena_ref.get(id)
+            && node.widget.wants_after_paint()
+        {
+            let view = crate::widget::WidgetTreeView::new(arena_ref);
+            let resolved_theme = arena_ref.resolve_theme(id, base_theme);
+            let ctx = PaintContext {
+                theme: &resolved_theme,
+                scale_factor: 1.0,
+                prefers_high_contrast: a11y_prefs.high_contrast,
+                prefers_reduced_motion: a11y_prefs.reduced_motion,
+                prefers_large_text: a11y_prefs.large_text,
+            };
+            node.widget.after_paint(&view, &ctx);
+        }
+    }
+
     if clips {
         frame.draw_order.push(fern_canvas::DrawCommand::ClearClip);
     }

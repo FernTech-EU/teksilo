@@ -1,6 +1,7 @@
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 
 use crate::accessibility::AccessNodeBuilder;
+use crate::arena::WidgetArena;
 use crate::widget_id::WidgetId;
 
 /// A child that is either pre-registered (ID) or waiting to be inserted.
@@ -211,6 +212,35 @@ pub struct PaintContext<'a> {
     pub prefers_large_text: bool,
 }
 
+/// Read-only view of the widget tree's geometry passed to
+/// [`Widget::after_paint`]. Wraps a borrow of the arena so a parent
+/// widget can read the layout-resolved bounds of any descendant
+/// (typically by ids it memoised during `build`) once their paint
+/// pass has committed.
+///
+/// The view exposes only immutable queries; constructing one is
+/// crate-internal so the contract stays narrow.
+pub struct WidgetTreeView<'a> {
+    arena: &'a WidgetArena,
+}
+
+impl<'a> WidgetTreeView<'a> {
+    pub(crate) fn new(arena: &'a WidgetArena) -> Self {
+        Self { arena }
+    }
+
+    /// Logical-pixel bounds of `id` after the most recent layout pass.
+    /// Returns `Rect::ZERO` for unknown ids.
+    pub fn bounds(&self, id: WidgetId) -> Rect {
+        self.arena.bounds(id)
+    }
+
+    /// Direct arena children of `id`, in order.
+    pub fn children(&self, id: WidgetId) -> &[WidgetId] {
+        self.arena.children(id)
+    }
+}
+
 /// Placement of a child widget during layout.
 #[derive(Debug, Clone, Copy)]
 pub struct WidgetPlacement {
@@ -295,6 +325,33 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     fn paint(&self, _bounds: Rect, _canvas: &mut Canvas, _ctx: &PaintContext) {
         // Default: nothing to paint (layout-only containers).
     }
+
+    /// Whether this widget wants its [`after_paint`](Self::after_paint)
+    /// hook to fire each frame. Returning `false` (the default) saves
+    /// a virtual call per widget per frame for the vast majority of
+    /// widgets that don't aggregate descendant geometry.
+    ///
+    /// Same opt-in pattern as
+    /// [`wants_descendant_redirects`](Self::wants_descendant_redirects).
+    fn wants_after_paint(&self) -> bool {
+        false
+    }
+
+    /// Called once per frame after this widget's subtree has finished
+    /// painting. Receives a read-only view of the layout-resolved
+    /// arena so a parent can read its descendants' final bounds —
+    /// e.g. `TitleBar` aggregates its drag region and control-button
+    /// rects into a single `HitRegions` payload for the Windows
+    /// backend's `WM_NCHITTEST`.
+    ///
+    /// Walk order is depth-first **post**-order: a parent's
+    /// `after_paint` runs after every descendant's `paint` has
+    /// committed.
+    ///
+    /// Default: empty. Only widgets that override
+    /// [`wants_after_paint`](Self::wants_after_paint) and return `true`
+    /// see this called.
+    fn after_paint(&self, _view: &WidgetTreeView<'_>, _ctx: &PaintContext) {}
 
     /// Declare this widget's accessibility identity.
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}

@@ -93,8 +93,8 @@ pub use window::{
 };
 pub use window::state::WindowStateInit;
 pub use window_chrome::{
-    HitRegions, PlatformError, PlatformTitleBarHost, ResizeBorders, ResizeEdge,
-    TitleBarHostCallbacks,
+    ControlTarget, HitRegions, PlatformError, PlatformTitleBarHost, ResizeBorders, ResizeEdge,
+    TitleBarHostCallbacks, TitleBarHoverEvent, TitleBarSyntheticEvent,
 };
 
 pub use accesskit;

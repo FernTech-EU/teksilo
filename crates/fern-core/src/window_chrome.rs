@@ -6,10 +6,14 @@
 //! !Sync`: every implementation lives on the UI thread alongside the widget
 //! tree.
 
+use std::any::Any;
 use std::fmt;
 use std::rc::Rc;
 
 use fern_canvas::{Point, Rect, Size};
+
+use crate::widget_id::WidgetId;
+use crate::window::FernWindowId;
 
 /// Capabilities the title bar widget needs from the windowing layer.
 pub trait PlatformTitleBarHost {
@@ -45,25 +49,120 @@ pub trait PlatformTitleBarHost {
     /// only; other platforms return `Ok(())` and do nothing.
     fn show_window_menu(&self, at: Point) -> Result<(), PlatformError>;
 
-    /// Publish the current physical-pixel rectangles of the title bar's
-    /// interactive sub-regions. The Windows backend reads these from its
-    /// `WM_NCHITTEST` handler each frame; other backends ignore them.
+    /// Publish the current rectangles of the title bar's interactive
+    /// sub-regions. The widget tree publishes them in **logical**
+    /// pixels; backends that need physical pixels (Windows) convert
+    /// internally. Wayland and macOS ignore the payload.
     ///
-    /// Called from `TitleBar::paint` on every frame.
+    /// Called once per frame from
+    /// [`Widget::after_paint`](crate::widget::Widget::after_paint) on
+    /// the [`crate::Widget`]-implementing title bar root.
     fn update_hit_regions(&self, regions: &HitRegions);
+
+    /// Resolve a control-button target back to the `WidgetId` of the
+    /// `ControlButton` that the widget tree last reported for it.
+    /// Used by the Windows backend's synthetic-tap forwarding when
+    /// `WM_NCLBUTTONUP` fires on `HTMINBUTTON`/`HTMAXBUTTON`/`HTCLOSE`
+    /// — the OS owns the click area, so the proc looks up the
+    /// matching widget id and the app routes a synthetic tap into it.
+    ///
+    /// Default: `None`. Backends that don't intercept non-client
+    /// button presses (Wayland, macOS) have no synthetic-tap path.
+    fn title_bar_widget_id(&self, _target: ControlTarget) -> Option<WidgetId> {
+        None
+    }
+
+    /// Inject a synthetic hover entered/leave event for the given
+    /// control button. Used by the Windows backend's `WM_NCMOUSEMOVE`
+    /// / `WM_NCMOUSELEAVE` path: the OS handles non-client hover, so
+    /// widget-side hover events never fire over button rects.
+    ///
+    /// Default: no-op. The Windows host stores the matching
+    /// `Signal<bool>` (registered by `WindowControls` at build time)
+    /// and writes it; macOS / Wayland never produce these so the
+    /// no-op suffices.
+    fn set_button_hover(&self, _target: ControlTarget, _entered: bool) {}
+
+    /// Register the per-button hover signal that the host writes
+    /// when the OS reports a non-client hover for the matching
+    /// `target`. Called by `WindowControls` at build time for each
+    /// of the three buttons.
+    ///
+    /// Default: no-op. macOS / Wayland never need this — they get
+    /// hover events through the widget tree's pointer pipeline.
+    fn register_hover_signal(
+        &self,
+        _target: ControlTarget,
+        _signal: crate::signal::Signal<bool>,
+    ) {
+    }
 }
 
-/// Callbacks the window manager hands to a platform host at construction
-/// time. Hosts invoke these for operations that must go through the event
-/// loop, in particular closing a window: winit 0.30 offers no synchronous
-/// `Window::request_close`, so the host posts a user event and the
-/// application routes it to `WindowManager::queue_close` on the next tick.
+/// Target a synthetic title-bar tap or hover at a specific button.
+/// The Windows backend posts these as part of
+/// [`TitleBarSyntheticEvent`] / [`TitleBarHoverEvent`] payloads; the
+/// fern-app dispatcher then looks up the matching widget id via
+/// [`PlatformTitleBarHost::title_bar_widget_id`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ControlTarget {
+    Minimize,
+    Maximize,
+    Close,
+}
+
+/// Synthetic primary-button tap on a custom title bar's control
+/// button. Posted by the Windows backend's wndproc subclass on
+/// `WM_NCLBUTTONUP` over `HTMINBUTTON` / `HTMAXBUTTON` / `HTCLOSE` —
+/// the OS owned the click area (returned non-`HTCLIENT` from
+/// `WM_NCHITTEST`) so widget land never saw it. The fern-app
+/// dispatcher resolves the right `ControlButton` via
+/// [`PlatformTitleBarHost::title_bar_widget_id`] and calls
+/// `WidgetTree::synthesise_tap` on it. Wayland and macOS never
+/// produce these.
+#[derive(Debug, Clone, Copy)]
+pub struct TitleBarSyntheticEvent {
+    pub fern_id: FernWindowId,
+    pub target: ControlTarget,
+}
+
+/// Hover entered/leave for a custom title-bar control button. Posted
+/// by the Windows backend's `WM_NCMOUSEMOVE` / `WM_NCMOUSELEAVE`
+/// handlers for the same reason as [`TitleBarSyntheticEvent`]: the
+/// OS owns hover events over non-client areas.
+#[derive(Debug, Clone, Copy)]
+pub struct TitleBarHoverEvent {
+    pub fern_id: FernWindowId,
+    pub target: ControlTarget,
+    pub entered: bool,
+}
+
+/// Callbacks the window manager hands to a platform host at
+/// construction time. Hosts invoke these for operations that must go
+/// through the event loop:
+///
+/// - `request_close`: winit 0.30 has no synchronous
+///   `Window::request_close`, so the host posts a `CloseWindowRequest`
+///   and `fern-app` routes it to `WindowManager::queue_close`.
+/// - `post_external`: the Windows backend forwards `WM_NCLBUTTONUP` /
+///   `WM_NCMOUSEMOVE` over its custom title-bar buttons as
+///   `TitleBarSyntheticEvent` / `TitleBarHoverEvent` payloads through
+///   the same `AppEvent::External` arm. The closure abstracts the
+///   posting mechanism (a winit `EventLoopProxy` in production) so
+///   fern-core stays winit-free.
+/// - `fern_id`: the host's window id, copied into the synthetic
+///   payloads so the dispatcher knows which window to address.
 #[derive(Clone)]
 pub struct TitleBarHostCallbacks {
-    /// Request that this host's window be closed. The callback boxes a
-    /// `CloseWindowRequest`-style payload onto the event loop; the concrete
-    /// wiring lives in `fern-app`.
     pub request_close: Rc<dyn Fn()>,
+    /// Post a `Box<dyn Any + Send>` payload back to the application
+    /// event loop. Currently used by the Windows backend for
+    /// `TitleBarSyntheticEvent` and `TitleBarHoverEvent`. Wayland and
+    /// macOS construct hosts that never call this.
+    pub post_external: Rc<dyn Fn(Box<dyn Any + Send>)>,
+    /// fern-side window id. The Windows backend stamps this into
+    /// every synthetic payload it posts so the app dispatcher can
+    /// route into the right `WidgetTree`.
+    pub fern_id: FernWindowId,
 }
 
 impl TitleBarHostCallbacks {
@@ -72,6 +171,8 @@ impl TitleBarHostCallbacks {
     pub fn noop() -> Self {
         Self {
             request_close: Rc::new(|| {}),
+            post_external: Rc::new(|_| {}),
+            fern_id: FernWindowId::new(0),
         }
     }
 }
@@ -82,14 +183,23 @@ impl fmt::Debug for TitleBarHostCallbacks {
     }
 }
 
-/// Set of physical-pixel rectangles inside the window client area that the
-/// title bar widget cares about. Coordinates are relative to the window
-/// client origin (top-left).
+/// Set of rectangles inside the window client area that the title bar
+/// widget cares about. The widget tree publishes them in **logical**
+/// pixels (its native coordinate system); platform backends that need
+/// physical pixels (Windows) convert internally before storing.
+/// Coordinates are relative to the window client origin (top-left).
 #[derive(Debug, Default, Clone)]
 pub struct HitRegions {
     pub minimize: Option<Rect>,
     pub maximize: Option<Rect>,
     pub close: Option<Rect>,
+    /// Widget id of the minimize button, when one is present in the
+    /// tree. Companions to the rect above; the Windows backend uses
+    /// these to route `WM_NCLBUTTONUP` on `HTMINBUTTON` back into the
+    /// widget tree as a synthetic tap.
+    pub minimize_id: Option<WidgetId>,
+    pub maximize_id: Option<WidgetId>,
+    pub close_id: Option<WidgetId>,
     /// One or more drag-region rectangles. Multiple rects allow non-rectangular
     /// drag surfaces (e.g. drag region split around a centred search bar).
     pub drag: Vec<Rect>,

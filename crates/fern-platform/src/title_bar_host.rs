@@ -10,8 +10,27 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use fern_core::{PlatformError, PlatformTitleBarHost, TitleBarHostCallbacks};
-use winit::window::Window;
+use fern_core::{PlatformError, PlatformTitleBarHost, ResizeEdge, TitleBarHostCallbacks};
+use winit::window::{ResizeDirection, Window};
+
+/// Map a fern-core [`ResizeEdge`] to winit's [`ResizeDirection`].
+/// Used by the Wayland and Windows backends — both delegate
+/// interactive resize to winit, which translates internally to the
+/// platform's native protocol (xdg-shell `resize`, `WM_NCLBUTTONDOWN`
+/// with `HTLEFT`/etc.).
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub(crate) fn edge_to_direction(edge: ResizeEdge) -> ResizeDirection {
+    match edge {
+        ResizeEdge::Top => ResizeDirection::North,
+        ResizeEdge::TopRight => ResizeDirection::NorthEast,
+        ResizeEdge::Right => ResizeDirection::East,
+        ResizeEdge::BottomRight => ResizeDirection::SouthEast,
+        ResizeEdge::Bottom => ResizeDirection::South,
+        ResizeEdge::BottomLeft => ResizeDirection::SouthWest,
+        ResizeEdge::Left => ResizeDirection::West,
+        ResizeEdge::TopLeft => ResizeDirection::NorthWest,
+    }
+}
 
 #[cfg(target_os = "macos")]
 mod macos;

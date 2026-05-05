@@ -102,17 +102,19 @@ The widget is identical everywhere; the host decides what renders where. `TitleB
 
 | Capability | Wayland | macOS | Windows | X11 |
 |---|---|---|---|---|
-| `custom_chrome` supported | yes | yes | yes (stub → M5) | no — `title_bar_host()` returns `None` |
+| `custom_chrome` supported | yes | yes | yes | no — `title_bar_host()` returns `None` |
 | `reserved_leading_inset()` | `ZERO` | ~78×22 (traffic-light cluster) | `ZERO` | — |
 | `renders_custom_controls()` | `true` | **`false`** | `true` | — |
-| `needs_custom_resize_handles()` | `true` | **`false`** | `true` | — |
+| `needs_custom_resize_handles()` | `true` | **`false`** | **`false`** (OS handles via `WM_NCHITTEST`) | — |
 | `begin_drag()` | winit `drag_window` | winit `drag_window` | winit `drag_window` | — |
 | `begin_resize(edge)` | winit `drag_resize_window` | `Unsupported` (NSWindow handles edges) | winit `drag_resize_window` | — |
-| `show_window_menu(at)` | xdg-shell `show_window_menu` | no-op (`Ok(())`) | synthetic `WM_SYSMENU` (M5) | — |
-| `close()` | routes via event proxy | routes via event proxy | routes via event proxy | — |
-| `toggle_maximize()` | winit `set_maximized` | `-[NSWindow performZoom:]` | winit `set_maximized` | — |
+| `show_window_menu(at)` | xdg-shell `show_window_menu` | no-op (`Ok(())`) | `SendMessage(WM_SYSCOMMAND, SC_KEYMENU)` | — |
+| `update_hit_regions(&HitRegions)` | no-op | no-op | snapshot stored for `WM_NCHITTEST` (logical→physical converted via `GetDpiForWindow`) | — |
+| Snap-layout flyout (Win11) | n/a | n/a | yes — proc returns `HTMAXBUTTON` for the maximize-button rect | — |
 
-On macOS, because `renders_custom_controls()` is `false`, `WindowControls` never enters the tree — the OS's native traffic lights are what you see. Applications still receive the `is_maximized` signal for their own iconography if they need it.
+On macOS, because `renders_custom_controls()` is `false`, `WindowControls` never enters the tree — the OS's native traffic lights are what you see.
+
+Window minimize / maximize / close are **not** trait methods. They flow through [`WindowState::placement`](../crates/fern-core/src/window/state.rs) (a `Signal<WindowPlacement>`) and `WindowState::close` — `WindowControls` mutates these and the app-level [`apply_window_command`](../crates/fern-app/src/window_manager.rs) translates each `WindowCommand` into the matching winit call. OS-initiated changes flow back via `set_placement_from_os` (re-entrancy guarded).
 
 ---
 
@@ -122,31 +124,36 @@ Full signature in [fern-core/src/window_chrome.rs](../crates/fern-core/src/windo
 
 | Method | Purpose |
 |---|---|
-| `reserved_leading_inset() -> Size` | Blank leading-edge area the OS draws over |
+| `reserved_leading_inset() -> Size` | Blank leading-edge area the OS draws over (macOS traffic lights); `ZERO` elsewhere |
 | `reserved_trailing_inset() -> Size` | Reserved trailing-edge area (always `ZERO` today) |
 | `renders_custom_controls() -> bool` | Whether the widget should draw min/max/close |
 | `needs_custom_resize_handles() -> bool` | Whether the app should install a `WindowFrame` overlay |
 | `begin_drag() -> Result<(), PlatformError>` | Start interactive window move |
 | `begin_resize(ResizeEdge) -> Result<(), PlatformError>` | Start interactive resize from an edge/corner |
-| `show_window_menu(Point) -> Result<(), PlatformError>` | Wayland system menu; no-op elsewhere |
-| `minimize()` / `toggle_maximize()` / `close()` | Button actions |
-| `is_maximized() -> bool` | Synchronous OS state |
-| `is_maximized_signal() -> Signal<bool>` | Reactive view, driven by the host |
-| `notify_window_resized()` | Called by `WindowManager` on `WindowEvent::Resized`; default impl refreshes the signal |
-| `update_hit_regions(&HitRegions)` | Windows `WM_NCHITTEST` input (no-op elsewhere) |
+| `show_window_menu(Point) -> Result<(), PlatformError>` | Show the system window menu |
+| `update_hit_regions(&HitRegions)` | Per-frame snapshot of drag + button rects; only the Windows backend uses it (`WM_NCHITTEST`) |
+| `title_bar_widget_id(ControlTarget) -> Option<WidgetId>` | Resolve a button target to its widget id; Windows uses this to route synthetic taps from `WM_NCLBUTTONUP` |
+| `set_button_hover(ControlTarget, bool)` | Inject non-client hover from `WM_NCMOUSEMOVE` (Windows) |
+| `register_hover_signal(ControlTarget, Signal<bool>)` | `WindowControls` registers the per-button hover signal at build time so the host can drive it |
+
+Window-state mutations (minimize, maximize, close) are **not** trait methods. The widget tree mutates `WindowState::placement` / `WindowState::close` directly; the app-level `apply_window_command` translates them into the matching winit calls. This means a custom `close_action` override on `TitleBar` is honoured on every backend including Windows — the `ControlButton`'s `on_tap` runs the override regardless of how the click arrived (widget tree or synthetic tap from the wndproc).
 
 `PlatformError::Unsupported` vs `PlatformError::Os(String)` — `Unsupported` means the platform has no way to do it (`begin_resize` on macOS); `Os(String)` means the OS call failed at runtime. The string is for logs, not programmatic matching.
+
+### `Widget::after_paint` aggregation
+
+`TitleBar` overrides [`Widget::after_paint`](../crates/fern-core/src/widget.rs) (gated on `wants_after_paint() == true`) to publish a single complete `HitRegions` snapshot per frame. The hook receives a read-only [`WidgetTreeView`](../crates/fern-core/src/widget.rs) so the parent can read the resolved bounds of memoised descendants — the drag region and the three `ControlButton`s registered by `WindowControls` via a shared layout sink. Wayland and macOS hosts ignore the published payload (their `update_hit_regions` is a no-op); the Windows host converts logical→physical via `GetDpiForWindow(hwnd)` and stores the snapshot under a `Mutex` for `WM_NCHITTEST` to consume.
+
+This is also why per-button publishing from `ControlButton::paint` would be wrong: `update_hit_regions` is replace-semantics, so concurrent publishes by sibling controls would each clobber the previous payload. Aggregation in the parent is the only correct approach.
 
 ---
 
 ## The close action
 
-Closing a window from a widget-tree callback is awkward because winit 0.30 has no synchronous `Window::request_close`. The host routes close through [`TitleBarHostCallbacks::request_close`](../crates/fern-core/src/window_chrome.rs), which boxes a `CloseWindowRequest` onto the event loop; `WindowManager` dequeues it and closes the window on the next tick.
+The close button on `WindowControls` has two paths:
 
-Two paths reach that closure:
-
-1. **Default** — the close button calls `host.close()`, which runs the callback.
-2. **Override** — `TitleBar::close_action(|ctx| …)` intercepts the button. Useful when the app wants to confirm unsaved work first, or to send an `Intent` for a root-level `Action`:
+1. **Default** — the button's `on_tap` calls [`EventContext::close_window`](../crates/fern-core/src/widget.rs), which queues a `WindowCommand::Close` on the window's `WindowState`. The app drains the queue on the next event-loop tick (winit 0.30 has no synchronous `Window::request_close`, so we hop through the command queue).
+2. **Override** — `TitleBar::close_action(|ctx| …)` replaces the default `on_tap` entirely. Useful when the app wants to confirm unsaved work first, or to send an `Intent` for a root-level `Action`:
 
 ```rust
 TitleBar::new(host).close_action(|ctx| ctx.close_window())
@@ -154,29 +161,49 @@ TitleBar::new(host).close_action(|ctx| ctx.close_window())
 TitleBar::new(host).close_action(|ctx| ctx.send_intent(AppIntent::RequestQuit))
 ```
 
-Even with an override, `host.close()` remains available for programmatic close from anywhere you hold an `Rc<dyn PlatformTitleBarHost>`.
+The override fires on **every** backend including Windows: when the OS reports `WM_NCLBUTTONUP` over the close-button rect, fern-platform posts a `TitleBarSyntheticEvent` through `AppEvent::External`, the dispatcher resolves the button's `WidgetId` via `host.title_bar_widget_id(Close)`, and `WidgetTree::synthesise_tap` runs the same `on_tap` handler the override installed.
 
 ---
 
 ## Reactive maximize
 
-`TitleBar::is_maximized_signal()` returns a read-only `Signal<bool>` sourced from the host. The flow:
+`TitleBar` derives the maximize signal from the hosting window's [`WindowState::placement`](../crates/fern-core/src/window/state.rs):
+
+```rust
+let is_maximized_signal = ctx
+    .window()
+    .map(|w| w.placement().map(|p| p.is_maximized()))
+    .unwrap_or_else(|| Signal::new(false));
+```
+
+End-to-end flow:
 
 ```
-user clicks maximize ─► host.toggle_maximize() ─► OS zooms
+user clicks maximize ─► ControlButton on_tap fires:
+                       w.placement().set(Maximized | Floating)
                                                     │
                                                     ▼
-                      WindowEvent::Resized ─► host.notify_window_resized()
+                  observer enqueues WindowCommand::SetPlacement(...)
                                                     │
                                                     ▼
-                                        signal.set(host.is_maximized())
+              WindowManager::drain_window_commands → apply_window_command
                                                     │
                                                     ▼
-                                    WindowControls Switcher swaps glyph:
+                                    winit `set_maximized(true|false)`
+                                                    │
+                                                    ▼
+                       OS zooms, fires WindowEvent::Resized
+                                                    │
+                                                    ▼
+              FernAppHandler::window_event → set_placement_from_os(...)
+                                  (re-entrancy guarded — observers don't echo)
+                                                    │
+                                                    ▼
+                       placement signal flips → Switcher swaps glyph:
                                          □ (U+25A1) ↔ ❐ (U+2750)
 ```
 
-OS-initiated maximizes — macOS green-light zoom, Wayland `xdg_toplevel.state` changes, Windows `WM_SIZE`/`SC_MAXIMIZE` — all flow through the same `WindowEvent::Resized` path, so the signal is always consistent with the OS. Applications can subscribe to swap their own iconography but **must not** write to the signal; doing so speculatively de-syncs it from the OS.
+OS-initiated maximizes (macOS green-light zoom, Windows drag-to-top snap, Wayland `xdg_toplevel.state` changes) all flow through the same `WindowEvent::Resized` arm, so the placement signal is always consistent with the OS. Applications can subscribe to drive their own iconography from the same signal.
 
 > **macOS caveat.** `NSWindow.isZoomed` tracks traffic-light zoom only. Native fullscreen (green light + Option, or `-[NSWindow toggleFullScreen:]`) puts the window on its own Space and leaves `isZoomed` false. The title bar isn't visible during fullscreen anyway, so we don't track that state.
 
@@ -202,21 +229,35 @@ Builder: `.new(host)` → `.thickness(f32)` → `.content(widget)` / `.content_b
 
 ---
 
-## Windows backend preview — `HitRegions`
+## Windows backend
 
-The Windows backend (M4/M5) needs a physical-pixel map of hit-test regions ahead of time because `WM_NCHITTEST` runs outside the normal event flow. `TitleBar::paint` publishes this every frame via `host.update_hit_regions(&HitRegions { … })`:
+The Windows host extends the DWM-drawn frame into the client area with a 1-pixel top inset (the magic value that preserves Win11's rounded corners — `0` gives square corners), then installs a `SetWindowSubclass` proc on the HWND to intercept the non-client messages that would otherwise hand control back to the OS frame. winit's own wndproc was registered at class-registration time via raw `SetWindowLongPtrW` and runs first; the comctl32 subclass chain fires after and falls through to `DefSubclassProc` for messages we don't intercept. AccessKit's `WM_GETOBJECT` subclass is a separate slot and they coexist.
+
+**Messages the proc handles:**
+
+- `WM_NCCALCSIZE` — zero non-client insets so the client area covers the full window. When `IsZoomed` is true, restore the system `SM_CXFRAME + SM_CXPADDEDBORDER` insets and clamp to the monitor work area so the maximized window doesn't cover the taskbar.
+- `WM_NCHITTEST` — return `HTLEFT` / `HTTOP` / corner codes for the outer N pixels (so the OS handles the resize loop natively, with the right cursor and snap behavior), `HTCAPTION` for the widget's drag region, and `HTMINBUTTON` / `HTMAXBUTTON` / `HTCLOSE` for the control-button rects. Returning `HTMAXBUTTON` is what makes Win11 show the snap-layout flyout on hover.
+- `WM_NCLBUTTONUP` over a button hit code — post a [`TitleBarSyntheticEvent`](../crates/fern-core/src/window_chrome.rs) through `AppEventProxy::send_external_boxed`. The fern-app dispatcher resolves the matching `WidgetId` via `host.title_bar_widget_id(target)` and calls `WidgetTree::synthesise_tap` to run the button's `on_tap` handler. `close_action` overrides fire here.
+- `WM_NCMOUSEMOVE` / `WM_NCMOUSELEAVE` — post `TitleBarHoverEvent` for the same reason. The host writes the matching `Signal<bool>` (registered by `WindowControls` via `host.register_hover_signal(...)` at build time); an effect inside `ControlButton` maps the bool to its visual `bg_signal`, so OS-driven hover renders identically to widget-tree hover.
+- `WM_DPICHANGED` — re-call `DwmExtendFrameIntoClientArea` so rounded corners survive a DPI change (winit handles the resize but doesn't re-extend). Falls through to `DefSubclassProc` for the rest.
+- `WM_NCPAINT` / `WM_NCACTIVATE` — return early (`0` and `TRUE` respectively) so DWM doesn't paint legacy caption-button artwork over our pixels and the frame doesn't flicker on focus changes.
+
+**Hit-region snapshot.** `TitleBar::after_paint` publishes a single complete `HitRegions` per frame. Wayland and macOS backends ignore it; the Windows host converts the logical-pixel rects to physical pixels via `GetDpiForWindow(hwnd)` and stores under a `Mutex<HitRegions>` shared with the proc. The proc reads via `try_lock` — if it's contended (re-entry via `SendMessage`), it falls through to `HTCLIENT` rather than blocking the message pump.
 
 ```rust
 pub struct HitRegions {
     pub minimize: Option<Rect>,
     pub maximize: Option<Rect>,
     pub close: Option<Rect>,
+    pub minimize_id: Option<WidgetId>,
+    pub maximize_id: Option<WidgetId>,
+    pub close_id: Option<WidgetId>,
     pub drag: Vec<Rect>,                    // multiple → non-rectangular drag
-    pub resize_borders: ResizeBorders,      // per-edge widths in px
+    pub resize_borders: ResizeBorders,      // per-edge widths
 }
 ```
 
-Wayland and macOS backends ignore the payload (default impl is a no-op). The `Vec<Rect>` for drag lets apps split the drag band around a centered search field or title pill without losing draggability.
+The `Vec<Rect>` for drag lets apps split the drag band around a centered search field or title pill without losing draggability. The `*_id` companions are the routing target for synthetic-tap forwarding.
 
 ---
 

@@ -3,6 +3,22 @@ use super::*;
 impl WidgetTree {
     /// Simulate a click at the center of a widget.
     pub fn click(&mut self, id: WidgetId) {
+        self.synthesise_tap(id);
+    }
+
+    /// Synthesise a primary-button tap at the center of `id`'s
+    /// resolved bounds. The OS hands the click off to the widget tree
+    /// even though the click never went through the normal hit-test
+    /// path. Used by the Windows custom-title-bar backend when
+    /// `WM_NCHITTEST` reported `HTMINBUTTON`/`HTMAXBUTTON`/`HTCLOSE`
+    /// for an area covering a `ControlButton` — the OS treated the
+    /// area as non-client and `WM_LBUTTONDOWN`/`UP` never fired in
+    /// widget land, so we re-issue a synthetic primary-button down
+    /// + up on the right widget.
+    ///
+    /// Equivalent semantics to [`Self::click`]; named differently so
+    /// production call sites read clearly.
+    pub fn synthesise_tap(&mut self, id: WidgetId) {
         let center = self.arena.bounds(id).center();
         self.dispatch_event(WidgetEvent::PointerDown {
             position: center,

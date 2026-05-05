@@ -1,9 +1,20 @@
 # Custom `TitleBar` Widget — M3+ Plan
 
 **Companion to:** fern-ui-architecture.md, fern-ui-milestones.md
-**Status:** Living document — M1 + M2 + M3 shipped; M4 / M5 (Windows)
-and M6 (polish) remain. Reference docs at
-[docs/title-bar.md](../title-bar.md).
+**Status:** Living document — M1 + M2 + M3 + **M4 + M5 (Windows)** all
+shipped. M6 (polish) is the only outstanding section. Reference docs
+at [docs/title-bar.md](../title-bar.md).
+
+> **Heads-up on stale content below.** Sections §1.3 ("M3 trait
+> additions"), §3.3 ("`is_maximized_signal` is read-only"), and most
+> of the original §4/§5 plan describe a trait shape that no longer
+> exists. After M3 the trait was trimmed: `is_maximized`,
+> `is_maximized_signal`, `notify_window_resized`, `minimize`,
+> `toggle_maximize`, and `close` were removed in favour of the
+> existing [`WindowState::placement`](../../crates/fern-core/src/window/state.rs)
+> signal flow + `WindowCommand` drain (see [window_manager.rs](../../crates/fern-app/src/window_manager.rs)
+> `apply_window_command`). The §M-Win retrospective at the very end
+> of this document describes what actually shipped on Windows.
 
 This document picks up where the original title-bar plan (in the private
 `~/.claude/plans/` scratch area) left off. It records:
@@ -801,3 +812,136 @@ the implementer. Re-read before starting each milestone.
    [`title_bar.rs`](../crates/fern-widgets/src/title_bar.rs) and
    [`window_frame.rs`](../crates/fern-widgets/src/title_bar/window_frame.rs)
    — any M3+ framework change must not break these.
+
+---
+
+## M-Win — Windows backend (shipped)
+
+The Windows backend that the original §4 and §5 sections planned out
+is now in place. The shipped design diverges from the original sketch
+in two material ways:
+
+1. **No `notify_window_resized` / `is_maximized_signal` on the host.**
+   The post-M3 trim moved window-state mutations onto the
+   `WindowState::placement` signal flow + `WindowCommand` drain. The
+   Switcher glyph swap reads the placement signal directly via
+   `ctx.window().placement()`. The Windows `WM_DPICHANGED` handler
+   re-applies `DwmExtendFrameIntoClientArea` inside the subclass
+   proc, with no host-side notify hook.
+
+2. **Synthetic-tap forwarding via `AppEvent::External` instead of
+   direct host methods.** Once `WM_NCHITTEST` returns
+   `HTMINBUTTON`/`HTMAXBUTTON`/`HTCLOSE`, the OS owns the click area
+   and `WM_LBUTTONDOWN`/`UP` never fires in widget land. The proc
+   posts a [`TitleBarSyntheticEvent`](../../crates/fern-core/src/window_chrome.rs)
+   through the new
+   [`AppEventProxy::send_external_boxed`](../../crates/fern-app/src/app.rs)
+   path; the dispatcher resolves the right `WidgetId` via
+   `host.title_bar_widget_id(target)` and calls
+   [`WidgetTree::synthesise_tap`](../../crates/fern-core/src/widget_tree/test_api.rs).
+   Preserves user `close_action` overrides — they sit on the
+   `ControlButton`'s `on_tap`.
+
+### Framework prerequisites that landed first
+
+Net-additive, no behaviour change on Wayland or macOS — verified by
+the full ~2300-test workspace suite staying green:
+
+- **`Widget::after_paint`** + **`WidgetTreeView`** in
+  [widget.rs](../../crates/fern-core/src/widget.rs): post-paint hook
+  invoked by [rendering_impl.rs](../../crates/fern-core/src/widget_tree/rendering_impl.rs)
+  after the subtree paint walk completes. Gated on
+  `wants_after_paint() == true` so the vast majority of widgets pay
+  zero overhead.
+- **`HitRegions` extended** with `minimize_id` / `maximize_id` /
+  `close_id` companions ([window_chrome.rs](../../crates/fern-core/src/window_chrome.rs)).
+- **`WidgetTree::synthesise_tap`** ([test_api.rs](../../crates/fern-core/src/widget_tree/test_api.rs))
+  promoted from the test-only `click()` helper to a public method.
+- **`TitleBarSyntheticEvent` / `TitleBarHoverEvent`** payloads
+  defined in fern-core so fern-platform can construct them without
+  depending on fern-app.
+- **Trait extensions**: `title_bar_widget_id`, `set_button_hover`,
+  `register_hover_signal`. All default no-op so Wayland and macOS
+  don't see any change.
+- **`TitleBarHostCallbacks`** gains `post_external` (the
+  Box-payload-aware sibling of `request_close`) and `fern_id`.
+  [`AppEventProxy::send_external_boxed`](../../crates/fern-app/src/app.rs)
+  added to support the `Box<dyn Any + Send>` shape.
+- **Aggregation moved out of `DragRegion::paint`** and into
+  `TitleBar::after_paint`. The DragRegion publish would clobber any
+  parallel `update_hit_regions` from sibling controls; aggregation
+  in the parent reads memoised child ids via the new
+  `WidgetTreeView` and publishes one complete snapshot per frame.
+- **`ControlButton::bind_external_hover`** + matching effect.
+  `WindowControls::build` creates three `Signal<bool>`s, registers
+  them with the host via `register_hover_signal`, and binds them
+  into the buttons. On Windows the `WM_NCMOUSEMOVE` proc writes
+  these signals; on Wayland and macOS `register_hover_signal` is a
+  no-op so the signals never fire.
+
+### Windows backend surface
+
+In [crates/fern-platform/src/title_bar_host/windows.rs](../../crates/fern-platform/src/title_bar_host/windows.rs)
+(replaces the M1 stub):
+
+- **`WindowsHost::new`**:
+  - Extracts the HWND via `winit::raw_window_handle::HasWindowHandle`
+    (Win32 variant). Mirrors the macOS NSView/NSWindow pattern.
+  - `DwmExtendFrameIntoClientArea(hwnd, MARGINS{cyTopHeight: 1, ..})`
+    — the 1-pixel top inset preserves Win11 rounded corners.
+  - `SetWindowPos(.., SWP_FRAMECHANGED | SWP_NO{MOVE,SIZE,ZORDER,ACTIVATE})`
+    forces a frame recompute so our subclass sees the first
+    `WM_NCCALCSIZE`.
+  - `SetWindowSubclass` with a unique id from a static `AtomicUsize`
+    counter. The proc receives a `*const SubclassData` raw pointer
+    via `dwRefData`; the `Rc<SubclassData>` on the host keeps the
+    allocation alive, and `RemoveWindowSubclass` in `Drop` stops the
+    proc before the Rc drops.
+
+- **Subclass proc handles**:
+  - `WM_NCCALCSIZE` — zero non-client insets when floating; restore
+    `SM_CXFRAME + SM_CXPADDEDBORDER` and clamp to monitor work area
+    when zoomed.
+  - `WM_NCHITTEST` — outer-edge resize codes (skipped when zoomed),
+    then `HTMINBUTTON`/`HTMAXBUTTON`/`HTCLOSE` (the latter triggers
+    the Win11 snap-layout flyout), then `HTCAPTION` for drag rects,
+    falling through to `HTCLIENT`. Reads the shared `Mutex<HitRegions>`
+    via `try_lock` to dodge deadlocks on re-entry from `SendMessage`.
+  - `WM_NCLBUTTONUP` over a button — posts `TitleBarSyntheticEvent`.
+  - `WM_NCMOUSEMOVE` / `WM_NCMOUSELEAVE` — posts
+    `TitleBarHoverEvent` and arms `TrackMouseEvent(TME_NONCLIENT |
+    TME_LEAVE)` so the OS reliably fires the leave event.
+  - `WM_DPICHANGED` — re-extends the DWM frame, then falls through
+    so winit's resize handling runs.
+  - `WM_NCPAINT` returns 0 / `WM_NCACTIVATE` returns 1 — suppress
+    legacy caption-button artwork without focus-change flicker.
+
+- **Trait impl**: `renders_custom_controls = true`,
+  `needs_custom_resize_handles = false` (the OS handles edge resize
+  via the `WM_NCHITTEST` codes). `update_hit_regions` does the
+  logical→physical conversion via `GetDpiForWindow(hwnd)` and stores
+  the scaled snapshot for the proc.
+
+### Caveats & non-blocking known gaps
+
+- **`PaintContext::scale_factor` is still hardcoded to `1.0`** at
+  [rendering_impl.rs:249](../../crates/fern-core/src/widget_tree/rendering_impl.rs).
+  This is dead code — no widget reads it — so it doesn't block the
+  Windows backend, but it's a latent defect we should clean up.
+- **Subclass coexistence with AccessKit verified by message
+  disjointness** (we touch `WM_NC*` / `WM_DPICHANGED`, AccessKit
+  touches `WM_GETOBJECT`). No conflicts observed in the demo build,
+  but worth re-checking with Narrator enabled during the M-Win
+  acceptance walk.
+- **`HitRegions::resize_borders`** is still unpopulated — on Windows
+  the proc reads `GetSystemMetricsForDpi(SM_CXPADDEDBORDER + SM_CXFRAME)`
+  directly per-message instead. The field is a left-over from the
+  trait sketch; we can remove it in a future cleanup.
+
+### Acceptance walk (user-driven, on Windows hardware)
+
+The full M4 + M5 acceptance checklists from §4.8 and §5.5 are
+unchanged. End-to-end visual QA on Win10 + Win11, single + multi-
+monitor, 100% + 150% DPI, with Narrator enabled, is the user's
+final sign-off — `cargo build -p title-bar-demo` is the entry
+point.

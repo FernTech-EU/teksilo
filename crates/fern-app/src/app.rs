@@ -1239,6 +1239,30 @@ impl ApplicationHandler<AppEvent> for FernAppHandler {
                     Err(payload) => {
                         if let Some(req) = payload.downcast_ref::<CloseWindowRequest>() {
                             self.wm.queue_close(req.fern_id);
+                        } else if let Some(evt) =
+                            payload.downcast_ref::<TitleBarSyntheticEvent>()
+                        {
+                            // Windows custom-chrome wndproc sends this when
+                            // `WM_NCLBUTTONUP` fires over a control-button
+                            // hit-region. The button's pixels are owned by
+                            // the OS so the widget tree never saw the click;
+                            // re-issue it as a synthetic tap on the
+                            // matching `ControlButton`.
+                            self.wm
+                                .route_title_bar_synthetic_tap(evt.fern_id, evt.target);
+                        } else if let Some(evt) =
+                            payload.downcast_ref::<TitleBarHoverEvent>()
+                        {
+                            // Same idea for hover: `WM_NCMOUSEMOVE` over a
+                            // control-button hit-region delivers an
+                            // entered/leave event the widget tree never
+                            // sees, so we drive the matching button's
+                            // hover signal explicitly.
+                            self.wm.route_title_bar_synthetic_hover(
+                                evt.fern_id,
+                                evt.target,
+                                evt.entered,
+                            );
                         }
                     }
                 }
@@ -1279,6 +1303,12 @@ pub struct CloseWindowRequest {
     pub fern_id: FernWindowId,
 }
 
+// `TitleBarSyntheticEvent` and `TitleBarHoverEvent` live in
+// `fern_core::window_chrome` so fern-platform (which posts them from
+// the Windows wndproc subclass) and fern-app (which routes them) can
+// both name the type without fern-platform depending on fern-app.
+pub use fern_core::{TitleBarHoverEvent, TitleBarSyntheticEvent};
+
 /// A thread-safe handle for posting `AppEvent`s to the UI thread.
 ///
 /// Clone and send to background threads. The event loop wakes up
@@ -1308,6 +1338,15 @@ impl AppEventProxy {
     /// Post an arbitrary external event.
     pub fn send_external(&self, payload: impl std::any::Any + Send + 'static) {
         let _ = self.inner.send_event(AppEvent::External(Box::new(payload)));
+    }
+
+    /// Post a pre-boxed external event. Used by callers that already
+    /// hold a `Box<dyn Any + Send>` (notably
+    /// `TitleBarHostCallbacks::post_external`, which abstracts the
+    /// posting mechanism behind a closure that fern-core can hold
+    /// without depending on winit).
+    pub fn send_external_boxed(&self, payload: Box<dyn std::any::Any + Send>) {
+        let _ = self.inner.send_event(AppEvent::External(payload));
     }
 
     /// Post a backend-event delivery for the given subscription id. Called

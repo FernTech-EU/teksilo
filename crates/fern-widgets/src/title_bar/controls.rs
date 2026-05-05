@@ -15,6 +15,7 @@
 //! button always shows the `□` glyph. M3+ will add a `Signal<bool>`-driven
 //! glyph swap once the host can update it from `WindowEvent::Resized`.
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use fern_canvas::{Rect, Size, SizeProposal};
@@ -30,6 +31,24 @@ use fern_tokens::{Color, TextStyleRole};
 
 use crate::primitives::{Center, FixedSize, HStack, RectWidget, Switcher, TextWidget, ZStack};
 use crate::title_bar::CloseAction;
+
+/// Layout snapshot a `WindowControls` exports back to its parent
+/// `TitleBar` so the parent's `after_paint` aggregator can read the
+/// per-button `WidgetId`s. Populated during `WindowControls::build`.
+///
+/// The maximize slot is the **Switcher** that wraps the two glyph
+/// buttons (`□` / `❐`), not either child directly: the inactive
+/// Switcher child is dormant and has `Rect::ZERO` bounds, but the
+/// Switcher container itself is always laid out by the parent
+/// HStack and has valid bounds. A synthetic tap dispatched at the
+/// Switcher's bounds-center routes through hit-testing to whichever
+/// child is currently visible.
+#[derive(Debug, Clone)]
+pub struct WindowControlsLayout {
+    pub minimize_id: WidgetId,
+    pub maximize_id: WidgetId,
+    pub close_id: WidgetId,
+}
 
 /// Action invoked when a [`ControlButton`] is tapped.
 pub type ControlAction = Rc<dyn Fn(&mut EventContext)>;
@@ -53,6 +72,14 @@ pub struct ControlButton {
     /// Accessible name exposed to AT. Reactive so `WindowControls` can
     /// flip it between "Maximize" and "Restore" without rebuilding.
     a11y_name: Signal<String>,
+    /// External hover input — the Windows host writes this when the
+    /// OS reports `WM_NCMOUSEMOVE` over the button rect (the OS owns
+    /// non-client hover events, so the widget's own `on_hover`
+    /// handler never fires for those pixels). Wired through an effect
+    /// that drives `bg_signal` so the visual hover state is identical
+    /// to widget-tree-driven hover. `None` means no external feed —
+    /// only the widget's internal hover handler runs.
+    external_hover: Option<Signal<bool>>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -77,8 +104,20 @@ impl ControlButton {
             action: None,
             bg_signal: Signal::new(Color::TRANSPARENT),
             a11y_name: Signal::new(String::new()),
+            external_hover: None,
             root_child_id: None,
         }
+    }
+
+    /// Bind an external boolean hover input. The Windows backend
+    /// writes this signal on `WM_NCMOUSEMOVE` / `WM_NCMOUSELEAVE`
+    /// over the button rect, since those events never reach the
+    /// widget tree (the OS treats the area as non-client). `build`
+    /// installs an effect that maps the bool to the `bg_signal`
+    /// colour identically to the internal hover handler.
+    pub(crate) fn bind_external_hover(mut self, signal: Signal<bool>) -> Self {
+        self.external_hover = Some(signal);
+        self
     }
 
     pub fn hover_background(mut self, color: Color) -> Self {
@@ -154,6 +193,20 @@ impl Widget for ControlButton {
 
         ctx.apply_self_handlers(handlers);
 
+        // External hover feed (Windows non-client hover): map the
+        // boolean signal to the same `bg_signal` colour that the
+        // internal hover handler writes, so OS-driven hover renders
+        // identically to widget-tree-driven hover. The effect handle
+        // is owned by the BuildContext so it lives as long as the
+        // widget node.
+        if let Some(ext) = self.external_hover.take() {
+            let bg_target = self.bg_signal.clone();
+            let hover_color = self.hover_bg;
+            ctx.effect(&ext, move |entered| {
+                bg_target.set(if *entered { hover_color } else { Color::TRANSPARENT });
+            });
+        }
+
         // Refresh the a11y node whenever the name signal changes
         // (maximize ⇄ restore toggle).
         let self_id = ctx.self_id();
@@ -211,6 +264,10 @@ pub struct WindowControls {
     /// [`crate::title_bar::TitleBar::close_action`].
     close_action: Option<CloseAction>,
     root_child_id: Option<WidgetId>,
+    /// Sink the parent `TitleBar` shares with us so its
+    /// `after_paint` aggregator can read our per-button `WidgetId`s.
+    /// `None` when the controls are used standalone (tests / docs).
+    layout_sink: Option<Rc<Cell<Option<WindowControlsLayout>>>>,
 }
 
 impl std::fmt::Debug for WindowControls {
@@ -230,7 +287,19 @@ impl WindowControls {
             is_maximized,
             close_action,
             root_child_id: None,
+            layout_sink: None,
         }
+    }
+
+    /// Wire a sink the parent `TitleBar` will read from in its
+    /// `after_paint` hook. The sink receives a [`WindowControlsLayout`]
+    /// snapshot during this widget's `build` pass.
+    pub(crate) fn layout_sink(
+        mut self,
+        sink: Rc<Cell<Option<WindowControlsLayout>>>,
+    ) -> Self {
+        self.layout_sink = Some(sink);
+        self
     }
 }
 
@@ -292,31 +361,71 @@ impl Widget for WindowControls {
         let maximize_name = fern_i18n::tr_widget!(a11y_window_maximize_name()).to_signal();
         let restore_name = fern_i18n::tr_widget!(a11y_window_restore_name()).to_signal();
 
+        // Per-button hover signals for the Windows custom-chrome
+        // path. The host writes them on `WM_NCMOUSEMOVE` /
+        // `WM_NCMOUSELEAVE` over the matching button rect; the
+        // button's effect maps the bool to its visual `bg_signal`.
+        // On Wayland and macOS the host's `register_hover_signal` is
+        // a no-op, so these are never written from outside — the
+        // buttons fall back to their internal `on_hover` handler.
+        let minimize_hover = Signal::new(false);
+        let maximize_hover = Signal::new(false);
+        let close_hover_signal = Signal::new(false);
+        self.host
+            .register_hover_signal(fern_core::ControlTarget::Minimize, minimize_hover.clone());
+        self.host
+            .register_hover_signal(fern_core::ControlTarget::Maximize, maximize_hover.clone());
+        self.host
+            .register_hover_signal(fern_core::ControlTarget::Close, close_hover_signal.clone());
+
         let minimize = ControlButton::new("\u{2014}", cell_w, cell_h, fg)
             .hover_background(hover_bg)
             .with_action(minimize_action)
-            .bind_a11y_name(minimize_name);
-        // Maximize/restore glyph swap. `□` (U+25A1) when the window is
-        // normal, `❐` (U+2750) when maximized. Wrapping both in a
-        // `Switcher` driven by `is_maximized` keeps the geometry stable
-        // (Switcher lays out all children, shows one) — and the hidden
-        // child's a11y node doesn't reach AT, so each button gets its
-        // own static name rather than a reactive toggle.
+            .bind_a11y_name(minimize_name)
+            .bind_external_hover(minimize_hover);
+        let minimize_id = ctx.add(minimize);
+
+        // Maximize/restore: both states use `□` (U+25A1). The
+        // semantically nicer "two stacked squares" glyphs (`❐` U+2750,
+        // `⧉` U+29C9, `🗗` U+1F5D7) and even neighbouring Geometric
+        // Shapes glyphs like `▭` U+25AD all render as missing on
+        // Windows because text-typeset's font fallback chain only
+        // reliably hits `□` from Segoe UI's basic geometric coverage
+        // (same root cause as the close button using U+00D7 instead
+        // of U+2715). State differentiation is still carried by:
+        //   - the OS itself (window is or isn't maximized);
+        //   - the reactive a11y name (Maximize / Restore — both
+        //     Switcher children carry their own static name and the
+        //     hidden child's a11y node doesn't reach AT);
+        //   - the action (toggles correctly via `WindowState::placement`).
+        // A future pass can swap the glyph for custom rect-primitive
+        // icons to restore the visual delta.
         let switcher_idx = self
             .is_maximized
             .map(|b| if *b { 1usize } else { 0usize });
         let maximize_action_restore = maximize_action.clone();
+        // Both Switcher children share the same external_hover
+        // signal: only one is visible at a time, and the host
+        // doesn't distinguish between "maximize-normal" and
+        // "maximize-zoomed" — the OS just reports a hit on
+        // `HTMAXBUTTON`, which both buttons occupy.
         let maximize_normal = ControlButton::new("\u{25A1}", cell_w, cell_h, fg)
             .hover_background(hover_bg)
             .with_action(maximize_action)
-            .bind_a11y_name(maximize_name);
-        let maximize_zoomed = ControlButton::new("\u{2750}", cell_w, cell_h, fg)
+            .bind_a11y_name(maximize_name)
+            .bind_external_hover(maximize_hover.clone());
+        let maximize_zoomed = ControlButton::new("\u{25A1}", cell_w, cell_h, fg)
             .hover_background(hover_bg)
             .with_action(maximize_action_restore)
-            .bind_a11y_name(restore_name);
-        let maximize = Switcher::new(switcher_idx)
-            .child(maximize_normal)
-            .child(maximize_zoomed);
+            .bind_a11y_name(restore_name)
+            .bind_external_hover(maximize_hover);
+        let max_normal_id = ctx.add(maximize_normal);
+        let max_zoomed_id = ctx.add(maximize_zoomed);
+        let maximize_switcher = Switcher::new(switcher_idx)
+            .child_id(max_normal_id)
+            .child_id(max_zoomed_id);
+        let switcher_id = ctx.add(maximize_switcher);
+
         // U+00D7 (Latin-1 ×) instead of U+2715 (Dingbats ✕): the latter
         // is missing from many default Linux sans-serif fonts, leaving the
         // close cell unlabelled. The Latin-1 multiplication sign is in
@@ -324,16 +433,37 @@ impl Widget for WindowControls {
         let close = ControlButton::new("\u{00D7}", cell_w, cell_h, fg)
             .hover_background(close_hover)
             .with_action(close_action)
-            .bind_a11y_name(close_name);
+            .bind_a11y_name(close_name)
+            .bind_external_hover(close_hover_signal);
+        let close_id = ctx.add(close);
 
         let row = HStack::new()
             .spacing(0.0)
-            .child(minimize)
-            .child(maximize)
-            .child(close);
+            .add_child(minimize_id)
+            .add_child(switcher_id)
+            .add_child(close_id);
 
         let root = ctx.add(row);
         self.root_child_id = Some(root);
+
+        // Publish the layout snapshot for the parent `TitleBar`'s
+        // `after_paint` aggregator. The sink is `None` when the
+        // controls are used standalone (e.g. in tests that don't go
+        // through `TitleBar`); the publish call is a no-op then.
+        //
+        // The maximize slot is the Switcher's id, not either glyph
+        // button: the inactive Switcher child is dormant and reports
+        // `Rect::ZERO`, but the Switcher container itself is laid out
+        // by the parent HStack and has stable bounds across the
+        // floating ↔ maximized transition.
+        if let Some(sink) = &self.layout_sink {
+            sink.set(Some(WindowControlsLayout {
+                minimize_id,
+                maximize_id: switcher_id,
+                close_id,
+            }));
+        }
+
         vec![root]
     }
 

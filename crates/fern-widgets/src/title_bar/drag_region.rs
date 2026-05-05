@@ -3,9 +3,12 @@
 //! Captures pointer events that are not consumed by inner content and
 //! forwards them to the platform host: drag gestures begin a window move,
 //! double taps toggle maximize, and right clicks open the system window
-//! menu (Wayland only). On Windows the same hit region is also published
-//! into [`HitRegions::drag`] from `paint()` so the wndproc subclass can
-//! return `HTCAPTION` for the same area.
+//! menu (Wayland only). On Windows the drag rect is published into
+//! `HitRegions::drag` so the wndproc subclass returns `HTCAPTION` for
+//! the same area — but the actual publish happens from
+//! [`crate::title_bar::TitleBar::after_paint`], which aggregates this
+//! drag region and the three control buttons into one snapshot per
+//! frame. This widget no longer publishes from `paint()`.
 
 use std::rc::Rc;
 
@@ -16,7 +19,7 @@ use fern_core::gesture::DragPhase;
 use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_core::{HitRegions, PlatformTitleBarHost};
+use fern_core::PlatformTitleBarHost;
 
 pub struct DragRegion {
     host: Rc<dyn PlatformTitleBarHost>,
@@ -147,13 +150,10 @@ impl Widget for DragRegion {
         }
     }
 
-    fn paint(&self, bounds: Rect, _canvas: &mut fern_canvas::Canvas, _ctx: &PaintContext) {
-        // Publish our physical-pixel rectangle into the host's hit-region
-        // table. The Windows backend reads this from `WM_NCHITTEST` to
-        // return `HTCAPTION` for the same area; other backends are no-ops.
-        let mut regions = HitRegions::new();
-        regions.drag.push(bounds);
-        self.host.update_hit_regions(&regions);
+    fn paint(&self, _bounds: Rect, _canvas: &mut fern_canvas::Canvas, _ctx: &PaintContext) {
+        // No paint — our parent `TitleBar::after_paint` reads our
+        // bounds and publishes them as part of the aggregated
+        // `HitRegions` snapshot.
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

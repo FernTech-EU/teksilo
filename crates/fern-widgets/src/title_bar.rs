@@ -24,15 +24,17 @@
 //! })
 //! ```
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::widget::{
     EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
+    WidgetTreeView,
 };
 use fern_core::widget_id::WidgetId;
-use fern_core::{PlatformTitleBarHost, Signal};
+use fern_core::{HitRegions, PlatformTitleBarHost, Signal};
 use fern_tokens::{Color, CornerRadius};
 
 use crate::primitives::{FixedSize, HStack};
@@ -42,7 +44,7 @@ mod drag_region;
 mod resize_strip;
 mod window_frame;
 
-pub use controls::{ControlAction, ControlButton, WindowControls};
+pub use controls::{ControlAction, ControlButton, WindowControls, WindowControlsLayout};
 pub use drag_region::DragRegion;
 pub use resize_strip::ResizeStrip;
 pub use window_frame::WindowFrame;
@@ -80,6 +82,14 @@ pub struct TitleBar {
     /// button invokes this closure instead of `ctx.close_window()`.
     close_action: Option<CloseAction>,
     root_child_id: Option<WidgetId>,
+    /// `WidgetId` of the `DragRegion` we install. Memoised at build
+    /// time so `after_paint` can read its bounds via `WidgetTreeView`
+    /// without walking the subtree.
+    drag_region_id: Cell<Option<WidgetId>>,
+    /// Sink that the inner `WindowControls` populates with its
+    /// per-button ids during build. `None` when no controls are
+    /// rendered (macOS, where the OS draws traffic lights).
+    controls_layout: Rc<Cell<Option<WindowControlsLayout>>>,
 }
 
 impl std::fmt::Debug for TitleBar {
@@ -111,6 +121,8 @@ impl TitleBar {
             border_width: 0.0,
             close_action: None,
             root_child_id: None,
+            drag_region_id: Cell::new(None),
+            controls_layout: Rc::new(Cell::new(None)),
         }
     }
 
@@ -206,6 +218,8 @@ impl Widget for TitleBar {
             Some(PendingChild::Id(id)) => DragRegion::with_child_id(self.host.clone(), id),
             None => DragRegion::new(self.host.clone()),
         };
+        let drag_region_id = ctx.add(drag_region);
+        self.drag_region_id.set(Some(drag_region_id));
 
         // Derive the maximize signal from the hosting window's
         // `WindowState::placement`. When no state is attached (standalone
@@ -215,11 +229,14 @@ impl Widget for TitleBar {
             .map(|w| w.placement().map(|p| p.is_maximized()))
             .unwrap_or_else(|| Signal::new(false));
         let controls: Option<WindowControls> = if renders_controls {
-            Some(WindowControls::new(
-                self.host.clone(),
-                is_maximized_signal,
-                self.close_action.clone(),
-            ))
+            Some(
+                WindowControls::new(
+                    self.host.clone(),
+                    is_maximized_signal,
+                    self.close_action.clone(),
+                )
+                .layout_sink(self.controls_layout.clone()),
+            )
         } else {
             None
         };
@@ -247,7 +264,7 @@ impl Widget for TitleBar {
             row = row.add_child(id);
         }
 
-        row = row.child(drag_region);
+        row = row.add_child(drag_region_id);
 
         if let Some(trailing) = self.trailing.take() {
             let id = match trailing {
@@ -304,6 +321,56 @@ impl Widget for TitleBar {
         if self.border_width > 0.0 && self.border_color.a() > 0.0 {
             canvas.draw_border_bottom(bounds, self.border_color, self.border_width);
         }
+    }
+
+    fn wants_after_paint(&self) -> bool {
+        // We aggregate descendant rects (drag region + min/max/close
+        // buttons) into a single `HitRegions` payload for the host
+        // every frame. The Windows backend reads it from
+        // `WM_NCHITTEST`; Wayland and macOS backends ignore it.
+        true
+    }
+
+    fn after_paint(&self, view: &WidgetTreeView<'_>, _ctx: &PaintContext) {
+        // Build one complete `HitRegions` snapshot per frame. The
+        // widget tree publishes logical-pixel rects (its native
+        // coordinate system); platform backends that need physical
+        // pixels (Windows) convert internally.
+        let mut regions = HitRegions::new();
+
+        if let Some(drag_id) = self.drag_region_id.get() {
+            let drag_bounds = view.bounds(drag_id);
+            // A zero-size drag bounds (host doesn't render controls,
+            // tree not laid out yet, etc.) would still hit-test true
+            // for any point at the origin — skip it.
+            if drag_bounds.width > 0.0 && drag_bounds.height > 0.0 {
+                regions.drag.push(drag_bounds);
+            }
+        }
+
+        if let Some(layout) = self.controls_layout.take() {
+            regions.minimize = Some(view.bounds(layout.minimize_id));
+            regions.minimize_id = Some(layout.minimize_id);
+
+            // The maximize id is the Switcher's, not either glyph
+            // button's. The Switcher's bounds are always valid (the
+            // parent HStack lays it out regardless of which child is
+            // visible); a synthetic tap at the Switcher center routes
+            // through hit-testing to whichever child is currently
+            // visible — handles the floating ↔ maximized swap without
+            // the dormant-child-zero-bounds trap.
+            regions.maximize = Some(view.bounds(layout.maximize_id));
+            regions.maximize_id = Some(layout.maximize_id);
+
+            regions.close = Some(view.bounds(layout.close_id));
+            regions.close_id = Some(layout.close_id);
+
+            // Restore the layout cell so we don't have to rebuild it
+            // every frame.
+            self.controls_layout.set(Some(layout));
+        }
+
+        self.host.update_hit_regions(&regions);
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

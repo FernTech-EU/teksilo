@@ -7,7 +7,9 @@ use std::sync::Arc;
 use fern_canvas::{Point, Size};
 use fern_core::{HitRegions, PlatformError, PlatformTitleBarHost, ResizeEdge, TitleBarHostCallbacks};
 use winit::dpi::LogicalPosition;
-use winit::window::{ResizeDirection, Window};
+use winit::window::Window;
+
+use super::edge_to_direction;
 
 pub struct WaylandHost {
     window: Arc<Window>,
@@ -69,18 +71,5 @@ impl PlatformTitleBarHost for WaylandHost {
         // Wayland doesn't need hit regions: the widget tree handles every
         // pointer event itself, and `begin_drag` / `begin_resize` are
         // initiated explicitly from the widget's pointer handlers.
-    }
-}
-
-fn edge_to_direction(edge: ResizeEdge) -> ResizeDirection {
-    match edge {
-        ResizeEdge::Top => ResizeDirection::North,
-        ResizeEdge::TopRight => ResizeDirection::NorthEast,
-        ResizeEdge::Right => ResizeDirection::East,
-        ResizeEdge::BottomRight => ResizeDirection::SouthEast,
-        ResizeEdge::Bottom => ResizeDirection::South,
-        ResizeEdge::BottomLeft => ResizeDirection::SouthWest,
-        ResizeEdge::Left => ResizeDirection::West,
-        ResizeEdge::TopLeft => ResizeDirection::NorthWest,
     }
 }

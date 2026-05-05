@@ -436,15 +436,31 @@ impl WindowManager {
         // continue with native decorations and leave the host slot empty.
         let title_bar_host: Option<Rc<dyn PlatformTitleBarHost>> = if wants_custom_chrome {
             let callbacks = match self.event_proxy.clone() {
-                Some(proxy) => TitleBarHostCallbacks {
-                    request_close: Rc::new(move || {
-                        proxy.send_external(CloseWindowRequest { fern_id });
-                    }),
-                },
+                Some(proxy) => {
+                    let close_proxy = proxy.clone();
+                    let post_proxy = proxy;
+                    TitleBarHostCallbacks {
+                        request_close: Rc::new(move || {
+                            close_proxy.send_external(CloseWindowRequest { fern_id });
+                        }),
+                        // Used by the Windows backend to post
+                        // `TitleBarSyntheticEvent` / `TitleBarHoverEvent`
+                        // back through `AppEvent::External`. Wayland
+                        // and macOS construct the host but never call
+                        // this closure.
+                        post_external: Rc::new(move |payload| {
+                            post_proxy.send_external_boxed(payload);
+                        }),
+                        fern_id,
+                    }
+                }
                 // Headless / test path: no event loop proxy is installed, so
                 // the host's close() becomes a silent no-op. Real windowed
                 // runs always install a proxy via `set_event_proxy`.
-                None => TitleBarHostCallbacks::noop(),
+                None => TitleBarHostCallbacks {
+                    fern_id,
+                    ..TitleBarHostCallbacks::noop()
+                },
             };
             match create_title_bar_host(pw.window_arc(), callbacks) {
                 Ok(host) => Some(host),
@@ -639,6 +655,54 @@ impl WindowManager {
     /// Queue a window closure (processed in the next event loop tick).
     pub fn queue_close(&mut self, fern_id: FernWindowId) {
         self.pending_closes.push(fern_id);
+    }
+
+    /// Route a Windows-side synthetic title-bar tap. The wndproc
+    /// posts a [`crate::TitleBarSyntheticEvent`] when `WM_NCLBUTTONUP`
+    /// fires on a button rect that the OS treated as non-client; we
+    /// resolve the matching `WidgetId` via the host and synthesise a
+    /// primary-button tap so the widget's normal `on_tap` handler
+    /// runs. No-op on platforms that never produce these events.
+    pub fn route_title_bar_synthetic_tap(
+        &mut self,
+        fern_id: FernWindowId,
+        target: fern_core::ControlTarget,
+    ) {
+        let Some(winit_id) = self.fern_to_winit.get(&fern_id).copied() else {
+            return;
+        };
+        let Some(managed) = self.windows.get_mut(&winit_id) else {
+            return;
+        };
+        let Some(host) = managed.title_bar_host.as_ref() else {
+            return;
+        };
+        let Some(button_id) = host.title_bar_widget_id(target) else {
+            return;
+        };
+        managed.tree.synthesise_tap(button_id);
+    }
+
+    /// Route a Windows-side synthetic title-bar hover entered/leave.
+    /// Delegates to the host's `set_button_hover`, which writes the
+    /// signal `WindowControls` registered for the matching button.
+    /// No-op on platforms that don't intercept non-client hover.
+    pub fn route_title_bar_synthetic_hover(
+        &mut self,
+        fern_id: FernWindowId,
+        target: fern_core::ControlTarget,
+        entered: bool,
+    ) {
+        let Some(winit_id) = self.fern_to_winit.get(&fern_id).copied() else {
+            return;
+        };
+        let Some(managed) = self.windows.get(&winit_id) else {
+            return;
+        };
+        let Some(host) = managed.title_bar_host.as_ref() else {
+            return;
+        };
+        host.set_button_hover(target, entered);
     }
 
     /// Drain the app→OS command queue on every window and translate
