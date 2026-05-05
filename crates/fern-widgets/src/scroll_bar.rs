@@ -1,14 +1,18 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use fern_canvas::{Point, Rect, Size, SizeProposal};
+use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::binding::BindingLevel;
 use fern_core::event::{EventResponse, PointerButton, WidgetEvent};
 use fern_core::gesture::DragPhase;
 use fern_core::signal::Signal;
-use fern_core::widget::{LayoutContext, PaintContext, Widget};
+use fern_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
+use fern_core::widget_id::WidgetId;
 use fern_tokens::CornerRadius;
+
+use crate::animations::Fade;
 
 /// Orientation of the scroll bar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,15 +46,29 @@ pub struct ScrollBar {
 
     // --- interaction state ---
     /// Whether the pointer is over the scroll bar.
-    hovered: Rc<Cell<bool>>,
+    hovered: Signal<bool>,
     /// Whether the thumb is being dragged.
-    dragging: Rc<Cell<bool>>,
+    dragging: Signal<bool>,
+    /// Mutable mirror of `hovered || dragging`. Drives `Fade` over the
+    /// full overlay bar; mutable because `Fade` (via `ctx.effect`) only
+    /// accepts mutable signals.
+    active: Signal<bool>,
+    /// Mutable mirror of `!active`. Drives the inverse `Fade` over the
+    /// thin resting indicator so it cross-fades against the full bar
+    /// without us re-creating either subtree on toggle (which would
+    /// snap opacity and produce visible flicker on rapid hover events).
+    inactive: Signal<bool>,
     /// Pointer position at drag start (in scroll bar local coords).
     drag_start_pointer: Rc<Cell<f32>>,
     /// Scroll position at drag start.
     drag_start_scroll: Rc<Cell<f32>>,
     /// Current bounds, cached from last layout for event handling.
     cached_bounds: Rc<Cell<Rect>>,
+    /// In overlay mode, the ids of the two `Fade`-wrapped painter
+    /// children: thin indicator (driven by `inactive`) at index 0,
+    /// full bar (driven by `active`) at index 1. Order matters so the
+    /// full bar paints on top during the cross-fade.
+    overlay_children: Vec<WidgetId>,
 
     // --- visual tuning ---
     /// Thickness of the scroll bar (width for vertical, height for horizontal).
@@ -73,7 +91,20 @@ impl std::fmt::Debug for ScrollBar {
             .field("orientation", &self.orientation)
             .field("hovered", &self.hovered.get())
             .field("dragging", &self.dragging.get())
+            .field("overlay_mode", &self.overlay_mode)
             .finish()
+    }
+}
+
+/// Update `active` and its inverse `inactive`, but only when the value
+/// actually changes. `Signal::set` always notifies observers; routing
+/// every redundant write through it would re-fire `Fade`'s effect (and
+/// any other subscriber) without cause, which can interrupt in-flight
+/// tweens with a fresh retarget every frame on jittery input.
+fn set_active(active: &Signal<bool>, inactive: &Signal<bool>, value: bool) {
+    if active.get() != value {
+        active.set(value);
+        inactive.set(!value);
     }
 }
 
@@ -96,11 +127,14 @@ impl ScrollBar {
             scroll_position,
             max_scroll,
             viewport_ratio,
-            hovered: Rc::new(Cell::new(false)),
-            dragging: Rc::new(Cell::new(false)),
+            hovered: Signal::new(false),
+            dragging: Signal::new(false),
+            active: Signal::new(false),
+            inactive: Signal::new(true),
             drag_start_pointer: Rc::new(Cell::new(0.0)),
             drag_start_scroll: Rc::new(Cell::new(0.0)),
             cached_bounds: Rc::new(Cell::new(Rect::ZERO)),
+            overlay_children: Vec::new(),
             thickness: 8.0,
             min_thumb_length: 24.0,
             step_size: 40.0,
@@ -201,24 +235,21 @@ impl Widget for ScrollBar {
     fn build(
         &mut self,
         ctx: &mut fern_core::build_context::BuildContext,
-    ) -> Vec<fern_core::widget_id::WidgetId> {
+    ) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
-        self.scroll_position.bind_to(
-            self_id,
-            registry,
-            fern_core::binding::BindingLevel::RepaintOnly,
-        );
-        self.max_scroll.bind_to(
-            self_id,
-            registry,
-            fern_core::binding::BindingLevel::RepaintOnly,
-        );
-        self.viewport_ratio.bind_to(
-            self_id,
-            registry,
-            fern_core::binding::BindingLevel::RepaintOnly,
-        );
+        self.scroll_position
+            .bind_to(self_id, registry, BindingLevel::RepaintOnly);
+        self.max_scroll
+            .bind_to(self_id, registry, BindingLevel::RepaintOnly);
+        self.viewport_ratio
+            .bind_to(self_id, registry, BindingLevel::RepaintOnly);
+        // Hovered/dragging drive thumb color in non-overlay paint AND the
+        // Fade visibility in overlay mode. Bind so paint stays current.
+        self.hovered
+            .bind_to(self_id, registry, BindingLevel::RepaintOnly);
+        self.dragging
+            .bind_to(self_id, registry, BindingLevel::RepaintOnly);
 
         let scroll_position = self.scroll_position.clone();
         let max_scroll = self.max_scroll.clone();
@@ -226,6 +257,8 @@ impl Widget for ScrollBar {
         let orientation = self.orientation;
         let hovered = self.hovered.clone();
         let dragging = self.dragging.clone();
+        let active = self.active.clone();
+        let inactive = self.inactive.clone();
         let drag_start_pointer = self.drag_start_pointer.clone();
         let drag_start_scroll = self.drag_start_scroll.clone();
         let cached_bounds = self.cached_bounds.clone();
@@ -314,6 +347,9 @@ impl Widget for ScrollBar {
         // are handled by `on_tap` below.
         {
             let dragging = dragging.clone();
+            let active = active.clone();
+            let inactive = inactive.clone();
+            let hovered = hovered.clone();
             let drag_start_pointer = drag_start_pointer.clone();
             let drag_start_scroll = drag_start_scroll.clone();
             let scroll_position = scroll_position.clone();
@@ -334,6 +370,7 @@ impl Widget for ScrollBar {
                     } => {
                         if thumb_rect().contains(position) {
                             dragging.set(true);
+                            set_active(&active, &inactive, true);
                             drag_start_pointer.set(axis_value(position));
                             drag_start_scroll.set(scroll_position.get());
                         }
@@ -349,6 +386,7 @@ impl Widget for ScrollBar {
                     }
                     DragPhase::Ended { .. } => {
                         dragging.set(false);
+                        set_active(&active, &inactive, hovered.get());
                     }
                     _ => {}
                 }
@@ -366,12 +404,13 @@ impl Widget for ScrollBar {
             let viewport_ratio = viewport_ratio.clone();
             let set_scroll = set_scroll.clone();
             let thumb_rect = thumb_rect.clone();
-            handlers = handlers.on_tap(move |position, _ctx| {
+            handlers = handlers.on_tap(move |event, _ctx| {
                 let max = max_scroll.get();
                 if max <= 0.0 {
                     return;
                 }
                 let tr = thumb_rect();
+                let position = event.position;
                 if tr.contains(position) {
                     return;
                 }
@@ -394,8 +433,12 @@ impl Widget for ScrollBar {
         // Hover handler
         {
             let hovered = hovered.clone();
+            let active = active.clone();
+            let inactive = inactive.clone();
+            let dragging = dragging.clone();
             handlers = handlers.on_hover(move |entered, _ctx| {
                 hovered.set(entered);
+                set_active(&active, &inactive, entered || dragging.get());
             });
         }
 
@@ -459,10 +502,44 @@ impl Widget for ScrollBar {
 
         ctx.apply_self_handlers(handlers);
 
+        // In overlay mode, both painters are mounted simultaneously
+        // (each in its own `Fade`) and persist across hover toggles.
+        // `Fade` retargets the existing opacity tween from its current
+        // value on each `visible` flip, so rapid hover/un-hover events
+        // smoothly redirect mid-flight instead of snapping.
+        //
+        // Order: thin first (paints below), full second (paints on top
+        // during the cross-fade).
+        if self.overlay_mode {
+            let thin = ThinIndicatorPainter {
+                orientation: self.orientation,
+                thickness: self.thickness,
+                resting_thickness: self.resting_thickness,
+                min_thumb_length: self.min_thumb_length,
+                scroll_position: self.scroll_position.clone(),
+                max_scroll: self.max_scroll.clone(),
+                viewport_ratio: self.viewport_ratio.clone(),
+            };
+            let full = FullBarPainter {
+                orientation: self.orientation,
+                thickness: self.thickness,
+                min_thumb_length: self.min_thumb_length,
+                scroll_position: self.scroll_position.clone(),
+                max_scroll: self.max_scroll.clone(),
+                viewport_ratio: self.viewport_ratio.clone(),
+                hovered: self.hovered.clone(),
+                dragging: self.dragging.clone(),
+            };
+            let thin_id = ctx.add(Fade::new(self.inactive.clone()).child(thin));
+            let full_id = ctx.add(Fade::new(self.active.clone()).child(full));
+            self.overlay_children = vec![thin_id, full_id];
+            return self.overlay_children.clone();
+        }
+
         Vec::new()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
         match self.orientation {
             ScrollBarOrientation::Vertical => {
                 Size::new(self.thickness, proposal.height.unwrap_or(100.0))
@@ -473,76 +550,268 @@ impl Widget for ScrollBar {
         }.into()
     }
 
-    fn paint(&self, bounds: Rect, canvas: &mut fern_canvas::Canvas, ctx: &PaintContext) {
-        // Cache bounds for event handling
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        // The Crossfade child (overlay mode) covers the full scrollbar
+        // bounds; both painters share the slot and clip themselves to
+        // their drawn area.
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.overlay_children.clone()
+    }
+
+    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        // Cache bounds for event handling (drag/tap hit-tests against
+        // `self.thumb_rect()`, which reads `cached_bounds`).
         self.cached_bounds.set(bounds);
+
+        if self.overlay_mode {
+            // Overlay mode: the Crossfade child owns all painting.
+            return;
+        }
 
         let max = self.max_scroll.get();
         if max <= 0.0 {
             return;
         }
 
+        // Permanent mode: full track + thumb painted directly.
         let dragging = self.dragging.get();
         let hovered = self.hovered.get();
-        let active = hovered || dragging;
+        let radius = CornerRadius::uniform(self.thickness / 2.0);
+        let colors = &ctx.theme.colors;
 
-        if self.overlay_mode && !active {
-            // --- Resting state: thin indicator aligned to trailing edge ---
-            let thin = self.resting_thickness;
-            let thin_bounds = match self.orientation {
-                ScrollBarOrientation::Vertical => {
-                    Rect::new(bounds.right() - thin, bounds.y, thin, bounds.height)
-                }
-                ScrollBarOrientation::Horizontal => {
-                    Rect::new(bounds.x, bounds.bottom() - thin, bounds.width, thin)
-                }
-            };
-            let radius = CornerRadius::uniform(thin / 2.0);
-            // Thin thumb
-            let offset = self.thumb_offset();
-            let thumb_len = self.thumb_length();
-            let thumb_rect = match self.orientation {
-                ScrollBarOrientation::Vertical => {
-                    Rect::new(thin_bounds.x, thin_bounds.y + offset, thin, thumb_len)
-                }
-                ScrollBarOrientation::Horizontal => {
-                    Rect::new(thin_bounds.x + offset, thin_bounds.y, thumb_len, thin)
-                }
-            };
-            // Thin resting indicator uses the idle thumb color.
-            let thumb_color = ctx.theme.colors.scrollbar_thumb;
-            canvas.fill_rounded_rect(thumb_rect, radius, thumb_color);
-        } else {
-            // --- Full-size state (Permanent, or Overlay when hovered/dragging) ---
-            let radius = CornerRadius::uniform(self.thickness / 2.0);
-            let colors = &ctx.theme.colors;
-
-            // Track background — Int UI scrollbar track is transparent at idle
-            // and a faint tint on hover. `show_track: true` (Permanent mode)
-            // forces it visible.
-            if self.show_track {
-                canvas.fill_rounded_rect(bounds, radius, colors.scrollbar_track_hover);
-            } else if self.overlay_mode && active {
-                canvas.fill_rounded_rect(bounds, radius, colors.scrollbar_track_hover);
-            }
-
-            // Thumb — switch color by pressed/hover/idle state.
-            let thumb = self.thumb_rect();
-            let thumb_color = if dragging {
-                colors.scrollbar_thumb_pressed
-            } else if hovered {
-                colors.scrollbar_thumb_hover
-            } else {
-                colors.scrollbar_thumb
-            };
-            canvas.fill_rounded_rect(thumb, radius, thumb_color);
+        if self.show_track {
+            canvas.fill_rounded_rect(bounds, radius, colors.scrollbar_track_hover);
         }
+
+        let thumb = self.thumb_rect();
+        let thumb_color = if dragging {
+            colors.scrollbar_thumb_pressed
+        } else if hovered {
+            colors.scrollbar_thumb_hover
+        } else {
+            colors.scrollbar_thumb
+        };
+        canvas.fill_rounded_rect(thumb, radius, thumb_color);
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         // Scrollbars are pointer UI. AT uses ScrollUp/Down/Left/Right on the
         // parent ScrollView node — exposing the bar itself adds noise without
         // benefit and creates spurious Tab stops in screen readers.
+        builder.set_hidden();
+    }
+}
+
+/// Paints the thin resting indicator at the trailing edge of the
+/// scrollbar slot. Mounted by `Crossfade` in `ScrollBar::build` while
+/// the bar is idle; cross-fades to `FullBarPainter` on hover/drag.
+struct ThinIndicatorPainter {
+    orientation: ScrollBarOrientation,
+    /// Slot thickness — needed so `layout_response` can return a
+    /// reasonable fallback size matching the parent's expectation.
+    thickness: f32,
+    resting_thickness: f32,
+    min_thumb_length: f32,
+    scroll_position: Signal<f32>,
+    max_scroll: Signal<f32>,
+    viewport_ratio: Signal<f32>,
+}
+
+impl std::fmt::Debug for ThinIndicatorPainter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ThinIndicatorPainter")
+            .field("orientation", &self.orientation)
+            .finish()
+    }
+}
+
+impl Widget for ThinIndicatorPainter {
+    fn build(
+        &mut self,
+        ctx: &mut fern_core::build_context::BuildContext,
+    ) -> Vec<WidgetId> {
+        let id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        self.scroll_position
+            .bind_to(id, registry, BindingLevel::RepaintOnly);
+        self.max_scroll
+            .bind_to(id, registry, BindingLevel::RepaintOnly);
+        self.viewport_ratio
+            .bind_to(id, registry, BindingLevel::RepaintOnly);
+        Vec::new()
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        // Match the parent's slot extent. The actual painted area is
+        // narrower (just `resting_thickness` at the trailing edge); the
+        // wider slot exists so Crossfade's ZStack sees a consistent
+        // size for both painters.
+        match self.orientation {
+            ScrollBarOrientation::Vertical => {
+                Size::new(self.thickness, proposal.height.unwrap_or(0.0))
+            }
+            ScrollBarOrientation::Horizontal => {
+                Size::new(proposal.width.unwrap_or(0.0), self.thickness)
+            }
+        }
+        .into()
+    }
+
+    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        let max = self.max_scroll.get();
+        if max <= 0.0 {
+            return;
+        }
+        let thin = self.resting_thickness;
+        let thin_bounds = match self.orientation {
+            ScrollBarOrientation::Vertical => {
+                Rect::new(bounds.right() - thin, bounds.y, thin, bounds.height)
+            }
+            ScrollBarOrientation::Horizontal => {
+                Rect::new(bounds.x, bounds.bottom() - thin, bounds.width, thin)
+            }
+        };
+        let track_len = match self.orientation {
+            ScrollBarOrientation::Vertical => bounds.height,
+            ScrollBarOrientation::Horizontal => bounds.width,
+        };
+        let ratio = self.viewport_ratio.get().clamp(0.0, 1.0);
+        let thumb_len = (track_len * ratio).max(self.min_thumb_length).min(track_len);
+        let pos = self.scroll_position.get();
+        let scroll_ratio = (pos / max).clamp(0.0, 1.0);
+        let offset = scroll_ratio * (track_len - thumb_len);
+
+        let radius = CornerRadius::uniform(thin / 2.0);
+        let thumb_rect = match self.orientation {
+            ScrollBarOrientation::Vertical => {
+                Rect::new(thin_bounds.x, thin_bounds.y + offset, thin, thumb_len)
+            }
+            ScrollBarOrientation::Horizontal => {
+                Rect::new(thin_bounds.x + offset, thin_bounds.y, thumb_len, thin)
+            }
+        };
+        canvas.fill_rounded_rect(thumb_rect, radius, ctx.theme.colors.scrollbar_thumb);
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_hidden();
+    }
+}
+
+/// Paints the full overlay scrollbar (track + thumb) at the parent's
+/// bounds. Mounted by `Crossfade` while the bar is hovered or dragged;
+/// cross-fades to `ThinIndicatorPainter` on un-hover.
+///
+/// All input state lives on the parent `ScrollBar`; this widget binds
+/// to the same signals to repaint when scroll position, viewport, or
+/// interaction state changes.
+struct FullBarPainter {
+    orientation: ScrollBarOrientation,
+    thickness: f32,
+    min_thumb_length: f32,
+    scroll_position: Signal<f32>,
+    max_scroll: Signal<f32>,
+    viewport_ratio: Signal<f32>,
+    hovered: Signal<bool>,
+    dragging: Signal<bool>,
+}
+
+impl std::fmt::Debug for FullBarPainter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FullBarPainter")
+            .field("orientation", &self.orientation)
+            .finish()
+    }
+}
+
+impl Widget for FullBarPainter {
+    fn build(
+        &mut self,
+        ctx: &mut fern_core::build_context::BuildContext,
+    ) -> Vec<WidgetId> {
+        let id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        self.scroll_position
+            .bind_to(id, registry, BindingLevel::RepaintOnly);
+        self.max_scroll
+            .bind_to(id, registry, BindingLevel::RepaintOnly);
+        self.viewport_ratio
+            .bind_to(id, registry, BindingLevel::RepaintOnly);
+        self.hovered.bind_to(id, registry, BindingLevel::RepaintOnly);
+        self.dragging
+            .bind_to(id, registry, BindingLevel::RepaintOnly);
+        Vec::new()
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        // ScrollBar::place_children forces our bounds to the full slot, so
+        // the response here is a fallback only. Match ScrollBar's own
+        // layout_response shape so we report something sensible if the
+        // parent ever changes.
+        match self.orientation {
+            ScrollBarOrientation::Vertical => {
+                Size::new(self.thickness, proposal.height.unwrap_or(0.0))
+            }
+            ScrollBarOrientation::Horizontal => {
+                Size::new(proposal.width.unwrap_or(0.0), self.thickness)
+            }
+        }
+        .into()
+    }
+
+    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        let max = self.max_scroll.get();
+        if max <= 0.0 {
+            return;
+        }
+        let ratio = self.viewport_ratio.get().clamp(0.0, 1.0);
+        let track_len = match self.orientation {
+            ScrollBarOrientation::Vertical => bounds.height,
+            ScrollBarOrientation::Horizontal => bounds.width,
+        };
+        let thumb_len = (track_len * ratio).max(self.min_thumb_length).min(track_len);
+        let pos = self.scroll_position.get();
+        let scroll_ratio = (pos / max).clamp(0.0, 1.0);
+        let offset = scroll_ratio * (track_len - thumb_len);
+
+        let radius = CornerRadius::uniform(self.thickness / 2.0);
+        let colors = &ctx.theme.colors;
+
+        // Track: always painted; Fade owns visibility via subtree opacity.
+        canvas.fill_rounded_rect(bounds, radius, colors.scrollbar_track_hover);
+
+        let thumb = match self.orientation {
+            ScrollBarOrientation::Vertical => {
+                Rect::new(bounds.x, bounds.y + offset, bounds.width, thumb_len)
+            }
+            ScrollBarOrientation::Horizontal => {
+                Rect::new(bounds.x + offset, bounds.y, thumb_len, bounds.height)
+            }
+        };
+        let thumb_color = if self.dragging.get() {
+            colors.scrollbar_thumb_pressed
+        } else if self.hovered.get() {
+            colors.scrollbar_thumb_hover
+        } else {
+            colors.scrollbar_thumb
+        };
+        canvas.fill_rounded_rect(thumb, radius, thumb_color);
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // Same rationale as ScrollBar: pointer-only affordance, hidden from AT.
         builder.set_hidden();
     }
 }
