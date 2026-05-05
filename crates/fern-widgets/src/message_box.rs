@@ -97,7 +97,7 @@ use crate::button::{Button, ButtonVariant};
 use crate::checkbox::Checkbox;
 use crate::dialog::ModalContainer;
 use crate::primitives::icon_widget::IconMode;
-use crate::primitives::{HStack, IconWidget, Spacer, TextWidget, VStack};
+use crate::primitives::{Expand, HStack, IconWidget, Spacer, TextWidget, VStack};
 
 // ── Severity ────────────────────────────────────────────────────────
 
@@ -710,7 +710,8 @@ impl MessageBox {
             })
             .presentation(ModalPresentation::Auto)
             .close_behavior(close_behavior)
-            .title(title),
+            .title(title)
+            .size(460, 240),
         );
     }
 
@@ -772,6 +773,11 @@ impl Widget for MessageBox {
         }
 
         let header: Box<dyn Widget> = if let Some(icon_path) = severity_icon(self.severity) {
+            // Wrap the text stack in `Expand::horizontal()` so HStack
+            // distributes its width slack to the text column. Without
+            // this the HStack measures the text stack with width=None
+            // (single-line), which makes the body / informative text
+            // overflow the dialog instead of wrapping.
             Box::new(
                 HStack::new()
                     .spacing(16.0)
@@ -782,7 +788,7 @@ impl Widget for MessageBox {
                             .mode(IconMode::Tintable)
                             .color(severity_color(&theme, self.severity)),
                     )
-                    .child(header_text_stack),
+                    .child(Expand::horizontal().child(header_text_stack)),
             )
         } else {
             Box::new(header_text_stack)
@@ -836,6 +842,9 @@ impl Widget for MessageBox {
         if let Some(cb) = checkbox_child {
             stack = stack.add_child(ctx.add_boxed(cb));
         }
+        // Push the footer to the bottom of the dialog by absorbing any
+        // vertical slack with a Spacer (flex=1).
+        stack = stack.add_child(ctx.add(Spacer::new()));
         let footer_id = ctx.add(footer);
         stack = stack.add_child(footer_id);
 

@@ -213,6 +213,32 @@ impl WindowManager {
         let modal_parent = config.modal_parent();
         let modal_focus_target = config.modal_focus_target();
 
+        // Center modal windows over their parent when the caller did not
+        // request a specific position. Approximates the modal's outer
+        // rect with its inner (client) size — close enough visually
+        // since decoration thickness is small relative to the dialog.
+        // No-op on Wayland (compositor owns positioning).
+        if config.position.is_none()
+            && let Some(parent_id) = modal_parent
+            && let Some(parent_winit) = self.winit_id_for_fern(parent_id)
+            && let Some(parent_managed) = self.windows.get(&parent_winit)
+        {
+            let parent_window = parent_managed.platform_window.window();
+            if let Ok(parent_outer_pos) = parent_window.outer_position() {
+                let parent_sf = parent_window.scale_factor();
+                let parent_outer_size = parent_window.outer_size();
+                let p_x = parent_outer_pos.x as f64 / parent_sf;
+                let p_y = parent_outer_pos.y as f64 / parent_sf;
+                let p_w = parent_outer_size.width as f64 / parent_sf;
+                let p_h = parent_outer_size.height as f64 / parent_sf;
+                let m_w = config.size.0 as f64;
+                let m_h = config.size.1 as f64;
+                let x = (p_x + (p_w - m_w) / 2.0).round() as i32;
+                let y = (p_y + (p_h - m_h) / 2.0).round() as i32;
+                config.position = Some((x, y));
+            }
+        }
+
         let mut window_attrs = winit::window::Window::default_attributes()
             .with_title(&config.title)
             .with_inner_size(winit::dpi::LogicalSize::new(config.size.0, config.size.1))
@@ -288,7 +314,14 @@ impl WindowManager {
                 .with_title_hidden(true);
         }
 
-        if is_modal || config.always_on_top {
+        // Z-order for modals comes from the parent relationship below
+        // (`with_owner_window` on Win32; `with_parent_window` on X11/Wayland;
+        // `attach_child_window` on macOS), not from `WindowLevel::AlwaysOnTop`.
+        // Setting TOPMOST on a Win32 owned window is redundant and disrupts
+        // the message pump (paint events stop arriving until the user forces
+        // a redraw via focus change or resize). Only honour the explicit
+        // `always_on_top` config flag here.
+        if config.always_on_top {
             window_attrs = window_attrs.with_window_level(WindowLevel::AlwaysOnTop);
         }
 
@@ -297,11 +330,18 @@ impl WindowManager {
         // palettes, floating tool panels — the coming multi-window
         // cases) take the same path.
         //
-        // Non-macOS: winit's builder wires the parent via
-        // `with_parent_window` (Win32 owner, X11 WM_TRANSIENT_FOR,
-        // xdg_toplevel.set_parent) — none of those make the child
-        // visible, so the AccessKit adapter can still be installed
-        // afterwards.
+        // Win32: use `with_owner_window` (CreateWindowEx's hwndOwner) —
+        // winit documents this as "for dialog boxes". Produces an owned
+        // WS_POPUP/WS_OVERLAPPED that floats above its owner, gets its
+        // own paint/input messages, and tracks its owner's minimize
+        // state. We do NOT use `with_parent_window` here: on Win32 winit
+        // calls `SetParent`, making the dialog a `WS_CHILD` clipped
+        // inside the owner's client area — wrong for dialogs in every
+        // way (paint, input, movement, z-order).
+        //
+        // X11 / Wayland: `with_parent_window` is correct — winit wires
+        // it through `WM_TRANSIENT_FOR` / `xdg_toplevel.set_parent`,
+        // both of which match dialog semantics.
         //
         // macOS: skip here and defer to `attach_child_window` after
         // `PlatformWindow::new_with_a11y`. AppKit's
@@ -309,7 +349,19 @@ impl WindowManager {
         // front (making it visible), which would race with the
         // AccessKit adapter that requires a hidden window at
         // construction.
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "windows")]
+        if let Some(parent_id) = modal_parent
+            && let Some(parent_winit) = self.winit_id_for_fern(parent_id)
+            && let Some(parent_managed) = self.windows.get(&parent_winit)
+            && let Ok(parent_handle) = parent_managed.platform_window.window().window_handle()
+            && let winit::raw_window_handle::RawWindowHandle::Win32(win32) =
+                parent_handle.as_raw()
+        {
+            use winit::platform::windows::WindowAttributesExtWindows;
+            window_attrs = window_attrs.with_owner_window(win32.hwnd.get());
+        }
+
+        #[cfg(all(unix, not(target_os = "macos")))]
         if let Some(parent_id) = modal_parent
             && let Some(parent_winit) = self.winit_id_for_fern(parent_id)
             && let Some(parent_managed) = self.windows.get(&parent_winit)
@@ -372,7 +424,9 @@ impl WindowManager {
         }
 
         if is_modal {
-            pw.window().set_window_level(WindowLevel::AlwaysOnTop);
+            // No `set_window_level(AlwaysOnTop)` here — see the comment
+            // on `with_window_level` above. The owner relationship
+            // already keeps the modal ordered above its parent.
             pw.window().focus_window();
         }
 
