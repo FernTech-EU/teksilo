@@ -15,7 +15,8 @@
 
 use std::rc::Rc;
 
-use fern_core::widget::Widget;
+use fern_canvas::Point;
+use fern_core::widget::{EventContext, Widget};
 use fern_i18n::LocalizedString;
 
 use crate::IconWidget;
@@ -23,7 +24,15 @@ use crate::IconWidget;
 /// A reusable widget factory the framework calls every time a context
 /// menu opens. Returns a fresh widget instance each call (the
 /// framework can't reuse a single widget across multiple openings).
-pub type ContextMenuFactory = Rc<dyn Fn() -> Box<dyn Widget>>;
+///
+/// Same shape as the framework's
+/// [`fern_core::widget_builder::ContextMenuFactory`] — receives the
+/// click position (in tab-local coords) and a full
+/// [`EventContext`], and returns `Some(menu)` to mount or `None` to
+/// decline. The `Rc` wrapping is a tab-widget convenience: the
+/// delegate clones the factory per-tab without reallocating.
+pub type ContextMenuFactory =
+    Rc<dyn Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>>>;
 
 /// Bar orientation. Selects between a horizontal row of tabs (default
 /// for browser-style document tabs) and a vertical column of pills

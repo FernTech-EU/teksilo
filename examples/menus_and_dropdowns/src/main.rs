@@ -236,8 +236,8 @@ impl Widget for Root {
                                                 .color(TextRole::Primary),
                                         ),
                                 )
-                                .context_menu(|| {
-                                    Box::new(
+                                .context_menu(|_pos, _ctx| {
+                                    Some(Box::new(
                                         MenuList::new()
                                             .item(
                                                 MenuItem::new_literal("Undo")
@@ -293,7 +293,7 @@ impl Widget for Root {
                                                         ),
                                                 )
                                             })),
-                                    )
+                                    ))
                                 }),
                         )
                         .child(
@@ -315,8 +315,8 @@ impl Widget for Root {
                                                 .color(TextRole::Primary),
                                         ),
                                 )
-                                .context_menu(|| {
-                                    Box::new(
+                                .context_menu(|_pos, _ctx| {
+                                    Some(Box::new(
                                         MenuList::new()
                                             .item(
                                                 MenuItem::new_literal("New File")
@@ -335,7 +335,7 @@ impl Widget for Root {
                                             )
                                             .separator()
                                             .item(MenuItem::new_literal("Export as PDF").enabled(false)),
-                                    )
+                                    ))
                                 }),
                         ),
                 ),

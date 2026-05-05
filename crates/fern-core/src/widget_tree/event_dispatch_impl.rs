@@ -362,35 +362,73 @@ impl WidgetTree {
         position: Point,
         ops: &mut dyn crate::window::WindowOps,
     ) -> bool {
-        let mut current = Some(target);
-        let factory_owner = loop {
-            match current {
-                None => break None,
-                Some(id) => {
-                    if self
-                        .arena
-                        .get(id)
-                        .is_some_and(|node| node.context_menu_factory.is_some())
-                    {
-                        break Some(id);
+        // Walks up the parent chain calling each factory in turn. A
+        // factory returning `Some(menu)` claims the click and mounts;
+        // a factory returning `None` declines and the walk continues.
+        // No factory anywhere on the chain → fall through to whatever
+        // the caller does with the unconsumed PointerDown.
+        let mut ctx = self.make_event_context(&mut *ops);
+        let mut walker = Some(target);
+        let menu_decision: Option<(WidgetId, Box<dyn Widget>)> = loop {
+            // Walk to the next ancestor (including `walker` itself)
+            // that owns a factory.
+            let owner_id = {
+                let mut probe = walker;
+                loop {
+                    match probe {
+                        None => break None,
+                        Some(id) => {
+                            if self
+                                .arena
+                                .get(id)
+                                .is_some_and(|node| node.context_menu_factory.is_some())
+                            {
+                                break Some(id);
+                            }
+                            probe = self.arena.get(id).and_then(|node| node.parent);
+                        }
                     }
-                    current = self.arena.get(id).and_then(|node| node.parent);
+                }
+            };
+            let Some(owner_id) = owner_id else {
+                break None;
+            };
+            // Invoke the factory with the click position and a real
+            // EventContext. The factory is `Fn` (not FnMut), so we
+            // can call it through an immutable borrow on the node.
+            // `ctx` is a local — its `&mut WindowOps` lifetime is
+            // disjoint from `self.arena`, so the immutable arena
+            // borrow doesn't conflict with the mutable ctx borrow.
+            let outcome: Option<Box<dyn Widget>> = {
+                let node = self.arena.get(owner_id).unwrap();
+                let factory = node.context_menu_factory.as_ref().unwrap();
+                factory(position, &mut ctx)
+            };
+            match outcome {
+                Some(menu) => break Some((owner_id, menu)),
+                None => {
+                    // Decline → keep walking up from the parent.
+                    walker = self.arena.get(owner_id).and_then(|n| n.parent);
                 }
             }
         };
 
-        let Some(owner_id) = factory_owner else {
+        // Drain ctx side effects regardless of whether a menu showed —
+        // a factory that returns `None` may still have queued intents,
+        // updated signals, or requested a frame.
+        let drain_anchor = menu_decision
+            .as_ref()
+            .map(|(id, _)| *id)
+            .or_else(|| self.arena.roots().first().copied())
+            .unwrap_or(target);
+        self.collect_from_ctx(ctx, drain_anchor);
+
+        let Some((owner_id, menu_widget)) = menu_decision else {
             return false;
         };
 
         let dismissed = self.overlay_manager.dismiss_all();
         self.dormant_dismissed_content(&dismissed, &mut *ops);
-
-        let menu_widget = {
-            let node = self.arena.get(owner_id).unwrap();
-            let factory = node.context_menu_factory.as_ref().unwrap();
-            factory()
-        };
 
         let content_id = self.add_boxed(menu_widget);
         let prev_focus = self.focused;
@@ -408,6 +446,11 @@ impl WidgetTree {
             self.overlay_manager.set_top_focus_restore(focus_id);
         }
         self.focus_ops(content_id, &mut *ops);
+        // Flush intents the factory queued so they take effect on the
+        // same dispatch tick as the menu mount. The caller's
+        // PointerDown handler returns after we return `true`, skipping
+        // its own drain — fire ours here.
+        self.drain_pending_intents(&mut *ops);
         true
     }
 
@@ -4462,5 +4505,110 @@ mod tests {
         let screen_corner = eff.apply_point(Point::new(50.0, 25.0));
         assert!((screen_corner.x - 200.0).abs() < 1e-5);
         assert!((screen_corner.y - 50.0).abs() < 1e-5);
+    }
+
+    // ─── Context-menu factory: position, ctx, None fall-through ─────────
+
+    /// A throwaway content widget the factory mounts. We never paint
+    /// it — the test only checks that it lands in the overlay manager.
+    #[derive(Debug)]
+    struct StubMenu;
+    impl crate::widget::Widget for StubMenu {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &crate::widget::LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            fern_canvas::Size::new(100.0, 40.0).into()
+        }
+    }
+
+    #[test]
+    fn context_menu_factory_receives_click_position() {
+        use crate::event::{Modifiers, PointerButton};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let captured_position = Rc::new(Cell::new(None::<Point>));
+        let cap = captured_position.clone();
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new().context_menu(move |pos, _ctx| {
+            cap.set(Some(pos));
+            Some(Box::new(StubMenu) as Box<dyn crate::widget::Widget>)
+        }));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let click = Point::new(73.0, 42.0);
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: click,
+            button: PointerButton::Secondary,
+            modifiers: Modifiers::NONE,
+        });
+
+        let got = captured_position.get();
+        assert_eq!(
+            got,
+            Some(click),
+            "factory must receive the click position; got {:?}",
+            got
+        );
+        let _ = widget;
+    }
+
+    #[test]
+    fn context_menu_factory_returning_none_falls_through_to_parent() {
+        use crate::event::{Modifiers, PointerButton};
+        use crate::test_widgets::StackWidget;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        // Outer factory always returns Some(StubMenu); inner factory
+        // returns None. Right-click should walk past the inner and
+        // mount the outer's menu.
+        let outer_called = Rc::new(Cell::new(0_u32));
+        let outer_flag = outer_called.clone();
+        let mut tree = WidgetTree::new();
+        let inner = tree.add(FillWidget::new().context_menu(|_pos, _ctx| None));
+        let _outer = tree.add(
+            StackWidget::new().add_child(inner).context_menu(move |_pos, _ctx| {
+                outer_flag.set(outer_flag.get() + 1);
+                Some(Box::new(StubMenu) as Box<dyn crate::widget::Widget>)
+            }),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(50.0, 25.0),
+            button: PointerButton::Secondary,
+            modifiers: Modifiers::NONE,
+        });
+
+        assert_eq!(
+            outer_called.get(),
+            1,
+            "inner returning None must fall through to the outer factory"
+        );
+    }
+
+    #[test]
+    fn context_menu_factory_none_throughout_chain_does_not_show_overlay() {
+        use crate::event::{Modifiers, PointerButton};
+
+        // Single factory returning None → no overlay shown, no panic.
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new().context_menu(|_pos, _ctx| None));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let overlay_count_before = tree.overlay_manager.len();
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(50.0, 25.0),
+            button: PointerButton::Secondary,
+            modifiers: Modifiers::NONE,
+        });
+        let overlay_count_after = tree.overlay_manager.len();
+        assert_eq!(
+            overlay_count_before, overlay_count_after,
+            "a factory returning None must not mount any overlay"
+        );
     }
 }

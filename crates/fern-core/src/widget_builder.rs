@@ -255,8 +255,30 @@ impl AccessibilityOverrides {
 
 /// Temporary storage for handlers and metadata accumulated via builder
 /// methods. Transferred to the `WidgetNode` during arena insertion.
-/// Type alias for a context menu content factory.
-pub type ContextMenuFactory = Box<dyn Fn() -> Box<dyn Widget>>;
+/// Type alias for a context-menu content factory.
+///
+/// The factory is invoked on every right-click that lands on a widget
+/// owning the factory (or on a descendant whose nearest ancestor with
+/// a factory is this one). It receives:
+///
+/// - `position`: pointer position in widget-local coordinates of the
+///   factory-owning widget. Useful when the menu's contents depend on
+///   *what* was right-clicked (a row in a list, a node in a tree, an
+///   item under a hit-test, …).
+/// - `ctx`: a full [`EventContext`], so the factory can read window
+///   state, query app state, send intents (e.g. for analytics), or
+///   update Signals before the menu mounts.
+///
+/// The factory returns:
+///
+/// - `Some(widget)` to mount `widget` as the menu overlay anchored at
+///   the factory-owning widget, placed at `position`.
+/// - `None` to **decline this right-click**. The framework continues
+///   walking up the parent chain looking for the next ancestor with a
+///   factory. This lets a widget conditionally suppress its own menu
+///   without uninstalling the factory.
+pub type ContextMenuFactory =
+    Box<dyn Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>>>;
 
 pub struct HandlerSet {
     pub(crate) handlers: EventHandlers,
@@ -557,9 +579,15 @@ impl HandlerSet {
         self
     }
 
-    /// Set a context menu factory. The factory is invoked on right-click
-    /// to produce the overlay content widget (typically a `MenuList`).
-    pub fn context_menu(mut self, factory: impl Fn() -> Box<dyn Widget> + 'static) -> Self {
+    /// Set a context-menu factory. See [`ContextMenuFactory`] for the
+    /// full contract: the closure receives the click position
+    /// (widget-local) and a full [`EventContext`], and returns
+    /// `Some(menu)` to mount or `None` to decline (falling through to
+    /// the nearest ancestor with a factory).
+    pub fn context_menu(
+        mut self,
+        factory: impl Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>> + 'static,
+    ) -> Self {
         self.context_menu_factory = Some(Box::new(factory));
         self
     }
@@ -839,7 +867,12 @@ impl<W: Widget> WidgetWithHandlers<W> {
         self
     }
 
-    pub fn context_menu(mut self, factory: impl Fn() -> Box<dyn Widget> + 'static) -> Self {
+    /// Set a context-menu factory. See
+    /// [`HandlerSet::context_menu`] for the full contract.
+    pub fn context_menu(
+        mut self,
+        factory: impl Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>> + 'static,
+    ) -> Self {
         self.handler_set.context_menu_factory = Some(Box::new(factory));
         self
     }
@@ -1512,9 +1545,11 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         WidgetWithHandlers::new(self).event_pass_through(pass_through)
     }
 
+    /// Set a context-menu factory. See
+    /// [`HandlerSet::context_menu`] for the full contract.
     fn context_menu(
         self,
-        factory: impl Fn() -> Box<dyn Widget> + 'static,
+        factory: impl Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>> + 'static,
     ) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).context_menu(factory)
     }

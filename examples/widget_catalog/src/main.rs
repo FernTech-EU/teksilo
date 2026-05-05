@@ -1994,8 +1994,8 @@ impl WidgetCatalog {
                                 .style(TextStyleRole::Body)
                                 .color(TextRole::Primary),
                         )
-                        .context_menu(|| {
-                            Box::new(
+                        .context_menu(|_pos, _ctx| {
+                            Some(Box::new(
                                 MenuList::new()
                                     .item(
                                         MenuItem::new_literal("Cut")
@@ -2014,7 +2014,7 @@ impl WidgetCatalog {
                                     )
                                     .separator()
                                     .item(MenuItem::new_literal("Disabled item").enabled(false)),
-                            )
+                            ))
                         }),
                 ),
         )
@@ -3218,14 +3218,14 @@ impl WidgetCatalog {
                     background: SurfaceRole::Main
                     corner_radius: 8.0
                     padding: 16.0
-                    context_menu: || Box::new(
+                    context_menu: |_pos, _ctx| Some(Box::new(
                             MenuList::new()
                                 .item(MenuItem::new_literal("Cut").on_activate_fn(|_| println!("Cut")).shortcut_label("Ctrl+X"))
                                 .item(MenuItem::new_literal("Copy").on_activate_fn(|_| println!("Copy")).shortcut_label("Ctrl+C"))
                                 .item(MenuItem::new_literal("Paste").on_activate_fn(|_| println!("Paste")).shortcut_label("Ctrl+V"))
                                 .separator()
                                 .item(MenuItem::new_literal("Disabled item").enabled(false))
-                        )
+                        ))
                     TextWidget::new_literal("Right-click here for a context menu") {
                         style: TextStyleRole::Body
                         color: TextRole::Primary

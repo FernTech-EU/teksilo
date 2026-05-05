@@ -841,10 +841,6 @@ impl Widget for TextInputField {
             });
         }
 
-        // Pre-build the right-click context menu as a dormant widget.
-        let context_menu_id = build_context_menu(ctx, self.state());
-        self.state().borrow_mut().context_menu_id = Some(context_menu_id);
-
         // Apply initial disabled state once the state is ready.
         if !self.enabled {
             self.interaction.set(InteractionState::Disabled);
@@ -866,6 +862,7 @@ impl Widget for TextInputField {
         let state_for_double = self.state().clone();
         let state_for_triple = self.state().clone();
         let state_for_access = self.state().clone();
+        let state_for_menu = self.state().clone();
 
         let handlers = HandlerSet::new()
             .focusable(enabled)
@@ -920,6 +917,22 @@ impl Widget for TextInputField {
             })
             .on_access_action_request(move |action, _target_node, data, ctx| {
                 handle_access_action(&state_for_access, action, data, ctx)
+            })
+            // Right-click context menu — built fresh per click so the
+            // enabled state of each item reflects the live selection /
+            // clipboard state at the moment the menu opens. The framework
+            // handles overlay placement, focus restoration, and dismissal.
+            .context_menu(move |position, ctx| {
+                let _ = ctx;
+                if !enabled {
+                    return None;
+                }
+                // Reposition the caret to the click position when the
+                // click lands outside the existing selection — the
+                // platform convention for "right-click then Cut /
+                // Copy / Paste at the new caret".
+                mouse::reposition_caret_for_context_menu(&state_for_menu, position);
+                Some(build_context_menu_widget(&state_for_menu))
             });
 
         ctx.apply_self_handlers(handlers);
@@ -1297,69 +1310,82 @@ fn compute_word_starts(text: &str) -> Vec<u8> {
     starts
 }
 
-/// Pre-build the right-click context menu as a dormant widget.
-fn build_context_menu(ctx: &mut BuildContext, state: &SharedState) -> WidgetId {
+/// Build a fresh right-click context menu widget. Called from the
+/// `.context_menu(...)` factory on every right-click, so each open
+/// reads live `has_selection` / `is_empty` state when computing each
+/// item's enabled flag.
+fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
+    let st = state.borrow();
+    let has_selection = st.cursor.has_selection();
+    let doc_non_empty = !st
+        .document
+        .to_plain_text()
+        .unwrap_or_default()
+        .is_empty();
+    drop(st);
+
     let state_cut = state.clone();
     let state_copy = state.clone();
     let state_paste = state.clone();
     let state_select_all = state.clone();
 
-    let menu = MenuList::new()
-        .item(
-            MenuItem::new_literal("Cut")
-                .shortcut_label("Ctrl+X")
-                .on_activate_fn(move |ctx| {
-                    {
-                        let mut st = state_cut.borrow_mut();
-                        keyboard::clipboard_cut(&mut st, ctx);
-                    }
-                    sync_cursor_signals(&state_cut);
-                    ctx.request_frame();
-                    ctx.dismiss_all_overlays();
-                }),
-        )
-        .item(
-            MenuItem::new_literal("Copy")
-                .shortcut_label("Ctrl+C")
-                .on_activate_fn(move |ctx| {
-                    {
-                        let mut st = state_copy.borrow_mut();
-                        keyboard::clipboard_copy(&mut st, ctx);
-                    }
-                    ctx.dismiss_all_overlays();
-                }),
-        )
-        .item(
-            MenuItem::new_literal("Paste")
-                .shortcut_label("Ctrl+V")
-                .on_activate_fn(move |ctx| {
-                    {
-                        let mut st = state_paste.borrow_mut();
-                        keyboard::clipboard_paste(&mut st, ctx);
-                    }
-                    sync_cursor_signals(&state_paste);
-                    ctx.request_frame();
-                    ctx.dismiss_all_overlays();
-                }),
-        )
-        .item(MenuSeparator)
-        .item(
-            MenuItem::new_literal("Select All")
-                .shortcut_label("Ctrl+A")
-                .on_activate_fn(move |ctx| {
-                    {
-                        let st = state_select_all.borrow();
-                        st.cursor.select(SelectionType::Document);
-                    }
-                    sync_cursor_signals(&state_select_all);
-                    ctx.request_frame();
-                    ctx.dismiss_all_overlays();
-                }),
-        );
-
-    let menu_id = ctx.add(menu);
-    ctx.set_dormant(menu_id);
-    menu_id
+    Box::new(
+        MenuList::new()
+            .item(
+                MenuItem::new_literal("Cut")
+                    .shortcut_label("Ctrl+X")
+                    .enabled(has_selection)
+                    .on_activate_fn(move |ctx| {
+                        {
+                            let mut st = state_cut.borrow_mut();
+                            keyboard::clipboard_cut(&mut st, ctx);
+                        }
+                        sync_cursor_signals(&state_cut);
+                        ctx.request_frame();
+                        ctx.dismiss_all_overlays();
+                    }),
+            )
+            .item(
+                MenuItem::new_literal("Copy")
+                    .shortcut_label("Ctrl+C")
+                    .enabled(has_selection)
+                    .on_activate_fn(move |ctx| {
+                        {
+                            let mut st = state_copy.borrow_mut();
+                            keyboard::clipboard_copy(&mut st, ctx);
+                        }
+                        ctx.dismiss_all_overlays();
+                    }),
+            )
+            .item(
+                MenuItem::new_literal("Paste")
+                    .shortcut_label("Ctrl+V")
+                    .on_activate_fn(move |ctx| {
+                        {
+                            let mut st = state_paste.borrow_mut();
+                            keyboard::clipboard_paste(&mut st, ctx);
+                        }
+                        sync_cursor_signals(&state_paste);
+                        ctx.request_frame();
+                        ctx.dismiss_all_overlays();
+                    }),
+            )
+            .item(MenuSeparator)
+            .item(
+                MenuItem::new_literal("Select All")
+                    .shortcut_label("Ctrl+A")
+                    .enabled(doc_non_empty)
+                    .on_activate_fn(move |ctx| {
+                        {
+                            let st = state_select_all.borrow();
+                            st.cursor.select(SelectionType::Document);
+                        }
+                        sync_cursor_signals(&state_select_all);
+                        ctx.request_frame();
+                        ctx.dismiss_all_overlays();
+                    }),
+            ),
+    )
 }
 
 /// Run the validator on the bound text and update the feedback signal.

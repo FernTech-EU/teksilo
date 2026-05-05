@@ -99,13 +99,17 @@ pub const INTENT_SELECT_ALL: &str = "fern.rich_text.select_all";
 pub(super) fn default_factory(
     state: SharedState,
     policy: PolicyBundle,
-) -> Box<dyn Fn() -> Box<dyn Widget>> {
+) -> RichTextContextMenuFactory {
     // The closure is called each right-click. `state` is captured
     // once and cloned for each menu item's action closure; the
-    // `Rc<RefCell<...>>` behind `SharedState` makes that cheap.
-    Box::new(move || {
+    // `Rc<RefCell<...>>` behind `SharedState` makes that cheap. The
+    // built-in menu is unconditional — it always returns
+    // `Some(menu)`, ignoring position and ctx. Callers needing a
+    // position-aware menu install their own via
+    // `RichTextEditor::context_menu`.
+    Box::new(move |_pos, _ctx| {
         let state_for_build = state.clone();
-        Box::new(build_menu(state_for_build, policy)) as Box<dyn Widget>
+        Some(Box::new(build_menu(state_for_build, policy)) as Box<dyn Widget>)
     })
 }
 
@@ -236,11 +240,11 @@ fn build_menu(state: SharedState, policy: PolicyBundle) -> MenuList {
 ///    widget unhandled; `context_target_at` remains available so the
 ///    app can render its own menu from outside.
 pub(super) fn resolve_factory(
-    user_factory: Option<Box<dyn Fn() -> Box<dyn Widget>>>,
+    user_factory: Option<RichTextContextMenuFactory>,
     default_enabled: bool,
     state: SharedState,
     policy: PolicyBundle,
-) -> Option<Box<dyn Fn() -> Box<dyn Widget>>> {
+) -> Option<RichTextContextMenuFactory> {
     if let Some(user) = user_factory {
         return Some(user);
     }
@@ -249,6 +253,17 @@ pub(super) fn resolve_factory(
     }
     None
 }
+
+/// Internal alias — same shape as the framework's
+/// [`fern_core::widget_builder::ContextMenuFactory`]. Re-declared
+/// locally so the rich-text module doesn't have to thread the public
+/// alias through every signature.
+pub(super) type RichTextContextMenuFactory = Box<
+    dyn Fn(
+        fern_canvas::Point,
+        &mut fern_core::widget::EventContext,
+    ) -> Option<Box<dyn Widget>>,
+>;
 
 /// Keep the `Rc` re-export so callers that need the shared-state
 /// alias stay stable even if the internals move.

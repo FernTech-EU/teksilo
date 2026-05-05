@@ -122,9 +122,9 @@ pub(crate) struct TextInputState {
     /// suffix paint origin.
     pub suffix_width: f32,
 
-    /// Pre-built context menu widget id, created dormant in field.rs build().
-    pub context_menu_id: Option<WidgetId>,
-    /// The field widget's own id, used as anchor for overlays.
+    /// The field widget's own id, used as anchor for overlays (e.g.
+    /// the autocomplete popup) and for downstream tests that snapshot
+    /// AT trees keyed by widget id.
     pub field_widget_id: Option<WidgetId>,
 }
 
@@ -216,7 +216,6 @@ impl TextInputState {
             suffix,
             suffix_engine: None,
             suffix_width: 0.0,
-            context_menu_id: None,
             field_widget_id: None,
         }))
     }

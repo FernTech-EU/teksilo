@@ -81,7 +81,7 @@ pub(crate) struct TabHeader {
     leading_slot: Option<Box<dyn Widget>>,
     trailing_slot: Option<Box<dyn Widget>>,
     tooltip: Option<LocalizedString>,
-    context_menu_factory: Option<Rc<dyn Fn() -> Box<dyn Widget>>>,
+    context_menu_factory: Option<super::delegate::ContextMenuFactory>,
     /// Per-tab close callback. Set when the tab is closable AND the
     /// bar carries an `on_close` handler (or its source is a
     /// `ListModel<T>` providing a default-remove). The header wires
@@ -147,7 +147,7 @@ pub(crate) struct TabHeaderConfig {
     pub leading_slot: Option<Box<dyn Widget>>,
     pub trailing_slot: Option<Box<dyn Widget>>,
     pub tooltip: Option<LocalizedString>,
-    pub context_menu_factory: Option<Rc<dyn Fn() -> Box<dyn Widget>>>,
+    pub context_menu_factory: Option<super::delegate::ContextMenuFactory>,
     pub on_close: Option<Rc<dyn Fn()>>,
     pub on_reorder_to: Option<Rc<dyn Fn(usize)>>,
     pub drag_source_bar_id: Option<WidgetId>,
@@ -584,7 +584,8 @@ impl Widget for TabHeader {
         }
 
         if let Some(factory) = self.context_menu_factory.clone() {
-            handler_set = handler_set.context_menu(move || (factory)());
+            handler_set =
+                handler_set.context_menu(move |pos, ctx| (factory)(pos, ctx));
         }
 
         ctx.apply_self_handlers(handler_set);

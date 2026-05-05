@@ -2130,8 +2130,8 @@ fn editor_context_menu_slot_replaces_default_entirely() {
 
     let doc = TextDocument::new();
     doc.set_plain_text("content").unwrap();
-    let editor = RichTextEditor::editor(doc).context_menu(|| {
-        Box::new(
+    let editor = RichTextEditor::editor(doc).context_menu(|_pos, _ctx| {
+        Some(Box::new(
             crate::menu_list::MenuList::new()
                 .item(
                     crate::menu_item::MenuItem::new_literal("Custom Action A")
@@ -2141,7 +2141,7 @@ fn editor_context_menu_slot_replaces_default_entirely() {
                     crate::menu_item::MenuItem::new_literal("Custom Action B")
                         .on_activate_fn(|_| ()),
                 ),
-        )
+        ))
     });
 
     let mut tree = WidgetTree::new();

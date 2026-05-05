@@ -1,9 +1,10 @@
 //! Pointer dispatch for the text input widget.
 //!
 //! Simplified from [`rich_text::mouse`]: no scroll handling (single-line),
-//! no auto-scroll velocity, no link/image click detection.
-//! Right-click context menu support is wired in `field.rs` build()
-//! where we have `BuildContext` access to pre-create the menu widget.
+//! no auto-scroll velocity, no link/image click detection. Right-click
+//! routes through the framework's `.context_menu(...)` plumbing — see
+//! `field.rs` build() — so this module only handles primary-button
+//! selection and drag.
 
 use fern_canvas::Point;
 use fern_core::event::{EventResponse, PointerButton, WidgetEvent};
@@ -23,9 +24,6 @@ pub(crate) fn handle_pointer_event(
             button,
             modifiers,
         } => {
-            if *button == PointerButton::Secondary {
-                return handle_secondary_click(state, position, ctx);
-            }
             if *button != PointerButton::Primary {
                 return EventResponse::Ignored;
             }
@@ -148,55 +146,36 @@ fn hit_test(state: &SharedState, local: &Point) -> Option<usize> {
     None
 }
 
-/// Handle right-click: if the click lands outside the current selection,
-/// move caret to click position. Then show the pre-built context menu.
-fn handle_secondary_click(
+/// Reposition the caret in response to a right-click that's about to
+/// open the context menu. Called from the `.context_menu(...)`
+/// factory in `field.rs`.
+///
+/// Mirrors the platform convention: a right-click *inside* the
+/// existing selection leaves the selection alone (so menu actions
+/// like Cut / Copy operate on the visible selection), but a
+/// right-click *outside* the selection moves the caret to the click
+/// position so menu actions there target the new caret location.
+///
+/// `position` is in widget-local coords (already transformed by the
+/// dispatch — same coords the new factory closure receives).
+pub(crate) fn reposition_caret_for_context_menu(
     state: &SharedState,
-    position: &Point,
-    ctx: &mut EventContext,
-) -> EventResponse {
-    let local = to_local(state, position);
-    let hit = hit_test(state, &local);
-    if let Some(hit_pos) = hit {
-        let st = state.borrow();
-        let anchor = st.cursor.anchor();
-        let caret = st.cursor.position();
-        let (lo, hi) = (anchor.min(caret), anchor.max(caret));
-        let in_selection = lo != hi && hit_pos >= lo && hit_pos <= hi;
-        drop(st);
-
-        if !in_selection {
-            let st = state.borrow();
-            st.cursor.set_position(hit_pos, MoveMode::MoveAnchor);
-            drop(st);
-            sync_cursor_signals(state);
-        }
-    }
-
-    // Show the pre-built context menu. The menu_id is stashed on the
-    // state by field.rs build(). If it's not there (shouldn't happen),
-    // just eat the event.
+    position: Point,
+) {
+    let local = to_local(state, &position);
+    let Some(hit_pos) = hit_test(state, &local) else {
+        return;
+    };
     let st = state.borrow();
-    let menu_id = st.context_menu_id;
-    let anchor = st.field_widget_id;
+    let anchor = st.cursor.anchor();
+    let caret = st.cursor.position();
+    let (lo, hi) = (anchor.min(caret), anchor.max(caret));
+    let in_selection = lo != hi && hit_pos >= lo && hit_pos <= hi;
     drop(st);
-    if let (Some(menu_id), Some(anchor)) = (menu_id, anchor) {
-        use fern_core::overlay::{
-            DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest,
-        };
-        ctx.activate(menu_id);
-        ctx.show_overlay(OverlayRequest {
-            content_id: menu_id,
-            anchor,
-            placement: OverlayPlacement::AtPointer(*position),
-            dismiss: DismissBehavior::EscapeOrClickOutside,
-            layer: OverlayLayer::InTree,
-            parent_overlay: None,
-            on_dismiss: None,
-            fade_duration: None,
-        });
+    if !in_selection {
+        let st = state.borrow();
+        st.cursor.set_position(hit_pos, MoveMode::MoveAnchor);
+        drop(st);
+        sync_cursor_signals(state);
     }
-
-    ctx.request_frame();
-    EventResponse::Handled
 }

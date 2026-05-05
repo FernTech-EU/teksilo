@@ -169,7 +169,38 @@ Plus a handful of flag-like attachments that don't take event-data closures:
 | `.tab_index(n)` | Explicit tab index override |
 | `.cursor(CursorIcon::Pointer)` | Cursor when pointer is over the widget |
 | `.clips_children(true)` | Scissor clipping to bounds (ScrollArea, MaxSize) |
-| `.context_menu(factory)` | Right-click overlay factory — `Fn() -> Box<dyn Widget>` |
+| `.context_menu(factory)` | Right-click overlay factory — see §3.1.4 |
+
+### 3.1.4 Context-menu factory — `Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>>`
+
+Right-click handling lives at a different tier from the four tap-family hooks. Instead of a recognizer-driven callback, the framework wires a single **factory** that produces the menu widget on demand. When the user right-clicks, the framework's `show_context_menu_for` walks up the parent chain looking for the nearest ancestor with a factory installed, calls it with the click position (widget-local) plus a full `EventContext`, and:
+
+- Mounts the returned widget as an `OverlayLayer::InTree` overlay anchored at the factory-owning widget, placed at the click position.
+- Dismisses pre-existing overlays first.
+- Saves the previously-focused widget for restoration when the menu dismisses.
+- Focuses the menu content so keyboard navigation works immediately.
+
+```rust
+.context_menu(|position, ctx| {
+    // Use `position` to identify what was right-clicked (a row in a
+    // list, a node in a tree, an item under a hit-test).
+    let row = pick_row_at(position.y)?;
+    // Use `ctx` to read window state, query app-state, send intents,
+    // or update Signals before the menu mounts.
+    ctx.send_intent(AppIntent::TelemetryRightClick { row_id: row.id });
+    Some(Box::new(build_menu_for(row)))
+})
+```
+
+The factory is `Fn` (re-entrant) and called fresh on every right-click — the menu's enabled / disabled flags read live state at the moment it opens, so a "Paste" item correctly greys out when the clipboard becomes empty between two right-clicks.
+
+**Returning `None` declines the click** and the framework continues walking up the parent chain to the next ancestor with a factory. This lets a widget conditionally suppress its own menu without uninstalling the factory:
+
+```rust
+.context_menu(|_, _| if disabled.get() { None } else { Some(build_menu()) })
+```
+
+A factory that always returns `None` produces no menu and no fall-through visible effect — the right-click is consumed silently.
 
 ### 3.2 HandlerSet — handlers from inside `build()`
 

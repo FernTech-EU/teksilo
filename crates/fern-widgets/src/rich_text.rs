@@ -107,7 +107,14 @@ pub struct RichTextEditor {
     /// precedence over the default factory regardless of
     /// `default_context_menu_enabled`. Taken out (via `Option::take`)
     /// during `build()` because `Box<dyn Fn>` is not `Clone`.
-    custom_context_menu: Option<Box<dyn Fn() -> Box<dyn fern_core::widget::Widget>>>,
+    custom_context_menu: Option<
+        Box<
+            dyn Fn(
+                fern_canvas::Point,
+                &mut fern_core::widget::EventContext,
+            ) -> Option<Box<dyn fern_core::widget::Widget>>,
+        >,
+    >,
     /// Minimum visible-text height expressed in lines. When set,
     /// switches `size_that_fits` from greedy (consume the proposal)
     /// to **intrinsic** sizing — see [`min_lines`](Self::min_lines).
@@ -265,18 +272,19 @@ impl RichTextEditor {
     }
 
     /// Replace the built-in right-click context menu with a
-    /// user-provided factory. The factory is invoked on each
-    /// right-click inside the widget; it returns whatever `Widget`
-    /// should appear as the menu (typically a
-    /// [`MenuList`](crate::menu_list::MenuList), but any widget
-    /// works).
+    /// user-provided factory. Same shape as the framework's
+    /// [`fern_core::widget_builder::ContextMenuFactory`]: the
+    /// closure receives the click position (widget-local) and a full
+    /// [`EventContext`](fern_core::widget::EventContext), and returns
+    /// `Some(menu_widget)` to mount or `None` to decline (falling
+    /// through to the next ancestor with a factory).
     ///
     /// Taking this branch disables the default menu unconditionally.
     /// The framework's
     /// [`show_context_menu_for`](fern_core::widget_tree) handles
     /// the overlay lifecycle (open at pointer, dismiss on
-    /// click-outside / Escape), so the user's factory only needs to
-    /// build the menu content.
+    /// click-outside / Escape, focus-restore on dismiss), so the
+    /// factory only needs to build the menu content.
     ///
     /// This is an **inherent method**: it shadows the blanket
     /// [`WidgetBuilder::context_menu`](fern_core::widget_builder::WidgetBuilder::context_menu)
@@ -285,7 +293,11 @@ impl RichTextEditor {
     /// node via the same `HandlerSet::context_menu` plumbing.
     pub fn context_menu(
         mut self,
-        factory: impl Fn() -> Box<dyn fern_core::widget::Widget> + 'static,
+        factory: impl Fn(
+            fern_canvas::Point,
+            &mut fern_core::widget::EventContext,
+        ) -> Option<Box<dyn fern_core::widget::Widget>>
+        + 'static,
     ) -> Self {
         self.custom_context_menu = Some(Box::new(factory));
         self
@@ -1157,7 +1169,10 @@ impl Widget for RichTextEditor {
             self.state.clone(),
             policy_snapshot,
         ) {
-            handlers = handlers.context_menu(move || factory());
+            // The resolved factory is already in the framework's
+            // `Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>>`
+            // shape — install it directly.
+            handlers = handlers.context_menu(move |pos, ctx| factory(pos, ctx));
         }
 
         ctx.apply_self_handlers(handlers);
