@@ -60,11 +60,11 @@ impl BannerSeverity {
     }
 }
 
-const GLYPH_SIZE: f32 = 16.0;
-
-/// Small leaf widget that paints the severity glyph (circle or triangle).
+/// Small leaf widget that paints the severity glyph (circle or
+/// triangle). Sized via `BannerStyle::glyph_size` at paint time.
 struct SeverityGlyph {
     severity: BannerSeverity,
+    size: f32,
 }
 
 impl std::fmt::Debug for SeverityGlyph {
@@ -81,7 +81,7 @@ impl Widget for SeverityGlyph {
         proposal: SizeProposal,
         _ctx: &LayoutContext,
     ) -> fern_core::widget::LayoutResponse {
-        proposal.resolve(GLYPH_SIZE, GLYPH_SIZE).into()
+        proposal.resolve(self.size, self.size).into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -213,10 +213,7 @@ impl std::fmt::Debug for Banner {
 impl Widget for Banner {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let severity = self.severity;
-        // Reuse NotificationStyle tokens (already tuned for inline status
-        // strips: 12 dp horizontal / 10 dp vertical / 8 dp corner) — same
-        // family as Snackbar so banners and snackbars feel coherent.
-        let style = ctx.theme().components.notification;
+        let style = ctx.theme().components.banner;
         let radius = CornerRadius::uniform(style.corner_radius);
 
         // Background panel — status surface tint, no border (the surface
@@ -228,7 +225,10 @@ impl Widget for Banner {
         );
 
         // Severity glyph.
-        let glyph = ctx.add(SeverityGlyph { severity });
+        let glyph = ctx.add(SeverityGlyph {
+            severity,
+            size: style.glyph_size,
+        });
 
         // Title + optional description column.
         let title = ctx.add(
@@ -237,7 +237,9 @@ impl Widget for Banner {
                 .bind_color(TextRole::Primary)
                 .single_line(),
         );
-        let mut text_column = VStack::new().spacing(2.0).add_child(title);
+        let mut text_column = VStack::new()
+            .spacing(style.title_description_gap)
+            .add_child(title);
         if let Some(description) = &self.description {
             let desc = ctx.add(
                 TextWidget::new_literal(description)
@@ -250,7 +252,7 @@ impl Widget for Banner {
 
         // Row layout: [glyph] [text + spacer expanding] [action] [dismiss]
         let mut row = HStack::new()
-            .spacing(10.0)
+            .spacing(style.content_gap)
             .alignment(VAlignment::Center)
             .add_child(glyph)
             .add_child(ctx.add(Expand::horizontal().child_id(text_column_id)));

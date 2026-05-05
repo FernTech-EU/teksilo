@@ -66,24 +66,22 @@ use crate::primitives::{
 };
 use crate::text_input::TextInput;
 
-const SEARCH_GLYPH_SIZE: f32 = 14.0;
-/// Reserved width for the magnifier slot — pushes the icon center
-/// inward so it doesn't sit flush against the field's leading edge.
-const SEARCH_GLYPH_SLOT_WIDTH: f32 = 22.0;
+/// Default cap on the number of suggestions rendered in the popup.
+/// Lives in code (not in `SearchFieldStyle`) because it's a behavior
+/// default, not a visual dimension — apps override per-instance via
+/// [`SearchField::max_suggestions`].
 const DEFAULT_MAX_SUGGESTIONS: usize = 8;
-const SUGGESTION_ROW_HEIGHT: f32 = 26.0;
-const SUGGESTION_ROW_PADDING_X: f32 = 10.0;
 
 type SuggestionProvider = Rc<dyn Fn(&str) -> Vec<String>>;
 type OnSelect = Rc<dyn Fn(&str, &mut EventContext)>;
 type OnSubmit = Rc<dyn Fn(&mut EventContext)>;
 
-fn search_glyph() -> impl Widget + 'static {
+fn search_glyph(glyph_size: f32, slot_width: f32) -> impl Widget + 'static {
     let icon = (BuiltInIcons::global().search)()
-        .icon_size(SEARCH_GLYPH_SIZE)
+        .icon_size(glyph_size)
         .color(TextRole::Secondary);
     FixedSize::new()
-        .bind_width(SEARCH_GLYPH_SLOT_WIDTH)
+        .bind_width(slot_width)
         .child(Center::new().child(icon))
 }
 
@@ -206,6 +204,7 @@ impl Widget for SearchField {
         // Built inline (matching DateEdit / TimeEdit / SpinBox) — no
         // helper method or stored Option<TextInput>, just direct
         // construction from the SearchField's own config fields.
+        let style = ctx.theme().components.search_field;
         let placeholder = self
             .placeholder
             .clone()
@@ -220,7 +219,7 @@ impl Widget for SearchField {
         let mut input = TextInput::new(self.text.clone())
             .placeholder(placeholder)
             .show_clear_button(true)
-            .leading_slot(search_glyph())
+            .leading_slot(search_glyph(style.glyph_size, style.glyph_slot_width))
             .enabled(self.enabled)
             .on_submit_fn(move |ctx| {
                 let idx = highlighted_for_submit.get();
@@ -312,7 +311,12 @@ impl Widget for SearchField {
         ctx.visible_when(panel_id, is_open_derived);
 
         // ── Compose ─────────────────────────────────────────────────
-        let column = ctx.add(VStack::new().spacing(2.0).add_child(input_id).add_child(panel_id));
+        let column = ctx.add(
+            VStack::new()
+                .spacing(style.input_panel_gap)
+                .add_child(input_id)
+                .add_child(panel_id),
+        );
         let visible_root = ctx.add(MinSize::new(0.0, 0.0).child_id(column));
         self.root_child_id = Some(visible_root);
 
@@ -458,6 +462,7 @@ impl Widget for SuggestionPanel {
         self.suggestions
             .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
+        let style = ctx.theme().components.search_field;
         let suggestions = self.suggestions.clone();
         let highlighted = self.highlighted.clone();
         let on_select = self.on_select.clone();
@@ -475,7 +480,7 @@ impl Widget for SuggestionPanel {
             let bg = ctx.add(
                 RectWidget::new()
                     .bind_background(bg_role)
-                    .corner_radius(CornerRadius::uniform(2.0)),
+                    .corner_radius(CornerRadius::uniform(style.row_corner_radius)),
             );
             let label_id = ctx.add(
                 TextWidget::new_literal(&value)
@@ -483,7 +488,8 @@ impl Widget for SuggestionPanel {
                     .single_line(),
             );
             let inner_padded = ctx.add(
-                Padding::symmetric(4.0, SUGGESTION_ROW_PADDING_X).child_id(label_id),
+                Padding::symmetric(style.row_padding_vertical, style.row_padding_horizontal)
+                    .child_id(label_id),
             );
             let row_z = ctx.add(ZStack::new().add_child(bg).add_child(inner_padded));
 
@@ -497,6 +503,7 @@ impl Widget for SuggestionPanel {
                     label: value.clone(),
                     index: idx,
                     total,
+                    row_height: style.row_height,
                     selected_signal: highlighted.clone(),
                     inner_id: row_z,
                 }
@@ -524,9 +531,9 @@ impl Widget for SuggestionPanel {
                 .background(SurfaceRole::Raised)
                 .border_color(BorderRole::Default)
                 .border_width(1.0)
-                .corner_radius(CornerRadius::uniform(6.0)),
+                .corner_radius(CornerRadius::uniform(style.panel_corner_radius)),
         );
-        let padded = ctx.add(Padding::uniform(4.0).child_id(listbox_inner));
+        let padded = ctx.add(Padding::uniform(style.panel_padding).child_id(listbox_inner));
         let bordered = ctx.add(ZStack::new().add_child(bg_rect).add_child(padded));
 
         let listbox = ctx.add(SuggestionListBox { inner: bordered });
@@ -624,6 +631,9 @@ struct SuggestionRow {
     label: String,
     index: usize,
     total: usize,
+    /// Minimum row height — pulled from
+    /// `SearchFieldStyle::row_height` at build time.
+    row_height: f32,
     selected_signal: Signal<Option<usize>>,
     inner_id: WidgetId,
 }
@@ -645,8 +655,8 @@ impl Widget for SuggestionRow {
     ) -> fern_core::widget::LayoutResponse {
         let inner = ctx
             .child_size(self.inner_id, proposal)
-            .unwrap_or_else(|| proposal.resolve(0.0, SUGGESTION_ROW_HEIGHT));
-        let height = inner.height.max(SUGGESTION_ROW_HEIGHT);
+            .unwrap_or_else(|| proposal.resolve(0.0, self.row_height));
+        let height = inner.height.max(self.row_height);
         let width = proposal.width.unwrap_or(inner.width).max(inner.width);
         fern_canvas::Size::new(width, height).into()
     }

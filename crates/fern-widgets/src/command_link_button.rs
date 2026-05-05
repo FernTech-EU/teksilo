@@ -30,13 +30,6 @@ use crate::button::InteractionState;
 use crate::primitives::icon_widget::IconWidget;
 use crate::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
 
-const ICON_SIZE: f32 = 28.0;
-const ICON_TEXT_GAP: f32 = 14.0;
-const TITLE_DESC_GAP: f32 = 4.0;
-const PADDING_VERTICAL: f32 = 14.0;
-const PADDING_HORIZONTAL: f32 = 16.0;
-const MIN_HEIGHT: f32 = 64.0;
-
 /// A large two-line CTA button: icon + title + subtitle.
 pub struct CommandLinkButton {
     title: String,
@@ -149,6 +142,7 @@ impl Widget for CommandLinkButton {
         });
         let icon_role = title_role.clone();
 
+        let style = ctx.theme().components.command_link_button;
         let normal_bw = ctx.theme().components.button.border_width;
         let focus_bw = ctx.theme().shape.focus_ring_width;
         let border_width = interaction.map(move |s| match s {
@@ -166,7 +160,7 @@ impl Widget for CommandLinkButton {
         let title_id = ctx.add(title_widget);
 
         let mut text_column = VStack::new()
-            .spacing(TITLE_DESC_GAP)
+            .spacing(style.title_description_gap)
             .alignment(HAlignment::Leading)
             .add_child(title_id);
         if let Some(description) = &self.description {
@@ -182,10 +176,10 @@ impl Widget for CommandLinkButton {
 
         // Optional leading icon.
         let mut row = HStack::new()
-            .spacing(ICON_TEXT_GAP)
+            .spacing(style.icon_text_gap)
             .alignment(VAlignment::Center);
         if let Some(icon) = self.icon.take() {
-            let icon_id = ctx.add(icon.icon_size(ICON_SIZE).bind_color(icon_role));
+            let icon_id = ctx.add(icon.icon_size(style.icon_size).bind_color(icon_role));
             row = row.add_child(icon_id);
         }
         row = row.add_child(text_column_id);
@@ -193,7 +187,7 @@ impl Widget for CommandLinkButton {
 
         // Padding inside the surface.
         let padded = ctx.add(
-            Padding::symmetric(PADDING_VERTICAL, PADDING_HORIZONTAL).child_id(row_id),
+            Padding::symmetric(style.padding_vertical, style.padding_horizontal).child_id(row_id),
         );
 
         // Surface (background + border, drives hover / press / focus).
@@ -206,7 +200,7 @@ impl Widget for CommandLinkButton {
         );
 
         let zstack = ctx.add(ZStack::new().add_child(rect).add_child(padded));
-        let root = ctx.add(crate::primitives::MinSize::new(0.0, MIN_HEIGHT).child_id(zstack));
+        let root = ctx.add(crate::primitives::MinSize::new(0.0, style.min_height).child_id(zstack));
 
         // Attached handlers — same shape as Button but without
         // shortcut / tooltip / has_popup machinery.
@@ -311,9 +305,10 @@ impl Widget for CommandLinkButton {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> fern_core::widget::LayoutResponse {
+        let min_height = ctx.theme.components.command_link_button.min_height;
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, MIN_HEIGHT))
+            .unwrap_or_else(|| proposal.resolve(0.0, min_height))
             .into()
     }
 
@@ -365,7 +360,8 @@ mod tests {
         });
         let b = tree.bounds(id);
         assert!(b.width > 0.0);
-        assert!(b.height >= MIN_HEIGHT);
+        let min_height = Theme::light_default().components.command_link_button.min_height;
+        assert!(b.height >= min_height);
     }
 
     #[test]

@@ -33,7 +33,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole};
+use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::button::InteractionState;
 use crate::primitives::text_input_field::{TextInputField, ValidationFeedback};
@@ -450,19 +450,27 @@ impl Widget for TextInput {
         // measurement — without auto-basis the column reports 0 dp and
         // the whole composite collapses to `MinSize`'s 65 dp floor.
         let text_column_id = if !self.placeholder.is_empty() {
+            // Match the inner TextInputField's text style + single-line
+            // behaviour so the placeholder layout box has the same
+            // intrinsic height as the rich-text engine's frame. Without
+            // `single_line()` the placeholder defaults to Wrap, which
+            // can report extra vertical leading space.
             let ph = TextWidget::new(self.placeholder.clone())
+                .style(TextStyleRole::Body)
                 .color(TextRole::Secondary)
+                .single_line()
                 .a11y_hidden();
+            // Center the placeholder vertically within the column.
+            // `Padding(top=padding_vertical, bottom=padding_vertical)`
+            // pinned the placeholder to the top of its inset box, but
+            // the rich-text engine inside the field paints glyphs with
+            // its own line-leading offset, so the two paths drifted
+            // by a few pixels. `Center` aligns purely on the layout
+            // box midline, which matches the engine's frame midline.
             let ph_id = ctx.add(
-                Expand::new().respect_intrinsic().child(
-                    Padding::new(
-                        field_style.padding_vertical,
-                        0.0,
-                        field_style.padding_vertical,
-                        0.0,
-                    )
-                    .child(ph),
-                ),
+                Expand::new()
+                    .respect_intrinsic()
+                    .child(crate::primitives::Center::new().child(ph)),
             );
             let visible = text_signal_for_vis.map(|t| t.is_empty());
             ctx.visible_when(ph_id, visible);

@@ -1149,6 +1149,116 @@ impl Default for ColorPickerStyle {
     }
 }
 
+// ─── Banner / CommandLinkButton / SearchField ───────────────────────────────
+
+/// Style tokens for [`Banner`](../../fern_widgets/banner/struct.Banner.html) —
+/// a persistent inline status strip distinct from the transient
+/// `Snackbar` that uses [`NotificationStyle`]. Banners get their own
+/// padding family because they're a "page-level" surface (full-width
+/// inside a Panel), whereas notifications are corner-anchored toasts.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct BannerStyle {
+    pub padding_horizontal: f32,
+    pub padding_vertical: f32,
+    pub corner_radius: f32,
+    /// Diameter of the leading severity glyph (info / success / error
+    /// circle, warning triangle).
+    pub glyph_size: f32,
+    /// Horizontal gap between glyph, text column, action widget, and
+    /// dismiss button.
+    pub content_gap: f32,
+    /// Vertical gap between the title and the optional description
+    /// text inside the body column.
+    pub title_description_gap: f32,
+}
+
+impl Default for BannerStyle {
+    fn default() -> Self {
+        Self {
+            padding_horizontal: 12.0,
+            padding_vertical: 10.0,
+            corner_radius: 8.0,
+            glyph_size: 16.0,
+            content_gap: 10.0,
+            title_description_gap: 2.0,
+        }
+    }
+}
+
+/// Style tokens for
+/// [`CommandLinkButton`](../../fern_widgets/command_link_button/struct.CommandLinkButton.html) —
+/// the large two-line CTA used on wizard landing screens. Sized so
+/// that a 28 dp icon + bold title + secondary description fit in a 64
+/// dp row with comfortable padding.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct CommandLinkButtonStyle {
+    pub icon_size: f32,
+    /// Horizontal gap between the leading icon and the text column.
+    pub icon_text_gap: f32,
+    /// Vertical gap between title and description inside the text
+    /// column.
+    pub title_description_gap: f32,
+    pub padding_horizontal: f32,
+    pub padding_vertical: f32,
+    pub min_height: f32,
+}
+
+impl Default for CommandLinkButtonStyle {
+    fn default() -> Self {
+        Self {
+            icon_size: 28.0,
+            icon_text_gap: 14.0,
+            title_description_gap: 4.0,
+            padding_horizontal: 16.0,
+            padding_vertical: 14.0,
+            min_height: 64.0,
+        }
+    }
+}
+
+/// Style tokens for
+/// [`SearchField`](../../fern_widgets/search_field/struct.SearchField.html) —
+/// covers both the leading magnifier slot and the suggestions popup
+/// surface. The bound `TextInput` reads from `text_field` for its
+/// frame; this struct only carries SearchField-specific dimensions.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SearchFieldStyle {
+    /// Visual size of the magnifier glyph drawn inside the leading
+    /// slot.
+    pub glyph_size: f32,
+    /// Reserved width of the leading slot — wider than the glyph so
+    /// it doesn't sit flush against the field's leading edge.
+    pub glyph_slot_width: f32,
+    /// Vertical gap between the input field and the suggestions popup
+    /// rendered below it.
+    pub input_panel_gap: f32,
+    /// Padding between the popup surface border and the row column
+    /// inside.
+    pub panel_padding: f32,
+    pub panel_corner_radius: f32,
+    /// Per-row hover-highlight corner radius.
+    pub row_corner_radius: f32,
+    pub row_padding_horizontal: f32,
+    pub row_padding_vertical: f32,
+    pub row_height: f32,
+}
+
+impl Default for SearchFieldStyle {
+    fn default() -> Self {
+        Self {
+            glyph_size: 14.0,
+            glyph_slot_width: 22.0,
+            input_panel_gap: 2.0,
+            panel_padding: 4.0,
+            panel_corner_radius: 6.0,
+            row_corner_radius: 2.0,
+            row_padding_horizontal: 10.0,
+            row_padding_vertical: 4.0,
+            row_height: 26.0,
+        }
+    }
+}
+
 // ─── Aggregate ──────────────────────────────────────────────────────────────
 
 /// All per-component style structs, owned by the [`crate::theme::Theme`].
@@ -1195,4 +1305,7 @@ pub struct ComponentStyles {
     pub date_edit: DateEditStyle,
     pub time_edit: TimeEditStyle,
     pub color_picker: ColorPickerStyle,
+    pub banner: BannerStyle,
+    pub command_link_button: CommandLinkButtonStyle,
+    pub search_field: SearchFieldStyle,
 }
