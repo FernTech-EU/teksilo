@@ -130,8 +130,29 @@ impl Root {
             .style(TextStyleRole::Small)
             .color(TextRole::Accent);
 
+        // Static dictionary of fruits — the suggestion provider filters
+        // case-insensitively by prefix. Try typing "ap" → Apple,
+        // Apricot. Use ArrowDown / ArrowUp to navigate and Enter to
+        // pick (or click the row).
+        const FRUITS: &[&str] = &[
+            "Apple", "Apricot", "Avocado", "Banana", "Blackberry", "Blueberry",
+            "Cherry", "Coconut", "Cranberry", "Date", "Elderberry", "Fig", "Grape",
+            "Grapefruit", "Guava", "Kiwi", "Lemon", "Lime", "Lychee", "Mango",
+            "Melon", "Nectarine", "Olive", "Orange", "Papaya", "Passionfruit",
+            "Peach", "Pear", "Persimmon", "Pineapple", "Plum", "Pomegranate",
+            "Quince", "Raspberry", "Strawberry", "Tangerine", "Watermelon",
+        ];
         let search = SearchField::new(self.search_text.clone())
-            .placeholder("Filter library — type then press Enter")
+            .placeholder("Type a fruit — Apple, Banana, …")
+            .with_suggestions(|prefix| {
+                let p = prefix.to_lowercase();
+                FRUITS
+                    .iter()
+                    .filter(|f| f.to_lowercase().starts_with(&p))
+                    .map(|f| (*f).to_string())
+                    .collect()
+            })
+            .on_select(|value, _ctx| println!("picked suggestion: {value}"))
             .on_submit_fn({
                 let s = self.search_text.clone();
                 let count = submit_count.clone();
