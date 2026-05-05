@@ -14,6 +14,7 @@ pub mod accordion;
 pub mod animations;
 pub mod avatar;
 pub mod badge;
+pub mod banner;
 pub mod breadcrumb;
 pub mod built_in_button;
 pub mod button;
@@ -25,6 +26,7 @@ pub mod color_edit;
 #[cfg(feature = "rich-text")]
 pub mod color_picker;
 pub mod combo_box;
+pub mod command_link_button;
 pub mod common;
 #[cfg(feature = "rich-text")]
 pub mod date_edit;
@@ -34,10 +36,14 @@ pub mod date_range_edit;
 pub mod date_time_edit;
 pub mod dialog;
 pub(crate) mod drag_preview;
+#[cfg(feature = "rich-text")]
+pub mod file_picker_field;
 pub mod group_box;
 pub mod group_header;
 #[cfg(feature = "rich-text")]
 pub mod hex_color_input;
+#[cfg(feature = "rich-text")]
+pub mod input_dialog;
 pub mod keystroke_format;
 pub mod link;
 pub(crate) mod list_item_a11y;
@@ -62,6 +68,8 @@ pub mod repeater;
 pub mod rich_text;
 pub mod scroll_area;
 pub mod scroll_bar;
+#[cfg(feature = "rich-text")]
+pub mod search_field;
 pub mod segmented_control;
 pub mod shortcut_settings;
 pub mod slider;
@@ -99,6 +107,7 @@ pub use animations::{
 };
 pub use avatar::{Avatar, AvatarCorner, AvatarPresence, AvatarShape, AvatarSize};
 pub use badge::Badge;
+pub use banner::{Banner, BannerSeverity};
 pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
 pub use built_in_button::{BuiltInButton, BuiltInButtonSize, BuiltInIcons};
 pub use button::{Button, ButtonVariant, IconLocation};
@@ -110,6 +119,7 @@ pub use color_edit::ColorEdit;
 #[cfg(feature = "rich-text")]
 pub use color_picker::{ColorPicker, ColorPickerLayout, ColorSwatch, DEFAULT_SWATCHES};
 pub use combo_box::ComboBox;
+pub use command_link_button::CommandLinkButton;
 #[cfg(feature = "rich-text")]
 pub use date_edit::DateEdit;
 #[cfg(feature = "rich-text")]
@@ -117,10 +127,14 @@ pub use date_range_edit::DateRangeEdit;
 #[cfg(feature = "rich-text")]
 pub use date_time_edit::DateTimeEdit;
 pub use dialog::{Dialog, DialogContent, ModalContainer};
+#[cfg(feature = "rich-text")]
+pub use file_picker_field::{FilePickerField, FilePickerKind};
 pub use group_box::GroupBox;
 pub use group_header::GroupHeader;
 #[cfg(feature = "rich-text")]
 pub use hex_color_input::HexColorInput;
+#[cfg(feature = "rich-text")]
+pub use input_dialog::InputDialog;
 pub use link::Link;
 pub use list_view::ListView;
 pub use menu_bar::MenuBar;
@@ -147,6 +161,8 @@ pub use radio_group::RadioGroup;
 pub use repeater::Repeater;
 pub use scroll_area::{ScrollArea, ScrollBarMode, ScrollBarPolicy};
 pub use scroll_bar::{ScrollBar, ScrollBarOrientation};
+#[cfg(feature = "rich-text")]
+pub use search_field::SearchField;
 pub use segmented_control::SegmentedControl;
 pub use shortcut_settings::ShortcutSettings;
 pub use slider::Slider;

@@ -152,10 +152,13 @@ and Qt offers them as `QFoo`.
    a layout subsystem (drag-to-dock regions, stripe buttons, layout
    persistence), not a single widget.
 
-9. **CommandLinkButton** — `QCommandLinkButton`. Large button with icon,
-   primary title, and descriptive subtitle. Used for wizard landing choices
-   ("Create a new project" / "Open existing…"). Existing
-   [Wizard](crates/fern-widgets/src/wizard.rs) would benefit.
+9. **CommandLinkButton** — **Shipped** as
+   [CommandLinkButton](crates/fern-widgets/src/command_link_button.rs).
+   Large two-line CTA: leading 28 dp icon + bold title + secondary
+   description, flat surface (Int UI convention) with hover / press /
+   focus tint and `Role::Button` accessibility. Composable with the
+   existing [Wizard](crates/fern-widgets/src/wizard.rs) for landing
+   screens. Showcase: [examples/new_widgets_kit](examples/new_widgets_kit/).
 
 10. **ToolBox** — `QToolBox`. Vertically stacked collapsible pages, exactly
     one expanded at a time. **Shipped** as a dedicated widget at
@@ -198,11 +201,13 @@ and Qt offers them as `QFoo`.
    fallback. Distinct from linear ProgressBar; for unknown-duration
    async work.
 
-3. **Banner / inline callout** — Persistent inline info/warning/error strip
-   (not a toast). Status color + icon + message + optional action buttons.
-   Tokens exist (`status_*_bg`, `status_*_fg`). Distinct from
-   [Snackbar](crates/fern-widgets/src/snackbar.rs) (transient, corner) and
-   Dialog (modal). **Low effort.**
+3. **Banner / inline callout** — **Shipped** as
+   [Banner](crates/fern-widgets/src/banner.rs) (with `BannerSeverity`).
+   Persistent inline info / success / warning / error strip with status
+   surface tint, severity glyph (circle / triangle), title + optional
+   description, optional action widget, and an optional dismiss-X
+   button. `Role::Status` + `Live::Polite` for screen readers.
+   Showcase: [examples/new_widgets_kit](examples/new_widgets_kit/).
 
 4. **GroupHeader** — Horizontal section header: label + trailing rule line.
    Int UI uses it to segment settings pages and forms. Trivial composite
@@ -416,20 +421,38 @@ remaining items are listed under "Still open" below.
   [HexColorInput](crates/fern-widgets/src/hex_color_input.rs); part of the
   ColorPicker family (Gap 2 item 7).
 
+- **SearchField** — **Shipped** as
+  [SearchField](crates/fern-widgets/src/search_field.rs). Thin
+  [TextInput](crates/fern-widgets/src/text_input.rs) preset with a
+  leading magnifier glyph, default-on clear-X, and the localized
+  "Search" placeholder. `Role::SearchInput` AT role. Drop down to
+  the underlying TextInput via `into_input()` for any option the
+  wrapper doesn't surface. History dropdown + scoped-search chips
+  remain a future extension. Showcase:
+  [examples/new_widgets_kit](examples/new_widgets_kit/).
+- **Path / FilePicker field** — **Shipped** as
+  [FilePickerField](crates/fern-widgets/src/file_picker_field.rs)
+  (with `FilePickerKind::OpenFile` / `PickFolder` / `SaveFile`). A
+  TextInput preset with a trailing Browse button that opens the
+  native file dialog via `EventContextFileDialogExt` and writes the
+  chosen path back into the bound text signal. Multi-file selection
+  doesn't fit the "one editable line" model — apps that need it call
+  the file-dialog API directly. Showcase:
+  [examples/new_widgets_kit](examples/new_widgets_kit/).
+- **InputDialog** — **Shipped** as
+  [InputDialog](crates/fern-widgets/src/input_dialog.rs). Single-field
+  input modal: title + optional prompt + TextInput body + Cancel / OK
+  footer, presented via `present_modal` on the same modal
+  infrastructure as [MessageBox](crates/fern-widgets/src/message_box.rs).
+  `on_result` delivers `Some(value)` on accept, `None` on cancel.
+  Showcase: [examples/new_widgets_kit](examples/new_widgets_kit/).
+
 ### Still open
 
-- **SearchField** — specialized TextField with magnifier icon, clear button,
-  history dropdown, optional scoped-search chips. Int UI's is distinctive.
-- **Path / FilePicker field** — TextField + browse button that opens a file
-  dialog. Native file dialog backend already lands via
-  `EventContextFileDialogExt`; this is the matching field widget.
 - **EditableComboBox** — ComboBox with freeform typing. Current
   [ComboBox](crates/fern-widgets/src/combo_box.rs) is selection-only.
 - **FontComboBox** — ComboBox pre-populated with installed font families,
   each rendered in its own font.
-- **InputDialog** — `QInputDialog` equivalent. Modal with a single input
-  field. [MessageBox](crates/fern-widgets/src/message_box.rs) covers
-  buttons-only modals; this is the input variant.
 
 ---
 
@@ -453,10 +476,10 @@ Listed so they're consciously out of scope, not accidentally forgotten:
 
 ## Recommended phasing
 
-**Phase A — Remaining low-effort wins.** Chip, Banner, Disclosure triangle,
-CommandLinkButton. Each is days, not weeks, and each unlocks real visual
-polish. (Image, GroupHeader, IconButton-as-Button, SplitButton, Spinner,
-Avatar, and the Rich Tooltip extension have shipped.)
+**Phase A — Remaining low-effort wins.** Chip, Disclosure triangle.
+(Banner, CommandLinkButton, Image, GroupHeader, IconButton-as-Button,
+SplitButton, Spinner, Avatar, and the Rich Tooltip extension have
+shipped.)
 
 **Phase B — Remaining mid-effort essentials.** Balloon notification,
 ButtonGroup cross-subtree coordinator, composable-MenuList keyboard /
@@ -470,10 +493,10 @@ all shipped.)
 Gap 2 item 1 and Gap 3.6 item 2.) Each remaining item is a milestone,
 not a widget, and needs its own design pass before implementation.
 
-**Phase D — Remaining text-input-dependent.** SearchField, Path/FilePicker
-field, EditableComboBox, FontComboBox, InputDialog. (TextInput,
-RichTextEditor, SpinBox, DateEdit/TimeEdit/DateTimeEdit/DateRangeEdit,
-HexColorInput have all shipped.)
+**Phase D — Remaining text-input-dependent.** EditableComboBox,
+FontComboBox. (TextInput, RichTextEditor, SpinBox, DateEdit / TimeEdit
+/ DateTimeEdit / DateRangeEdit, HexColorInput, SearchField,
+FilePickerField, InputDialog have all shipped.)
 
 ---
 

@@ -1,0 +1,17 @@
+[package]
+name = "new-widgets-kit"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+authors.workspace = true
+publish = false
+
+[[bin]]
+name = "new-widgets-kit"
+path = "src/main.rs"
+
+[dependencies]
+# `rich-text` pulls in TextInput / RichTextEditor widgets + signals.
+# `file-dialog` is on by default (RfdAsyncBackend) — explicit here to
+# document the dependency for the FilePickerField demo.
+fern-ui = { workspace = true, features = ["rich-text", "file-dialog"] }
