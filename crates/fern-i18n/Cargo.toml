@@ -22,6 +22,7 @@ icu_calendar = { workspace = true }
 icu_locale_core = { workspace = true }
 fixed_decimal = { workspace = true }
 jiff = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 trybuild = "1"

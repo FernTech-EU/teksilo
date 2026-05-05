@@ -90,9 +90,11 @@ struct AnimationState {
     target: Option<f32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SignalAccessError {
+    #[error("signal is read-only")]
     ReadOnly,
+    #[error("signal does not support animation")]
     AnimationUnsupported,
 }
 

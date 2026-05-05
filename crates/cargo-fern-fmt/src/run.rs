@@ -112,37 +112,14 @@ enum FileResult {
     NoFernMacros,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 enum ProcessError {
-    Io(std::io::Error),
-    Fmt(FmtError),
-    Persist(tempfile::PersistError),
-}
-
-impl std::fmt::Display for ProcessError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ProcessError::Io(e) => write!(f, "{e}"),
-            ProcessError::Fmt(e) => write!(f, "{e}"),
-            ProcessError::Persist(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl From<std::io::Error> for ProcessError {
-    fn from(e: std::io::Error) -> Self {
-        ProcessError::Io(e)
-    }
-}
-impl From<FmtError> for ProcessError {
-    fn from(e: FmtError) -> Self {
-        ProcessError::Fmt(e)
-    }
-}
-impl From<tempfile::PersistError> for ProcessError {
-    fn from(e: tempfile::PersistError) -> Self {
-        ProcessError::Persist(e)
-    }
+    #[error("{0}")]
+    Io(#[from] std::io::Error),
+    #[error("{0}")]
+    Fmt(#[from] FmtError),
+    #[error("{0}")]
+    Persist(#[from] tempfile::PersistError),
 }
 
 fn process_one(

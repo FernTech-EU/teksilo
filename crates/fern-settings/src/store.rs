@@ -48,37 +48,14 @@ use crate::flush::{DebouncedWriter, FlushError};
 pub const DEFAULT_DEBOUNCE: Duration = Duration::from_millis(500);
 
 /// Errors surfaced by [`SettingsStore::open`].
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SettingsStoreError {
-    Io(io::Error),
-    Parse(toml::de::Error),
-    Flush(FlushError),
-}
-
-impl std::fmt::Display for SettingsStoreError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SettingsStoreError::Io(e) => write!(f, "settings store I/O: {e}"),
-            SettingsStoreError::Parse(e) => write!(f, "settings store parse: {e}"),
-            SettingsStoreError::Flush(e) => write!(f, "settings store flush: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for SettingsStoreError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            SettingsStoreError::Io(e) => Some(e),
-            SettingsStoreError::Parse(e) => Some(e),
-            SettingsStoreError::Flush(e) => Some(e),
-        }
-    }
-}
-
-impl From<io::Error> for SettingsStoreError {
-    fn from(e: io::Error) -> Self {
-        Self::Io(e)
-    }
+    #[error("settings store I/O: {0}")]
+    Io(#[from] io::Error),
+    #[error("settings store parse: {0}")]
+    Parse(#[source] toml::de::Error),
+    #[error("settings store flush: {0}")]
+    Flush(#[source] FlushError),
 }
 
 /// A statically-named setting. Centralizes the dotted key, the value

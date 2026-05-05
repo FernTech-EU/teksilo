@@ -60,44 +60,21 @@ pub trait Versioned {
 }
 
 /// Errors surfaced by [`Migrator::run`].
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum MigrationError {
     /// The on-disk version is newer than this build can read. Refuse
     /// to deserialize rather than risk silent corruption.
+    #[error("settings file is version {on_disk}, but this build only reads up to {current}")]
     NewerThanCurrent { on_disk: u32, current: u32 },
     /// No migration step is registered for the on-disk version.
+    #[error("no migration step registered for settings version {0}")]
     NoStepFor(u32),
     /// A migration step itself returned an error.
+    #[error("migration step {from} -> {} failed: {message}", from + 1)]
     Step { from: u32, message: String },
     /// The post-migration value did not deserialize as the target type.
-    Deserialize(toml::de::Error),
-}
-
-impl std::fmt::Display for MigrationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MigrationError::NewerThanCurrent { on_disk, current } => write!(
-                f,
-                "settings file is version {on_disk}, but this build only reads up to {current}",
-            ),
-            MigrationError::NoStepFor(v) => {
-                write!(f, "no migration step registered for settings version {v}",)
-            }
-            MigrationError::Step { from, message } => {
-                write!(f, "migration step {from} -> {} failed: {message}", from + 1,)
-            }
-            MigrationError::Deserialize(e) => write!(f, "post-migration deserialization: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for MigrationError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            MigrationError::Deserialize(e) => Some(e),
-            _ => None,
-        }
-    }
+    #[error("post-migration deserialization: {0}")]
+    Deserialize(#[source] toml::de::Error),
 }
 
 type StepFn = Box<dyn Fn(toml::Value) -> Result<toml::Value, String> + Send + Sync>;

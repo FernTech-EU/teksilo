@@ -348,21 +348,12 @@ impl FormattedMask {
 /// any other character becomes a fixed literal (Qt's permissive
 /// behaviour) so most accidental "weird" masks just produce odd
 /// templates rather than parse failures.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum MaskError {
     /// `\` at the end of the mask string with no character to escape.
+    #[error("trailing `\\` in mask string")]
     TrailingBackslash,
 }
-
-impl std::fmt::Display for MaskError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::TrailingBackslash => f.write_str("trailing `\\` in mask string"),
-        }
-    }
-}
-
-impl std::error::Error for MaskError {}
 
 #[cfg(test)]
 mod tests {

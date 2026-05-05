@@ -242,24 +242,15 @@ pub enum ResizeEdge {
     BottomRight,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum PlatformError {
     /// The current platform / window system does not support custom chrome
     /// at all (e.g. X11) or does not support a specific operation (e.g.
     /// `begin_resize` on macOS, where winit lacks `drag_resize_window`).
+    #[error("operation not supported on this platform")]
     Unsupported,
     /// An OS-level call failed. The string is intended for logging, not
     /// programmatic inspection.
+    #[error("platform error: {0}")]
     Os(String),
 }
-
-impl fmt::Display for PlatformError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Unsupported => write!(f, "operation not supported on this platform"),
-            Self::Os(msg) => write!(f, "platform error: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for PlatformError {}

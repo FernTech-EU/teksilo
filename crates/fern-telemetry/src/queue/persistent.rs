@@ -49,35 +49,14 @@ fn default_version() -> u32 {
     1
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum PersistentQueueError {
-    Io(std::io::Error),
-    Database(redb::Error),
-    Serialize(serde_json::Error),
-}
-
-impl std::fmt::Display for PersistentQueueError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(e) => write!(f, "i/o error: {e}"),
-            Self::Database(e) => write!(f, "redb error: {e}"),
-            Self::Serialize(e) => write!(f, "serialize error: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for PersistentQueueError {}
-
-impl From<std::io::Error> for PersistentQueueError {
-    fn from(e: std::io::Error) -> Self {
-        Self::Io(e)
-    }
-}
-
-impl From<redb::Error> for PersistentQueueError {
-    fn from(e: redb::Error) -> Self {
-        Self::Database(e)
-    }
+    #[error("i/o error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("redb error: {0}")]
+    Database(#[from] redb::Error),
+    #[error("serialize error: {0}")]
+    Serialize(#[from] serde_json::Error),
 }
 
 impl From<redb::DatabaseError> for PersistentQueueError {
@@ -107,12 +86,6 @@ impl From<redb::StorageError> for PersistentQueueError {
 impl From<redb::CommitError> for PersistentQueueError {
     fn from(e: redb::CommitError) -> Self {
         Self::Database(e.into())
-    }
-}
-
-impl From<serde_json::Error> for PersistentQueueError {
-    fn from(e: serde_json::Error) -> Self {
-        Self::Serialize(e)
     }
 }
 

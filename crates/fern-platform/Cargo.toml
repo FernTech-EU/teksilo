@@ -23,6 +23,7 @@ rfd = { version = "0.15", default-features = false, features = [
     "async-std",
 ], optional = true }
 async-std = { version = "1", optional = true }
+thiserror = { workspace = true }
 
 [features]
 default = []

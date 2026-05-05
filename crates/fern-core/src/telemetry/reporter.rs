@@ -116,64 +116,33 @@ impl std::fmt::Debug for TelemetryContext {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum TelemetryError {
     /// Anonymous mode: no linkable data to erase.
+    #[error("erasure unsupported (anonymous mode)")]
     ErasureUnsupported,
     /// Anonymous mode: no per-user query surface.
+    #[error("fetch unsupported (anonymous mode)")]
     FetchUnsupported,
     /// Backend has no DELETE endpoint configured (OTLP variants).
+    #[error("erasure unsupported by configured backend")]
     ErasureUnsupportedByBackend,
     /// Backend has no query endpoint configured.
+    #[error("fetch unsupported by configured backend")]
     FetchUnsupportedByBackend,
-    Network(io::Error),
-    Server {
-        status: u16,
-        body: String,
-    },
+    #[error("network error: {0}")]
+    Network(#[from] io::Error),
+    #[error("server returned {status}: {body}")]
+    Server { status: u16, body: String },
     /// Adapter rate-limited the export (Art. 12(3) one-month SLA
     /// applies — the controller must honor the request out-of-band).
+    #[error("rate-limited; retry later")]
     QuotaExceeded,
     /// Consent state forbids the operation right now.
+    #[error("consent not granted")]
     NotConsented,
+    #[error("{0}")]
     Other(String),
-}
-
-impl std::fmt::Display for TelemetryError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ErasureUnsupported => f.write_str("erasure unsupported (anonymous mode)"),
-            Self::FetchUnsupported => f.write_str("fetch unsupported (anonymous mode)"),
-            Self::ErasureUnsupportedByBackend => {
-                f.write_str("erasure unsupported by configured backend")
-            }
-            Self::FetchUnsupportedByBackend => {
-                f.write_str("fetch unsupported by configured backend")
-            }
-            Self::Network(e) => write!(f, "network error: {e}"),
-            Self::Server { status, body } => {
-                write!(f, "server returned {status}: {body}")
-            }
-            Self::QuotaExceeded => f.write_str("rate-limited; retry later"),
-            Self::NotConsented => f.write_str("consent not granted"),
-            Self::Other(s) => f.write_str(s),
-        }
-    }
-}
-
-impl std::error::Error for TelemetryError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Network(e) => Some(e),
-            _ => None,
-        }
-    }
-}
-
-impl From<io::Error> for TelemetryError {
-    fn from(e: io::Error) -> Self {
-        Self::Network(e)
-    }
 }
 
 // --- Consent state --------------------------------------------------

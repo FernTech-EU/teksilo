@@ -69,37 +69,14 @@ impl Default for PrivacyPolicy {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum TelemetryBundleError {
+    #[error(
+        "TelemetryBundle: no adapter configured (call .with_anonymous(...) or .with_pseudonymous(...))"
+    )]
     NoAdapter,
-    Settings(SettingsFileError),
-}
-
-impl std::fmt::Display for TelemetryBundleError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NoAdapter => f.write_str(
-                "TelemetryBundle: no adapter configured \
-                 (call .with_anonymous(...) or .with_pseudonymous(...))",
-            ),
-            Self::Settings(e) => write!(f, "TelemetryBundle: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for TelemetryBundleError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Settings(e) => Some(e),
-            _ => None,
-        }
-    }
-}
-
-impl From<SettingsFileError> for TelemetryBundleError {
-    fn from(e: SettingsFileError) -> Self {
-        Self::Settings(e)
-    }
+    #[error("TelemetryBundle: {0}")]
+    Settings(#[from] SettingsFileError),
 }
 
 /// Declarative configuration for the telemetry stack. Consume with

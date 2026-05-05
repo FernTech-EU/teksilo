@@ -61,6 +61,7 @@ Tests are fully headless — no Xvfb, no GPU, no display server needed.
 - **Naming:** snake_case functions, CamelCase types, standard Rust conventions
 - **Dependencies:** Centralized in workspace `[workspace.dependencies]`
 - **No `mod.rs` files** — always use `foo.rs` alongside `foo/` directory
+- **Error types:** Use `thiserror` (workspace dep) — `#[derive(thiserror::Error)]` with `#[error("...")]` per variant; `#[from]` for transparent conversions, `#[source]` for nested error chains. Don't hand-roll `Display` / `std::error::Error` / `From`.
 
 ## Crate Architecture
 

@@ -751,6 +751,7 @@ version = "0.1.0"
 dependencies = [
  "fern-fmt",
  "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1350,6 +1351,7 @@ dependencies = [
  "image-webp",
  "png 0.17.16",
  "roxmltree",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1387,6 +1389,7 @@ dependencies = [
  "raw-window-handle",
  "serde",
  "slotmap",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1405,6 +1408,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1433,6 +1437,7 @@ dependencies = [
  "jiff",
  "notify",
  "sys-locale",
+ "thiserror 2.0.18",
  "trybuild",
  "unic-langid",
 ]
@@ -1488,6 +1493,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "raw-window-handle",
  "rfd",
+ "thiserror 2.0.18",
  "wgpu",
  "windows 0.61.3",
  "winit",
@@ -1565,6 +1571,7 @@ dependencies = [
  "fern-data",
  "serde",
  "tempfile",
+ "thiserror 2.0.18",
  "toml 0.8.23",
 ]
 
@@ -1578,6 +1585,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror 2.0.18",
  "uuid",
 ]
 
@@ -1658,6 +1666,7 @@ dependencies = [
  "jiff",
  "open",
  "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

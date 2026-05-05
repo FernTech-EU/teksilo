@@ -1,24 +1,15 @@
 //! Raster icon decoding: PNG and static WebP → RGBA pixel data.
 
 /// Error type for image decoding failures.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ImageDecodeError {
     /// The image data is malformed or unsupported.
+    #[error("image decode error: {0}")]
     InvalidData(String),
     /// The image has zero dimensions.
+    #[error("image has zero dimensions")]
     EmptyImage,
 }
-
-impl std::fmt::Display for ImageDecodeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidData(e) => write!(f, "image decode error: {e}"),
-            Self::EmptyImage => write!(f, "image has zero dimensions"),
-        }
-    }
-}
-
-impl std::error::Error for ImageDecodeError {}
 
 /// A decoded raster icon: RGBA pixel data at a fixed size.
 #[derive(Debug, Clone)]

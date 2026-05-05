@@ -8,14 +8,9 @@ use accesskit::ActionRequest;
 use fern_render::Renderer;
 
 /// Error returned when surface texture acquisition fails during rendering.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("Surface error: {0}")]
 pub struct SurfaceRenderError(pub String);
-
-impl std::fmt::Display for SurfaceRenderError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Surface error: {}", self.0)
-    }
-}
 
 /// Outcome of [`PlatformWindow::render_frame`]. Mirrors the wgpu
 /// surface-status cases that matter to the caller so the app loop can

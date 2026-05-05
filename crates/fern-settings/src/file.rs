@@ -25,43 +25,18 @@ use crate::flush::{DebouncedWriter, FlushError};
 use crate::migration::{MigrationError, Migrator, Versioned};
 
 /// Errors surfaced by [`SettingsFile`] operations.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SettingsFileError {
-    Io(io::Error),
-    Parse(toml::de::Error),
-    Migrate(MigrationError),
-    Serialize(toml::ser::Error),
-    Flush(FlushError),
-}
-
-impl std::fmt::Display for SettingsFileError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SettingsFileError::Io(e) => write!(f, "settings file I/O: {e}"),
-            SettingsFileError::Parse(e) => write!(f, "settings file parse: {e}"),
-            SettingsFileError::Migrate(e) => write!(f, "settings file migration: {e}"),
-            SettingsFileError::Serialize(e) => write!(f, "settings file serialize: {e}"),
-            SettingsFileError::Flush(e) => write!(f, "settings file flush: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for SettingsFileError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            SettingsFileError::Io(e) => Some(e),
-            SettingsFileError::Parse(e) => Some(e),
-            SettingsFileError::Migrate(e) => Some(e),
-            SettingsFileError::Serialize(e) => Some(e),
-            SettingsFileError::Flush(e) => Some(e),
-        }
-    }
-}
-
-impl From<io::Error> for SettingsFileError {
-    fn from(e: io::Error) -> Self {
-        Self::Io(e)
-    }
+    #[error("settings file I/O: {0}")]
+    Io(#[from] io::Error),
+    #[error("settings file parse: {0}")]
+    Parse(#[source] toml::de::Error),
+    #[error("settings file migration: {0}")]
+    Migrate(#[source] MigrationError),
+    #[error("settings file serialize: {0}")]
+    Serialize(#[source] toml::ser::Error),
+    #[error("settings file flush: {0}")]
+    Flush(#[source] FlushError),
 }
 
 struct Inner<T> {

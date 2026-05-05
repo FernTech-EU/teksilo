@@ -30,40 +30,12 @@ use crate::store::{DEFAULT_DEBOUNCE, SettingsStore, SettingsStoreError};
 use crate::window_state::WindowStateService;
 
 /// Errors surfaced by [`SettingsBundle::open`].
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SettingsBundleError {
-    Store(SettingsStoreError),
-    File(SettingsFileError),
-}
-
-impl std::fmt::Display for SettingsBundleError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SettingsBundleError::Store(e) => write!(f, "settings bundle: {e}"),
-            SettingsBundleError::File(e) => write!(f, "settings bundle: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for SettingsBundleError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            SettingsBundleError::Store(e) => Some(e),
-            SettingsBundleError::File(e) => Some(e),
-        }
-    }
-}
-
-impl From<SettingsStoreError> for SettingsBundleError {
-    fn from(e: SettingsStoreError) -> Self {
-        Self::Store(e)
-    }
-}
-
-impl From<SettingsFileError> for SettingsBundleError {
-    fn from(e: SettingsFileError) -> Self {
-        Self::File(e)
-    }
+    #[error("settings bundle: {0}")]
+    Store(#[from] SettingsStoreError),
+    #[error("settings bundle: {0}")]
+    File(#[from] SettingsFileError),
 }
 
 /// Declarative configuration for the persistence services an app

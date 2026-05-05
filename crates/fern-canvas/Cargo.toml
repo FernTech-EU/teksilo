@@ -12,3 +12,4 @@ fern-tokens = { workspace = true }
 roxmltree = { workspace = true }
 png = { workspace = true }
 image-webp = { workspace = true }
+thiserror = { workspace = true }

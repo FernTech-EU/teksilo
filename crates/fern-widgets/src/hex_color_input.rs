@@ -534,10 +534,13 @@ fn invalid_message(alpha_enabled: bool) -> String {
     resolve_message_widget(key, &[])
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 enum ParseError {
+    #[error("missing `#` prefix")]
     MissingHash,
+    #[error("invalid hex length")]
     InvalidLength,
+    #[error("invalid hex digit")]
     InvalidDigit,
 }
 

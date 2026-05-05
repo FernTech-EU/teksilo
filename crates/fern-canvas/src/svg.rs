@@ -11,35 +11,24 @@ use crate::geometry::{Point, Rect, Transform2D};
 use crate::path::Path;
 
 /// Error type for SVG parsing failures.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum SvgParseError {
     /// XML is malformed.
+    #[error("SVG XML error: {0}")]
     XmlError(String),
     /// No `<svg>` root element found.
+    #[error("no <svg> root element found")]
     MissingSvgElement,
     /// viewBox attribute is missing or invalid.
+    #[error("invalid viewBox: {0}")]
     InvalidViewBox(String),
     /// Path data string (`d` attribute) is malformed.
+    #[error("invalid path data at position {position}: {detail}")]
     InvalidPathData { detail: String, position: usize },
     /// A `transform` attribute could not be parsed.
+    #[error("invalid transform: {0}")]
     InvalidTransform(String),
 }
-
-impl std::fmt::Display for SvgParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::XmlError(e) => write!(f, "SVG XML error: {e}"),
-            Self::MissingSvgElement => write!(f, "no <svg> root element found"),
-            Self::InvalidViewBox(e) => write!(f, "invalid viewBox: {e}"),
-            Self::InvalidPathData { detail, position } => {
-                write!(f, "invalid path data at position {position}: {detail}")
-            }
-            Self::InvalidTransform(e) => write!(f, "invalid transform: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for SvgParseError {}
 
 /// A parsed SVG icon: merged path geometry + viewBox, ready to be
 /// scaled and rendered. All original fill/stroke colors are stripped.

@@ -45,31 +45,15 @@ use std::time::{Duration, Instant};
 use tempfile::NamedTempFile;
 
 /// Errors surfaced by [`DebouncedWriter::flush_now`].
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum FlushError {
     /// The shared I/O thread panicked or has already shut down. The
     /// writer cannot make progress.
+    #[error("settings I/O thread disconnected")]
     Disconnected,
     /// The atomic write failed.
-    Io(io::Error),
-}
-
-impl std::fmt::Display for FlushError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FlushError::Disconnected => f.write_str("settings I/O thread disconnected"),
-            FlushError::Io(e) => write!(f, "settings flush failed: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for FlushError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            FlushError::Disconnected => None,
-            FlushError::Io(e) => Some(e),
-        }
-    }
+    #[error("settings flush failed: {0}")]
+    Io(#[from] io::Error),
 }
 
 // ---------------------------------------------------------------------------

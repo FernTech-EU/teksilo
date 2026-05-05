@@ -29,25 +29,16 @@ use std::str::FromStr;
 pub struct FmtConfig {}
 
 /// Errors produced by the formatter.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum FmtError {
     /// The `fern!` body failed to parse. Carries the underlying syn error
     /// with its span pointing into the input source.
+    #[error("fern! body parse error: {0}")]
     Parse(syn::Error),
     /// The host Rust file failed to parse. Only produced by [`format_file`].
+    #[error("host file parse error: {0}")]
     HostParse(syn::Error),
 }
-
-impl std::fmt::Display for FmtError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FmtError::Parse(e) => write!(f, "fern! body parse error: {e}"),
-            FmtError::HostParse(e) => write!(f, "host file parse error: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for FmtError {}
 
 /// Format the body of a single `fern!(...)` invocation.
 ///

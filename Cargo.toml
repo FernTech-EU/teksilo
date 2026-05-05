@@ -31,6 +31,7 @@ icu_calendar = "2"
 icu_locale_core = "2"
 fixed_decimal = { version = "0.7", features = ["ryu"] }
 serde = { version = "1", features = ["derive"] }
+thiserror = "2"
 toml = "0.8"
 directories = "6"
 tempfile = "3"

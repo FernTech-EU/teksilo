@@ -173,36 +173,25 @@ impl ParsedPattern {
 }
 
 /// Pattern parse errors.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PatternError {
     /// `%` at end of string.
+    #[error("trailing `%` at end of pattern")]
     TrailingPercent,
     /// `%X` where `X` isn't a supported directive.
+    #[error(
+        "{}",
+        if *with_dash_modifier {
+            format!("unsupported directive `%-{directive}` in pattern")
+        } else {
+            format!("unsupported directive `%{directive}` in pattern")
+        }
+    )]
     UnsupportedDirective {
         directive: char,
         with_dash_modifier: bool,
     },
 }
-
-impl std::fmt::Display for PatternError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::TrailingPercent => f.write_str("trailing `%` at end of pattern"),
-            Self::UnsupportedDirective {
-                directive,
-                with_dash_modifier,
-            } => {
-                if *with_dash_modifier {
-                    write!(f, "unsupported directive `%-{}` in pattern", directive)
-                } else {
-                    write!(f, "unsupported directive `%{}` in pattern", directive)
-                }
-            }
-        }
-    }
-}
-
-impl std::error::Error for PatternError {}
 
 /// What a segment evaluates to. `Year` can be negative; the rest
 /// are non-negative integers. `Period` is `0` for AM, `1` for PM.

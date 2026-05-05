@@ -292,26 +292,15 @@ impl I18nManager {
 
 /// Errors returned by `I18nManager::reload_from_path`. The watcher keeps
 /// the previous bundle intact on any failure and logs the details.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ReloadError {
-    Io(std::io::Error),
+    #[error("failed to read .ftl file: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Fluent parse errors: {0:?}")]
     Parse(Vec<fluent_syntax::parser::ParserError>),
+    #[error("errors adding resource to bundle: {0:?}")]
     AddResource(Vec<fluent_bundle::FluentError>),
 }
-
-impl std::fmt::Display for ReloadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ReloadError::Io(e) => write!(f, "failed to read .ftl file: {e}"),
-            ReloadError::Parse(errs) => write!(f, "Fluent parse errors: {errs:?}"),
-            ReloadError::AddResource(errs) => {
-                write!(f, "errors adding resource to bundle: {errs:?}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for ReloadError {}
 
 /// Apply the framework-wide bundle configuration: turn off isolating
 /// directional marks (so we don't sprinkle U+2068/U+2069 around every
