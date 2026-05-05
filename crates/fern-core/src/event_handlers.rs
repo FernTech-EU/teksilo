@@ -3,23 +3,50 @@
 //! `EventHandlers` stores optional closures for each handler type.
 //! These are stored on the `WidgetNode` in the arena and dispatched
 //! by the framework during event passes.
+//!
+//! The four click-style handlers (`on_tap` / `on_double_tap` /
+//! `on_triple_tap` / `on_long_press`) share a [`TapHandler`] alias —
+//! `Box<dyn FnMut(&TapEvent, &mut EventContext)>` — and are
+//! complemented by four `*_buttons: Option<ButtonMask>` fields that
+//! customise the auto-wired recognizers' acceptance sets. Default
+//! is [`ButtonMask::PRIMARY`] for every recognizer; widen via the
+//! matching `accept_*_buttons(...)` builder method on `HandlerSet`,
+//! `WidgetBuilder`, or `WidgetWithHandlers`.
 
 use fern_canvas::Point;
 
 use crate::drag_payload::DragPayload;
 use crate::drag_state::DropFeedback;
-use crate::event::{EventResponse, WidgetEvent};
-use crate::gesture::{DragPhase, GestureArena, PinchPhase, SwipeDirection};
+use crate::event::{ButtonMask, EventResponse, WidgetEvent};
+use crate::gesture::{DragPhase, GestureArena, PinchPhase, SwipeDirection, TapEvent};
 use crate::widget::EventContext;
+
+/// Type alias for the four tap-family handler closures
+/// (`on_tap` / `on_double_tap` / `on_triple_tap` / `on_long_press`).
+/// They all share the same shape: take a borrowed `TapEvent` (carrying
+/// position, button, and modifiers at the finalising event) plus the
+/// usual `EventContext`.
+pub(crate) type TapHandler = Box<dyn FnMut(&TapEvent, &mut EventContext)>;
 
 /// Event handlers attached to a widget node. Each field is an optional
 /// closure dispatched by the framework during the event pass.
 #[allow(clippy::type_complexity)]
 pub(crate) struct EventHandlers {
-    pub on_tap: Option<Box<dyn FnMut(Point, &mut EventContext)>>,
-    pub on_double_tap: Option<Box<dyn FnMut(Point, &mut EventContext)>>,
-    pub on_triple_tap: Option<Box<dyn FnMut(Point, &mut EventContext)>>,
-    pub on_long_press: Option<Box<dyn FnMut(Point, &mut EventContext)>>,
+    pub on_tap: Option<TapHandler>,
+    pub on_double_tap: Option<TapHandler>,
+    pub on_triple_tap: Option<TapHandler>,
+    pub on_long_press: Option<TapHandler>,
+    /// Per-recognizer button-acceptance overrides for the auto-wired
+    /// gesture arena. `None` → recognizer uses its default
+    /// (`ButtonMask::PRIMARY`). Set via `accept_tap_buttons(...)` /
+    /// `accept_double_tap_buttons(...)` / `accept_triple_tap_buttons(...)`
+    /// / `accept_long_press_buttons(...)` on the widget builder or
+    /// `HandlerSet`. Read by `ensure_gesture_arena` when constructing
+    /// the arena.
+    pub tap_buttons: Option<ButtonMask>,
+    pub double_tap_buttons: Option<ButtonMask>,
+    pub triple_tap_buttons: Option<ButtonMask>,
+    pub long_press_buttons: Option<ButtonMask>,
     pub on_drag: Option<Box<dyn FnMut(DragPhase, &mut EventContext)>>,
     pub on_swipe: Option<Box<dyn FnMut(SwipeDirection, f32, &mut EventContext)>>,
     pub on_pinch: Option<Box<dyn FnMut(PinchPhase, &mut EventContext)>>,
@@ -94,6 +121,10 @@ impl EventHandlers {
             on_double_tap: None,
             on_triple_tap: None,
             on_long_press: None,
+            tap_buttons: None,
+            double_tap_buttons: None,
+            triple_tap_buttons: None,
+            long_press_buttons: None,
             on_drag: None,
             on_swipe: None,
             on_pinch: None,
@@ -139,10 +170,14 @@ impl EventHandlers {
 
     pub fn merge(self, other: EventHandlers) -> EventHandlers {
         EventHandlers {
-            on_tap: merge_point_handler(self.on_tap, other.on_tap),
-            on_double_tap: merge_point_handler(self.on_double_tap, other.on_double_tap),
-            on_triple_tap: merge_point_handler(self.on_triple_tap, other.on_triple_tap),
-            on_long_press: merge_point_handler(self.on_long_press, other.on_long_press),
+            on_tap: merge_tap_handler(self.on_tap, other.on_tap),
+            on_double_tap: merge_tap_handler(self.on_double_tap, other.on_double_tap),
+            on_triple_tap: merge_tap_handler(self.on_triple_tap, other.on_triple_tap),
+            on_long_press: merge_tap_handler(self.on_long_press, other.on_long_press),
+            tap_buttons: other.tap_buttons.or(self.tap_buttons),
+            double_tap_buttons: other.double_tap_buttons.or(self.double_tap_buttons),
+            triple_tap_buttons: other.triple_tap_buttons.or(self.triple_tap_buttons),
+            long_press_buttons: other.long_press_buttons.or(self.long_press_buttons),
             on_drag: merge_drag_handler(self.on_drag, other.on_drag),
             on_swipe: merge_swipe_handler(self.on_swipe, other.on_swipe),
             on_pinch: merge_pinch_handler(self.on_pinch, other.on_pinch),
@@ -173,6 +208,21 @@ fn merge_point_handler(
         (Some(mut existing), Some(mut incoming)) => Some(Box::new(move |point, ctx| {
             existing(point, ctx);
             incoming(point, ctx);
+        })),
+        (Some(existing), None) => Some(existing),
+        (None, Some(incoming)) => Some(incoming),
+        (None, None) => None,
+    }
+}
+
+fn merge_tap_handler(
+    existing: Option<TapHandler>,
+    incoming: Option<TapHandler>,
+) -> Option<TapHandler> {
+    match (existing, incoming) {
+        (Some(mut existing), Some(mut incoming)) => Some(Box::new(move |event, ctx| {
+            existing(event, ctx);
+            incoming(event, ctx);
         })),
         (Some(existing), None) => Some(existing),
         (None, Some(incoming)) => Some(incoming),
@@ -323,6 +373,10 @@ impl std::fmt::Debug for EventHandlers {
             .field("on_double_tap", &self.on_double_tap.is_some())
             .field("on_triple_tap", &self.on_triple_tap.is_some())
             .field("on_long_press", &self.on_long_press.is_some())
+            .field("tap_buttons", &self.tap_buttons)
+            .field("double_tap_buttons", &self.double_tap_buttons)
+            .field("triple_tap_buttons", &self.triple_tap_buttons)
+            .field("long_press_buttons", &self.long_press_buttons)
             .field("on_drag", &self.on_drag.is_some())
             .field("on_swipe", &self.on_swipe.is_some())
             .field("on_pinch", &self.on_pinch.is_some())

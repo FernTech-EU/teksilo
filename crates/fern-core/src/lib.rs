@@ -45,7 +45,9 @@ pub use color_prop::{ColorProp, TextStyleProp};
 pub use drag_payload::{DragData, DragPayload};
 pub use drag_state::DropFeedback;
 pub use environment::{Environment, LayoutDirection};
-pub use event::{EventResponse, Key, Modifiers, PointerButton, ScrollDelta, WidgetEvent};
+pub use event::{
+    ButtonMask, EventResponse, Key, Modifiers, PointerButton, ScrollDelta, WidgetEvent,
+};
 pub use event_source::{
     AppEventPoster, EventSource, EventSourceAdapter, SubscriptionHandle, SubscriptionId,
 };
@@ -53,7 +55,7 @@ pub use focus::{FocusOrigin, FocusPolicy};
 pub use gesture::{
     DoubleTapRecognizer, DragRecognizer, GestureArena, GestureEvent, GestureRecognizer,
     GestureResult, LongPressRecognizer, RawPointerEvent, SwipeDirection, SwipeRecognizer,
-    TapRecognizer, TripleTapRecognizer,
+    TapEvent, TapRecognizer, TripleTapRecognizer,
 };
 pub use idle::IdleDeadline;
 pub use modal::{

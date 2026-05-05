@@ -302,7 +302,7 @@ impl Widget for Snackbar {
 
         let open_on_tap = {
             let dismiss = dismiss.clone();
-            move |_pos: fern_canvas::Point, ctx: &mut fern_core::widget::EventContext| {
+            move |_event: &fern_core::TapEvent, ctx: &mut fern_core::widget::EventContext| {
                 if !enabled {
                     return;
                 }

@@ -1,6 +1,6 @@
 use fern_canvas::Point;
 use fern_core::event::{Key, Modifiers, PointerButton, ScrollDelta, WidgetEvent};
-use fern_core::gesture::GestureEvent;
+use fern_core::gesture::{GestureEvent, TapEvent};
 
 /// State tracked during event translation.
 pub struct TranslationState {
@@ -60,6 +60,10 @@ pub fn translate_mouse_button(button: winit::event::MouseButton) -> Option<Point
         winit::event::MouseButton::Left => Some(PointerButton::Primary),
         winit::event::MouseButton::Right => Some(PointerButton::Secondary),
         winit::event::MouseButton::Middle => Some(PointerButton::Middle),
+        winit::event::MouseButton::Back => Some(PointerButton::Back),
+        winit::event::MouseButton::Forward => Some(PointerButton::Forward),
+        // MouseButton::Other(_) — vendor-specific extra buttons we don't
+        // currently surface. Returning None drops the event.
         _ => None,
     }
 }
@@ -258,10 +262,20 @@ pub fn translate_rotation_gesture(
 }
 
 /// Translate a winit DoubleTapGesture (trackpad smart magnification).
+///
+/// Synthetic OS-driven double-tap: there's no underlying mouse button
+/// or modifier set the OS hands us, so we attribute it to
+/// `PointerButton::Primary` with no modifiers. Apps that need richer
+/// trackpad-gesture metadata should match on `WidgetEvent::Gesture`
+/// directly rather than hooking `on_double_tap`.
 pub fn translate_double_tap_gesture(state: &TranslationState) -> Option<WidgetEvent> {
     let position = state.cursor_position.unwrap_or(Point::ZERO);
     Some(WidgetEvent::Gesture {
-        gesture: GestureEvent::DoubleTap { position },
+        gesture: GestureEvent::DoubleTap(TapEvent::new(
+            position,
+            PointerButton::Primary,
+            state.current_modifiers,
+        )),
     })
 }
 
@@ -397,11 +411,12 @@ mod tests {
         translate_cursor_moved(75.0, 25.0, &mut state);
         let event = translate_double_tap_gesture(&state).unwrap();
         if let WidgetEvent::Gesture {
-            gesture: GestureEvent::DoubleTap { position },
+            gesture: GestureEvent::DoubleTap(tap_event),
         } = event
         {
-            assert_eq!(position.x, 75.0);
-            assert_eq!(position.y, 25.0);
+            assert_eq!(tap_event.position.x, 75.0);
+            assert_eq!(tap_event.position.y, 25.0);
+            assert_eq!(tap_event.button, PointerButton::Primary);
         } else {
             panic!("Expected DoubleTap");
         }

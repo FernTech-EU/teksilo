@@ -3899,7 +3899,7 @@ Instead of implementing a monolithic `event()` method with a match on every even
 // At the widget construction site or inside build():
 MinSize::new(48.0, 48.0)
     .child(content)
-    .on_tap(|ctx| { ctx.send_intent(AppIntent::Clicked); })
+    .on_tap(|event, ctx| { ctx.send_intent(AppIntent::Clicked); })
     .on_hover(|entered, ctx| {
         interaction.set(if entered { Hovered } else { Idle });
     })
@@ -3911,10 +3911,18 @@ The handler methods are defined on a `WidgetBuilder` trait that is blanket-imple
 
 ```rust
 pub trait WidgetBuilder: Widget + Sized {
-    // Gesture handlers — the framework attaches the appropriate recognizer
-    fn on_tap(self, f: impl FnMut(&mut EventContext) + 'static) -> Self;
-    fn on_double_tap(self, f: impl FnMut(&mut EventContext) + 'static) -> Self;
-    fn on_long_press(self, f: impl FnMut(Point, &mut EventContext) + 'static) -> Self;
+    // Gesture handlers — the framework attaches the appropriate recognizer.
+    // The four click-style handlers all receive a borrowed `TapEvent`
+    // (position, button, modifiers). Default acceptance is
+    // `ButtonMask::PRIMARY`; widen via `accept_*_buttons(...)`.
+    fn on_tap(self, f: impl FnMut(&TapEvent, &mut EventContext) + 'static) -> Self;
+    fn on_double_tap(self, f: impl FnMut(&TapEvent, &mut EventContext) + 'static) -> Self;
+    fn on_triple_tap(self, f: impl FnMut(&TapEvent, &mut EventContext) + 'static) -> Self;
+    fn on_long_press(self, f: impl FnMut(&TapEvent, &mut EventContext) + 'static) -> Self;
+    fn accept_tap_buttons(self, mask: impl Into<ButtonMask>) -> Self;
+    fn accept_double_tap_buttons(self, mask: impl Into<ButtonMask>) -> Self;
+    fn accept_triple_tap_buttons(self, mask: impl Into<ButtonMask>) -> Self;
+    fn accept_long_press_buttons(self, mask: impl Into<ButtonMask>) -> Self;
     fn on_drag(self, f: impl FnMut(DragPhase, &mut EventContext) + 'static) -> Self;
 
     // Focus and keyboard
@@ -4073,6 +4081,18 @@ pub(crate) struct EventHandlers {
     pub on_tap: Option<Box<dyn FnMut(&mut EventContext)>>,
     pub on_double_tap: Option<Box<dyn FnMut(&mut EventContext)>>,
     pub on_long_press: Option<Box<dyn FnMut(Point, &mut EventContext)>>,
+    // The four click-style handlers all receive a borrowed `TapEvent`
+    // (position + button + modifiers). Default acceptance is
+    // `ButtonMask::PRIMARY`; widen via the four `*_buttons: Option<ButtonMask>`
+    // fields populated by `accept_*_buttons(...)` builder methods.
+    pub on_tap: Option<Box<dyn FnMut(&TapEvent, &mut EventContext)>>,
+    pub on_double_tap: Option<Box<dyn FnMut(&TapEvent, &mut EventContext)>>,
+    pub on_triple_tap: Option<Box<dyn FnMut(&TapEvent, &mut EventContext)>>,
+    pub on_long_press: Option<Box<dyn FnMut(&TapEvent, &mut EventContext)>>,
+    pub tap_buttons: Option<ButtonMask>,
+    pub double_tap_buttons: Option<ButtonMask>,
+    pub triple_tap_buttons: Option<ButtonMask>,
+    pub long_press_buttons: Option<ButtonMask>,
     pub on_drag: Option<Box<dyn FnMut(DragPhase, &mut EventContext)>>,
     pub on_hover: Option<Box<dyn FnMut(bool, &mut EventContext)>>,
     pub on_key: Option<Box<dyn FnMut(Key, Modifiers, &mut EventContext) -> bool>>,

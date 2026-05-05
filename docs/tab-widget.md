@@ -313,24 +313,38 @@ pub enum TabSizing {
 | Orientation  | "Layout axis" | Default       | Meaning                                                           |
 |--------------|---------------|---------------|-------------------------------------------------------------------|
 | `Horizontal` | width         | `Shared`      | Uniform tab widths (Firefox / Chrome convention).                 |
-| `Vertical`   | height        | `Shared`      | Uniform pill heights (sidebar / IDE-perspective convention).      |
+| `Vertical`   | height        | `Shared`      | Uniform pill heights — fixed at `editor_tab_height`.              |
 
 Pinned tabs are **always fixed-extent** (`pinned_tab_width`) regardless
 of `TabSizing` — that's what "pinned" means visually.
 
-Shared-extent math (per layout pass, in pseudo-code):
+The two orientations apply Shared sizing differently:
 
-```text
-available = scroll_region_extent  // excludes pinned strip + bar slots + dropdown + scroll arrows
-n         = unpinned_count
-ideal     = available / n
-target    = clamp(ideal, min_tab_extent, max_tab_extent)
-```
+- **Horizontal** divides the viewport width across tabs (Firefox /
+  Chrome convention) and clamps by the `min_tab_width` /
+  `max_tab_width` knobs:
 
-If `target * n < available`, slack is left as trailing empty space
-inside the scroll region (tabs do **not** stretch past `max`). If
-`target * n > available`, content overflows into scroll (arrows, wheel
-remap, dropdown engage normally).
+  ```text
+  available = scroll_region_width
+  n         = unpinned_count
+  ideal     = available / n
+  target    = clamp(ideal, min_tab_width, max_tab_width)
+  ```
+
+  If `target * n < available`, slack is left as trailing empty space
+  inside the scroll region (tabs do **not** stretch past `max`). If
+  `target * n > available`, content overflows into scroll (arrows,
+  wheel remap, dropdown engage normally).
+
+- **Vertical does NOT divide the viewport.** Sidebar pills stay at
+  the intrinsic per-tab height (`theme.components.tab.editor_tab_height`,
+  default 50 dp) regardless of how tall the bar is. A 800 dp bar with
+  4 tabs gives 4 pills of 50 dp at the top, not 4 × 200 dp bands.
+  This matches VS Code, IntelliJ tool-window tabs, and the user
+  expectation of sidebar tabs being short pills. The `min_tab_width`
+  / `max_tab_width` knobs are width-defaulted (96 / 240) and
+  intentionally **don't apply to vertical's height axis** — they'd
+  force pills unreasonably tall.
 
 Reactive: `TabWidget::sizing_signal(Signal<TabSizing>)` rebinds at
 `BindingLevel::Rebuild` so toggling Shared ↔ Independent is a one-line
@@ -416,7 +430,8 @@ is a drag source; the bar is the drop target.
   through a shared `Cell<Option<f32>>` that the bar's `paint()` reads.
 - **Drop indicator.** A 2 dp accent-color line at the insertion
   boundary. Vertical line for horizontal bar, horizontal line for
-  vertical bar (paint is axis-aware).
+  vertical bar — both the paint and the hover-to-insertion-boundary
+  math are axis-aware.
 - **Edge auto-scroll.** `on_drag_tick` ramps scroll velocity inside a
   32 dp edge zone, capped at 12 dp/frame — same constants as `ListView`.
 - **Pinned/unpinned model index translation.** Insertion is computed in
@@ -427,9 +442,7 @@ is a drag source; the bar is the drop target.
 - **Cross-pane drops** (drop a non-pinned tab into the pinned strip, or
   vice versa) fire `on_pin_toggle` instead of `on_reorder`.
 
-Vertical drag-reorder paints axis-aware drop indicators today; the
-y-axis insertion math is the only piece still pending (horizontal bar
-DnD is fully wired).
+Drag-reorder is fully wired in both orientations.
 
 ---
 
@@ -636,9 +649,6 @@ TabWidget::new(selected)
   `Wrap::max_lines(...)`; dropped — lots of layout machinery for a
   feature most desktop apps don't use, and the overflow dropdown covers
   the same fast-jump need)
-- vertical drag-reorder y-axis insertion math (drop-indicator paint is
-  axis-aware; the hover-to-insertion-boundary computation is x-only
-  today)
 - touchscreen flick momentum on the scroll viewport (desktop trackpads
   hit the existing `ScrollDelta::Pixels` path with `Easing::EaseOut`
   animation; touch flicks would need `ScrollArea` ↔ `SwipeRecognizer`

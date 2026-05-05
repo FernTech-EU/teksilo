@@ -53,8 +53,8 @@ impl Widget for LocaleTab {
         let snapshot_handle = self.locales.clone();
         let handlers = HandlerSet::new()
             .focusable(true)
-            .on_tap(move |position, event_ctx| {
-                let idx = (position.y / ROW_HEIGHT).floor() as usize;
+            .on_tap(move |event, event_ctx| {
+                let idx = (event.position.y / ROW_HEIGHT).floor() as usize;
                 let tag = snapshot_handle.borrow().get(idx).cloned();
                 if let Some(tag) = tag {
                     event_ctx.set_locale(tag);

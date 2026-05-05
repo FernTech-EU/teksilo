@@ -351,6 +351,7 @@ Visual showcase: `cargo run -p animations-kit`.
 - `EventHandlers` struct on `WidgetNode` stores closures, dispatched by framework
 - `.focusable(true)`, `.cursor(CursorIcon::Pointer)` — framework-level properties on node
 - Cross-widget behavior: `ctx.send_intent(MyIntent::X)` inside handlers; ancestor `Action`s consume it (see "Actions, Intents & Shortcuts")
+- **Tap-family callbacks take `&TapEvent` (`{ position, button, modifiers }`)** — `on_tap` / `on_double_tap` / `on_triple_tap` / `on_long_press`. Default acceptance is `ButtonMask::PRIMARY` only (right-click never activates `on_tap` by accident). Widen with `.accept_tap_buttons(...)` / `accept_double_tap_buttons(...)` / `accept_triple_tap_buttons(...)` / `accept_long_press_buttons(...)`. `PointerButton` covers `Primary | Secondary | Middle | Back | Forward`. Multi-tap recognizers require button-match across the whole sequence; mixed-button sequences fail rather than spuriously firing.
 
 ## Accessibility Overrides
 
@@ -735,7 +736,7 @@ impl Widget for MyWidget {
 // Attached event handlers — via WidgetBuilder on child widgets
 ctx.add(
     MinSize::new(48.0, 48.0).child(content)
-        .on_tap(|ctx| { ctx.send_intent(MyIntent::Clicked); })
+        .on_tap(|_event, ctx| { ctx.send_intent(MyIntent::Clicked); })
         .on_hover(move |entered, _ctx| { interaction.set(if entered { Hovered } else { Idle }); })
         .focusable(true)
         .cursor(CursorIcon::Pointer)
@@ -744,7 +745,7 @@ ctx.add(
 // Attached event handlers — via HandlerSet on self in build()
 fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
     let handlers = HandlerSet::new()
-        .on_tap(move |ctx| { /* ... */ })
+        .on_tap(move |_event, ctx| { /* ... */ })
         .on_hover(move |entered, _ctx| { /* ... */ })
         .focusable(true)
         .cursor(CursorIcon::Pointer);

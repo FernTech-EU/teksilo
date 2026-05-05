@@ -829,7 +829,9 @@ impl WidgetTree {
                 }
             }
             WidgetEvent::PointerDown {
-                position, button, ..
+                position,
+                button,
+                modifiers,
             } => {
                 // Raw pointer handler runs first so widgets can intercept
                 // events that the gesture recognizers won't catch (e.g.
@@ -862,6 +864,7 @@ impl WidgetTree {
                     let result = arena.process(&RawPointerEvent::Down {
                         position: *position,
                         button: *button,
+                        modifiers: *modifiers,
                     });
                     if let Some(gesture) = result {
                         Self::dispatch_recognized_gesture(node, gesture, ctx);
@@ -871,7 +874,9 @@ impl WidgetTree {
                 None
             }
             WidgetEvent::PointerUp {
-                position, button, ..
+                position,
+                button,
+                modifiers,
             } => {
                 if fire_on_pointer_event {
                     let r = fire_event_handler_both(
@@ -888,6 +893,7 @@ impl WidgetTree {
                     let result = arena.process(&RawPointerEvent::Up {
                         position: *position,
                         button: *button,
+                        modifiers: *modifiers,
                     });
                     if let Some(gesture) = result {
                         Self::dispatch_recognized_gesture(node, gesture, ctx);
@@ -964,6 +970,27 @@ impl WidgetTree {
             return;
         }
 
+        // Read per-handler button-mask overrides from BOTH buckets,
+        // preferring the own (`handlers`) bucket. Falls back to the
+        // recognizer's own default (`ButtonMask::PRIMARY`) when neither
+        // bucket sets a mask.
+        let tap_buttons = node
+            .handlers
+            .tap_buttons
+            .or(node.external_handlers.tap_buttons);
+        let double_tap_buttons = node
+            .handlers
+            .double_tap_buttons
+            .or(node.external_handlers.double_tap_buttons);
+        let triple_tap_buttons = node
+            .handlers
+            .triple_tap_buttons
+            .or(node.external_handlers.triple_tap_buttons);
+        let long_press_buttons = node
+            .handlers
+            .long_press_buttons
+            .or(node.external_handlers.long_press_buttons);
+
         let mut arena = GestureArena::new();
         // Important: install `TapRecognizer` ONLY when the widget actually
         // wired `on_tap` AND no multi-tap recognizer is in the arena. A
@@ -977,19 +1004,35 @@ impl WidgetTree {
         // use `on_pointer_event::PointerDown` (which fires before the
         // gesture arena and runs regardless of multi-tap state).
         if has_tap && !(has_double_tap || has_triple_tap) {
-            arena.add(crate::gesture::TapRecognizer::new());
+            let mut rec = crate::gesture::TapRecognizer::new();
+            if let Some(mask) = tap_buttons {
+                rec = rec.accept_buttons(mask);
+            }
+            arena.add(rec);
         }
         if has_double_tap {
-            arena.add(crate::gesture::DoubleTapRecognizer::new());
+            let mut rec = crate::gesture::DoubleTapRecognizer::new();
+            if let Some(mask) = double_tap_buttons {
+                rec = rec.accept_buttons(mask);
+            }
+            arena.add(rec);
         }
         if has_triple_tap {
-            arena.add(crate::gesture::TripleTapRecognizer::new());
+            let mut rec = crate::gesture::TripleTapRecognizer::new();
+            if let Some(mask) = triple_tap_buttons {
+                rec = rec.accept_buttons(mask);
+            }
+            arena.add(rec);
         }
         if has_drag {
             arena.add(crate::gesture::DragRecognizer::new().threshold(5.0));
         }
         if has_long_press {
-            arena.add(crate::gesture::LongPressRecognizer::new());
+            let mut rec = crate::gesture::LongPressRecognizer::new();
+            if let Some(mask) = long_press_buttons {
+                rec = rec.accept_buttons(mask);
+            }
+            arena.add(rec);
         }
         if has_swipe {
             arena.add(crate::gesture::SwipeRecognizer::new());
@@ -1020,36 +1063,36 @@ impl WidgetTree {
         // and more importantly, so widgets that rely on one bucket don't
         // miss the gesture when the other is empty.
         match gesture {
-            GestureEvent::Tap { position } => {
+            GestureEvent::Tap(event) => {
                 if let Some(h) = node.external_handlers.on_tap.as_mut() {
-                    h(position, ctx);
+                    h(&event, ctx);
                 }
                 if let Some(h) = node.handlers.on_tap.as_mut() {
-                    h(position, ctx);
+                    h(&event, ctx);
                 }
             }
-            GestureEvent::DoubleTap { position } => {
+            GestureEvent::DoubleTap(event) => {
                 if let Some(h) = node.external_handlers.on_double_tap.as_mut() {
-                    h(position, ctx);
+                    h(&event, ctx);
                 }
                 if let Some(h) = node.handlers.on_double_tap.as_mut() {
-                    h(position, ctx);
+                    h(&event, ctx);
                 }
             }
-            GestureEvent::TripleTap { position } => {
+            GestureEvent::TripleTap(event) => {
                 if let Some(h) = node.external_handlers.on_triple_tap.as_mut() {
-                    h(position, ctx);
+                    h(&event, ctx);
                 }
                 if let Some(h) = node.handlers.on_triple_tap.as_mut() {
-                    h(position, ctx);
+                    h(&event, ctx);
                 }
             }
-            GestureEvent::LongPress { position } => {
+            GestureEvent::LongPress(event) => {
                 if let Some(h) = node.external_handlers.on_long_press.as_mut() {
-                    h(position, ctx);
+                    h(&event, ctx);
                 }
                 if let Some(h) = node.handlers.on_long_press.as_mut() {
-                    h(position, ctx);
+                    h(&event, ctx);
                 }
             }
             GestureEvent::DragStarted { position, button } => {

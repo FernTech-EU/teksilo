@@ -5,12 +5,20 @@
 //! the handlers and metadata alongside the widget. When the widget is
 //! inserted into the arena, the handler set is extracted and applied to
 //! the `WidgetNode`.
+//!
+//! The four click-style handlers (`on_tap` / `on_double_tap` /
+//! `on_triple_tap` / `on_long_press`) all receive a borrowed
+//! [`crate::gesture::TapEvent`] (position + button + modifiers) and
+//! default to [`crate::event::ButtonMask::PRIMARY`] acceptance. Widen
+//! that filter via the matching `accept_*_buttons(...)` knob — see the
+//! "Event System" section in `docs/events-and-gestures.md` for the
+//! full contract and examples.
 
 use fern_canvas::Point;
 
-use crate::event::{EventResponse, WidgetEvent};
+use crate::event::{ButtonMask, EventResponse, WidgetEvent};
 use crate::event_handlers::EventHandlers;
-use crate::gesture::{DragPhase, PinchPhase, SwipeDirection};
+use crate::gesture::{DragPhase, PinchPhase, SwipeDirection, TapEvent};
 use crate::widget::{CursorIcon, EventContext, Widget};
 use crate::widget_id::WidgetId;
 
@@ -309,15 +317,29 @@ impl HandlerSet {
 
     // -- Builder methods (mirror WidgetWithHandlers) --
 
-    /// Set the on_tap handler. The closure receives the tap position
-    /// (in widget-local coordinates inside the widget's bounds).
-    pub fn on_tap(mut self, f: impl FnMut(Point, &mut EventContext) + 'static) -> Self {
+    /// Set the on_tap handler. The closure receives a borrowed
+    /// [`TapEvent`](crate::gesture::TapEvent) carrying the position in
+    /// widget-local coordinates, the finalising mouse button, and the
+    /// modifier state at that moment.
+    ///
+    /// Default acceptance is [`ButtonMask::PRIMARY`] — left-click only.
+    /// Use [`accept_tap_buttons`](Self::accept_tap_buttons) to widen
+    /// the set if you need right-click, middle-click, or auxiliary
+    /// buttons to fire this handler.
+    pub fn on_tap(
+        mut self,
+        f: impl FnMut(&TapEvent, &mut EventContext) + 'static,
+    ) -> Self {
         self.handlers.on_tap = Some(Box::new(f));
         self
     }
 
-    /// Set the on_double_tap handler.
-    pub fn on_double_tap(mut self, f: impl FnMut(Point, &mut EventContext) + 'static) -> Self {
+    /// Set the on_double_tap handler. See [`on_tap`](Self::on_tap) for
+    /// the callback contract.
+    pub fn on_double_tap(
+        mut self,
+        f: impl FnMut(&TapEvent, &mut EventContext) + 'static,
+    ) -> Self {
         self.handlers.on_double_tap = Some(Box::new(f));
         self
     }
@@ -326,17 +348,56 @@ impl HandlerSet {
     /// recognizer's window (same 300 ms / 10 px defaults as double tap).
     /// Runs independently of `on_double_tap` via cooperative gesture
     /// recognizers (`GestureRecognizer::resets_on_peer_recognition`).
-    pub fn on_triple_tap(mut self, f: impl FnMut(Point, &mut EventContext) + 'static) -> Self {
+    pub fn on_triple_tap(
+        mut self,
+        f: impl FnMut(&TapEvent, &mut EventContext) + 'static,
+    ) -> Self {
         self.handlers.on_triple_tap = Some(Box::new(f));
         self
     }
 
-    /// Set the on_long_press handler.
+    /// Set the on_long_press handler. The callback receives a borrowed
+    /// [`TapEvent`](crate::gesture::TapEvent) whose modifiers are
+    /// captured from the held `Down` (since long-press recognises on a
+    /// timer before any `Up`).
     pub fn on_long_press(
         mut self,
-        f: impl FnMut(Point, &mut EventContext) + 'static,
+        f: impl FnMut(&TapEvent, &mut EventContext) + 'static,
     ) -> Self {
         self.handlers.on_long_press = Some(Box::new(f));
+        self
+    }
+
+    /// Restrict (or extend) the set of pointer buttons that fire
+    /// [`on_tap`](Self::on_tap). Default is [`ButtonMask::PRIMARY`]
+    /// (left-click only). Pass `ButtonMask::ALL` or
+    /// `ButtonMask::PRIMARY | ButtonMask::SECONDARY`, etc.
+    pub fn accept_tap_buttons(mut self, mask: impl Into<ButtonMask>) -> Self {
+        self.handlers.tap_buttons = Some(mask.into());
+        self
+    }
+
+    /// Restrict (or extend) the set of pointer buttons that fire
+    /// [`on_double_tap`](Self::on_double_tap). Default
+    /// [`ButtonMask::PRIMARY`].
+    pub fn accept_double_tap_buttons(mut self, mask: impl Into<ButtonMask>) -> Self {
+        self.handlers.double_tap_buttons = Some(mask.into());
+        self
+    }
+
+    /// Restrict (or extend) the set of pointer buttons that fire
+    /// [`on_triple_tap`](Self::on_triple_tap). Default
+    /// [`ButtonMask::PRIMARY`].
+    pub fn accept_triple_tap_buttons(mut self, mask: impl Into<ButtonMask>) -> Self {
+        self.handlers.triple_tap_buttons = Some(mask.into());
+        self
+    }
+
+    /// Restrict (or extend) the set of pointer buttons that fire
+    /// [`on_long_press`](Self::on_long_press). Default
+    /// [`ButtonMask::PRIMARY`].
+    pub fn accept_long_press_buttons(mut self, mask: impl Into<ButtonMask>) -> Self {
+        self.handlers.long_press_buttons = Some(mask.into());
         self
     }
 
@@ -597,23 +658,63 @@ impl<W: Widget> WidgetWithHandlers<W> {
 
     // -- Gesture handlers --
 
-    pub fn on_tap(mut self, f: impl FnMut(Point, &mut EventContext) + 'static) -> Self {
+    pub fn on_tap(
+        mut self,
+        f: impl FnMut(&TapEvent, &mut EventContext) + 'static,
+    ) -> Self {
         self.handler_set.handlers.on_tap = Some(Box::new(f));
         self
     }
 
-    pub fn on_double_tap(mut self, f: impl FnMut(Point, &mut EventContext) + 'static) -> Self {
+    pub fn on_double_tap(
+        mut self,
+        f: impl FnMut(&TapEvent, &mut EventContext) + 'static,
+    ) -> Self {
         self.handler_set.handlers.on_double_tap = Some(Box::new(f));
         self
     }
 
-    pub fn on_triple_tap(mut self, f: impl FnMut(Point, &mut EventContext) + 'static) -> Self {
+    pub fn on_triple_tap(
+        mut self,
+        f: impl FnMut(&TapEvent, &mut EventContext) + 'static,
+    ) -> Self {
         self.handler_set.handlers.on_triple_tap = Some(Box::new(f));
         self
     }
 
-    pub fn on_long_press(mut self, f: impl FnMut(Point, &mut EventContext) + 'static) -> Self {
+    pub fn on_long_press(
+        mut self,
+        f: impl FnMut(&TapEvent, &mut EventContext) + 'static,
+    ) -> Self {
         self.handler_set.handlers.on_long_press = Some(Box::new(f));
+        self
+    }
+
+    /// Restrict (or extend) the set of pointer buttons that fire
+    /// `on_tap`. Default is [`ButtonMask::PRIMARY`].
+    pub fn accept_tap_buttons(mut self, mask: impl Into<ButtonMask>) -> Self {
+        self.handler_set.handlers.tap_buttons = Some(mask.into());
+        self
+    }
+
+    /// Restrict (or extend) the set of pointer buttons that fire
+    /// `on_double_tap`. Default [`ButtonMask::PRIMARY`].
+    pub fn accept_double_tap_buttons(mut self, mask: impl Into<ButtonMask>) -> Self {
+        self.handler_set.handlers.double_tap_buttons = Some(mask.into());
+        self
+    }
+
+    /// Restrict (or extend) the set of pointer buttons that fire
+    /// `on_triple_tap`. Default [`ButtonMask::PRIMARY`].
+    pub fn accept_triple_tap_buttons(mut self, mask: impl Into<ButtonMask>) -> Self {
+        self.handler_set.handlers.triple_tap_buttons = Some(mask.into());
+        self
+    }
+
+    /// Restrict (or extend) the set of pointer buttons that fire
+    /// `on_long_press`. Default [`ButtonMask::PRIMARY`].
+    pub fn accept_long_press_buttons(mut self, mask: impl Into<ButtonMask>) -> Self {
+        self.handler_set.handlers.long_press_buttons = Some(mask.into());
         self
     }
 
@@ -1259,30 +1360,63 @@ mod tests {
 pub trait WidgetBuilder: Widget + Sized + 'static {
     fn on_tap(
         self,
-        f: impl FnMut(Point, &mut EventContext) + 'static,
+        f: impl FnMut(&TapEvent, &mut EventContext) + 'static,
     ) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).on_tap(f)
     }
 
     fn on_double_tap(
         self,
-        f: impl FnMut(Point, &mut EventContext) + 'static,
+        f: impl FnMut(&TapEvent, &mut EventContext) + 'static,
     ) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).on_double_tap(f)
     }
 
     fn on_triple_tap(
         self,
-        f: impl FnMut(Point, &mut EventContext) + 'static,
+        f: impl FnMut(&TapEvent, &mut EventContext) + 'static,
     ) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).on_triple_tap(f)
     }
 
     fn on_long_press(
         self,
-        f: impl FnMut(Point, &mut EventContext) + 'static,
+        f: impl FnMut(&TapEvent, &mut EventContext) + 'static,
     ) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).on_long_press(f)
+    }
+
+    /// Restrict (or extend) the set of pointer buttons that fire
+    /// `on_tap`. Default is [`ButtonMask::PRIMARY`].
+    fn accept_tap_buttons(self, mask: impl Into<ButtonMask>) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).accept_tap_buttons(mask)
+    }
+
+    /// Restrict (or extend) the set of pointer buttons that fire
+    /// `on_double_tap`. Default [`ButtonMask::PRIMARY`].
+    fn accept_double_tap_buttons(
+        self,
+        mask: impl Into<ButtonMask>,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).accept_double_tap_buttons(mask)
+    }
+
+    /// Restrict (or extend) the set of pointer buttons that fire
+    /// `on_triple_tap`. Default [`ButtonMask::PRIMARY`].
+    fn accept_triple_tap_buttons(
+        self,
+        mask: impl Into<ButtonMask>,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).accept_triple_tap_buttons(mask)
+    }
+
+    /// Restrict (or extend) the set of pointer buttons that fire
+    /// `on_long_press`. Default [`ButtonMask::PRIMARY`].
+    fn accept_long_press_buttons(
+        self,
+        mask: impl Into<ButtonMask>,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).accept_long_press_buttons(mask)
     }
 
     fn on_drag(

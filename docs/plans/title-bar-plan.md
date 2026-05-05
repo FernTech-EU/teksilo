@@ -16,6 +16,17 @@ at [docs/title-bar.md](../title-bar.md).
 > `apply_window_command`). The §M-Win retrospective at the very end
 > of this document describes what actually shipped on Windows.
 
+> **API note (subsequent gesture-API rewrite):** The four click-style
+> handlers (`on_tap` / `on_double_tap` / `on_triple_tap` / `on_long_press`)
+> referenced below now take `&TapEvent` (carrying position, button, and
+> modifiers) instead of the bare `Point` they had when this plan
+> originally landed. Default acceptance tightened to
+> `ButtonMask::PRIMARY` only — DragRegion's double-tap-to-maximize
+> is already primary-button anyway, so the existing wiring keeps working
+> as documented. See
+> [docs/plans/gesture-tap-event-plan.md](gesture-tap-event-plan.md) for
+> the migration's full scope.
+
 This document picks up where the original title-bar plan (in the private
 `~/.claude/plans/` scratch area) left off. It records:
 

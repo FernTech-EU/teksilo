@@ -313,7 +313,11 @@ impl<T: 'static> TabBar<T> {
     }
 
     /// Minimum width (in dp) any unpinned tab will be drawn at.
-    /// Default: [`DEFAULT_MIN_TAB_WIDTH`].
+    /// Default: [`DEFAULT_MIN_TAB_WIDTH`]. Applies to horizontal bars
+    /// only — vertical bars use the intrinsic per-tab height
+    /// (`theme.components.tab.editor_tab_height`) regardless of this
+    /// knob, so sidebar pills don't get forced unreasonably tall by
+    /// width-oriented defaults.
     pub fn min_tab_width(mut self, dp: f32) -> Self {
         self.min_tab_width = dp.max(0.0);
         self
@@ -321,7 +325,8 @@ impl<T: 'static> TabBar<T> {
 
     /// Maximum width (in dp) any unpinned tab will be drawn at — long
     /// labels truncate with an ellipsis at this width.
-    /// Default: [`DEFAULT_MAX_TAB_WIDTH`].
+    /// Default: [`DEFAULT_MAX_TAB_WIDTH`]. Applies to horizontal bars
+    /// only (see [`min_tab_width`](Self::min_tab_width)).
     pub fn max_tab_width(mut self, dp: f32) -> Self {
         self.max_tab_width = dp.max(0.0);
         self
@@ -1052,6 +1057,7 @@ impl<T: 'static> Widget for TabBar<T> {
         // `place_children`.
         if let Some(reorder) = reorder_handler.clone() {
             let bar_id_for_drop = self_id;
+            let axis = self.orientation;
             let drop_handler = HandlerSet::new()
                 .on_drag_hover({
                     let header_bounds = header_bounds_buf.clone();
@@ -1072,11 +1078,20 @@ impl<T: 'static> Widget for TabBar<T> {
                             drop_indicator.set(None);
                             return DropFeedback::NoFeedback;
                         }
-                        let pointer_world_x = position.x + bar.x;
-                        let insertion_world_x =
-                            insertion_world_x_for(&bounds, pointer_world_x);
-                        let insertion_local_x = insertion_world_x - bar.x;
-                        drop_indicator.set(Some(insertion_local_x));
+                        // Layout-axis pointer position in world coords:
+                        // x for horizontal bars, y for vertical bars.
+                        let (pointer_world_main, bar_origin_main) = match axis {
+                            TabBarOrientation::Horizontal => {
+                                (position.x + bar.x, bar.x)
+                            }
+                            TabBarOrientation::Vertical => {
+                                (position.y + bar.y, bar.y)
+                            }
+                        };
+                        let insertion_world_main =
+                            insertion_world_main_for(&bounds, pointer_world_main, axis);
+                        let insertion_local_main = insertion_world_main - bar_origin_main;
+                        drop_indicator.set(Some(insertion_local_main));
                         DropFeedback::InsertionLine {
                             y: 0.0,
                             width: bounds[0].height,
@@ -1110,7 +1125,10 @@ impl<T: 'static> Widget for TabBar<T> {
                         if bounds.is_empty() {
                             return false;
                         }
-                        let pointer_world_x = position.x + bar.x;
+                        let pointer_world_main = match axis {
+                            TabBarOrientation::Horizontal => position.x + bar.x,
+                            TabBarOrientation::Vertical => position.y + bar.y,
+                        };
                         // `insertion_index_for` returns a position
                         // in **unpinned** space (the bounds buffer
                         // only contains unpinned headers). Convert
@@ -1118,7 +1136,8 @@ impl<T: 'static> Widget for TabBar<T> {
                         // doing any arithmetic against
                         // `data.source_index`, which is already in
                         // model space.
-                        let to_unpinned = insertion_index_for(&bounds, pointer_world_x);
+                        let to_unpinned =
+                            insertion_index_for(&bounds, pointer_world_main, axis);
                         let to_model = if to_unpinned < unpinned_to_model.len() {
                             unpinned_to_model[to_unpinned]
                         } else {
@@ -1155,26 +1174,31 @@ impl<T: 'static> Widget for TabBar<T> {
                     // Edge auto-scroll while a drag is in progress.
                     // Ramp the scroll velocity linearly inside the
                     // edge zones; cap at `DRAG_MAX_VELOCITY` so fast
-                    // drags don't rocket past the content.
-                    let scroll_x = scroll_x.clone();
-                    let max_scroll_x = max_scroll_x.clone();
+                    // drags don't rocket past the content. Axis-aware:
+                    // horizontal bars scroll by x, vertical by y.
+                    let scroll_main = scroll_main.clone();
+                    let max_scroll_main = max_scroll_main.clone();
                     let bar_bounds = self.paint_state.last_bar_bounds.clone();
                     move |position: Point, _ctx: &mut EventContext| {
                         let bar = bar_bounds.get();
-                        let max = max_scroll_x.get();
-                        let cur = scroll_x.get();
-                        let left_in = (DRAG_EDGE_ZONE - position.x).max(0.0);
-                        let right_in =
-                            (position.x - (bar.width - DRAG_EDGE_ZONE)).max(0.0);
-                        let delta = if left_in > 0.0 {
-                            -(left_in / DRAG_EDGE_ZONE) * DRAG_MAX_VELOCITY
-                        } else if right_in > 0.0 {
-                            (right_in / DRAG_EDGE_ZONE) * DRAG_MAX_VELOCITY
+                        let (pointer_main, bar_extent) = match axis {
+                            TabBarOrientation::Horizontal => (position.x, bar.width),
+                            TabBarOrientation::Vertical => (position.y, bar.height),
+                        };
+                        let max = max_scroll_main.get();
+                        let cur = scroll_main.get();
+                        let leading_in = (DRAG_EDGE_ZONE - pointer_main).max(0.0);
+                        let trailing_in =
+                            (pointer_main - (bar_extent - DRAG_EDGE_ZONE)).max(0.0);
+                        let delta = if leading_in > 0.0 {
+                            -(leading_in / DRAG_EDGE_ZONE) * DRAG_MAX_VELOCITY
+                        } else if trailing_in > 0.0 {
+                            (trailing_in / DRAG_EDGE_ZONE) * DRAG_MAX_VELOCITY
                         } else {
                             0.0
                         };
                         if delta.abs() > 0.001 {
-                            scroll_x.set((cur + delta).clamp(0.0, max));
+                            scroll_main.set((cur + delta).clamp(0.0, max));
                         }
                     }
                 });
@@ -1239,11 +1263,9 @@ impl<T: 'static> Widget for TabBar<T> {
 
         // Drop indicator: a vertical accent-color line at the
         // would-be insertion x in horizontal mode, a horizontal line
-        // at the insertion y in vertical mode. The position is
-        // stored in bar-local coords by `on_drag_hover`; convert back
-        // to world by adding bounds origin. Vertical-bar DnD is not
-        // wired through the drop handlers yet — the indicator path
-        // therefore only fires in horizontal mode in practice.
+        // at the insertion y in vertical mode. The position is the
+        // layout-axis offset stored in bar-local coords by
+        // `on_drag_hover` (x-axis for horizontal, y-axis for vertical).
         if let Some(local_pos) = self.paint_state.drop_indicator_x.get() {
             let indicator = match self.orientation {
                 TabBarOrientation::Horizontal => {
@@ -1314,10 +1336,28 @@ impl TabHeaderRow {
         }
         match self.sizing {
             TabSizing::Shared => {
-                let total_spacing = self.spacing * (n.saturating_sub(1)) as f32;
-                let avail = viewport_main.unwrap_or(0.0).max(0.0);
-                let ideal = ((avail - total_spacing).max(0.0) / n as f32).max(0.0);
-                let target = ideal.clamp(self.min_extent, self.max_extent);
+                let target = match self.axis {
+                    TabBarOrientation::Horizontal => {
+                        // Divide the viewport width across tabs
+                        // (Firefox / Chrome convention) and clamp by
+                        // the layout-axis [min, max] knobs.
+                        let total_spacing = self.spacing * (n.saturating_sub(1)) as f32;
+                        let avail = viewport_main.unwrap_or(0.0).max(0.0);
+                        let ideal =
+                            ((avail - total_spacing).max(0.0) / n as f32).max(0.0);
+                        ideal.clamp(self.min_extent, self.max_extent)
+                    }
+                    TabBarOrientation::Vertical => {
+                        // Vertical sidebar pills are NOT viewport-
+                        // divided — that turns a tall bar into ~200 dp
+                        // tab bands, which neither Firefox / Chrome
+                        // (no native vertical mode) nor VS Code /
+                        // IntelliJ do. Use the intrinsic per-tab
+                        // height (`editor_tab_height`) so vertical
+                        // tabs match horizontal tabs in size.
+                        TabHeader::intrinsic_height(ctx)
+                    }
+                };
                 vec![target; n]
             }
             TabSizing::Independent => self
@@ -1329,8 +1369,22 @@ impl TabHeaderRow {
                         TabBarOrientation::Horizontal => s.map(|s| s.width),
                         TabBarOrientation::Vertical => s.map(|s| s.height),
                     };
-                    raw.unwrap_or(self.min_extent)
-                        .clamp(self.min_extent, self.max_extent)
+                    let fallback = match self.axis {
+                        TabBarOrientation::Horizontal => self.min_extent,
+                        TabBarOrientation::Vertical => TabHeader::intrinsic_height(ctx),
+                    };
+                    let raw = raw.unwrap_or(fallback);
+                    // [min, max] are width-defaulted (96 / 240) and
+                    // axis-mismatched in vertical mode where they'd
+                    // force tab heights to ≥96 dp. Skip the clamp on
+                    // the height axis; the intrinsic per-tab height
+                    // is already the right answer.
+                    match self.axis {
+                        TabBarOrientation::Horizontal => {
+                            raw.clamp(self.min_extent, self.max_extent)
+                        }
+                        TabBarOrientation::Vertical => raw,
+                    }
                 })
                 .collect(),
         }
@@ -1603,46 +1657,69 @@ fn build_overflow_dropdown(
 
 // ─── Helper math: drop-insertion index + selection adjust ───────────
 
-/// Find the world-coord x of the insertion-line position closest to
-/// `pointer_world_x`, given each header's world bounds. The returned
-/// x is a tab boundary (left edge of a header, or right edge of the
-/// last header).
-fn insertion_world_x_for(bounds: &[Rect], pointer_world_x: f32) -> f32 {
+/// Pull the layout-axis range `(start, end)` out of a header's world
+/// bounds. Horizontal bars use `(x, right)`; vertical bars use
+/// `(y, bottom)`.
+fn axis_range(rect: &Rect, axis: TabBarOrientation) -> (f32, f32) {
+    match axis {
+        TabBarOrientation::Horizontal => (rect.x, rect.right()),
+        TabBarOrientation::Vertical => (rect.y, rect.bottom()),
+    }
+}
+
+/// Find the world-coord (along the layout axis) of the insertion-line
+/// position closest to `pointer_main`, given each header's world
+/// bounds. The returned coordinate is a tab boundary — the leading
+/// edge of a header, or the trailing edge of the last header.
+fn insertion_world_main_for(
+    bounds: &[Rect],
+    pointer_main: f32,
+    axis: TabBarOrientation,
+) -> f32 {
     let n = bounds.len();
     debug_assert!(n > 0);
-    let last = &bounds[n - 1];
-    if pointer_world_x >= last.right() {
-        return last.right();
+    let (_, last_end) = axis_range(&bounds[n - 1], axis);
+    if pointer_main >= last_end {
+        return last_end;
     }
-    if pointer_world_x <= bounds[0].x {
-        return bounds[0].x;
+    let (first_start, _) = axis_range(&bounds[0], axis);
+    if pointer_main <= first_start {
+        return first_start;
     }
     for header in bounds {
-        let mid = header.x + header.width * 0.5;
-        if pointer_world_x < mid {
-            return header.x;
+        let (start, end) = axis_range(header, axis);
+        let mid = (start + end) * 0.5;
+        if pointer_main < mid {
+            return start;
         }
     }
-    last.right()
+    last_end
 }
 
 /// Find the model index where the dragged tab should be inserted.
 /// `n` items → `n+1` valid insertion indices: 0 means "before the
 /// first", `n` means "after the last".
-fn insertion_index_for(bounds: &[Rect], pointer_world_x: f32) -> usize {
+fn insertion_index_for(
+    bounds: &[Rect],
+    pointer_main: f32,
+    axis: TabBarOrientation,
+) -> usize {
     let n = bounds.len();
     if n == 0 {
         return 0;
     }
-    if pointer_world_x >= bounds[n - 1].right() {
+    let (_, last_end) = axis_range(&bounds[n - 1], axis);
+    if pointer_main >= last_end {
         return n;
     }
-    if pointer_world_x <= bounds[0].x {
+    let (first_start, _) = axis_range(&bounds[0], axis);
+    if pointer_main <= first_start {
         return 0;
     }
     for (i, header) in bounds.iter().enumerate() {
-        let mid = header.x + header.width * 0.5;
-        if pointer_world_x < mid {
+        let (start, end) = axis_range(header, axis);
+        let mid = (start + end) * 0.5;
+        if pointer_main < mid {
             return i;
         }
     }
@@ -1668,34 +1745,80 @@ mod drop_math_tests {
         ]
     }
 
+    fn three_tabs_vertical() -> Vec<Rect> {
+        vec![
+            Rect::new(0.0, 0.0, 200.0, 50.0),     // y ∈ [0..50)
+            Rect::new(0.0, 50.0, 200.0, 50.0),    // y ∈ [50..100)
+            Rect::new(0.0, 100.0, 200.0, 50.0),   // y ∈ [100..150)
+        ]
+    }
+
     #[test]
     fn pointer_before_first_tab_inserts_at_zero() {
         let bounds = three_tabs();
-        assert_eq!(insertion_index_for(&bounds, -10.0), 0);
-        assert_eq!(insertion_world_x_for(&bounds, -10.0), 0.0);
+        let axis = TabBarOrientation::Horizontal;
+        assert_eq!(insertion_index_for(&bounds, -10.0, axis), 0);
+        assert_eq!(insertion_world_main_for(&bounds, -10.0, axis), 0.0);
     }
 
     #[test]
     fn pointer_past_last_tab_appends() {
         let bounds = three_tabs();
-        assert_eq!(insertion_index_for(&bounds, 999.0), 3);
-        assert_eq!(insertion_world_x_for(&bounds, 999.0), 300.0);
+        let axis = TabBarOrientation::Horizontal;
+        assert_eq!(insertion_index_for(&bounds, 999.0, axis), 3);
+        assert_eq!(insertion_world_main_for(&bounds, 999.0, axis), 300.0);
     }
 
     #[test]
     fn pointer_in_left_half_of_a_tab_inserts_before_it() {
         let bounds = three_tabs();
+        let axis = TabBarOrientation::Horizontal;
         // Tab 1 spans 100..200; pointer at x=120 is in its left half.
-        assert_eq!(insertion_index_for(&bounds, 120.0), 1);
-        assert_eq!(insertion_world_x_for(&bounds, 120.0), 100.0);
+        assert_eq!(insertion_index_for(&bounds, 120.0, axis), 1);
+        assert_eq!(insertion_world_main_for(&bounds, 120.0, axis), 100.0);
     }
 
     #[test]
     fn pointer_in_right_half_of_a_tab_inserts_after_it() {
         let bounds = three_tabs();
+        let axis = TabBarOrientation::Horizontal;
         // Tab 1's right half is 150..200 → insertion at index 2.
-        assert_eq!(insertion_index_for(&bounds, 175.0), 2);
-        assert_eq!(insertion_world_x_for(&bounds, 175.0), 200.0);
+        assert_eq!(insertion_index_for(&bounds, 175.0, axis), 2);
+        assert_eq!(insertion_world_main_for(&bounds, 175.0, axis), 200.0);
+    }
+
+    #[test]
+    fn vertical_pointer_above_first_tab_inserts_at_zero() {
+        let bounds = three_tabs_vertical();
+        let axis = TabBarOrientation::Vertical;
+        assert_eq!(insertion_index_for(&bounds, -10.0, axis), 0);
+        assert_eq!(insertion_world_main_for(&bounds, -10.0, axis), 0.0);
+    }
+
+    #[test]
+    fn vertical_pointer_past_last_tab_appends() {
+        let bounds = three_tabs_vertical();
+        let axis = TabBarOrientation::Vertical;
+        assert_eq!(insertion_index_for(&bounds, 999.0, axis), 3);
+        assert_eq!(insertion_world_main_for(&bounds, 999.0, axis), 150.0);
+    }
+
+    #[test]
+    fn vertical_pointer_in_top_half_of_a_tab_inserts_before_it() {
+        let bounds = three_tabs_vertical();
+        let axis = TabBarOrientation::Vertical;
+        // Tab 1 spans y=50..100; pointer at y=60 is in its top half.
+        assert_eq!(insertion_index_for(&bounds, 60.0, axis), 1);
+        assert_eq!(insertion_world_main_for(&bounds, 60.0, axis), 50.0);
+    }
+
+    #[test]
+    fn vertical_pointer_in_bottom_half_of_a_tab_inserts_after_it() {
+        let bounds = three_tabs_vertical();
+        let axis = TabBarOrientation::Vertical;
+        // Tab 1's bottom half is y=75..100 → insertion at index 2.
+        assert_eq!(insertion_index_for(&bounds, 88.0, axis), 2);
+        assert_eq!(insertion_world_main_for(&bounds, 88.0, axis), 100.0);
     }
 }
 

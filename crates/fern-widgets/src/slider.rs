@@ -241,11 +241,11 @@ impl Widget for Slider {
         // past threshold goes to `on_drag` instead.
         {
             let set_value = set_value_from_position.clone();
-            handlers = handlers.on_tap(move |position, _ctx| {
+            handlers = handlers.on_tap(move |event, _ctx| {
                 if !enabled {
                     return;
                 }
-                set_value(position.x, position.y);
+                set_value(event.position.x, event.position.y);
             });
         }
 

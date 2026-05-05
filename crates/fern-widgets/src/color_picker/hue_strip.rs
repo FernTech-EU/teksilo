@@ -168,11 +168,11 @@ impl Widget for HueStrip {
         }
         {
             let apply = apply.clone();
-            handlers = handlers.on_tap(move |position, _ctx| {
+            handlers = handlers.on_tap(move |event, _ctx| {
                 if !enabled {
                     return;
                 }
-                apply(position.x, position.y);
+                apply(event.position.x, event.position.y);
             });
         }
 

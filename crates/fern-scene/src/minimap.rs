@@ -229,7 +229,8 @@ impl Widget for SceneMinimap {
             // dispatch.
             let content = self.content_bounds;
             let size = self.size;
-            let handlers = HandlerSet::new().on_tap(move |local, ev_ctx| {
+            let handlers = HandlerSet::new().on_tap(move |event, ev_ctx| {
+                let local = event.position;
                 let nx = if size.width > 0.0 {
                     local.x / size.width
                 } else {

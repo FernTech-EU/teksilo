@@ -69,7 +69,8 @@ Widget builders register event handlers via blanket-implemented methods on the [
 ```rust
 ctx.add(
     MinSize::new(48.0, 48.0).child(content)
-        .on_tap(|_pos, ctx| {
+        .on_tap(|event, ctx| {
+            // event is &TapEvent { position, button, modifiers }
             ctx.send_intent(AppIntent::Clicked);
         })
         .on_hover(move |entered, _ctx| {
@@ -92,7 +93,7 @@ Under the hood, the builder wraps the widget in a `WidgetWithHandlers<W>` that c
 
 | Handler | Fires when | Signature (simplified) |
 |---|---|---|
-| `on_tap` | A single primary-button tap completes | `FnMut(Point, &mut EventContext)` |
+| `on_tap` | A single primary-button tap completes | `FnMut(&TapEvent, &mut EventContext)` |
 | `on_double_tap` | Two taps within 300 ms, within 10 px | same |
 | `on_triple_tap` | Three taps within the recognizer window | same |
 | `on_long_press` | Pointer held past the long-press threshold | same |
@@ -110,6 +111,55 @@ Under the hood, the builder wraps the widget in a `WidgetWithHandlers<W>` that c
 | `on_drop` | DnD payload released on the widget | `FnMut(DragPayload, Point, &mut EventContext) -> bool` |
 | `on_access_action` | AccessKit action request targets the widget | `FnMut(accesskit::Action, &mut EventContext) -> EventResponse` |
 | `on_access_action_request` | Full AccessKit action with payload (`SetTextSelection`, `SetValue`, `SetScrollOffset`) | see source |
+
+### 3.1.1 `TapEvent` — button + modifiers in the callback
+
+The four click-style handlers (`on_tap` / `on_double_tap` / `on_triple_tap` / `on_long_press`) all receive a borrowed [`TapEvent`](../crates/fern-core/src/gesture.rs):
+
+```rust
+#[non_exhaustive]
+pub struct TapEvent {
+    pub position: Point,         // widget-local coords
+    pub button: PointerButton,   // which button finalised the gesture
+    pub modifiers: Modifiers,    // held at the finalising event
+}
+```
+
+This lets a single handler discriminate by mouse button and modifier without falling back to `on_pointer_event`:
+
+```rust
+.on_tap(|event, ctx| match (event.button, event.modifiers) {
+    (PointerButton::Primary, Modifiers::SHIFT) => extend_selection(ctx),
+    (PointerButton::Primary, Modifiers::CTRL)  => toggle_selection(ctx),
+    (PointerButton::Primary, _)                => set_selection(ctx),
+    (PointerButton::Secondary, _)              => show_quick_actions(ctx),
+    _ => {}
+})
+```
+
+Modifiers come from the finalising event — `Up` for `on_tap` / `on_double_tap` / `on_triple_tap`, the held `Down` for `on_long_press` (which recognises on a timer before any `Up`). The struct is `#[non_exhaustive]` so future fields don't break match patterns or constructors.
+
+### 3.1.2 Button-acceptance filter — default Primary, opt-in to more
+
+Each of the four recognizers defaults to [`ButtonMask::PRIMARY`] — left-click only. A right-click on a `Button`, `Checkbox`, `MenuItem`, etc. does **not** activate the widget; it can still open a context menu via `.context_menu(...)` or be handled directly via `on_pointer_event`. Multi-tap recognizers further require every tap in the sequence to use the same button — mixed-button sequences fail rather than spuriously firing.
+
+To opt a handler into a wider button set, call the matching `accept_*_buttons(...)` knob:
+
+```rust
+Button::new("Action")
+    .accept_tap_buttons(ButtonMask::PRIMARY | ButtonMask::SECONDARY)
+    .on_tap(|event, ctx| match event.button {
+        PointerButton::Primary   => primary_action(ctx),
+        PointerButton::Secondary => alt_action(ctx),
+        _ => {}
+    });
+```
+
+`ButtonMask` exposes the obvious constants and bitwise operators; `ButtonMask::ALL` is the catch-everything shorthand and `accept_any_button()` on the recognizer types is the equivalent. The same family of knobs exists for double-tap (`accept_double_tap_buttons`), triple-tap (`accept_triple_tap_buttons`), and long-press (`accept_long_press_buttons`).
+
+The `PointerButton` enum covers `Primary`, `Secondary`, `Middle`, plus `Back` and `Forward` (mouse 4 / 5). Platforms that don't surface the auxiliary buttons simply never emit them.
+
+### 3.1.3 Other flag-like attachments
 
 Plus a handful of flag-like attachments that don't take event-data closures:
 
@@ -130,7 +180,7 @@ fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
     let handlers = HandlerSet::new()
         .focusable(self.enabled)
         .cursor(CursorIcon::Pointer)
-        .on_tap(move |_pos, ctx| { /* ... */ })
+        .on_tap(move |_event, ctx| { /* ... */ })
         .on_key(move |event, ctx| {
             if let WidgetEvent::KeyDown { key: Key::Space, .. } = event {
                 // handle activation
@@ -157,12 +207,12 @@ The `event()`-method vs attached-handlers tradeoff flipped once three things bec
 
 [`gesture.rs`](../crates/fern-core/src/gesture.rs) defines the recognizer state machines. Each is a pure, platform-free value type that consumes `RawPointerEvent::{Down, Move, Up}` and emits `GestureResult::{Pending, Recognized(GestureEvent), Failed}`.
 
-Built-in recognizers:
+Built-in recognizers (the four click-style ones default to `ButtonMask::PRIMARY` — call `.accept_buttons(...)` / `.accept_any_button()` to widen):
 
-- `TapRecognizer` — fires on a down-up without movement past the tap-slop threshold.
-- `DoubleTapRecognizer` — two taps within 300 ms.
-- `TripleTapRecognizer` — three.
-- `LongPressRecognizer` — pointer held past ~500 ms.
+- `TapRecognizer` — fires on a down-up without movement past the tap-slop threshold. Down/Up button must match.
+- `DoubleTapRecognizer` — two taps within 300 ms. Both taps must use the same button.
+- `TripleTapRecognizer` — three. Same button across all three.
+- `LongPressRecognizer` — pointer held past ~500 ms. Modifiers are captured at `Down`.
 - `DragRecognizer` — emits `DragStarted` once the pointer moves past the drag-start threshold, then `DragMoved` per move, then `DragEnded` on pointer-up.
 - `SwipeRecognizer` — pointer moves fast enough to qualify as a swipe in one of four cardinal directions.
 

@@ -866,6 +866,69 @@ mod tests {
         );
     }
 
+    #[test]
+    fn framework_default_blocks_secondary_tap_on_button() {
+        // Framework default: `TapRecognizer::accept = ButtonMask::PRIMARY`.
+        // A right-click on a Button does NOT activate. Generalises the
+        // tab-specific `primary_click_activates_tab_secondary_does_not`
+        // regression to every widget that wires `on_tap`.
+        use fern_core::event::PointerButton;
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let fired = Rc::new(Cell::new(0_u32));
+        let fired_for_btn = fired.clone();
+        let btn = tree.add(Button::new_literal("T").on_activate_fn(move |_ctx| {
+            fired_for_btn.set(fired_for_btn.get() + 1);
+        }));
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+        let center = tree.bounds(btn).center();
+
+        tree.pointer_down_button(center, PointerButton::Secondary);
+        tree.pointer_up_button(center, PointerButton::Secondary);
+        assert_eq!(fired.get(), 0, "right-click must not activate a Button");
+
+        tree.pointer_down_button(center, PointerButton::Middle);
+        tree.pointer_up_button(center, PointerButton::Middle);
+        assert_eq!(fired.get(), 0, "middle-click must not activate a Button");
+
+        // Sanity: primary click still activates.
+        tree.pointer_down_button(center, PointerButton::Primary);
+        tree.pointer_up_button(center, PointerButton::Primary);
+        assert_eq!(fired.get(), 1, "primary-click must activate a Button");
+    }
+
+    #[test]
+    fn framework_accept_tap_buttons_secondary_fires_handler() {
+        // `accept_tap_buttons` opts the auto-wired `TapRecognizer` into
+        // a wider button set. With `Secondary` allowed, right-click
+        // activates.
+        use fern_core::event::{ButtonMask, PointerButton};
+        use fern_core::widget_builder::WidgetBuilder;
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let fired = Rc::new(Cell::new(0_u32));
+        let fired_for_btn = fired.clone();
+        let btn = tree.add(
+            Button::new_literal("T")
+                .on_activate_fn(move |_ctx| {
+                    fired_for_btn.set(fired_for_btn.get() + 1);
+                })
+                .accept_tap_buttons(ButtonMask::PRIMARY | ButtonMask::SECONDARY),
+        );
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+        let center = tree.bounds(btn).center();
+
+        tree.pointer_down_button(center, PointerButton::Secondary);
+        tree.pointer_up_button(center, PointerButton::Secondary);
+        assert_eq!(
+            fired.get(),
+            1,
+            "right-click must activate a Button when accept_tap_buttons includes Secondary",
+        );
+
+        tree.pointer_down_button(center, PointerButton::Primary);
+        tree.pointer_up_button(center, PointerButton::Primary);
+        assert_eq!(fired.get(), 2, "primary-click still activates");
+    }
+
     #[cfg(feature = "rich-text")]
     #[test]
     fn hidden_slot_marks_swatch_node_as_at_hidden() {

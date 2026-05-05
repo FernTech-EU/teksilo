@@ -899,6 +899,74 @@ fn dynamic_default_close_removes_from_model() {
 }
 
 #[test]
+fn primary_click_activates_tab_secondary_does_not() {
+    use fern_canvas::Point;
+    use fern_core::event::PointerButton;
+
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let id_a = TabId::fresh();
+    let id_b = TabId::fresh();
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let widget_id = tree.add(
+        TabWidget::new(selected.clone())
+            .static_tab_with_id(
+                id_a,
+                TabInfo::new().title(label("A")),
+                FixedLeaf(120.0, 48.0),
+            )
+            .static_tab_with_id(
+                id_b,
+                TabInfo::new().title(label("B")),
+                FixedLeaf(120.0, 48.0),
+            )
+            .show_scroll_arrows(false)
+            .show_overflow_dropdown(false),
+    );
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+
+    // Initial selection lands on A (first static tab).
+    assert_eq!(selected.get(), Some(id_a));
+
+    let bar = bar_of(&tree, widget_id);
+    let header_row = data_source_header_row(&tree, bar);
+    let headers = tree.children(header_row);
+    let center_b: Point = tree.bounds(headers[1]).center();
+
+    // Right-click on tab B with no context-menu factory installed:
+    // the framework's secondary-click path falls through to the
+    // widget, but the auto-wired `TapRecognizer` defaults to
+    // `ButtonMask::PRIMARY` and silently ignores non-Primary
+    // presses, so no Tap is recognised. Selection must not move.
+    tree.pointer_down_button(center_b, PointerButton::Secondary);
+    tree.pointer_up_button(center_b, PointerButton::Secondary);
+    assert_eq!(
+        selected.get(),
+        Some(id_a),
+        "right-click must not activate a tab"
+    );
+
+    // Middle-click likewise must not activate (the close handler is
+    // independent and doesn't fire here because the tab isn't
+    // closable).
+    tree.pointer_down_button(center_b, PointerButton::Middle);
+    tree.pointer_up_button(center_b, PointerButton::Middle);
+    assert_eq!(
+        selected.get(),
+        Some(id_a),
+        "middle-click must not activate a tab"
+    );
+
+    // Primary click does activate.
+    tree.pointer_down_button(center_b, PointerButton::Primary);
+    tree.pointer_up_button(center_b, PointerButton::Primary);
+    assert_eq!(
+        selected.get(),
+        Some(id_b),
+        "primary-click must activate the clicked tab"
+    );
+}
+
+#[test]
 fn explicit_on_close_receives_tab_id() {
     let selected: Signal<Option<TabId>> = Signal::new(None);
     let id_a = TabId::fresh();
@@ -1170,7 +1238,7 @@ fn vertical_bar_lays_out_pills_top_to_bottom() {
 }
 
 #[test]
-fn vertical_shared_sizing_divides_height_equally() {
+fn vertical_shared_sizing_uses_intrinsic_pill_height() {
     let selected: Signal<Option<TabId>> = Signal::new(None);
     let model = ListModel::from_vec(vec![
         TabHandle::dynamic(TabId::fresh(), "doc", TabInfo::new().title(label("A")), ()),
@@ -1181,12 +1249,12 @@ fn vertical_shared_sizing_divides_height_equally() {
     let delegate = TabDelegate::new(|_, h: &TabHandle| {
         h.info.title.clone().unwrap_or_else(|| label(""))
     });
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let theme = Theme::light_default();
+    let intrinsic = theme.components.tab.editor_tab_height;
+    let mut tree = WidgetTree::new().with_theme(theme);
     let bar_id = tree.add(
         TabBar::vertical(model, delegate, selected, |_, h: &TabHandle| h.id)
             .tab_sizing(TabSizing::Shared)
-            .min_tab_width(0.0)
-            .max_tab_width(1000.0)
             .tab_spacing(0.0)
             .show_scroll_arrows(false)
             .show_overflow_dropdown(false),
@@ -1203,9 +1271,14 @@ fn vertical_shared_sizing_divides_height_equally() {
             "heights drift in Shared mode: {heights:?}"
         );
     }
-    // Available is 800 (the bar height); 4 tabs → ~200 dp each
-    // (clamped by min/max to allow the full range).
-    assert!(target >= 100.0, "expected >=100 dp per tab, got {target}");
+    // Vertical Shared does NOT divide the viewport — sidebar pills
+    // stay at the intrinsic per-tab height (`editor_tab_height`)
+    // regardless of bar height. A 800 dp bar with 4 tabs gives 4
+    // pills of ~50 dp each, not 4 × ~200 dp bands.
+    assert!(
+        (target - intrinsic).abs() < 0.5,
+        "expected ~{intrinsic} dp per tab (editor_tab_height), got {target}"
+    );
 }
 
 #[test]

@@ -7,13 +7,62 @@
 //!
 //! The [`GestureArena`] arbitrates when multiple recognizers compete on the
 //! same event stream: all are fed in parallel, and when one recognizes, the
-//! rest are reset.
+//! rest are reset (except cooperative peers — see
+//! [`GestureRecognizer::resets_on_peer_recognition`]).
+//!
+//! **Click-style recognizers carry button + modifiers.** [`TapRecognizer`],
+//! [`DoubleTapRecognizer`], [`TripleTapRecognizer`], and
+//! [`LongPressRecognizer`] all default to [`ButtonMask::PRIMARY`] —
+//! left-click only — and emit [`TapEvent`]s carrying position, the
+//! finalising button, and modifier state. Multi-tap recognizers
+//! require button-match across the whole sequence. Widen the accepted
+//! set with `.accept_buttons(...)` / `.accept_any_button()`.
 
 use std::time::{Duration, Instant};
 
 use fern_canvas::{Point, Vec2};
 
-use crate::event::PointerButton;
+use crate::event::{ButtonMask, Modifiers, PointerButton};
+
+/// Information about a recognized click-style gesture, passed to the
+/// four tap-family handlers (`on_tap`, `on_double_tap`, `on_triple_tap`,
+/// `on_long_press`).
+///
+/// The struct is `#[non_exhaustive]` so future fields (timestamp, click
+/// count for a hypothetical `on_n_tap`, pressure for stylus events) can
+/// land without breaking existing match patterns.
+#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
+pub struct TapEvent {
+    /// Pointer position in widget-local coords, captured at the
+    /// finalising event (the `Up` of the last tap for tap / double-tap /
+    /// triple-tap; the held `Down` for long-press, since long-press
+    /// recognises on a `tick` before any `Up`).
+    pub position: Point,
+
+    /// Which button finalised the gesture. Multi-tap recognizers
+    /// require every tap in the sequence to use the same button —
+    /// mixed-button sequences fail rather than spuriously firing.
+    pub button: PointerButton,
+
+    /// Modifier keys held at the finalising event. Sourced from
+    /// `WidgetEvent::PointerUp { modifiers, .. }` (or `PointerDown` for
+    /// long-press).
+    pub modifiers: Modifiers,
+}
+
+impl TapEvent {
+    /// Construct a `TapEvent` directly. Useful for tests; widgets receive
+    /// `&TapEvent` from the recognizer pipeline and rarely need to build
+    /// one by hand.
+    pub fn new(position: Point, button: PointerButton, modifiers: Modifiers) -> Self {
+        Self {
+            position,
+            button,
+            modifiers,
+        }
+    }
+}
 
 /// Raw pointer events fed into gesture recognizers.
 #[derive(Debug, Clone, Copy)]
@@ -21,6 +70,7 @@ pub enum RawPointerEvent {
     Down {
         position: Point,
         button: PointerButton,
+        modifiers: Modifiers,
     },
     Move {
         position: Point,
@@ -28,6 +78,7 @@ pub enum RawPointerEvent {
     Up {
         position: Point,
         button: PointerButton,
+        modifiers: Modifiers,
     },
 }
 
@@ -43,20 +94,16 @@ pub enum GestureResult {
 }
 
 /// A recognized gesture event.
-#[derive(Debug, Clone)]
+///
+/// The four click-style variants (`Tap` / `DoubleTap` / `TripleTap` /
+/// `LongPress`) carry a [`TapEvent`] payload — pointer position, the
+/// finalising mouse button, and the modifier state at that moment.
+#[derive(Debug, Clone, Copy)]
 pub enum GestureEvent {
-    Tap {
-        position: Point,
-    },
-    DoubleTap {
-        position: Point,
-    },
-    TripleTap {
-        position: Point,
-    },
-    LongPress {
-        position: Point,
-    },
+    Tap(TapEvent),
+    DoubleTap(TapEvent),
+    TripleTap(TapEvent),
+    LongPress(TapEvent),
     DragStarted {
         position: Point,
         button: PointerButton,
@@ -174,23 +221,45 @@ pub trait GestureRecognizer {
 // ---------------------------------------------------------------------------
 
 /// Recognizes a single tap (pointer down + up without significant movement).
+///
+/// The recognizer is button-aware: it only fires when the press button
+/// matches the release button, and only for buttons present in
+/// [`accept`](TapRecognizer::accept_buttons). Default `accept` is
+/// [`ButtonMask::PRIMARY`] — left-click only — which is what users
+/// expect from a "tap" and keeps right-click free for context menus.
 #[derive(Debug)]
 pub struct TapRecognizer {
     max_distance: f32,
+    accept: ButtonMask,
     down_position: Option<Point>,
+    down_button: Option<PointerButton>,
 }
 
 impl TapRecognizer {
     pub fn new() -> Self {
         Self {
             max_distance: 5.0,
+            accept: ButtonMask::PRIMARY,
             down_position: None,
+            down_button: None,
         }
     }
 
     pub fn max_distance(mut self, d: f32) -> Self {
         self.max_distance = d;
         self
+    }
+
+    /// Restrict (or extend) the set of buttons that can fire this
+    /// recognizer. Default is [`ButtonMask::PRIMARY`].
+    pub fn accept_buttons(mut self, mask: impl Into<ButtonMask>) -> Self {
+        self.accept = mask.into();
+        self
+    }
+
+    /// Convenience: accept any pointer button.
+    pub fn accept_any_button(self) -> Self {
+        self.accept_buttons(ButtonMask::ALL)
     }
 }
 
@@ -203,8 +272,14 @@ impl Default for TapRecognizer {
 impl GestureRecognizer for TapRecognizer {
     fn process(&mut self, event: &RawPointerEvent) -> GestureResult {
         match event {
-            RawPointerEvent::Down { position, .. } => {
+            RawPointerEvent::Down {
+                position, button, ..
+            } => {
+                if !self.accept.contains(*button) {
+                    return GestureResult::Pending;
+                }
                 self.down_position = Some(*position);
+                self.down_button = Some(*button);
                 GestureResult::Pending
             }
             RawPointerEvent::Move { position } => {
@@ -213,20 +288,34 @@ impl GestureRecognizer for TapRecognizer {
                     let dy = position.y - down.y;
                     if (dx * dx + dy * dy).sqrt() > self.max_distance {
                         self.down_position = None;
+                        self.down_button = None;
                         return GestureResult::Failed;
                     }
                 }
                 GestureResult::Pending
             }
-            RawPointerEvent::Up { position, .. } => {
-                if let Some(down) = self.down_position.take() {
-                    let dx = position.x - down.x;
-                    let dy = position.y - down.y;
-                    if (dx * dx + dy * dy).sqrt() <= self.max_distance {
-                        return GestureResult::Recognized(GestureEvent::Tap {
-                            position: *position,
-                        });
-                    }
+            RawPointerEvent::Up {
+                position,
+                button,
+                modifiers,
+            } => {
+                let Some(down) = self.down_position.take() else {
+                    return GestureResult::Failed;
+                };
+                let Some(down_button) = self.down_button.take() else {
+                    return GestureResult::Failed;
+                };
+                if *button != down_button {
+                    return GestureResult::Failed;
+                }
+                let dx = position.x - down.x;
+                let dy = position.y - down.y;
+                if (dx * dx + dy * dy).sqrt() <= self.max_distance {
+                    return GestureResult::Recognized(GestureEvent::Tap(TapEvent {
+                        position: *position,
+                        button: *button,
+                        modifiers: *modifiers,
+                    }));
                 }
                 GestureResult::Failed
             }
@@ -235,6 +324,7 @@ impl GestureRecognizer for TapRecognizer {
 
     fn reset(&mut self) {
         self.down_position = None;
+        self.down_button = None;
     }
 
     fn priority(&self) -> u32 {
@@ -246,14 +336,23 @@ impl GestureRecognizer for TapRecognizer {
 // DoubleTapRecognizer
 // ---------------------------------------------------------------------------
 
-/// Recognizes a double-tap (two taps within a time window and distance).
+/// Recognizes a double-tap (two taps within a time window and distance,
+/// using the same button).
+///
+/// Default `accept` is [`ButtonMask::PRIMARY`]; presses on other buttons
+/// are ignored. Within the recognized sequence, both taps must match
+/// the press button — a `Primary` then `Secondary` sequence resets to
+/// the new tap as a fresh "first" rather than firing `DoubleTap`.
 #[derive(Debug)]
 pub struct DoubleTapRecognizer {
     max_distance: f32,
     max_interval: Duration,
+    accept: ButtonMask,
     first_tap_position: Option<Point>,
     first_tap_time: Option<Instant>,
+    first_tap_button: Option<PointerButton>,
     down_position: Option<Point>,
+    down_button: Option<PointerButton>,
 }
 
 impl DoubleTapRecognizer {
@@ -261,9 +360,12 @@ impl DoubleTapRecognizer {
         Self {
             max_distance: 10.0,
             max_interval: Duration::from_millis(300),
+            accept: ButtonMask::PRIMARY,
             first_tap_position: None,
             first_tap_time: None,
+            first_tap_button: None,
             down_position: None,
+            down_button: None,
         }
     }
 
@@ -277,11 +379,40 @@ impl DoubleTapRecognizer {
         self
     }
 
+    /// Restrict (or extend) the set of buttons that can fire this
+    /// recognizer. Default is [`ButtonMask::PRIMARY`].
+    pub fn accept_buttons(mut self, mask: impl Into<ButtonMask>) -> Self {
+        self.accept = mask.into();
+        self
+    }
+
+    /// Convenience: accept any pointer button.
+    pub fn accept_any_button(self) -> Self {
+        self.accept_buttons(ButtonMask::ALL)
+    }
+
     /// Feed an event with an explicit timestamp (for testability without real clocks).
     pub fn process_at(&mut self, event: &RawPointerEvent, now: Instant) -> GestureResult {
         match event {
-            RawPointerEvent::Down { position, .. } => {
+            RawPointerEvent::Down {
+                position, button, ..
+            } => {
+                if !self.accept.contains(*button) {
+                    return GestureResult::Pending;
+                }
+                // Cross-tap button-match: if we have a first tap from a
+                // different button, the new press starts fresh — reset
+                // the accumulated state to avoid spuriously firing a
+                // mixed-button DoubleTap.
+                if let Some(first_button) = self.first_tap_button
+                    && first_button != *button
+                {
+                    self.first_tap_position = None;
+                    self.first_tap_time = None;
+                    self.first_tap_button = None;
+                }
                 self.down_position = Some(*position);
+                self.down_button = Some(*button);
                 GestureResult::Pending
             }
             RawPointerEvent::Move { position } => {
@@ -292,36 +423,57 @@ impl DoubleTapRecognizer {
                 }
                 GestureResult::Pending
             }
-            RawPointerEvent::Up { position, .. } => {
+            RawPointerEvent::Up {
+                position,
+                button,
+                modifiers,
+            } => {
                 let Some(down) = self.down_position else {
                     return GestureResult::Failed;
                 };
+                let Some(down_button) = self.down_button else {
+                    return GestureResult::Failed;
+                };
+                self.down_position = None;
+                self.down_button = None;
+                if *button != down_button {
+                    return GestureResult::Failed;
+                }
                 if distance(*position, down) > self.max_distance {
                     return GestureResult::Failed;
                 }
 
-                if let (Some(first_pos), Some(first_time)) =
-                    (self.first_tap_position, self.first_tap_time)
-                {
-                    // Second tap — check distance from first and time interval
-                    if distance(*position, first_pos) <= self.max_distance
+                if let (Some(first_pos), Some(first_time), Some(first_button)) = (
+                    self.first_tap_position,
+                    self.first_tap_time,
+                    self.first_tap_button,
+                ) {
+                    // Second tap — check distance, time interval, AND
+                    // button match against the first tap.
+                    if first_button == *button
+                        && distance(*position, first_pos) <= self.max_distance
                         && now.duration_since(first_time) <= self.max_interval
                     {
                         self.reset();
-                        return GestureResult::Recognized(GestureEvent::DoubleTap {
-                            position: *position,
-                        });
+                        return GestureResult::Recognized(GestureEvent::DoubleTap(
+                            TapEvent {
+                                position: *position,
+                                button: *button,
+                                modifiers: *modifiers,
+                            },
+                        ));
                     }
-                    // Too far/too slow — treat this as a new first tap
+                    // Out of window or button mismatch — treat as new
+                    // first tap.
                     self.first_tap_position = Some(*position);
                     self.first_tap_time = Some(now);
-                    self.down_position = None;
+                    self.first_tap_button = Some(*button);
                     GestureResult::Pending
                 } else {
-                    // First tap — record and wait for second
+                    // First tap — record and wait for second.
                     self.first_tap_position = Some(*position);
                     self.first_tap_time = Some(now);
-                    self.down_position = None;
+                    self.first_tap_button = Some(*button);
                     GestureResult::Pending
                 }
             }
@@ -343,7 +495,9 @@ impl GestureRecognizer for DoubleTapRecognizer {
     fn reset(&mut self) {
         self.first_tap_position = None;
         self.first_tap_time = None;
+        self.first_tap_button = None;
         self.down_position = None;
+        self.down_button = None;
     }
 
     fn priority(&self) -> u32 {
@@ -365,20 +519,27 @@ impl GestureRecognizer for DoubleTapRecognizer {
 // TripleTapRecognizer
 // ---------------------------------------------------------------------------
 
-/// Recognizes a triple tap (three taps within a time window and distance).
+/// Recognizes a triple tap (three taps within a time window and
+/// distance, all using the same button).
+///
 /// State machine mirrors `DoubleTapRecognizer` with one extra step:
 /// Idle → FirstTapLanded → SecondTapLanded → Recognized(TripleTap).
-/// Defaults match `DoubleTapRecognizer` (300 ms / 10 px) so the two fire
-/// as a natural escalating pair.
+/// Defaults match `DoubleTapRecognizer` (300 ms / 10 px / Primary only)
+/// so the two fire as a natural escalating pair. Mixed-button sequences
+/// reset to a fresh first tap.
 #[derive(Debug)]
 pub struct TripleTapRecognizer {
     max_distance: f32,
     max_interval: Duration,
+    accept: ButtonMask,
     first_tap_position: Option<Point>,
     first_tap_time: Option<Instant>,
+    first_tap_button: Option<PointerButton>,
     second_tap_position: Option<Point>,
     second_tap_time: Option<Instant>,
+    second_tap_button: Option<PointerButton>,
     down_position: Option<Point>,
+    down_button: Option<PointerButton>,
 }
 
 impl TripleTapRecognizer {
@@ -386,11 +547,15 @@ impl TripleTapRecognizer {
         Self {
             max_distance: 10.0,
             max_interval: Duration::from_millis(300),
+            accept: ButtonMask::PRIMARY,
             first_tap_position: None,
             first_tap_time: None,
+            first_tap_button: None,
             second_tap_position: None,
             second_tap_time: None,
+            second_tap_button: None,
             down_position: None,
+            down_button: None,
         }
     }
 
@@ -404,11 +569,44 @@ impl TripleTapRecognizer {
         self
     }
 
+    /// Restrict (or extend) the set of buttons that can fire this
+    /// recognizer. Default is [`ButtonMask::PRIMARY`].
+    pub fn accept_buttons(mut self, mask: impl Into<ButtonMask>) -> Self {
+        self.accept = mask.into();
+        self
+    }
+
+    /// Convenience: accept any pointer button.
+    pub fn accept_any_button(self) -> Self {
+        self.accept_buttons(ButtonMask::ALL)
+    }
+
     /// Feed an event with an explicit timestamp (for testability without real clocks).
     pub fn process_at(&mut self, event: &RawPointerEvent, now: Instant) -> GestureResult {
         match event {
-            RawPointerEvent::Down { position, .. } => {
+            RawPointerEvent::Down {
+                position, button, ..
+            } => {
+                if !self.accept.contains(*button) {
+                    return GestureResult::Pending;
+                }
+                // Cross-tap button-match: if any accumulated tap used a
+                // different button, drop everything and start fresh.
+                let mismatch = self
+                    .first_tap_button
+                    .map(|b| b != *button)
+                    .unwrap_or(false)
+                    || self.second_tap_button.map(|b| b != *button).unwrap_or(false);
+                if mismatch {
+                    self.first_tap_position = None;
+                    self.first_tap_time = None;
+                    self.first_tap_button = None;
+                    self.second_tap_position = None;
+                    self.second_tap_time = None;
+                    self.second_tap_button = None;
+                }
                 self.down_position = Some(*position);
+                self.down_button = Some(*button);
                 GestureResult::Pending
             }
             RawPointerEvent::Move { position } => {
@@ -419,67 +617,103 @@ impl TripleTapRecognizer {
                 }
                 GestureResult::Pending
             }
-            RawPointerEvent::Up { position, .. } => {
+            RawPointerEvent::Up {
+                position,
+                button,
+                modifiers,
+            } => {
                 let Some(down) = self.down_position else {
                     return GestureResult::Failed;
                 };
+                let Some(down_button) = self.down_button else {
+                    return GestureResult::Failed;
+                };
+                self.down_position = None;
+                self.down_button = None;
+                if *button != down_button {
+                    return GestureResult::Failed;
+                }
                 if distance(*position, down) > self.max_distance {
                     return GestureResult::Failed;
                 }
-                self.down_position = None;
 
-                // Second tap landed — this is the third if both prior
-                // timings are in window.
-                if let (Some(first_pos), Some(first_time), Some(second_pos), Some(second_time)) = (
+                // Third tap landed — this is the third if both prior
+                // timings AND buttons are in window/match.
+                if let (
+                    Some(first_pos),
+                    Some(first_time),
+                    Some(first_button),
+                    Some(second_pos),
+                    Some(second_time),
+                    Some(second_button),
+                ) = (
                     self.first_tap_position,
                     self.first_tap_time,
+                    self.first_tap_button,
                     self.second_tap_position,
                     self.second_tap_time,
+                    self.second_tap_button,
                 ) {
-                    if distance(*position, second_pos) <= self.max_distance
+                    if first_button == *button
+                        && second_button == *button
+                        && distance(*position, second_pos) <= self.max_distance
                         && now.duration_since(second_time) <= self.max_interval
                         && distance(second_pos, first_pos) <= self.max_distance
                         && second_time.duration_since(first_time) <= self.max_interval
                     {
                         self.reset();
-                        return GestureResult::Recognized(GestureEvent::TripleTap {
-                            position: *position,
-                        });
+                        return GestureResult::Recognized(GestureEvent::TripleTap(
+                            TapEvent {
+                                position: *position,
+                                button: *button,
+                                modifiers: *modifiers,
+                            },
+                        ));
                     }
-                    // Out of window: fold the two most recent taps forward
-                    // so the next tap can pair with this one.
+                    // Out of window or button mismatch: fold this tap
+                    // forward as a fresh first.
                     self.first_tap_position = Some(*position);
                     self.first_tap_time = Some(now);
+                    self.first_tap_button = Some(*button);
                     self.second_tap_position = None;
                     self.second_tap_time = None;
+                    self.second_tap_button = None;
                     return GestureResult::Pending;
                 }
 
                 // First or second tap.
-                if let (Some(first_pos), Some(first_time)) =
-                    (self.first_tap_position, self.first_tap_time)
-                {
-                    // Second tap — if in window, promote to "second landed".
-                    if distance(*position, first_pos) <= self.max_distance
+                if let (Some(first_pos), Some(first_time), Some(first_button)) = (
+                    self.first_tap_position,
+                    self.first_tap_time,
+                    self.first_tap_button,
+                ) {
+                    // Second tap — if in window AND button matches, promote.
+                    if first_button == *button
+                        && distance(*position, first_pos) <= self.max_distance
                         && now.duration_since(first_time) <= self.max_interval
                     {
                         self.second_tap_position = Some(*position);
                         self.second_tap_time = Some(now);
+                        self.second_tap_button = Some(*button);
                         return GestureResult::Pending;
                     }
-                    // Out of window — treat as a fresh first tap.
+                    // Out of window or mismatch — treat as fresh first.
                     self.first_tap_position = Some(*position);
                     self.first_tap_time = Some(now);
+                    self.first_tap_button = Some(*button);
                     self.second_tap_position = None;
                     self.second_tap_time = None;
+                    self.second_tap_button = None;
                     return GestureResult::Pending;
                 }
 
                 // No prior tap — record as first.
                 self.first_tap_position = Some(*position);
                 self.first_tap_time = Some(now);
+                self.first_tap_button = Some(*button);
                 self.second_tap_position = None;
                 self.second_tap_time = None;
+                self.second_tap_button = None;
                 GestureResult::Pending
             }
         }
@@ -500,9 +734,12 @@ impl GestureRecognizer for TripleTapRecognizer {
     fn reset(&mut self) {
         self.first_tap_position = None;
         self.first_tap_time = None;
+        self.first_tap_button = None;
         self.second_tap_position = None;
         self.second_tap_time = None;
+        self.second_tap_button = None;
         self.down_position = None;
+        self.down_button = None;
     }
 
     fn priority(&self) -> u32 {
@@ -532,12 +769,20 @@ impl GestureRecognizer for TripleTapRecognizer {
 /// an event-loop deadline). The recognizer itself does not spawn timers.
 /// The [`GestureRecognizer::next_deadline`] method exposes when the next
 /// tick is needed so the event loop can wake up in time.
+///
+/// Default `accept` is [`ButtonMask::PRIMARY`]; presses on other buttons
+/// are ignored. Modifiers are captured at the `Down` (since the
+/// recognition timer fires before any `Up`) and surfaced through the
+/// emitted [`TapEvent`].
 #[derive(Debug)]
 pub struct LongPressRecognizer {
     max_distance: f32,
     min_duration: Duration,
+    accept: ButtonMask,
     down_position: Option<Point>,
     down_time: Option<Instant>,
+    down_button: Option<PointerButton>,
+    down_modifiers: Modifiers,
     recognized: bool,
 }
 
@@ -546,8 +791,11 @@ impl LongPressRecognizer {
         Self {
             max_distance: 5.0,
             min_duration: Duration::from_millis(500),
+            accept: ButtonMask::PRIMARY,
             down_position: None,
             down_time: None,
+            down_button: None,
+            down_modifiers: Modifiers::NONE,
             recognized: false,
         }
     }
@@ -560,6 +808,18 @@ impl LongPressRecognizer {
     pub fn min_duration(mut self, dur: Duration) -> Self {
         self.min_duration = dur;
         self
+    }
+
+    /// Restrict (or extend) the set of buttons that can fire this
+    /// recognizer. Default is [`ButtonMask::PRIMARY`].
+    pub fn accept_buttons(mut self, mask: impl Into<ButtonMask>) -> Self {
+        self.accept = mask.into();
+        self
+    }
+
+    /// Convenience: accept any pointer button.
+    pub fn accept_any_button(self) -> Self {
+        self.accept_buttons(ButtonMask::ALL)
     }
 
     #[cfg(test)]
@@ -577,9 +837,18 @@ impl Default for LongPressRecognizer {
 impl GestureRecognizer for LongPressRecognizer {
     fn process(&mut self, event: &RawPointerEvent) -> GestureResult {
         match event {
-            RawPointerEvent::Down { position, .. } => {
+            RawPointerEvent::Down {
+                position,
+                button,
+                modifiers,
+            } => {
+                if !self.accept.contains(*button) {
+                    return GestureResult::Pending;
+                }
                 self.down_position = Some(*position);
                 self.down_time = Some(Instant::now());
+                self.down_button = Some(*button);
+                self.down_modifiers = *modifiers;
                 self.recognized = false;
                 GestureResult::Pending
             }
@@ -606,6 +875,8 @@ impl GestureRecognizer for LongPressRecognizer {
     fn reset(&mut self) {
         self.down_position = None;
         self.down_time = None;
+        self.down_button = None;
+        self.down_modifiers = Modifiers::NONE;
         self.recognized = false;
     }
 
@@ -617,11 +888,16 @@ impl GestureRecognizer for LongPressRecognizer {
         if self.recognized {
             return GestureResult::Pending;
         }
-        if let (Some(pos), Some(time)) = (self.down_position, self.down_time)
+        if let (Some(pos), Some(time), Some(button)) =
+            (self.down_position, self.down_time, self.down_button)
             && now.duration_since(time) >= self.min_duration
         {
             self.recognized = true;
-            return GestureResult::Recognized(GestureEvent::LongPress { position: pos });
+            return GestureResult::Recognized(GestureEvent::LongPress(TapEvent {
+                position: pos,
+                button,
+                modifiers: self.down_modifiers,
+            }));
         }
         GestureResult::Pending
     }
@@ -674,7 +950,9 @@ impl Default for DragRecognizer {
 impl GestureRecognizer for DragRecognizer {
     fn process(&mut self, event: &RawPointerEvent) -> GestureResult {
         match event {
-            RawPointerEvent::Down { position, button } => {
+            RawPointerEvent::Down {
+                position, button, ..
+            } => {
                 self.down_position = Some(*position);
                 self.down_button = Some(*button);
                 self.last_position = Some(*position);
@@ -1059,39 +1337,157 @@ fn distance(a: Point, b: Point) -> f32 {
 mod tests {
     use super::*;
 
+    // ─── helpers ──────────────────────────────────────────────────────────
+
+    fn down(pos: Point) -> RawPointerEvent {
+        down_btn(pos, PointerButton::Primary)
+    }
+
+    fn down_btn(pos: Point, button: PointerButton) -> RawPointerEvent {
+        down_full(pos, button, Modifiers::NONE)
+    }
+
+    fn down_full(pos: Point, button: PointerButton, modifiers: Modifiers) -> RawPointerEvent {
+        RawPointerEvent::Down {
+            position: pos,
+            button,
+            modifiers,
+        }
+    }
+
+    fn up(pos: Point) -> RawPointerEvent {
+        up_btn(pos, PointerButton::Primary)
+    }
+
+    fn up_btn(pos: Point, button: PointerButton) -> RawPointerEvent {
+        up_full(pos, button, Modifiers::NONE)
+    }
+
+    fn up_full(pos: Point, button: PointerButton, modifiers: Modifiers) -> RawPointerEvent {
+        RawPointerEvent::Up {
+            position: pos,
+            button,
+            modifiers,
+        }
+    }
+
+    fn move_to(pos: Point) -> RawPointerEvent {
+        RawPointerEvent::Move { position: pos }
+    }
+
     // --- TapRecognizer ---
 
     #[test]
     fn tap_recognized_on_quick_down_up() {
         let mut rec = TapRecognizer::new();
         assert!(matches!(
-            rec.process(&RawPointerEvent::Down {
-                position: Point::new(10.0, 10.0),
-                button: PointerButton::Primary,
-            }),
+            rec.process(&down(Point::new(10.0, 10.0))),
             GestureResult::Pending
         ));
         assert!(matches!(
-            rec.process(&RawPointerEvent::Up {
-                position: Point::new(10.0, 10.0),
-                button: PointerButton::Primary,
-            }),
-            GestureResult::Recognized(GestureEvent::Tap { .. })
+            rec.process(&up(Point::new(10.0, 10.0))),
+            GestureResult::Recognized(GestureEvent::Tap(_))
         ));
     }
 
     #[test]
     fn tap_fails_if_moved_too_far() {
         let mut rec = TapRecognizer::new().max_distance(5.0);
-        rec.process(&RawPointerEvent::Down {
-            position: Point::new(10.0, 10.0),
-            button: PointerButton::Primary,
-        });
+        rec.process(&down(Point::new(10.0, 10.0)));
         assert!(matches!(
-            rec.process(&RawPointerEvent::Move {
-                position: Point::new(20.0, 10.0),
-            }),
+            rec.process(&move_to(Point::new(20.0, 10.0))),
             GestureResult::Failed
+        ));
+    }
+
+    // --- TapRecognizer: button filter + modifiers ---
+
+    #[test]
+    fn tap_default_filters_secondary_button() {
+        let mut rec = TapRecognizer::new();
+        // Right-click: Down is silently ignored (still Pending), Up
+        // sees no down_position recorded and fails — no Tap fires.
+        assert!(matches!(
+            rec.process(&down_btn(Point::new(10.0, 10.0), PointerButton::Secondary)),
+            GestureResult::Pending
+        ));
+        assert!(matches!(
+            rec.process(&up_btn(Point::new(10.0, 10.0), PointerButton::Secondary)),
+            GestureResult::Failed
+        ));
+    }
+
+    #[test]
+    fn tap_default_filters_middle_button() {
+        let mut rec = TapRecognizer::new();
+        assert!(matches!(
+            rec.process(&down_btn(Point::new(10.0, 10.0), PointerButton::Middle)),
+            GestureResult::Pending
+        ));
+        assert!(matches!(
+            rec.process(&up_btn(Point::new(10.0, 10.0), PointerButton::Middle)),
+            GestureResult::Failed
+        ));
+    }
+
+    #[test]
+    fn tap_accept_secondary_recognises_right_click() {
+        let mut rec = TapRecognizer::new().accept_buttons(ButtonMask::SECONDARY);
+        rec.process(&down_btn(Point::new(10.0, 10.0), PointerButton::Secondary));
+        match rec.process(&up_btn(Point::new(10.0, 10.0), PointerButton::Secondary)) {
+            GestureResult::Recognized(GestureEvent::Tap(event)) => {
+                assert_eq!(event.button, PointerButton::Secondary);
+            }
+            other => panic!("expected Tap on right-click, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn tap_button_mismatch_fails() {
+        let mut rec = TapRecognizer::new().accept_any_button();
+        rec.process(&down_btn(Point::new(10.0, 10.0), PointerButton::Primary));
+        // Up with a different button → Failed, no Tap.
+        assert!(matches!(
+            rec.process(&up_btn(Point::new(10.0, 10.0), PointerButton::Secondary)),
+            GestureResult::Failed
+        ));
+    }
+
+    #[test]
+    fn tap_carries_modifiers_from_up() {
+        let mut rec = TapRecognizer::new();
+        rec.process(&down_full(
+            Point::new(10.0, 10.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        match rec.process(&up_full(
+            Point::new(10.0, 10.0),
+            PointerButton::Primary,
+            Modifiers::CTRL | Modifiers::SHIFT,
+        )) {
+            GestureResult::Recognized(GestureEvent::Tap(event)) => {
+                assert!(event.modifiers.ctrl());
+                assert!(event.modifiers.shift());
+                assert!(!event.modifiers.alt());
+            }
+            other => panic!("expected Tap with modifiers, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn tap_recognised_for_forward_or_back_when_accepted() {
+        let mut rec = TapRecognizer::new()
+            .accept_buttons(ButtonMask::FORWARD | ButtonMask::BACK);
+        rec.process(&down_btn(Point::new(0.0, 0.0), PointerButton::Forward));
+        assert!(matches!(
+            rec.process(&up_btn(Point::new(0.0, 0.0), PointerButton::Forward)),
+            GestureResult::Recognized(GestureEvent::Tap(_))
+        ));
+        rec.process(&down_btn(Point::new(0.0, 0.0), PointerButton::Back));
+        assert!(matches!(
+            rec.process(&up_btn(Point::new(0.0, 0.0), PointerButton::Back)),
+            GestureResult::Recognized(GestureEvent::Tap(_))
         ));
     }
 
@@ -1101,41 +1497,21 @@ mod tests {
     fn double_tap_recognized_within_interval() {
         let mut rec = DoubleTapRecognizer::new().max_interval(Duration::from_millis(500));
         let t0 = Instant::now();
+        let p = Point::new(10.0, 10.0);
 
         // First tap
-        rec.process_at(
-            &RawPointerEvent::Down {
-                position: Point::new(10.0, 10.0),
-                button: PointerButton::Primary,
-            },
-            t0,
-        );
-        rec.process_at(
-            &RawPointerEvent::Up {
-                position: Point::new(10.0, 10.0),
-                button: PointerButton::Primary,
-            },
-            t0 + Duration::from_millis(50),
-        );
+        rec.process_at(&down(p), t0);
+        rec.process_at(&up(p), t0 + Duration::from_millis(50));
 
         // Second tap within interval
-        rec.process_at(
-            &RawPointerEvent::Down {
-                position: Point::new(11.0, 10.0),
-                button: PointerButton::Primary,
-            },
-            t0 + Duration::from_millis(200),
-        );
+        rec.process_at(&down(Point::new(11.0, 10.0)), t0 + Duration::from_millis(200));
         let result = rec.process_at(
-            &RawPointerEvent::Up {
-                position: Point::new(11.0, 10.0),
-                button: PointerButton::Primary,
-            },
+            &up(Point::new(11.0, 10.0)),
             t0 + Duration::from_millis(250),
         );
         assert!(matches!(
             result,
-            GestureResult::Recognized(GestureEvent::DoubleTap { .. })
+            GestureResult::Recognized(GestureEvent::DoubleTap(_))
         ));
     }
 
@@ -1143,38 +1519,13 @@ mod tests {
     fn double_tap_fails_if_too_slow() {
         let mut rec = DoubleTapRecognizer::new().max_interval(Duration::from_millis(300));
         let t0 = Instant::now();
+        let p = Point::new(10.0, 10.0);
 
-        // First tap
-        rec.process_at(
-            &RawPointerEvent::Down {
-                position: Point::new(10.0, 10.0),
-                button: PointerButton::Primary,
-            },
-            t0,
-        );
-        rec.process_at(
-            &RawPointerEvent::Up {
-                position: Point::new(10.0, 10.0),
-                button: PointerButton::Primary,
-            },
-            t0 + Duration::from_millis(50),
-        );
+        rec.process_at(&down(p), t0);
+        rec.process_at(&up(p), t0 + Duration::from_millis(50));
 
-        // Second tap too late
-        rec.process_at(
-            &RawPointerEvent::Down {
-                position: Point::new(10.0, 10.0),
-                button: PointerButton::Primary,
-            },
-            t0 + Duration::from_millis(400),
-        );
-        let result = rec.process_at(
-            &RawPointerEvent::Up {
-                position: Point::new(10.0, 10.0),
-                button: PointerButton::Primary,
-            },
-            t0 + Duration::from_millis(450),
-        );
+        rec.process_at(&down(p), t0 + Duration::from_millis(400));
+        let result = rec.process_at(&up(p), t0 + Duration::from_millis(450));
         // Should be Pending (treated as new first tap), not Recognized
         assert!(matches!(result, GestureResult::Pending));
     }
@@ -1183,40 +1534,63 @@ mod tests {
     fn double_tap_fails_if_too_far() {
         let mut rec = DoubleTapRecognizer::new().max_distance(5.0);
         let t0 = Instant::now();
+        let p = Point::new(10.0, 10.0);
 
-        // First tap
-        rec.process_at(
-            &RawPointerEvent::Down {
-                position: Point::new(10.0, 10.0),
-                button: PointerButton::Primary,
-            },
-            t0,
-        );
-        rec.process_at(
-            &RawPointerEvent::Up {
-                position: Point::new(10.0, 10.0),
-                button: PointerButton::Primary,
-            },
-            t0 + Duration::from_millis(50),
-        );
+        rec.process_at(&down(p), t0);
+        rec.process_at(&up(p), t0 + Duration::from_millis(50));
 
         // Second tap too far from first
-        rec.process_at(
-            &RawPointerEvent::Down {
-                position: Point::new(50.0, 50.0),
-                button: PointerButton::Primary,
-            },
-            t0 + Duration::from_millis(100),
-        );
+        rec.process_at(&down(Point::new(50.0, 50.0)), t0 + Duration::from_millis(100));
         let result = rec.process_at(
-            &RawPointerEvent::Up {
-                position: Point::new(50.0, 50.0),
-                button: PointerButton::Primary,
-            },
+            &up(Point::new(50.0, 50.0)),
             t0 + Duration::from_millis(150),
         );
         // Treated as new first tap
         assert!(matches!(result, GestureResult::Pending));
+    }
+
+    #[test]
+    fn double_tap_button_mismatch_fails_at_second_down() {
+        // First tap Primary, second tap Secondary → no DoubleTap. The
+        // second tap is recorded as a fresh first instead.
+        let mut rec = DoubleTapRecognizer::new().accept_any_button();
+        let t0 = Instant::now();
+        let p = Point::new(10.0, 10.0);
+
+        rec.process_at(&down_btn(p, PointerButton::Primary), t0);
+        rec.process_at(&up_btn(p, PointerButton::Primary), t0 + Duration::from_millis(50));
+
+        rec.process_at(
+            &down_btn(p, PointerButton::Secondary),
+            t0 + Duration::from_millis(150),
+        );
+        let result = rec.process_at(
+            &up_btn(p, PointerButton::Secondary),
+            t0 + Duration::from_millis(200),
+        );
+        assert!(matches!(result, GestureResult::Pending));
+    }
+
+    #[test]
+    fn double_tap_carries_modifiers_from_second_up() {
+        let mut rec = DoubleTapRecognizer::new();
+        let t0 = Instant::now();
+        let p = Point::new(10.0, 10.0);
+
+        rec.process_at(&down(p), t0);
+        rec.process_at(&up(p), t0 + Duration::from_millis(50));
+
+        rec.process_at(&down(p), t0 + Duration::from_millis(150));
+        let result = rec.process_at(
+            &up_full(p, PointerButton::Primary, Modifiers::SHIFT),
+            t0 + Duration::from_millis(200),
+        );
+        match result {
+            GestureResult::Recognized(GestureEvent::DoubleTap(event)) => {
+                assert!(event.modifiers.shift());
+            }
+            other => panic!("expected DoubleTap with shift, got {:?}", other),
+        }
     }
 
     // --- LongPressRecognizer ---
@@ -1224,10 +1598,7 @@ mod tests {
     #[test]
     fn long_press_recognized_after_timeout() {
         let mut rec = LongPressRecognizer::new().min_duration(Duration::from_millis(500));
-        rec.process(&RawPointerEvent::Down {
-            position: Point::new(10.0, 10.0),
-            button: PointerButton::Primary,
-        });
+        rec.process(&down(Point::new(10.0, 10.0)));
 
         let down_time = rec.down_time.unwrap();
 
@@ -1240,21 +1611,16 @@ mod tests {
         // Now!
         assert!(matches!(
             rec.check_timeout(down_time + Duration::from_millis(600)),
-            GestureResult::Recognized(GestureEvent::LongPress { .. })
+            GestureResult::Recognized(GestureEvent::LongPress(_))
         ));
     }
 
     #[test]
     fn long_press_fails_on_movement() {
         let mut rec = LongPressRecognizer::new().max_distance(5.0);
-        rec.process(&RawPointerEvent::Down {
-            position: Point::new(10.0, 10.0),
-            button: PointerButton::Primary,
-        });
+        rec.process(&down(Point::new(10.0, 10.0)));
         assert!(matches!(
-            rec.process(&RawPointerEvent::Move {
-                position: Point::new(30.0, 30.0),
-            }),
+            rec.process(&move_to(Point::new(30.0, 30.0))),
             GestureResult::Failed
         ));
     }
@@ -1262,17 +1628,40 @@ mod tests {
     #[test]
     fn long_press_fails_on_early_up() {
         let mut rec = LongPressRecognizer::new();
-        rec.process(&RawPointerEvent::Down {
-            position: Point::new(10.0, 10.0),
-            button: PointerButton::Primary,
-        });
+        rec.process(&down(Point::new(10.0, 10.0)));
         assert!(matches!(
-            rec.process(&RawPointerEvent::Up {
-                position: Point::new(10.0, 10.0),
-                button: PointerButton::Primary,
-            }),
+            rec.process(&up(Point::new(10.0, 10.0))),
             GestureResult::Failed
         ));
+    }
+
+    #[test]
+    fn long_press_default_filters_secondary() {
+        let mut rec = LongPressRecognizer::new().min_duration(Duration::from_millis(50));
+        // Right-click Down is silently ignored.
+        rec.process(&down_btn(Point::new(0.0, 0.0), PointerButton::Secondary));
+        // Even after the timeout, no LongPress fires because no down
+        // state was captured.
+        let later = Instant::now() + Duration::from_millis(500);
+        assert!(matches!(rec.check_timeout(later), GestureResult::Pending));
+    }
+
+    #[test]
+    fn long_press_carries_modifiers_from_down() {
+        let mut rec = LongPressRecognizer::new().min_duration(Duration::from_millis(50));
+        rec.process(&down_full(
+            Point::new(0.0, 0.0),
+            PointerButton::Primary,
+            Modifiers::SHIFT,
+        ));
+        let down_time = rec.down_time.unwrap();
+        match rec.check_timeout(down_time + Duration::from_millis(100)) {
+            GestureResult::Recognized(GestureEvent::LongPress(event)) => {
+                assert!(event.modifiers.shift());
+                assert_eq!(event.button, PointerButton::Primary);
+            }
+            other => panic!("expected LongPress, got {:?}", other),
+        }
     }
 
     // --- DragRecognizer ---
@@ -1281,27 +1670,17 @@ mod tests {
     fn drag_recognizer_fires_after_threshold() {
         let mut rec = DragRecognizer::new().threshold(5.0);
 
-        assert!(matches!(
-            rec.process(&RawPointerEvent::Down {
-                position: Point::new(10.0, 10.0),
-                button: PointerButton::Primary,
-            }),
-            GestureResult::Pending
-        ));
+        assert!(matches!(rec.process(&down(Point::new(10.0, 10.0))), GestureResult::Pending));
 
         // Small move — still pending
         assert!(matches!(
-            rec.process(&RawPointerEvent::Move {
-                position: Point::new(12.0, 10.0),
-            }),
+            rec.process(&move_to(Point::new(12.0, 10.0))),
             GestureResult::Pending
         ));
 
         // Large move — drag started
         assert!(matches!(
-            rec.process(&RawPointerEvent::Move {
-                position: Point::new(20.0, 10.0),
-            }),
+            rec.process(&move_to(Point::new(20.0, 10.0))),
             GestureResult::Recognized(GestureEvent::DragStarted { .. })
         ));
     }
@@ -1309,29 +1688,19 @@ mod tests {
     #[test]
     fn drag_emits_moved_and_ended() {
         let mut rec = DragRecognizer::new().threshold(1.0);
-        rec.process(&RawPointerEvent::Down {
-            position: Point::new(0.0, 0.0),
-            button: PointerButton::Primary,
-        });
+        rec.process(&down(Point::new(0.0, 0.0)));
         // Cross threshold
-        rec.process(&RawPointerEvent::Move {
-            position: Point::new(10.0, 0.0),
-        });
+        rec.process(&move_to(Point::new(10.0, 0.0)));
 
         // Subsequent move
-        let result = rec.process(&RawPointerEvent::Move {
-            position: Point::new(15.0, 0.0),
-        });
+        let result = rec.process(&move_to(Point::new(15.0, 0.0)));
         assert!(matches!(
             result,
             GestureResult::Recognized(GestureEvent::DragMoved { .. })
         ));
 
         // Release
-        let result = rec.process(&RawPointerEvent::Up {
-            position: Point::new(15.0, 0.0),
-            button: PointerButton::Primary,
-        });
+        let result = rec.process(&up(Point::new(15.0, 0.0)));
         assert!(matches!(
             result,
             GestureResult::Recognized(GestureEvent::DragEnded { .. })
@@ -1341,36 +1710,20 @@ mod tests {
     #[test]
     fn drag_fails_on_up_without_movement() {
         let mut rec = DragRecognizer::new().threshold(5.0);
-        rec.process(&RawPointerEvent::Down {
-            position: Point::new(10.0, 10.0),
-            button: PointerButton::Primary,
-        });
-        assert!(matches!(
-            rec.process(&RawPointerEvent::Up {
-                position: Point::new(10.0, 10.0),
-                button: PointerButton::Primary,
-            }),
-            GestureResult::Failed
-        ));
+        rec.process(&down(Point::new(10.0, 10.0)));
+        assert!(matches!(rec.process(&up(Point::new(10.0, 10.0))), GestureResult::Failed));
     }
 
     #[test]
     fn reset_clears_state() {
         let mut rec = DragRecognizer::new().threshold(1.0);
-        rec.process(&RawPointerEvent::Down {
-            position: Point::new(0.0, 0.0),
-            button: PointerButton::Primary,
-        });
-        rec.process(&RawPointerEvent::Move {
-            position: Point::new(10.0, 0.0),
-        });
+        rec.process(&down(Point::new(0.0, 0.0)));
+        rec.process(&move_to(Point::new(10.0, 0.0)));
         rec.reset();
 
         // After reset, move without down should be pending (not drag)
         assert!(matches!(
-            rec.process(&RawPointerEvent::Move {
-                position: Point::new(20.0, 0.0),
-            }),
+            rec.process(&move_to(Point::new(20.0, 0.0))),
             GestureResult::Pending
         ));
     }
@@ -1384,18 +1737,9 @@ mod tests {
             .min_distance(20.0);
         let t0 = Instant::now();
 
-        rec.process_at(
-            &RawPointerEvent::Down {
-                position: Point::new(10.0, 50.0),
-                button: PointerButton::Primary,
-            },
-            t0,
-        );
+        rec.process_at(&down(Point::new(10.0, 50.0)), t0);
         let result = rec.process_at(
-            &RawPointerEvent::Up {
-                position: Point::new(200.0, 55.0),
-                button: PointerButton::Primary,
-            },
+            &up(Point::new(200.0, 55.0)),
             t0 + Duration::from_millis(100),
         );
         match result {
@@ -1417,18 +1761,9 @@ mod tests {
             .min_distance(20.0);
         let t0 = Instant::now();
 
-        rec.process_at(
-            &RawPointerEvent::Down {
-                position: Point::new(200.0, 50.0),
-                button: PointerButton::Primary,
-            },
-            t0,
-        );
+        rec.process_at(&down(Point::new(200.0, 50.0)), t0);
         let result = rec.process_at(
-            &RawPointerEvent::Up {
-                position: Point::new(10.0, 55.0),
-                button: PointerButton::Primary,
-            },
+            &up(Point::new(10.0, 55.0)),
             t0 + Duration::from_millis(100),
         );
         assert!(matches!(
@@ -1445,18 +1780,9 @@ mod tests {
         let mut rec = SwipeRecognizer::new().min_velocity(500.0);
         let t0 = Instant::now();
 
-        rec.process_at(
-            &RawPointerEvent::Down {
-                position: Point::new(10.0, 10.0),
-                button: PointerButton::Primary,
-            },
-            t0,
-        );
+        rec.process_at(&down(Point::new(10.0, 10.0)), t0);
         let result = rec.process_at(
-            &RawPointerEvent::Up {
-                position: Point::new(50.0, 10.0),
-                button: PointerButton::Primary,
-            },
+            &up(Point::new(50.0, 10.0)),
             t0 + Duration::from_secs(5), // Very slow
         );
         assert!(matches!(result, GestureResult::Failed));
@@ -1469,19 +1795,10 @@ mod tests {
             .min_distance(20.0);
         let t0 = Instant::now();
 
-        rec.process_at(
-            &RawPointerEvent::Down {
-                position: Point::new(10.0, 10.0),
-                button: PointerButton::Primary,
-            },
-            t0,
-        );
+        rec.process_at(&down(Point::new(10.0, 10.0)), t0);
         // Equal dx and dy — diagonal, cross_ratio = 1.0 > 0.5
         let result = rec.process_at(
-            &RawPointerEvent::Up {
-                position: Point::new(100.0, 100.0),
-                button: PointerButton::Primary,
-            },
+            &up(Point::new(100.0, 100.0)),
             t0 + Duration::from_millis(100),
         );
         assert!(matches!(result, GestureResult::Failed));
@@ -1494,15 +1811,9 @@ mod tests {
         let mut arena = GestureArena::new();
         arena.add(TapRecognizer::new());
 
-        arena.process(&RawPointerEvent::Down {
-            position: Point::new(10.0, 10.0),
-            button: PointerButton::Primary,
-        });
-        let result = arena.process(&RawPointerEvent::Up {
-            position: Point::new(10.0, 10.0),
-            button: PointerButton::Primary,
-        });
-        assert!(matches!(result, Some(GestureEvent::Tap { .. })));
+        arena.process(&down(Point::new(10.0, 10.0)));
+        let result = arena.process(&up(Point::new(10.0, 10.0)));
+        assert!(matches!(result, Some(GestureEvent::Tap(_))));
     }
 
     #[test]
@@ -1511,15 +1822,10 @@ mod tests {
         arena.add(TapRecognizer::new().max_distance(5.0));
         arena.add(DragRecognizer::new().threshold(5.0));
 
-        arena.process(&RawPointerEvent::Down {
-            position: Point::new(10.0, 10.0),
-            button: PointerButton::Primary,
-        });
+        arena.process(&down(Point::new(10.0, 10.0)));
 
         // Move beyond both thresholds — drag recognized (higher priority)
-        let result = arena.process(&RawPointerEvent::Move {
-            position: Point::new(30.0, 10.0),
-        });
+        let result = arena.process(&move_to(Point::new(30.0, 10.0)));
         assert!(matches!(result, Some(GestureEvent::DragStarted { .. })));
     }
 
@@ -1529,17 +1835,11 @@ mod tests {
         arena.add(TapRecognizer::new());
         arena.add(DragRecognizer::new().threshold(5.0));
 
-        arena.process(&RawPointerEvent::Down {
-            position: Point::new(10.0, 10.0),
-            button: PointerButton::Primary,
-        });
+        arena.process(&down(Point::new(10.0, 10.0)));
 
         // Up without significant movement — drag fails, tap wins
-        let result = arena.process(&RawPointerEvent::Up {
-            position: Point::new(10.0, 10.0),
-            button: PointerButton::Primary,
-        });
-        assert!(matches!(result, Some(GestureEvent::Tap { .. })));
+        let result = arena.process(&up(Point::new(10.0, 10.0)));
+        assert!(matches!(result, Some(GestureEvent::Tap(_))));
     }
 
     // --- TripleTapRecognizer ---
@@ -1548,30 +1848,19 @@ mod tests {
     fn triple_tap_recognized_within_intervals() {
         let mut rec = TripleTapRecognizer::new();
         let t0 = Instant::now();
+        let p = Point::new(10.0, 10.0);
 
         // Three taps all within window, all at (10, 10).
         for i in 0..3 {
             let offset = Duration::from_millis(200 * i as u64);
-            rec.process_at(
-                &RawPointerEvent::Down {
-                    position: Point::new(10.0, 10.0),
-                    button: PointerButton::Primary,
-                },
-                t0 + offset,
-            );
-            let result = rec.process_at(
-                &RawPointerEvent::Up {
-                    position: Point::new(10.0, 10.0),
-                    button: PointerButton::Primary,
-                },
-                t0 + offset + Duration::from_millis(50),
-            );
+            rec.process_at(&down(p), t0 + offset);
+            let result = rec.process_at(&up(p), t0 + offset + Duration::from_millis(50));
             if i < 2 {
                 assert!(matches!(result, GestureResult::Pending));
             } else {
                 assert!(matches!(
                     result,
-                    GestureResult::Recognized(GestureEvent::TripleTap { .. })
+                    GestureResult::Recognized(GestureEvent::TripleTap(_))
                 ));
             }
         }
@@ -1582,16 +1871,16 @@ mod tests {
         let mut rec = TripleTapRecognizer::new().max_interval(Duration::from_millis(300));
         let t0 = Instant::now();
         let stamp = |ms| t0 + Duration::from_millis(ms);
+        let p = Point::new(10.0, 10.0);
 
-        // Taps 1, 2 in window.
-        rec.process_at(&RawPointerEvent::Down { position: Point::new(10.0, 10.0), button: PointerButton::Primary }, stamp(0));
-        rec.process_at(&RawPointerEvent::Up { position: Point::new(10.0, 10.0), button: PointerButton::Primary }, stamp(50));
-        rec.process_at(&RawPointerEvent::Down { position: Point::new(10.0, 10.0), button: PointerButton::Primary }, stamp(200));
-        rec.process_at(&RawPointerEvent::Up { position: Point::new(10.0, 10.0), button: PointerButton::Primary }, stamp(250));
+        rec.process_at(&down(p), stamp(0));
+        rec.process_at(&up(p), stamp(50));
+        rec.process_at(&down(p), stamp(200));
+        rec.process_at(&up(p), stamp(250));
 
         // Third tap > 300 ms after the second — does not recognize.
-        rec.process_at(&RawPointerEvent::Down { position: Point::new(10.0, 10.0), button: PointerButton::Primary }, stamp(700));
-        let result = rec.process_at(&RawPointerEvent::Up { position: Point::new(10.0, 10.0), button: PointerButton::Primary }, stamp(750));
+        rec.process_at(&down(p), stamp(700));
+        let result = rec.process_at(&up(p), stamp(750));
         assert!(matches!(result, GestureResult::Pending));
     }
 
@@ -1600,15 +1889,36 @@ mod tests {
         let mut rec = TripleTapRecognizer::new().max_distance(5.0);
         let t0 = Instant::now();
         let stamp = |ms| t0 + Duration::from_millis(ms);
+        let p = Point::new(10.0, 10.0);
 
-        rec.process_at(&RawPointerEvent::Down { position: Point::new(10.0, 10.0), button: PointerButton::Primary }, stamp(0));
-        rec.process_at(&RawPointerEvent::Up { position: Point::new(10.0, 10.0), button: PointerButton::Primary }, stamp(50));
-        rec.process_at(&RawPointerEvent::Down { position: Point::new(10.0, 10.0), button: PointerButton::Primary }, stamp(100));
-        rec.process_at(&RawPointerEvent::Up { position: Point::new(10.0, 10.0), button: PointerButton::Primary }, stamp(150));
+        rec.process_at(&down(p), stamp(0));
+        rec.process_at(&up(p), stamp(50));
+        rec.process_at(&down(p), stamp(100));
+        rec.process_at(&up(p), stamp(150));
 
         // Third tap > 5 px from the second.
-        rec.process_at(&RawPointerEvent::Down { position: Point::new(30.0, 10.0), button: PointerButton::Primary }, stamp(200));
-        let result = rec.process_at(&RawPointerEvent::Up { position: Point::new(30.0, 10.0), button: PointerButton::Primary }, stamp(250));
+        rec.process_at(&down(Point::new(30.0, 10.0)), stamp(200));
+        let result = rec.process_at(&up(Point::new(30.0, 10.0)), stamp(250));
+        assert!(matches!(result, GestureResult::Pending));
+    }
+
+    #[test]
+    fn triple_tap_button_mismatch_fails_at_third_down() {
+        // Third tap with a different button → no TripleTap. The
+        // second-tap state collapses and the new tap becomes a fresh
+        // first.
+        let mut rec = TripleTapRecognizer::new().accept_any_button();
+        let t0 = Instant::now();
+        let stamp = |ms| t0 + Duration::from_millis(ms);
+        let p = Point::new(10.0, 10.0);
+
+        rec.process_at(&down_btn(p, PointerButton::Primary), stamp(0));
+        rec.process_at(&up_btn(p, PointerButton::Primary), stamp(50));
+        rec.process_at(&down_btn(p, PointerButton::Primary), stamp(150));
+        rec.process_at(&up_btn(p, PointerButton::Primary), stamp(200));
+
+        rec.process_at(&down_btn(p, PointerButton::Secondary), stamp(300));
+        let result = rec.process_at(&up_btn(p, PointerButton::Secondary), stamp(350));
         assert!(matches!(result, GestureResult::Pending));
     }
 
@@ -1626,40 +1936,24 @@ mod tests {
         let pos = Point::new(10.0, 10.0);
 
         // Click 1 — both recognizers pending.
-        assert!(
-            arena
-                .process(&RawPointerEvent::Down { position: pos, button: PointerButton::Primary })
-                .is_none()
-        );
-        assert!(
-            arena
-                .process(&RawPointerEvent::Up { position: pos, button: PointerButton::Primary })
-                .is_none()
-        );
+        assert!(arena.process(&down(pos)).is_none());
+        assert!(arena.process(&up(pos)).is_none());
 
         // Click 2 — DoubleTap fires.
+        assert!(arena.process(&down(pos)).is_none());
+        let second = arena.process(&up(pos));
         assert!(
-            arena
-                .process(&RawPointerEvent::Down { position: pos, button: PointerButton::Primary })
-                .is_none()
-        );
-        let second = arena.process(&RawPointerEvent::Up { position: pos, button: PointerButton::Primary });
-        assert!(
-            matches!(second, Some(GestureEvent::DoubleTap { .. })),
+            matches!(second, Some(GestureEvent::DoubleTap(_))),
             "click 2 must produce DoubleTap, got {:?}",
             second
         );
 
         // Click 3 — TripleTap fires. If the arena reset TripleTapRecognizer
         // after DoubleTap won, this would be None.
+        assert!(arena.process(&down(pos)).is_none());
+        let third = arena.process(&up(pos));
         assert!(
-            arena
-                .process(&RawPointerEvent::Down { position: pos, button: PointerButton::Primary })
-                .is_none()
-        );
-        let third = arena.process(&RawPointerEvent::Up { position: pos, button: PointerButton::Primary });
-        assert!(
-            matches!(third, Some(GestureEvent::TripleTap { .. })),
+            matches!(third, Some(GestureEvent::TripleTap(_))),
             "click 3 must produce TripleTap, got {:?}",
             third
         );
@@ -1671,34 +1965,20 @@ mod tests {
         arena.add(TapRecognizer::new().max_distance(5.0));
 
         // First sequence: fail the tap by moving
-        arena.process(&RawPointerEvent::Down {
-            position: Point::new(10.0, 10.0),
-            button: PointerButton::Primary,
-        });
-        arena.process(&RawPointerEvent::Move {
-            position: Point::new(50.0, 50.0),
-        });
+        arena.process(&down(Point::new(10.0, 10.0)));
+        arena.process(&move_to(Point::new(50.0, 50.0)));
 
         // New sequence: should work fresh
-        arena.process(&RawPointerEvent::Down {
-            position: Point::new(10.0, 10.0),
-            button: PointerButton::Primary,
-        });
-        let result = arena.process(&RawPointerEvent::Up {
-            position: Point::new(10.0, 10.0),
-            button: PointerButton::Primary,
-        });
-        assert!(matches!(result, Some(GestureEvent::Tap { .. })));
+        arena.process(&down(Point::new(10.0, 10.0)));
+        let result = arena.process(&up(Point::new(10.0, 10.0)));
+        assert!(matches!(result, Some(GestureEvent::Tap(_))));
     }
 
     #[test]
     fn arena_empty_returns_none() {
         let mut arena = GestureArena::new();
         assert!(arena.is_empty());
-        let result = arena.process(&RawPointerEvent::Down {
-            position: Point::new(10.0, 10.0),
-            button: PointerButton::Primary,
-        });
+        let result = arena.process(&down(Point::new(10.0, 10.0)));
         assert!(result.is_none());
     }
 }

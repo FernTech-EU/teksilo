@@ -3,11 +3,137 @@ use fern_canvas::{Point, Rect};
 use crate::gesture::GestureEvent;
 
 /// Pointer button identifiers.
+///
+/// `Forward` and `Back` correspond to the auxiliary mouse buttons (mouse
+/// 4 / mouse 5) typically labelled "browser back / forward". Platforms
+/// that don't have those buttons simply never emit them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PointerButton {
+    /// Left-click (or main-action button on left-handed mice).
     Primary,
+    /// Right-click.
     Secondary,
+    /// Middle / wheel-click.
     Middle,
+    /// "Back" auxiliary button (mouse 4 on most 5-button mice). Often
+    /// bound to "navigate back" in browsers.
+    Back,
+    /// "Forward" auxiliary button (mouse 5). Often bound to "navigate
+    /// forward".
+    Forward,
+}
+
+/// Set of pointer buttons a gesture recognizer is configured to fire
+/// for. Used by the four click-style recognizers (`TapRecognizer`,
+/// `DoubleTapRecognizer`, `TripleTapRecognizer`, `LongPressRecognizer`)
+/// and the matching widget-level builders (`accept_tap_buttons`, …).
+///
+/// Default for every recognizer is [`ButtonMask::PRIMARY`] — left-click
+/// only — which matches the user's expectation for a "tap" and keeps
+/// right-click free to open a context menu without spuriously
+/// activating the widget. Use [`ButtonMask::ALL`] or a hand-built
+/// `PRIMARY | SECONDARY` etc. to opt into broader button sets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ButtonMask(u8);
+
+impl ButtonMask {
+    /// Empty mask — no buttons accepted.
+    pub const NONE: Self = Self(0);
+    /// Left-click on most desktop pointing devices.
+    pub const PRIMARY: Self = Self(1 << 0);
+    /// Right-click on most desktop pointing devices.
+    pub const SECONDARY: Self = Self(1 << 1);
+    /// Middle / wheel-click.
+    pub const MIDDLE: Self = Self(1 << 2);
+    /// "Back" auxiliary button (mouse 4).
+    pub const BACK: Self = Self(1 << 3);
+    /// "Forward" auxiliary button (mouse 5).
+    pub const FORWARD: Self = Self(1 << 4);
+    /// All buttons currently representable by [`PointerButton`].
+    pub const ALL: Self = Self(0b0001_1111);
+
+    /// `true` when the mask contains the given button.
+    pub const fn contains(self, button: PointerButton) -> bool {
+        let bit = match button {
+            PointerButton::Primary => 1 << 0,
+            PointerButton::Secondary => 1 << 1,
+            PointerButton::Middle => 1 << 2,
+            PointerButton::Back => 1 << 3,
+            PointerButton::Forward => 1 << 4,
+        };
+        self.0 & bit != 0
+    }
+
+    /// `true` when no buttons are accepted.
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    /// Union — accept any button in either mask.
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    /// Intersection — accept only buttons present in both masks.
+    pub const fn intersection(self, other: Self) -> Self {
+        Self(self.0 & other.0)
+    }
+}
+
+impl From<PointerButton> for ButtonMask {
+    fn from(button: PointerButton) -> Self {
+        match button {
+            PointerButton::Primary => Self::PRIMARY,
+            PointerButton::Secondary => Self::SECONDARY,
+            PointerButton::Middle => Self::MIDDLE,
+            PointerButton::Back => Self::BACK,
+            PointerButton::Forward => Self::FORWARD,
+        }
+    }
+}
+
+impl<const N: usize> From<[PointerButton; N]> for ButtonMask {
+    fn from(buttons: [PointerButton; N]) -> Self {
+        let mut mask = Self::NONE;
+        let mut i = 0;
+        while i < N {
+            mask = mask.union(ButtonMask::from(buttons[i]));
+            i += 1;
+        }
+        mask
+    }
+}
+
+impl std::ops::BitOr for ButtonMask {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self {
+        self.union(rhs)
+    }
+}
+
+impl std::ops::BitAnd for ButtonMask {
+    type Output = Self;
+    fn bitand(self, rhs: Self) -> Self {
+        self.intersection(rhs)
+    }
+}
+
+impl std::ops::BitOrAssign for ButtonMask {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+impl std::ops::BitAndAssign for ButtonMask {
+    fn bitand_assign(&mut self, rhs: Self) {
+        self.0 &= rhs.0;
+    }
+}
+
+impl Default for ButtonMask {
+    fn default() -> Self {
+        Self::PRIMARY
+    }
 }
 
 /// Keyboard key identifiers.

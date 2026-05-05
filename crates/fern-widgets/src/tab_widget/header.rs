@@ -399,7 +399,7 @@ impl Widget for TabHeader {
         let focus_origin_for_handler = focus_origin.clone();
 
         let mut handler_set = HandlerSet::new()
-            .on_tap(move |_pos, _ctx: &mut EventContext| {
+            .on_tap(move |_event, _ctx: &mut EventContext| {
                 if enabled {
                     selected.set(index);
                 }
@@ -564,12 +564,12 @@ impl Widget for TabHeader {
             });
         }
 
-        // Middle-click closes the tab (Firefox / Chrome convention).
-        // Attached as `on_pointer_event` so it sees `PointerUp`
-        // events whether the pointer landed on the tab body, the
-        // label, or the close button — the handler fires on the
-        // ancestor preview pass for descendants and on the target
-        // for the body itself.
+        // Middle-click closes the tab on Up (Firefox / Chrome
+        // convention). Non-Primary activation is already filtered at
+        // the framework level: `TapRecognizer` defaults to
+        // `ButtonMask::PRIMARY`, so a right-click or middle-click
+        // press never fires the inner `on_tap`. The `on_pointer_event`
+        // handler here only adds the close-on-middle-up behaviour.
         if let Some(close_fn) = self.on_close.clone() {
             handler_set = handler_set.on_pointer_event(move |event, _ctx| match event {
                 WidgetEvent::PointerUp {

@@ -912,11 +912,11 @@ impl Widget for TextInputField {
                 mouse::handle_pointer_event(&state_for_pointer, event, ctx)
             })
             .on_key(move |event, ctx| keyboard::handle_key(&state_for_key, event, ctx))
-            .on_double_tap(move |pos, ctx| {
-                mouse::handle_double_tap(&state_for_double, pos, ctx)
+            .on_double_tap(move |event, ctx| {
+                mouse::handle_double_tap(&state_for_double, event.position, ctx)
             })
-            .on_triple_tap(move |pos, ctx| {
-                mouse::handle_triple_tap(&state_for_triple, pos, ctx)
+            .on_triple_tap(move |event, ctx| {
+                mouse::handle_triple_tap(&state_for_triple, event.position, ctx)
             })
             .on_access_action_request(move |action, _target_node, data, ctx| {
                 handle_access_action(&state_for_access, action, data, ctx)

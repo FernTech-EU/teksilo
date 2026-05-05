@@ -1123,11 +1123,15 @@ impl Widget for RichTextEditor {
             })
             .on_double_tap({
                 let state = self.state.clone();
-                move |pos, ctx| self::mouse::handle_double_tap(&state, pos, ctx)
+                move |event, ctx| {
+                    self::mouse::handle_double_tap(&state, event.position, ctx)
+                }
             })
             .on_triple_tap({
                 let state = self.state.clone();
-                move |pos, ctx| self::mouse::handle_triple_tap(&state, pos, ctx)
+                move |event, ctx| {
+                    self::mouse::handle_triple_tap(&state, event.position, ctx)
+                }
             })
             .on_access_action_request({
                 let state = self.state.clone();

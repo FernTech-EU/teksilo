@@ -263,8 +263,9 @@ impl Widget for TextWidget {
             if let Some(on_click) = self.on_link_click.clone() {
                 let last_layout = self.last_layout.clone();
                 let last_bounds = self.last_bounds.clone();
-                handler_set = handler_set.on_tap(move |pt, ctx| {
+                handler_set = handler_set.on_tap(move |event, ctx| {
                     let bounds = last_bounds.get();
+                    let pt = event.position;
                     let local = Point::new(pt.x - bounds.x, pt.y - bounds.y);
                     if let Some(layout) = last_layout.borrow().as_ref()
                         && let Some(HitTarget::Link { url }) = layout.hit_test(local)

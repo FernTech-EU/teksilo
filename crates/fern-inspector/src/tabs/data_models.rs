@@ -70,10 +70,10 @@ impl Widget for DataModelsTab {
         let state_for_handler = self.state.clone();
         let handlers = HandlerSet::new()
             .focusable(true)
-            .on_tap(move |position, _ctx| {
+            .on_tap(move |event, _ctx| {
                 state_for_handler
                     .pending_models_click_y
-                    .set(Some(position.y));
+                    .set(Some(event.position.y));
             });
         ctx.apply_self_handlers(handlers);
         Vec::new()
