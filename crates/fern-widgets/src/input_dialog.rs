@@ -129,7 +129,10 @@ impl InputDialog {
                 let dlg = inner
                     .take()
                     .expect("InputDialog present closure called twice");
-                tree.add(ModalContainer::new(InputDialogBody::new(dlg)).title_literal(dialog_title.clone()))
+                tree.add(
+                    ModalContainer::new(InputDialogBody::new(dlg))
+                        .title_literal(dialog_title.clone()),
+                )
             })
             .presentation(ModalPresentation::Auto)
             .close_behavior(ModalCloseBehavior::EscapeOrClickOutside)
@@ -225,12 +228,7 @@ impl Widget for InputDialogBody {
         let fired_for_submit = self.fired.clone();
         let mut input = TextInput::new(text_signal.clone()).on_submit_fn(move |ctx| {
             let value = text_signal.get();
-            Self::fire(
-                &on_result_for_submit,
-                &fired_for_submit,
-                Some(value),
-                ctx,
-            );
+            Self::fire(&on_result_for_submit, &fired_for_submit, Some(value), ctx);
         });
         if let Some(ph) = &self.placeholder {
             input = input.placeholder(ph.clone());

@@ -10,8 +10,9 @@
 
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Button, ButtonVariant, ComboBox, Divider, Expand, HStack, IconWidget, MenuBar, MenuItem,
-    MenuList, Padding, Panel, ScrollArea, Spacer, StatusBar, TextWidget, Toolbar, VStack,
+    Button, ButtonVariant, ComboBox, Divider, Expand, HStack, IconButton, IconWidget, MenuBar,
+    MenuItem, MenuList, Padding, Panel, PopoverButton, PopoverIconButton, ScrollArea, Slider,
+    Spacer, StatusBar, TextWidget, Toolbar, VStack,
 };
 
 // ---------------------------------------------------------------------------
@@ -398,6 +399,223 @@ impl Widget for Root {
                 ),
         );
 
+        // --- Section 4: Rich-content menu ---
+        //
+        // `MenuList::item(...)` accepts any `impl Widget + 'static`, so a
+        // menu can mix plain `MenuItem` rows with arbitrary controls —
+        // a quick-action button column, a slider, a combo box, a regular
+        // button. Mouse interaction works on every child; arrow keys
+        // highlight rows but only `MenuItem`s activate via Enter.
+
+        let opacity_signal = ctx.signal(0.65_f32);
+        let theme_choice = ctx.signal(Some("Auto".to_string()));
+        let pinned = ctx.signal(false);
+
+        let rich_menu_section = ctx.add(
+            VStack::new()
+                .spacing(12.0)
+                .child(
+                    TextWidget::new_literal("Rich-content menu")
+                        .style(TextStyleRole::BodyBold)
+                        .color(TextRole::Primary),
+                )
+                .child(
+                    TextWidget::new_literal(
+                        "Click the button below to open a menu mixing a column of icon \
+                         actions, a slider, a combo box, a regular button, and plain \
+                         menu items. `MenuList` accepts any widget via `.item(...)`.",
+                    )
+                    .style(TextStyleRole::Body)
+                    .color(TextRole::Primary),
+                )
+                .child(
+                    TextWidget::new_literal(
+                        "Or use a PopoverIconButton — same overlay wiring, square \
+                         icon-only trigger with a disclosure caret painted in the \
+                         bottom-right corner.",
+                    )
+                    .style(TextStyleRole::Small)
+                    .color(TextRole::Secondary),
+                )
+                .child(
+                    HStack::new()
+                        .spacing(12.0)
+                        .child(
+                            PopoverIconButton::new(IconButton::add().toolbar()).content(
+                                MenuList::new()
+                                    .item(
+                                        MenuItem::new_literal("New file")
+                                            .on_activate_fn(|_| println!("NewFileFromPopoverIcon")),
+                                    )
+                                    .item(
+                                        MenuItem::new_literal("New folder").on_activate_fn(|_| {
+                                            println!("NewFolderFromPopoverIcon")
+                                        }),
+                                    )
+                                    .separator()
+                                    .item(
+                                        MenuItem::new_literal("New project…")
+                                            .on_activate_fn(|_| println!("NewProject")),
+                                    ),
+                            ),
+                        )
+                        .child(
+                            PopoverIconButton::new(IconButton::search().large()).content(
+                                MenuList::new()
+                                    .item(
+                                        MenuItem::new_literal("Search files")
+                                            .shortcut_label("Ctrl+P")
+                                            .on_activate_fn(|_| println!("SearchFiles")),
+                                    )
+                                    .item(
+                                        MenuItem::new_literal("Search symbols")
+                                            .shortcut_label("Ctrl+T")
+                                            .on_activate_fn(|_| println!("SearchSymbols")),
+                                    )
+                                    .item(
+                                        MenuItem::new_literal("Search everywhere")
+                                            .shortcut_label("Shift+Shift")
+                                            .on_activate_fn(|_| println!("SearchEverywhere")),
+                                    ),
+                            ),
+                        ),
+                )
+                .child(
+                    PopoverButton::new(
+                        Button::new_literal("View options").style(ButtonVariant::Regular),
+                    )
+                    .show_disclosure_caret(true)
+                    .content(
+                        MenuList::new()
+                            // Row of square, icon-only, flat IconButtons at
+                            // Toolbar (40 dp) size — stand-alone visual mode
+                            // (full-weight icons). The trailing one is bistate
+                            // via `.toggle(pinned)` — clicking flips the
+                            // signal and the surface reads as Selected while
+                            // `pinned == true`.
+                            .item(
+                                Padding::symmetric(6.0, 6.0).child(
+                                    HStack::new()
+                                        .spacing(4.0)
+                                        .child(
+                                            IconButton::new(IconWidget::chevron_left(20.0))
+                                                .toolbar()
+                                                .tooltip_literal("Previous")
+                                                .on_activate_fn(|_| println!("Prev")),
+                                        )
+                                        .child(
+                                            IconButton::new(IconWidget::chevron_right(20.0))
+                                                .toolbar()
+                                                .tooltip_literal("Next")
+                                                .on_activate_fn(|_| println!("Next")),
+                                        )
+                                        .child(
+                                            IconButton::new(IconWidget::chevron_up(20.0))
+                                                .toolbar()
+                                                .tooltip_literal("Move up")
+                                                .on_activate_fn(|_| println!("MoveUp")),
+                                        )
+                                        .child(
+                                            IconButton::new(IconWidget::chevron_down(20.0))
+                                                .toolbar()
+                                                .tooltip_literal("Move down")
+                                                .on_activate_fn(|_| println!("MoveDown")),
+                                        )
+                                        .child(
+                                            IconButton::new(IconWidget::checkmark(20.0))
+                                                .toolbar()
+                                                .tooltip_literal("Pin (bistate)")
+                                                .toggle(pinned.clone())
+                                                .on_activate_fn(|_| println!("TogglePin")),
+                                        ),
+                                ),
+                            )
+                            .separator()
+                            // Column of embedded-mode IconButtons — the
+                            // dim-at-rest "built-in" look, useful for
+                            // secondary quick actions tucked into a menu.
+                            .item(
+                                Padding::symmetric(6.0, 6.0).child(
+                                    VStack::new()
+                                        .spacing(2.0)
+                                        .child(
+                                            IconButton::copy()
+                                                .embedded()
+                                                .on_activate_fn(|_| println!("QuickCopy")),
+                                        )
+                                        .child(
+                                            IconButton::clear()
+                                                .embedded()
+                                                .on_activate_fn(|_| println!("QuickClear")),
+                                        )
+                                        .child(
+                                            IconButton::add()
+                                                .embedded()
+                                                .on_activate_fn(|_| println!("QuickAdd")),
+                                        )
+                                        .child(
+                                            IconButton::search()
+                                                .embedded()
+                                                .on_activate_fn(|_| println!("QuickSearch")),
+                                        ),
+                                ),
+                            )
+                            .separator()
+                            // Labelled slider.
+                            .item(
+                                Padding::symmetric(6.0, 10.0).child(
+                                    VStack::new()
+                                        .spacing(4.0)
+                                        .child(
+                                            TextWidget::new_literal("Opacity")
+                                                .style(TextStyleRole::Small)
+                                                .color(TextRole::Primary),
+                                        )
+                                        .child(
+                                            Slider::new(opacity_signal.clone(), 0.0, 1.0)
+                                                .label_literal("Opacity"),
+                                        ),
+                                ),
+                            )
+                            // Labelled combo box.
+                            .item(
+                                Padding::symmetric(6.0, 10.0).child(
+                                    VStack::new()
+                                        .spacing(4.0)
+                                        .child(
+                                            TextWidget::new_literal("Theme")
+                                                .style(TextStyleRole::Small)
+                                                .color(TextRole::Primary),
+                                        )
+                                        .child(ComboBox::new(
+                                            vec!["Auto", "Light", "Dark", "High Contrast"],
+                                            theme_choice.clone(),
+                                        )),
+                                ),
+                            )
+                            // Plain button.
+                            .item(
+                                Padding::symmetric(6.0, 10.0).child(
+                                    Button::new_literal("Advanced settings…")
+                                        .style(ButtonVariant::Flat)
+                                        .on_activate_fn(|_| println!("AdvancedSettings")),
+                                ),
+                            )
+                            .separator()
+                            // Plain menu items still work alongside rich content.
+                            .item(
+                                MenuItem::new_literal("Reset to defaults")
+                                    .on_activate_fn(|_| println!("ResetDefaults")),
+                            )
+                            .item(
+                                MenuItem::new_literal("Close menu")
+                                    .shortcut_label("Esc")
+                                    .on_activate_fn(|_| println!("CloseMenu")),
+                            ),
+                    ),
+                ),
+        );
+
         // --- Assemble ---
 
         let toolbar = ctx.add(
@@ -424,7 +642,9 @@ impl Widget for Root {
                 .child(Divider::new().thickness(2.0))
                 .add_child(context_menu_section)
                 .child(Divider::new().thickness(2.0))
-                .add_child(menu_showcase_section),
+                .add_child(menu_showcase_section)
+                .child(Divider::new().thickness(2.0))
+                .add_child(rich_menu_section),
         );
         let padded = ctx.add(Padding::uniform(24.0).child_id(content));
         let scroll = ctx.add(

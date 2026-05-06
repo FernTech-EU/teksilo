@@ -29,7 +29,7 @@
 //!   Visual only; AT users see the wrapper's `Role::DateTimeInput`. The
 //!   separator can be replaced with a custom string via
 //!   [`Self::separator`] (rendered as styled secondary text).
-//! - **One trailing calendar button** — Int UI `BuiltInButton` with the
+//! - **One trailing calendar button** — Int UI `IconButton::embedded()` with the
 //!   calendar glyph. Opens a single popover hosting `Calendar::single`
 //!   bound to the date half. Picking a cell commits the date and closes
 //!   the popover; the time half retains whatever the user typed.
@@ -67,7 +67,6 @@ use fern_i18n::resolve_message_widget;
 use fern_tokens::{BorderRole, CornerRadius, SurfaceRole};
 use jiff::civil::Weekday;
 
-use crate::built_in_button::{BuiltInButton, BuiltInButtonSize};
 use crate::calendar::Calendar;
 use crate::common::datetime::pattern::{
     ParseTarget, ParsedPattern, ParsedValue, format_value, mask_for_pattern, parse_value,
@@ -76,6 +75,7 @@ use crate::common::datetime::pattern::{
 use crate::common::datetime::types::today_local;
 use crate::common::datetime::{Date, DateTime, Time};
 use crate::date_edit::{ValidationBehavior, build_date_validator, calendar_glyph_icon, clamp_date};
+use crate::icon_button::{IconButton, IconButtonSize};
 use crate::primitives::text_input_field::{TextInputField, ValidationFeedback};
 use crate::primitives::{
     Center, FixedSize, HStack, IconWidget, MinSize, Padding, RectWidget, TextWidget, VStack, ZStack,
@@ -520,34 +520,34 @@ impl Widget for DateTimeEdit {
                     popover_open.set(false);
                 })
             };
-            let trigger_btn =
-                BuiltInButton::new(calendar_glyph_icon(date_style.calendar_icon_size))
-                    .size(BuiltInButtonSize::Default)
-                    .enabled(enabled && !read_only)
-                    .tooltip(resolve_message_widget(
-                        "date-time-edit-trigger-tooltip",
-                        &[],
-                    ))
-                    .on_activate_fn(move |ctx_evt: &mut EventContext| {
-                        if popover_open.get() {
-                            popover_open.set(false);
-                            ctx_evt.dismiss_all_overlays();
-                        } else {
-                            popover_open.set(true);
-                            ctx_evt.activate(cal_id);
-                            ctx_evt.show_overlay(OverlayRequest {
-                                content_id: cal_id,
-                                anchor: self_ref,
-                                placement: OverlayPlacement::BelowPreferred,
-                                dismiss: DismissBehavior::EscapeOrClickOutside,
-                                layer: OverlayLayer::InTree,
-                                parent_overlay: None,
-                                on_dismiss: Some(dismiss_cb.clone()),
-                                fade_duration: None,
-                            });
-                            ctx_evt.request_focus(cal_id);
-                        }
-                    });
+            let trigger_btn = IconButton::new(calendar_glyph_icon(date_style.calendar_icon_size))
+                .embedded()
+                .size(IconButtonSize::Default)
+                .enabled(enabled && !read_only)
+                .tooltip(resolve_message_widget(
+                    "date-time-edit-trigger-tooltip",
+                    &[],
+                ))
+                .on_activate_fn(move |ctx_evt: &mut EventContext| {
+                    if popover_open.get() {
+                        popover_open.set(false);
+                        ctx_evt.dismiss_all_overlays();
+                    } else {
+                        popover_open.set(true);
+                        ctx_evt.activate(cal_id);
+                        ctx_evt.show_overlay(OverlayRequest {
+                            content_id: cal_id,
+                            anchor: self_ref,
+                            placement: OverlayPlacement::BelowPreferred,
+                            dismiss: DismissBehavior::EscapeOrClickOutside,
+                            layer: OverlayLayer::InTree,
+                            parent_overlay: None,
+                            on_dismiss: Some(dismiss_cb.clone()),
+                            fade_duration: None,
+                        });
+                        ctx_evt.request_focus(cal_id);
+                    }
+                });
             Some(ctx.add(trigger_btn))
         } else {
             None

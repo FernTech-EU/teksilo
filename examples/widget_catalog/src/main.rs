@@ -40,13 +40,13 @@ use fern_ui::prelude::*;
 use fern_ui::tokens::{FontWeight, Orientation, TextStyle, VAlignment};
 use fern_ui::widgets::tooltip::TooltipContent;
 use fern_ui::widgets::{
-    Accordion, Avatar, AvatarPresence, AvatarShape, AvatarSize, Badge, BuiltInButton,
-    BuiltInButtonSize, Button, ButtonVariant, Card, CheckState, Checkbox, ComboBox, Divider,
-    EventContextMessageBoxExt, Expand, FixedSize, Grid, GroupBox, GroupHeader, HStack,
-    IconLocation, IconWidget, ImageFit, ImageWidget, Link, MaxSize, MenuItem, MenuList, MessageBox,
-    MessageBoxButtons, Padding, Panel, ProgressBar, RadioButton, ScrollArea, SegmentedControl,
-    Slider, Spacer, SplitButton, SplitView, StandardButton, StatusBar, TabId, TabInfo, TabWidget,
-    TextInput, TextWidget, Toggle, ToolBox, ToolBoxItem, Toolbar, TrackSize, VStack, Wrap,
+    Accordion, Avatar, AvatarPresence, AvatarShape, AvatarSize, Badge, Button, ButtonVariant, Card,
+    CheckState, Checkbox, ComboBox, Divider, EventContextMessageBoxExt, Expand, FixedSize, Grid,
+    GroupBox, GroupHeader, HStack, IconButton, IconButtonSize, IconLocation, IconWidget, ImageFit,
+    ImageWidget, Link, MaxSize, MenuItem, MenuList, MessageBox, MessageBoxButtons, Padding, Panel,
+    ProgressBar, RadioButton, ScrollArea, SegmentedControl, Slider, Spacer, SplitButton, SplitView,
+    StandardButton, StatusBar, TabId, TabInfo, TabWidget, TextInput, TextWidget, Toggle, ToolBox,
+    ToolBoxItem, Toolbar, TrackSize, VStack, Wrap,
 };
 
 /// `fern!`-DSL-friendly helper: a free fn returns a `TabInfo` that
@@ -98,6 +98,7 @@ struct Signals {
     tool_box_selected: Signal<usize>,
     combo_selected: Signal<Option<String>>,
     visibility_signal: Signal<bool>,
+    pinned_signal: Signal<bool>,
     search_text: Signal<String>,
     username_text: Signal<String>,
     readonly_text: Signal<String>,
@@ -126,6 +127,7 @@ impl Signals {
             tool_box_selected: ctx.signal(0_usize),
             combo_selected: ctx.signal(None::<String>),
             visibility_signal: ctx.signal(false),
+            pinned_signal: ctx.signal(false),
             search_text: ctx.signal(String::new()),
             username_text: ctx.signal("cyril".to_string()),
             readonly_text: ctx.signal("Read-only value".to_string()),
@@ -2051,18 +2053,25 @@ impl WidgetCatalog {
                 "Hidden".to_string()
             }
         });
+        let pin_label = sigs.pinned_signal.map(|v| {
+            if *v {
+                "Pinned".to_string()
+            } else {
+                "Unpinned".to_string()
+            }
+        });
 
         ctx.add(
             VStack::new()
                 .spacing(8.0)
                 .child(
-                    TextWidget::new_literal("Built-in Buttons")
+                    TextWidget::new_literal("Icon Buttons")
                         .style(TextStyleRole::BodyBold)
                         .color(TextRole::Primary),
                 )
                 .child(
                     TextWidget::new_literal(
-                        "Predefined (browse, expand, search, copy, clear, add)",
+                        "Predefined constructors — stand-alone (default) visual mode",
                     )
                     .style(TextStyleRole::Small)
                     .color(TextRole::Secondary),
@@ -2070,22 +2079,123 @@ impl WidgetCatalog {
                 .child(
                     HStack::new()
                         .spacing(4.0)
-                        .child(BuiltInButton::browse().on_activate_fn(|_| println!("Save")))
-                        .child(BuiltInButton::expand().on_activate_fn(|_| println!("Save")))
-                        .child(BuiltInButton::search().on_activate_fn(|_| println!("Save")))
-                        .child(BuiltInButton::copy().on_activate_fn(|_| println!("Copy")))
-                        .child(BuiltInButton::clear().on_activate_fn(|_| println!("Save")))
-                        .child(BuiltInButton::add().on_activate_fn(|_| println!("Save"))),
+                        .child(IconButton::browse().on_activate_fn(|_| println!("Browse")))
+                        .child(IconButton::expand().on_activate_fn(|_| println!("Expand")))
+                        .child(IconButton::search().on_activate_fn(|_| println!("Search")))
+                        .child(IconButton::copy().on_activate_fn(|_| println!("Copy")))
+                        .child(IconButton::clear().on_activate_fn(|_| println!("Clear")))
+                        .child(IconButton::add().on_activate_fn(|_| println!("Add"))),
                 )
                 .child(
-                    TextWidget::new_literal("Visibility toggle")
-                        .style(TextStyleRole::Small)
-                        .color(TextRole::Secondary),
+                    TextWidget::new_literal(
+                        "Same buttons in .embedded() mode — Secondary at rest, the dim \
+                         look used inside TextInput / ComboBox trailing slots",
+                    )
+                    .style(TextStyleRole::Small)
+                    .color(TextRole::Secondary),
+                )
+                .child(
+                    HStack::new()
+                        .spacing(4.0)
+                        .child(
+                            IconButton::browse()
+                                .embedded()
+                                .on_activate_fn(|_| println!("Browse")),
+                        )
+                        .child(
+                            IconButton::expand()
+                                .embedded()
+                                .on_activate_fn(|_| println!("Expand")),
+                        )
+                        .child(
+                            IconButton::search()
+                                .embedded()
+                                .on_activate_fn(|_| println!("Search")),
+                        )
+                        .child(
+                            IconButton::copy()
+                                .embedded()
+                                .on_activate_fn(|_| println!("Copy")),
+                        )
+                        .child(
+                            IconButton::clear()
+                                .embedded()
+                                .on_activate_fn(|_| println!("Clear")),
+                        )
+                        .child(
+                            IconButton::add()
+                                .embedded()
+                                .on_activate_fn(|_| println!("Add")),
+                        ),
+                )
+                .child(
+                    TextWidget::new_literal(
+                        "Five sizes: Compact (22 dp), Default (24 dp), Toolbar (30 dp), \
+                         Large (40 dp), Hero (50 dp)",
+                    )
+                    .style(TextStyleRole::Small)
+                    .color(TextRole::Secondary),
                 )
                 .child(
                     HStack::new()
                         .spacing(8.0)
-                        .child(BuiltInButton::visibility_toggle(
+                        .child(
+                            IconButton::search()
+                                .size(IconButtonSize::Compact)
+                                .on_activate_fn(|_| println!("Compact")),
+                        )
+                        .child(IconButton::search().on_activate_fn(|_| println!("Default")))
+                        .child(
+                            IconButton::search()
+                                .toolbar()
+                                .on_activate_fn(|_| println!("Toolbar")),
+                        )
+                        .child(
+                            IconButton::search()
+                                .large()
+                                .on_activate_fn(|_| println!("Large")),
+                        )
+                        .child(
+                            IconButton::search()
+                                .hero()
+                                .on_activate_fn(|_| println!("Hero")),
+                        ),
+                )
+                .child(
+                    TextWidget::new_literal(
+                        "Bistate — surface-tint (icon stays). Click to pin / unpin.",
+                    )
+                    .style(TextStyleRole::Small)
+                    .color(TextRole::Secondary),
+                )
+                .child(
+                    HStack::new()
+                        .spacing(8.0)
+                        .child(
+                            IconButton::new(IconWidget::checkmark(20.0))
+                                .toolbar()
+                                .tooltip_literal("Pin")
+                                .toggle(sigs.pinned_signal.clone())
+                                .on_activate_fn(|_| println!("TogglePin")),
+                        )
+                        .child(
+                            TextWidget::new_literal("Unpinned")
+                                .bind_text(pin_label)
+                                .style(TextStyleRole::Body)
+                                .color(TextRole::Primary),
+                        ),
+                )
+                .child(
+                    TextWidget::new_literal(
+                        "Bistate — surface-tint + icon-swap. Visibility toggle (eye / eye-off).",
+                    )
+                    .style(TextStyleRole::Small)
+                    .color(TextRole::Secondary),
+                )
+                .child(
+                    HStack::new()
+                        .spacing(8.0)
+                        .child(IconButton::visibility_toggle(
                             sigs.visibility_signal.clone(),
                         ))
                         .child(
@@ -2096,26 +2206,6 @@ impl WidgetCatalog {
                         ),
                 )
                 .child(
-                    TextWidget::new_literal("Size variants (compact, default, large)")
-                        .style(TextStyleRole::Small)
-                        .color(TextRole::Secondary),
-                )
-                .child(
-                    HStack::new()
-                        .spacing(8.0)
-                        .child(
-                            BuiltInButton::search()
-                                .size(BuiltInButtonSize::Compact)
-                                .on_activate_fn(|_| println!("Save")),
-                        )
-                        .child(BuiltInButton::search().on_activate_fn(|_| println!("Save")))
-                        .child(
-                            BuiltInButton::search()
-                                .size(BuiltInButtonSize::Large)
-                                .on_activate_fn(|_| println!("Save")),
-                        ),
-                )
-                .child(
                     TextWidget::new_literal("Disabled")
                         .style(TextStyleRole::Small)
                         .color(TextRole::Secondary),
@@ -2123,8 +2213,8 @@ impl WidgetCatalog {
                 .child(
                     HStack::new()
                         .spacing(4.0)
-                        .child(BuiltInButton::browse().enabled(false))
-                        .child(BuiltInButton::clear().enabled(false)),
+                        .child(IconButton::browse().enabled(false))
+                        .child(IconButton::clear().enabled(false)),
                 )
                 .child(
                     TextWidget::new_literal("Custom icon")
@@ -2132,7 +2222,7 @@ impl WidgetCatalog {
                         .color(TextRole::Secondary),
                 )
                 .child(
-                    BuiltInButton::new(IconWidget::checkmark(16.0))
+                    IconButton::new(IconWidget::checkmark(16.0))
                         .tooltip_literal("Custom checkmark")
                         .on_activate_fn(|_| println!("Save")),
                 ),
@@ -2171,7 +2261,9 @@ impl WidgetCatalog {
                         .placeholder("Username")
                         .label("Username")
                         .trailing_slot(
-                            BuiltInButton::browse().on_activate_fn(|_| println!("Save")),
+                            IconButton::browse()
+                                .embedded()
+                                .on_activate_fn(|_| println!("Save")),
                         ),
                 )
                 .child(TextInput::new(sigs.readonly_text.clone()).read_only(true)),
@@ -3262,67 +3354,131 @@ impl WidgetCatalog {
                 "Hidden".to_string()
             }
         });
+        let pin_label = sigs.pinned_signal.map(|v| {
+            if *v {
+                "Pinned".to_string()
+            } else {
+                "Unpinned".to_string()
+            }
+        });
 
         fern!(ctx => VStack {
                 spacing: 8.0
-                TextWidget::new_literal("Built-in Buttons") {
+                TextWidget::new_literal("Icon Buttons") {
                     style: TextStyleRole::BodyBold
                     color: TextRole::Primary
                 }
-                TextWidget::new_literal("Predefined (browse, expand, search, copy, clear, add)") {
+                TextWidget::new_literal("Predefined constructors — stand-alone (default) visual mode") {
                     style: TextStyleRole::Small
                     color: TextRole::Secondary
                 }
                 HStack {
                     spacing: 4.0
-                    BuiltInButton::browse() {
-                        on_activate_fn: |_| println!("Save")
+                    IconButton::browse() {
+                        on_activate_fn: |_| println!("Browse")
                     }
-                    BuiltInButton::expand() {
-                        on_activate_fn: |_| println!("Save")
+                    IconButton::expand() {
+                        on_activate_fn: |_| println!("Expand")
                     }
-                    BuiltInButton::search() {
-                        on_activate_fn: |_| println!("Save")
+                    IconButton::search() {
+                        on_activate_fn: |_| println!("Search")
                     }
-                    BuiltInButton::copy() {
+                    IconButton::copy() {
                         on_activate_fn: |_| println!("Copy")
                     }
-                    BuiltInButton::clear() {
-                        on_activate_fn: |_| println!("Save")
+                    IconButton::clear() {
+                        on_activate_fn: |_| println!("Clear")
                     }
-                    BuiltInButton::add() {
-                        on_activate_fn: |_| println!("Save")
+                    IconButton::add() {
+                        on_activate_fn: |_| println!("Add")
                     }
                 }
-                TextWidget::new_literal("Visibility toggle") {
+                TextWidget::new_literal("Same buttons in .embedded() mode — Secondary at rest") {
+                    style: TextStyleRole::Small
+                    color: TextRole::Secondary
+                }
+                HStack {
+                    spacing: 4.0
+                    IconButton::browse() {
+                        embedded
+                        on_activate_fn: |_| println!("Browse")
+                    }
+                    IconButton::expand() {
+                        embedded
+                        on_activate_fn: |_| println!("Expand")
+                    }
+                    IconButton::search() {
+                        embedded
+                        on_activate_fn: |_| println!("Search")
+                    }
+                    IconButton::copy() {
+                        embedded
+                        on_activate_fn: |_| println!("Copy")
+                    }
+                    IconButton::clear() {
+                        embedded
+                        on_activate_fn: |_| println!("Clear")
+                    }
+                    IconButton::add() {
+                        embedded
+                        on_activate_fn: |_| println!("Add")
+                    }
+                }
+                TextWidget::new_literal("Five sizes: Compact, Default, Toolbar, Large, Hero") {
                     style: TextStyleRole::Small
                     color: TextRole::Secondary
                 }
                 HStack {
                     spacing: 8.0
-                    BuiltInButton::visibility_toggle(sigs.visibility_signal.clone())
-                    TextWidget::new_literal("Hidden") {
-                        bind_text: vis_label
+                    IconButton::search() {
+                        size: IconButtonSize::Compact
+                        on_activate_fn: |_| println!("Compact")
+                    }
+                    IconButton::search() {
+                        on_activate_fn: |_| println!("Default")
+                    }
+                    IconButton::search() {
+                        toolbar
+                        on_activate_fn: |_| println!("Toolbar")
+                    }
+                    IconButton::search() {
+                        large
+                        on_activate_fn: |_| println!("Large")
+                    }
+                    IconButton::search() {
+                        hero
+                        on_activate_fn: |_| println!("Hero")
+                    }
+                }
+                TextWidget::new_literal("Bistate — surface-tint (icon stays). Click to pin / unpin.") {
+                    style: TextStyleRole::Small
+                    color: TextRole::Secondary
+                }
+                HStack {
+                    spacing: 8.0
+                    IconButton(IconWidget::checkmark(20.0)) {
+                        toolbar
+                        tooltip_literal: "Pin"
+                        toggle: sigs.pinned_signal.clone()
+                        on_activate_fn: |_| println!("TogglePin")
+                    }
+                    TextWidget::new_literal("Unpinned") {
+                        bind_text: pin_label
                         style: TextStyleRole::Body
                         color: TextRole::Primary
                     }
                 }
-                TextWidget::new_literal("Size variants (compact, default, large)") {
+                TextWidget::new_literal("Bistate — surface-tint + icon-swap (visibility toggle)") {
                     style: TextStyleRole::Small
                     color: TextRole::Secondary
                 }
                 HStack {
                     spacing: 8.0
-                    BuiltInButton::search() {
-                        size: BuiltInButtonSize::Compact
-                        on_activate_fn: |_| println!("Save")
-                    }
-                    BuiltInButton::search() {
-                        on_activate_fn: |_| println!("Save")
-                    }
-                    BuiltInButton::search() {
-                        size: BuiltInButtonSize::Large
-                        on_activate_fn: |_| println!("Save")
+                    IconButton::visibility_toggle(sigs.visibility_signal.clone())
+                    TextWidget::new_literal("Hidden") {
+                        bind_text: vis_label
+                        style: TextStyleRole::Body
+                        color: TextRole::Primary
                     }
                 }
                 TextWidget::new_literal("Disabled") {
@@ -3331,10 +3487,10 @@ impl WidgetCatalog {
                 }
                 HStack {
                     spacing: 4.0
-                    BuiltInButton::browse() {
+                    IconButton::browse() {
                         enabled: false
                     }
-                    BuiltInButton::clear() {
+                    IconButton::clear() {
                         enabled: false
                     }
                 }
@@ -3342,7 +3498,7 @@ impl WidgetCatalog {
                     style: TextStyleRole::Small
                     color: TextRole::Secondary
                 }
-                BuiltInButton(IconWidget::checkmark(16.0)) {
+                IconButton(IconWidget::checkmark(16.0)) {
                     tooltip_literal: "Custom checkmark"
                     on_activate_fn: |_| println!("Save")
                 }
@@ -3371,7 +3527,8 @@ impl WidgetCatalog {
                 TextInput(sigs.username_text.clone()) {
                     placeholder: "Username"
                     label: "Username"
-                    trailing_slot: BuiltInButton::browse() {
+                    trailing_slot: IconButton::browse() {
+                        embedded
                         on_activate_fn: |_| println!("Save")
                     }
                 }

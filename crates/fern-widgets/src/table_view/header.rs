@@ -207,7 +207,7 @@ impl Widget for HeaderCell {
 
         // Filter popover trigger — appears at the trailing end of the
         // cell after the sort indicator. The Popover content is a
-        // `TextInput` with a trailing clear `BuiltInButton` bound back
+        // `TextInput` with a trailing clear `IconButton` bound back
         // into `filters_signal`. Gated behind `rich-text` because
         // `TextInput` itself lives there; without the feature the
         // glyph and popover are simply not built (callers can still

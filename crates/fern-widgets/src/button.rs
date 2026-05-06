@@ -129,6 +129,12 @@ pub struct Button {
     /// `accessibility()`. Used alongside `has_popup` for the
     /// standard ARIA disclosure pattern.
     expanded_signal: Option<Signal<bool>>,
+    /// Optional caller-supplied interaction signal. When set, `build()`
+    /// uses this signal instead of allocating its own — letting an
+    /// external widget (e.g. `PopoverButton`'s disclosure caret)
+    /// observe hover / press / focus / disabled state and match the
+    /// label's color exactly. See [`Button::share_interaction`].
+    shared_interaction: Option<Signal<InteractionState>>,
     /// Interaction state signal — set during build().
     interaction: Signal<InteractionState>,
     /// Root child ID — set during build().
@@ -157,11 +163,35 @@ impl Button {
             rich_tooltip_source: None,
             has_popup: None,
             expanded_signal: None,
+            shared_interaction: None,
             leading: None,
             trailing: None,
             interaction: Signal::new(InteractionState::Idle),
             root_child_id: None,
         }
+    }
+
+    /// Returns the configured visual variant. Used by wrappers like
+    /// [`PopoverButton`](crate::popover_button::PopoverButton) that
+    /// derive their own chrome colors from the same role-resolution
+    /// path the inner Button uses.
+    pub fn variant(&self) -> ButtonVariant {
+        self.style
+    }
+
+    /// Bind the button's internal interaction state to a caller-owned
+    /// `Signal<InteractionState>` instead of letting `build()` allocate
+    /// its own. Used by wrapper widgets like
+    /// [`PopoverButton`](crate::popover_button::PopoverButton) whose
+    /// disclosure caret needs to match the label's color across hover
+    /// / press / focus / disabled states.
+    ///
+    /// The provided signal is reset to `Disabled` when `enabled == false`
+    /// during `build()` so the shared signal honors the button's
+    /// enabled state without the caller having to seed it.
+    pub fn share_interaction(mut self, signal: Signal<InteractionState>) -> Self {
+        self.shared_interaction = Some(signal);
+        self
     }
 
     /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in
@@ -352,7 +382,7 @@ fn resolve_bg_role(style: ButtonVariant, state: InteractionState) -> SurfaceRole
     }
 }
 
-fn resolve_text_role(style: ButtonVariant, state: InteractionState) -> TextRole {
+pub(crate) fn resolve_text_role(style: ButtonVariant, state: InteractionState) -> TextRole {
     match (style, state) {
         (ButtonVariant::Default, InteractionState::Disabled) => TextRole::Disabled,
         (ButtonVariant::Default, _) => TextRole::OnAccent,
@@ -407,12 +437,22 @@ impl fern_core::widget::Widget for Button {
         let style = self.style;
         let enabled = self.enabled;
 
-        // Create interaction signal
-        let interaction = ctx.signal(if enabled {
-            InteractionState::Idle
-        } else {
-            InteractionState::Disabled
-        });
+        // Create interaction signal — caller-supplied via
+        // `share_interaction` when set (so a wrapping widget's chrome
+        // can mirror the label's color), otherwise allocated locally.
+        let interaction = match self.shared_interaction.take() {
+            Some(shared) => {
+                if !enabled {
+                    shared.set(InteractionState::Disabled);
+                }
+                shared
+            }
+            None => ctx.signal(if enabled {
+                InteractionState::Idle
+            } else {
+                InteractionState::Disabled
+            }),
+        };
         self.interaction = interaction.clone();
 
         // If an `expanded_signal` was wired up (disclosure

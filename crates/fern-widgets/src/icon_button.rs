@@ -1,36 +1,63 @@
-//! BuiltInButton — a small icon-only button designed to live inside
-//! another widget's trailing edge (text field, combo box, search field).
+//! IconButton — a square, icon-only, flat-surface button.
 //!
-//! Follows the JetBrains Int UI "built-in button" pattern: flat/transparent
-//! at idle, subtle hover/press feedback, sized to [`IconButtonStyle`] tokens.
+//! Five sizes covering both **embedded** use (inside another widget's
+//! trailing slot — TextInput's clear-X, ComboBox's chevron, SearchField's
+//! magnifier) and **stand-alone** use (toolbars, rich menus, hero CTAs).
+//! The `.embedded()` flag opts into the JetBrains "built-in" look —
+//! dimmer icon at rest (Secondary), brightening on hover (Primary),
+//! flashing accent on press — so an IconButton living inside a TextInput
+//! doesn't compete visually with the field's text. Without the flag the
+//! icon stays at full visual weight (Primary at rest), the right default
+//! for stand-alone toolbar / menu rows.
 //!
 //! ```ignore
-//! BuiltInButton::new(IconWidget::from_svg(MY_SVG))
-//!     .tooltip(tr!("Browse..."))
-//!     .on_activate_fn(|ctx| ctx.send_intent(AppIntent::Browse))
+//! // Stand-alone toolbar use — full-weight icon.
+//! IconButton::new(IconWidget::from_svg(MY_SVG))
+//!     .toolbar()
+//!     .tooltip(tr!("Save"))
+//!     .on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save))
+//!
+//! // Embedded inside a TextInput's trailing slot — dim until hover.
+//! IconButton::clear()
+//!     .embedded()
+//!     .on_activate_fn(|ctx| ctx.send_intent(AppIntent::Clear))
 //! ```
 //!
 //! ## Predefined constructors
 //!
-//! Common built-in button types ship with appropriate icons and i18n tooltips:
+//! Common roles ship with the appropriate icon and an i18n tooltip
+//! (which doubles as the AT name). They are size- and mode-agnostic —
+//! call `.embedded()`, `.toolbar()`, `.large()`, etc. to configure:
 //!
 //! ```ignore
-//! BuiltInButton::browse().on_activate_fn(|ctx| ctx.send_intent(AppIntent::Browse))
-//! BuiltInButton::clear().on_activate_fn(|ctx| ctx.send_intent(AppIntent::Clear))
-//! BuiltInButton::search().on_activate_fn(|ctx| ctx.send_intent(AppIntent::Search))
-//! BuiltInButton::visibility_toggle(visible_signal)
+//! IconButton::browse().embedded()           // 24 dp, dim — TextInput trailing
+//! IconButton::clear().embedded()            // 24 dp, dim — clear-X
+//! IconButton::search().toolbar()            // 40 dp, full weight — toolbar
+//! IconButton::visibility_toggle(visible)    // password-field eye toggle
 //! ```
+//!
+//! ## Bistate
+//!
+//! Two distinct toggle modes:
+//!
+//! - [`IconButton::toggle`] — surface-tint bistate: clicking flips the
+//!   bound `Signal<bool>`; while `true`, the background reads as
+//!   `SurfaceRole::Selected` ("on"). Same icon throughout. The
+//!   pin-this-row / select-this-tool pattern.
+//! - [`IconButton::toggle_with_icon`] — surface-tint **and** icon-swap
+//!   bistate: same surface flip plus the icon glyph swaps to a second
+//!   icon. The visibility-toggle pattern (eye ↔ eye-off).
 //!
 //! ## Slot convention
 //!
-//! Host widgets that accept built-in buttons follow the `trailing_slot`
+//! Host widgets that accept icon buttons follow the `trailing_slot`
 //! convention established by [`TabWidget`](crate::tab_widget::TabWidget):
 //!
 //! ```ignore
 //! TextInput::new(value)
 //!     .trailing_slot(HStack::new().spacing(0.0)
-//!         .child(BuiltInButton::clear().on_activate_fn(|ctx| ctx.send_intent(AppIntent::Clear)))
-//!         .child(BuiltInButton::browse().on_activate_fn(|ctx| ctx.send_intent(AppIntent::Browse)))
+//!         .child(IconButton::clear().embedded().on_activate_fn(|ctx| ctx.send_intent(AppIntent::Clear)))
+//!         .child(IconButton::browse().embedded().on_activate_fn(|ctx| ctx.send_intent(AppIntent::Browse)))
 //!     )
 //! ```
 
@@ -51,30 +78,46 @@ use crate::button::InteractionState;
 use crate::primitives::icon_widget::IconWidget;
 use crate::primitives::{Center, FixedSize, RectWidget, Switcher, ZStack};
 
-/// Size variant for built-in buttons, mapping to [`IconButtonStyle`] token
-/// dimensions.
+/// Size variant for [`IconButton`], mapping to [`IconButtonStyle`] token
+/// dimensions. Listed in ascending size order, calibrated to the
+/// IntelliJ Int UI scale:
+///
+/// - `Compact` (22 dp) — buttons inside tool windows / inspector panels.
+/// - `Default` (24 dp) — TextInput / ComboBox / SearchField trailing slots.
+/// - `Toolbar` (30 dp) — side-toolbar density (left / right / top edges).
+/// - `Large` (40 dp) — emphasized stand-alone buttons in rich menus.
+/// - `Hero` (50 dp) — hero / landing-screen CTAs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum BuiltInButtonSize {
-    /// 22 dp — `icon_button.size_compact`.
+pub enum IconButtonSize {
+    /// 22 dp — `icon_button.size_compact`. Tool-window density.
     Compact,
-    /// 24 dp — `icon_button.size_default`.
+    /// 24 dp — `icon_button.size_default`. Default size; trailing-slot density.
     #[default]
     Default,
-    /// 30 dp — `icon_button.size_large`.
+    /// 30 dp — `icon_button.size_toolbar`. Side-toolbar density
+    /// (the IntelliJ left / right / top window-edge buttons).
+    Toolbar,
+    /// 40 dp — `icon_button.size_large`. Emphasized stand-alone use.
     Large,
+    /// 50 dp — `icon_button.size_hero`. Hero / landing-screen CTAs.
+    Hero,
 }
 
 /// Type-erased action factory — captures the concrete command type.
 type ActionFactory = Box<dyn Fn(&mut EventContext)>;
 
-/// A small icon-only button designed to be embedded inside another widget's
-/// trailing edge via the `trailing_slot` convention.
-pub struct BuiltInButton {
+/// A square, icon-only, flat-surface button. See module docs for
+/// embedded vs stand-alone modes, the five sizes, and the two bistate
+/// toggle modes.
+pub struct IconButton {
     // Configuration (set via builder)
     icon: IconWidget,
     tooltip_text: Option<String>,
     enabled: bool,
-    size: BuiltInButtonSize,
+    size: IconButtonSize,
+    /// Embedded mode — Secondary-at-rest icon color, the JetBrains
+    /// "built-in" look. Default `false` (stand-alone, full-weight icon).
+    embedded: bool,
     action: Option<ActionFactory>,
     /// Whether the button takes keyboard focus on Tab navigation.
     /// `true` (default): focusable when enabled. `false`: never
@@ -83,30 +126,98 @@ pub struct BuiltInButton {
     /// onto each tab's close button).
     focusable: bool,
 
-    // Toggle support (visibility_toggle use case)
+    // Toggle support
     toggled: Option<Signal<bool>>,
+    /// Optional alternate icon for the icon-swap toggle mode set via
+    /// [`IconButton::toggle_with_icon`]. When `None`, surface-tint-only
+    /// toggle mode applies (set via [`IconButton::toggle`]).
     toggled_icon: Option<IconWidget>,
+
+    // Disclosure support — wired up by `PopoverIconButton` so AT
+    // announces the button as a menu / popup trigger and reflects the
+    // open state. Both fields are opt-in via `.has_popup(...)` /
+    // `.expanded_when(...)`.
+    has_popup: Option<fern_core::accesskit::HasPopup>,
+    expanded_signal: Option<Signal<bool>>,
+
+    /// Optional caller-supplied interaction signal. When set, `build()`
+    /// uses this signal instead of allocating its own — letting an
+    /// external widget (e.g. `PopoverIconButton`'s disclosure caret)
+    /// observe hover / press / focus / disabled state and match the
+    /// icon's color exactly. See [`IconButton::share_interaction`].
+    shared_interaction: Option<Signal<InteractionState>>,
 
     // Build state (set in build())
     interaction: Signal<InteractionState>,
     root_child_id: Option<WidgetId>,
 }
 
-impl BuiltInButton {
-    /// Create a built-in button from a custom icon.
+impl IconButton {
+    /// Create an icon button from a custom icon. Defaults to
+    /// `IconButtonSize::Default` (24 dp) and stand-alone visual mode.
+    /// Apply `.embedded()` for the JetBrains "built-in" dim look,
+    /// and one of the size methods (`.large()` / `.toolbar()` /
+    /// `.hero()`) or `.size(...)` to pick a different size.
     pub fn new(icon: IconWidget) -> Self {
         Self {
             icon,
             tooltip_text: None,
             enabled: true,
-            size: BuiltInButtonSize::Default,
+            size: IconButtonSize::Default,
+            embedded: false,
             action: None,
             focusable: true,
             toggled: None,
             toggled_icon: None,
+            has_popup: None,
+            expanded_signal: None,
+            shared_interaction: None,
             interaction: Signal::new(InteractionState::Idle),
             root_child_id: None,
         }
+    }
+
+    /// Returns the configured size variant. Used by wrappers like
+    /// [`PopoverIconButton`](crate::popover_icon_button::PopoverIconButton)
+    /// that need to reason about the trigger's footprint at build time
+    /// (e.g. to skip a corner decoration that wouldn't fit at Compact).
+    pub fn size_variant(&self) -> IconButtonSize {
+        self.size
+    }
+
+    /// Returns whether the button is in the JetBrains "built-in" /
+    /// embedded color profile (Secondary at rest). Mirror getter to
+    /// [`size_variant`](Self::size_variant) for wrappers that want to
+    /// derive their own chrome colors from the same icon role.
+    pub fn is_embedded(&self) -> bool {
+        self.embedded
+    }
+
+    /// Bind the button's internal interaction state to a caller-owned
+    /// `Signal<InteractionState>` instead of letting `build()` allocate
+    /// its own. Used by wrapper widgets like
+    /// [`PopoverIconButton`](crate::popover_icon_button::PopoverIconButton)
+    /// whose disclosure caret needs to match the icon's color across
+    /// hover / press / focus / disabled states.
+    ///
+    /// The provided signal is reset to `Disabled` when `enabled == false`
+    /// during `build()` so the shared signal honors the button's
+    /// enabled state without the caller having to seed it.
+    pub fn share_interaction(mut self, signal: Signal<InteractionState>) -> Self {
+        self.shared_interaction = Some(signal);
+        self
+    }
+
+    /// Opt into the **embedded** visual treatment — the JetBrains
+    /// "built-in button" look. Icon dims to `Secondary` at rest,
+    /// brightens to `Primary` on hover, flashes `Accent` on press —
+    /// designed to live inside another widget's trailing slot
+    /// (TextInput's clear-X, ComboBox's chevron) without competing
+    /// visually with the host's content. Default mode is stand-alone
+    /// (icon at full visual weight, `Primary` always).
+    pub fn embedded(mut self) -> Self {
+        self.embedded = true;
+        self
     }
 
     /// Whether the button takes keyboard focus. Default `true` —
@@ -120,7 +231,8 @@ impl BuiltInButton {
         self
     }
 
-    /// Attach a tooltip that appears after a hover delay.
+    /// Attach a tooltip that appears after a hover delay. Required —
+    /// the tooltip text doubles as the AT name for icon-only buttons.
     pub fn tooltip(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
         let ls: fern_i18n::LocalizedString = text.into();
         self.tooltip_text = Some(ls.resolve_now());
@@ -140,27 +252,93 @@ impl BuiltInButton {
         self
     }
 
-    /// Set the size variant (compact/default/large).
-    pub fn size(mut self, size: BuiltInButtonSize) -> Self {
+    /// Set the size variant. Most callers prefer the named shortcuts
+    /// [`large`](Self::large) / [`toolbar`](Self::toolbar) /
+    /// [`hero`](Self::hero); use `.size(...)` for `Compact` or for
+    /// programmatic size selection.
+    pub fn size(mut self, size: IconButtonSize) -> Self {
         self.size = size;
         self
     }
 
-    /// Closure invoked on activation.
+    /// Shortcut for `.size(IconButtonSize::Toolbar)` (30 dp) — the
+    /// IntelliJ side-toolbar density (left / right / top window edges).
+    pub fn toolbar(mut self) -> Self {
+        self.size = IconButtonSize::Toolbar;
+        self
+    }
+
+    /// Shortcut for `.size(IconButtonSize::Large)` (40 dp) —
+    /// emphasized stand-alone buttons in rich menus and detail panes.
+    pub fn large(mut self) -> Self {
+        self.size = IconButtonSize::Large;
+        self
+    }
+
+    /// Shortcut for `.size(IconButtonSize::Hero)` (50 dp) — hero /
+    /// landing-screen CTAs.
+    pub fn hero(mut self) -> Self {
+        self.size = IconButtonSize::Hero;
+        self
+    }
+
+    /// Closure invoked on activation. Fires after the toggle signal
+    /// (if any) is flipped, so apps observing the closure see the
+    /// post-flip state.
     pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.action = Some(Box::new(f));
         self
     }
 
-    /// Enable toggle mode: clicking flips `state` instead of firing `action`,
-    /// and the icon swaps between the primary icon and `toggled_icon`.
-    pub fn toggle(mut self, state: Signal<bool>, toggled_icon: IconWidget) -> Self {
+    /// Enable **surface-tint** bistate: clicking flips `state` and the
+    /// background reads as `SurfaceRole::Selected` while `state == true`.
+    /// The icon glyph is unchanged. Pin / select / lock-toggle pattern.
+    /// `on_activate_fn`, if any, still fires after the flip.
+    ///
+    /// For the eye / eye-off pattern where the icon glyph also changes,
+    /// use [`toggle_with_icon`](Self::toggle_with_icon) instead.
+    pub fn toggle(mut self, state: Signal<bool>) -> Self {
+        self.toggled = Some(state);
+        self.toggled_icon = None;
+        self
+    }
+
+    /// Enable **surface-tint plus icon-swap** bistate: clicking flips
+    /// `state`, the background flips to `Selected`, **and** the icon
+    /// swaps to `toggled_icon`. The visibility-toggle pattern (eye ↔
+    /// eye-off). For surface-only bistate (icon stays the same), use
+    /// [`toggle`](Self::toggle).
+    pub fn toggle_with_icon(mut self, state: Signal<bool>, toggled_icon: IconWidget) -> Self {
         self.toggled = Some(state);
         self.toggled_icon = Some(toggled_icon);
         self
     }
 
+    /// Declare that this button is a disclosure trigger for a popup
+    /// (menu, dialog, listbox, …). Surfaced via `set_has_popup` in
+    /// the a11y node so screen readers announce it as opening the
+    /// named popup kind. Wired automatically by
+    /// [`PopoverIconButton`](crate::popover_icon_button::PopoverIconButton).
+    pub fn has_popup(mut self, kind: fern_core::accesskit::HasPopup) -> Self {
+        self.has_popup = Some(kind);
+        self
+    }
+
+    /// Bind a signal reporting whether this button's popup is
+    /// currently visible. The popover wrapper owns the signal and
+    /// flips it on show / dismiss; IconButton reads it in
+    /// `accessibility()` to publish `set_expanded`. Only meaningful
+    /// alongside [`has_popup`](Self::has_popup).
+    pub fn expanded_when(mut self, signal: Signal<bool>) -> Self {
+        self.expanded_signal = Some(signal);
+        self
+    }
+
     // ── Predefined constructors ─────────────────────────────────────────
+    //
+    // Each ships a standard icon and an i18n tooltip. They are size-
+    // and mode-agnostic — chain `.embedded()` for the dim look,
+    // `.toolbar()` / `.large()` / `.hero()` for the size.
 
     /// Browse button (ellipsis icon). Opens a file/directory chooser.
     pub fn browse() -> Self {
@@ -198,33 +376,46 @@ impl BuiltInButton {
     }
 
     /// Visibility toggle (eye / eye-off). Toggles password visibility.
+    /// Uses the icon-swap bistate mode internally — the icon advertises
+    /// the **expected action**, matching the prevailing password-field
+    /// convention (1Password, Bitwarden, KeePass, Chrome, GitHub):
+    /// `eye` (open) while the value is hidden, suggesting "click to
+    /// reveal"; `eye_off` (closed) once revealed, suggesting "click to
+    /// hide". `set_toggled` still reports the literal current state, so
+    /// AT readers are not misled.
+    ///
+    /// For a current-state-instead semantics (icon shows what IS),
+    /// build your own with [`toggle_with_icon`](Self::toggle_with_icon)
+    /// and the eye glyphs in the opposite order.
     ///
     /// The `visible` signal is flipped on each click. The host widget reads
     /// it to decide whether to mask or show the text.
     pub fn visibility_toggle(visible: Signal<bool>) -> Self {
         let icons = BuiltInIcons::global();
         Self::new((icons.eye)())
-            .toggle(visible, (icons.eye_off)())
+            .toggle_with_icon(visible, (icons.eye_off)())
             .tooltip(fern_i18n::tr_widget!(a11y_builtin_visibility()))
     }
 }
 
-impl std::fmt::Debug for BuiltInButton {
+impl std::fmt::Debug for IconButton {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BuiltInButton")
+        f.debug_struct("IconButton")
             .field("enabled", &self.enabled)
             .field("size", &self.size)
+            .field("embedded", &self.embedded)
             .finish()
     }
 }
 
 // ── Color resolution ────────────────────────────────────────────────────────
 //
-// Built-in buttons are always flat: transparent idle, subtle hover/press.
-// The icon dims to text_secondary at rest, brightens to text_primary on
-// hover, and flashes accent on press.
+// All IconButtons are flat: transparent idle, hover/press surface tint.
+// Icon coloring depends on the `embedded` flag — embedded mode dims to
+// `Secondary` at rest (the JetBrains "built-in" look), stand-alone mode
+// stays at `Primary` always so toolbar / menu icons read at full weight.
 
-fn resolve_bg_role(state: InteractionState) -> SurfaceRole {
+fn resolve_bg_role_plain(state: InteractionState) -> SurfaceRole {
     match state {
         InteractionState::Idle | InteractionState::Focused | InteractionState::Disabled => {
             SurfaceRole::Transparent
@@ -234,12 +425,33 @@ fn resolve_bg_role(state: InteractionState) -> SurfaceRole {
     }
 }
 
-fn resolve_icon_role(state: InteractionState) -> TextRole {
+/// Bistate background. While `on == true` the surface reads as
+/// `Selected` (with a Pressed flash on press). Off branch matches the
+/// regular flat treatment.
+fn resolve_bg_role_toggled(state: InteractionState, on: bool) -> SurfaceRole {
+    if on {
+        match state {
+            InteractionState::Pressed => SurfaceRole::Pressed,
+            _ => SurfaceRole::Selected,
+        }
+    } else {
+        resolve_bg_role_plain(state)
+    }
+}
+
+pub(crate) fn resolve_icon_role_embedded(state: InteractionState) -> TextRole {
     match state {
         InteractionState::Idle | InteractionState::Focused => TextRole::Secondary,
         InteractionState::Hovered => TextRole::Primary,
         InteractionState::Pressed => TextRole::Accent,
         InteractionState::Disabled => TextRole::Disabled,
+    }
+}
+
+pub(crate) fn resolve_icon_role_standalone(state: InteractionState) -> TextRole {
+    match state {
+        InteractionState::Disabled => TextRole::Disabled,
+        _ => TextRole::Primary,
     }
 }
 
@@ -250,28 +462,58 @@ fn resolve_border_role(state: InteractionState) -> BorderRole {
     }
 }
 
-fn resolve_size(size: BuiltInButtonSize, style: &fern_tokens::IconButtonStyle) -> f32 {
+fn resolve_size(size: IconButtonSize, style: &fern_tokens::IconButtonStyle) -> f32 {
     match size {
-        BuiltInButtonSize::Compact => style.size_compact,
-        BuiltInButtonSize::Default => style.size_default,
-        BuiltInButtonSize::Large => style.size_large,
+        IconButtonSize::Compact => style.size_compact,
+        IconButtonSize::Default => style.size_default,
+        IconButtonSize::Toolbar => style.size_toolbar,
+        IconButtonSize::Large => style.size_large,
+        IconButtonSize::Hero => style.size_hero,
+    }
+}
+
+/// Per-size icon dimension. The two smallest buttons (Compact 22,
+/// Default 24) share the standard `icon_size` (16 dp); Toolbar / Large
+/// / Hero scale up via dedicated tokens so a 50 dp button doesn't
+/// carry a tiny 16 dp glyph.
+fn resolve_icon_size(size: IconButtonSize, style: &fern_tokens::IconButtonStyle) -> f32 {
+    match size {
+        IconButtonSize::Compact | IconButtonSize::Default => style.icon_size,
+        IconButtonSize::Toolbar => style.icon_size_toolbar,
+        IconButtonSize::Large => style.icon_size_large,
+        IconButtonSize::Hero => style.icon_size_hero,
     }
 }
 
 // ── Widget trait ─────────────────────────────────────────────────────────────
 
-impl fern_core::widget::Widget for BuiltInButton {
+impl fern_core::widget::Widget for IconButton {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let ib_style = ctx.theme().components.icon_button;
         let focus_ring_width = ctx.theme().shape.focus_ring_width;
         let enabled = self.enabled;
+        let embedded = self.embedded;
+        let icon_size = resolve_icon_size(self.size, &ib_style);
 
-        // Interaction signal
-        let interaction = ctx.signal(if enabled {
-            InteractionState::Idle
-        } else {
-            InteractionState::Disabled
-        });
+        // Interaction signal — caller-supplied via `share_interaction`
+        // when set (so a wrapping widget's chrome can mirror the icon's
+        // color), otherwise allocated locally.
+        let interaction = match self.shared_interaction.take() {
+            Some(shared) => {
+                // Honor the button's enabled state regardless of the
+                // signal's seeded value, so callers don't have to know
+                // whether the trigger ended up disabled.
+                if !enabled {
+                    shared.set(InteractionState::Disabled);
+                }
+                shared
+            }
+            None => ctx.signal(if enabled {
+                InteractionState::Idle
+            } else {
+                InteractionState::Disabled
+            }),
+        };
         self.interaction = interaction.clone();
 
         // Propagate enabled state to the arena so the a11y tree and
@@ -291,25 +533,49 @@ impl fern_core::widget::Widget for BuiltInButton {
             toggled.bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
         }
 
-        // Derived reactive roles — the interaction signal is the only
-        // upstream; the paint layer resolves roles against the current
-        // theme on every pass, so theme switches repaint for free.
-        let bg_role = interaction.map(|s| resolve_bg_role(*s));
-        let icon_role = interaction.map(|s| resolve_icon_role(*s));
+        // Register the popover-open signal so AT picks up `set_expanded`
+        // flips when a wrapping `PopoverIconButton` toggles the popover.
+        // No relayout — AccessibilityOnly is enough.
+        if let Some(ref expanded) = self.expanded_signal {
+            let self_id = ctx.self_id();
+            let registry = ctx.binding_registry();
+            expanded.bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
+        }
 
-        // Build the icon content
-        let icon_content_id = if let Some(ref toggled) = self.toggled {
-            // Toggle mode: Switcher with two icons driven by the bool signal
+        // Derived reactive roles. Background switches between the
+        // standard flat treatment and a Selected-when-on bistate when a
+        // toggle signal is bound. Icon coloring depends on the
+        // `embedded` flag — embedded mode dims at rest, stand-alone
+        // mode keeps full visual weight.
+        let bg_role = match self.toggled.clone() {
+            Some(toggle) => interaction
+                .zip(&toggle)
+                .map(|(s, on)| resolve_bg_role_toggled(*s, *on)),
+            None => interaction.map(|s| resolve_bg_role_plain(*s)),
+        };
+        let icon_role = if embedded {
+            interaction.map(|s| resolve_icon_role_embedded(*s))
+        } else {
+            interaction.map(|s| resolve_icon_role_standalone(*s))
+        };
+
+        // Build the icon content. Icon-swap toggle (eye / eye-off) only
+        // applies when a `toggled_icon` was provided via
+        // `toggle_with_icon`; surface-tint-only toggle keeps the same
+        // glyph throughout.
+        let icon_content_id = if let (Some(ref toggled), Some(_)) =
+            (self.toggled.as_ref(), self.toggled_icon.as_ref())
+        {
             let toggled_index = toggled.map(|v| if *v { 1 } else { 0 });
             let primary_icon =
                 std::mem::replace(&mut self.icon, IconWidget::from_path(Path::new(), 0.0))
-                    .icon_size(ib_style.icon_size)
+                    .icon_size(icon_size)
                     .bind_color(icon_role.clone());
             let alt_icon = self
                 .toggled_icon
                 .take()
-                .unwrap_or_else(|| IconWidget::from_path(Path::new(), 0.0))
-                .icon_size(ib_style.icon_size)
+                .expect("toggled_icon checked above")
+                .icon_size(icon_size)
                 .bind_color(icon_role);
             ctx.add(
                 Switcher::new(toggled_index)
@@ -317,9 +583,8 @@ impl fern_core::widget::Widget for BuiltInButton {
                     .child(alt_icon),
             )
         } else {
-            // Normal mode: single icon
             let icon = std::mem::replace(&mut self.icon, IconWidget::from_path(Path::new(), 0.0))
-                .icon_size(ib_style.icon_size)
+                .icon_size(icon_size)
                 .bind_color(icon_role);
             ctx.add(icon)
         };
@@ -394,7 +659,8 @@ impl fern_core::widget::Widget for BuiltInButton {
                     }
                     if let Some(ref toggled) = toggled_for_tap {
                         toggled.set(!toggled.get());
-                    } else if let Some(ref action) = *action_for_tap {
+                    }
+                    if let Some(ref action) = *action_for_tap {
                         action(ctx);
                     }
                     interaction.set(InteractionState::Hovered);
@@ -434,7 +700,8 @@ impl fern_core::widget::Widget for BuiltInButton {
                         } => {
                             if let Some(ref toggled) = toggled_for_key {
                                 toggled.set(!toggled.get());
-                            } else if let Some(ref action) = *action_for_key {
+                            }
+                            if let Some(ref action) = *action_for_key {
                                 action(ctx);
                             }
                             interaction.set(InteractionState::Focused);
@@ -463,7 +730,8 @@ impl fern_core::widget::Widget for BuiltInButton {
                     if action == fern_core::accesskit::Action::Click && enabled {
                         if let Some(ref toggled) = toggled_for_access {
                             toggled.set(!toggled.get());
-                        } else if let Some(ref act) = *action_for_access {
+                        }
+                        if let Some(ref act) = *action_for_access {
                             act(ctx);
                         }
                         EventResponse::Handled
@@ -511,8 +779,8 @@ impl fern_core::widget::Widget for BuiltInButton {
         builder.set_role(fern_core::accesskit::Role::Button);
         debug_assert!(
             self.tooltip_text.is_some(),
-            "BuiltInButton: expected a tooltip (used as the accessible name). \
-             Use .tooltip(tr!(…)) or a predefined constructor like BuiltInButton::clear()."
+            "IconButton: expected a tooltip (used as the accessible name). \
+             Use .tooltip(tr!(…)) or a predefined constructor like IconButton::clear()."
         );
         if let Some(ref text) = self.tooltip_text {
             builder.set_name(text.as_str());
@@ -524,6 +792,16 @@ impl fern_core::widget::Widget for BuiltInButton {
         }
         if let Some(ref toggled) = self.toggled {
             builder.set_toggled(toggled.get());
+        }
+        // ARIA disclosure pattern: a button that opens a popup
+        // declares `has_popup` and, when the wrapper tracks it,
+        // `expanded`. Both are opt-in — regular icon buttons stay
+        // silent on these properties.
+        if let Some(kind) = self.has_popup {
+            builder.set_has_popup(kind);
+        }
+        if let Some(ref signal) = self.expanded_signal {
+            builder.set_expanded(signal.get());
         }
         builder.add_action(fern_core::accesskit::Action::Click);
         builder.add_action(fern_core::accesskit::Action::Focus);

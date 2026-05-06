@@ -42,8 +42,8 @@ use crate::tab_widget::delegate::{TabBarOrientation, TabDelegate, TabSizing};
 use crate::tab_widget::header::{HeaderShared, TabHeader, TabHeaderConfig};
 use crate::tab_widget::id::TabId;
 use crate::{
-    BuiltInButton, BuiltInButtonSize, Button, ButtonVariant, Expand, HStack, IconLocation,
-    IconWidget, ListView, Panel, PopoverButton,
+    Button, ButtonVariant, Expand, HStack, IconButton, IconButtonSize, IconLocation, IconWidget,
+    ListView, Panel, PopoverButton,
 };
 use fern_core::accesskit::HasPopup;
 use fern_tokens::{BorderRole, SurfaceRole};
@@ -1510,8 +1510,9 @@ fn build_scroll_arrow(
             LocalizedString::literal("Scroll tabs down")
         }
     };
-    let button = BuiltInButton::new(icon)
-        .size(BuiltInButtonSize::Compact)
+    let button = IconButton::new(icon)
+        .embedded()
+        .size(IconButtonSize::Compact)
         .tooltip(tooltip)
         .on_activate_fn(move |_ctx| {
             let cur = scroll_main.get();

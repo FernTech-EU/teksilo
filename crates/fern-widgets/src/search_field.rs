@@ -60,7 +60,7 @@ use fern_core::widget_builder::{HandlerSet, WidgetBuilder};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{BorderRole, CornerRadius, HAlignment, SurfaceRole, TextRole, TextStyleRole};
 
-use crate::built_in_button::BuiltInIcons;
+use crate::icon_button::BuiltInIcons;
 use crate::primitives::{
     Center, FixedSize, MinSize, Padding, RectWidget, TextWidget, VStack, ZStack,
 };

@@ -239,10 +239,10 @@ impl ColorTokens {
             // The Int UI v2 reference doc's `text_secondary` picked
             // gray(9) (#9DA0A8) by mistake, which makes caption labels
             // read way too bright. Use Jewel's actual gray(7).
-            text_primary: Color::from_hex("#DFE1E5"),
+            text_primary: Color::from_hex("#BDBFC5"),
             text_secondary: Color::from_hex("#6F737A"),
             text_disabled: Color::from_hex("#5A5D63"),
-            text_on_accent: Color::from_hex("#FFFFFF"),
+            text_on_accent: Color::from_hex("#FDFEFF"),
             text_link: Color::from_hex("#19BDD4"),
             text_link_hover: Color::from_hex("#3DD0E0"),
             text_error: Color::from_hex("#E55765"),

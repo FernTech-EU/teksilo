@@ -5,14 +5,14 @@
 //! column is `filterable`. With the `rich-text` feature enabled,
 //! tapping the glyph opens a [`Popover`] anchored to it whose content
 //! is a [`FilterPopoverContent`] widget — a [`TextInput`] with a
-//! trailing [`BuiltInButton::clear`] bound to the table's
+//! trailing [`IconButton::clear`] bound to the table's
 //! `filters_signal[col_id]` slot. Without `rich-text`, the popover
 //! trigger is not built (callers can still drive `filters_signal`
 //! programmatically).
 //!
 //! [`Popover`]: crate::popover::Popover
 //! [`TextInput`]: crate::text_input::TextInput
-//! [`BuiltInButton::clear`]: crate::built_in_button::BuiltInButton::clear
+//! [`IconButton::clear`]: crate::icon_button::IconButton::clear
 
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
@@ -106,12 +106,12 @@ mod rich {
     use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
     use fern_core::widget_id::WidgetId;
 
-    use crate::built_in_button::BuiltInButton;
+    use crate::icon_button::IconButton;
     use crate::text_input::TextInput;
 
     /// Content widget for the per-column filter popover. A
     /// [`TextInput`] bound to a `Signal<String>` with a trailing
-    /// [`BuiltInButton::clear`] that empties the field — and via the
+    /// [`IconButton::clear`] that empties the field — and via the
     /// `on_change` bridge, the upstream `filters_signal[col_id]` slot.
     pub(crate) struct FilterPopoverContent {
         text: Signal<String>,
@@ -174,7 +174,7 @@ mod rich {
             }
 
             let text = self.text.clone();
-            let clear = BuiltInButton::clear().on_activate_fn({
+            let clear = IconButton::clear().embedded().on_activate_fn({
                 let text = text.clone();
                 move |_| {
                     if !text.get().is_empty() {

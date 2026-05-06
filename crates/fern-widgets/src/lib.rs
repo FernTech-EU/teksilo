@@ -16,7 +16,6 @@ pub mod avatar;
 pub mod badge;
 pub mod banner;
 pub mod breadcrumb;
-pub mod built_in_button;
 pub mod button;
 pub mod calendar;
 pub mod card;
@@ -42,6 +41,7 @@ pub mod group_box;
 pub mod group_header;
 #[cfg(feature = "rich-text")]
 pub mod hex_color_input;
+pub mod icon_button;
 #[cfg(feature = "rich-text")]
 pub mod input_dialog;
 pub mod keystroke_format;
@@ -58,6 +58,8 @@ pub(crate) mod overlay_trigger;
 pub mod panel;
 pub mod popover;
 pub mod popover_button;
+pub(crate) mod popover_caret;
+pub mod popover_icon_button;
 pub mod primitives;
 pub mod privacy_settings;
 pub mod progress_bar;
@@ -109,7 +111,6 @@ pub use avatar::{Avatar, AvatarCorner, AvatarPresence, AvatarShape, AvatarSize};
 pub use badge::Badge;
 pub use banner::{Banner, BannerSeverity};
 pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
-pub use built_in_button::{BuiltInButton, BuiltInButtonSize, BuiltInIcons};
 pub use button::{Button, ButtonVariant, IconLocation};
 pub use calendar::{Calendar, DateRange, WeekNumberDisplay};
 pub use card::Card;
@@ -133,6 +134,7 @@ pub use group_box::GroupBox;
 pub use group_header::GroupHeader;
 #[cfg(feature = "rich-text")]
 pub use hex_color_input::HexColorInput;
+pub use icon_button::{BuiltInIcons, IconButton, IconButtonSize};
 #[cfg(feature = "rich-text")]
 pub use input_dialog::InputDialog;
 pub use link::Link;
@@ -147,6 +149,7 @@ pub use message_box::{
 pub use panel::Panel;
 pub use popover::Popover;
 pub use popover_button::PopoverButton;
+pub use popover_icon_button::PopoverIconButton;
 #[cfg(feature = "rich-text")]
 pub use primitives::TextInputField;
 pub use primitives::{

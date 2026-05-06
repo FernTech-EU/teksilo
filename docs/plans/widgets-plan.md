@@ -48,8 +48,11 @@ don't get re-requested):
 [PrivacySettings](crates/fern-widgets/src/privacy_settings.rs),
 [ShortcutSettings](crates/fern-widgets/src/shortcut_settings.rs),
 [DateRangeEdit](crates/fern-widgets/src/date_range_edit.rs),
-[BuiltInButton](crates/fern-widgets/src/built_in_button.rs) (internal-use
-icon button embedded inside other widgets like TextInput's clear-X), and
+[IconButton](crates/fern-widgets/src/icon_button.rs) (square, icon-only,
+flat-surface button — five sizes from Compact (22 dp) to Hero (50 dp);
+`.embedded()` mode is the JetBrains "built-in" dim look used inside
+TextInput / ComboBox trailing slots, default mode is full-weight
+toolbar / menu / hero use), and
 the full
 [animations/](crates/fern-widgets/src/animations/) wrapper family (Blur,
 Collapse, Crossfade, Cycle, Fade, Pulse, Rotate, Scale, Shake, Slide,
@@ -179,19 +182,27 @@ and Qt offers them as `QFoo`.
 
 ## Gap 3 — Int UI / Jewel additions (not in Qt)
 
-1. **IconButton / ActionButton** — **Covered by Button.**
-   [Button](crates/fern-widgets/src/button.rs) supports
-   `ButtonVariant::Flat` (borderless, transparent at idle, `surface_hover`
-   on hover) and `IconLocation::IconOnly` (icon with no label, no
-   label-layout overhead). The combination
-   `Button::new("").style(Flat).icon(icon, IconLocation::IconOnly)` is the
-   Int UI IconButton; the toolbar / inline pattern is already supported.
-   A separate widget is only worth shipping if profiling shows the unused
-   label slot is a real cost — currently no evidence it is. The
-   [BuiltInButton](crates/fern-widgets/src/built_in_button.rs) widget is an
-   internal-use icon button for embedding inside other widgets (TextInput's
-   clear-X, search affordances, etc.) — not a public top-level IconButton.
-   **Closed unless evidence forces a split.**
+1. **IconButton / ActionButton** — **Shipped** as
+   [IconButton](crates/fern-widgets/src/icon_button.rs). Square,
+   icon-only, flat-surface button covering both stand-alone (toolbars,
+   rich menus, hero CTAs) and embedded (inside TextInput / ComboBox /
+   SearchField trailing slots) use cases. Five sizes via
+   `IconButtonSize`, calibrated to the IntelliJ Int UI scale: Compact
+   (22 dp, tool-window density), Default (24 dp, trailing-slot
+   density), Toolbar (30 dp, IntelliJ side-toolbar density), Large
+   (40 dp, emphasized stand-alone), Hero (50 dp, landing-screen
+   CTAs), with quick-method shortcuts `.toolbar()` / `.large()` /
+   `.hero()`. `.embedded()` opts into the
+   JetBrains "built-in" dim look (Secondary at rest, Primary on hover,
+   Accent on press) so embedded buttons don't compete with host text;
+   default is stand-alone (Primary at rest). Two bistate modes:
+   `.toggle(state)` (surface-tint only — pin / select pattern) and
+   `.toggle_with_icon(state, alt)` (surface-tint + icon-swap — eye /
+   eye-off pattern). Predefined constructors `browse() / clear() /
+   search() / copy() / add() / expand() / visibility_toggle(state)`
+   ship standard icons + i18n tooltips; the
+   [BuiltInIcons](crates/fern-widgets/src/icon_button.rs) factory is
+   the override point for theming the default icon set.
 
 2. **CircularProgressIndicator / Spinner** — **Shipped** as
    [Spinner](crates/fern-widgets/src/spinner.rs). Animated arc backed by

@@ -24,11 +24,9 @@ use fern_core::build_context::BuildContext;
 use fern_core::signal::Signal;
 use fern_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
-use fern_platform::file_dialog::{
-    EventContextFileDialogExt, FileDialogRequest, FileDialogResult,
-};
+use fern_platform::file_dialog::{EventContextFileDialogExt, FileDialogRequest, FileDialogResult};
 
-use crate::built_in_button::BuiltInButton;
+use crate::icon_button::IconButton;
 use crate::text_input::TextInput;
 
 /// Which file-dialog kind the trailing button opens.
@@ -195,7 +193,8 @@ impl Widget for FilePickerField {
             self.on_pick.take().map(std::rc::Rc::from);
         let text_signal = self.text.clone();
 
-        let browse = BuiltInButton::browse()
+        let browse = IconButton::browse()
+            .embedded()
             .enabled(self.enabled)
             .on_activate_fn(move |ctx| {
                 let request = build_request_owned(
@@ -274,9 +273,7 @@ impl Widget for FilePickerField {
 fn apply_result(result: &FileDialogResult, text: &Signal<String>, kind: FilePickerKind) {
     let path = match result {
         FileDialogResult::File(Some(p)) if matches!(kind, FilePickerKind::OpenFile) => Some(p),
-        FileDialogResult::Folder(Some(p)) if matches!(kind, FilePickerKind::PickFolder) => {
-            Some(p)
-        }
+        FileDialogResult::Folder(Some(p)) if matches!(kind, FilePickerKind::PickFolder) => Some(p),
         FileDialogResult::Saved(Some(p)) if matches!(kind, FilePickerKind::SaveFile) => Some(p),
         _ => None,
     };

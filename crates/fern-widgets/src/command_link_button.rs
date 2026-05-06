@@ -243,34 +243,36 @@ impl Widget for CommandLinkButton {
                     int_hover_leave.set(InteractionState::Idle);
                 }
             })
-            .on_key(move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
-                if !enabled {
-                    return EventResponse::Ignored;
-                }
-                match event {
-                    WidgetEvent::KeyDown {
-                        key: Key::Space | Key::Enter,
-                        ..
-                    } => {
-                        int_key.set(InteractionState::Pressed);
-                        EventResponse::Handled
+            .on_key(
+                move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
+                    if !enabled {
+                        return EventResponse::Ignored;
                     }
-                    WidgetEvent::KeyUp {
-                        key: Key::Space | Key::Enter,
-                        ..
-                    } => {
-                        if int_key.get() != InteractionState::Pressed {
-                            return EventResponse::Ignored;
+                    match event {
+                        WidgetEvent::KeyDown {
+                            key: Key::Space | Key::Enter,
+                            ..
+                        } => {
+                            int_key.set(InteractionState::Pressed);
+                            EventResponse::Handled
                         }
-                        if let Some(ref a) = *action_for_key {
-                            a(ctx);
+                        WidgetEvent::KeyUp {
+                            key: Key::Space | Key::Enter,
+                            ..
+                        } => {
+                            if int_key.get() != InteractionState::Pressed {
+                                return EventResponse::Ignored;
+                            }
+                            if let Some(ref a) = *action_for_key {
+                                a(ctx);
+                            }
+                            int_key.set(InteractionState::Focused);
+                            EventResponse::Handled
                         }
-                        int_key.set(InteractionState::Focused);
-                        EventResponse::Handled
+                        _ => EventResponse::Ignored,
                     }
-                    _ => EventResponse::Ignored,
-                }
-            })
+                },
+            )
             .on_focus(move |gained: bool, _ctx: &mut EventContext| {
                 if gained {
                     if int_focus.get() == InteractionState::Idle {
@@ -360,7 +362,10 @@ mod tests {
         });
         let b = tree.bounds(id);
         assert!(b.width > 0.0);
-        let min_height = Theme::light_default().components.command_link_button.min_height;
+        let min_height = Theme::light_default()
+            .components
+            .command_link_button
+            .min_height;
         assert!(b.height >= min_height);
     }
 

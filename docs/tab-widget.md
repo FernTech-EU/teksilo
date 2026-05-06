@@ -453,7 +453,7 @@ When the headers row doesn't fit the viewport, three affordances engage
 
 ### Scroll arrows
 
-Two `BuiltInButton`s (chevron-leading, chevron-trailing) flank the
+Two `IconButton`s (chevron-leading, chevron-trailing, embedded mode) flank the
 scrollable region. **Visibility is dynamic**: leading visible iff
 `scroll_x > 0`, trailing visible iff `scroll_x < max_scroll_x`. Click
 animates `scroll_x` by ~one tab-width via `Signal::animate_to` with

@@ -22,7 +22,7 @@ use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget, Widge
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{CornerRadius, SurfaceRole, TextRole, TextStyleRole, VAlignment};
 
-use crate::built_in_button::BuiltInButton;
+use crate::icon_button::IconButton;
 use crate::primitives::{Expand, HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
 
 /// Banner severity level. Drives the surface tint, glyph color, and
@@ -260,10 +260,14 @@ impl Widget for Banner {
             row = row.add_child(ctx.add_boxed(action));
         }
         if let Some(on_dismiss) = self.on_dismiss.take() {
-            // BuiltInButton::clear() ships with its own translated
+            // IconButton::clear() ships with its own translated
             // "Clear" tooltip / a11y label — adequate for a banner
             // dismiss button without inventing a new i18n key.
-            let btn = BuiltInButton::clear().on_activate_fn(move |c| on_dismiss(c));
+            // `.embedded()` keeps the icon dim until hover so the X
+            // doesn't compete with the banner's title/body text.
+            let btn = IconButton::clear()
+                .embedded()
+                .on_activate_fn(move |c| on_dismiss(c));
             row = row.add_child(ctx.add(btn));
         }
 

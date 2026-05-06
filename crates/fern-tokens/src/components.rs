@@ -41,12 +41,36 @@ impl Default for ButtonStyle {
     }
 }
 
+/// Square, icon-only [`IconButton`](crate::icon_button::IconButton)
+/// dimensions. Five sizes calibrated to the IntelliJ Int UI scale,
+/// listed in ascending size order:
+///
+/// - `size_compact` (22 dp) — small buttons inside tool windows
+///   / inspector panels.
+/// - `size_default` (24 dp) — TextInput / ComboBox / SearchField
+///   trailing-slot density.
+/// - `size_toolbar` (30 dp) — side-toolbar buttons (left / right /
+///   top window edges in IntelliJ).
+/// - `size_large` (40 dp) — emphasized stand-alone buttons in rich
+///   menus and detail panes.
+/// - `size_hero` (50 dp) — hero / landing-screen CTAs.
+///
+/// The `icon_size` field applies to the two smallest buttons
+/// (Compact, Default); Toolbar / Large / Hero scale up via the
+/// dedicated `icon_size_toolbar` / `icon_size_large` /
+/// `icon_size_hero` fields so a 50 dp button doesn't carry a tiny
+/// 16 dp glyph.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct IconButtonStyle {
     pub size_compact: f32,
     pub size_default: f32,
+    pub size_toolbar: f32,
     pub size_large: f32,
+    pub size_hero: f32,
     pub icon_size: f32,
+    pub icon_size_toolbar: f32,
+    pub icon_size_large: f32,
+    pub icon_size_hero: f32,
     pub corner_radius: f32,
 }
 
@@ -55,9 +79,14 @@ impl Default for IconButtonStyle {
         Self {
             size_compact: 22.0,
             size_default: 24.0,
-            size_large: 30.0,
+            size_toolbar: 30.0,
+            size_large: 40.0,
+            size_hero: 50.0,
             icon_size: 16.0,
-            corner_radius: 4.0,
+            icon_size_toolbar: 18.0,
+            icon_size_large: 24.0,
+            icon_size_hero: 32.0,
+            corner_radius: 8.0,
         }
     }
 }

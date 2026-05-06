@@ -38,7 +38,7 @@ use fern_core::widget_id::WidgetId;
 use fern_i18n::LocalizedString;
 use fern_tokens::{Color, CornerRadius, TextRole};
 
-use crate::{BuiltInButton, BuiltInButtonSize, HStack, IconWidget, TextWidget};
+use crate::{HStack, IconButton, IconButtonSize, IconWidget, TextWidget};
 
 /// Minimum natural width when the label is empty / extremely short.
 const NATURAL_MIN_WIDTH: f32 = 72.0;
@@ -342,8 +342,9 @@ impl Widget for TabHeader {
                 // via mouse click, middle-click on the tab body
                 // (handled by the surrounding `on_pointer_event`),
                 // or AT custom action.
-                let close_button = BuiltInButton::clear()
-                    .size(BuiltInButtonSize::Compact)
+                let close_button = IconButton::clear()
+                    .embedded()
+                    .size(IconButtonSize::Compact)
                     .focusable(false)
                     .tooltip(LocalizedString::literal("Close tab"))
                     .on_activate_fn(move |_ctx| (close_fn)());

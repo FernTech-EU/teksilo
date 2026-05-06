@@ -212,7 +212,7 @@ The attach helpers do three things:
 |------|-------|--------------------|
 | Rich tooltip | `200 ms` | `DEFAULT_RICH_TOOLTIP_DELAY` in [tooltip/attach.rs](../crates/fern-widgets/src/tooltip/attach.rs) |
 | `Button` plain tooltip | `200 ms` | inline literal in [button.rs](../crates/fern-widgets/src/button.rs) |
-| `Checkbox`, `RadioButton`, `MenuItem`, `SplitButton`, `Link`, `BuiltInButton`, `TextInput` plain tooltip | `500 ms` | inline literal in each widget |
+| `Checkbox`, `RadioButton`, `MenuItem`, `SplitButton`, `Link`, `IconButton`, `TextInput` plain tooltip | `500 ms` | inline literal in each widget |
 
 There is no token for plain-tooltip delay yet; widgets that need a custom
 value pass an explicit `Duration` to `attach_tooltip`.
@@ -403,7 +403,7 @@ the rich source, and vice versa.
 | [`Checkbox`](../crates/fern-widgets/src/checkbox.rs) | `tooltip(text)` | — | — |
 | [`RadioButton`](../crates/fern-widgets/src/radio_button.rs) | `tooltip(text)` | — | — |
 | [`SplitButton`](../crates/fern-widgets/src/split_button.rs) | `tooltip(text)` | — | — |
-| [`BuiltInButton`](../crates/fern-widgets/src/built_in_button.rs) | `tooltip(text)` | — | — |
+| [`IconButton`](../crates/fern-widgets/src/icon_button.rs) | `tooltip(text)` | — | — |
 | [`TextInput`](../crates/fern-widgets/src/text_input.rs) | `tooltip_literal(text)` | `rich_tooltip_key(key)` | `rich_tooltip(content)` |
 | [`ToolBox`](../crates/fern-widgets/src/tool_box.rs) | — | `tooltip(impl Into<RichTooltipSource>)` | `tooltip_content(content)` |
 

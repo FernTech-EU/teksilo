@@ -68,7 +68,6 @@ use fern_core::widget_id::WidgetId;
 use fern_i18n::resolve_message_widget;
 use jiff::civil::Weekday;
 
-use crate::built_in_button::{BuiltInButton, BuiltInButtonSize};
 use crate::calendar::Calendar;
 use crate::common::datetime::Date;
 use crate::common::datetime::pattern::{
@@ -76,6 +75,7 @@ use crate::common::datetime::pattern::{
     mask_for_pattern, parse_value, segment_at_position, step_date_field,
 };
 use crate::common::datetime::types::{YearMonth, today_local};
+use crate::icon_button::{IconButton, IconButtonSize};
 use crate::primitives::IconWidget;
 use crate::primitives::text_input_field::{ValidationFeedback, ValidationOutcome};
 use crate::text_input::TextInput;
@@ -550,11 +550,11 @@ impl Widget for DateEdit {
 
         // ── Calendar trigger button (built as a value, dropped into
         //    the TextInput's trailing slot) ──────────────────────
-        // Same Int UI `BuiltInButton` the other datetime widgets
-        // (DateRangeEdit, DateTimeEdit) use, so the visual treatment
-        // — hover/pressed background, icon size, focus halo — stays
-        // consistent across the family.
-        let trigger_widget_opt: Option<BuiltInButton> = if self.show_calendar_button {
+        // Same Int UI `IconButton` (in embedded mode) the other
+        // datetime widgets (DateRangeEdit, DateTimeEdit) use, so the
+        // visual treatment — hover/pressed background, icon size,
+        // focus halo — stays consistent across the family.
+        let trigger_widget_opt: Option<IconButton> = if self.show_calendar_button {
             let popover_open = self.popover_open.clone();
             let calendar_id = calendar_id_opt.expect("calendar built when button enabled");
             let placement = self.calendar_popover_placement.clone();
@@ -566,8 +566,9 @@ impl Widget for DateEdit {
                 })
             };
             Some(
-                BuiltInButton::new(calendar_glyph_icon(date_style.calendar_icon_size))
-                    .size(BuiltInButtonSize::Default)
+                IconButton::new(calendar_glyph_icon(date_style.calendar_icon_size))
+                    .embedded()
+                    .size(IconButtonSize::Default)
                     .enabled(enabled && !read_only)
                     .tooltip(resolve_message_widget("date-edit-trigger-tooltip", &[]))
                     .on_activate_fn(move |ctx_evt: &mut EventContext| {
@@ -605,7 +606,7 @@ impl Widget for DateEdit {
         // every TextInput uses (border, padding, validation strip,
         // focus border) and parks the calendar trigger in its
         // trailing slot — flush against the field's right edge with
-        // no manual divider, matching Int UI's BuiltInButton convention.
+        // no manual divider, matching Int UI's embedded IconButton convention.
         let pattern_for_filter = pattern_rc.clone();
         let mask_string = mask_for_pattern(&pattern_rc);
         let mut text_input = TextInput::new(self.text_signal.clone())

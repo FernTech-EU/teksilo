@@ -209,14 +209,14 @@ impl TextInput {
     }
 
     /// Set an arbitrary widget in the leading slot (before the text area).
-    /// Typically a `BuiltInButton` or `IconWidget`.
+    /// Typically an `IconButton` or `IconWidget`.
     pub fn leading_slot(mut self, widget: impl Widget + 'static) -> Self {
         self.leading_slot = Some(Box::new(widget));
         self
     }
 
     /// Set an arbitrary widget in the trailing slot (after the text area).
-    /// Typically a `BuiltInButton` or `IconWidget`.
+    /// Typically an `IconButton` or `IconWidget`.
     pub fn trailing_slot(mut self, widget: impl Widget + 'static) -> Self {
         self.trailing_slot = Some(Box::new(widget));
         self
@@ -428,7 +428,7 @@ impl Widget for TextInput {
         let inner_feedback = field.validation_feedback_signal();
 
         // Text editing area, wrapped in vertical padding so slots
-        // (BuiltInButton etc.) sit flush against top/bottom of the
+        // (IconButton etc.) sit flush against top/bottom of the
         // inner border area and are vertically centered by the HStack.
         let padded_field = Padding::new(
             field_style.padding_vertical,
@@ -500,7 +500,7 @@ impl Widget for TextInput {
         // bound text signal — the field's ext→internal effect
         // picks this up and wipes the document.
         if self.show_clear_button {
-            let icon = (crate::built_in_button::BuiltInIcons::global().clear)()
+            let icon = (crate::icon_button::BuiltInIcons::global().clear)()
                 .icon_size(12.0)
                 .color(TextRole::Secondary);
             let text_for_clear = self.text.clone();

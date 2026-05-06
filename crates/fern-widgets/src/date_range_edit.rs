@@ -25,7 +25,7 @@
 //!   focused segment matches `DateEdit`).
 //! - **Painted arrow separator** — a thin chevron-right glyph, no text.
 //!   Visual only; AT users see the wrapper's `Role::DateInput`.
-//! - **One trailing calendar button** — Int UI `BuiltInButton` with
+//! - **One trailing calendar button** — Int UI `IconButton::embedded()` with
 //!   the calendar glyph. Opens a single popover hosting
 //!   `Calendar::range` bound to the outer signal. The two-anchor
 //!   click model (start-then-end) commits the range and closes the
@@ -65,7 +65,6 @@ use fern_i18n::resolve_message_widget;
 use fern_tokens::{BorderRole, CornerRadius, SurfaceRole};
 use jiff::civil::Weekday;
 
-use crate::built_in_button::{BuiltInButton, BuiltInButtonSize};
 use crate::calendar::{Calendar, DateRange};
 use crate::common::datetime::Date;
 use crate::common::datetime::pattern::{
@@ -74,6 +73,7 @@ use crate::common::datetime::pattern::{
 };
 use crate::common::datetime::types::today_local;
 use crate::date_edit::{ValidationBehavior, build_date_validator, calendar_glyph_icon, clamp_date};
+use crate::icon_button::{IconButton, IconButtonSize};
 use crate::primitives::text_input_field::{TextInputField, ValidationFeedback};
 use crate::primitives::{
     Center, FixedSize, HStack, IconWidget, MinSize, Padding, RectWidget, VStack, ZStack,
@@ -370,8 +370,9 @@ impl Widget for DateRangeEdit {
                 popover_open.set(false);
             })
         };
-        let trigger_btn = BuiltInButton::new(calendar_glyph_icon(date_style.calendar_icon_size))
-            .size(BuiltInButtonSize::Default)
+        let trigger_btn = IconButton::new(calendar_glyph_icon(date_style.calendar_icon_size))
+            .embedded()
+            .size(IconButtonSize::Default)
             .enabled(enabled && !read_only)
             .tooltip(resolve_message_widget(
                 "date-range-edit-trigger-tooltip",
@@ -401,7 +402,7 @@ impl Widget for DateRangeEdit {
 
         // ── Row layout ─────────────────────────────────────────
         // No divider before the trailing trigger — Int UI's
-        // BuiltInButton sits flush inside the field's trailing slot
+        // embedded IconButton sits flush inside the field's trailing slot
         // (the same convention TextInput uses) and the button's own
         // hover/pressed background gives it enough visual separation.
         let row = HStack::new()

@@ -17,7 +17,7 @@
 //!   Slider, ProgressBar, Badge, Link, ComboBox, SegmentedControl,
 //!   IconWidget, Divider.
 //! - Tier B (composites with fixture variants): Card, Panel, GroupBox,
-//!   GroupHeader, BuiltInButton, Snackbar, Breadcrumb, Toolbar,
+//!   GroupHeader, IconButton, Snackbar, Breadcrumb, Toolbar,
 //!   StatusBar, Accordion, RadioGroup, SplitButton.
 //! - Tier C (data-driven / structural): ListView, TreeView, MenuList,
 //!   ScrollArea, SplitView, TabWidget, ToolBox, Repeater.
@@ -39,10 +39,10 @@ use crate::primitives::{
 };
 use crate::{
     Accordion, Avatar, AvatarPresence, AvatarShape, AvatarSize, Badge, Breadcrumb, BreadcrumbItem,
-    BuiltInButton, BuiltInButtonSize, Button, ButtonVariant, Card, Checkbox, ComboBox, GroupBox,
-    GroupHeader, Link, ListView, MenuItem, MenuList, Panel, ProgressBar, RadioButton, RadioGroup,
-    ScrollArea, SegmentedControl, Slider, Snackbar, SplitButton, SplitView, StatusBar, TabWidget,
-    Toggle, ToolBox, Toolbar, TreeView,
+    Button, ButtonVariant, Card, Checkbox, ComboBox, GroupBox, GroupHeader, IconButton,
+    IconButtonSize, Link, ListView, MenuItem, MenuList, Panel, ProgressBar, RadioButton,
+    RadioGroup, ScrollArea, SegmentedControl, Slider, Snackbar, SplitButton, SplitView, StatusBar,
+    TabWidget, Toggle, ToolBox, Toolbar, TreeView,
 };
 
 // ---------------------------------------------------------------------------
@@ -1065,44 +1065,46 @@ impl WidgetCatalog for GroupHeader {
 register_widget_catalog_at!("crates/fern-widgets/src/group_header.rs", GroupHeader);
 
 // ---------------------------------------------------------------------------
-// BuiltInButton
+// IconButton
 // ---------------------------------------------------------------------------
 
-impl WidgetCatalog for BuiltInButton {
+impl WidgetCatalog for IconButton {
     fn id() -> &'static str {
-        "built_in_button"
+        "icon_button"
     }
     fn group() -> &'static str {
         "Controls"
     }
     fn display_name() -> &'static str {
-        "BuiltInButton"
+        "IconButton"
     }
     fn variants() -> Vec<PreviewVariant> {
-        fn build_browse() -> Box<dyn Widget> {
-            Box::new(BuiltInButton::browse().size(BuiltInButtonSize::Default))
+        // Stand-alone scenarios (default visual mode).
+        fn build_search_toolbar() -> Box<dyn Widget> {
+            Box::new(IconButton::search().toolbar())
         }
-        fn build_search() -> Box<dyn Widget> {
-            Box::new(BuiltInButton::search().size(BuiltInButtonSize::Default))
+        fn build_add_hero() -> Box<dyn Widget> {
+            Box::new(IconButton::add().hero())
         }
-        fn build_clear() -> Box<dyn Widget> {
-            Box::new(BuiltInButton::clear().size(BuiltInButtonSize::Compact))
+        // Embedded scenarios — the JetBrains "built-in" dim look.
+        fn build_browse_embedded() -> Box<dyn Widget> {
+            Box::new(IconButton::browse().embedded())
         }
-        fn build_add() -> Box<dyn Widget> {
-            Box::new(BuiltInButton::add().size(BuiltInButtonSize::Large))
+        fn build_clear_embedded_compact() -> Box<dyn Widget> {
+            Box::new(IconButton::clear().embedded().size(IconButtonSize::Compact))
         }
         vec![
-            PreviewVariant::scenario("browse", build_browse),
-            PreviewVariant::scenario("search", build_search),
-            PreviewVariant::scenario("clear-compact", build_clear),
-            PreviewVariant::scenario("add-large", build_add),
+            PreviewVariant::scenario("search-toolbar", build_search_toolbar),
+            PreviewVariant::scenario("add-hero", build_add_hero),
+            PreviewVariant::scenario("browse-embedded", build_browse_embedded),
+            PreviewVariant::scenario("clear-embedded-compact", build_clear_embedded_compact),
         ]
     }
     fn build(variant: &str, _knobs: &KnobValues) -> Box<dyn Widget> {
         scenario_for::<Self>(variant)
     }
 }
-register_widget_catalog_at!("crates/fern-widgets/src/built_in_button.rs", BuiltInButton);
+register_widget_catalog_at!("crates/fern-widgets/src/icon_button.rs", IconButton);
 
 // ---------------------------------------------------------------------------
 // Snackbar

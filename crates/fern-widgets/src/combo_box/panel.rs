@@ -520,7 +520,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
         };
 
         // Searchable mode: prepend a `TextInput` with a trailing
-        // `BuiltInButton::clear()` so the user can wipe the query back
+        // `IconButton::clear()` so the user can wipe the query back
         // to empty. Both sit in a VStack above the filtered items. The
         // input's widget id is captured in a shared slot so the owning
         // `ComboBox` can programmatically focus it when the overlay opens.
@@ -534,7 +534,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
                     // its visibility to `text.is_empty().not()` so the
                     // button only appears once something has been typed.
                     // Using the built-in option here rather than a
-                    // hand-wired `BuiltInButton::clear()` in the
+                    // hand-wired `IconButton::clear()` in the
                     // trailing slot avoids reaching for the trailing
                     // widget's id from the outside (it lives inside
                     // TextInput's build) just to register
