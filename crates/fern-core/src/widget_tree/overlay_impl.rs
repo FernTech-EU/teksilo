@@ -1061,6 +1061,28 @@ mod tests {
     }
 
     #[test]
+    fn tooltip_survives_theme_switch() {
+        // Regression: switching themes used to wipe the tooltip
+        // registry, so subsequent hovers found nothing to show. Theme
+        // changes don't rebuild widgets (they only update the theme
+        // signal), so the registry must be preserved.
+        let mut tree = WidgetTree::new().with_theme(fern_tokens::Theme::light_default());
+        let anchor = tree.add(FillWidget::new());
+        let tooltip = tree.add(FillWidget::new().label("Tip"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.attach_tooltip(anchor, tooltip, std::time::Duration::from_millis(500));
+
+        tree.set_theme(fern_tokens::Theme::dark_default());
+
+        tree.pointer_move(tree.bounds(anchor).center());
+        tree.advance_time(std::time::Duration::from_millis(600));
+
+        assert_eq!(tree.active_overlays().len(), 1);
+        assert!(tree.find_by_label("Tip").is_some());
+    }
+
+    #[test]
     fn tooltip_dismissed_on_pointer_leave() {
         let mut tree = WidgetTree::new();
         let anchor = tree.add(FillWidget::new());

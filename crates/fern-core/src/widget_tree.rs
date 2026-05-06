@@ -1045,7 +1045,6 @@ impl WidgetTree {
     pub fn set_theme(&mut self, theme: Theme) {
         self.theme = theme.clone();
         self.theme_signal.set(theme);
-        self.tooltips.clear();
         self.arena.mark_all_dirty();
     }
 
