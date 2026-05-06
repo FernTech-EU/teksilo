@@ -59,7 +59,7 @@
 use fern_scene::{A11yGroup, A11yNode, PathItem, RectItem, Scene, SceneView};
 use fern_ui::canvas::{Path, Point, Rect};
 use fern_ui::prelude::*;
-use fern_ui::widgets::{Panel, TextWidget, VStack};
+use fern_ui::widgets::{Button, Expand, HStack, Panel, Spacer, TextWidget, Toolbar, VStack};
 
 const CARDS_PER_ROW: usize = 3;
 const ROWS: usize = 3;
@@ -67,6 +67,23 @@ const CARD_WIDTH: f32 = 220.0;
 const CARD_HEIGHT: f32 = 140.0;
 const CARD_GAP: f32 = 24.0;
 const SCENE_MARGIN: f32 = 32.0;
+
+fn dark_mode_toolbar() -> impl Widget {
+    let is_dark = Signal::new(false);
+    Toolbar::new().child(
+        HStack::new().child(Spacer::new()).child(
+            Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+                let next = !is_dark.get();
+                is_dark.set(next);
+                ctx.set_theme(if next {
+                    Theme::dark_default()
+                } else {
+                    Theme::light_default()
+                });
+            }),
+        ),
+    )
+}
 
 /// Story cards in reading order (top-leading to bottom-trailing).
 const CARDS: [(&str, &str); 9] = [
@@ -231,7 +248,13 @@ fn main() {
             WindowConfig::new()
                 .title("FernUI — Scene Corkboard (Phase 5b: cards auto-grafted into Act groups)")
                 .size(900, 600)
-                .root(|tree, _state| tree.add(build_corkboard())),
+                .root(|tree, _state| {
+                    tree.add(
+                        VStack::new()
+                            .child(dark_mode_toolbar())
+                            .child(Expand::new().child(build_corkboard())),
+                    )
+                }),
         )
         .run();
 }

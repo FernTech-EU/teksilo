@@ -14,8 +14,26 @@
 
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Button, ButtonVariant, HStack, Panel, Spinner, Switcher, TextWidget, VStack,
+    Button, ButtonVariant, Expand, HStack, Panel, Spacer, Spinner, Switcher, TextWidget, Toolbar,
+    VStack,
 };
+
+fn dark_mode_toolbar() -> impl Widget {
+    let is_dark = Signal::new(false);
+    Toolbar::new().child(
+        HStack::new().child(Spacer::new()).child(
+            Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+                let next = !is_dark.get();
+                is_dark.set(next);
+                ctx.set_theme(if next {
+                    Theme::dark_default()
+                } else {
+                    Theme::light_default()
+                });
+            }),
+        ),
+    )
+}
 
 fn main() {
     FernAppBuilder::new()
@@ -26,7 +44,13 @@ fn main() {
             WindowConfig::new()
                 .title("FernUI — Native File Dialogs")
                 .size(720, 420)
-                .root(|tree, _state| tree.add(FileDialogShowcase::new())),
+                .root(|tree, _state| {
+                    tree.add(
+                        VStack::new()
+                            .child(dark_mode_toolbar())
+                            .child(Expand::new().child(FileDialogShowcase::new())),
+                    )
+                }),
         )
         .run();
 }

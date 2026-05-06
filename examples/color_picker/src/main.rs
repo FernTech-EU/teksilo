@@ -26,9 +26,26 @@ use fern_ui::i18n::I18nConfig;
 use fern_ui::prelude::*;
 use fern_ui::tokens::{Color, Theme};
 use fern_ui::widgets::{
-    ColorEdit, ColorPicker, ColorPickerLayout, HStack, HexColorInput, Padding, Panel, ScrollArea,
-    TextWidget, VStack,
+    Button, ColorEdit, ColorPicker, ColorPickerLayout, Expand, HStack, HexColorInput, Padding,
+    Panel, ScrollArea, Spacer, TextWidget, Toolbar, VStack,
 };
+
+fn dark_mode_toolbar() -> impl Widget {
+    let is_dark = Signal::new(false);
+    Toolbar::new().child(
+        HStack::new().child(Spacer::new()).child(
+            Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+                let next = !is_dark.get();
+                is_dark.set(next);
+                ctx.set_theme(if next {
+                    Theme::dark_default()
+                } else {
+                    Theme::light_default()
+                });
+            }),
+        ),
+    )
+}
 
 #[derive(Debug)]
 struct Root {
@@ -233,7 +250,13 @@ fn main() {
             WindowConfig::new()
                 .title("FernUI — ColorPicker gallery")
                 .size(960, 900)
-                .root(|tree, _state| tree.add(Root::new())),
+                .root(|tree, _state| {
+                    tree.add(
+                        VStack::new()
+                            .child(dark_mode_toolbar())
+                            .child(Expand::new().child(Root::new())),
+                    )
+                }),
         )
         .run();
 }

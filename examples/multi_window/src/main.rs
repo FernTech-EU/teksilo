@@ -18,7 +18,7 @@ use fern_ui::IntentKind;
 use fern_ui::core::Action;
 use fern_ui::core::shortcut::{KeyStroke, Shortcut};
 use fern_ui::prelude::*;
-use fern_ui::widgets::{Button, ButtonVariant};
+use fern_ui::widgets::{Button, ButtonVariant, Expand, HStack, Spacer, Toolbar};
 
 #[derive(Debug, IntentKind)]
 enum AppIntent {
@@ -27,6 +27,23 @@ enum AppIntent {
     #[name = "app.toggle_fullscreen"]
     #[allow(dead_code)]
     ToggleFullscreen,
+}
+
+fn dark_mode_toolbar() -> impl Widget {
+    let is_dark = Signal::new(false);
+    Toolbar::new().child(
+        HStack::new().child(Spacer::new()).child(
+            Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+                let next = !is_dark.get();
+                is_dark.set(next);
+                ctx.set_theme(if next {
+                    Theme::dark_default()
+                } else {
+                    Theme::light_default()
+                });
+            }),
+        ),
+    )
 }
 
 fn main() {
@@ -40,7 +57,13 @@ fn main() {
                 .size(520, 320)
                 .min_size(320, 200)
                 .initial_placement(WindowPlacement::Floating)
-                .root(|tree, _state| tree.add(MainRoot::default())),
+                .root(|tree, _state| {
+                    tree.add(
+                        fern_ui::widgets::VStack::new()
+                            .child(dark_mode_toolbar())
+                            .child(Expand::new().child(MainRoot::default())),
+                    )
+                }),
         )
         .run();
 }

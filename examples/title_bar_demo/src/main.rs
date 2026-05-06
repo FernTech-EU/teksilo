@@ -18,7 +18,24 @@
 //! title bar.
 
 use fern_ui::prelude::*;
-use fern_ui::widgets::{Expand, RectWidget, TextWidget, TitleBar, VStack, WindowFrame, ZStack};
+use fern_ui::widgets::{Button, Expand, HStack, RectWidget, Spacer, TextWidget, TitleBar, Toolbar, VStack, WindowFrame, ZStack};
+
+fn dark_mode_toolbar() -> impl Widget {
+    let is_dark = Signal::new(false);
+    Toolbar::new().child(
+        HStack::new().child(Spacer::new()).child(
+            Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+                let next = !is_dark.get();
+                is_dark.set(next);
+                ctx.set_theme(if next {
+                    Theme::dark_default()
+                } else {
+                    Theme::light_default()
+                });
+            }),
+        ),
+    )
+}
 
 fn main() {
     FernAppBuilder::new()
@@ -104,12 +121,20 @@ fn main() {
                     // On platforms where the host is None (X11, unsupported
                     // Unix) the frame can't be created either; we just return
                     // the inner content uncovered.
-                    match tree.title_bar_host() {
+                    let frame_or_inner = match tree.title_bar_host() {
                         Some(host) if host.needs_custom_resize_handles() => {
                             tree.add(WindowFrame::new(host).thickness(6.0).content_id(inner))
                         }
                         _ => inner,
-                    }
+                    };
+
+                    let toolbar_id = tree.add(dark_mode_toolbar());
+                    let expanded_content_id = tree.add(Expand::new().child_id(frame_or_inner));
+                    tree.add(
+                        VStack::new()
+                            .add_child(toolbar_id)
+                            .add_child(expanded_content_id),
+                    )
                 }),
         )
         .run();

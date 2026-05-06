@@ -22,10 +22,27 @@ use std::time::Duration;
 
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Blur, Button, ButtonVariant, Card, Center, Collapse, Crossfade, Cycle, Divider, Fade,
+    Blur, Button, ButtonVariant, Card, Center, Collapse, Crossfade, Cycle, Divider, Expand, Fade,
     FixedSize, HStack, Padding, Panel, ProgressBar, Pulse, RectWidget, Rotate, Scale, ScaleOrigin,
-    ScrollArea, Shake, Slide, SlideEdge, SmoothSize, Spinner, TextWidget, Toggle, VStack, ZStack,
+    ScrollArea, Shake, Slide, SlideEdge, SmoothSize, Spacer, Spinner, TextWidget, Toggle, Toolbar, VStack, ZStack,
 };
+
+fn dark_mode_toolbar() -> impl Widget {
+    let is_dark = Signal::new(false);
+    Toolbar::new().child(
+        HStack::new().child(Spacer::new()).child(
+            Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+                let next = !is_dark.get();
+                is_dark.set(next);
+                ctx.set_theme(if next {
+                    Theme::dark_default()
+                } else {
+                    Theme::light_default()
+                });
+            }),
+        ),
+    )
+}
 
 fn main() {
     FernAppBuilder::new()
@@ -40,11 +57,13 @@ fn main() {
                     let collapse_expanded = Signal::new(false);
                     let fade_visible = Signal::new(true);
                     tree.add(
-                        ScrollArea::new().child(Padding::uniform(24.0).child(build_kit(
-                            toggle_state,
-                            collapse_expanded,
-                            fade_visible,
-                        ))),
+                        VStack::new()
+                            .child(dark_mode_toolbar())
+                            .child(Expand::new().child(ScrollArea::new().child(Padding::uniform(24.0).child(build_kit(
+                                toggle_state,
+                                collapse_expanded,
+                                fade_visible,
+                            ))))),
                     )
                 }),
         )

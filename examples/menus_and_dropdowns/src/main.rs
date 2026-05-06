@@ -8,12 +8,20 @@
 //!
 //! Run with: `cargo run -p menus-and-dropdowns`
 
+use fern_ui::IntentKind;
+use fern_ui::core::Action;
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
     Button, ButtonVariant, ComboBox, Divider, Expand, HStack, IconButton, IconWidget, MenuBar,
     MenuItem, MenuList, Padding, Panel, PopoverButton, PopoverIconButton, ScrollArea, Slider,
     Spacer, StatusBar, TextWidget, Toolbar, VStack,
 };
+
+#[derive(Debug, IntentKind)]
+enum AppIntent {
+    #[name = "menus.toggle_dark_mode"]
+    ToggleDarkMode,
+}
 
 // ---------------------------------------------------------------------------
 // Root composite
@@ -35,6 +43,20 @@ impl Root {
 impl Widget for Root {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let _theme = ctx.theme_signal().get();
+
+        let is_dark = ctx.signal(false);
+        let is_dark_for_action = is_dark.clone();
+        ctx.register_action(Action::new("menus.toggle_dark_mode").on_invoke(
+            move |_intent, ctx| {
+                let dark = !is_dark_for_action.get();
+                is_dark_for_action.set(dark);
+                ctx.set_theme(if dark {
+                    Theme::dark_default()
+                } else {
+                    Theme::light_default()
+                });
+            },
+        ));
 
         // --- Section 1: ComboBox demos ---
 
@@ -630,7 +652,9 @@ impl Widget for Root {
                     .child(
                         Button::new_literal("Toggle Dark Mode")
                             .style(ButtonVariant::Regular)
-                            .on_activate_fn(|_| println!("ToggleDarkMode")),
+                            .on_activate_fn(|ctx| {
+                                ctx.send_intent(AppIntent::ToggleDarkMode);
+                            }),
                     ),
             ),
         );
@@ -675,7 +699,7 @@ impl Widget for Root {
                             .separator()
                             .item(
                                 MenuItem::new_literal("Quit")
-                                    .on_activate_fn(|_| println!("ToggleDarkMode")),
+                                    .on_activate_fn(|_| println!("Quit")),
                             ),
                     )
                 })
@@ -743,14 +767,16 @@ impl Widget for Root {
                             .separator()
                             .item(
                                 MenuItem::new_literal("Toggle Dark Mode")
-                                    .on_activate_fn(|_| println!("ToggleDarkMode")),
+                                    .on_activate_fn(|ctx| {
+                                        ctx.send_intent(AppIntent::ToggleDarkMode);
+                                    }),
                             ),
                     )
                 })
                 .trailing_slot(
                     Button::new_literal("Settings")
                         .style(ButtonVariant::Flat)
-                        .on_activate_fn(|_| println!("ToggleDarkMode")),
+                        .on_activate_fn(|_| println!("Settings")),
                 ),
         );
 

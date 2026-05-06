@@ -28,9 +28,9 @@ use fern_ui::data::{
 };
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Button, CellContext, Column, ColumnWidth, EditTrigger, GridLines, HStack, Padding, Panel,
+    Button, CellContext, Column, ColumnWidth, EditTrigger, Expand, GridLines, HStack, Padding, Panel,
     Spacer, TableAlignment as Alignment, TableSelectionMode, TableView, TextInput, TextWidget,
-    VStack,
+    Toolbar, VStack,
 };
 
 #[derive(Clone, Debug)]
@@ -160,6 +160,23 @@ fn main() {
 
     let selection = SelectionModel::new(SelectionMode::Multi);
 
+    fn dark_mode_toolbar() -> impl Widget {
+        let is_dark = Signal::new(false);
+        Toolbar::new().child(
+            HStack::new().child(Spacer::new()).child(
+                Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+                    let next = !is_dark.get();
+                    is_dark.set(next);
+                    ctx.set_theme(if next {
+                        Theme::dark_default()
+                    } else {
+                        Theme::light_default()
+                    });
+                }),
+            ),
+        )
+    }
+
     FernAppBuilder::new()
         .install_inspector_in_debug()
         .theme(Theme::light_default())
@@ -207,7 +224,11 @@ fn main() {
                     .spacing(6.0)
                     .child(Padding::symmetric(6.0_f32, 12.0_f32).child(toolbar))
                     .child(Panel::new().child_id(table_id));
-                tree.add(layout)
+                tree.add(
+                    VStack::new()
+                        .child(dark_mode_toolbar())
+                        .child(Expand::new().child(layout)),
+                )
             },
         ))
         .run();

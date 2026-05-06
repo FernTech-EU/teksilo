@@ -12,10 +12,27 @@
 use fern_ui::core::WidgetPlacement;
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Calendar, DateEdit, DateRange, DateRangeEdit, DateTimeEdit, GroupHeader, HStack, Padding,
-    Panel, SecondsMode, TextWidget, TimeEdit, TimeFormat, VStack,
+    Button, Calendar, DateEdit, DateRange, DateRangeEdit, DateTimeEdit, Expand, GroupHeader, HStack, Padding,
+    Panel, SecondsMode, Spacer, TextWidget, TimeEdit, TimeFormat, Toolbar, VStack,
 };
 use jiff::civil::{Date, DateTime, Time};
+
+fn dark_mode_toolbar() -> impl Widget {
+    let is_dark = Signal::new(false);
+    Toolbar::new().child(
+        HStack::new().child(Spacer::new()).child(
+            Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+                let next = !is_dark.get();
+                is_dark.set(next);
+                ctx.set_theme(if next {
+                    Theme::dark_default()
+                } else {
+                    Theme::light_default()
+                });
+            }),
+        ),
+    )
+}
 
 #[derive(Debug)]
 struct Root {
@@ -306,7 +323,13 @@ fn main() {
             WindowConfig::new()
                 .title("FernUI — Date / Time pickers")
                 .size(960, 720)
-                .root(|tree, _state| tree.add(Root::new())),
+                .root(|tree, _state| {
+                    tree.add(
+                        VStack::new()
+                            .child(dark_mode_toolbar())
+                            .child(Expand::new().child(Root::new())),
+                    )
+                }),
         )
         .run();
 }

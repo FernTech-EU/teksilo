@@ -1,7 +1,24 @@
 use fern_ui::core::{Signal, WidgetPlacement};
 use fern_ui::prelude::*;
 use fern_ui::tokens::Orientation;
-use fern_ui::widgets::{Badge, FixedSize, Panel, ScrollArea, SplitView, TextWidget, VStack};
+use fern_ui::widgets::{Badge, Button, Expand, FixedSize, HStack, Panel, ScrollArea, Spacer, SplitView, TextWidget, Toolbar, VStack};
+
+fn dark_mode_toolbar() -> impl Widget {
+    let is_dark = Signal::new(false);
+    Toolbar::new().child(
+        HStack::new().child(Spacer::new()).child(
+            Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+                let next = !is_dark.get();
+                is_dark.set(next);
+                ctx.set_theme(if next {
+                    Theme::dark_default()
+                } else {
+                    Theme::light_default()
+                });
+            }),
+        ),
+    )
+}
 
 #[derive(Debug)]
 struct SplitViewDemo {
@@ -146,7 +163,13 @@ fn main() {
             WindowConfig::new()
                 .title("SplitView")
                 .size(980, 760)
-                .root(|tree, _state| tree.add(SplitViewDemo::new())),
+                .root(|tree, _state| {
+                    tree.add(
+                        VStack::new()
+                            .child(dark_mode_toolbar())
+                            .child(Expand::new().child(SplitViewDemo::new())),
+                    )
+                }),
         )
         .run();
 }

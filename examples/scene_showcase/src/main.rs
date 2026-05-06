@@ -41,7 +41,7 @@ use fern_ui::canvas::{Canvas, Path, Point, Rect, StrokeStyle};
 use fern_ui::core::binding::BindingLevel;
 use fern_ui::prelude::*;
 use fern_ui::tokens::Easing;
-use fern_ui::widgets::{Button, ComboBox, HStack, Panel, ScrollArea, TextWidget, VStack};
+use fern_ui::widgets::{Button, ComboBox, Expand, HStack, Panel, ScrollArea, Spacer, TextWidget, Toolbar, VStack};
 
 // ---------------------------------------------------------------------------
 // Scene layout: tight 4×2 grid that fits naturally in a 1500×950 window
@@ -886,6 +886,23 @@ fn build_status_row(view: &SceneView) -> impl Widget + 'static {
         )
 }
 
+fn dark_mode_toolbar() -> impl Widget {
+    let is_dark = Signal::new(false);
+    Toolbar::new().child(
+        HStack::new().child(Spacer::new()).child(
+            Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+                let next = !is_dark.get();
+                is_dark.set(next);
+                ctx.set_theme(if next {
+                    Theme::dark_default()
+                } else {
+                    Theme::light_default()
+                });
+            }),
+        ),
+    )
+}
+
 fn build_root() -> impl Widget + 'static {
     let view = build_showcase_view();
     let status = build_status_row(&view);
@@ -905,7 +922,13 @@ fn main() {
             WindowConfig::new()
                 .title("FernUI — fern-scene showcase")
                 .size(1500, 950)
-                .root(|tree, _state| tree.add(build_root())),
+                .root(|tree, _state| {
+                    tree.add(
+                        VStack::new()
+                            .child(dark_mode_toolbar())
+                            .child(Expand::new().child(build_root())),
+                    )
+                }),
         )
         .run();
 }

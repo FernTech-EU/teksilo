@@ -17,9 +17,26 @@ use fern_ui::core::WidgetPlacement;
 use fern_ui::data::{ListModel, SelectionMode, SelectionModel, TreeModel};
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Divider, Expand, HStack, ListView, Padding, Panel, RectWidget, Spacer, TextWidget, TreeView,
+    Button, Divider, Expand, HStack, ListView, Padding, Panel, RectWidget, Spacer, TextWidget, Toolbar, TreeView,
     VStack, ZStack,
 };
+
+fn dark_mode_toolbar() -> impl Widget {
+    let is_dark = Signal::new(false);
+    Toolbar::new().child(
+        HStack::new().child(Spacer::new()).child(
+            Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+                let next = !is_dark.get();
+                is_dark.set(next);
+                ctx.set_theme(if next {
+                    Theme::dark_default()
+                } else {
+                    Theme::light_default()
+                });
+            }),
+        ),
+    )
+}
 
 fn main() {
     FernAppBuilder::new()
@@ -48,7 +65,11 @@ fn main() {
                         .collect(),
                     );
                     let folders = build_folder_tree();
-                    tree.add(Root::new(songs, folders))
+                    tree.add(
+                        VStack::new()
+                            .child(dark_mode_toolbar())
+                            .child(Expand::new().child(Root::new(songs, folders))),
+                    )
                 }),
         )
         .run();

@@ -10,6 +10,7 @@
 
 use fern_ui::prelude::*;
 use fern_ui::text_document::TextDocument;
+use fern_ui::widgets::{Button, Expand, HStack, Spacer, Toolbar};
 use fern_ui::widgets::rich_text::RichTextEditor;
 
 const SAMPLE: &str = r#"# FernUI Rich Text Viewer
@@ -68,6 +69,23 @@ scaling path covers blocks only in M8a, and a verified fix for
 tables needs test hardware with a range of DPIs.
 "#;
 
+fn dark_mode_toolbar() -> impl Widget {
+    let is_dark = Signal::new(false);
+    Toolbar::new().child(
+        HStack::new().child(Spacer::new()).child(
+            Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+                let next = !is_dark.get();
+                is_dark.set(next);
+                ctx.set_theme(if next {
+                    Theme::dark_default()
+                } else {
+                    Theme::light_default()
+                });
+            }),
+        ),
+    )
+}
+
 fn main() {
     let doc = TextDocument::new();
     doc.set_markdown(SAMPLE)
@@ -80,7 +98,13 @@ fn main() {
             WindowConfig::new()
                 .title("FernUI — Rich Text Viewer")
                 .size(720, 540)
-                .root(move |tree, _state| tree.add(RichTextEditor::read_only(doc.clone()))),
+                .root(move |tree, _state| {
+                    tree.add(
+                        fern_ui::widgets::VStack::new()
+                            .child(dark_mode_toolbar())
+                            .child(Expand::new().child(RichTextEditor::read_only(doc.clone()))),
+                    )
+                }),
         )
         .run();
 }

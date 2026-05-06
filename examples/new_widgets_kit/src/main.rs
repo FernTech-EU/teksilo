@@ -15,10 +15,27 @@
 use fern_ui::core::widget::WidgetPlacement;
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Banner, Button, ButtonVariant, Card, Collapse, CommandLinkButton, FilePickerField,
+    Banner, Button, ButtonVariant, Card, Collapse, CommandLinkButton, Expand, FilePickerField,
     FilePickerKind, GroupHeader, HStack, IconWidget, Panel, SearchField, Spacer, TextWidget,
-    VStack,
+    Toolbar, VStack,
 };
+
+fn dark_mode_toolbar() -> impl Widget {
+    let is_dark = Signal::new(false);
+    Toolbar::new().child(
+        HStack::new().child(Spacer::new()).child(
+            Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+                let next = !is_dark.get();
+                is_dark.set(next);
+                ctx.set_theme(if next {
+                    Theme::dark_default()
+                } else {
+                    Theme::light_default()
+                });
+            }),
+        ),
+    )
+}
 
 #[derive(Debug)]
 struct Root {
@@ -359,7 +376,13 @@ fn main() {
             WindowConfig::new()
                 .title("New widgets kit")
                 .size(720, 720)
-                .root(|tree, _state| tree.add(Root::new())),
+                .root(|tree, _state| {
+                    tree.add(
+                        VStack::new()
+                            .child(dark_mode_toolbar())
+                            .child(Expand::new().child(Root::new())),
+                    )
+                }),
         )
         .run();
 }
