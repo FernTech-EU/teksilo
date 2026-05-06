@@ -1,0 +1,367 @@
+// fern-collector wire format — v1
+//
+// Versioning rules (also recorded in docs/proto-versioning.md):
+//
+// 1. Tag numbers are NEVER reused. Once retired, a field's tag goes
+//    into a `reserved 7;` line so a future schema change cannot
+//    silently re-bind it to a new field.
+// 2. Field types are NEVER changed in place. A new type means a new
+//    tag number; the old field stays declared (and ignored) until
+//    every deployed client has migrated.
+// 3. Adding a field is always safe. Old clients ignore unknown tags;
+//    new clients tolerate missing fields by virtue of proto3
+//    defaults.
+// 4. The crate version of `fern-collector-proto` mirrors the proto
+//    version: bump the major when a wire-incompatible change is
+//    necessary (it shouldn't be, given the rules above).
+//
+// Sub-phase A scope: Telemetry.Ingest only. Query and Admin services
+// are reserved for sub-phases C and B respectively; their RPC
+// definitions land then.
+
+syntax = "proto3";
+package fern.telemetry.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// ---------- Service ----------
+
+service Telemetry {
+  // Bidirectional stream — clients open one stream per session,
+  // push EventBatch messages, server replies with IngestAck per
+  // batch. Server may close the stream with a status (auth failure,
+  // schema rejection, rate limit); client is expected to reconnect
+  // with backoff.
+  rpc Ingest (stream EventBatch) returns (stream IngestAck);
+
+  // GDPR Art. 15 + 20 portability — fetches every event recorded
+  // under (product_id, install_id). Result is streamed in pages
+  // so the client can render progressively. An empty `events`
+  // field on a page indicates end-of-stream.
+  rpc Fetch (FetchRequest) returns (stream FetchPage);
+
+  // GDPR Art. 17 right-to-be-forgotten — deletes every event
+  // recorded under (product_id, install_id). Synchronous; returns
+  // the number actually erased.
+  rpc Erase (EraseRequest) returns (EraseAck);
+}
+
+// Operator-facing query surface — used by `fern-dashboard`. Bound
+// to the `Read` or `Admin` role; ingest tokens cannot call these.
+service Query {
+  // Aggregate count of events in a time range, optionally
+  // grouped by event name. Used by the dashboard's leaderboard
+  // and KPI cards.
+  rpc CountEvents (CountRequest) returns (CountResponse);
+
+  // Time-bucketed event count. Powers line charts. Bucket size
+  // is server-chosen when 0 is passed (auto-pick based on the
+  // requested span: minute / hour / day).
+  rpc EventsOverTime (TimeSeriesRequest) returns (TimeSeriesResponse);
+
+  // Distinct install_id count for a product over a time range.
+  // Anonymous-mode products always return 0.
+  rpc ActiveInstalls (ActiveInstallsRequest) returns (ActiveInstallsResponse);
+
+  // List products visible in the storage backend, with rough
+  // event-count and time-range stats.
+  rpc ListProducts (ListProductsRequest) returns (ListProductsResponse);
+}
+
+// Operator-only management surface — backs the dashboard's Admin
+// tab. Every RPC requires `Admin` role; the `Read` and `Ingest`
+// roles cannot call them.
+service Admin {
+  // Read the full token list from `tokens.sqlite`. Secrets are
+  // never returned — only the public id, product binding, role,
+  // and lifecycle timestamps. The same data shown by the
+  // `fern-collector token list` CLI.
+  rpc ListTokens (ListTokensRequest) returns (ListTokensResponse);
+
+  // Mint a fresh token. The plaintext secret is in the response
+  // exactly once — the dashboard surfaces it for the operator to
+  // copy, then it's gone. Subsequent calls only see the hash.
+  rpc MintToken (MintTokenRequest) returns (MintTokenResponse);
+
+  // Revoke a token by its public id. Idempotent: revoking an
+  // already-revoked or unknown id returns `revoked = false`.
+  rpc RevokeToken (RevokeTokenRequest) returns (RevokeTokenAck);
+
+  // Snapshot of the in-process counters that back the Prometheus
+  // exporter. The dashboard rebuilds the Admin tab from this
+  // instead of scraping `/metrics` so everything stays on the
+  // same gRPC channel.
+  rpc GetServerStats (GetServerStatsRequest) returns (GetServerStatsResponse);
+
+  // List the per-product schema-version registry rows. One row
+  // per product the server has ever ingested a batch for.
+  rpc ListSchemaRegistry (ListSchemaRegistryRequest) returns (ListSchemaRegistryResponse);
+}
+
+// ---------- Request / response ----------
+
+message EventBatch {
+  // Client-assigned monotonic id; included in the matching
+  // `IngestAck` so the client can correlate. Need not be globally
+  // unique — uniqueness within a single stream session is enough.
+  uint64 batch_id = 1;
+
+  // Operator-defined product identifier ("skribisto",
+  // "telemetry-plausible-demo", ...). Server validates this
+  // against the API token's allowed scope (sub-phase B).
+  string product_id = 2;
+
+  // Whether the events in this batch carry an `install_id`.
+  TelemetryMode mode = 3;
+
+  // Application-level event-schema version. Independent of this
+  // proto's wire version. Used by the server to reject events the
+  // operator hasn't yet registered.
+  uint32 schema_version = 4;
+
+  repeated Event events = 5;
+}
+
+enum TelemetryMode {
+  TELEMETRY_MODE_UNSPECIFIED = 0;
+  TELEMETRY_MODE_ANONYMOUS = 1;
+  TELEMETRY_MODE_PSEUDONYMOUS = 2;
+}
+
+message Event {
+  string name = 1;                  // e.g. "intent.dispatched"
+  EventCategory category = 2;
+  google.protobuf.Timestamp timestamp = 3;
+
+  // Present iff `mode == PSEUDONYMOUS`. Server validates the
+  // pairing — a pseudonymous batch with empty install_id, or an
+  // anonymous batch with a non-empty install_id, is rejected.
+  optional string install_id = 4;
+
+  // Per-session id. Cleared by the client on app restart.
+  string session_id = 5;
+
+  repeated Prop props = 6;
+}
+
+enum EventCategory {
+  EVENT_CATEGORY_UNSPECIFIED = 0;
+  EVENT_CATEGORY_INTENT = 1;
+  EVENT_CATEGORY_LIFECYCLE = 2;
+  EVENT_CATEGORY_NAVIGATION = 3;
+  EVENT_CATEGORY_CENSUS = 4;
+  EVENT_CATEGORY_CUSTOM = 5;
+}
+
+message Prop {
+  string key = 1;
+  oneof value {
+    string str = 2;
+    uint32 u32 = 3;
+    int64 i64 = 4;
+    bool boolean = 5;
+    F64Bucket f64_bucket = 6;
+    HistogramStrU32 histogram_str_u32 = 7;
+  }
+}
+
+message F64Bucket {
+  int64 min_x100 = 1;               // [min, max) encoded ×100 fixed-point
+  int64 max_x100 = 2;
+}
+
+message HistogramStrU32 {
+  repeated HistogramEntry entries = 1;
+}
+
+message HistogramEntry {
+  string key = 1;
+  uint32 count = 2;
+}
+
+message IngestAck {
+  uint64 batch_id = 1;
+  uint32 events_accepted = 2;
+  uint32 events_rejected = 3;
+  string rejection_reason = 4;      // empty when rejected == 0
+}
+
+// ---------- Fetch / Erase ----------
+
+message FetchRequest {
+  string product_id = 1;
+  string install_id = 2;
+}
+
+message FetchPage {
+  repeated Event events = 1;
+  // True on the last page (which may itself be empty when the
+  // total is a multiple of the page size). Once the client sees
+  // `is_last == true`, it stops reading.
+  bool is_last = 2;
+}
+
+message EraseRequest {
+  string product_id = 1;
+  string install_id = 2;
+}
+
+message EraseAck {
+  uint64 events_erased = 1;
+}
+
+// ---------- Query ----------
+
+enum CountGroupBy {
+  COUNT_GROUP_BY_UNSPECIFIED = 0;
+  // Single bucket with `key = ""` carrying the total count.
+  COUNT_GROUP_BY_NONE = 1;
+  // One bucket per distinct `event_name`.
+  COUNT_GROUP_BY_EVENT_NAME = 2;
+}
+
+message CountRequest {
+  string product_id = 1;
+  int64 from_unix_ms = 2;
+  int64 to_unix_ms = 3;
+  // Optional substring filter on `event_name`. Empty = no filter.
+  string event_name_contains = 4;
+  CountGroupBy group_by = 5;
+}
+
+message CountResponse {
+  repeated CountBucket buckets = 1;
+}
+
+message CountBucket {
+  string key = 1;
+  uint64 count = 2;
+}
+
+message TimeSeriesRequest {
+  string product_id = 1;
+  int64 from_unix_ms = 2;
+  int64 to_unix_ms = 3;
+  // Server picks a sensible bucket size when 0.
+  uint32 bucket_size_ms = 4;
+  string event_name_contains = 5;
+}
+
+message TimeSeriesResponse {
+  // Bucket size actually used (in case the server auto-picked).
+  uint32 bucket_size_ms = 1;
+  repeated TimeBucket buckets = 2;
+}
+
+message TimeBucket {
+  int64 bucket_start_unix_ms = 1;
+  uint64 count = 2;
+}
+
+message ActiveInstallsRequest {
+  string product_id = 1;
+  int64 from_unix_ms = 2;
+  int64 to_unix_ms = 3;
+}
+
+message ActiveInstallsResponse {
+  uint64 install_count = 1;
+}
+
+message ListProductsRequest {}
+
+message ListProductsResponse {
+  repeated ProductInfo products = 1;
+}
+
+message ProductInfo {
+  string product_id = 1;
+  uint64 event_count = 2;
+  // Approximate, derived from on-disk file metadata.
+  int64 oldest_event_unix_ms = 3;
+  int64 newest_event_unix_ms = 4;
+}
+
+// ---------- Admin ----------
+
+message ListTokensRequest {}
+
+message ListTokensResponse {
+  repeated TokenSummary tokens = 1;
+}
+
+message TokenSummary {
+  // Public id (the part between `fct_` and the next `_` of a
+  // minted token). Sufficient to identify a token; the secret is
+  // never echoed.
+  string id = 1;
+  string product_id = 2;
+  // "ingest" | "read" | "admin".
+  string role = 3;
+  int64 created_at_unix_s = 4;
+  // 0 when the token is still active.
+  int64 revoked_at_unix_s = 5;
+  // 0 when the token has never been used.
+  int64 last_used_at_unix_s = 6;
+}
+
+message MintTokenRequest {
+  string product_id = 1;
+  // "ingest" | "read" | "admin". Defaults to "ingest" when empty.
+  string role = 2;
+}
+
+message MintTokenResponse {
+  // The full `fct_<id>_<secret>` string. The dashboard MUST show
+  // this once and never persist it — the secret can't be recovered.
+  string token = 1;
+  // Convenience for refreshing the dashboard's token list without
+  // a follow-up `ListTokens` round-trip.
+  TokenSummary summary = 2;
+}
+
+message RevokeTokenRequest {
+  string id = 1;
+}
+
+message RevokeTokenAck {
+  // True iff a previously-active token id was revoked. False for
+  // unknown ids and for already-revoked ids — both idempotent.
+  bool revoked = 1;
+}
+
+message GetServerStatsRequest {}
+
+message GetServerStatsResponse {
+  // Total events the server has ingested since process start.
+  uint64 events_ingested_total = 1;
+  // Counters for each rejection reason. The list is open-ended
+  // — clients render unknown keys as-is.
+  repeated CounterPair events_rejected = 2;
+  // Counters for each schema-check outcome
+  // ("first_seen" / "match" / "higher" / "lower").
+  repeated CounterPair events_schema_check = 3;
+  // Counters for each Query RPC, keyed by `<rpc>_<result>`
+  // (e.g. "count_events_ok", "events_over_time_error").
+  repeated CounterPair queries_processed = 4;
+  // Process-uptime hint for the dashboard's "since" footer.
+  int64 process_started_unix_s = 5;
+}
+
+message CounterPair {
+  string key = 1;
+  uint64 value = 2;
+}
+
+message ListSchemaRegistryRequest {}
+
+message ListSchemaRegistryResponse {
+  repeated ProductSchemaInfo products = 1;
+}
+
+message ProductSchemaInfo {
+  string product_id = 1;
+  uint32 schema_version = 2;
+  int64 first_seen_at_unix_s = 3;
+  int64 updated_at_unix_s = 4;
+}

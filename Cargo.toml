@@ -82,11 +82,14 @@ fern-ui = { path = "crates/fern-ui", version = "0.1.0" }
 fern-preview = { path = "crates/fern-preview", version = "0.1.0" }
 fern-preview-ui = { path = "crates/fern-preview-ui", version = "0.1.0" }
 
-# gRPC proto crate — path dep so the location is centralized; the
-# adapter that consumes it (fern-analytics-fern) owns its own
-# tonic/prost/tokio versions in its own Cargo.toml since no other
-# framework crate uses them.
-fern-collector-proto = { path = "../fern-collector/crates/fern-collector-proto" }
+# gRPC proto crate — lives in-tree as a workspace member so cross
+# builds and CI environments don't need the sibling `fern-collector`
+# repo checked out. The adapter that consumes it (fern-analytics-fern)
+# owns its own tonic/prost/tokio versions in its own Cargo.toml since
+# no other framework crate uses them. The `fern-collector` server repo
+# path-deps back into this crate to keep the wire-format spec
+# single-sourced.
+fern-collector-proto = { path = "crates/fern-collector-proto", version = "0.1.0" }
 fern-analytics-fern = { path = "crates/fern-analytics-fern", version = "0.1.0" }
 fern-telemetry-codegen = { path = "crates/fern-telemetry-codegen", version = "0.1.0" }
 

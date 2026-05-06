@@ -1,0 +1,32 @@
+[package]
+name = "fern-collector-proto"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Generated tonic client + server stubs for the fern-collector wire format. Single source of truth for the v1 proto schema."
+
+# gRPC + tonic versions kept local to this crate. The only fern-ui
+# crate that consumes the generated stubs (`fern-analytics-fern`)
+# pins the same versions in its own Cargo.toml; promoting these to
+# workspace deps would leak the transport choice to crates that have
+# nothing to do with telemetry.
+[dependencies]
+tonic = { version = "0.12", default-features = false, features = ["codegen", "prost", "transport", "tls"] }
+prost = "0.13"
+prost-types = "0.13"
+
+[build-dependencies]
+tonic-build = "0.12"
+
+# Bundles a protoc binary so the build is self-contained — no
+# system `apt-get install protobuf-compiler` required. Adds
+# ~30 s to the *first* build (compiles the C++ protoc); cached
+# afterward. Skipped on Windows hosts because protobuf-src 2.x
+# hits a CRT-mismatch link failure under MSVC (`__imp_ceilf`
+# unresolved externals from the vendored abseil .lib files);
+# Windows users set `PROTOC` to a system-installed protoc.exe.
+[target.'cfg(not(target_os = "windows"))'.build-dependencies]
+protobuf-src = "2"
