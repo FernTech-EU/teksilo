@@ -130,6 +130,17 @@ impl PopoverIconButton {
     /// subtree during `build()`, woken via
     /// [`EventContext::activate`](fern_core::widget::EventContext::activate)
     /// when the trigger fires. Required.
+    ///
+    /// **Shadow note**: when the content is a [`MenuList`](crate::menu_list::MenuList),
+    /// pair it with `.attached_side(AttachedSide::*)` matching the
+    /// placement so the menu's drop shadow doesn't draw on the side
+    /// touching the trigger:
+    ///
+    /// | placement | menu attached side |
+    /// |---|---|
+    /// | `Below` / `BelowPreferred` / `NearAnchor` | `Top` |
+    /// | `Above` | `Bottom` |
+    /// | `TrailingEdge` | `Left` (LTR) / `Right` (RTL) |
     pub fn content(mut self, content: impl Widget + 'static) -> Self {
         self.content = Some(Box::new(content));
         self

@@ -89,7 +89,19 @@ impl WidgetTree {
             large_text: self.text_scale_factor > 1.0,
         };
 
+        let overlay_skip: std::collections::HashSet<WidgetId> = self
+            .overlay_manager
+            .active_content_ids()
+            .into_iter()
+            .collect();
+
         for root_id in self.arena.roots() {
+            // Don't descend into overlay content via its anchor parent — it
+            // is painted via the dedicated overlay loop below. Without this,
+            // the overlay content paints twice per frame.
+            if overlay_skip.contains(&root_id) {
+                continue;
+            }
             paint_widget_cached(
                 &mut self.arena,
                 root_id,
@@ -99,6 +111,8 @@ impl WidgetTree {
                 None,
                 &a11y_prefs,
                 paint_epoch,
+                &overlay_skip,
+                self.layout_direction,
             );
         }
 
@@ -112,6 +126,8 @@ impl WidgetTree {
                 None,
                 &a11y_prefs,
                 paint_epoch,
+                &overlay_skip,
+                self.layout_direction,
             );
         }
 
@@ -147,6 +163,8 @@ fn paint_widget_cached(
     clip_bounds: Option<Rect>,
     a11y_prefs: &A11yPaintPrefs,
     paint_epoch: u64,
+    overlay_skip: &std::collections::HashSet<WidgetId>,
+    layout_direction: crate::environment::LayoutDirection,
 ) {
     if !arena.is_active(id) {
         return;
@@ -246,6 +264,7 @@ fn paint_widget_cached(
         let ctx = PaintContext {
             theme: &resolved_theme,
             scale_factor: 1.0,
+            layout_direction,
             prefers_high_contrast: a11y_prefs.high_contrast,
             prefers_reduced_motion: a11y_prefs.reduced_motion,
             prefers_large_text: a11y_prefs.large_text,
@@ -313,6 +332,14 @@ fn paint_widget_cached(
     }
 
     for child_id in children {
+        // Skip overlay-managed content here — it is painted via the
+        // dedicated overlay loop in render_with_ops. Without this, an
+        // overlay (e.g. a tooltip) attached as a child of its anchor
+        // would paint twice per frame: once via the parent walk and
+        // once via the overlay loop.
+        if overlay_skip.contains(&child_id) {
+            continue;
+        }
         paint_widget_cached(
             arena,
             child_id,
@@ -322,6 +349,8 @@ fn paint_widget_cached(
             next_clip,
             a11y_prefs,
             paint_epoch,
+            overlay_skip,
+            layout_direction,
         );
     }
 
@@ -342,6 +371,7 @@ fn paint_widget_cached(
             let ctx = PaintContext {
                 theme: &resolved_theme,
                 scale_factor: 1.0,
+                layout_direction,
                 prefers_high_contrast: a11y_prefs.high_contrast,
                 prefers_reduced_motion: a11y_prefs.reduced_motion,
                 prefers_large_text: a11y_prefs.large_text,

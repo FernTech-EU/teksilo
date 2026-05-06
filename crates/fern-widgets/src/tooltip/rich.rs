@@ -393,6 +393,7 @@ impl Widget for RichTooltipWidget {
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let style = ctx.theme.components.tooltip;
         let radius = CornerRadius::uniform(style.corner_radius);
+        super::paint_tooltip_shadows(canvas, bounds, radius, ctx);
         canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.tooltip_bg);
         // paint() is the visibility hook — only called when the
         // tooltip is active. Drives the dwell-promotion timer.

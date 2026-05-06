@@ -206,6 +206,11 @@ impl<'a> LayoutContext<'a> {
 pub struct PaintContext<'a> {
     pub theme: &'a fern_tokens::Theme,
     pub scale_factor: f32,
+    /// Active layout direction. Used by widgets that have to resolve
+    /// Leading/Trailing semantics into geometric Left/Right at paint
+    /// time (e.g. attached-side shadow suppression on a popover that
+    /// opened off the trailing edge of its anchor).
+    pub layout_direction: crate::environment::LayoutDirection,
     // TODO: Wire from platform accessibility settings (winit doesn't expose these yet)
     pub prefers_high_contrast: bool,
     pub prefers_reduced_motion: bool,

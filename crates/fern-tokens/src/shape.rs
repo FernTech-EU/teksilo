@@ -83,6 +83,14 @@ impl Default for Shadow {
 ///
 /// Int UI uses 1 dp borders universally; emphasis is color-only, never
 /// thickness. Focus rings are drawn **outside** the control with a 2 dp gap.
+///
+/// Shadows are paired: each `shadow_*` (the wide soft outer halo) has a
+/// matching `shadow_inner_*` (a sharp short-blur rim) so elevated
+/// surfaces can layer the two via [`fern_widgets::shadow::paint_layered_shadow`].
+/// Per-component `shadow_density` (in `ComponentStyles::*::shadow_density`)
+/// scales the inner rim's effective alpha at paint time, so themes can
+/// dial individual surfaces (tooltip vs card vs dialog) up or down
+/// without touching shape tokens.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShapeTokens {
     /// 4 dp — buttons, fields, combo boxes, checkbox visual, menu items.
@@ -97,30 +105,50 @@ pub struct ShapeTokens {
     pub focus_ring_width: f32,
     /// 2 dp — gap between control edge and focus ring.
     pub focus_ring_offset: f32,
-    /// Tooltips.
+    /// Tooltips — outer soft halo.
     pub shadow_xs: Shadow,
-    /// Menus, dropdowns.
+    /// Menus, dropdowns — outer soft halo.
     pub shadow_sm: Shadow,
-    /// Notification balloons.
+    /// Notification balloons — outer soft halo.
     pub shadow_md: Shadow,
-    /// Modal dialogs.
+    /// Modal dialogs — outer soft halo.
     pub shadow_lg: Shadow,
+    /// Tooltips — sharp inner rim. Alpha encodes the "max" intensity
+    /// (density = 1.0); per-component `shadow_density` scales it down.
+    pub shadow_inner_xs: Shadow,
+    /// Menus, dropdowns — sharp inner rim.
+    pub shadow_inner_sm: Shadow,
+    /// Notification balloons — sharp inner rim.
+    pub shadow_inner_md: Shadow,
+    /// Modal dialogs — sharp inner rim.
+    pub shadow_inner_lg: Shadow,
 }
 
 impl ShapeTokens {
-    /// Light-theme shadows. Alphas: xs 10%, sm 12%, md 16%, lg 20%.
+    /// Light-theme shadows.
+    /// Outer alphas: xs 85%, sm 22%, md 28%, lg 36%.
+    /// Inner alphas (density-1.0 max): xs 85%, sm 50%, md 55%, lg 60%.
     pub fn light_default() -> Self {
-        Self::with_shadow_alphas(0.10, 0.12, 0.16, 0.20)
+        Self::with_shadow_alphas(
+            [0.85, 0.22, 0.28, 0.36],
+            [0.85, 0.50, 0.55, 0.60],
+        )
     }
 
-    /// Dark-theme shadows — alphas roughly 4× stronger than light to remain
-    /// visible against dark surfaces, per the Int UI v2 reference (Section 3).
-    /// Alphas: xs 40%, sm 50%, md 60%, lg 70%.
+    /// Dark-theme shadows — pure-black shadows blend into dark surfaces,
+    /// so dark-theme alphas need to be high to read at all.
+    /// Outer alphas: xs 55%, sm 65%, md 70%, lg 80%.
+    /// Inner alphas (density-1.0 max): xs 65%, sm 70%, md 75%, lg 85%.
     pub fn dark_default() -> Self {
-        Self::with_shadow_alphas(0.40, 0.50, 0.60, 0.70)
+        Self::with_shadow_alphas(
+            [0.55, 0.65, 0.70, 0.80],
+            [0.65, 0.70, 0.75, 0.85],
+        )
     }
 
-    fn with_shadow_alphas(a_xs: f32, a_sm: f32, a_md: f32, a_lg: f32) -> Self {
+    fn with_shadow_alphas(outer: [f32; 4], inner: [f32; 4]) -> Self {
+        let [o_xs, o_sm, o_md, o_lg] = outer;
+        let [i_xs, i_sm, i_md, i_lg] = inner;
         Self {
             radius_control: 4.0,
             radius_popup: 8.0,
@@ -129,27 +157,51 @@ impl ShapeTokens {
             focus_ring_width: 2.0,
             focus_ring_offset: 2.0,
             shadow_xs: Shadow {
-                offset_y: 1.0,
-                blur: 2.0,
-                color: Color::new(0.0, 0.0, 0.0, a_xs),
+                offset_y: 8.0,
+                blur: 28.0,
+                color: Color::new(0.0, 0.0, 0.0, o_xs),
                 ..Shadow::default()
             },
             shadow_sm: Shadow {
                 offset_y: 2.0,
                 blur: 6.0,
-                color: Color::new(0.0, 0.0, 0.0, a_sm),
+                color: Color::new(0.0, 0.0, 0.0, o_sm),
                 ..Shadow::default()
             },
             shadow_md: Shadow {
                 offset_y: 4.0,
                 blur: 12.0,
-                color: Color::new(0.0, 0.0, 0.0, a_md),
+                color: Color::new(0.0, 0.0, 0.0, o_md),
                 ..Shadow::default()
             },
             shadow_lg: Shadow {
                 offset_y: 8.0,
                 blur: 24.0,
-                color: Color::new(0.0, 0.0, 0.0, a_lg),
+                color: Color::new(0.0, 0.0, 0.0, o_lg),
+                ..Shadow::default()
+            },
+            shadow_inner_xs: Shadow {
+                offset_y: 3.0,
+                blur: 6.0,
+                color: Color::new(0.0, 0.0, 0.0, i_xs),
+                ..Shadow::default()
+            },
+            shadow_inner_sm: Shadow {
+                offset_y: 2.0,
+                blur: 4.0,
+                color: Color::new(0.0, 0.0, 0.0, i_sm),
+                ..Shadow::default()
+            },
+            shadow_inner_md: Shadow {
+                offset_y: 2.0,
+                blur: 5.0,
+                color: Color::new(0.0, 0.0, 0.0, i_md),
+                ..Shadow::default()
+            },
+            shadow_inner_lg: Shadow {
+                offset_y: 3.0,
+                blur: 6.0,
+                color: Color::new(0.0, 0.0, 0.0, i_lg),
                 ..Shadow::default()
             },
         }

@@ -227,9 +227,17 @@ impl Widget for Card {
             .unwrap_or(ctx.theme.shape.radius_popup);
         let cr = CornerRadius::uniform(radius);
 
-        // Shadow
-        let shadow = self.shadow.unwrap_or(ctx.theme.shape.shadow_md);
-        canvas.draw_shadow(bounds, cr, &shadow);
+        // Shadow — outer + inner pair from theme, density from CardStyle.
+        let outer = self.shadow.unwrap_or(ctx.theme.shape.shadow_md);
+        crate::shadow::paint_layered_shadow(
+            canvas,
+            bounds,
+            cr,
+            &outer,
+            &ctx.theme.shape.shadow_inner_md,
+            ctx.theme.components.card.shadow_density,
+            None,
+        );
 
         // Background
         let bg = self

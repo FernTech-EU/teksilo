@@ -18,7 +18,7 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::signal::Signal;
-use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
+use fern_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{BorderRole, CornerRadius, SurfaceRole};
@@ -731,6 +731,24 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
             child.origin = bounds.origin();
             child.size = bounds.size();
         }
+    }
+
+    fn paint(&self, bounds: Rect, canvas: &mut fern_canvas::Canvas, ctx: &PaintContext) {
+        // Combo-box dropdowns always open Below (or flip to Above when
+        // there's no room) the trigger field, so the panel is attached
+        // along its top edge to the combo's input box. Suppress the
+        // top-side shadow so the panel reads as a vertical extension
+        // of the trigger.
+        let radius = CornerRadius::uniform(ctx.theme.components.menu.popup_corner_radius);
+        crate::shadow::paint_layered_shadow(
+            canvas,
+            bounds,
+            radius,
+            &ctx.theme.shape.shadow_sm,
+            &ctx.theme.shape.shadow_inner_sm,
+            ctx.theme.components.menu.shadow_density,
+            Some(crate::shadow::AttachedSide::Top),
+        );
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

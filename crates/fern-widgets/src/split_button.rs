@@ -280,7 +280,10 @@ impl Widget for SplitButton {
 
         let mut labels_vec: Vec<String> = Vec::new();
         let mut actions_vec: Vec<Option<Rc<dyn Fn(&mut EventContext)>>> = Vec::new();
-        let mut menu = MenuList::new();
+        // Split button menus always open Below the trigger (the chevron
+        // half lives at the bottom-right of the button), so the menu's
+        // top edge is attached to the trigger.
+        let mut menu = MenuList::new().attached_side(crate::shadow::AttachedSide::Top);
 
         // Create the `selected` signal early so the wrap closures can
         // capture it.

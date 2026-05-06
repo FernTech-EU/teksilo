@@ -170,6 +170,12 @@ pub struct MenuList {
     /// panel height is capped to `n * item_height`. `None` (default)
     /// lets the menu grow with its content.
     max_visible_items: Option<usize>,
+    /// Side of the menu panel that is visually attached to its trigger
+    /// (e.g. a menu button or combo-box). When set, drop shadow
+    /// drawing is suppressed on that side so the menu reads as one
+    /// piece with the trigger. Set by the opener based on the chosen
+    /// placement; `None` leaves the full halo intact.
+    attached_side: Option<crate::shadow::AttachedSide>,
 }
 
 impl MenuList {
@@ -180,7 +186,16 @@ impl MenuList {
             item_widget_ids: Vec::new(),
             submenu_flags: Vec::new(),
             max_visible_items: None,
+            attached_side: None,
         }
+    }
+
+    /// Suppress drop-shadow drawing on the side that visually merges
+    /// with the menu's trigger. See [`crate::shadow::AttachedSide`]
+    /// for the available edges.
+    pub fn attached_side(mut self, side: crate::shadow::AttachedSide) -> Self {
+        self.attached_side = Some(side);
+        self
     }
 
     /// Add a menu item (typically a `MenuItem`).
@@ -418,6 +433,22 @@ impl Widget for MenuList {
             child.origin = bounds.origin();
             child.size = bounds.size();
         }
+    }
+
+    fn paint(&self, bounds: Rect, canvas: &mut fern_canvas::Canvas, ctx: &PaintContext) {
+        // Drop shadow underneath the menu surface. The bg + border
+        // themselves are painted by a child `RectWidget` set up in
+        // `build()`, so this method only contributes the shadow.
+        let radius = CornerRadius::uniform(ctx.theme.components.menu.popup_corner_radius);
+        crate::shadow::paint_layered_shadow(
+            canvas,
+            bounds,
+            radius,
+            &ctx.theme.shape.shadow_sm,
+            &ctx.theme.shape.shadow_inner_sm,
+            ctx.theme.components.menu.shadow_density,
+            self.attached_side,
+        );
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

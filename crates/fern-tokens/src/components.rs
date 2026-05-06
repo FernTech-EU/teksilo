@@ -328,6 +328,9 @@ pub struct MenuStyle {
     /// Corner radius of the per-row hover / pressed highlight rect.
     /// Independent of `popup_corner_radius`, which rounds the menu surface.
     pub item_corner_radius: f32,
+    /// 0..=1 multiplier on `shape.shadow_inner_sm.color.a` at paint time.
+    /// 1.0 = full theme-token alpha, 0.0 = single-layer outer shadow only.
+    pub shadow_density: f32,
 }
 
 impl Default for MenuStyle {
@@ -342,6 +345,7 @@ impl Default for MenuStyle {
             popup_corner_radius: 8.0,
             popup_border_width: 1.0,
             item_corner_radius: 8.0,
+            shadow_density: 0.5,
         }
     }
 }
@@ -352,6 +356,10 @@ pub struct TooltipStyle {
     pub padding_vertical: f32,
     pub corner_radius: f32,
     pub max_width: f32,
+    /// 0..=1 multiplier on `shape.shadow_inner_xs.color.a` at paint time.
+    /// 1.0 = full theme-token alpha (the punchy tooltip rim), 0.0 =
+    /// single-layer outer shadow only.
+    pub shadow_density: f32,
 }
 
 impl Default for TooltipStyle {
@@ -361,6 +369,7 @@ impl Default for TooltipStyle {
             padding_vertical: 6.0,
             corner_radius: 8.0,
             max_width: 320.0,
+            shadow_density: 1.0,
         }
     }
 }
@@ -471,6 +480,8 @@ pub struct CardStyle {
     pub padding: f32,
     pub corner_radius: f32,
     pub border_width: f32,
+    /// 0..=1 multiplier on `shape.shadow_inner_md.color.a` at paint time.
+    pub shadow_density: f32,
 }
 
 impl Default for CardStyle {
@@ -479,6 +490,7 @@ impl Default for CardStyle {
             padding: 16.0,
             corner_radius: 8.0,
             border_width: 1.0,
+            shadow_density: 0.5,
         }
     }
 }
@@ -488,6 +500,8 @@ pub struct PopoverStyle {
     pub padding: f32,
     pub corner_radius: f32,
     pub border_width: f32,
+    /// 0..=1 multiplier on `shape.shadow_inner_sm.color.a` at paint time.
+    pub shadow_density: f32,
 }
 
 impl Default for PopoverStyle {
@@ -496,6 +510,7 @@ impl Default for PopoverStyle {
             padding: 12.0,
             corner_radius: 8.0,
             border_width: 1.0,
+            shadow_density: 0.5,
         }
     }
 }

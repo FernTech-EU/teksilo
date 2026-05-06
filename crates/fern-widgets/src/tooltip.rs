@@ -27,6 +27,28 @@ use fern_core::widget::{LayoutContext, PaintContext, Widget};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::CornerRadius;
 
+use crate::shadow::paint_layered_shadow;
+
+/// Tooltip-specific wrapper around [`paint_layered_shadow`] — pulls the
+/// xs outer + inner shadow tokens and the per-component
+/// `shadow_density` from the theme.
+pub(crate) fn paint_tooltip_shadows(
+    canvas: &mut Canvas,
+    bounds: Rect,
+    radius: CornerRadius,
+    ctx: &PaintContext,
+) {
+    paint_layered_shadow(
+        canvas,
+        bounds,
+        radius,
+        &ctx.theme.shape.shadow_xs,
+        &ctx.theme.shape.shadow_inner_xs,
+        ctx.theme.components.tooltip.shadow_density,
+        None,
+    );
+}
+
 /// A tooltip content widget — a themed rounded rect with text.
 #[derive(Debug)]
 pub struct TooltipWidget {
@@ -72,6 +94,7 @@ impl Widget for TooltipWidget {
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let style = ctx.theme.components.tooltip;
         let radius = CornerRadius::uniform(style.corner_radius);
+        paint_tooltip_shadows(canvas, bounds, radius, ctx);
         canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.tooltip_bg);
         let text_bounds = Rect::new(
             bounds.x + style.padding_horizontal,
@@ -118,5 +141,63 @@ impl std::fmt::Debug for TooltipState {
             .field("text", &self.text)
             .field("is_shown", &self.overlay_id.is_some())
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fern_canvas::SizeProposal;
+    use fern_core::overlay::{
+        DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest,
+    };
+    use fern_core::widget_tree::WidgetTree;
+    use fern_tokens::Theme;
+
+    #[test]
+    fn tooltip_widget_emits_shadow() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let _ = tree.add(TooltipWidget::new_literal("hello"));
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+        let frame = tree.render();
+        assert!(
+            !frame.shadows.is_empty(),
+            "tooltip should emit at least one shadow"
+        );
+    }
+
+    #[test]
+    fn tooltip_overlay_emits_shadow_through_fade() {
+        // End-to-end-ish: anchor + tooltip overlay with a fade scope
+        // applied (the production overlay path). Shadow must still
+        // land in the rendered frame.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let anchor = tree.add(TooltipWidget::new_literal("anchor"));
+        let tip = tree.add(TooltipWidget::new_literal("hello"));
+        tree.set_dormant(tip);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        tree.show_overlay(
+            OverlayRequest {
+                content_id: tip,
+                anchor,
+                placement: OverlayPlacement::NearAnchor {
+                    offset: fern_canvas::Vec2::new(0.0, 8.0),
+                },
+                dismiss: DismissBehavior::PointerLeave {
+                    delay: std::time::Duration::from_millis(100),
+                },
+                layer: OverlayLayer::InTree,
+                parent_overlay: None,
+                on_dismiss: None,
+                fade_duration: Some(std::time::Duration::from_millis(120)),
+            },
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let frame = tree.render();
+        assert!(
+            !frame.shadows.is_empty(),
+            "tooltip overlay should emit at least one shadow even under fade scope"
+        );
     }
 }

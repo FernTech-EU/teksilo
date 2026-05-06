@@ -73,6 +73,7 @@ pub mod scroll_bar;
 #[cfg(feature = "rich-text")]
 pub mod search_field;
 pub mod segmented_control;
+pub mod shadow;
 pub mod shortcut_settings;
 pub mod slider;
 pub mod snackbar;

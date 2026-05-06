@@ -45,6 +45,33 @@ impl PopoverSurface {
         }
     }
 
+    /// Which side of the panel rect is attached to the trigger and
+    /// should suppress shadow drawing. Derived from `placement` plus
+    /// the active layout direction (resolved at paint time):
+    /// - `Below*` / `NearAnchor` → anchor sits above ⇒ Top.
+    /// - `Above` → anchor sits below ⇒ Bottom.
+    /// - `TrailingEdge` → anchor sits on the leading side ⇒ Left in
+    ///   LTR, Right in RTL.
+    /// - Anything else (Centered, AtPointer, BottomCenter) → not
+    ///   visually attached ⇒ no suppression.
+    fn attached_shadow_side(
+        &self,
+        layout_direction: fern_core::environment::LayoutDirection,
+    ) -> Option<crate::shadow::AttachedSide> {
+        use fern_core::environment::LayoutDirection;
+        match self.placement {
+            OverlayPlacement::Below
+            | OverlayPlacement::BelowPreferred
+            | OverlayPlacement::NearAnchor { .. } => Some(crate::shadow::AttachedSide::Top),
+            OverlayPlacement::Above => Some(crate::shadow::AttachedSide::Bottom),
+            OverlayPlacement::TrailingEdge => match layout_direction {
+                LayoutDirection::LeftToRight => Some(crate::shadow::AttachedSide::Left),
+                LayoutDirection::RightToLeft => Some(crate::shadow::AttachedSide::Right),
+            },
+            _ => None,
+        }
+    }
+
     fn caret_insets(&self) -> (f32, f32) {
         if !self.show_caret {
             return (0.0, 0.0);
@@ -169,6 +196,19 @@ impl Widget for PopoverSurface {
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let panel = self.panel_bounds(bounds);
         let radius = CornerRadius::uniform(ctx.theme.shape.radius_popup);
+        crate::shadow::paint_layered_shadow(
+            canvas,
+            panel,
+            radius,
+            &ctx.theme.shape.shadow_sm,
+            &ctx.theme.shape.shadow_inner_sm,
+            ctx.theme.components.popover.shadow_density,
+            self.attached_shadow_side(ctx.layout_direction),
+        );
+        // The caret extends into the just-suppressed zone (between
+        // panel and trigger). It's painted unshaded below — that's
+        // intentional, the caret reads as part of the trigger-attach
+        // region, not as a separate elevated surface.
         canvas.fill_rounded_rect(panel, radius, ctx.theme.colors.surface_main);
         canvas.stroke_rounded_rect(
             panel,

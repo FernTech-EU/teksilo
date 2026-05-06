@@ -17,9 +17,9 @@ use fern_core::signal::Signal;
 use fern_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_platform::ClipboardHandle;
-use fern_tokens::{Color, ColorTokens, TextRole, TextStyleRole, Theme};
+use fern_tokens::{Color, ColorTokens, ComponentStyles, ShapeTokens, TextRole, TextStyleRole, Theme};
 use fern_widgets::primitives::{HStack, Padding, Spacer, VStack};
-use fern_widgets::{Button, ColorEdit, ScrollArea, TextWidget};
+use fern_widgets::{Button, ColorEdit, ScrollArea, Slider, TextWidget};
 
 use crate::state::InspectorState;
 
@@ -37,6 +37,81 @@ type ColorAccess = (
     fn(&ColorTokens) -> Color,
     fn(&mut ColorTokens, Color),
 );
+
+/// f32 token getter / setter pair, used for both shape-shadow alphas
+/// (read against `ShapeTokens`) and component-level `shadow_density`
+/// (read against `ComponentStyles`).
+type F32Access<Owner> = (
+    &'static str,
+    fn(&Owner) -> f32,
+    fn(&mut Owner, f32),
+);
+
+const SHOWN_SHADOW_ALPHAS: &[F32Access<ShapeTokens>] = &[
+    (
+        "shadow_xs.alpha",
+        |s| s.shadow_xs.color.a(),
+        |s, a| s.shadow_xs.color = s.shadow_xs.color.with_alpha(a),
+    ),
+    (
+        "shadow_sm.alpha",
+        |s| s.shadow_sm.color.a(),
+        |s, a| s.shadow_sm.color = s.shadow_sm.color.with_alpha(a),
+    ),
+    (
+        "shadow_md.alpha",
+        |s| s.shadow_md.color.a(),
+        |s, a| s.shadow_md.color = s.shadow_md.color.with_alpha(a),
+    ),
+    (
+        "shadow_lg.alpha",
+        |s| s.shadow_lg.color.a(),
+        |s, a| s.shadow_lg.color = s.shadow_lg.color.with_alpha(a),
+    ),
+    (
+        "shadow_inner_xs.alpha",
+        |s| s.shadow_inner_xs.color.a(),
+        |s, a| s.shadow_inner_xs.color = s.shadow_inner_xs.color.with_alpha(a),
+    ),
+    (
+        "shadow_inner_sm.alpha",
+        |s| s.shadow_inner_sm.color.a(),
+        |s, a| s.shadow_inner_sm.color = s.shadow_inner_sm.color.with_alpha(a),
+    ),
+    (
+        "shadow_inner_md.alpha",
+        |s| s.shadow_inner_md.color.a(),
+        |s, a| s.shadow_inner_md.color = s.shadow_inner_md.color.with_alpha(a),
+    ),
+    (
+        "shadow_inner_lg.alpha",
+        |s| s.shadow_inner_lg.color.a(),
+        |s, a| s.shadow_inner_lg.color = s.shadow_inner_lg.color.with_alpha(a),
+    ),
+];
+
+const SHOWN_DENSITIES: &[F32Access<ComponentStyles>] = &[
+    (
+        "tooltip.shadow_density",
+        |c| c.tooltip.shadow_density,
+        |c, v| c.tooltip.shadow_density = v,
+    ),
+    (
+        "card.shadow_density",
+        |c| c.card.shadow_density,
+        |c, v| c.card.shadow_density = v,
+    ),
+    (
+        "popover.shadow_density",
+        |c| c.popover.shadow_density,
+        |c, v| c.popover.shadow_density = v,
+    ),
+    (
+        "menu.shadow_density",
+        |c| c.menu.shadow_density,
+        |c, v| c.menu.shadow_density = v,
+    ),
+];
 
 const SHOWN_COLORS: &[ColorAccess] = &[
     ("accent", |t| t.accent, |t, c| t.accent = c),
@@ -125,6 +200,44 @@ impl std::fmt::Debug for ThemeTab {
     }
 }
 
+/// Section divider (a small bold heading) to separate Colors / Shape /
+/// Components groups inside the tab's scroll body.
+fn section_header(text: &str) -> impl Widget {
+    Padding::new(8.0, 0.0, 4.0, 0.0).child(
+        TextWidget::new_literal(text)
+            .style(TextStyleRole::BodyBold)
+            .color(TextRole::Primary),
+    )
+}
+
+/// One row: name in a fixed-width column on the left, a 0..=1 slider on
+/// the right, with the current value rendered after the slider so the
+/// developer can read the exact alpha / density without dragging.
+fn slider_row(name: &'static str, draft: Signal<f32>) -> impl Widget {
+    let value_text = draft.map(|v| format!("{:.2}", v));
+    let name_text = TextWidget::new_literal(name)
+        .style(TextStyleRole::Body)
+        .color(TextRole::Primary);
+    let value_label = TextWidget::new_literal("")
+        .bind_text(value_text)
+        .style(TextStyleRole::Body)
+        .color(TextRole::Secondary);
+    HStack::new()
+        .spacing(8.0)
+        .child(
+            fern_widgets::primitives::FixedSize::new()
+                .bind_width(Signal::new(NAME_COLUMN_WIDTH))
+                .child(name_text),
+        )
+        .child(Spacer::new())
+        .child(Slider::new(draft, 0.0, 1.0).step(0.01))
+        .child(
+            fern_widgets::primitives::FixedSize::new()
+                .bind_width(Signal::new(40.0_f32))
+                .child(value_label),
+        )
+}
+
 impl Widget for ThemeTab {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let _ = &self.state;
@@ -138,6 +251,14 @@ impl Widget for ThemeTab {
             .iter()
             .map(|(_, get, _)| Signal::new(get(&initial_theme.colors)))
             .collect();
+        let alpha_drafts: Vec<Signal<f32>> = SHOWN_SHADOW_ALPHAS
+            .iter()
+            .map(|(_, get, _)| Signal::new(get(&initial_theme.shape)))
+            .collect();
+        let density_drafts: Vec<Signal<f32>> = SHOWN_DENSITIES
+            .iter()
+            .map(|(_, get, _)| Signal::new(get(&initial_theme.components)))
+            .collect();
 
         // Theme → drafts bridge. Fires after every successful
         // `ctx.set_theme(...)`. Without this the row swatches would
@@ -145,10 +266,24 @@ impl Widget for ThemeTab {
         // preset switch.
         {
             let drafts = drafts.clone();
+            let alpha_drafts = alpha_drafts.clone();
+            let density_drafts = density_drafts.clone();
             let h = theme_sig.observe(move |theme| {
                 for ((_, get, _), sig) in SHOWN_COLORS.iter().zip(&drafts) {
                     let v = get(&theme.colors);
                     if sig.get() != v {
+                        sig.set(v);
+                    }
+                }
+                for ((_, get, _), sig) in SHOWN_SHADOW_ALPHAS.iter().zip(&alpha_drafts) {
+                    let v = get(&theme.shape);
+                    if (sig.get() - v).abs() > f32::EPSILON {
+                        sig.set(v);
+                    }
+                }
+                for ((_, get, _), sig) in SHOWN_DENSITIES.iter().zip(&density_drafts) {
+                    let v = get(&theme.components);
+                    if (sig.get() - v).abs() > f32::EPSILON {
                         sig.set(v);
                     }
                 }
@@ -164,23 +299,45 @@ impl Widget for ThemeTab {
 
         // Apply: fold every draft back into a fresh theme and commit.
         let drafts_for_apply = drafts.clone();
+        let alpha_drafts_for_apply = alpha_drafts.clone();
+        let density_drafts_for_apply = density_drafts.clone();
         let theme_for_apply = theme_sig.clone();
         let apply_btn = Button::new_literal("Apply").on_activate_fn(move |c| {
             let mut next = theme_for_apply.get();
             for ((_, _, set), sig) in SHOWN_COLORS.iter().zip(&drafts_for_apply) {
                 set(&mut next.colors, sig.get());
             }
+            for ((_, _, set), sig) in SHOWN_SHADOW_ALPHAS.iter().zip(&alpha_drafts_for_apply) {
+                set(&mut next.shape, sig.get());
+            }
+            for ((_, _, set), sig) in SHOWN_DENSITIES.iter().zip(&density_drafts_for_apply) {
+                set(&mut next.components, sig.get());
+            }
             c.set_theme(next);
         });
 
         // Reset: discard pending drafts by re-reading the active theme.
         let drafts_for_reset = drafts.clone();
+        let alpha_drafts_for_reset = alpha_drafts.clone();
+        let density_drafts_for_reset = density_drafts.clone();
         let theme_for_reset = theme_sig.clone();
         let reset_btn = Button::new_literal("Reset").on_activate_fn(move |_c| {
             let theme = theme_for_reset.get();
             for ((_, get, _), sig) in SHOWN_COLORS.iter().zip(&drafts_for_reset) {
                 let v = get(&theme.colors);
                 if sig.get() != v {
+                    sig.set(v);
+                }
+            }
+            for ((_, get, _), sig) in SHOWN_SHADOW_ALPHAS.iter().zip(&alpha_drafts_for_reset) {
+                let v = get(&theme.shape);
+                if (sig.get() - v).abs() > f32::EPSILON {
+                    sig.set(v);
+                }
+            }
+            for ((_, get, _), sig) in SHOWN_DENSITIES.iter().zip(&density_drafts_for_reset) {
+                let v = get(&theme.components);
+                if (sig.get() - v).abs() > f32::EPSILON {
                     sig.set(v);
                 }
             }
@@ -242,6 +399,18 @@ impl Widget for ThemeTab {
                 .child(Spacer::new())
                 .child(ColorEdit::new(sig.clone()).alpha_enabled(true));
             rows = rows.child(row);
+        }
+
+        // Shape — shadow alphas (outer + inner pair per scale).
+        rows = rows.child(section_header("Shape — shadow alphas"));
+        for ((name, _, _), sig) in SHOWN_SHADOW_ALPHAS.iter().zip(&alpha_drafts) {
+            rows = rows.child(slider_row(name, sig.clone()));
+        }
+
+        // Components — per-surface inner-rim density multiplier.
+        rows = rows.child(section_header("Components — shadow density"));
+        for ((name, _, _), sig) in SHOWN_DENSITIES.iter().zip(&density_drafts) {
+            rows = rows.child(slider_row(name, sig.clone()));
         }
 
         let root = ctx.add(
