@@ -4,6 +4,8 @@
 //! that programmatic interactions with `ConsentStore` (matching what
 //! the widget's buttons would do) update the state correctly.
 
+#![cfg(feature = "telemetry")]
+
 use std::rc::Rc;
 use std::time::Duration;
 

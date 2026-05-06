@@ -7,7 +7,7 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-fern-ui = { workspace = true }
+fern-ui = { workspace = true, features = ["telemetry"] }
 fern-analytics-plausible = { workspace = true }
 fern-settings = { workspace = true }
 fern-telemetry = { workspace = true }

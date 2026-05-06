@@ -23,6 +23,12 @@ file-dialog = ["fern-platform/file-dialog"]
 # `FernAppBuilder::install_file_dialog` which auto-registers an
 # `RfdAsyncBackend`. Implies `file-dialog`.
 rfd-backend = ["file-dialog", "fern-platform/rfd-backend"]
+# Telemetry support. Gates the `.telemetry(bundle)` builder method,
+# the `install_telemetry` wiring, and the `dep:fern-telemetry`
+# dependency. Also forwards to `fern-widgets/telemetry` so the
+# `PrivacySettings` widget surface light up together. Off by default
+# — apps that don't ship analytics pay nothing.
+telemetry = ["dep:fern-telemetry", "dep:uuid", "fern-widgets/telemetry"]
 
 [dependencies]
 fern-core = { workspace = true }
@@ -36,11 +42,13 @@ fern-platform = { workspace = true }
 # Registration wiring only — no widget constructors used here.
 fern-widgets = { workspace = true }
 fern-settings = { workspace = true }
-fern-telemetry = { workspace = true }
+fern-telemetry = { workspace = true, optional = true }
 fern-text = { workspace = true, optional = true }
 winit = { workspace = true }
 pollster = "0.4"
-uuid = { workspace = true }
+# Only used by the telemetry session-id generator; pulled in with the
+# `telemetry` feature.
+uuid = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

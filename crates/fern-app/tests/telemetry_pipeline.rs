@@ -4,6 +4,8 @@
 //! app_state registration → dispatch tap in
 //! `WidgetTree::dispatch_intent` → `StubReporter` recorded events.
 
+#![cfg(feature = "telemetry")]
+
 use std::rc::Rc;
 use std::time::Duration;
 

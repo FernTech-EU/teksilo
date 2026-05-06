@@ -52,6 +52,14 @@ file-dialog = ["fern-app/rfd-backend"]
 # backend.
 file-dialog-trait = ["fern-app/file-dialog"]
 
+# Telemetry support. Forwards to the `telemetry` features on
+# `fern-app` (gates `.telemetry(bundle)` + the install wiring) and on
+# `fern-widgets` (gates the `PrivacySettings` widget). Off by default
+# — apps that don't ship analytics pay nothing. Standalone analytics
+# adapter crates (`fern-analytics-{plausible,fern,otlp}`) are not
+# pulled in by this feature; apps add them as direct deps.
+telemetry = ["fern-app/telemetry", "fern-widgets?/telemetry"]
+
 # Font bundle features — forwarded to `fern-text`'s own feature set
 # via the `fern-text?/...` optional-dep syntax. The `?` means the
 # forwarding only activates when `fern-text` itself is in the build

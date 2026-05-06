@@ -61,6 +61,7 @@ pub mod popover_button;
 pub(crate) mod popover_caret;
 pub mod popover_icon_button;
 pub mod primitives;
+#[cfg(feature = "telemetry")]
 pub mod privacy_settings;
 pub mod progress_bar;
 pub mod radio_button;
@@ -158,6 +159,7 @@ pub use primitives::{
     ImageFit, ImageWidget, MasonryLayout, MaxSize, MinSize, Padding, RectWidget, Spacer, Switcher,
     TextWidget, TrackSize, VStack, Wrap, ZStack,
 };
+#[cfg(feature = "telemetry")]
 pub use privacy_settings::PrivacySettings;
 pub use progress_bar::ProgressBar;
 pub use radio_button::RadioButton;

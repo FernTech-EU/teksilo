@@ -18,6 +18,10 @@ rich-text = ["dep:fern-text"]
 # default — pulls in no runtime cost and adds no symbols when not
 # enabled. Standard production builds and headless tests ignore it.
 preview = ["dep:fern-preview"]
+# Telemetry support. Gates the `PrivacySettings` widget (the only
+# widget that binds to `fern-telemetry` types) and its `serde_json`
+# dep. Off by default — apps that don't ship analytics pay nothing.
+telemetry = ["dep:fern-telemetry", "dep:serde_json"]
 
 [dependencies]
 fern-core = { workspace = true }
@@ -26,12 +30,13 @@ fern-tokens = { workspace = true }
 fern-canvas = { workspace = true }
 fern-i18n = { workspace = true }
 # `PrivacySettings` widget binds to `OpenedTelemetry` and `ConsentStore`.
-# Pulling fern-telemetry in unconditionally is fine — when an app doesn't
-# install a `TelemetryBundle`, the widget shows a "telemetry not configured"
-# placeholder and produces no events.
-fern-telemetry = { workspace = true }
-# JSON rendering for the privacy widget's "Get my data" viewer.
-serde_json = { workspace = true }
+# Gated behind the `telemetry` feature — apps that don't ship analytics
+# pay nothing. Without the feature, the widget and its re-export are
+# absent from the public surface.
+fern-telemetry = { workspace = true, optional = true }
+# JSON rendering for the privacy widget's "Get my data" viewer. Only
+# pulled in with the `telemetry` feature.
+serde_json = { workspace = true, optional = true }
 # `PrivacySettings` widget reaches native file dialogs through
 # `fern_platform::file_dialog::EventContextFileDialogExt`. The
 # `file-dialog` feature on fern-platform brings in just the trait

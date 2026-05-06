@@ -69,6 +69,7 @@ enum ResolvedModalPresentation {
 /// pseudonymous tracking, distinct from `InstallId`'s 13-month UUID).
 /// The first 16 hex chars of a fresh UUID are sufficient for grouping
 /// events within one process lifetime.
+#[cfg(feature = "telemetry")]
 fn generate_session_id() -> String {
     let uuid = uuid::Uuid::new_v4().simple().to_string();
     uuid[..16].to_string()
@@ -1416,6 +1417,7 @@ pub struct FernAppBuilder {
     /// hook the dispatch tap in
     /// [`fern_core::widget_tree::WidgetTree::dispatch_intent`] uses to
     /// emit `intent.dispatched` events.
+    #[cfg(feature = "telemetry")]
     telemetry_bundle: Option<fern_telemetry::TelemetryBundle>,
 }
 
@@ -1435,6 +1437,7 @@ impl FernAppBuilder {
             tooltip_contents: Vec::new(),
             app_paths: None,
             settings_bundle: None,
+            #[cfg(feature = "telemetry")]
             telemetry_bundle: None,
         }
     }
@@ -1504,6 +1507,7 @@ impl FernAppBuilder {
     /// [`settings`](Self::settings) bundle was registered (the
     /// telemetry consent file is opened via the same `AppPaths` and
     /// the endpoint-override key is read from the `SettingsStore`).
+    #[cfg(feature = "telemetry")]
     pub fn telemetry(mut self, bundle: fern_telemetry::TelemetryBundle) -> Self {
         self.telemetry_bundle = Some(bundle);
         self
@@ -1695,6 +1699,7 @@ impl FernAppBuilder {
     /// endpoint-override key lives in the `SettingsStore`.
     /// Fail-closed by design — a misconfigured app must not silently
     /// skip telemetry installation.
+    #[cfg(feature = "telemetry")]
     fn install_telemetry(&mut self, settings: Option<&fern_settings::SettingsStore>) {
         let Some(bundle) = self.telemetry_bundle.take() else {
             return;
@@ -1755,6 +1760,7 @@ impl FernAppBuilder {
         // Open telemetry (if a bundle was configured). Must come after
         // install_settings — TelemetryBundle reads the endpoint-override
         // key from the SettingsStore.
+        #[cfg(feature = "telemetry")]
         self.install_telemetry(opened_settings.as_ref().map(|s| &s.store));
 
         let mut tree = WidgetTree::new().with_theme(self.theme.clone());
@@ -1846,6 +1852,7 @@ impl FernAppBuilder {
         // Open telemetry (if a bundle was configured). Must come after
         // install_settings — TelemetryBundle reads the endpoint-override
         // key from the SettingsStore.
+        #[cfg(feature = "telemetry")]
         self.install_telemetry(opened_settings.as_ref().map(|s| &s.store));
 
         // Construct the i18n manager (if configured) and install it on
