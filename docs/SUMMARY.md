@@ -5,9 +5,10 @@ directory; in-progress design work lives separately under [plans/](plans/).
 
 ## Architecture & roadmap
 
-- [fern-ui-architecture.md](fern-ui-architecture.md) — the master architecture
-  document (28 sections covering layout, scrolling, reactivity, overlays,
-  rendering, accessibility, threading, window management).
+- [fern-ui-architecture.md](fern-ui-architecture.md) — framework-internals
+  reference: scrolling, arena, Canvas API, rendering pipeline, HiDPI,
+  threading, testability, crate dependency graph, design comparisons,
+  open questions. Per-subsystem APIs live in the focused docs below.
 - [fern-ui-milestones.md](fern-ui-milestones.md) — the demo-driven milestone
   roadmap; each milestone produces a runnable example exercising one slice
   of the architecture.
