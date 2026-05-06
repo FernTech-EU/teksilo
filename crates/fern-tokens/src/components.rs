@@ -325,6 +325,9 @@ pub struct MenuStyle {
     pub separator_height: f32,
     pub popup_corner_radius: f32,
     pub popup_border_width: f32,
+    /// Corner radius of the per-row hover / pressed highlight rect.
+    /// Independent of `popup_corner_radius`, which rounds the menu surface.
+    pub item_corner_radius: f32,
 }
 
 impl Default for MenuStyle {
@@ -338,6 +341,7 @@ impl Default for MenuStyle {
             separator_height: 9.0,
             popup_corner_radius: 8.0,
             popup_border_width: 1.0,
+            item_corner_radius: 8.0,
         }
     }
 }

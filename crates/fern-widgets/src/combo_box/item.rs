@@ -11,7 +11,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{SurfaceRole, TextRole, TextStyleRole};
+use fern_tokens::{CornerRadius, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::primitives::{HStack, Padding, RectWidget, Spacer, TextWidget, ZStack};
 
@@ -46,7 +46,13 @@ pub(super) fn build_default_item(
     let row_id = ctx.add(row);
 
     let menu_style = theme.components.menu;
-    let pad_v = ((menu_style.item_height - theme.typography.body.size).max(0.0) * 0.5).max(0.0);
+    // Compare against the rendered text line (`size * line_height`), not
+    // the bare font size — TextWidget lays out at the line height, so
+    // using `size` alone over-pads and pushes a nominal 24 dp row to
+    // ~28 dp.
+    let body = &theme.typography.body;
+    let body_line = body.size * body.line_height;
+    let pad_v = ((menu_style.item_height - body_line) * 0.5).max(0.0);
     let padding = Padding::symmetric(pad_v, menu_style.item_padding_horizontal).child_id(row_id);
     ctx.add(padding)
 }
@@ -116,7 +122,10 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
             None => build_default_item(ctx, &self.label, &theme),
         };
 
-        let bg = RectWidget::new().background(bg_role);
+        let menu_style = theme.components.menu;
+        let bg = RectWidget::new()
+            .background(bg_role)
+            .corner_radius(CornerRadius::uniform(menu_style.item_corner_radius));
         let bg_id = ctx.add(bg);
 
         let zstack = ZStack::new().add_child(bg_id).add_child(inner_id);

@@ -15,7 +15,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{SurfaceRole, TextRole, TextStyleRole};
+use fern_tokens::{CornerRadius, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::keystroke_format::format_keystroke;
 use crate::primitives::{HStack, IconWidget, Padding, RectWidget, Spacer, TextWidget, ZStack};
@@ -262,7 +262,7 @@ impl std::fmt::Debug for MenuItem {
 fn resolve_bg_role(state: MenuItemState) -> SurfaceRole {
     match state {
         MenuItemState::Idle | MenuItemState::Disabled => SurfaceRole::Transparent,
-        MenuItemState::Hovered => SurfaceRole::Hover,
+        MenuItemState::Hovered => SurfaceRole::AccentSubtle,
         MenuItemState::Pressed => SurfaceRole::Pressed,
     }
 }
@@ -436,13 +436,14 @@ impl Widget for MenuItem {
 
         let row_id = ctx.add(row);
 
-        // Padding: vertical derived so the row has the full `item_height`
-        // (24 dp); left padding uses `item_padding_horizontal`; RIGHT
-        // padding is zero because the chevron column occupies that space.
-        // Body text is 13 dp so that's ~5.5 dp top + 5.5 dp bottom.
-        // Body size drives the vertical padding of the menu row.
-        let body_size = ctx.theme().typography.body.size;
-        let pad_v = ((menu_style.item_height - body_size) * 0.5).max(0.0);
+        // Padding: vertical derived so the row has the full `item_height`.
+        // Compare against the rendered text line (`size * line_height`),
+        // not the bare font size — TextWidget lays out at the line height,
+        // so using `size` alone over-pads by ~`size * (line_height - 1)`
+        // (e.g. 13 × 0.4 = 5.2 dp, pushing a nominal 24 dp row to ~29 dp).
+        let body = &ctx.theme().typography.body;
+        let body_line = body.size * body.line_height;
+        let pad_v = ((menu_style.item_height - body_line) * 0.5).max(0.0);
         let padding = Padding::new(
             pad_v,                              // top
             0.0,                                // right — chevron column fills this
@@ -453,7 +454,9 @@ impl Widget for MenuItem {
         let padding_id = ctx.add(padding);
 
         // Background rect
-        let rect = RectWidget::new().bind_background(bg_role);
+        let rect = RectWidget::new()
+            .bind_background(bg_role)
+            .corner_radius(CornerRadius::uniform(menu_style.item_corner_radius));
         let rect_id = ctx.add(rect);
 
         let zstack = ZStack::new().add_child(rect_id).add_child(padding_id);
@@ -725,10 +728,9 @@ impl Widget for MenuItem {
                 // to stretch — so the shortcut would sit flush against
                 // the label instead of pushing to the trailing edge.
                 let width = proposal.width.unwrap_or(size.width);
-                // Enforce minimum height of 32px for touch targets
-                Size::new(width, size.height.max(32.0))
+                Size::new(width, size.height)
             }
-            None => proposal.resolve(120.0, 32.0),
+            None => proposal.resolve(120.0, 24.0),
         }
         .into()
     }
