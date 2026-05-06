@@ -13,6 +13,15 @@ directory; in-progress design work lives separately under [plans/](plans/).
   roadmap; each milestone produces a runnable example exercising one slice
   of the architecture.
 
+## Widget catalog
+
+- [widgets-overview.md](widgets-overview.md) — every shipped widget
+  categorized (layout / visual / containers / buttons / inputs / text
+  family / menus / overlays / data-driven / charts / animations /
+  settings) with a one-line description and source-file link. Pair with
+  `python3 tools/extract_widget_api.py <Widget…>` for the full API
+  surface of any widget.
+
 ## Authoring widgets
 
 - [layout-primitives.md](layout-primitives.md) — `HStack` / `VStack` /
