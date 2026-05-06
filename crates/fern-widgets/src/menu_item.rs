@@ -598,6 +598,15 @@ impl Widget for MenuItem {
                             action(ctx);
                             ctx.dismiss_all_overlays();
                         }
+                        // Reset to Idle after dispatching — the
+                        // overlay dismissal swallows the trailing
+                        // PointerUp that would normally clear Pressed,
+                        // and the dormant content widgets keep their
+                        // last-painted state. Without this the
+                        // previously-clicked item reads as Pressed
+                        // (highlighted) the next time the menu opens,
+                        // until a hover transition overwrites it.
+                        int_tap.set(MenuItemState::Idle);
                     }
                 })
                 .on_hover({

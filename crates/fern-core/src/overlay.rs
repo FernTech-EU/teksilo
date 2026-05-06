@@ -679,11 +679,32 @@ impl OverlayManager {
 
     /// Dismiss all overlays.
     /// Returns the content widget IDs of all dismissed overlays.
+    /// Fires every dismissed overlay's `on_dismiss` callback after the
+    /// stack is cleared — same contract as [`dismiss`](Self::dismiss),
+    /// so wrappers like [`PopoverButton`](crate::widget::EventContext)'s
+    /// `popover_open` signal flip back to `false` when a `MenuItem`
+    /// fires `ctx.dismiss_all_overlays()`. Without this, the trigger's
+    /// next click would observe stale-true and silently retoggle
+    /// instead of reopening the menu.
     pub fn dismiss_all(&mut self) -> Vec<WidgetId> {
         let content_ids: Vec<WidgetId> = self.stack.iter().map(|o| o.content_id).collect();
-        if !content_ids.is_empty() {
-            self.stack.clear();
-            self.bump_version();
+        if content_ids.is_empty() {
+            return content_ids;
+        }
+        // Collect dismiss callbacks (via Rc::clone) before clear so we
+        // can invoke them AFTER the borrow is released. Callbacks may
+        // do anything, including touching the arena, so running them
+        // mid-clear would risk re-entrancy. Mirrors the pattern in
+        // [`dismiss_immediate`](Self::dismiss_immediate).
+        let callbacks: Vec<OverlayDismissCallback> = self
+            .stack
+            .iter()
+            .filter_map(|o| o.on_dismiss.clone())
+            .collect();
+        self.stack.clear();
+        self.bump_version();
+        for cb in callbacks {
+            cb();
         }
         content_ids
     }
@@ -963,6 +984,63 @@ mod tests {
 
     fn fake_id(n: u64) -> WidgetId {
         KeyData::from_ffi(n).into()
+    }
+
+    #[test]
+    fn dismiss_all_fires_on_dismiss_callbacks() {
+        // Regression: a `MenuItem`'s tap handler calls
+        // `ctx.dismiss_all_overlays()` to close the menu after firing
+        // its action. The dismiss callback set on the parent
+        // `PopoverButton`/`PopoverIconButton`'s `OverlayRequest`
+        // (which flips `popover_open` back to `false`) must fire so
+        // the next trigger click reopens the menu instead of
+        // observing stale-true and silently retoggling.
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let mut mgr = OverlayManager::new();
+        let fired_a = Rc::new(Cell::new(0_u32));
+        let fired_b = Rc::new(Cell::new(0_u32));
+        let cb_a: OverlayDismissCallback = {
+            let f = fired_a.clone();
+            Rc::new(move || f.set(f.get() + 1))
+        };
+        let cb_b: OverlayDismissCallback = {
+            let f = fired_b.clone();
+            Rc::new(move || f.set(f.get() + 1))
+        };
+        mgr.show(OverlayRequest {
+            content_id: fake_id(10),
+            anchor: fake_id(1),
+            placement: OverlayPlacement::Below,
+            dismiss: DismissBehavior::ClickOutside,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: Some(cb_a),
+            fade_duration: None,
+        });
+        mgr.show(OverlayRequest {
+            content_id: fake_id(11),
+            anchor: fake_id(2),
+            placement: OverlayPlacement::Below,
+            dismiss: DismissBehavior::ClickOutside,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: Some(cb_b),
+            fade_duration: None,
+        });
+        let dismissed = mgr.dismiss_all();
+        assert_eq!(dismissed.len(), 2);
+        assert!(mgr.is_empty());
+        assert_eq!(
+            fired_a.get(),
+            1,
+            "first overlay's on_dismiss must fire exactly once",
+        );
+        assert_eq!(
+            fired_b.get(),
+            1,
+            "second overlay's on_dismiss must fire exactly once",
+        );
     }
 
     #[test]
