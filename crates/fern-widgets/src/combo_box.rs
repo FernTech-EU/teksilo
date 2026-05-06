@@ -807,14 +807,15 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> fern_core::widget::LayoutResponse {
+        let min_height = ctx.theme.components.combo_box.height;
         match self.root_child_id {
             Some(id) => {
                 let child_size = ctx
                     .child_size(id, proposal)
                     .unwrap_or_else(|| proposal.resolve(0.0, 0.0));
-                Size::new(child_size.width.max(120.0), child_size.height.max(36.0))
+                Size::new(child_size.width.max(120.0), child_size.height.max(min_height))
             }
-            None => proposal.resolve(120.0, 36.0),
+            None => proposal.resolve(120.0, min_height),
         }
         .into()
     }

@@ -223,7 +223,7 @@ pub struct ComboBoxStyle {
 impl Default for ComboBoxStyle {
     fn default() -> Self {
         Self {
-            height: 24.0,
+            height: 28.0,
             padding_horizontal: 9.0,
             arrow_column_width: 23.0,
             corner_radius: 4.0,
