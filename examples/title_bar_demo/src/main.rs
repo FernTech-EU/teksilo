@@ -22,6 +22,7 @@ use fern_ui::widgets::{Expand, RectWidget, TextWidget, TitleBar, VStack, WindowF
 
 fn main() {
     FernAppBuilder::new()
+        .install_inspector_in_debug()
         .theme(Theme::dark_default())
         .initial_window(
             WindowConfig::new()

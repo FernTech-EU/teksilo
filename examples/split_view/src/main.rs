@@ -140,6 +140,7 @@ fn build_preview_pane(title: &str, text: &str, theme: &Theme) -> impl Widget {
 
 fn main() {
     FernAppBuilder::new()
+        .install_inspector_in_debug()
         .theme(Theme::light_default())
         .initial_window(
             WindowConfig::new()

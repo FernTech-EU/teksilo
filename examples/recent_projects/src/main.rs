@@ -390,6 +390,7 @@ fn main() {
         MruList::open(&paths, "recent_projects", 8).expect("open recent_projects.toml");
 
     FernAppBuilder::new()
+        .install_inspector_in_debug()
         .theme(Theme::light_default())
         .app_paths(paths)
         .settings(SettingsBundle::new().with_window_state(true))

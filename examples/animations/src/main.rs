@@ -48,6 +48,7 @@ fn main() {
     let selected_for_root = selected.clone();
 
     let mut builder = FernAppBuilder::new()
+        .install_inspector_in_debug()
         .theme(Theme::light_default())
         .initial_window(
             WindowConfig::new()

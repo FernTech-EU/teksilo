@@ -194,6 +194,7 @@ fn build_color_box(color: impl Into<fern_ui::core::ColorProp>, label: &str) -> P
 
 fn main() {
     FernAppBuilder::new()
+        .install_inspector_in_debug()
         .theme(Theme::light_default())
         .initial_window(
             WindowConfig::new()

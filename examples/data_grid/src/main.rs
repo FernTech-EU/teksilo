@@ -161,6 +161,7 @@ fn main() {
     let selection = SelectionModel::new(SelectionMode::Multi);
 
     FernAppBuilder::new()
+        .install_inspector_in_debug()
         .theme(Theme::light_default())
         .initial_window(WindowConfig::new().title("Data Grid").size(1100, 640).root(
             move |tree, _| {

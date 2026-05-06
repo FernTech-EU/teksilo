@@ -223,6 +223,7 @@ fn material_palette() -> Vec<Color> {
 
 fn main() {
     FernAppBuilder::new()
+        .install_inspector_in_debug()
         .theme(Theme::light_default())
         // Register fern-widgets' own translatable strings so internal
         // labels (Role::Slider names, swatch hex readouts, etc.) resolve

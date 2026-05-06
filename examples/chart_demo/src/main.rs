@@ -47,6 +47,7 @@ fn make_pie_data(seed: u32) -> Vec<ChartDatum<String>> {
 
 fn main() {
     FernAppBuilder::new()
+        .install_inspector_in_debug()
         .theme(Theme::light_default())
         .initial_window(
             WindowConfig::new()

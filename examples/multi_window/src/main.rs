@@ -31,6 +31,7 @@ enum AppIntent {
 
 fn main() {
     FernAppBuilder::new()
+        .install_inspector_in_debug()
         .theme(Theme::light_default())
         .initial_window(
             WindowConfig::new()

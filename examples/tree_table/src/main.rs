@@ -86,6 +86,7 @@ fn main() {
     let selection = SelectionModel::new(SelectionMode::Multi);
 
     FernAppBuilder::new()
+        .install_inspector_in_debug()
         .theme(Theme::light_default())
         .initial_window(WindowConfig::new().title("TreeTable").size(900, 580).root(
             move |tree, _| {

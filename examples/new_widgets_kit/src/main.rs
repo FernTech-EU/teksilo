@@ -352,6 +352,7 @@ impl Widget for Root {
 
 fn main() {
     FernAppBuilder::new()
+        .install_inspector_in_debug()
         .theme(Theme::light_default())
         .install_file_dialog()
         .initial_window(

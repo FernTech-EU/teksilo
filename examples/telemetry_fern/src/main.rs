@@ -203,6 +203,7 @@ fn main() {
     );
 
     FernAppBuilder::new()
+        .install_inspector_in_debug()
         .application("eu", "FernTech", "telemetry-fern-demo")
         .settings(SettingsBundle::new())
         .telemetry(telemetry)

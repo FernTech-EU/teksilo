@@ -299,6 +299,7 @@ fn main() {
         .framework_locales(fern_ui::widgets::framework_locales());
 
     FernAppBuilder::new()
+        .install_inspector_in_debug()
         .theme(Theme::light_default())
         .i18n(i18n_config)
         .initial_window(

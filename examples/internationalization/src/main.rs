@@ -490,6 +490,7 @@ fn main() {
     }
 
     FernAppBuilder::new()
+        .install_inspector_in_debug()
         .theme(Theme::light_default())
         .i18n(config)
         .initial_window(

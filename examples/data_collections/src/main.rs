@@ -420,6 +420,7 @@ fn main() {
     tree_model.insert_root(2, "Downloads".into());
 
     FernAppBuilder::new()
+        .install_inspector_in_debug()
         .theme(Theme::light_default())
         .initial_window(
             WindowConfig::new()

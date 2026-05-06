@@ -131,6 +131,7 @@ fn main() {
         .with_data_residency_region(fern_telemetry::DataResidencyRegion::EU);
 
     FernAppBuilder::new()
+        .install_inspector_in_debug()
         .application("eu", "FernTech", "telemetry-plausible-demo")
         .settings(SettingsBundle::new())
         .telemetry(telemetry)
