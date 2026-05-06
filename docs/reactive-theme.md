@@ -80,6 +80,71 @@ This only marks the subtree dirty; layout/paint contexts resolve ancestor overri
 
 ---
 
+## Constructing and loading themes
+
+### Built-in defaults
+
+Two ship in [`fern-tokens`](../crates/fern-tokens/src/theme.rs):
+
+```rust
+let light = Theme::light_default();
+let dark  = Theme::dark_default();
+```
+
+Both are neutral Int UI baselines — not visually distinctive, designed to be customized. Apps usually start from one of them and override the slots they care about.
+
+### Programmatic customization via struct spread
+
+`Theme`, `ColorTokens`, `TypographyTokens`, `ShapeTokens`, `LayoutTokens`, `MotionTokens`, and `ComponentStyles` are plain structs. Override the fields you want and spread the rest from the chosen base:
+
+```rust
+use fern_tokens::{Theme, ColorTokens, TypographyTokens, TextStyle, Color};
+
+let editor_light = Theme {
+    colors: ColorTokens {
+        accent: Color::from_hex("#2E7D32"),
+        accent_hover: Color::from_hex("#1B5E20"),
+        text_on_accent: Color::WHITE,
+        surface_main: Color::from_hex("#FAFAF5"),
+        ..ColorTokens::light_default()
+    },
+    typography: TypographyTokens {
+        body: TextStyle {
+            family: "Literata".to_string(),
+            size: 16.0,
+            ..TextStyle::default()
+        },
+        ..TypographyTokens::default()
+    },
+    ..Theme::light_default()
+};
+
+tree.set_theme(editor_light);
+```
+
+The same pattern works for sub-trees via `set_theme_override(panel_id, |theme| { ... })` (see above).
+
+### Loading from a file
+
+Every token struct in `fern-tokens` derives `serde::Serialize` and `serde::Deserialize`, so themes round-trip through any serde format the app picks (TOML, JSON, RON, YAML). The runtime cost is one read + one deserialize + one `set_theme` call:
+
+```rust
+use std::fs;
+use fern_tokens::Theme;
+
+let toml = fs::read_to_string("themes/editor-light.toml")?;
+let theme: Theme = toml::from_str(&toml)?;
+tree.set_theme(theme);
+```
+
+Authoring a theme file is the inverse — `toml::to_string(&Theme::light_default())?` writes a complete starter file the user can edit.
+
+### Partial files — current limitation
+
+The token structs **do not** carry `#[serde(default)]` on their fields, so a file missing any field fails to deserialize. To accept hand-edited theme files that only specify a few overrides, the app needs to do the merge itself — typically by deserializing into an `Option`-wrapped or `serde_json::Value` shape, then folding non-null values onto a base produced by `Theme::light_default()`. A future change can add `#[serde(default)]` so partial files merge automatically; until it lands, treat the file format as "all fields required."
+
+---
+
 ## Role enums
 
 All defined in [`crates/fern-tokens/src/roles.rs`](../crates/fern-tokens/src/roles.rs), exported from `fern_tokens::{TextRole, SurfaceRole, BorderRole, TextStyleRole}` and re-exported through `fern_ui::prelude`.
