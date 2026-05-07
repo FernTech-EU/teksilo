@@ -49,7 +49,7 @@ struct Root {
 impl Root {
     fn new() -> Self {
         let initial_date = Date::constant(2026, 5, 2);
-        let initial_time = Time::new(14, 35, 0, 0).unwrap();
+        let initial_time = Time::new(14, 35, 0, 0).expect("14:35:00 is a valid time");
         Self {
             selected_date: Signal::new(Some(initial_date)),
             selected_range: Signal::new(None),
@@ -309,10 +309,13 @@ fn main() {
     // resolver falls back to the key itself — visible in the UI as
     // the literal key string.
     let i18n_config = fern_ui::i18n::I18nConfig::new()
-        .source_locale("en-US".parse().unwrap())
-        .supported_locales(["en-US".parse().unwrap(), "fr-FR".parse().unwrap()])
+        .source_locale("en-US".parse().expect("en-US is a valid BCP-47 tag"))
+        .supported_locales([
+            "en-US".parse().expect("en-US is a valid BCP-47 tag"),
+            "fr-FR".parse().expect("fr-FR is a valid BCP-47 tag"),
+        ])
         .auto_detect_os_locale(true)
-        .fallback_locale("en-US".parse().unwrap())
+        .fallback_locale("en-US".parse().expect("en-US is a valid BCP-47 tag"))
         .framework_locales(fern_ui::widgets::framework_locales());
 
     FernAppBuilder::new()

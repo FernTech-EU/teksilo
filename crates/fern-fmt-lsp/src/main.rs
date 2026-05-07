@@ -78,7 +78,10 @@ impl Server {
         let params = msg.params.clone().unwrap_or(Value::Null);
 
         match (method, id.is_some()) {
-            ("initialize", true) => Some(ok(id.unwrap(), self.handle_initialize())),
+            ("initialize", true) => Some(ok(
+                id.expect("matched on id.is_some() == true"),
+                self.handle_initialize(),
+            )),
             ("initialized", false) => None,
             ("textDocument/didOpen", false) => {
                 self.handle_did_open(&params);
@@ -92,11 +95,16 @@ impl Server {
                 self.handle_did_close(&params);
                 None
             }
-            ("textDocument/formatting", true) => Some(self.handle_formatting(id.unwrap(), &params)),
-            ("shutdown", true) => Some(ok(id.unwrap(), Value::Null)),
+            ("textDocument/formatting", true) => Some(
+                self.handle_formatting(id.expect("matched on id.is_some() == true"), &params),
+            ),
+            ("shutdown", true) => Some(ok(
+                id.expect("matched on id.is_some() == true"),
+                Value::Null,
+            )),
             ("exit", false) => None,
             (_, true) => Some(err(
-                id.unwrap(),
+                id.expect("matched on id.is_some() == true"),
                 METHOD_NOT_FOUND,
                 &format!("method not handled: {method}"),
             )),

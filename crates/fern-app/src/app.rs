@@ -1878,7 +1878,7 @@ impl FernAppBuilder {
 
         let event_loop = winit::event_loop::EventLoop::<AppEvent>::with_user_event()
             .build()
-            .unwrap();
+            .expect("winit event loop creation failed");
         event_loop.set_control_flow(ControlFlow::Wait);
 
         // Always create a proxy: it's needed by both `on_ready` (if set)
@@ -1990,7 +1990,9 @@ impl FernAppBuilder {
             proxy.clone(),
         );
 
-        event_loop.run_app(&mut app).unwrap();
+        event_loop
+            .run_app(&mut app)
+            .expect("winit event loop exited with error");
 
         // Flush any pending settings writes synchronously before the
         // process exits. The `DebouncedWriter` background threads also

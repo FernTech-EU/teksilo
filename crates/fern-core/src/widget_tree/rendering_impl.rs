@@ -170,7 +170,7 @@ fn paint_widget_cached(
         return;
     }
 
-    let node = arena.get(id).unwrap();
+    let node = arena.get(id).expect("node id is active (guarded above)");
     let bounds = node.bounds;
     if let Some(clip) = clip_bounds {
         let x0 = bounds.x.max(clip.x);
@@ -198,7 +198,7 @@ fn paint_widget_cached(
     // for the paint/cache path. The scope wraps both this widget's own
     // paint and its children's paint, composing with any ancestor
     // opacity via the canvas's stacked-opacity model.
-    let node = arena.get(id).unwrap();
+    let node = arena.get(id).expect("node id is active (guarded above)");
     let opacity = node.opacity_prop.as_ref().map(|p| p.get().clamp(0.0, 1.0));
     if let Some(o) = opacity
         && o < 1.0 / 512.0
@@ -218,7 +218,7 @@ fn paint_widget_cached(
     // result back at the widget's bounds. Sub-perceptual radii skip the
     // pair entirely so animated 0→target_radius patterns have zero cost
     // when fully off.
-    let node = arena.get(id).unwrap();
+    let node = arena.get(id).expect("node id is active (guarded above)");
     let blur_radius = node
         .blur_prop
         .as_ref()
@@ -247,7 +247,7 @@ fn paint_widget_cached(
     // transform instead of clobbering it. Skip the push entirely when
     // the transform is identity — saves a flush on every wrapper that
     // happens to be at its rest pose.
-    let node = arena.get(id).unwrap();
+    let node = arena.get(id).expect("node id is active (guarded above)");
     let transform = node.transform_prop.as_ref().map(|p| p.get());
     let push_transform = transform.filter(|t| *t != fern_canvas::Transform2D::IDENTITY);
     if let Some(t) = push_transform {
@@ -256,7 +256,7 @@ fn paint_widget_cached(
             .push(fern_canvas::DrawCommand::PushTransform(t));
     }
 
-    let node = arena.get(id).unwrap();
+    let node = arena.get(id).expect("node id is active (guarded above)");
     let needs_paint = node.dirty.needs_paint;
 
     if needs_paint || node.cached_paint.is_none() {
@@ -271,7 +271,7 @@ fn paint_widget_cached(
         };
 
         let bounds = arena.bounds(id);
-        let node = arena.get(id).unwrap();
+        let node = arena.get(id).expect("node id is active (guarded above)");
 
         let mut canvas = match text_backend {
             Some(tb) => Canvas::with_text_backend(tb.clone()),
@@ -285,7 +285,7 @@ fn paint_widget_cached(
             node.cached_paint = Some(widget_frame);
         }
     } else {
-        let node = arena.get(id).unwrap();
+        let node = arena.get(id).expect("node id is active (guarded above)");
         if let Some(cached) = &node.cached_paint {
             // Refresh the text backend's glyph timestamps for every
             // layout baked into this cached paint. Without this,
@@ -306,7 +306,7 @@ fn paint_widget_cached(
         }
     }
 
-    let node = arena.get(id).unwrap();
+    let node = arena.get(id).expect("node id is active (guarded above)");
     let clips = node.clips_children;
     let children: Vec<WidgetId> = node.children.clone();
     let bounds = node.bounds;

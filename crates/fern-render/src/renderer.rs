@@ -628,8 +628,12 @@ impl Renderer {
                 // we weren't drawing into THIS target. They paint first
                 // in the new segment so subsequent commands stack on
                 // top of the blurred quad.
-                let composites_to_draw: Vec<PendingComposite> =
-                    std::mem::take(&mut target_stack.last_mut().unwrap().pending_composites);
+                let composites_to_draw: Vec<PendingComposite> = std::mem::take(
+                    &mut target_stack
+                        .last_mut()
+                        .expect("target_stack always has the surface target")
+                        .pending_composites,
+                );
 
                 {
                     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1401,13 +1405,27 @@ impl Renderer {
                             scope.intermediate.is_some(),
                             "End popped the surface (impossible if walker is balanced)"
                         );
-                        let intermediate = scope.intermediate.unwrap();
-                        let bounds = scope.blur_bounds.unwrap();
-                        let radius = scope.blur_radius_logical.unwrap();
-                        let used_w = scope.used_w.unwrap();
-                        let used_h = scope.used_h.unwrap();
-                        let bucket_w = scope.bucket_w.unwrap();
-                        let bucket_h = scope.bucket_h.unwrap();
+                        let intermediate = scope
+                            .intermediate
+                            .expect("blur scope intermediate set in BeginBlurredSubtree");
+                        let bounds = scope
+                            .blur_bounds
+                            .expect("blur scope bounds set in BeginBlurredSubtree");
+                        let radius = scope
+                            .blur_radius_logical
+                            .expect("blur scope radius set in BeginBlurredSubtree");
+                        let used_w = scope
+                            .used_w
+                            .expect("blur scope used_w set in BeginBlurredSubtree");
+                        let used_h = scope
+                            .used_h
+                            .expect("blur scope used_h set in BeginBlurredSubtree");
+                        let bucket_w = scope
+                            .bucket_w
+                            .expect("blur scope bucket_w set in BeginBlurredSubtree");
+                        let bucket_h = scope
+                            .bucket_h
+                            .expect("blur scope bucket_h set in BeginBlurredSubtree");
 
                         // Pop the translation pushed in Begin.
                         if transform_stack.len() > 1 {
@@ -1437,8 +1455,11 @@ impl Renderer {
 
                         // Schedule a composite into the parent target's
                         // next segment open.
-                        target_stack.last_mut().unwrap().pending_composites.push(
-                            PendingComposite {
+                        target_stack
+                            .last_mut()
+                            .expect("target_stack always has the surface target")
+                            .pending_composites
+                            .push(PendingComposite {
                                 blurred_texture: blurred.texture,
                                 used_w: blurred.used_w,
                                 used_h: blurred.used_h,
@@ -1460,10 +1481,16 @@ impl Renderer {
             // The remaining surface target may still have a pending
             // composite (an outermost blur scope ending at end-of-frame
             // with no further commands). Drain it in one final pass.
-            let final_composites =
-                std::mem::take(&mut target_stack.last_mut().unwrap().pending_composites);
+            let final_composites = std::mem::take(
+                &mut target_stack
+                    .last_mut()
+                    .expect("target_stack always has the surface target")
+                    .pending_composites,
+            );
             if !final_composites.is_empty() {
-                let surface = target_stack.last_mut().unwrap();
+                let surface = target_stack
+                    .last_mut()
+                    .expect("target_stack always has the surface target");
                 let load_op = if surface.opened {
                     wgpu::LoadOp::Load
                 } else {
@@ -1508,7 +1535,11 @@ impl Renderer {
                         viewport_height,
                     );
                 }
-            } else if !target_stack.last().unwrap().opened {
+            } else if !target_stack
+                .last()
+                .expect("target_stack always has the surface target")
+                .opened
+            {
                 // Empty frame — open one pass to apply the clear.
                 let _ = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("fern_empty_clear_pass"),

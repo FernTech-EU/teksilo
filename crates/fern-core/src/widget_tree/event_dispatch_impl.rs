@@ -393,8 +393,14 @@ impl WidgetTree {
             // disjoint from `self.arena`, so the immutable arena
             // borrow doesn't conflict with the mutable ctx borrow.
             let outcome: Option<Box<dyn Widget>> = {
-                let node = self.arena.get(owner_id).unwrap();
-                let factory = node.context_menu_factory.as_ref().unwrap();
+                let node = self
+                    .arena
+                    .get(owner_id)
+                    .expect("owner_id from active arena walk");
+                let factory = node
+                    .context_menu_factory
+                    .as_ref()
+                    .expect("owner_id only set when factory present");
                 factory(position, &mut ctx)
             };
             match outcome {

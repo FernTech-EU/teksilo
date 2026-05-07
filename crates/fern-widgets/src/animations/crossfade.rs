@@ -95,7 +95,7 @@ impl<K: Eq + Clone + 'static> Widget for Crossfade<K> {
         let mut zstack = ZStack::new();
 
         if key_changed {
-            let prev_key = prev_key.unwrap();
+            let prev_key = prev_key.expect("key_changed implies prev_key is Some");
             let outgoing = (self.builder)(&prev_key);
             let outgoing_id = ctx.add_boxed(outgoing);
             let opacity = ctx.animated_signal(1.0);

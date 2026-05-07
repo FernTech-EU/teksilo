@@ -364,7 +364,11 @@ impl<T: 'static> SortFilterListModel<T> {
             }
             *rev = Some(v);
         }
-        rev.as_ref().unwrap().get(source).copied().flatten()
+        rev.as_ref()
+            .expect("rev was just initialized above when None")
+            .get(source)
+            .copied()
+            .flatten()
     }
 }
 

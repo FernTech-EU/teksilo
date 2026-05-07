@@ -148,7 +148,10 @@ impl WidgetTree {
             return;
         }
 
-        let node = self.arena.get(id).unwrap();
+        let node = self
+            .arena
+            .get(id)
+            .expect("widget id is active in arena");
         let mut builder = AccessNodeBuilder::for_widget(id);
         node.widget.accessibility(&mut builder);
 
@@ -326,7 +329,10 @@ impl WidgetTree {
     /// `text_content`, and the recursive walker stay in sync.
     fn build_overridden_builder(&self, id: WidgetId) -> AccessNodeBuilder {
         use crate::widget_builder::AccessSubtreeMode;
-        let node = self.arena.get(id).unwrap();
+        let node = self
+            .arena
+            .get(id)
+            .expect("widget id is active in arena");
         let mut builder = AccessNodeBuilder::for_widget(id);
         node.widget.accessibility(&mut builder);
         if let Some(ov) = node.access_overrides.as_deref() {
@@ -347,7 +353,10 @@ impl WidgetTree {
     }
 
     pub fn accessibility_node(&self, id: WidgetId) -> AccessibilityInfo {
-        let node = self.arena.get(id).unwrap();
+        let node = self
+            .arena
+            .get(id)
+            .expect("widget id is active in arena");
         let builder = self.build_overridden_builder(id);
         let role = builder.role();
         let name = builder.name().map(|s| s.to_string());

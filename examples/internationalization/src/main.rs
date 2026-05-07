@@ -479,11 +479,11 @@ fn parse_translation_dev_flags() -> Vec<(LanguageIdentifier, std::path::PathBuf)
 
 fn main() {
     let mut config = I18nConfig::new()
-        .source_locale("en-US".parse().unwrap())
+        .source_locale("en-US".parse().expect("en-US is a valid BCP-47 tag"))
         .supported_locales([
-            "en-US".parse().unwrap(),
-            "fr-FR".parse().unwrap(),
-            "ar-SA".parse().unwrap(),
+            "en-US".parse().expect("en-US is a valid BCP-47 tag"),
+            "fr-FR".parse().expect("fr-FR is a valid BCP-47 tag"),
+            "ar-SA".parse().expect("ar-SA is a valid BCP-47 tag"),
         ])
         .compile_in(&[
             ("en-US", &[include_str!("../locales/en-US.ftl")]),
@@ -491,7 +491,7 @@ fn main() {
             ("ar-SA", &[include_str!("../locales/ar-SA.ftl")]),
         ])
         .auto_detect_os_locale(false)
-        .fallback_locale("en-US".parse().unwrap())
+        .fallback_locale("en-US".parse().expect("en-US is a valid BCP-47 tag"))
         .framework_locales(fern_ui::widgets::framework_locales());
 
     // Apply any `--translation-dev LOCALE=PATH` overrides. Missing

@@ -512,7 +512,7 @@ impl Widget for MenuItem {
             // timer system (like tooltips). On hover leave: cancel the pending
             // request. The widget tree checks pending overlays during layout()
             // and opens them once the delay elapses.
-            let sub_id = submenu_content_id.unwrap();
+            let sub_id = submenu_content_id.expect("is_submenu implies submenu_content_id is Some");
             let open_delay = self.submenu_open_delay;
 
             let open_for_tap = submenu_open_signal.clone();

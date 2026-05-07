@@ -169,7 +169,7 @@ impl PreviewerOptions {
         }
 
         if let Some(want_variant) = &self.initial_variant {
-            let entry = entry.unwrap();
+            let entry = entry.expect("entry.is_none() exits the process above");
             let variants = entry.variants();
             let names: Vec<&'static str> = variants.iter().map(|v| v.name()).collect();
             if !names.contains(&want_variant.as_str()) {

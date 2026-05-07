@@ -60,7 +60,9 @@ impl PlatformWindow {
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
 
-        let surface = instance.create_surface(window.clone()).unwrap();
+        let surface = instance
+            .create_surface(window.clone())
+            .expect("wgpu surface creation failed for the platform window");
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -69,7 +71,7 @@ impl PlatformWindow {
                 force_fallback_adapter: false,
             })
             .await
-            .unwrap();
+            .expect("no compatible wgpu adapter available");
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
@@ -79,7 +81,7 @@ impl PlatformWindow {
                 ..Default::default()
             })
             .await
-            .unwrap();
+            .expect("wgpu device request failed");
 
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps
@@ -135,7 +137,9 @@ impl PlatformWindow {
         let scale_factor = window.scale_factor();
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let surface = instance.create_surface(window.clone()).unwrap();
+        let surface = instance
+            .create_surface(window.clone())
+            .expect("wgpu surface creation failed for the platform window");
 
         let gpu_adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -144,7 +148,7 @@ impl PlatformWindow {
                 force_fallback_adapter: false,
             })
             .await
-            .unwrap();
+            .expect("no compatible wgpu adapter available");
 
         let (device, queue) = gpu_adapter
             .request_device(&wgpu::DeviceDescriptor {
@@ -154,7 +158,7 @@ impl PlatformWindow {
                 ..Default::default()
             })
             .await
-            .unwrap();
+            .expect("wgpu device request failed");
 
         let surface_caps = surface.get_capabilities(&gpu_adapter);
         let surface_format = surface_caps

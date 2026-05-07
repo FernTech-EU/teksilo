@@ -90,7 +90,9 @@ impl AnimatedIcon {
                 return &self.frames[i];
             }
         }
-        self.frames.last().unwrap()
+        self.frames
+            .last()
+            .expect("AnimatedIcon constructor enforces frames.len() >= 1")
     }
 
     /// Access all frames.

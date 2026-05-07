@@ -374,7 +374,11 @@ impl<T: 'static> Widget for TreeView<T> {
                                     if is_root_level {
                                         tree.move_to_root(node_id, sibling_idx - 1);
                                     } else {
-                                        tree.move_node(node_id, parent.unwrap(), sibling_idx - 1);
+                                        tree.move_node(
+                                            node_id,
+                                            parent.expect("non-root branch implies parent is Some"),
+                                            sibling_idx - 1,
+                                        );
                                     }
                                     // Find new flat index after node was moved
                                     for new_flat in 0..visible_count {
@@ -394,7 +398,11 @@ impl<T: 'static> Widget for TreeView<T> {
                                     if is_root_level {
                                         tree.move_to_root(node_id, sibling_idx + 1);
                                     } else {
-                                        tree.move_node(node_id, parent.unwrap(), sibling_idx + 1);
+                                        tree.move_node(
+                                            node_id,
+                                            parent.expect("non-root branch implies parent is Some"),
+                                            sibling_idx + 1,
+                                        );
                                     }
                                     // Find new flat index after node was moved
                                     for new_flat in 0..visible_count {

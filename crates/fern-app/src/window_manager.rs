@@ -366,7 +366,9 @@ impl WindowManager {
             window_attrs = unsafe { window_attrs.with_parent_window(Some(parent_handle.as_raw())) };
         }
 
-        let window = target.create_window(window_attrs).unwrap();
+        let window = target
+            .create_window(window_attrs)
+            .expect("winit window creation failed");
         let winit_id = window.id();
         let scale_factor = window.scale_factor();
 

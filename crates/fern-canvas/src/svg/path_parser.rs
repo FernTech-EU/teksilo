@@ -423,7 +423,8 @@ impl<'a> PathDataParser<'a> {
         if !has_digits || start == self.pos {
             return Err(self.error("expected number"));
         }
-        let s = std::str::from_utf8(&self.input[start..self.pos]).unwrap();
+        let s = std::str::from_utf8(&self.input[start..self.pos])
+            .expect("number tokens consist of ASCII digits/sign/dot/exponent");
         s.parse::<f32>()
             .map_err(|_| self.error(&format!("invalid number '{s}'")))
     }

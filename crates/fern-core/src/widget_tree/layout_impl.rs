@@ -263,7 +263,10 @@ impl WidgetTree {
                     arena: Some(&self.arena),
                     extras: Some(extras),
                 };
-                let node = self.arena.get(*content_id).unwrap();
+                let node = self
+                    .arena
+                    .get(*content_id)
+                    .expect("content_id from active arena children");
                 node.widget
                     .layout_response(
                         SizeProposal {
@@ -381,7 +384,7 @@ fn layout_widget_recursive(
             arena: Some(arena),
             extras,
         };
-        let node = arena.get(id).unwrap();
+        let node = arena.get(id).expect("widget id is active in arena");
         node.widget.layout_response(proposal, &ctx).size
     };
 
@@ -424,7 +427,7 @@ fn layout_widget_recursive(
                 arena: Some(arena),
                 extras,
             };
-            let node = arena.get(id).unwrap();
+            let node = arena.get(id).expect("widget id is active in arena");
             node.widget
                 .place_children(bounds, proposal, &mut placements, &ctx);
         }
