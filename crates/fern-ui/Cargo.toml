@@ -110,7 +110,7 @@ fern-widgets = { workspace = true, optional = true }
 # restores the out-of-the-box behavior, and downstream apps that use
 # `default-features = false` on fern-ui get a clean slate with no
 # Noto fonts bundled.
-fern-text = { path = "../fern-text", version = "0.1.0", optional = true, default-features = false }
+fern-text = { path = "../fern-text", version = "0.2.0", optional = true, default-features = false }
 fern-i18n = { workspace = true, optional = true }
 fern-inspector = { workspace = true, optional = true }
 fern-resources = { workspace = true }

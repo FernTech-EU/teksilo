@@ -6,7 +6,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license-file = "LICENSE"
 publish = false
@@ -54,33 +54,33 @@ text-document = { path = "../text-document/crates/public_api" }
 text-typeset = { path = "../text-typeset" }
 
 # Internal crates
-fern-tokens = { path = "crates/fern-tokens", version = "0.1.0" }
-fern-canvas = { path = "crates/fern-canvas", version = "0.1.0" }
-fern-core = { path = "crates/fern-core", version = "0.1.0" }
-fern-data = { path = "crates/fern-data", version = "0.1.0" }
-fern-settings = { path = "crates/fern-settings", version = "0.1.0" }
-fern-telemetry = { path = "crates/fern-telemetry", version = "0.1.0" }
-fern-analytics-plausible = { path = "crates/fern-analytics-plausible", version = "0.1.0" }
-fern-analytics-otlp = { path = "crates/fern-analytics-otlp", version = "0.1.0" }
-fern-widgets = { path = "crates/fern-widgets", version = "0.1.0" }
-fern-charts = { path = "crates/fern-charts", version = "0.1.0" }
-fern-scene = { path = "crates/fern-scene", version = "0.1.0" }
-fern-i18n = { path = "crates/fern-i18n", version = "0.1.0" }
-fern-i18n-macros = { path = "crates/fern-i18n-macros", version = "0.1.0" }
-cargo-fern-fmt = { path = "crates/cargo-fern-fmt", version = "0.1.0" }
-fern-fmt = { path = "crates/fern-fmt", version = "0.1.0" }
-fern-fmt-lsp = { path = "crates/fern-fmt-lsp", version = "0.1.0" }
-fern-parse = { path = "crates/fern-parse", version = "0.1.0" }
-fern-ui-macros = { path = "crates/fern-ui-macros", version = "0.1.0" }
-fern-text = { path = "crates/fern-text", version = "0.1.0" }
-fern-render = { path = "crates/fern-render", version = "0.1.0" }
-fern-platform = { path = "crates/fern-platform", version = "0.1.0" }
-fern-app = { path = "crates/fern-app", version = "0.1.0" }
-fern-inspector = { path = "crates/fern-inspector", version = "0.1.0" }
-fern-resources = { path = "crates/fern-resources", version = "0.1.0" }
-fern-ui = { path = "crates/fern-ui", version = "0.1.0" }
-fern-preview = { path = "crates/fern-preview", version = "0.1.0" }
-fern-preview-ui = { path = "crates/fern-preview-ui", version = "0.1.0" }
+fern-tokens = { path = "crates/fern-tokens", version = "0.2.0" }
+fern-canvas = { path = "crates/fern-canvas", version = "0.2.0" }
+fern-core = { path = "crates/fern-core", version = "0.2.0" }
+fern-data = { path = "crates/fern-data", version = "0.2.0" }
+fern-settings = { path = "crates/fern-settings", version = "0.2.0" }
+fern-telemetry = { path = "crates/fern-telemetry", version = "0.2.0" }
+fern-analytics-plausible = { path = "crates/fern-analytics-plausible", version = "0.2.0" }
+fern-analytics-otlp = { path = "crates/fern-analytics-otlp", version = "0.2.0" }
+fern-widgets = { path = "crates/fern-widgets", version = "0.2.0" }
+fern-charts = { path = "crates/fern-charts", version = "0.2.0" }
+fern-scene = { path = "crates/fern-scene", version = "0.2.0" }
+fern-i18n = { path = "crates/fern-i18n", version = "0.2.0" }
+fern-i18n-macros = { path = "crates/fern-i18n-macros", version = "0.2.0" }
+cargo-fern-fmt = { path = "crates/cargo-fern-fmt", version = "0.2.0" }
+fern-fmt = { path = "crates/fern-fmt", version = "0.2.0" }
+fern-fmt-lsp = { path = "crates/fern-fmt-lsp", version = "0.2.0" }
+fern-parse = { path = "crates/fern-parse", version = "0.2.0" }
+fern-ui-macros = { path = "crates/fern-ui-macros", version = "0.2.0" }
+fern-text = { path = "crates/fern-text", version = "0.2.0" }
+fern-render = { path = "crates/fern-render", version = "0.2.0" }
+fern-platform = { path = "crates/fern-platform", version = "0.2.0" }
+fern-app = { path = "crates/fern-app", version = "0.2.0" }
+fern-inspector = { path = "crates/fern-inspector", version = "0.2.0" }
+fern-resources = { path = "crates/fern-resources", version = "0.2.0" }
+fern-ui = { path = "crates/fern-ui", version = "0.2.0" }
+fern-preview = { path = "crates/fern-preview", version = "0.2.0" }
+fern-preview-ui = { path = "crates/fern-preview-ui", version = "0.2.0" }
 
 # gRPC proto crate — lives in-tree as a workspace member so cross
 # builds and CI environments don't need the sibling `fern-collector`
@@ -89,9 +89,9 @@ fern-preview-ui = { path = "crates/fern-preview-ui", version = "0.1.0" }
 # no other framework crate uses them. The `fern-collector` server repo
 # path-deps back into this crate to keep the wire-format spec
 # single-sourced.
-fern-collector-proto = { path = "crates/fern-collector-proto", version = "0.1.0" }
-fern-analytics-fern = { path = "crates/fern-analytics-fern", version = "0.1.0" }
-fern-telemetry-codegen = { path = "crates/fern-telemetry-codegen", version = "0.1.0" }
+fern-collector-proto = { path = "crates/fern-collector-proto", version = "0.2.0" }
+fern-analytics-fern = { path = "crates/fern-analytics-fern", version = "0.2.0" }
+fern-telemetry-codegen = { path = "crates/fern-telemetry-codegen", version = "0.2.0" }
 
 
 [profile.release]

@@ -181,14 +181,14 @@ dependencies = [
 
 [[package]]
 name = "animations"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
 
 [[package]]
 name = "animations-kit"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
@@ -747,7 +747,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-fern-fmt"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-fmt",
  "tempfile",
@@ -756,7 +756,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-fern-telemetry-lint"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -789,7 +789,7 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chart-demo"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-charts",
  "fern-ui",
@@ -840,7 +840,7 @@ dependencies = [
 
 [[package]]
 name = "color-picker-demo"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
@@ -971,21 +971,21 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
 name = "data-collections"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
 
 [[package]]
 name = "data-grid"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
 
 [[package]]
 name = "datetime-pickers"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
  "jiff",
@@ -1014,7 +1014,7 @@ dependencies = [
 
 [[package]]
 name = "dialogs-and-popovers"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
@@ -1116,7 +1116,7 @@ checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 
 [[package]]
 name = "drag-and-drop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
@@ -1282,7 +1282,7 @@ dependencies = [
 
 [[package]]
 name = "fern-analytics-fern"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-collector-proto",
  "fern-core",
@@ -1298,7 +1298,7 @@ dependencies = [
 
 [[package]]
 name = "fern-analytics-otlp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-core",
  "fern-settings",
@@ -1311,7 +1311,7 @@ dependencies = [
 
 [[package]]
 name = "fern-analytics-plausible"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-core",
  "fern-settings",
@@ -1324,7 +1324,7 @@ dependencies = [
 
 [[package]]
 name = "fern-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-canvas",
  "fern-core",
@@ -1345,7 +1345,7 @@ dependencies = [
 
 [[package]]
 name = "fern-canvas"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-tokens",
  "image-webp",
@@ -1356,7 +1356,7 @@ dependencies = [
 
 [[package]]
 name = "fern-charts"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-canvas",
  "fern-core",
@@ -1369,7 +1369,7 @@ dependencies = [
 
 [[package]]
 name = "fern-collector-proto"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "prost",
  "prost-types",
@@ -1380,7 +1380,7 @@ dependencies = [
 
 [[package]]
 name = "fern-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "accesskit",
  "accesskit_consumer",
@@ -1394,7 +1394,7 @@ dependencies = [
 
 [[package]]
 name = "fern-data"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-core",
  "slotmap",
@@ -1402,7 +1402,7 @@ dependencies = [
 
 [[package]]
 name = "fern-fmt"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-parse",
  "proc-macro2",
@@ -1413,7 +1413,7 @@ dependencies = [
 
 [[package]]
 name = "fern-fmt-lsp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-fmt",
  "serde",
@@ -1422,7 +1422,7 @@ dependencies = [
 
 [[package]]
 name = "fern-i18n"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-core",
  "fern-i18n-macros",
@@ -1444,7 +1444,7 @@ dependencies = [
 
 [[package]]
 name = "fern-i18n-macros"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fluent-syntax",
  "proc-macro2",
@@ -1454,7 +1454,7 @@ dependencies = [
 
 [[package]]
 name = "fern-inspector"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-app",
  "fern-canvas",
@@ -1470,7 +1470,7 @@ dependencies = [
 
 [[package]]
 name = "fern-parse"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "proc-macro2",
  "syn",
@@ -1478,7 +1478,7 @@ dependencies = [
 
 [[package]]
 name = "fern-platform"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "accesskit",
  "accesskit_winit",
@@ -1501,7 +1501,7 @@ dependencies = [
 
 [[package]]
 name = "fern-preview"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-core",
  "fern-tokens",
@@ -1510,7 +1510,7 @@ dependencies = [
 
 [[package]]
 name = "fern-preview-ui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-app",
  "fern-canvas",
@@ -1529,7 +1529,7 @@ dependencies = [
 
 [[package]]
 name = "fern-render"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytemuck",
  "fern-canvas",
@@ -1541,7 +1541,7 @@ dependencies = [
 
 [[package]]
 name = "fern-resources"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1551,7 +1551,7 @@ dependencies = [
 
 [[package]]
 name = "fern-scene"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "accesskit",
  "fern-canvas",
@@ -1564,7 +1564,7 @@ dependencies = [
 
 [[package]]
 name = "fern-settings"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "directories",
  "fern-core",
@@ -1577,7 +1577,7 @@ dependencies = [
 
 [[package]]
 name = "fern-telemetry"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-core",
  "fern-settings",
@@ -1591,7 +1591,7 @@ dependencies = [
 
 [[package]]
 name = "fern-telemetry-codegen"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1602,7 +1602,7 @@ dependencies = [
 
 [[package]]
 name = "fern-text"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-canvas",
  "fern-tokens",
@@ -1612,7 +1612,7 @@ dependencies = [
 
 [[package]]
 name = "fern-tokens"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1620,7 +1620,7 @@ dependencies = [
 
 [[package]]
 name = "fern-ui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-app",
  "fern-canvas",
@@ -1641,7 +1641,7 @@ dependencies = [
 
 [[package]]
 name = "fern-ui-macros"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-parse",
  "proc-macro2",
@@ -1651,7 +1651,7 @@ dependencies = [
 
 [[package]]
 name = "fern-widgets"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "accesskit_consumer",
  "fern-canvas",
@@ -1671,7 +1671,7 @@ dependencies = [
 
 [[package]]
 name = "fern-widgets-previewer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-canvas",
  "fern-core",
@@ -1683,7 +1683,7 @@ dependencies = [
 
 [[package]]
 name = "file-dialogs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
@@ -2653,7 +2653,7 @@ dependencies = [
 
 [[package]]
 name = "internationalization"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
  "jiff",
@@ -3007,7 +3007,7 @@ dependencies = [
 
 [[package]]
 name = "menus-and-dropdowns"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
@@ -3052,7 +3052,7 @@ dependencies = [
 
 [[package]]
 name = "multi-window"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
@@ -3121,7 +3121,7 @@ dependencies = [
 
 [[package]]
 name = "new-widgets-kit"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
@@ -4167,7 +4167,7 @@ dependencies = [
 
 [[package]]
 name = "recent-projects"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
  "serde",
@@ -4281,14 +4281,14 @@ dependencies = [
 
 [[package]]
 name = "rich-text-editor"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
 
 [[package]]
 name = "rich-text-viewer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
@@ -4445,7 +4445,7 @@ dependencies = [
 
 [[package]]
 name = "scene-corkboard"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-scene",
  "fern-ui",
@@ -4453,7 +4453,7 @@ dependencies = [
 
 [[package]]
 name = "scene-showcase"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-scene",
  "fern-ui",
@@ -4632,7 +4632,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "shortcuts-demo"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
@@ -4671,7 +4671,7 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "simple-button"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
@@ -4788,7 +4788,7 @@ dependencies = [
 
 [[package]]
 name = "spin-box"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
@@ -4804,7 +4804,7 @@ dependencies = [
 
 [[package]]
 name = "split-view"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
@@ -4907,7 +4907,7 @@ dependencies = [
 
 [[package]]
 name = "tab-widget"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
@@ -4920,7 +4920,7 @@ checksum = "591ef38edfb78ca4771ee32cf494cb8771944bee237a9b91fc9c1424ac4b777b"
 
 [[package]]
 name = "telemetry-codegen"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-telemetry",
  "fern-telemetry-codegen",
@@ -4928,7 +4928,7 @@ dependencies = [
 
 [[package]]
 name = "telemetry-fern"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-analytics-fern",
  "fern-core",
@@ -4940,7 +4940,7 @@ dependencies = [
 
 [[package]]
 name = "telemetry-plausible"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-analytics-plausible",
  "fern-core",
@@ -4983,7 +4983,7 @@ dependencies = [
 
 [[package]]
 name = "text-and-layout"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
@@ -5276,7 +5276,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "title-bar-demo"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
@@ -5481,14 +5481,14 @@ dependencies = [
 
 [[package]]
 name = "tool-box"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
 
 [[package]]
 name = "tooltips-showcase"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
@@ -5572,7 +5572,7 @@ dependencies = [
 
 [[package]]
 name = "tree-table"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-ui",
 ]
@@ -6286,7 +6286,7 @@ dependencies = [
 
 [[package]]
 name = "widget-catalog"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fern-render",
  "fern-ui",
