@@ -28,17 +28,24 @@ use fern_ui::widgets::{
 
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
-    Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
-            let next = !is_dark.get();
-            is_dark.set(next);
-            ctx.set_theme(if next {
-                Theme::dark_default()
-            } else {
-                Theme::light_default()
-            });
-        }),
-    ))
+    fern!(
+        Toolbar {
+            HStack {
+                Spacer
+                Button::new_literal("Toggle Dark Mode") {
+                    on_activate_fn: move |ctx| {
+                        let next = !is_dark.get();
+                        is_dark.set(next);
+                        ctx.set_theme(if next {
+                            Theme::dark_default()
+                        } else {
+                            Theme::light_default()
+                        });
+                    }
+                }
+            }
+        }
+    )
 }
 
 #[derive(Debug)]
@@ -103,29 +110,24 @@ impl Widget for Root {
         let reset_timeout = self.values.timeout.clone();
         let reset_frequency = self.values.frequency.clone();
 
-        let root = ctx.add(
-            Padding::uniform(24.0).child(
-                Panel::new().child(
-                    Padding::uniform(20.0).child(
-                        VStack::new()
-                            .spacing(14.0)
+        let root = fern!(ctx => Padding::uniform(24.0) {
+                Panel {
+                    Padding::uniform(20.0) {
+                        VStack {
+                            spacing: 14.0
                             // Heading.
-                            .child(
-                                TextWidget::new_literal("SpinBox gallery")
-                                    .style(TextStyleRole::BodyBold)
-                                    .color(TextRole::Primary),
-                            )
-                            .child(
-                                TextWidget::new_literal(
-                                    "Every SpinBox feature on one page. \
-                                    Use arrow keys, Page↑/Page↓, mouse wheel, \
-                                    or the ± buttons; press Enter or Tab to commit typed input.",
-                                )
-                                .style(TextStyleRole::Body)
-                                .color(TextRole::Secondary),
-                            )
+                            TextWidget::new_literal("SpinBox gallery") {
+                                style: TextStyleRole::BodyBold
+                                color: TextRole::Primary
+                            }
+                            TextWidget::new_literal("Every SpinBox feature on one page. \
+                                            Use arrow keys, Page↑/Page↓, mouse wheel, \
+                                            or the ± buttons; press Enter or Tab to commit typed input.") {
+                                style: TextStyleRole::Body
+                                color: TextRole::Secondary
+                            }
                             // Row 1 — font size (integer, clamp, narrow width).
-                            .child(row(
+                            child: row(
                                 "Font size (narrow 80 dp)",
                                 SpinBox::new(self.values.font_size.clone(), 4, 96)
                                     .single_step(1)
@@ -134,9 +136,9 @@ impl Widget for Root {
                                     .width(80.0)
                                     .label("Font size"),
                                 font_size_text,
-                            ))
+                            )
                             // Row 2 — gain dB (float, 1 decimal).
-                            .child(row(
+                            child: row(
                                 "Gain",
                                 SpinBox::new(self.values.gain_db.clone(), -60.0, 12.0)
                                     .single_step(0.5)
@@ -149,9 +151,9 @@ impl Widget for Root {
                                     })
                                     .label("Gain"),
                                 gain_text,
-                            ))
+                            )
                             // Row 3 — opacity (integer, wrap mode for fun).
-                            .child(row(
+                            child: row(
                                 "Opacity",
                                 SpinBox::new(self.values.opacity.clone(), 0, 100)
                                     .single_step(5)
@@ -160,9 +162,9 @@ impl Widget for Root {
                                     .wrap_mode(WrapMode::Wrap)
                                     .label("Opacity"),
                                 opacity_text,
-                            ))
+                            )
                             // Row 4 — timeout with special value "Auto".
-                            .child(row(
+                            child: row(
                                 "Timeout",
                                 SpinBox::new(self.values.timeout.clone(), 0, 3600)
                                     .single_step(1)
@@ -171,9 +173,9 @@ impl Widget for Root {
                                     .special_value_text("Auto")
                                     .label("Timeout"),
                                 timeout_text,
-                            ))
+                            )
                             // Row 5 — frequency (adaptive step, wider width).
-                            .child(row(
+                            child: row(
                                 "Frequency (wider 180 dp)",
                                 SpinBox::new(self.values.frequency.clone(), 0.1, 20_000.0)
                                     .single_step(1.0)
@@ -184,9 +186,9 @@ impl Widget for Root {
                                     .width(180.0)
                                     .label("Frequency"),
                                 frequency_text,
-                            ))
+                            )
                             // Row 6 — Int UI-style dense field: buttons hidden.
-                            .child(row(
+                            child: row(
                                 "Font size (no buttons, Int UI)",
                                 SpinBox::new(self.values.font_size.clone(), 4, 96)
                                     .single_step(1)
@@ -195,100 +197,97 @@ impl Widget for Root {
                                     .show_buttons(false)
                                     .label("Font size, no buttons"),
                                 self.values.font_size.map(|v| format!("{} pt", v)),
-                            ))
+                            )
                             // Row 7 — read-only mirror of font_size.
-                            .child(row(
+                            child: row(
                                 "Font size (mirror, read-only)",
                                 SpinBox::new(self.values.mirror.clone(), 4, 96)
                                     .suffix(" pt")
                                     .read_only(true)
                                     .label("Font size mirror"),
                                 self.values.mirror.map(|v| format!("{} pt", v)),
-                            ))
+                            )
                             // ── Width gallery ──────────────────────
                             //
                             // Four SpinBoxes bound to the same `opacity`
                             // signal so the different widths are easy to
                             // compare side by side. Each row labels its
                             // width policy.
-                            .child(
-                                TextWidget::new_literal("Width control")
-                                    .style(TextStyleRole::BodyBold)
-                                    .color(TextRole::Primary),
-                            )
-                            .child(row(
+                            TextWidget::new_literal("Width control") {
+                                style: TextStyleRole::BodyBold
+                                color: TextRole::Primary
+                            }
+                            child: row(
                                 "Narrow — .width(64)",
                                 SpinBox::new(self.values.opacity.clone(), 0, 100)
                                     .suffix(" %")
                                     .width(64.0)
                                     .label("Opacity (narrow)"),
                                 self.values.opacity.map(|v| format!("{} %", v)),
-                            ))
-                            .child(row(
+                            )
+                            child: row(
                                 "Default — 120 dp cap",
                                 SpinBox::new(self.values.opacity.clone(), 0, 100)
                                     .suffix(" %")
                                     .label("Opacity (default)"),
                                 self.values.opacity.map(|v| format!("{} %", v)),
-                            ))
-                            .child(row(
+                            )
+                            child: row(
                                 "Wider — .width(220)",
                                 SpinBox::new(self.values.opacity.clone(), 0, 100)
                                     .suffix(" %")
                                     .width(220.0)
                                     .label("Opacity (wide)"),
                                 self.values.opacity.map(|v| format!("{} %", v)),
-                            ))
-                            .child(row(
+                            )
+                            child: row(
                                 "Chars — .width_chars(3) (fits \"100 %\")",
                                 SpinBox::new(self.values.opacity.clone(), 0, 100)
                                     .suffix(" %")
                                     .width_chars(3)
                                     .label("Opacity (3 chars)"),
                                 self.values.opacity.map(|v| format!("{} %", v)),
-                            ))
+                            )
                             // `.fill_width()` needs a flex parent to
                             // stretch into, so this row wraps the
                             // SpinBox in `Expand::horizontal()`
                             // instead of the normal `row` helper.
-                            .child(
-                                HStack::new()
-                                    .spacing(12.0)
-                                    .child(
-                                        MinSizeForLabel::new(TextWidget::new_literal(
-                                            "Fill — .fill_width()",
-                                        ))
-                                        .width(220.0),
-                                    )
-                                    .child(
-                                        Expand::horizontal().child(
-                                            SpinBox::new(self.values.opacity.clone(), 0, 100)
-                                                .suffix(" %")
-                                                .fill_width()
-                                                .label("Opacity (fill)"),
-                                        ),
-                                    )
-                                    .child(TextWidget::new_literal("").bind_text(
-                                        self.values.opacity.map(|v| format!("{} %", v)),
-                                    )),
-                            )
+                            HStack {
+                                spacing: 12.0
+                                MinSizeForLabel::new(TextWidget::new_literal(
+                                                "Fill — .fill_width()",
+                                            )) {
+                                    width: 220.0
+                                }
+                                Expand::horizontal() {
+                                    SpinBox::new(self.values.opacity.clone(), 0, 100) {
+                                        suffix: " %"
+                                        fill_width
+                                        label: "Opacity (fill)"
+                                    }
+                                }
+                                TextWidget::new_literal("") {
+                                    bind_text: self.values.opacity.map(|v| format!("{} %", v))
+                                }
+                            }
                             // Reset button.
-                            .child(
-                                HStack::new().spacing(8.0).child(
-                                    Button::new_literal("Reset all")
-                                        .style(ButtonVariant::Regular)
-                                        .on_activate_fn(move |_ctx| {
-                                            reset_font.set(12);
-                                            reset_gain.set(0.0);
-                                            reset_opacity.set(50);
-                                            reset_timeout.set(0);
-                                            reset_frequency.set(440.0);
-                                        }),
-                                ),
-                            ),
-                    ),
-                ),
-            ),
+                            HStack {
+                                spacing: 8.0
+                                Button::new_literal("Reset all") {
+                                    style: ButtonVariant::Regular
+                                    on_activate_fn: move |_ctx| {
+                                        reset_font.set(12);
+                                        reset_gain.set(0.0);
+                                        reset_opacity.set(50);
+                                        reset_timeout.set(0);
+                                        reset_frequency.set(440.0);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         );
         self.root_child_id = Some(root);
         vec![root]
@@ -308,11 +307,18 @@ fn row(
     spin: SpinBox<impl fern_ui::widgets::SpinValue>,
     readout: Signal<String>,
 ) -> impl Widget {
-    HStack::new()
-        .spacing(12.0)
-        .child(MinSizeForLabel::new(TextWidget::new_literal(label)).width(220.0))
-        .child(spin)
-        .child(TextWidget::new_literal("").bind_text(readout))
+    fern!(
+        HStack {
+            spacing: 12.0
+            MinSizeForLabel::new(TextWidget::new_literal(label)) {
+                width: 220.0
+            }
+            child: spin
+            TextWidget::new_literal("") {
+                bind_text: readout
+            }
+        }
+    )
 }
 
 /// Fixed-width label wrapper so the grid columns line up without a
@@ -384,10 +390,12 @@ fn main() {
                 .title("FernUI — SpinBox gallery")
                 .size(720, 560)
                 .root(|tree, _state| {
-                    tree.add(
-                        VStack::new()
-                            .child(dark_mode_toolbar())
-                            .child(Expand::new().child(Root::new())),
+                    fern!(tree => VStack {
+                            child: dark_mode_toolbar()
+                            Expand {
+                                Root::new()
+                            }
+                        }
                     )
                 }),
         )

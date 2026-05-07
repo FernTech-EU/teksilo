@@ -227,10 +227,27 @@ kicks in.
   hoist to the outermost block, so the widget is created
   unconditionally. Gate construction with `rust { ... }` if it matters.
 
+## Formatting
+
+After writing or editing a `fern!` block, run the dedicated formatter
+to canonicalize indentation, spacing, and line-wrapping inside the
+block (rustfmt skips `fern!` body content):
+
+- `cargo fern-fmt path/to/file.rs` — format a single file.
+- `cargo fern-fmt examples/widget_catalog` — walk a directory.
+- `cargo fern-fmt` — format from CWD (recurses, skips `target/`).
+- `cargo fern-fmt --check` — read-only; exits 1 if any file would
+  change. Use in CI / pre-merge verification.
+
+Run this **after** confirming the block compiles — formatting a
+syntactically broken block can mask the original error.
+
 ## Verifying changes
 
 - `cargo check -p <user-crate>` — fastest feedback after writing or
   editing a `fern!` block in an example or widget.
+- `cargo fern-fmt <path>` — canonicalize formatting once it compiles
+  (see "Formatting" above).
 - `cargo test -p widget-catalog` — existing structural assertions (e.g.
   `scroll_area_fills_remaining_space`) catch tree-shape regressions
   after a migration.
