@@ -1274,26 +1274,34 @@ impl WidgetTree {
         for callback in ctx.idle_callbacks {
             self.idle_queue.push_boxed(callback);
         }
-        if ctx.dismiss_all_overlays {
-            let dismissed = self.overlay_manager.dismiss_all();
-            self.dormant_dismissed_content(&dismissed, &mut *ops);
-        } else if ctx.dismiss_all_except_hosts {
-            self.dismiss_all_overlays_except_hosts(&mut *ops);
-        } else if ctx.dismiss_self_overlay_chain {
-            self.dismiss_self_overlay_chain_for_source(source_widget, &mut *ops);
-        } else if ctx.dismiss_top {
-            if let Some((_id, content_ids, focus_restore)) = self.overlay_manager.dismiss_top() {
-                self.dormant_dismissed_content(&content_ids, &mut *ops);
-                if let Some(restore_id) = focus_restore
-                    && self.arena.is_active(restore_id)
+        match ctx.dismiss_scope {
+            Some(crate::widget::DismissScope::All) => {
+                let dismissed = self.overlay_manager.dismiss_all();
+                self.dormant_dismissed_content(&dismissed, &mut *ops);
+            }
+            Some(crate::widget::DismissScope::AllExceptHosts) => {
+                self.dismiss_all_overlays_except_hosts(&mut *ops);
+            }
+            Some(crate::widget::DismissScope::SelfChain) => {
+                self.dismiss_self_overlay_chain_for_source(source_widget, &mut *ops);
+            }
+            Some(crate::widget::DismissScope::Top) => {
+                if let Some((_id, content_ids, focus_restore)) =
+                    self.overlay_manager.dismiss_top()
                 {
-                    self.focus_ops(restore_id, &mut *ops);
+                    self.dormant_dismissed_content(&content_ids, &mut *ops);
+                    if let Some(restore_id) = focus_restore
+                        && self.arena.is_active(restore_id)
+                    {
+                        self.focus_ops(restore_id, &mut *ops);
+                    }
                 }
             }
-        } else {
-            for id in ctx.overlay_dismissals {
-                let dismissed = self.overlay_manager.dismiss(id);
-                self.dormant_dismissed_content(&dismissed, &mut *ops);
+            None => {
+                for id in ctx.overlay_dismissals {
+                    let dismissed = self.overlay_manager.dismiss(id);
+                    self.dormant_dismissed_content(&dismissed, &mut *ops);
+                }
             }
         }
         for preserve_content in ctx.dismiss_descendant_overlays {

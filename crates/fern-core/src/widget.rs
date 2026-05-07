@@ -526,6 +526,26 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     }
 }
 
+/// Selects which overlay-dismissal pathway runs after a handler
+/// returns. Last-write-wins: each `dismiss_*_overlays()` setter
+/// overwrites the previous choice. `None` (the default) falls
+/// through to draining individual ids from `overlay_dismissals`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DismissScope {
+    /// Dismiss every overlay in the stack, including hosts.
+    All,
+    /// Dismiss every overlay whose content is *not* a host surface
+    /// (`Tooltip`, `Dialog`, `AlertDialog`). Used by popover triggers
+    /// and pre-show cleanup.
+    AllExceptHosts,
+    /// Walk up from the source widget's containing overlay,
+    /// dismissing menu-like overlays and stopping at the first host
+    /// surface. Used by menu / dropdown item activation.
+    SelfChain,
+    /// Dismiss the topmost overlay only.
+    Top,
+}
+
 /// Context available during event handling.
 pub struct EventContext<'ops> {
     pub(crate) cursor_request: Option<CursorIcon>,
@@ -535,20 +555,12 @@ pub struct EventContext<'ops> {
     pub(crate) dismiss_modal: bool,
     pub(crate) overlay_requests: Vec<crate::overlay::OverlayRequest>,
     pub(crate) overlay_dismissals: Vec<crate::overlay::OverlayId>,
-    /// Whether to dismiss all overlays (e.g., after menu item activation).
-    pub(crate) dismiss_all_overlays: bool,
-    /// Whether to dismiss the source widget's containing overlay chain
-    /// (menu cascade), stopping at any tooltip / dialog / alert-dialog
-    /// ancestor. Preferred over `dismiss_all_overlays` for menu/popover
-    /// item activation when the popover may be hosted inside an
-    /// unrelated overlay (e.g., a composite tooltip).
-    pub(crate) dismiss_self_overlay_chain: bool,
-    /// Dismiss every overlay whose content is *not* a host surface
-    /// (`Tooltip`, `Dialog`, `AlertDialog`) — leaves an outer composite
-    /// tooltip or modal hosting the trigger intact.
-    pub(crate) dismiss_all_except_hosts: bool,
-    /// Whether to dismiss just the topmost overlay (e.g., ArrowLeft in submenu).
-    pub(crate) dismiss_top: bool,
+    /// The dismissal scope chosen by the handler, if any. Set by
+    /// `dismiss_all_overlays()` / `dismiss_all_except_hosts()` /
+    /// `dismiss_self_overlay_chain()` / `dismiss_top_overlay()` —
+    /// last setter wins. `None` falls through to draining the
+    /// per-id `overlay_dismissals` vec instead.
+    pub(crate) dismiss_scope: Option<DismissScope>,
     /// Request to capture or release the pointer.
     pub(crate) pointer_capture: Option<bool>,
     /// Delayed overlay requests (request, delay, optional focus target).
@@ -668,10 +680,7 @@ impl<'ops> EventContext<'ops> {
             dismiss_modal: false,
             overlay_requests: Vec::new(),
             overlay_dismissals: Vec::new(),
-            dismiss_all_overlays: false,
-            dismiss_self_overlay_chain: false,
-            dismiss_all_except_hosts: false,
-            dismiss_top: false,
+            dismiss_scope: None,
             pointer_capture: None,
             delayed_overlay_requests: Vec::new(),
             timed_overlay_requests: Vec::new(),
@@ -995,7 +1004,7 @@ impl<'ops> EventContext<'ops> {
 
     /// Dismiss all active overlays (e.g., after a menu item is activated).
     pub fn dismiss_all_overlays(&mut self) {
-        self.dismiss_all_overlays = true;
+        self.dismiss_scope = Some(DismissScope::All);
     }
 
     /// Dismiss the source widget's containing overlay and any ancestor
@@ -1005,7 +1014,7 @@ impl<'ops> EventContext<'ops> {
     /// popover. Use for menu / dropdown item activation that wants to
     /// close the menu cascade without disturbing the host surface.
     pub fn dismiss_self_overlay_chain(&mut self) {
-        self.dismiss_self_overlay_chain = true;
+        self.dismiss_scope = Some(DismissScope::SelfChain);
     }
 
     /// Dismiss every overlay whose content is *not* a host surface
@@ -1015,13 +1024,13 @@ impl<'ops> EventContext<'ops> {
     /// want to close stale popovers / menus without taking a hosting
     /// surface with them.
     pub fn dismiss_all_except_hosts(&mut self) {
-        self.dismiss_all_except_hosts = true;
+        self.dismiss_scope = Some(DismissScope::AllExceptHosts);
     }
 
     /// Dismiss the topmost overlay only (e.g., closing a submenu while
     /// keeping the parent menu open).
     pub fn dismiss_top_overlay(&mut self) {
-        self.dismiss_top = true;
+        self.dismiss_scope = Some(DismissScope::Top);
     }
 
     /// Dismiss descendant overlays of the source widget's containing overlay.
