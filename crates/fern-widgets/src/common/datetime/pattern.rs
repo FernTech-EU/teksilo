@@ -267,8 +267,7 @@ pub fn format_value(pattern: &ParsedPattern, date: Option<Date>, time: Option<Ti
             PatternToken::Segment(kind) => {
                 let value = match (date, time) {
                     (Some(d), _) if segment_value_for_date(d, *kind).is_some() => {
-                        segment_value_for_date(d, *kind)
-                            .expect("guarded by is_some() above")
+                        segment_value_for_date(d, *kind).expect("guarded by is_some() above")
                     }
                     (_, Some(t)) => segment_value_for_time(t, *kind).unwrap_or(0),
                     (Some(d), None) => segment_value_for_date(d, *kind).unwrap_or(0),

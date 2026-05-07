@@ -70,19 +70,17 @@ const SCENE_MARGIN: f32 = 32.0;
 
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
-    Toolbar::new().child(
-        HStack::new().child(Spacer::new()).child(
-            Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
-                let next = !is_dark.get();
-                is_dark.set(next);
-                ctx.set_theme(if next {
-                    Theme::dark_default()
-                } else {
-                    Theme::light_default()
-                });
-            }),
-        ),
-    )
+    Toolbar::new().child(HStack::new().child(Spacer::new()).child(
+        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+            let next = !is_dark.get();
+            is_dark.set(next);
+            ctx.set_theme(if next {
+                Theme::dark_default()
+            } else {
+                Theme::light_default()
+            });
+        }),
+    ))
 }
 
 /// Story cards in reading order (top-leading to bottom-trailing).

@@ -231,8 +231,7 @@ impl SplitButton {
 
     /// Attach a rich tooltip to the chevron region.
     pub fn chevron_rich_tooltip(mut self, key: impl Into<String>) -> Self {
-        self.chevron_rich_tooltip_source =
-            Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.chevron_rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
         self.chevron_tooltip_text = None;
         self.chevron_composite_tooltip_content = None;
         self

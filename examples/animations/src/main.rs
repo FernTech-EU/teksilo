@@ -25,7 +25,10 @@ use std::time::Duration;
 
 use fern_ui::core::app_event::AppEvent;
 use fern_ui::prelude::*;
-use fern_ui::widgets::{Button, Expand, HStack, ProgressBar, Spacer, TabId, TabInfo, TabWidget, TextWidget, Toolbar, VStack};
+use fern_ui::widgets::{
+    Button, Expand, HStack, ProgressBar, Spacer, TabId, TabInfo, TabWidget, TextWidget, Toolbar,
+    VStack,
+};
 
 /// External `AppEvent` payload — the 5 s sleeper thread sends one to
 /// the UI thread, which downcasts and flips the tab signal.
@@ -34,19 +37,17 @@ struct SwitchToStaticTab;
 
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
-    Toolbar::new().child(
-        HStack::new().child(Spacer::new()).child(
-            Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
-                let next = !is_dark.get();
-                is_dark.set(next);
-                ctx.set_theme(if next {
-                    Theme::dark_default()
-                } else {
-                    Theme::light_default()
-                });
-            }),
-        ),
-    )
+    Toolbar::new().child(HStack::new().child(Spacer::new()).child(
+        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+            let next = !is_dark.get();
+            is_dark.set(next);
+            ctx.set_theme(if next {
+                Theme::dark_default()
+            } else {
+                Theme::light_default()
+            });
+        }),
+    ))
 }
 
 fn main() {
@@ -64,25 +65,24 @@ fn main() {
     let selected: Signal<Option<TabId>> = Signal::new(Some(animated_tab));
     let selected_for_root = selected.clone();
 
-    let mut builder = FernAppBuilder::new()
-        .install_inspector_in_debug()
-        .theme(Theme::light_default())
-        .initial_window(
-            WindowConfig::new()
-                .title("FernUI — Animations Drain Test")
-                .size(640, 420)
-                .root(move |tree, _state| {
-                    tree.add(
-                        VStack::new()
-                            .child(dark_mode_toolbar())
-                            .child(Expand::new().child(AnimationsRoot::new(
+    let mut builder =
+        FernAppBuilder::new()
+            .install_inspector_in_debug()
+            .theme(Theme::light_default())
+            .initial_window(
+                WindowConfig::new()
+                    .title("FernUI — Animations Drain Test")
+                    .size(640, 420)
+                    .root(move |tree, _state| {
+                        tree.add(VStack::new().child(dark_mode_toolbar()).child(
+                            Expand::new().child(AnimationsRoot::new(
                                 selected_for_root,
                                 animated_tab,
                                 static_tab,
-                            ))),
-                    )
-                }),
-        );
+                            )),
+                        ))
+                    }),
+            );
 
     if switch_after_5s {
         let selected_for_handler = selected;

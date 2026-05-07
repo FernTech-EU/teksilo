@@ -698,8 +698,7 @@ impl Widget for Root {
                             )
                             .separator()
                             .item(
-                                MenuItem::new_literal("Quit")
-                                    .on_activate_fn(|_| println!("Quit")),
+                                MenuItem::new_literal("Quit").on_activate_fn(|_| println!("Quit")),
                             ),
                     )
                 })
@@ -765,12 +764,11 @@ impl Widget for Root {
                                 )
                             }))
                             .separator()
-                            .item(
-                                MenuItem::new_literal("Toggle Dark Mode")
-                                    .on_activate_fn(|ctx| {
-                                        ctx.send_intent(AppIntent::ToggleDarkMode);
-                                    }),
-                            ),
+                            .item(MenuItem::new_literal("Toggle Dark Mode").on_activate_fn(
+                                |ctx| {
+                                    ctx.send_intent(AppIntent::ToggleDarkMode);
+                                },
+                            )),
                     )
                 })
                 .trailing_slot(

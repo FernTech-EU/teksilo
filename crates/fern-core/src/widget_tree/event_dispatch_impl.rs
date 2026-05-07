@@ -1286,8 +1286,7 @@ impl WidgetTree {
                 self.dismiss_self_overlay_chain_for_source(source_widget, &mut *ops);
             }
             Some(crate::widget::DismissScope::Top) => {
-                if let Some((_id, content_ids, focus_restore)) =
-                    self.overlay_manager.dismiss_top()
+                if let Some((_id, content_ids, focus_restore)) = self.overlay_manager.dismiss_top()
                 {
                     self.dormant_dismissed_content(&content_ids, &mut *ops);
                     if let Some(restore_id) = focus_restore

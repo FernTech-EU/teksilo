@@ -131,10 +131,7 @@ impl<T: 'static> std::fmt::Debug for TabDelegate<T> {
                 "has_rich_tooltip_content",
                 &self.rich_tooltip_content.is_some(),
             )
-            .field(
-                "has_composite_tooltip",
-                &self.composite_tooltip.is_some(),
-            )
+            .field("has_composite_tooltip", &self.composite_tooltip.is_some())
             .finish()
     }
 }
@@ -233,10 +230,7 @@ impl<T: 'static> TabDelegate<T> {
     /// Per-tab rich-tooltip registry key. Returning `Some(key)` makes
     /// the tab show a rich tooltip resolved against
     /// [`TooltipRegistry`](crate::tooltip::TooltipRegistry).
-    pub fn rich_tooltip_key(
-        mut self,
-        f: impl Fn(usize, &T) -> Option<String> + 'static,
-    ) -> Self {
+    pub fn rich_tooltip_key(mut self, f: impl Fn(usize, &T) -> Option<String> + 'static) -> Self {
         self.rich_tooltip_key = Some(Box::new(f));
         self.tooltip = None;
         self.rich_tooltip_content = None;
@@ -322,11 +316,7 @@ impl<T: 'static> TabDelegate<T> {
         self.tooltip.as_ref().and_then(|f| f(index, item))
     }
 
-    pub(crate) fn resolve_rich_tooltip(
-        &self,
-        index: usize,
-        item: &T,
-    ) -> Option<RichTooltipSource> {
+    pub(crate) fn resolve_rich_tooltip(&self, index: usize, item: &T) -> Option<RichTooltipSource> {
         if let Some(ref f) = self.rich_tooltip_key
             && let Some(k) = f(index, item)
         {

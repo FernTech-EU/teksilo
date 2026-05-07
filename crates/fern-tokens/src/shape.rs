@@ -129,10 +129,7 @@ impl ShapeTokens {
     /// Outer alphas: xs 85%, sm 22%, md 28%, lg 36%.
     /// Inner alphas (density-1.0 max): xs 85%, sm 50%, md 55%, lg 60%.
     pub fn light_default() -> Self {
-        Self::with_shadow_alphas(
-            [0.85, 0.22, 0.28, 0.36],
-            [0.85, 0.50, 0.55, 0.60],
-        )
+        Self::with_shadow_alphas([0.85, 0.22, 0.28, 0.36], [0.85, 0.50, 0.55, 0.60])
     }
 
     /// Dark-theme shadows — pure-black shadows blend into dark surfaces,
@@ -140,10 +137,7 @@ impl ShapeTokens {
     /// Outer alphas: xs 55%, sm 65%, md 70%, lg 80%.
     /// Inner alphas (density-1.0 max): xs 65%, sm 70%, md 75%, lg 85%.
     pub fn dark_default() -> Self {
-        Self::with_shadow_alphas(
-            [0.55, 0.65, 0.70, 0.80],
-            [0.65, 0.70, 0.75, 0.85],
-        )
+        Self::with_shadow_alphas([0.55, 0.65, 0.70, 0.80], [0.65, 0.70, 0.75, 0.85])
     }
 
     fn with_shadow_alphas(outer: [f32; 4], inner: [f32; 4]) -> Self {

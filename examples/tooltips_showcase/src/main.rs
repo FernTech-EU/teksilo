@@ -112,9 +112,10 @@ fn rich_column() -> impl Widget {
             .child(Button::new_literal("Hover for level 1").rich_tooltip(KEY_A))
             .child(Button::new_literal("Hover for level 2").rich_tooltip(KEY_B))
             .child(Button::new_literal("Hover for level 3").rich_tooltip(KEY_C))
-            .child(Button::new_literal("Plain among rich").tooltip_literal(
-                "Plain tooltip living in the rich column — diagnostic.",
-            ))
+            .child(
+                Button::new_literal("Plain among rich")
+                    .tooltip_literal("Plain tooltip living in the rich column — diagnostic."),
+            )
             .child(Spacer::new())
             .child(TextWidget::new_literal(
                 "Tip: dwell ~2 s to pin, then click links to chain.",
@@ -170,12 +171,9 @@ fn interactive_composite_body() -> impl Widget {
         .child(TextWidget::new_literal("Treasury report").style(TextStyleRole::BodyBold))
         .child(TextWidget::new_literal("This quarter: +423 coins"))
         .child(ProgressBar::new(0.42))
-        .child(
-            Button::new_literal("Open ledger")
-                .on_activate_fn(|_ctx| {
-                    println!("Open ledger pressed from inside a composite tooltip!");
-                }),
-        )
+        .child(Button::new_literal("Open ledger").on_activate_fn(|_ctx| {
+            println!("Open ledger pressed from inside a composite tooltip!");
+        }))
 }
 
 fn composite_column() -> impl Widget {
@@ -183,9 +181,13 @@ fn composite_column() -> impl Widget {
         VStack::new()
             .spacing(8.0)
             .child(TextWidget::new_literal("Composite tooltips").style(TextStyleRole::BodyBold))
-            .child(TextWidget::new_literal("(arbitrary widget tree, CK3-style)"))
+            .child(TextWidget::new_literal(
+                "(arbitrary widget tree, CK3-style)",
+            ))
             .child(Spacer::new())
-            .child(Button::new_literal("Province info").composite_tooltip(province_composite_body()))
+            .child(
+                Button::new_literal("Province info").composite_tooltip(province_composite_body()),
+            )
             .child(Button::new_literal("Tabbed details").composite_tooltip(tabbed_composite_body()))
             .child(
                 Button::new_literal("With internal Button")
@@ -201,12 +203,9 @@ fn composite_column() -> impl Widget {
 fn root() -> impl Widget {
     VStack::new()
         .spacing(12.0)
-        .child(
-            Padding::uniform(12.0).child(
-                TextWidget::new_literal("FernUI — Tooltips Showcase")
-                    .style(TextStyleRole::BodyBold),
-            ),
-        )
+        .child(Padding::uniform(12.0).child(
+            TextWidget::new_literal("FernUI — Tooltips Showcase").style(TextStyleRole::BodyBold),
+        ))
         .child(
             Expand::new().child(
                 HStack::new()

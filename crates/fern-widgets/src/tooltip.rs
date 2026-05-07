@@ -191,9 +191,7 @@ impl std::fmt::Debug for TooltipState {
 mod tests {
     use super::*;
     use fern_canvas::SizeProposal;
-    use fern_core::overlay::{
-        DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest,
-    };
+    use fern_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
     use fern_core::widget_tree::WidgetTree;
     use fern_tokens::Theme;
 
@@ -220,22 +218,20 @@ mod tests {
         tree.set_dormant(tip);
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
-        tree.show_overlay(
-            OverlayRequest {
-                content_id: tip,
-                anchor,
-                placement: OverlayPlacement::NearAnchor {
-                    offset: fern_canvas::Vec2::new(0.0, 8.0),
-                },
-                dismiss: DismissBehavior::PointerLeave {
-                    delay: std::time::Duration::from_millis(100),
-                },
-                layer: OverlayLayer::InTree,
-                parent_overlay: None,
-                on_dismiss: None,
-                fade_duration: Some(std::time::Duration::from_millis(120)),
+        tree.show_overlay(OverlayRequest {
+            content_id: tip,
+            anchor,
+            placement: OverlayPlacement::NearAnchor {
+                offset: fern_canvas::Vec2::new(0.0, 8.0),
             },
-        );
+            dismiss: DismissBehavior::PointerLeave {
+                delay: std::time::Duration::from_millis(100),
+            },
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: Some(std::time::Duration::from_millis(120)),
+        });
         tree.layout(SizeProposal::exact(800.0, 600.0));
         let frame = tree.render();
         assert!(

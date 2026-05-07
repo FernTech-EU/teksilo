@@ -24,24 +24,23 @@ use fern_ui::prelude::*;
 use fern_ui::widgets::{
     Blur, Button, ButtonVariant, Card, Center, Collapse, Crossfade, Cycle, Divider, Expand, Fade,
     FixedSize, HStack, Padding, Panel, ProgressBar, Pulse, RectWidget, Rotate, Scale, ScaleOrigin,
-    ScrollArea, Shake, Slide, SlideEdge, SmoothSize, Spacer, Spinner, TextWidget, Toggle, Toolbar, VStack, ZStack,
+    ScrollArea, Shake, Slide, SlideEdge, SmoothSize, Spacer, Spinner, TextWidget, Toggle, Toolbar,
+    VStack, ZStack,
 };
 
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
-    Toolbar::new().child(
-        HStack::new().child(Spacer::new()).child(
-            Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
-                let next = !is_dark.get();
-                is_dark.set(next);
-                ctx.set_theme(if next {
-                    Theme::dark_default()
-                } else {
-                    Theme::light_default()
-                });
-            }),
-        ),
-    )
+    Toolbar::new().child(HStack::new().child(Spacer::new()).child(
+        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+            let next = !is_dark.get();
+            is_dark.set(next);
+            ctx.set_theme(if next {
+                Theme::dark_default()
+            } else {
+                Theme::light_default()
+            });
+        }),
+    ))
 }
 
 fn main() {
@@ -59,11 +58,13 @@ fn main() {
                     tree.add(
                         VStack::new()
                             .child(dark_mode_toolbar())
-                            .child(Expand::new().child(ScrollArea::new().child(Padding::uniform(24.0).child(build_kit(
-                                toggle_state,
-                                collapse_expanded,
-                                fade_visible,
-                            ))))),
+                            .child(Expand::new().child(ScrollArea::new().child(
+                                Padding::uniform(24.0).child(build_kit(
+                                    toggle_state,
+                                    collapse_expanded,
+                                    fade_visible,
+                                )),
+                            ))),
                     )
                 }),
         )

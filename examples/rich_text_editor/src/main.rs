@@ -36,24 +36,22 @@
 
 use fern_ui::prelude::*;
 use fern_ui::text_document::TextDocument;
-use fern_ui::widgets::{Button, Expand, HStack, Spacer, SplitView, Toolbar};
 use fern_ui::widgets::rich_text::{RichTextEditor, ScrollPolicy};
+use fern_ui::widgets::{Button, Expand, HStack, Spacer, SplitView, Toolbar};
 
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
-    Toolbar::new().child(
-        HStack::new().child(Spacer::new()).child(
-            Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
-                let next = !is_dark.get();
-                is_dark.set(next);
-                ctx.set_theme(if next {
-                    Theme::dark_default()
-                } else {
-                    Theme::light_default()
-                });
-            }),
-        ),
-    )
+    Toolbar::new().child(HStack::new().child(Spacer::new()).child(
+        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+            let next = !is_dark.get();
+            is_dark.set(next);
+            ctx.set_theme(if next {
+                Theme::dark_default()
+            } else {
+                Theme::light_default()
+            });
+        }),
+    ))
 }
 
 const SAMPLE: &str = r#"# Rich Text Editor — Preview Pane
@@ -135,14 +133,16 @@ fn main() {
                     tree.add(
                         fern_ui::widgets::VStack::new()
                             .child(dark_mode_toolbar())
-                            .child(Expand::new().child(
-                                SplitView::new(split)
-                                    .first(RichTextEditor::editor(doc_editor))
-                                    .second(
-                                        RichTextEditor::read_only(doc_preview)
-                                            .v_scroll_policy(ScrollPolicy::Auto),
-                                    ),
-                            )),
+                            .child(
+                                Expand::new().child(
+                                    SplitView::new(split)
+                                        .first(RichTextEditor::editor(doc_editor))
+                                        .second(
+                                            RichTextEditor::read_only(doc_preview)
+                                                .v_scroll_policy(ScrollPolicy::Auto),
+                                        ),
+                                ),
+                            ),
                     )
                 }),
         )

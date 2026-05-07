@@ -813,7 +813,10 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                 let child_size = ctx
                     .child_size(id, proposal)
                     .unwrap_or_else(|| proposal.resolve(0.0, 0.0));
-                Size::new(child_size.width.max(120.0), child_size.height.max(min_height))
+                Size::new(
+                    child_size.width.max(120.0),
+                    child_size.height.max(min_height),
+                )
             }
             None => proposal.resolve(120.0, min_height),
         }

@@ -42,7 +42,7 @@ use crate::radio_button::RadioButton;
 
 enum RadioGroupChild {
     /// A radio button whose `group_ids` buffer gets injected at build time.
-    Radio(RadioButton),
+    Radio(Box<RadioButton>),
     /// Any other widget — dividers, section labels, spacers. Passed
     /// straight through to the internal stack without any a11y wiring.
     Other(Box<dyn Widget>),
@@ -107,7 +107,7 @@ impl RadioGroup {
     /// injected into the radio at build time so its accessibility
     /// impl can publish group membership via `push_to_radio_group`.
     pub fn radio(mut self, button: RadioButton) -> Self {
-        self.pending.push(RadioGroupChild::Radio(button));
+        self.pending.push(RadioGroupChild::Radio(Box::new(button)));
         self
     }
 
@@ -153,7 +153,7 @@ impl Widget for RadioGroup {
             .map(|child| match child {
                 RadioGroupChild::Radio(mut rb) => {
                     rb.set_group_ids(self.group_ids.clone());
-                    let id = ctx.add(rb);
+                    let id = ctx.add(*rb);
                     self.group_ids.borrow_mut().push(id);
                     id
                 }

@@ -17,7 +17,9 @@ use fern_core::signal::Signal;
 use fern_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_platform::ClipboardHandle;
-use fern_tokens::{Color, ColorTokens, ComponentStyles, ShapeTokens, TextRole, TextStyleRole, Theme};
+use fern_tokens::{
+    Color, ColorTokens, ComponentStyles, ShapeTokens, TextRole, TextStyleRole, Theme,
+};
 use fern_widgets::primitives::{HStack, Padding, Spacer, VStack};
 use fern_widgets::{Button, ColorEdit, ScrollArea, Slider, TextWidget};
 
@@ -41,11 +43,7 @@ type ColorAccess = (
 /// f32 token getter / setter pair, used for both shape-shadow alphas
 /// (read against `ShapeTokens`) and component-level `shadow_density`
 /// (read against `ComponentStyles`).
-type F32Access<Owner> = (
-    &'static str,
-    fn(&Owner) -> f32,
-    fn(&mut Owner, f32),
-);
+type F32Access<Owner> = (&'static str, fn(&Owner) -> f32, fn(&mut Owner, f32));
 
 const SHOWN_SHADOW_ALPHAS: &[F32Access<ShapeTokens>] = &[
     (

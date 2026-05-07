@@ -10,8 +10,8 @@
 
 use fern_ui::prelude::*;
 use fern_ui::text_document::TextDocument;
-use fern_ui::widgets::{Button, Expand, HStack, Spacer, Toolbar};
 use fern_ui::widgets::rich_text::RichTextEditor;
+use fern_ui::widgets::{Button, Expand, HStack, Spacer, Toolbar};
 
 const SAMPLE: &str = r#"# FernUI Rich Text Viewer
 
@@ -71,19 +71,17 @@ tables needs test hardware with a range of DPIs.
 
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
-    Toolbar::new().child(
-        HStack::new().child(Spacer::new()).child(
-            Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
-                let next = !is_dark.get();
-                is_dark.set(next);
-                ctx.set_theme(if next {
-                    Theme::dark_default()
-                } else {
-                    Theme::light_default()
-                });
-            }),
-        ),
-    )
+    Toolbar::new().child(HStack::new().child(Spacer::new()).child(
+        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+            let next = !is_dark.get();
+            is_dark.set(next);
+            ctx.set_theme(if next {
+                Theme::dark_default()
+            } else {
+                Theme::light_default()
+            });
+        }),
+    ))
 }
 
 fn main() {

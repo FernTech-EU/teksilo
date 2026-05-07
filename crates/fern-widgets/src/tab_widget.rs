@@ -661,10 +661,7 @@ impl Widget for TabWidget {
                 _ => None,
             }));
         delegate.composite_tooltip = Some(Box::new(|_, h: &TabHandle| {
-            h.info
-                .composite_tooltip
-                .as_ref()
-                .map(|factory| factory())
+            h.info.composite_tooltip.as_ref().map(|factory| factory())
         }));
 
         // Shared panel-id buffer: the Switcher writes panel widget

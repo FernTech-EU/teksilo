@@ -184,8 +184,7 @@ impl Widget for CompositeTooltipWidget {
         );
 
         let padded = ctx.add(
-            Padding::symmetric(style.padding_vertical, style.padding_horizontal)
-                .child_id(scrolled),
+            Padding::symmetric(style.padding_vertical, style.padding_horizontal).child_id(scrolled),
         );
 
         let indicator = ctx.add(DwellIndicator::new(
@@ -398,7 +397,9 @@ mod tests {
         tree.advance_time(DEFAULT_COMPOSITE_TOOLTIP_DELAY + Duration::from_millis(50));
         assert_eq!(tree.active_overlays().len(), 1);
 
-        let content_id = tooltip_id_sink.get().expect("tooltip id captured during build");
+        let content_id = tooltip_id_sink
+            .get()
+            .expect("tooltip id captured during build");
         tree.promote_tooltip_to_sticky(content_id);
 
         tree.pointer_move(fern_canvas::Point::new(2000.0, 2000.0));

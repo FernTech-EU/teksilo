@@ -601,7 +601,7 @@ impl fern_core::widget::Widget for IconButton {
         // applies when a `toggled_icon` was provided via
         // `toggle_with_icon`; surface-tint-only toggle keeps the same
         // glyph throughout.
-        let icon_content_id = if let (Some(ref toggled), Some(_)) =
+        let icon_content_id = if let (Some(toggled), Some(_)) =
             (self.toggled.as_ref(), self.toggled_icon.as_ref())
         {
             let toggled_index = toggled.map(|v| if *v { 1 } else { 0 });

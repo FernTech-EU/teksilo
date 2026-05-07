@@ -3090,9 +3090,9 @@ impl WidgetCatalog {
                                     color: TextRole::Primary
                                 }
                                 TextWidget::new_literal("TabWidget is a retained container with dormant panes: \
-                                                             only the active tab is built, inactive panes keep \
-                                                             their state but don't receive layout or paint until \
-                                                             they're re-activated.") {
+                                                                         only the active tab is built, inactive panes keep \
+                                                                         their state but don't receive layout or paint until \
+                                                                         they're re-activated.") {
                                     style: TextStyleRole::Body
                                     color: TextRole::Primary
                                 }
@@ -3113,8 +3113,8 @@ impl WidgetCatalog {
                                     color: TextRole::Primary
                                 }
                                 TextWidget::new_literal("Press Tab to move focus into the tab strip, then \
-                                                             Arrow Left / Arrow Right to switch between tabs. \
-                                                             Disabled tabs are skipped by keyboard navigation.") {
+                                                                         Arrow Left / Arrow Right to switch between tabs. \
+                                                                         Disabled tabs are skipped by keyboard navigation.") {
                                     style: TextStyleRole::Body
                                     color: TextRole::Primary
                                 }
@@ -3129,9 +3129,9 @@ impl WidgetCatalog {
                                     color: TextRole::Primary
                                 }
                                 TextWidget::new_literal("Int UI tabs: flat headers, no rounded corners, no \
-                                                             borders. The selected tab is marked only by a 3 dp \
-                                                             accent underline at its bottom edge, which \
-                                                             overpaints the tab bar's own 1 dp separator.") {
+                                                                         borders. The selected tab is marked only by a 3 dp \
+                                                                         accent underline at its bottom edge, which \
+                                                                         overpaints the tab bar's own 1 dp separator.") {
                                     style: TextStyleRole::Body
                                     color: TextRole::Primary
                                 }
@@ -3140,7 +3140,7 @@ impl WidgetCatalog {
                         static_tab: tab_info_disabled("Disabled"), Panel {
                             padding: 16.0
                             TextWidget::new_literal("Disabled panes are still listed in the tab bar but \
-                                             cannot be activated by click or keyboard.") {
+                                                         cannot be activated by click or keyboard.") {
                                 style: TextStyleRole::Body
                                 color: TextRole::Primary
                             }
@@ -3182,7 +3182,7 @@ impl WidgetCatalog {
                     color: TextRole::Primary
                 }
                 TextWidget::new_literal("Hover the buttons below. Inline `[label](:key)` links \
-                                             open nested tooltips; `https://` links open in the browser.") {
+                                                         open nested tooltips; `https://` links open in the browser.") {
                     style: TextStyleRole::Small
                     color: TextRole::Secondary
                 }

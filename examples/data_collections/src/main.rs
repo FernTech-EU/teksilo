@@ -19,25 +19,23 @@ use fern_ui::core::widget::WidgetPlacement;
 use fern_ui::data::{ListModel, SelectionMode, SelectionModel, TreeModel};
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Button, ButtonVariant, Card, Expand, HStack, ListView, Padding, Panel, RectWidget, Repeater, Spacer,
-    TabId, TabInfo, TabWidget, TextWidget, Toolbar, TreeView, VStack, ZStack,
+    Button, ButtonVariant, Card, Expand, HStack, ListView, Padding, Panel, RectWidget, Repeater,
+    Spacer, TabId, TabInfo, TabWidget, TextWidget, Toolbar, TreeView, VStack, ZStack,
 };
 
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
-    Toolbar::new().child(
-        HStack::new().child(Spacer::new()).child(
-            Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
-                let next = !is_dark.get();
-                is_dark.set(next);
-                ctx.set_theme(if next {
-                    Theme::dark_default()
-                } else {
-                    Theme::light_default()
-                });
-            }),
-        ),
-    )
+    Toolbar::new().child(HStack::new().child(Spacer::new()).child(
+        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+            let next = !is_dark.get();
+            is_dark.set(next);
+            ctx.set_theme(if next {
+                Theme::dark_default()
+            } else {
+                Theme::light_default()
+            });
+        }),
+    ))
 }
 
 // ---------------------------------------------------------------------------

@@ -12,26 +12,24 @@
 use fern_ui::core::WidgetPlacement;
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Button, Calendar, DateEdit, DateRange, DateRangeEdit, DateTimeEdit, Expand, GroupHeader, HStack, Padding,
-    Panel, SecondsMode, Spacer, TextWidget, TimeEdit, TimeFormat, Toolbar, VStack,
+    Button, Calendar, DateEdit, DateRange, DateRangeEdit, DateTimeEdit, Expand, GroupHeader,
+    HStack, Padding, Panel, SecondsMode, Spacer, TextWidget, TimeEdit, TimeFormat, Toolbar, VStack,
 };
 use jiff::civil::{Date, DateTime, Time};
 
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
-    Toolbar::new().child(
-        HStack::new().child(Spacer::new()).child(
-            Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
-                let next = !is_dark.get();
-                is_dark.set(next);
-                ctx.set_theme(if next {
-                    Theme::dark_default()
-                } else {
-                    Theme::light_default()
-                });
-            }),
-        ),
-    )
+    Toolbar::new().child(HStack::new().child(Spacer::new()).child(
+        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+            let next = !is_dark.get();
+            is_dark.set(next);
+            ctx.set_theme(if next {
+                Theme::dark_default()
+            } else {
+                Theme::light_default()
+            });
+        }),
+    ))
 }
 
 #[derive(Debug)]

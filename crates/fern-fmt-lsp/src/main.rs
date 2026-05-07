@@ -95,9 +95,9 @@ impl Server {
                 self.handle_did_close(&params);
                 None
             }
-            ("textDocument/formatting", true) => Some(
-                self.handle_formatting(id.expect("matched on id.is_some() == true"), &params),
-            ),
+            ("textDocument/formatting", true) => {
+                Some(self.handle_formatting(id.expect("matched on id.is_some() == true"), &params))
+            }
             ("shutdown", true) => Some(ok(
                 id.expect("matched on id.is_some() == true"),
                 Value::Null,

@@ -54,21 +54,34 @@ impl StubReporter {
     }
 
     pub fn recorded_count(&self) -> usize {
-        self.recorded.lock().expect("StubReporter mutex poisoned").len()
+        self.recorded
+            .lock()
+            .expect("StubReporter mutex poisoned")
+            .len()
     }
 
     pub fn last_recorded_name(&self) -> Option<String> {
-        self.recorded.lock().expect("StubReporter mutex poisoned").last().map(|e| e.name.clone())
+        self.recorded
+            .lock()
+            .expect("StubReporter mutex poisoned")
+            .last()
+            .map(|e| e.name.clone())
     }
 
     pub fn clear_recorded(&self) {
-        self.recorded.lock().expect("StubReporter mutex poisoned").clear();
+        self.recorded
+            .lock()
+            .expect("StubReporter mutex poisoned")
+            .clear();
     }
 }
 
 impl UsageReporter for StubReporter {
     fn record(&self, event: &Event<'_>) {
-        self.recorded.lock().expect("StubReporter mutex poisoned").push(event.to_owned());
+        self.recorded
+            .lock()
+            .expect("StubReporter mutex poisoned")
+            .push(event.to_owned());
     }
 
     fn discard_pending(&self) -> Result<(), TelemetryError> {

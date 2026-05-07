@@ -308,8 +308,10 @@ mod tests {
     #[test]
     fn fully_invisible_shadow_emits_nothing() {
         // Both alphas zero ⇒ no draw commands at all.
-        let mut zero = Shadow::default();
-        zero.color = Color::new(0.0, 0.0, 0.0, 0.0);
+        let zero = Shadow {
+            color: Color::new(0.0, 0.0, 0.0, 0.0),
+            ..Default::default()
+        };
         let frame = capture_frame(|c| {
             paint_layered_shadow(
                 c,
@@ -330,11 +332,13 @@ mod tests {
         // Offset y = +blur + 1: shadow shifts down enough that nothing
         // pokes past the top edge. shadow_extent_in(Up) should clamp
         // to zero. shadow_extent_in(Down) should be 2*blur + 1.
-        let mut s = Shadow::default();
-        s.blur = 10.0;
-        s.spread = 0.0;
-        s.offset_y = 11.0;
-        s.color = Color::new(0.0, 0.0, 0.0, 0.5);
+        let s = Shadow {
+            blur: 10.0,
+            spread: 0.0,
+            offset_y: 11.0,
+            color: Color::new(0.0, 0.0, 0.0, 0.5),
+            ..Default::default()
+        };
         assert_eq!(shadow_extent_in(&s, Direction::Up), 0.0);
         assert!((shadow_extent_in(&s, Direction::Down) - 21.0).abs() < 0.001);
         assert!((shadow_extent_in(&s, Direction::Left) - 10.0).abs() < 0.001);

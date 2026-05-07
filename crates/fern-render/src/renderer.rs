@@ -1466,8 +1466,7 @@ impl Renderer {
                                 bucket_w: blurred.bucket_w,
                                 bucket_h: blurred.bucket_h,
                                 bounds,
-                            },
-                        );
+                            });
                     }
                     _ => unreachable!("inner loop only breaks on Begin/End"),
                 }
