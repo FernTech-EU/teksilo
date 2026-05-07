@@ -190,6 +190,19 @@ impl WidgetTree {
         self.process_pointer_leave_overlays_real(&mut *ops);
         self.process_auto_dismiss_overlays_real(&mut *ops);
         self.process_overlay_fade_dismissals_real(&mut *ops);
+        // The show paths above may arm a fade animation via
+        // `attach_overlay_fade` (plain tooltips, delayed overlays).
+        // That sets `pending` on the opacity signal but does NOT
+        // register the animation with the scheduler — registration
+        // happens via `process_pending_animations`, which already ran
+        // earlier in this layout pass. Without a second drain here,
+        // the fade only enters the scheduler on the *next* layout
+        // pass, and for surfaces with no further wake source (plain
+        // tooltips, no dwell timer) `next_deadline` returns `None`
+        // and the event loop sleeps with the fade stuck at opacity 0
+        // — the tooltip is "shown" but invisible until an unrelated
+        // input event forces another layout pass.
+        self.process_pending_animations();
         // Overlay / tooltip activation may have flipped widgets from
         // dormant → active; if any of those had `needs_rebuild`
         // pending (e.g. a shortcut rebind happened while the tooltip
