@@ -537,6 +537,12 @@ pub struct EventContext<'ops> {
     pub(crate) overlay_dismissals: Vec<crate::overlay::OverlayId>,
     /// Whether to dismiss all overlays (e.g., after menu item activation).
     pub(crate) dismiss_all_overlays: bool,
+    /// Whether to dismiss the source widget's containing overlay chain
+    /// (menu cascade), stopping at any tooltip / dialog / alert-dialog
+    /// ancestor. Preferred over `dismiss_all_overlays` for menu/popover
+    /// item activation when the popover may be hosted inside an
+    /// unrelated overlay (e.g., a composite tooltip).
+    pub(crate) dismiss_self_overlay_chain: bool,
     /// Whether to dismiss just the topmost overlay (e.g., ArrowLeft in submenu).
     pub(crate) dismiss_top: bool,
     /// Request to capture or release the pointer.
@@ -659,6 +665,7 @@ impl<'ops> EventContext<'ops> {
             overlay_requests: Vec::new(),
             overlay_dismissals: Vec::new(),
             dismiss_all_overlays: false,
+            dismiss_self_overlay_chain: false,
             dismiss_top: false,
             pointer_capture: None,
             delayed_overlay_requests: Vec::new(),
@@ -984,6 +991,17 @@ impl<'ops> EventContext<'ops> {
     /// Dismiss all active overlays (e.g., after a menu item is activated).
     pub fn dismiss_all_overlays(&mut self) {
         self.dismiss_all_overlays = true;
+    }
+
+    /// Dismiss the source widget's containing overlay and any ancestor
+    /// overlays in the chain that are menu-like (anything that isn't a
+    /// `Role::Tooltip`, `Role::Dialog`, or `Role::AlertDialog`).
+    /// Preferred over [`dismiss_all_overlays`](Self::dismiss_all_overlays)
+    /// for menu / dropdown item activation: closes the menu cascade
+    /// without disturbing an outer composite tooltip or modal hosting
+    /// the popover.
+    pub fn dismiss_self_overlay_chain(&mut self) {
+        self.dismiss_self_overlay_chain = true;
     }
 
     /// Dismiss the topmost overlay only (e.g., closing a submenu while

@@ -357,6 +357,63 @@ impl WidgetTree {
         }
     }
 
+    /// Dismiss the menu chain anchored to `source_widget`. Walks from
+    /// the source's containing overlay up the `parent_overlay` chain,
+    /// collecting every overlay whose content role is *not* a "stop"
+    /// role (`Tooltip`, `Dialog`, `AlertDialog`). Dismisses the
+    /// topmost collected overlay — `OverlayManager::dismiss` cascades
+    /// to descendants, so the entire menu/popover cascade closes in
+    /// one go while a hosting tooltip / dialog is preserved.
+    ///
+    /// Replacement for `dismiss_all_overlays` in menu / dropdown item
+    /// activation handlers, where the popover may be hosted inside a
+    /// composite tooltip and "all overlays" is too broad.
+    pub(super) fn dismiss_self_overlay_chain_for_source(
+        &mut self,
+        source_widget: WidgetId,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        let Some(start) = self.overlay_ancestor_for_widget(source_widget) else {
+            return;
+        };
+
+        let mut topmost_to_dismiss: Option<crate::overlay::OverlayId> = None;
+        let mut current = Some(start);
+        while let Some(overlay_id) = current {
+            let Some(overlay) = self.overlay_manager.overlay(overlay_id) else {
+                break;
+            };
+            // Stop if this overlay is a "host" surface (tooltip /
+            // dialog / alert dialog) — preserve it and anything above.
+            if let Some(node) = self.arena.get(overlay.content_id) {
+                let mut builder = AccessNodeBuilder::new();
+                node.widget.accessibility(&mut builder);
+                let role = builder.role();
+                if matches!(
+                    role,
+                    accesskit::Role::Tooltip
+                        | accesskit::Role::Dialog
+                        | accesskit::Role::AlertDialog
+                ) {
+                    break;
+                }
+            }
+            topmost_to_dismiss = Some(overlay_id);
+            current = overlay.parent_overlay;
+        }
+
+        if let Some(target) = topmost_to_dismiss {
+            let (dismissed, focus_restore) =
+                self.overlay_manager.dismiss_with_focus_restore(target);
+            self.dormant_dismissed_content(&dismissed, &mut *ops);
+            if let Some(restore_id) = focus_restore
+                && self.arena.is_active(restore_id)
+            {
+                self.focus_ops(restore_id, &mut *ops);
+            }
+        }
+    }
+
     pub(super) fn dismiss_modal_for_source(
         &mut self,
         source_widget: WidgetId,

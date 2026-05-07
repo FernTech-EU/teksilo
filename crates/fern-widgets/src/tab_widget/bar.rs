@@ -1591,7 +1591,7 @@ fn build_overflow_dropdown(
                 .enabled(enabled)
                 .on_activate_fn(move |ctx: &mut EventContext| {
                     sel.set(Some(entry_id));
-                    ctx.dismiss_all_overlays();
+                    ctx.dismiss_self_overlay_chain();
                 }),
         ) as Box<dyn Widget>
     })

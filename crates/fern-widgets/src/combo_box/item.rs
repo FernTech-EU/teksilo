@@ -135,7 +135,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
         let handler_set = HandlerSet::new()
             .on_tap(move |_pos, ctx: &mut EventContext| {
                 selected_signal.set(Some(value_for_tap.clone()));
-                ctx.dismiss_all_overlays();
+                ctx.dismiss_self_overlay_chain();
             })
             .on_hover({
                 let highlighted = highlighted.clone();

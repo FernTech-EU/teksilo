@@ -623,7 +623,7 @@ impl Widget for MenuItem {
                         int_tap.set(MenuItemState::Pressed);
                         if let Some(ref action) = *action_for_tap {
                             action(ctx);
-                            ctx.dismiss_all_overlays();
+                            ctx.dismiss_self_overlay_chain();
                         }
                         // Reset to Idle after dispatching — the
                         // overlay dismissal swallows the trailing
@@ -668,7 +668,7 @@ impl Widget for MenuItem {
                     } => {
                         if let Some(ref action) = *action_for_key {
                             action(ctx);
-                            ctx.dismiss_all_overlays();
+                            ctx.dismiss_self_overlay_chain();
                         } else if let Some(sub_id) = sub_id {
                             ctx.dismiss_child_overlays_except(sub_id);
                             ctx.activate(sub_id);

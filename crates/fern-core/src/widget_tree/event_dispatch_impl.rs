@@ -1277,6 +1277,8 @@ impl WidgetTree {
         if ctx.dismiss_all_overlays {
             let dismissed = self.overlay_manager.dismiss_all();
             self.dormant_dismissed_content(&dismissed, &mut *ops);
+        } else if ctx.dismiss_self_overlay_chain {
+            self.dismiss_self_overlay_chain_for_source(source_widget, &mut *ops);
         } else if ctx.dismiss_top {
             if let Some((_id, content_ids, focus_restore)) = self.overlay_manager.dismiss_top() {
                 self.dormant_dismissed_content(&content_ids, &mut *ops);
