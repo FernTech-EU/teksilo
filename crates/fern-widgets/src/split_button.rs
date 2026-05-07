@@ -64,10 +64,21 @@ pub struct SplitButton {
     promote_on_select: bool,
     /// Tooltip shown on hover over the main (default-action) region.
     tooltip_text: Option<String>,
+    /// Rich tooltip source for the main region (registry key or inline
+    /// content). Mutually exclusive with `tooltip_text` and
+    /// `composite_tooltip_content`.
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Composite tooltip body for the main region (CK3-style widget
+    /// tree). Mutually exclusive with the other two main slots.
+    composite_tooltip_content: Option<Box<dyn fern_core::widget::Widget>>,
     /// Tooltip shown on hover over the trailing chevron region. Falls
     /// back to a generic "Show dropdown menu" label when not explicitly
     /// set, since the chevron region has no label of its own.
     chevron_tooltip_text: Option<String>,
+    /// Rich tooltip source for the chevron region.
+    chevron_rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Composite tooltip body for the chevron region.
+    chevron_composite_tooltip_content: Option<Box<dyn fern_core::widget::Widget>>,
     // Build state
     interaction: Signal<InteractionState>,
     selected: Signal<usize>,
@@ -93,7 +104,11 @@ impl SplitButton {
             initial_selected: 0,
             promote_on_select: true,
             tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
             chevron_tooltip_text: None,
+            chevron_rich_tooltip_source: None,
+            chevron_composite_tooltip_content: None,
             interaction: Signal::new(InteractionState::Idle),
             selected: Signal::new(0),
             labels: Rc::new(Vec::new()),
@@ -156,6 +171,8 @@ impl SplitButton {
     pub fn tooltip(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
         let ls: fern_i18n::LocalizedString = text.into();
         self.tooltip_text = Some(ls.resolve_now());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
         self
     }
 
@@ -163,6 +180,32 @@ impl SplitButton {
     #[doc(hidden)]
     pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip to the main region.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip to the main region driven by inline `TooltipContent`.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip to the main region.
+    pub fn composite_tooltip(mut self, content: impl fern_core::widget::Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 
@@ -172,6 +215,8 @@ impl SplitButton {
     pub fn chevron_tooltip(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
         let ls: fern_i18n::LocalizedString = text.into();
         self.chevron_tooltip_text = Some(ls.resolve_now());
+        self.chevron_rich_tooltip_source = None;
+        self.chevron_composite_tooltip_content = None;
         self
     }
 
@@ -179,6 +224,37 @@ impl SplitButton {
     #[doc(hidden)]
     pub fn chevron_tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.chevron_tooltip_text = Some(text.into());
+        self.chevron_rich_tooltip_source = None;
+        self.chevron_composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip to the chevron region.
+    pub fn chevron_rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.chevron_rich_tooltip_source =
+            Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.chevron_tooltip_text = None;
+        self.chevron_composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip to the chevron region driven by inline `TooltipContent`.
+    pub fn chevron_rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.chevron_rich_tooltip_source =
+            Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.chevron_tooltip_text = None;
+        self.chevron_composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip to the chevron region.
+    pub fn chevron_composite_tooltip(
+        mut self,
+        content: impl fern_core::widget::Widget + 'static,
+    ) -> Self {
+        self.chevron_composite_tooltip_content = Some(Box::new(content));
+        self.chevron_tooltip_text = None;
+        self.chevron_rich_tooltip_source = None;
         self
     }
 }
@@ -452,9 +528,23 @@ impl Widget for SplitButton {
         };
         let main_region_id = ctx.add(main_region);
 
-        // Attach the main-region tooltip if the caller set one. Uses the
-        // same 500 ms delay as Button.
-        if let Some(ref text) = self.tooltip_text {
+        // Attach the main-region tooltip if configured. Three
+        // mutually-exclusive setters; setters clear the others.
+        if let Some(content) = self.composite_tooltip_content.take() {
+            crate::tooltip::attach_composite_tooltip_boxed(
+                ctx,
+                main_region_id,
+                content,
+                crate::tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
+            );
+        } else if let Some(source) = self.rich_tooltip_source.take() {
+            crate::tooltip::attach_rich_tooltip_source(
+                ctx,
+                main_region_id,
+                source,
+                crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
+            );
+        } else if let Some(ref text) = self.tooltip_text {
             let tooltip_widget = crate::tooltip::TooltipWidget::new_literal(text);
             let tooltip_id = ctx.add(tooltip_widget);
             ctx.attach_tooltip(
@@ -520,8 +610,23 @@ impl Widget for SplitButton {
 
         // Attach the chevron tooltip. Defaults to "Show dropdown menu"
         // so the bare ▾ affordance is never silent — the caller can
-        // override via `.chevron_tooltip(...)`.
-        {
+        // override via `.chevron_tooltip(...)` (plain),
+        // `.chevron_rich_tooltip(...)`, or `.chevron_composite_tooltip(...)`.
+        if let Some(content) = self.chevron_composite_tooltip_content.take() {
+            crate::tooltip::attach_composite_tooltip_boxed(
+                ctx,
+                chevron_region_id,
+                content,
+                crate::tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
+            );
+        } else if let Some(source) = self.chevron_rich_tooltip_source.take() {
+            crate::tooltip::attach_rich_tooltip_source(
+                ctx,
+                chevron_region_id,
+                source,
+                crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
+            );
+        } else {
             let chevron_text = self
                 .chevron_tooltip_text
                 .clone()

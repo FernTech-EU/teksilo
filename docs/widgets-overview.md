@@ -138,7 +138,7 @@ All gated behind the `rich-text` feature; on by default in `fern-ui`.
 
 See [tooltips.md](tooltips.md) for the tooltip system.
 
-- [TooltipWidget](../crates/fern-widgets/src/tooltip.rs) — plain or rich tooltips; sticky-on-dwell promotion to non-modal `Role::Dialog`; `TooltipRegistry` for app-wide reuse.
+- [TooltipWidget](../crates/fern-widgets/src/tooltip.rs) — plain, rich, or composite tooltips (three tiers, per-anchor mutual exclusion); sticky-on-dwell promotion to non-modal `Role::Dialog`; `TooltipRegistry` for app-wide reuse. Rich tier carries inline markup + shortcut chip + "more" disclosure; composite tier ([`CompositeTooltipWidget`](../crates/fern-widgets/src/tooltip/composite.rs)) hosts an arbitrary widget tree (CK3-style: tabbed sections, charts, progress bars).
 - [Popover](../crates/fern-widgets/src/popover.rs) — anchored overlay accepting arbitrary `impl Widget` content; configurable placement, dismissal, optional caret.
 - [Dialog](../crates/fern-widgets/src/dialog.rs) — modal dialog frame; `DialogContent` / `ModalContainer` for content + presentation.
 - [MessageBox](../crates/fern-widgets/src/message_box.rs) — predefined info/warning/error/question modals (`MessageBoxSeverity`); semantic-role buttons (`ButtonRole`, `StandardButton`, `MessageBoxButton`, `MessageBoxButtons`) with platform-aware ordering; result via `MessageBoxResult`.

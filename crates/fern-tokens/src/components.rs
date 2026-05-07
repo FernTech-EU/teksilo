@@ -375,6 +375,30 @@ impl Default for TooltipStyle {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct CompositeTooltipStyle {
+    pub padding_horizontal: f32,
+    pub padding_vertical: f32,
+    pub corner_radius: f32,
+    pub max_width: f32,
+    pub max_height: f32,
+    /// 0..=1 multiplier on `shape.shadow_inner_md.color.a` at paint time.
+    pub shadow_density: f32,
+}
+
+impl Default for CompositeTooltipStyle {
+    fn default() -> Self {
+        Self {
+            padding_horizontal: 12.0,
+            padding_vertical: 12.0,
+            corner_radius: 8.0,
+            max_width: 480.0,
+            max_height: 480.0,
+            shadow_density: 0.7,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ScrollBarStyle {
     pub thickness_idle: f32,
     pub thickness_hover: f32,
@@ -1326,6 +1350,7 @@ pub struct ComponentStyles {
     pub status_bar: StatusBarStyle,
     pub menu: MenuStyle,
     pub tooltip: TooltipStyle,
+    pub composite_tooltip: CompositeTooltipStyle,
     pub scrollbar: ScrollBarStyle,
     pub tree_list: TreeListStyle,
     pub dialog: DialogStyle,

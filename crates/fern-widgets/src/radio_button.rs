@@ -28,6 +28,8 @@ pub struct RadioButton {
     selected: Signal<usize>,
     enabled: bool,
     tooltip_text: Option<String>,
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    composite_tooltip_content: Option<Box<dyn fern_core::widget::Widget>>,
     interaction: Option<Signal<InteractionState>>,
     root_child_id: Option<WidgetId>,
     /// Shared radio-group sibling id buffer populated by an enclosing
@@ -48,6 +50,8 @@ impl RadioButton {
             selected,
             enabled: true,
             tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
             interaction: None,
             root_child_id: None,
             group_ids: None,
@@ -99,6 +103,8 @@ impl RadioButton {
     pub fn tooltip(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
         let ls: fern_i18n::LocalizedString = text.into();
         self.tooltip_text = Some(ls.resolve_now());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
         self
     }
 
@@ -106,6 +112,34 @@ impl RadioButton {
     #[doc(hidden)]
     pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip resolved from the app-wide tooltip
+    /// registry. See [`Button::rich_tooltip`](crate::button::Button::rich_tooltip).
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip driven by inline `TooltipContent`.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip — third tier, hosting an arbitrary
+    /// widget tree. See [`Button::composite_tooltip`](crate::button::Button::composite_tooltip).
+    pub fn composite_tooltip(mut self, content: impl fern_core::widget::Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 
@@ -256,7 +290,21 @@ impl Widget for RadioButton {
         let root_id =
             ctx.add(MinSize::new(radio_style.hit_area, radio_style.hit_area).child_id(row_id));
 
-        if let Some(ref tooltip_text) = self.tooltip_text {
+        if let Some(content) = self.composite_tooltip_content.take() {
+            crate::tooltip::attach_composite_tooltip_boxed(
+                ctx,
+                root_id,
+                content,
+                crate::tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
+            );
+        } else if let Some(source) = self.rich_tooltip_source.take() {
+            crate::tooltip::attach_rich_tooltip_source(
+                ctx,
+                root_id,
+                source,
+                crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
+            );
+        } else if let Some(ref tooltip_text) = self.tooltip_text {
             let tw = crate::tooltip::TooltipWidget::new_literal(tooltip_text);
             let tid = ctx.add(tw);
             ctx.attach_tooltip(root_id, tid, std::time::Duration::from_millis(500));

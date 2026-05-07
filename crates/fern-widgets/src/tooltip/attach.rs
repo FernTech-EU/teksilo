@@ -20,14 +20,21 @@
 use std::time::Duration;
 
 use fern_core::build_context::BuildContext;
+use fern_core::widget::Widget;
 use fern_core::widget_id::WidgetId;
 
+use crate::tooltip::composite::CompositeTooltipWidget;
 use crate::tooltip::registry::TooltipContent;
 use crate::tooltip::rich::{DWELL_PROMOTION, RichTooltipWidget};
 
 /// Default hover-to-show delay for rich tooltips — matches the plain
 /// tooltip delay used by Button, Link, and MenuItem today.
 pub const DEFAULT_RICH_TOOLTIP_DELAY: Duration = Duration::from_millis(200);
+
+/// Default hover-to-show delay for composite tooltips. Slower than the
+/// rich-tooltip delay because composite surfaces are heavier-weight
+/// (charts, grids, tabbed content) and shouldn't pop on transient hover.
+pub const DEFAULT_COMPOSITE_TOOLTIP_DELAY: Duration = Duration::from_millis(400);
 
 /// Source resolution for a rich tooltip — either a registry key (the
 /// common path) or an inline [`TooltipContent`] entry (one-offs that
@@ -107,6 +114,36 @@ pub fn attach_rich_tooltip_source(
         RichTooltipSource::Key(k) => attach_rich_tooltip(ctx, anchor_id, k, delay),
         RichTooltipSource::Content(c) => attach_rich_tooltip_content(ctx, anchor_id, c, delay),
     }
+}
+
+/// Attach a composite tooltip — third tier, hosting an arbitrary
+/// `impl Widget + 'static` body. Wires the same dwell-to-sticky
+/// machinery rich tooltips use, so the surface promotes to a
+/// `Role::Dialog` after the user dwells for [`DWELL_PROMOTION`].
+pub fn attach_composite_tooltip(
+    ctx: &mut BuildContext,
+    anchor_id: WidgetId,
+    content: impl Widget + 'static,
+    delay: Duration,
+) -> WidgetId {
+    attach_composite_tooltip_boxed(ctx, anchor_id, Box::new(content), delay)
+}
+
+/// Variant of [`attach_composite_tooltip`] that takes an already-boxed
+/// body. Used by per-widget `.composite_tooltip(...)` setters that
+/// store `Box<dyn Widget>` so the user-supplied content can survive
+/// across the borrow boundary into `build()`.
+pub fn attach_composite_tooltip_boxed(
+    ctx: &mut BuildContext,
+    anchor_id: WidgetId,
+    content: Box<dyn Widget>,
+    delay: Duration,
+) -> WidgetId {
+    let tooltip = CompositeTooltipWidget::new().content_boxed(content);
+    let sink = tooltip.shown_at_sink();
+    let tooltip_id = ctx.add(tooltip);
+    ctx.attach_tooltip_with_sticky_sink(anchor_id, tooltip_id, delay, Some(DWELL_PROMOTION), sink);
+    tooltip_id
 }
 
 #[cfg(test)]
@@ -241,6 +278,27 @@ mod tests {
         );
 
         _reset_tooltip_registry();
+    }
+
+    #[test]
+    fn button_plain_tooltip_appears_after_hover_delay() {
+        let mut tree = tree_with_backend();
+        let btn = tree.add(Button::new_literal("Save").tooltip_literal("Save the document"));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        assert!(tree.active_overlays().is_empty());
+        tree.pointer_move(tree.bounds(btn).center());
+        assert!(
+            tree.active_overlays().is_empty(),
+            "plain tooltip should not appear instantly — waits for delay"
+        );
+        // Plain tooltip uses the Button-specific 200 ms delay.
+        tree.advance_time(Duration::from_millis(250));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "plain tooltip should have appeared after the hover delay"
+        );
     }
 
     #[test]

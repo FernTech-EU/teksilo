@@ -58,6 +58,7 @@ pub struct MenuItem {
     shortcut_id: Option<&'static str>,
     tooltip_text: Option<String>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    composite_tooltip_content: Option<Box<dyn fern_core::widget::Widget>>,
     action: Option<CommandFactory>,
     enabled: bool,
     submenu_factory: Option<Box<dyn Fn() -> Box<dyn Widget>>>,
@@ -90,6 +91,7 @@ impl MenuItem {
             shortcut_id: None,
             tooltip_text: None,
             rich_tooltip_source: None,
+            composite_tooltip_content: None,
             action: None,
             enabled: true,
             submenu_factory: None,
@@ -173,6 +175,7 @@ impl MenuItem {
         let ls: fern_i18n::LocalizedString = text.into();
         self.tooltip_text = Some(ls.resolve_now());
         self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
         self
     }
 
@@ -181,6 +184,7 @@ impl MenuItem {
     pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
         self
     }
 
@@ -191,6 +195,7 @@ impl MenuItem {
     pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
         self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
         self.tooltip_text = None;
+        self.composite_tooltip_content = None;
         self
     }
 
@@ -198,6 +203,16 @@ impl MenuItem {
     pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
         self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
         self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip — third tier, hosting an arbitrary
+    /// widget tree. See [`Button::composite_tooltip`](crate::button::Button::composite_tooltip).
+    pub fn composite_tooltip(mut self, content: impl Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 
@@ -216,6 +231,7 @@ impl MenuItem {
             shortcut_id: None,
             tooltip_text: None,
             rich_tooltip_source: None,
+            composite_tooltip_content: None,
             action: None,
             enabled: true,
             submenu_factory: Some(Box::new(factory)),
@@ -464,10 +480,18 @@ impl Widget for MenuItem {
 
         self.root_child_id = Some(root_id);
 
-        // Attach tooltip if configured. Same 500ms delay as Button.
-        // Rich-tooltip source takes precedence — setters clear the
-        // other field, so at most one branch runs.
-        if let Some(source) = self.rich_tooltip_source.take() {
+        // Attach tooltip if configured. The three setters
+        // (`tooltip`, `rich_tooltip*`, `composite_tooltip`) are
+        // mutually exclusive — setters clear the other two so at most
+        // one branch runs.
+        if let Some(content) = self.composite_tooltip_content.take() {
+            crate::tooltip::attach_composite_tooltip_boxed(
+                ctx,
+                root_id,
+                content,
+                crate::tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
+            );
+        } else if let Some(source) = self.rich_tooltip_source.take() {
             crate::tooltip::attach_rich_tooltip_source(
                 ctx,
                 root_id,

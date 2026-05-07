@@ -113,6 +113,7 @@ pub struct TextInput {
     feedback_to_bridge: Option<Signal<ValidationFeedback>>,
     tooltip_text: Option<String>,
     rich_tooltip_source: Option<RichTooltipSource>,
+    composite_tooltip_content: Option<Box<dyn fern_core::widget::Widget>>,
 
     // ── Internal (set during build) ─────────────────────────────────
     interaction: Signal<InteractionState>,
@@ -155,6 +156,7 @@ impl TextInput {
             feedback_to_bridge: None,
             tooltip_text: None,
             rich_tooltip_source: None,
+            composite_tooltip_content: None,
             interaction: Signal::new(InteractionState::Idle),
             root_child_id: None,
         }
@@ -333,18 +335,30 @@ impl TextInput {
     pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
         self
     }
 
     pub fn rich_tooltip_key(mut self, key: impl Into<String>) -> Self {
         self.rich_tooltip_source = Some(RichTooltipSource::Key(key.into()));
         self.tooltip_text = None;
+        self.composite_tooltip_content = None;
         self
     }
 
     pub fn rich_tooltip(mut self, content: tooltip::TooltipContent) -> Self {
         self.rich_tooltip_source = Some(RichTooltipSource::Content(content));
         self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip — third tier, hosting an arbitrary
+    /// widget tree. See [`Button::composite_tooltip`](crate::button::Button::composite_tooltip).
+    pub fn composite_tooltip(mut self, content: impl fern_core::widget::Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 
@@ -601,8 +615,16 @@ impl Widget for TextInput {
                 .add_child(strip_id),
         );
 
-        // Tooltip.
-        if let Some(source) = self.rich_tooltip_source.take() {
+        // Tooltip — three mutually-exclusive setters; setters clear
+        // the others so exactly one branch runs.
+        if let Some(content) = self.composite_tooltip_content.take() {
+            tooltip::attach_composite_tooltip_boxed(
+                ctx,
+                root_id,
+                content,
+                tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
+            );
+        } else if let Some(source) = self.rich_tooltip_source.take() {
             tooltip::attach_rich_tooltip_source(
                 ctx,
                 root_id,

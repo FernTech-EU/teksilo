@@ -624,7 +624,7 @@ impl Widget for TabWidget {
 
         // Translate `TabInfo` fields into the TabDelegate's
         // closure-shaped accessors.
-        let delegate = TabDelegate::new(|_, h: &TabHandle| {
+        let mut delegate = TabDelegate::new(|_, h: &TabHandle| {
             h.info
                 .title
                 .clone()
@@ -638,12 +638,34 @@ impl Widget for TabWidget {
             // Pinned tabs render icon-only; promote `title` to the
             // tooltip if the caller didn't set one explicitly so
             // the user can still identify the tab on hover.
-            if h.info.pinned && h.info.tooltip.is_none() {
+            if h.info.pinned
+                && h.info.tooltip.is_none()
+                && h.info.rich_tooltip.is_none()
+                && h.info.composite_tooltip.is_none()
+            {
                 h.info.title.clone()
             } else {
                 h.info.tooltip.clone()
             }
         });
+        // Bypass the tooltip-clearing setters here: TabInfo already
+        // enforces mutual exclusion across plain / rich / composite,
+        // so each closure returns `Some` only for its flavor.
+        delegate.rich_tooltip_key = Some(Box::new(|_, h: &TabHandle| match &h.info.rich_tooltip {
+            Some(crate::tooltip::RichTooltipSource::Key(k)) => Some(k.clone()),
+            _ => None,
+        }));
+        delegate.rich_tooltip_content =
+            Some(Box::new(|_, h: &TabHandle| match &h.info.rich_tooltip {
+                Some(crate::tooltip::RichTooltipSource::Content(c)) => Some(c.clone()),
+                _ => None,
+            }));
+        delegate.composite_tooltip = Some(Box::new(|_, h: &TabHandle| {
+            h.info
+                .composite_tooltip
+                .as_ref()
+                .map(|factory| factory())
+        }));
 
         // Shared panel-id buffer: the Switcher writes panel widget
         // ids into it as panes are added; the bar's headers read

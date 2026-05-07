@@ -105,9 +105,14 @@ pub struct Button {
     icon_location: IconLocation,
     tooltip_text: Option<String>,
     /// Optional rich tooltip source (registry key or inline content).
-    /// Takes precedence over `tooltip_text` when both are set — last
-    /// call wins because the setters clear the other field.
+    /// Mutually exclusive with `tooltip_text` and `composite_tooltip_content`
+    /// — every tooltip setter clears the other two so last-call wins.
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body. Hosts an arbitrary widget
+    /// tree (charts, grids, conditional rows). Mutually exclusive
+    /// with `tooltip_text` and `rich_tooltip_source` per the
+    /// last-call-wins matrix.
+    composite_tooltip_content: Option<Box<dyn fern_core::widget::Widget>>,
     /// Optional `has_popup` hint used when this button acts as a
     /// disclosure trigger for a popup (menu, dialog, listbox, etc.).
     /// Surfaced via `set_has_popup` in `accessibility()`.
@@ -161,6 +166,7 @@ impl Button {
             icon_location: IconLocation::None,
             tooltip_text: None,
             rich_tooltip_source: None,
+            composite_tooltip_content: None,
             has_popup: None,
             expanded_signal: None,
             shared_interaction: None,
@@ -240,6 +246,7 @@ impl Button {
         let ls: fern_i18n::LocalizedString = text.into();
         self.tooltip_text = Some(ls.resolve_now());
         self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
         self
     }
 
@@ -248,6 +255,7 @@ impl Button {
     pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
         self
     }
 
@@ -262,6 +270,7 @@ impl Button {
     pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
         self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
         self.tooltip_text = None;
+        self.composite_tooltip_content = None;
         self
     }
 
@@ -272,6 +281,20 @@ impl Button {
     pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
         self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
         self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip — third tier, hosting an arbitrary
+    /// widget tree (Crusader Kings 3 style: tabbed sections, charts,
+    /// progress bars, conditional rows). Promotes to a focusable
+    /// `Role::Dialog` after the user dwells for the standard
+    /// promotion threshold. Overrides any plain or rich tooltip
+    /// previously set on this button.
+    pub fn composite_tooltip(mut self, content: impl fern_core::widget::Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 
@@ -622,10 +645,18 @@ impl fern_core::widget::Widget for Button {
                 .child_id(zstack_id),
         );
 
-        // Attach tooltip if configured. Rich-tooltip source takes
-        // precedence — both setters clear the other, so at most one
-        // branch runs.
-        if let Some(source) = self.rich_tooltip_source.take() {
+        // Attach tooltip if configured. The three setters
+        // (`tooltip`, `rich_tooltip*`, `composite_tooltip`) are
+        // mutually exclusive — every setter clears the other two so
+        // exactly one branch runs.
+        if let Some(content) = self.composite_tooltip_content.take() {
+            crate::tooltip::attach_composite_tooltip_boxed(
+                ctx,
+                root_id,
+                content,
+                crate::tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
+            );
+        } else if let Some(source) = self.rich_tooltip_source.take() {
             crate::tooltip::attach_rich_tooltip_source(
                 ctx,
                 root_id,

@@ -5487,6 +5487,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "tooltips-showcase"
+version = "0.1.0"
+dependencies = [
+ "fern-ui",
+]
+
+[[package]]
 name = "tower"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"

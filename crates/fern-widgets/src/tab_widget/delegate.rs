@@ -20,6 +20,7 @@ use fern_core::widget::{EventContext, Widget};
 use fern_i18n::LocalizedString;
 
 use crate::IconWidget;
+use crate::tooltip::{RichTooltipSource, TooltipContent};
 
 /// A reusable widget factory the framework calls every time a context
 /// menu opens. Returns a fresh widget instance each call (the
@@ -84,6 +85,13 @@ type SlotFn<T> = Box<dyn Fn(usize, &T) -> Option<Box<dyn Widget>>>;
 type ContextMenuFn<T> = Box<dyn Fn(usize, &T) -> Option<ContextMenuFactory>>;
 /// Type alias for tooltip callbacks.
 type TooltipFn<T> = Box<dyn Fn(usize, &T) -> Option<LocalizedString>>;
+/// Type alias for rich-tooltip-key callbacks (returns a registry key per tab).
+type RichTooltipKeyFn<T> = Box<dyn Fn(usize, &T) -> Option<String>>;
+/// Type alias for inline rich-tooltip-content callbacks.
+type RichTooltipContentFn<T> = Box<dyn Fn(usize, &T) -> Option<TooltipContent>>;
+/// Type alias for composite-tooltip callbacks. Returns a boxed widget
+/// because closure-returning-`impl Trait` isn't object-safe.
+type CompositeTooltipFn<T> = Box<dyn Fn(usize, &T) -> Option<Box<dyn Widget>>>;
 /// Type alias for boolean capability callbacks.
 type FlagFn<T> = Box<dyn Fn(usize, &T) -> bool>;
 
@@ -102,6 +110,9 @@ pub struct TabDelegate<T: 'static> {
     pub(crate) pinned: Option<FlagFn<T>>,
     pub(crate) enabled: Option<FlagFn<T>>,
     pub(crate) tooltip: Option<TooltipFn<T>>,
+    pub(crate) rich_tooltip_key: Option<RichTooltipKeyFn<T>>,
+    pub(crate) rich_tooltip_content: Option<RichTooltipContentFn<T>>,
+    pub(crate) composite_tooltip: Option<CompositeTooltipFn<T>>,
 }
 
 impl<T: 'static> std::fmt::Debug for TabDelegate<T> {
@@ -115,6 +126,15 @@ impl<T: 'static> std::fmt::Debug for TabDelegate<T> {
             .field("has_pinned", &self.pinned.is_some())
             .field("has_enabled", &self.enabled.is_some())
             .field("has_tooltip", &self.tooltip.is_some())
+            .field("has_rich_tooltip_key", &self.rich_tooltip_key.is_some())
+            .field(
+                "has_rich_tooltip_content",
+                &self.rich_tooltip_content.is_some(),
+            )
+            .field(
+                "has_composite_tooltip",
+                &self.composite_tooltip.is_some(),
+            )
             .finish()
     }
 }
@@ -133,6 +153,9 @@ impl<T: 'static> TabDelegate<T> {
             pinned: None,
             enabled: None,
             tooltip: None,
+            rich_tooltip_key: None,
+            rich_tooltip_content: None,
+            composite_tooltip: None,
         }
     }
 
@@ -201,6 +224,52 @@ impl<T: 'static> TabDelegate<T> {
     /// `WidgetBuilder::tooltip` mechanism.
     pub fn tooltip(mut self, f: impl Fn(usize, &T) -> Option<LocalizedString> + 'static) -> Self {
         self.tooltip = Some(Box::new(f));
+        self.rich_tooltip_key = None;
+        self.rich_tooltip_content = None;
+        self.composite_tooltip = None;
+        self
+    }
+
+    /// Per-tab rich-tooltip registry key. Returning `Some(key)` makes
+    /// the tab show a rich tooltip resolved against
+    /// [`TooltipRegistry`](crate::tooltip::TooltipRegistry).
+    pub fn rich_tooltip_key(
+        mut self,
+        f: impl Fn(usize, &T) -> Option<String> + 'static,
+    ) -> Self {
+        self.rich_tooltip_key = Some(Box::new(f));
+        self.tooltip = None;
+        self.rich_tooltip_content = None;
+        self.composite_tooltip = None;
+        self
+    }
+
+    /// Per-tab inline rich-tooltip content. Skips the registry — useful
+    /// for tooltips whose body depends on `T`'s state.
+    pub fn rich_tooltip_content_with(
+        mut self,
+        f: impl Fn(usize, &T) -> Option<TooltipContent> + 'static,
+    ) -> Self {
+        self.rich_tooltip_content = Some(Box::new(f));
+        self.tooltip = None;
+        self.rich_tooltip_key = None;
+        self.composite_tooltip = None;
+        self
+    }
+
+    /// Per-tab composite-tooltip body factory. Returning
+    /// `Some(boxed_widget)` makes the tab show a composite tooltip
+    /// containing that subtree. The closure runs at tab-header build
+    /// time (and on every rebuild after data changes), so the body
+    /// can carry per-tab dynamic state.
+    pub fn composite_tooltip_with(
+        mut self,
+        f: impl Fn(usize, &T) -> Option<Box<dyn Widget>> + 'static,
+    ) -> Self {
+        self.composite_tooltip = Some(Box::new(f));
+        self.tooltip = None;
+        self.rich_tooltip_key = None;
+        self.rich_tooltip_content = None;
         self
     }
 
@@ -251,5 +320,31 @@ impl<T: 'static> TabDelegate<T> {
 
     pub(crate) fn resolve_tooltip(&self, index: usize, item: &T) -> Option<LocalizedString> {
         self.tooltip.as_ref().and_then(|f| f(index, item))
+    }
+
+    pub(crate) fn resolve_rich_tooltip(
+        &self,
+        index: usize,
+        item: &T,
+    ) -> Option<RichTooltipSource> {
+        if let Some(ref f) = self.rich_tooltip_key
+            && let Some(k) = f(index, item)
+        {
+            return Some(RichTooltipSource::Key(k));
+        }
+        if let Some(ref f) = self.rich_tooltip_content
+            && let Some(c) = f(index, item)
+        {
+            return Some(RichTooltipSource::Content(c));
+        }
+        None
+    }
+
+    pub(crate) fn resolve_composite_tooltip(
+        &self,
+        index: usize,
+        item: &T,
+    ) -> Option<Box<dyn Widget>> {
+        self.composite_tooltip.as_ref().and_then(|f| f(index, item))
     }
 }

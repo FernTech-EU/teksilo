@@ -81,6 +81,12 @@ pub(crate) struct TabHeader {
     leading_slot: Option<Box<dyn Widget>>,
     trailing_slot: Option<Box<dyn Widget>>,
     tooltip: Option<LocalizedString>,
+    /// Optional rich-tooltip source — registry key or inline content.
+    /// Mutually exclusive with `tooltip` and `composite_tooltip`.
+    rich_tooltip: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite-tooltip body. Mutually exclusive with the
+    /// other two slots.
+    composite_tooltip: Option<Box<dyn Widget>>,
     context_menu_factory: Option<super::delegate::ContextMenuFactory>,
     /// Per-tab close callback. Set when the tab is closable AND the
     /// bar carries an `on_close` handler (or its source is a
@@ -147,6 +153,8 @@ pub(crate) struct TabHeaderConfig {
     pub leading_slot: Option<Box<dyn Widget>>,
     pub trailing_slot: Option<Box<dyn Widget>>,
     pub tooltip: Option<LocalizedString>,
+    pub rich_tooltip: Option<crate::tooltip::RichTooltipSource>,
+    pub composite_tooltip: Option<Box<dyn Widget>>,
     pub context_menu_factory: Option<super::delegate::ContextMenuFactory>,
     pub on_close: Option<Rc<dyn Fn()>>,
     pub on_reorder_to: Option<Rc<dyn Fn(usize)>>,
@@ -171,6 +179,8 @@ impl TabHeader {
             leading_slot: cfg.leading_slot,
             trailing_slot: cfg.trailing_slot,
             tooltip: cfg.tooltip,
+            rich_tooltip: cfg.rich_tooltip,
+            composite_tooltip: cfg.composite_tooltip,
             context_menu_factory: cfg.context_menu_factory,
             on_close: cfg.on_close,
             on_reorder_to: cfg.on_reorder_to,
@@ -581,8 +591,23 @@ impl Widget for TabHeader {
 
         ctx.apply_self_handlers(handler_set);
 
-        // Attach tooltip via the framework helper.
-        if let Some(tip) = self.tooltip.take() {
+        // Attach tooltip via the framework helper. Three
+        // mutually-exclusive sources (composite > rich > plain).
+        if let Some(content) = self.composite_tooltip.take() {
+            crate::tooltip::attach_composite_tooltip_boxed(
+                ctx,
+                self_id,
+                content,
+                crate::tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
+            );
+        } else if let Some(source) = self.rich_tooltip.take() {
+            crate::tooltip::attach_rich_tooltip_source(
+                ctx,
+                self_id,
+                source,
+                crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
+            );
+        } else if let Some(tip) = self.tooltip.take() {
             let tip_widget = crate::tooltip::TooltipWidget::new(tip);
             let tip_id = ctx.add(tip_widget);
             ctx.attach_tooltip(self_id, tip_id, std::time::Duration::from_millis(400));

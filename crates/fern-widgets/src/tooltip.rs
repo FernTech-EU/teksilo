@@ -1,18 +1,41 @@
-//! Tooltip system — hover-triggered overlay with configurable delay.
+//! Tooltip system — hover-triggered overlays with configurable delay.
 //!
-//! A tooltip is attached to any widget via the WidgetTree API. The
-//! `TooltipAttachment` stores the tooltip state and is processed by
-//! the tree during event dispatch.
+//! Three tiers, increasing in expressive power:
+//!
+//! - [`TooltipWidget`] — single line of localized text in a themed
+//!   rounded rect. Attached via the per-widget `.tooltip(...)` setter.
+//! - [`RichTooltipWidget`] — `TooltipContent`-driven (body + optional
+//!   long-form "more" disclosure + shortcut chip), inline-markup body
+//!   so `[label](:key)` cascade links resolve against
+//!   [`TooltipRegistry`]. Attached via `.rich_tooltip(key)` /
+//!   `.rich_tooltip_content(content)`. Promotes to a focusable
+//!   `Role::Dialog` on dwell.
+//! - [`composite::CompositeTooltipWidget`] — hosts an arbitrary
+//!   `impl Widget + 'static` body inside the same chrome with a
+//!   larger surface budget. Crusader Kings 3-style: tabbed sections,
+//!   charts, progress bars, conditional rows. Attached via
+//!   `.composite_tooltip(content)`. "Primary-only" by construction —
+//!   has no inline-markup body and no registry key, so it cannot be
+//!   the target of a `[label](:key)` cascade. Child widgets *inside*
+//!   the body keep their own tooltip setters and cascade normally.
+//!
+//! All three tiers share the same overlay machinery, hover/focus
+//! tracking, and dwell-promotion timer in `fern-core`. The per-widget
+//! setters (`.tooltip` / `.rich_tooltip` / `.composite_tooltip`) are
+//! mutually exclusive (last-one-wins): each setter clears the others.
 
 pub mod attach;
+pub mod composite;
 pub(crate) mod dwell_indicator;
 pub mod registry;
 pub mod rich;
 
 pub use attach::{
-    DEFAULT_RICH_TOOLTIP_DELAY, RichTooltipSource, attach_rich_tooltip,
+    DEFAULT_COMPOSITE_TOOLTIP_DELAY, DEFAULT_RICH_TOOLTIP_DELAY, RichTooltipSource,
+    attach_composite_tooltip, attach_composite_tooltip_boxed, attach_rich_tooltip,
     attach_rich_tooltip_content, attach_rich_tooltip_source,
 };
+pub use composite::CompositeTooltipWidget;
 pub use registry::{
     TooltipContent, TooltipRegistry, install_tooltip_registry, with_tooltip_registry,
 };
@@ -45,6 +68,26 @@ pub(crate) fn paint_tooltip_shadows(
         &ctx.theme.shape.shadow_xs,
         &ctx.theme.shape.shadow_inner_xs,
         ctx.theme.components.tooltip.shadow_density,
+        None,
+    );
+}
+
+/// Composite-tooltip variant of [`paint_tooltip_shadows`] — uses the
+/// medium shadow tier (the larger CK3-style surface deserves more
+/// presence than the punchy `xs` rim of plain tooltips).
+pub(crate) fn paint_composite_tooltip_shadows(
+    canvas: &mut Canvas,
+    bounds: Rect,
+    radius: CornerRadius,
+    ctx: &PaintContext,
+) {
+    paint_layered_shadow(
+        canvas,
+        bounds,
+        radius,
+        &ctx.theme.shape.shadow_md,
+        &ctx.theme.shape.shadow_inner_md,
+        ctx.theme.components.composite_tooltip.shadow_density,
         None,
     );
 }

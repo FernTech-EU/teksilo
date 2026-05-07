@@ -1,7 +1,7 @@
 # Tooltip Reference
 
 Tooltips are hover-/focus-triggered overlays that surface ancillary information
-about a control. FernUI ships two flavors that share one attachment pipeline:
+about a control. FernUI ships **three tiers** that share one attachment pipeline:
 
 - **Plain tooltips** — a single localized string in a themed rounded-rect
   surface. Pure-text, ephemeral, no interaction.
@@ -9,21 +9,30 @@ about a control. FernUI ships two flavors that share one attachment pipeline:
   markup (`*italic*`, `**bold**`, `[label](url)`), a shortcut hint, an
   Accordion-revealed "more" body, and a sticky-on-dwell promotion to a
   focusable, click-through Dialog.
+- **Composite tooltips** — host an arbitrary widget tree (Crusader Kings 3
+  style: tabbed sections, charts, progress bars, conditional rows, dynamic
+  numeric values). Same dwell-to-sticky machinery as rich tooltips. "Primary
+  only" by construction — has no inline-markup body and no registry key, so
+  it cannot be the target of a `[label](:key)` cascade from a rich tooltip.
+  Child widgets *inside* the composite body keep their own
+  `.tooltip(...)` / `.rich_tooltip(...)` setters and cascade normally.
 
-Both ride the same `WidgetTree` machinery (hover/focus tracking, delay
-scheduling, overlay show/dismiss, fade-in animation). The choice of plain
-vs. rich is made per-anchor by which builder method you call on the host
-widget.
+All three ride the same `WidgetTree` machinery (hover/focus tracking, delay
+scheduling, overlay show/dismiss, fade-in animation). The choice of tier is
+made per-anchor by which builder method you call on the host widget. The
+three setters are mutually exclusive (last-call-wins): each setter clears
+the other two.
 
 | Layer | Type | Crate | What it does |
 |-------|------|-------|--------------|
 | Plain content widget | [`TooltipWidget`](../crates/fern-widgets/src/tooltip.rs) | `fern-widgets` | Themed rounded-rect with one line of text |
 | Rich content widget | [`RichTooltipWidget`](../crates/fern-widgets/src/tooltip/rich.rs) | `fern-widgets` | Body + shortcut chip + "more" disclosure + dwell indicator |
+| Composite content widget | [`CompositeTooltipWidget`](../crates/fern-widgets/src/tooltip/composite.rs) | `fern-widgets` | Surface hosting an arbitrary widget tree (TabWidget, charts, progress bars, conditional rows, dynamic values) with dwell-to-sticky promotion |
 | Registry | [`TooltipRegistry`](../crates/fern-widgets/src/tooltip/registry.rs) / [`TooltipContent`](../crates/fern-widgets/src/tooltip/registry.rs) | `fern-widgets` | Thread-local catalog keyed by short stable ids |
-| Attach helpers | [`attach_rich_tooltip*`](../crates/fern-widgets/src/tooltip/attach.rs) | `fern-widgets` | Wire a rich tooltip onto an anchor inside `build()` |
+| Attach helpers | [`attach_rich_tooltip*`](../crates/fern-widgets/src/tooltip/attach.rs) / [`attach_composite_tooltip*`](../crates/fern-widgets/src/tooltip/attach.rs) | `fern-widgets` | Wire a tooltip onto an anchor inside `build()` |
 | Tree machinery | [`WidgetTree::attach_tooltip*`](../crates/fern-core/src/widget_tree/overlay_impl.rs) | `fern-core` | Hover/focus tracking, dwell promotion, overlay lifetime |
-| Visual progress | [`DwellIndicator`](../crates/fern-widgets/src/tooltip/dwell_indicator.rs) | `fern-widgets` | Top-right pie-wedge / pin glyph for sticky-on-dwell |
-| Tokens | [`TooltipStyle`](../crates/fern-tokens/src/components.rs) | `fern-tokens` | `padding_horizontal`, `padding_vertical`, `corner_radius`, `max_width` |
+| Visual progress | [`DwellIndicator`](../crates/fern-widgets/src/tooltip/dwell_indicator.rs) | `fern-widgets` | Pie-wedge / pin glyph for sticky-on-dwell |
+| Tokens | [`TooltipStyle`](../crates/fern-tokens/src/components.rs) / [`CompositeTooltipStyle`](../crates/fern-tokens/src/components.rs) | `fern-tokens` | `padding_*`, `corner_radius`, `max_width`, `max_height` (composite only), `shadow_density` |
 
 ---
 
@@ -70,6 +79,73 @@ Two attachment paths once registered:
 - `.rich_tooltip_content(TooltipContent::new(...))` — inline content; bypasses
   the registry. Useful for one-off tooltips, tests, and per-row tips on
   data-driven widgets.
+
+### Composite tooltip (CK3-style)
+
+For tooltips that need a full widget tree — tabs, charts, progress bars,
+conditional rows, dynamic numeric values — use `.composite_tooltip(content)`:
+
+```rust
+use fern_ui::prelude::*;
+
+Button::new(tr!("province_info"))
+    .composite_tooltip(
+        VStack::new()
+            .spacing(8.0)
+            .child(TextWidget::new(tr!("province_header")).style(TextStyleRole::BodyBold))
+            .child(ProgressBar::new(prosperity_signal))
+            .child(
+                Grid::new()
+                    .columns(vec![TrackSize::Auto, TrackSize::Auto])
+                    .child(TextWidget::new(tr!("food")))
+                    .child(TextWidget::new_literal(food_value))
+                    .child(TextWidget::new(tr!("trade")))
+                    .child(TextWidget::new_literal(trade_value)),
+            ),
+    );
+```
+
+The dwell-to-sticky machinery is reused from rich tooltips: at 2 s the role
+flips `Tooltip → Dialog`, dismiss swaps to `EscapeOrClickOutside`, and the
+surface becomes Tab-reachable. Rare interactive descendants (a "Pin"
+button, an internal `TabWidget`) work cleanly post-promotion.
+
+The default delay is `DEFAULT_COMPOSITE_TOOLTIP_DELAY` (400 ms — slower than
+the 200 ms rich-tooltip delay because composite surfaces are heavier and
+shouldn't pop on transient hover). Default `max_width` × `max_height` are
+both 480 dp, configurable per-instance with `.max_width(f32)` /
+`.max_height(f32)` on `CompositeTooltipWidget`, or globally via
+`Theme::components.composite_tooltip`.
+
+**No registry, no `:key` cascade target.** Composite tooltips are widget
+trees, not data — they don't fit the `TooltipRegistry`'s
+`Vec<TooltipContent>` model and have no stable id to address in markup. The
+"primary-only" constraint is structural, not enforced at runtime: there is
+simply no key to write in `[label](:key)`.
+
+#### Cascading from a composite tooltip
+
+A child widget *inside* the composite body (e.g. a stat row's
+`Button::rich_tooltip("modifier-detail")`) keeps working as ordinary widget
+composition — its own `build()` runs the existing rich-attach path, and the
+nested overlay opens via `OverlayLayer::InTree` parented to the composite
+tooltip's overlay. Mix tiers freely.
+
+### Last-call-wins setter matrix
+
+The three setters are mutually exclusive — every setter clears the other two.
+
+| Setter | Sets | Clears |
+| --- | --- | --- |
+| `.tooltip(text)` / `.tooltip_literal(text)` | plain text | rich source, composite body |
+| `.rich_tooltip(key)` / `.rich_tooltip_content(c)` | rich source | plain text, composite body |
+| `.composite_tooltip(w)` | composite body | plain text, rich source |
+
+This is preserved across all widgets that expose multiple tooltip flavors:
+`Button`, `Link`, `MenuItem`, `TextInput`, `IconButton`, `Checkbox`,
+`RadioButton`, `SplitButton` (separate `.tooltip(...)` and
+`.chevron_tooltip(...)` matrices), and `TabInfo` / `TabDelegate` for tab
+strips.
 
 ---
 

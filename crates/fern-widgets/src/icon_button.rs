@@ -113,6 +113,12 @@ pub struct IconButton {
     // Configuration (set via builder)
     icon: IconWidget,
     tooltip_text: Option<String>,
+    /// Optional rich tooltip source — registry key or inline content.
+    /// Mutually exclusive with `tooltip_text` and `composite_tooltip_content`.
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional composite tooltip body (CK3-style widget tree).
+    /// Mutually exclusive with the other two tooltip slots.
+    composite_tooltip_content: Option<Box<dyn fern_core::widget::Widget>>,
     enabled: bool,
     size: IconButtonSize,
     /// Embedded mode — Secondary-at-rest icon color, the JetBrains
@@ -162,6 +168,8 @@ impl IconButton {
         Self {
             icon,
             tooltip_text: None,
+            rich_tooltip_source: None,
+            composite_tooltip_content: None,
             enabled: true,
             size: IconButtonSize::Default,
             embedded: false,
@@ -236,6 +244,8 @@ impl IconButton {
     pub fn tooltip(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
         let ls: fern_i18n::LocalizedString = text.into();
         self.tooltip_text = Some(ls.resolve_now());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
         self
     }
 
@@ -243,6 +253,34 @@ impl IconButton {
     #[doc(hidden)]
     pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip resolved from the app-wide tooltip
+    /// registry. See [`Button::rich_tooltip`](crate::button::Button::rich_tooltip).
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a rich tooltip driven by inline `TooltipContent`.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
+        self.composite_tooltip_content = None;
+        self
+    }
+
+    /// Attach a composite tooltip — third tier, hosting an arbitrary
+    /// widget tree. See [`Button::composite_tooltip`](crate::button::Button::composite_tooltip).
+    pub fn composite_tooltip(mut self, content: impl fern_core::widget::Widget + 'static) -> Self {
+        self.composite_tooltip_content = Some(Box::new(content));
+        self.tooltip_text = None;
+        self.rich_tooltip_source = None;
         self
     }
 
@@ -623,8 +661,23 @@ impl fern_core::widget::Widget for IconButton {
                 .child_id(zstack_id),
         );
 
-        // Tooltip
-        if let Some(ref tooltip_text) = self.tooltip_text {
+        // Tooltip — three mutually-exclusive setters; setters clear
+        // the others so exactly one branch runs.
+        if let Some(content) = self.composite_tooltip_content.take() {
+            crate::tooltip::attach_composite_tooltip_boxed(
+                ctx,
+                root_id,
+                content,
+                crate::tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
+            );
+        } else if let Some(source) = self.rich_tooltip_source.take() {
+            crate::tooltip::attach_rich_tooltip_source(
+                ctx,
+                root_id,
+                source,
+                crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
+            );
+        } else if let Some(ref tooltip_text) = self.tooltip_text {
             let tooltip_widget = crate::tooltip::TooltipWidget::new_literal(tooltip_text);
             let tooltip_id = ctx.add(tooltip_widget);
             let delay = std::time::Duration::from_millis(500);
@@ -777,12 +830,28 @@ impl fern_core::widget::Widget for IconButton {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::Button);
+        // The accessible name is sourced from whichever tooltip flavor
+        // is configured. Plain text is used directly; for a rich
+        // tooltip we use the inline content's body text when
+        // available; for a composite tooltip the caller is expected
+        // to provide an explicit `.access_label(...)` via the
+        // accessibility-overrides API.
+        let rich_name: Option<String> = self.rich_tooltip_source.as_ref().and_then(|s| match s {
+            crate::tooltip::RichTooltipSource::Content(c) => Some(c.text.resolve_now()),
+            crate::tooltip::RichTooltipSource::Key(_) => None,
+        });
         debug_assert!(
-            self.tooltip_text.is_some(),
+            self.tooltip_text.is_some()
+                || rich_name.is_some()
+                || self.rich_tooltip_source.is_some()
+                || self.composite_tooltip_content.is_some(),
             "IconButton: expected a tooltip (used as the accessible name). \
-             Use .tooltip(tr!(…)) or a predefined constructor like IconButton::clear()."
+             Use .tooltip(tr!(…)) or a predefined constructor like IconButton::clear(). \
+             For rich/composite tooltips, also pair with `.access_label(...)`."
         );
         if let Some(ref text) = self.tooltip_text {
+            builder.set_name(text.as_str());
+        } else if let Some(ref text) = rich_name {
             builder.set_name(text.as_str());
         } else {
             builder.set_name("Button");

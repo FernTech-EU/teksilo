@@ -695,6 +695,8 @@ impl<T: 'static> Widget for TabBar<T> {
                 let leading_slot = self.delegate.resolve_leading(i, item);
                 let trailing_slot = self.delegate.resolve_trailing(i, item);
                 let tooltip = self.delegate.resolve_tooltip(i, item);
+                let rich_tooltip = self.delegate.resolve_rich_tooltip(i, item);
+                let composite_tooltip = self.delegate.resolve_composite_tooltip(i, item);
                 let context_menu_factory = self.delegate.resolve_context_menu(i, item);
                 let enabled = self.delegate.resolve_enabled(i, item);
                 let closable = self.delegate.resolve_closable(i, item);
@@ -720,6 +722,8 @@ impl<T: 'static> Widget for TabBar<T> {
                     leading_slot,
                     trailing_slot,
                     tooltip,
+                    rich_tooltip,
+                    composite_tooltip,
                     context_menu_factory,
                     // Pinned tabs suppress the close button —
                     // Firefox / Chrome convention. They're closed

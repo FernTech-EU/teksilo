@@ -14,13 +14,22 @@
 
 use std::rc::Rc;
 
+use fern_core::widget::Widget;
 use fern_i18n::LocalizedString;
 
 use crate::IconWidget;
+use crate::tooltip::RichTooltipSource;
 
 /// Reusable factory for an [`IconWidget`]. Boxed in `Rc` so
 /// [`TabInfo`] is `Clone` without forcing `IconWidget: Clone`.
 pub type IconFactory = Rc<dyn Fn() -> IconWidget>;
+
+/// Reusable factory for a composite-tooltip body widget. Boxed in
+/// `Rc` so [`TabInfo`] is `Clone` without forcing the body's type to
+/// be `Clone`. The factory is called each time the tab's header
+/// builds — typically once per tab lifetime, plus rebuilds triggered
+/// by data-source mutations.
+pub type CompositeTooltipFactory = Rc<dyn Fn() -> Box<dyn Widget>>;
 
 /// Per-tab presentation metadata. Build with [`TabInfo::new`] and
 /// fluent setters.
@@ -36,6 +45,12 @@ pub struct TabInfo {
     pub(crate) title: Option<LocalizedString>,
     pub(crate) icon: Option<IconFactory>,
     pub(crate) tooltip: Option<LocalizedString>,
+    /// Optional rich tooltip — registry key or inline content.
+    /// Mutually exclusive with `tooltip` and `composite_tooltip`.
+    pub(crate) rich_tooltip: Option<RichTooltipSource>,
+    /// Optional composite tooltip body factory. Mutually exclusive
+    /// with the other two tooltip slots.
+    pub(crate) composite_tooltip: Option<CompositeTooltipFactory>,
     pub(crate) closable: bool,
     pub(crate) pinned: bool,
     pub(crate) enabled: bool,
@@ -47,6 +62,8 @@ impl std::fmt::Debug for TabInfo {
             .field("title", &self.title)
             .field("has_icon", &self.icon.is_some())
             .field("tooltip", &self.tooltip)
+            .field("has_rich_tooltip", &self.rich_tooltip.is_some())
+            .field("has_composite_tooltip", &self.composite_tooltip.is_some())
             .field("closable", &self.closable)
             .field("pinned", &self.pinned)
             .field("enabled", &self.enabled)
@@ -62,6 +79,8 @@ impl TabInfo {
             title: None,
             icon: None,
             tooltip: None,
+            rich_tooltip: None,
+            composite_tooltip: None,
             closable: false,
             pinned: false,
             enabled: true,
@@ -97,6 +116,39 @@ impl TabInfo {
     /// have no way for the user to identify them.
     pub fn tooltip(mut self, t: impl Into<LocalizedString>) -> Self {
         self.tooltip = Some(t.into());
+        self.rich_tooltip = None;
+        self.composite_tooltip = None;
+        self
+    }
+
+    /// Attach a rich tooltip resolved from the app-wide tooltip
+    /// registry. See [`Button::rich_tooltip`](crate::button::Button::rich_tooltip).
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip = Some(RichTooltipSource::Key(key.into()));
+        self.tooltip = None;
+        self.composite_tooltip = None;
+        self
+    }
+
+    /// Attach a rich tooltip driven by inline `TooltipContent`.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip = Some(RichTooltipSource::Content(content));
+        self.tooltip = None;
+        self.composite_tooltip = None;
+        self
+    }
+
+    /// Attach a composite tooltip — third tier, hosting an arbitrary
+    /// widget tree. The `factory` closure is called each time the
+    /// tab's header rebuilds, so the body picks up theme / locale
+    /// changes naturally without retaining state across rebuilds.
+    pub fn composite_tooltip<W>(mut self, factory: impl Fn() -> W + 'static) -> Self
+    where
+        W: Widget + 'static,
+    {
+        self.composite_tooltip = Some(Rc::new(move || -> Box<dyn Widget> { Box::new(factory()) }));
+        self.tooltip = None;
+        self.rich_tooltip = None;
         self
     }
 
