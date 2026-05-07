@@ -1351,7 +1351,6 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
                         }
                         sync_cursor_signals(&state_cut);
                         ctx.request_frame();
-                        ctx.dismiss_all_overlays();
                     }),
             )
             .item(
@@ -1359,11 +1358,8 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
                     .shortcut_label("Ctrl+C")
                     .enabled(has_selection)
                     .on_activate_fn(move |ctx| {
-                        {
-                            let mut st = state_copy.borrow_mut();
-                            keyboard::clipboard_copy(&mut st, ctx);
-                        }
-                        ctx.dismiss_all_overlays();
+                        let mut st = state_copy.borrow_mut();
+                        keyboard::clipboard_copy(&mut st, ctx);
                     }),
             )
             .item(
@@ -1376,7 +1372,6 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
                         }
                         sync_cursor_signals(&state_paste);
                         ctx.request_frame();
-                        ctx.dismiss_all_overlays();
                     }),
             )
             .item(MenuSeparator)
@@ -1391,7 +1386,6 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
                         }
                         sync_cursor_signals(&state_select_all);
                         ctx.request_frame();
-                        ctx.dismiss_all_overlays();
                     }),
             ),
     )

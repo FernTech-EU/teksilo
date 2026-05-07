@@ -412,7 +412,7 @@ impl Widget for Popover {
                         if !enabled {
                             return;
                         }
-                        ctx.dismiss_all_overlays();
+                        ctx.dismiss_all_except_hosts();
                         ctx.activate(content_id);
                         tap_open.set(true);
                         ctx.show_overlay(OverlayRequest {
@@ -438,7 +438,7 @@ impl Widget for Popover {
                             key: Key::Enter | Key::Space,
                             ..
                         } if enabled => {
-                            ctx.dismiss_all_overlays();
+                            ctx.dismiss_all_except_hosts();
                             ctx.activate(content_id);
                             key_open.set(true);
                             ctx.show_overlay(OverlayRequest {
@@ -462,7 +462,7 @@ impl Widget for Popover {
                 .on_access_action({
                     move |action, ctx| {
                         if action == fern_core::accesskit::Action::Click && enabled {
-                            ctx.dismiss_all_overlays();
+                            ctx.dismiss_all_except_hosts();
                             ctx.activate(content_id);
                             action_open.set(true);
                             ctx.show_overlay(OverlayRequest {
@@ -515,7 +515,7 @@ impl Widget for Popover {
                             if !enabled {
                                 return;
                             }
-                            ctx.dismiss_all_overlays();
+                            ctx.dismiss_all_except_hosts();
                             ctx.activate(content_id);
                             tap_open.set(true);
                             ctx.show_overlay(OverlayRequest {
@@ -541,7 +541,7 @@ impl Widget for Popover {
                                 key: Key::Enter | Key::Space,
                                 ..
                             } if enabled => {
-                                ctx.dismiss_all_overlays();
+                                ctx.dismiss_all_except_hosts();
                                 ctx.activate(content_id);
                                 key_open.set(true);
                                 ctx.show_overlay(OverlayRequest {
@@ -565,7 +565,7 @@ impl Widget for Popover {
                     .on_access_action({
                         move |action, ctx| {
                             if action == fern_core::accesskit::Action::Click && enabled {
-                                ctx.dismiss_all_overlays();
+                                ctx.dismiss_all_except_hosts();
                                 ctx.activate(content_id);
                                 action_open.set(true);
                                 ctx.show_overlay(OverlayRequest {

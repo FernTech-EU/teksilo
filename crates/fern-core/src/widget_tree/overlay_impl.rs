@@ -383,20 +383,8 @@ impl WidgetTree {
             let Some(overlay) = self.overlay_manager.overlay(overlay_id) else {
                 break;
             };
-            // Stop if this overlay is a "host" surface (tooltip /
-            // dialog / alert dialog) — preserve it and anything above.
-            if let Some(node) = self.arena.get(overlay.content_id) {
-                let mut builder = AccessNodeBuilder::new();
-                node.widget.accessibility(&mut builder);
-                let role = builder.role();
-                if matches!(
-                    role,
-                    accesskit::Role::Tooltip
-                        | accesskit::Role::Dialog
-                        | accesskit::Role::AlertDialog
-                ) {
-                    break;
-                }
+            if self.overlay_is_host_surface(overlay_id) {
+                break;
             }
             topmost_to_dismiss = Some(overlay_id);
             current = overlay.parent_overlay;
@@ -412,6 +400,54 @@ impl WidgetTree {
                 self.focus_ops(restore_id, &mut *ops);
             }
         }
+    }
+
+    /// Dismiss every overlay whose content's role is *not* a host
+    /// surface (`Tooltip` / `Dialog` / `AlertDialog`). Targets stay
+    /// stable across the loop because we resolve ids first, then
+    /// dismiss — `OverlayManager::dismiss` cascades to descendants,
+    /// so an already-cascaded id is a no-op.
+    ///
+    /// Replacement for `dismiss_all_overlays` in popover triggers and
+    /// pre-show cleanup paths, where the broad "dismiss everything"
+    /// semantics also closed an outer composite tooltip or modal
+    /// hosting the trigger.
+    pub(super) fn dismiss_all_overlays_except_hosts(
+        &mut self,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        let to_dismiss: Vec<crate::overlay::OverlayId> = self
+            .overlay_manager
+            .stack
+            .iter()
+            .map(|overlay| overlay.id)
+            .filter(|&id| !self.overlay_is_host_surface(id))
+            .collect();
+
+        for overlay_id in to_dismiss {
+            let dismissed = self.overlay_manager.dismiss(overlay_id);
+            self.dormant_dismissed_content(&dismissed, &mut *ops);
+        }
+    }
+
+    /// Whether `overlay_id` is a "host" surface — a tooltip, dialog,
+    /// or alert dialog. Host overlays survive `dismiss_all_except_hosts`
+    /// and stop the upward walk in `dismiss_self_overlay_chain_for_source`,
+    /// so a popover hosted inside a composite tooltip can dismiss
+    /// itself (or its menu cascade) without taking the host with it.
+    fn overlay_is_host_surface(&self, overlay_id: crate::overlay::OverlayId) -> bool {
+        let Some(overlay) = self.overlay_manager.overlay(overlay_id) else {
+            return false;
+        };
+        let Some(node) = self.arena.get(overlay.content_id) else {
+            return false;
+        };
+        let mut builder = AccessNodeBuilder::new();
+        node.widget.accessibility(&mut builder);
+        matches!(
+            builder.role(),
+            accesskit::Role::Tooltip | accesskit::Role::Dialog | accesskit::Role::AlertDialog
+        )
     }
 
     pub(super) fn dismiss_modal_for_source(

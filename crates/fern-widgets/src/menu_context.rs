@@ -92,7 +92,7 @@ impl MenuContext {
         let focus_id = inner.focus_ids[index];
         drop(inner);
 
-        ctx.dismiss_all_overlays();
+        ctx.dismiss_all_except_hosts();
         self.open_index.set(Some(index));
         ctx.activate(content_id);
         ctx.show_overlay(OverlayRequest {
@@ -115,7 +115,7 @@ impl MenuContext {
     pub fn close(&self, ctx: &mut EventContext) {
         let current_index = self.open_index.get();
         self.open_index.set(None);
-        ctx.dismiss_all_overlays();
+        ctx.dismiss_all_except_hosts();
 
         // Restore focus to the trigger that was open
         if let Some(index) = current_index

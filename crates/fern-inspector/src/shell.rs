@@ -409,7 +409,7 @@ fn build_pick_chain_menu(ctx: &mut BuildContext, state: InspectorState) -> Widge
                 if state_for_action.picker_mode.get() {
                     state_for_action.picker_mode.set(false);
                 }
-                c.dismiss_all_overlays();
+                c.dismiss_self_overlay_chain();
             });
         let row_id = ctx.add(row);
         ctx.visible_when(row_id, visible_signal);

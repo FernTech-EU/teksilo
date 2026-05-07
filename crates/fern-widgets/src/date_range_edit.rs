@@ -346,7 +346,7 @@ impl Widget for DateRangeEdit {
             Calendar::range(value_for_cal.clone()).on_range_changed(move |new_range, ctx_evt| {
                 if new_range.is_some() {
                     popover_open_for_cal.set(false);
-                    ctx_evt.dismiss_all_overlays();
+                    ctx_evt.dismiss_self_overlay_chain();
                     ctx_evt.request_frame();
                 }
             });
@@ -381,7 +381,7 @@ impl Widget for DateRangeEdit {
             .on_activate_fn(move |ctx_evt: &mut EventContext| {
                 if popover_open.get() {
                     popover_open.set(false);
-                    ctx_evt.dismiss_all_overlays();
+                    ctx_evt.dismiss_all_except_hosts();
                 } else {
                     popover_open.set(true);
                     ctx_evt.activate(cal_id);

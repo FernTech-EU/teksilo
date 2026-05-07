@@ -543,6 +543,10 @@ pub struct EventContext<'ops> {
     /// item activation when the popover may be hosted inside an
     /// unrelated overlay (e.g., a composite tooltip).
     pub(crate) dismiss_self_overlay_chain: bool,
+    /// Dismiss every overlay whose content is *not* a host surface
+    /// (`Tooltip`, `Dialog`, `AlertDialog`) — leaves an outer composite
+    /// tooltip or modal hosting the trigger intact.
+    pub(crate) dismiss_all_except_hosts: bool,
     /// Whether to dismiss just the topmost overlay (e.g., ArrowLeft in submenu).
     pub(crate) dismiss_top: bool,
     /// Request to capture or release the pointer.
@@ -666,6 +670,7 @@ impl<'ops> EventContext<'ops> {
             overlay_dismissals: Vec::new(),
             dismiss_all_overlays: false,
             dismiss_self_overlay_chain: false,
+            dismiss_all_except_hosts: false,
             dismiss_top: false,
             pointer_capture: None,
             delayed_overlay_requests: Vec::new(),
@@ -995,13 +1000,22 @@ impl<'ops> EventContext<'ops> {
 
     /// Dismiss the source widget's containing overlay and any ancestor
     /// overlays in the chain that are menu-like (anything that isn't a
-    /// `Role::Tooltip`, `Role::Dialog`, or `Role::AlertDialog`).
-    /// Preferred over [`dismiss_all_overlays`](Self::dismiss_all_overlays)
-    /// for menu / dropdown item activation: closes the menu cascade
-    /// without disturbing an outer composite tooltip or modal hosting
-    /// the popover.
+    /// `Role::Tooltip`, `Role::Dialog`, or `Role::AlertDialog`),
+    /// preserving an outer composite tooltip or modal hosting the
+    /// popover. Use for menu / dropdown item activation that wants to
+    /// close the menu cascade without disturbing the host surface.
     pub fn dismiss_self_overlay_chain(&mut self) {
         self.dismiss_self_overlay_chain = true;
+    }
+
+    /// Dismiss every overlay whose content is *not* a host surface
+    /// (`Role::Tooltip`, `Role::Dialog`, `Role::AlertDialog`),
+    /// preserving an outer composite tooltip or modal hosting the
+    /// trigger. Use for popover triggers and pre-show cleanup that
+    /// want to close stale popovers / menus without taking a hosting
+    /// surface with them.
+    pub fn dismiss_all_except_hosts(&mut self) {
+        self.dismiss_all_except_hosts = true;
     }
 
     /// Dismiss the topmost overlay only (e.g., closing a submenu while

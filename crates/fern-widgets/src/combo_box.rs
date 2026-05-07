@@ -611,7 +611,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                         } => {
                             if interaction.get() == ComboBoxState::Open {
                                 interaction.set(ComboBoxState::Focused);
-                                ctx.dismiss_all_overlays();
+                                ctx.dismiss_all_except_hosts();
                             } else {
                                 open_overlay(ctx);
                             }
@@ -622,7 +622,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                         } => {
                             if interaction.get() == ComboBoxState::Open {
                                 interaction.set(ComboBoxState::Focused);
-                                ctx.dismiss_all_overlays();
+                                ctx.dismiss_all_except_hosts();
                                 EventResponse::Handled
                             } else {
                                 EventResponse::Ignored
@@ -641,7 +641,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                         WidgetEvent::KeyDown { key: Key::Tab, .. } => {
                             if interaction.get() == ComboBoxState::Open {
                                 interaction.set(ComboBoxState::Focused);
-                                ctx.dismiss_all_overlays();
+                                ctx.dismiss_all_except_hosts();
                                 EventResponse::Handled
                             } else {
                                 EventResponse::Ignored

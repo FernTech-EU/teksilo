@@ -265,7 +265,7 @@ impl Widget for PopoverIconButton {
             move |ctx_evt: &mut EventContext| {
                 if popover_open.get() {
                     popover_open.set(false);
-                    ctx_evt.dismiss_all_overlays();
+                    ctx_evt.dismiss_all_except_hosts();
                 } else {
                     popover_open.set(true);
                     ctx_evt.activate(content_id);

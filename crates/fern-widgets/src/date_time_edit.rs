@@ -495,7 +495,7 @@ impl Widget for DateTimeEdit {
                         }
                     }
                     popover_open.set(false);
-                    ctx_evt.dismiss_all_overlays();
+                    ctx_evt.dismiss_self_overlay_chain();
                     ctx_evt.request_focus(return_focus_to);
                     ctx_evt.request_frame();
                 });
@@ -531,7 +531,7 @@ impl Widget for DateTimeEdit {
                 .on_activate_fn(move |ctx_evt: &mut EventContext| {
                     if popover_open.get() {
                         popover_open.set(false);
-                        ctx_evt.dismiss_all_overlays();
+                        ctx_evt.dismiss_all_except_hosts();
                     } else {
                         popover_open.set(true);
                         ctx_evt.activate(cal_id);

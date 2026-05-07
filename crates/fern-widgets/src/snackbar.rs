@@ -23,7 +23,7 @@ fn present_snackbar(
     auto_dismiss_after: Option<Duration>,
     fade_duration: Option<Duration>,
 ) {
-    ctx.dismiss_all_overlays();
+    ctx.dismiss_all_except_hosts();
     ctx.activate(content_id);
     let request = OverlayRequest {
         content_id,

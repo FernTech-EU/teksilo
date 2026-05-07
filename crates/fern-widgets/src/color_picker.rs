@@ -266,7 +266,7 @@ impl ColorPicker {
     /// that's the caller's responsibility (e.g. ColorEdit captures a
     /// snapshot at popover-open time and writes it back here). The
     /// callback's typical implementation is
-    /// `value.set(snapshot.get()); ctx.dismiss_all_overlays();`.
+    /// `value.set(snapshot.get()); ctx.dismiss_self_overlay_chain();`.
     /// Only meaningful when `show_footer(true)`.
     pub fn on_cancel(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.on_cancel = Some(Rc::new(f));

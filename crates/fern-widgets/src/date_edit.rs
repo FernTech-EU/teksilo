@@ -521,7 +521,7 @@ impl Widget for DateEdit {
                         cb(Some(clamped), ctx_evt);
                     }
                     popover_open.set(false);
-                    ctx_evt.dismiss_all_overlays();
+                    ctx_evt.dismiss_self_overlay_chain();
                     // Return focus to the DateEdit so keyboard users
                     // are back at the trigger after committing —
                     // matches the open path's `request_focus(calendar_id)`
@@ -574,7 +574,7 @@ impl Widget for DateEdit {
                     .on_activate_fn(move |ctx_evt: &mut EventContext| {
                         if popover_open.get() {
                             popover_open.set(false);
-                            ctx_evt.dismiss_all_overlays();
+                            ctx_evt.dismiss_all_except_hosts();
                         } else {
                             popover_open.set(true);
                             ctx_evt.activate(calendar_id);

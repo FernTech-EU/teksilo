@@ -275,7 +275,7 @@ impl Widget for ColorEdit {
             .swatch_columns(self.swatch_columns)
             .show_footer(true)
             .on_done(|ctx_evt| {
-                ctx_evt.dismiss_all_overlays();
+                ctx_evt.dismiss_self_overlay_chain();
             })
             .on_cancel({
                 let value = value.clone();
@@ -285,7 +285,7 @@ impl Widget for ColorEdit {
                     if value.get() != prior {
                         value.set(prior);
                     }
-                    ctx_evt.dismiss_all_overlays();
+                    ctx_evt.dismiss_self_overlay_chain();
                 }
             })
             .enabled(self.enabled);
