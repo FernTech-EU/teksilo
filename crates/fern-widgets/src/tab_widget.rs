@@ -203,11 +203,20 @@ pub struct TabWidget {
     /// [`BindingLevel::Rebuild`](fern_core::binding::BindingLevel::Rebuild)
     /// so toggling the signal swaps Shared ↔ Independent live.
     sizing: Option<Signal<TabSizing>>,
-    /// Background color/role applied to **every** tab — selected,
-    /// idle, and hovered all use this one value, so the strip reads
-    /// as visually uniform. Set via [`Self::tab_background`].
+    /// Surface color/role applied to **every** tab — selected, idle,
+    /// and hovered all use this one value, so the strip reads as
+    /// visually uniform. Set via [`Self::tab_surface_role`].
     /// `None` (default) means transparent.
-    tab_background: Option<fern_core::color_prop::ColorProp>,
+    tab_surface_role: Option<fern_core::color_prop::ColorProp>,
+    /// Text role used for the label (and matching icon tint) on the
+    /// selected tab. Set via [`Self::selected_text_role`]. `None`
+    /// defaults to [`fern_tokens::TextRole::Primary`] (Int UI
+    /// editor-strip convention).
+    selected_text_role: Option<fern_tokens::TextRole>,
+    /// Text role used for the label (and matching icon tint) on idle
+    /// tabs. Set via [`Self::idle_text_role`]. `None` defaults to
+    /// [`fern_tokens::TextRole::Secondary`].
+    idle_text_role: Option<fern_tokens::TextRole>,
     min_tab_width: Option<f32>,
     max_tab_width: Option<f32>,
     pinned_tab_width: Option<f32>,
@@ -251,7 +260,9 @@ impl TabWidget {
             dynamic_model: None,
             dyn_pane_ids: HashMap::new(),
             sizing: None,
-            tab_background: None,
+            tab_surface_role: None,
+            selected_text_role: None,
+            idle_text_role: None,
             min_tab_width: None,
             max_tab_width: None,
             pinned_tab_width: None,
@@ -441,15 +452,38 @@ impl TabWidget {
         self
     }
 
-    /// Set the background color for every tab in the strip. Accepts
-    /// any `Color`, `SurfaceRole`, or `Signal<Color>` (via
+    /// Set the surface color/role applied to every tab in the strip.
+    /// Accepts any `Color`, `SurfaceRole`, or `Signal<Color>` (via
     /// [`ColorProp`](fern_core::color_prop::ColorProp)). All tabs —
-    /// selected, idle, and hovered — render the same background, so
+    /// selected, idle, and hovered — render the same surface, so
     /// selection is conveyed only by the accent indicator and the
     /// label-color shift (Int UI editor-strip convention). Default
     /// is transparent.
-    pub fn tab_background(mut self, color: impl Into<fern_core::color_prop::ColorProp>) -> Self {
-        self.tab_background = Some(color.into());
+    pub fn tab_surface_role(
+        mut self,
+        color: impl Into<fern_core::color_prop::ColorProp>,
+    ) -> Self {
+        self.tab_surface_role = Some(color.into());
+        self
+    }
+
+    /// Set the text role used for the label (and matching icon tint)
+    /// on the **selected** tab. Default: [`fern_tokens::TextRole::Primary`]
+    /// — the Int UI editor-strip convention. Override to e.g.
+    /// [`fern_tokens::TextRole::Accent`] when the strip sits over a
+    /// tinted surface.
+    pub fn selected_text_role(mut self, role: fern_tokens::TextRole) -> Self {
+        self.selected_text_role = Some(role);
+        self
+    }
+
+    /// Set the text role used for the label (and matching icon tint)
+    /// on **idle** tabs (not selected, not disabled). Default:
+    /// [`fern_tokens::TextRole::Secondary`]. Disabled tabs always read
+    /// as [`fern_tokens::TextRole::Disabled`] regardless of this
+    /// setting.
+    pub fn idle_text_role(mut self, role: fern_tokens::TextRole) -> Self {
+        self.idle_text_role = Some(role);
         self
     }
     pub fn min_tab_width(mut self, dp: f32) -> Self {
@@ -697,8 +731,14 @@ impl Widget for TabWidget {
             sizing.bind_to(self_id, ctx.binding_registry(), BindingLevel::Rebuild);
             bar = bar.tab_sizing(sizing.get());
         }
-        if let Some(ref bg) = self.tab_background {
-            bar = bar.tab_background(bg.clone());
+        if let Some(ref bg) = self.tab_surface_role {
+            bar = bar.tab_surface_role(bg.clone());
+        }
+        if let Some(role) = self.selected_text_role {
+            bar = bar.selected_text_role(role);
+        }
+        if let Some(role) = self.idle_text_role {
+            bar = bar.idle_text_role(role);
         }
         if let Some(w) = self.min_tab_width {
             bar = bar.min_tab_width(w);

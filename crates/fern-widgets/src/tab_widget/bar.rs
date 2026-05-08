@@ -46,7 +46,7 @@ use crate::{
     ListView, Panel, PopoverButton,
 };
 use fern_core::accesskit::HasPopup;
-use fern_tokens::{BorderRole, SurfaceRole};
+use fern_tokens::{BorderRole, SurfaceRole, TextRole};
 
 use std::collections::HashMap;
 
@@ -123,11 +123,17 @@ pub struct TabBar<T: 'static> {
     pinned_tab_width: f32,
     spacing: f32,
 
-    /// Uniform background color/role applied to every tab header in
-    /// the strip — selected, idle, and hovered all paint the same
-    /// fill, so selection is conveyed by the accent indicator and
+    /// Uniform surface color/role applied to every tab header in the
+    /// strip — selected, idle, and hovered all paint the same fill,
+    /// so selection is conveyed by the accent indicator and the
     /// label-color shift only. Default `None` = transparent.
-    tab_background: Option<fern_core::color_prop::ColorProp>,
+    tab_surface_role: Option<fern_core::color_prop::ColorProp>,
+    /// Text role used for the label (and matching icon tint) on the
+    /// selected tab. Default: `TextRole::Primary`.
+    selected_text_role: TextRole,
+    /// Text role used for the label (and matching icon tint) on idle
+    /// tabs (not selected, not disabled). Default: `TextRole::Secondary`.
+    idle_text_role: TextRole,
 
     bar_leading_slot: Option<PendingChild>,
     bar_trailing_slot: Option<PendingChild>,
@@ -287,7 +293,9 @@ impl<T: 'static> TabBar<T> {
             max_tab_width: DEFAULT_MAX_TAB_WIDTH,
             pinned_tab_width: DEFAULT_PINNED_TAB_WIDTH,
             spacing: DEFAULT_TAB_SPACING,
-            tab_background: None,
+            tab_surface_role: None,
+            selected_text_role: TextRole::Primary,
+            idle_text_role: TextRole::Secondary,
             bar_leading_slot: None,
             bar_trailing_slot: None,
             show_separator: true,
@@ -345,12 +353,33 @@ impl<T: 'static> TabBar<T> {
         self
     }
 
-    /// Set the background color/role applied to **every** tab —
-    /// selected, idle, and hovered all paint the same fill. Accepts
-    /// any `Color`, `SurfaceRole`, or `Signal<Color>`. Default `None`
-    /// = transparent.
-    pub fn tab_background(mut self, color: impl Into<fern_core::color_prop::ColorProp>) -> Self {
-        self.tab_background = Some(color.into());
+    /// Set the surface color/role applied to **every** tab — selected,
+    /// idle, and hovered all paint the same fill. Accepts any `Color`,
+    /// `SurfaceRole`, or `Signal<Color>` (via [`ColorProp`](fern_core::color_prop::ColorProp)).
+    /// Default `None` = transparent.
+    pub fn tab_surface_role(
+        mut self,
+        color: impl Into<fern_core::color_prop::ColorProp>,
+    ) -> Self {
+        self.tab_surface_role = Some(color.into());
+        self
+    }
+
+    /// Set the text role used for the label (and matching icon tint)
+    /// on the **selected** tab. Default: [`TextRole::Primary`] — the
+    /// Int UI editor-strip convention. Override to e.g.
+    /// [`TextRole::Accent`] when the strip sits over a tinted surface.
+    pub fn selected_text_role(mut self, role: TextRole) -> Self {
+        self.selected_text_role = role;
+        self
+    }
+
+    /// Set the text role used for the label (and matching icon tint)
+    /// on **idle** tabs (not selected, not disabled). Default:
+    /// [`TextRole::Secondary`]. Disabled tabs always read as
+    /// [`TextRole::Disabled`] regardless of this setting.
+    pub fn idle_text_role(mut self, role: TextRole) -> Self {
+        self.idle_text_role = role;
         self
     }
 
@@ -743,7 +772,9 @@ impl<T: 'static> Widget for TabBar<T> {
                     max_width: max_w,
                     pinned: is_pinned,
                     orientation: self.orientation,
-                    tab_background: self.tab_background.clone(),
+                    tab_surface_role: self.tab_surface_role.clone(),
+                    selected_text_role: self.selected_text_role,
+                    idle_text_role: self.idle_text_role,
                 }))
             });
             // Should never be `None` for `i < len()`, but defend:
@@ -893,6 +924,7 @@ impl<T: 'static> Widget for TabBar<T> {
                 max_scroll_main.clone(),
                 motion_duration_normal,
                 motion_easing_standard,
+                self.idle_text_role,
             );
             // Visibility: only when there's something to scroll back.
             let visible = scroll_main.clone().map(|x| *x > 0.5);
@@ -917,6 +949,7 @@ impl<T: 'static> Widget for TabBar<T> {
                 max_scroll_main.clone(),
                 motion_duration_normal,
                 motion_easing_standard,
+                self.idle_text_role,
             );
             // Visibility: only when there's more to scroll forward.
             let visible = scroll_main
@@ -944,7 +977,12 @@ impl<T: 'static> Widget for TabBar<T> {
                     enabled,
                 })
                 .collect();
-            let dropdown_id = build_overflow_dropdown(ctx, self.selected_id.clone(), entries);
+            let dropdown_id = build_overflow_dropdown(
+                ctx,
+                self.selected_id.clone(),
+                entries,
+                self.idle_text_role,
+            );
             outer_children.push(dropdown_id);
         }
 
@@ -1216,6 +1254,19 @@ impl<T: 'static> Widget for TabBar<T> {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        // Uniform backdrop covering the entire bar — leading slot,
+        // pinned strip, scroll arrows, headers row, overflow dropdown,
+        // trailing slot. Painting it here (rather than per-tab) unifies
+        // the gaps between tabs and the chrome regions so the strip
+        // reads as a single surface. Individual tab headers paint the
+        // same role on top, which is visually a no-op.
+        if let Some(ref prop) = self.tab_surface_role {
+            let backdrop = prop.resolve(ctx.theme);
+            if backdrop.a() > 0.0 {
+                canvas.fill_rect(bounds, backdrop);
+            }
+        }
+
         if self.show_separator {
             // 1 dp separator: bottom in horizontal mode, trailing
             // edge (right) in vertical mode. Painted *inside* the
@@ -1484,6 +1535,7 @@ fn build_scroll_arrow(
     max_scroll_main: Signal<f32>,
     duration: std::time::Duration,
     easing: Easing,
+    icon_role: TextRole,
 ) -> WidgetId {
     let icon_size = ctx.theme().components.button.icon_size;
     let icon = match (orientation, kind) {
@@ -1517,6 +1569,7 @@ fn build_scroll_arrow(
     let button = IconButton::new(icon)
         .embedded()
         .size(IconButtonSize::Compact)
+        .icon_role(icon_role)
         .tooltip(tooltip)
         .on_activate_fn(move |_ctx| {
             let cur = scroll_main.get();
@@ -1568,10 +1621,12 @@ fn build_overflow_dropdown(
     ctx: &mut BuildContext,
     selected_id: Signal<Option<TabId>>,
     entries: Vec<DropdownEntry>,
+    icon_role: TextRole,
 ) -> WidgetId {
     let icon_size = ctx.theme().components.button.icon_size;
     let trigger = Button::new(LocalizedString::literal(""))
         .style(ButtonVariant::Flat)
+        .text_role(icon_role)
         .icon(IconWidget::chevron_down(icon_size), IconLocation::Leading)
         .tooltip(LocalizedString::literal("Show all tabs"));
 

@@ -140,6 +140,13 @@ pub struct Button {
     /// observe hover / press / focus / disabled state and match the
     /// label's color exactly. See [`Button::share_interaction`].
     shared_interaction: Option<Signal<InteractionState>>,
+    /// Optional caller-supplied label/icon color override. When `Some`,
+    /// both the label text and any icon are bound to this `ColorProp`
+    /// regardless of `style` / interaction state — the auto-derived
+    /// cascade is replaced. Used by chrome that has to match a host's
+    /// enforced text role (e.g. tab-bar overflow dropdown trigger
+    /// inheriting `idle_text_role`). See [`Button::text_role`].
+    text_role_override: Option<fern_core::color_prop::ColorProp>,
     /// Interaction state signal — set during build().
     interaction: Signal<InteractionState>,
     /// Root child ID — set during build().
@@ -170,6 +177,7 @@ impl Button {
             has_popup: None,
             expanded_signal: None,
             shared_interaction: None,
+            text_role_override: None,
             leading: None,
             trailing: None,
             interaction: Signal::new(InteractionState::Idle),
@@ -300,6 +308,19 @@ impl Button {
 
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+
+    /// Override the label and icon's tint with a static `ColorProp`.
+    /// When set, the button ignores its `style` and the auto-derived
+    /// idle/hover/press text-role cascade — both the label text and
+    /// any icon are bound directly to this prop instead. Use for chrome
+    /// whose host enforces a single text role across all of its
+    /// sub-widgets (e.g. tab-bar overflow-dropdown triggers that must
+    /// match the strip's `idle_text_role` regardless of hover state).
+    /// Accepts `Color`, `TextRole`, `Signal<Color>`, or `Signal<TextRole>`.
+    pub fn text_role(mut self, role: impl Into<fern_core::color_prop::ColorProp>) -> Self {
+        self.text_role_override = Some(role.into());
         self
     }
 
@@ -512,7 +533,18 @@ impl fern_core::widget::Widget for Button {
         // replaces the older `interaction.zip(&theme_signal).map(...)` zip
         // and drops the explicit theme-signal plumbing.
         let bg_role = interaction.map(move |s| resolve_bg_role(style, *s));
-        let text_role = interaction.map(move |s| resolve_text_role(style, *s));
+        // Label/icon color: a caller-supplied override wins over the
+        // auto cascade. The override replaces ALL states (idle / hover /
+        // press / focus / disabled) — chrome that uses this opts out of
+        // interaction-driven color feedback in exchange for matching a
+        // host's enforced text role. Both label and icon read this same
+        // prop, so a one-line override re-tints the whole button.
+        let text_role: fern_core::color_prop::ColorProp =
+            if let Some(ref over) = self.text_role_override {
+                over.clone()
+            } else {
+                interaction.map(move |s| resolve_text_role(style, *s)).into()
+            };
         let border_role = interaction.map(move |s| resolve_border_role(style, *s));
         let normal_bw = button_style.border_width;
         let focus_bw = ctx.theme_signal().get().shape.focus_ring_width;

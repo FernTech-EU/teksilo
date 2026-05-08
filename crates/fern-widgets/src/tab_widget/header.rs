@@ -124,10 +124,20 @@ pub(crate) struct TabHeader {
     /// browser-tab convention) or the leading edge (vertical bars,
     /// the IDE-perspective / sidebar convention).
     orientation: super::delegate::TabBarOrientation,
-    /// Uniform background applied regardless of selection / hover
-    /// state, set by the parent [`TabBar`](super::TabBar) via
-    /// `tab_background(...)`. `None` means transparent.
-    tab_background: Option<fern_core::color_prop::ColorProp>,
+    /// Uniform surface role/color applied regardless of selection /
+    /// hover state, set by the parent [`TabBar`](super::TabBar) via
+    /// `tab_surface_role(...)`. `None` means transparent.
+    tab_surface_role: Option<fern_core::color_prop::ColorProp>,
+    /// Text role used for the label (and matching icon tint) when this
+    /// tab is the selected one. Default: `TextRole::Primary` (the Int
+    /// UI editor-strip convention). Set by the parent [`TabBar`] via
+    /// `selected_text_role(...)`.
+    selected_text_role: TextRole,
+    /// Text role used for the label (and matching icon tint) when this
+    /// tab is idle (not selected, not disabled). Default:
+    /// `TextRole::Secondary`. Set by the parent [`TabBar`] via
+    /// `idle_text_role(...)`.
+    idle_text_role: TextRole,
 
     inner_root_id: Option<WidgetId>,
 }
@@ -167,7 +177,9 @@ pub(crate) struct TabHeaderConfig {
     pub max_width: f32,
     pub pinned: bool,
     pub orientation: super::delegate::TabBarOrientation,
-    pub tab_background: Option<fern_core::color_prop::ColorProp>,
+    pub tab_surface_role: Option<fern_core::color_prop::ColorProp>,
+    pub selected_text_role: TextRole,
+    pub idle_text_role: TextRole,
 }
 
 impl TabHeader {
@@ -195,7 +207,9 @@ impl TabHeader {
             max_width: cfg.max_width,
             pinned: cfg.pinned,
             orientation: cfg.orientation,
-            tab_background: cfg.tab_background,
+            tab_surface_role: cfg.tab_surface_role,
+            selected_text_role: cfg.selected_text_role,
+            idle_text_role: cfg.idle_text_role,
             inner_root_id: None,
         }
     }
@@ -285,16 +299,20 @@ impl Widget for TabHeader {
         // selected at `Primary`, idle at `Secondary`, disabled at
         // `Disabled` — the label-color shift on click is one of the
         // strongest "this tab is active" cues besides the accent
-        // indicator.
+        // indicator. The selected and idle roles are overridable via
+        // `TabBar::selected_text_role` / `idle_text_role`; disabled
+        // always reads as `TextRole::Disabled`.
         let enabled = self.enabled;
         let index_for_role = self.index;
+        let selected_role = self.selected_text_role;
+        let idle_role = self.idle_text_role;
         let role_signal = self.selected.map(move |sel| {
             if !enabled {
                 TextRole::Disabled
             } else if *sel == index_for_role {
-                TextRole::Primary
+                selected_role
             } else {
-                TextRole::Secondary
+                idle_role
             }
         });
 
@@ -666,11 +684,11 @@ impl Widget for TabHeader {
         // stroke width) so it never bleeds into the neighbour tab.
         let visual = bounds;
 
-        // Uniform background regardless of state — all tabs read
+        // Uniform surface regardless of state — all tabs read
         // visually identical except for the accent indicator and the
         // label-color shift. The role is set by the parent `TabBar`
-        // via `tab_background(...)`; default is transparent.
-        let background = if let Some(ref prop) = self.tab_background {
+        // via `tab_surface_role(...)`; default is transparent.
+        let background = if let Some(ref prop) = self.tab_surface_role {
             prop.resolve(ctx.theme)
         } else {
             Color::TRANSPARENT

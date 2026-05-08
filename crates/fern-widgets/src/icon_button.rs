@@ -153,6 +153,15 @@ pub struct IconButton {
     /// icon's color exactly. See [`IconButton::share_interaction`].
     shared_interaction: Option<Signal<InteractionState>>,
 
+    /// Optional caller-supplied icon-color override. When `Some`, the
+    /// icon's tint is bound to this `ColorProp` (a `Color`, role, or
+    /// `Signal<Color>`) regardless of `embedded` / interaction state —
+    /// the auto-derived idle/hover/press cascade is replaced. Used by
+    /// chrome that has to read with a host's text-role rather than the
+    /// IconButton's stand-alone palette (e.g. tab-bar scroll arrows
+    /// inheriting `idle_text_role`).
+    icon_role_override: Option<fern_core::color_prop::ColorProp>,
+
     // Build state (set in build())
     interaction: Signal<InteractionState>,
     root_child_id: Option<WidgetId>,
@@ -180,6 +189,7 @@ impl IconButton {
             has_popup: None,
             expanded_signal: None,
             shared_interaction: None,
+            icon_role_override: None,
             interaction: Signal::new(InteractionState::Idle),
             root_child_id: None,
         }
@@ -225,6 +235,18 @@ impl IconButton {
     /// (icon at full visual weight, `Primary` always).
     pub fn embedded(mut self) -> Self {
         self.embedded = true;
+        self
+    }
+
+    /// Override the icon's tint with a static `ColorProp`. When set,
+    /// the icon ignores `embedded` and the auto-derived idle/hover/press
+    /// role cascade — its color is bound directly to this prop instead.
+    /// Use for chrome whose host enforces a single text role across all
+    /// of its sub-widgets (e.g. tab-bar scroll arrows that must match
+    /// the tab strip's `idle_text_role` regardless of hover state).
+    /// Accepts `Color`, `TextRole`, `Signal<Color>`, or `Signal<TextRole>`.
+    pub fn icon_role(mut self, role: impl Into<fern_core::color_prop::ColorProp>) -> Self {
+        self.icon_role_override = Some(role.into());
         self
     }
 
@@ -591,11 +613,19 @@ impl fern_core::widget::Widget for IconButton {
                 .map(|(s, on)| resolve_bg_role_toggled(*s, *on)),
             None => interaction.map(|s| resolve_bg_role_plain(*s)),
         };
-        let icon_role = if embedded {
-            interaction.map(|s| resolve_icon_role_embedded(*s))
-        } else {
-            interaction.map(|s| resolve_icon_role_standalone(*s))
-        };
+        // Icon color: a caller-supplied override wins over the auto
+        // cascade. The override replaces ALL states (idle / hover /
+        // press / focus / disabled) — chrome that uses this opts out
+        // of interaction-driven color feedback in exchange for matching
+        // a host's enforced text role.
+        let icon_color: fern_core::color_prop::ColorProp =
+            if let Some(ref over) = self.icon_role_override {
+                over.clone()
+            } else if embedded {
+                interaction.map(|s| resolve_icon_role_embedded(*s)).into()
+            } else {
+                interaction.map(|s| resolve_icon_role_standalone(*s)).into()
+            };
 
         // Build the icon content. Icon-swap toggle (eye / eye-off) only
         // applies when a `toggled_icon` was provided via
@@ -608,13 +638,13 @@ impl fern_core::widget::Widget for IconButton {
             let primary_icon =
                 std::mem::replace(&mut self.icon, IconWidget::from_path(Path::new(), 0.0))
                     .icon_size(icon_size)
-                    .bind_color(icon_role.clone());
+                    .bind_color(icon_color.clone());
             let alt_icon = self
                 .toggled_icon
                 .take()
                 .expect("toggled_icon checked above")
                 .icon_size(icon_size)
-                .bind_color(icon_role);
+                .bind_color(icon_color);
             ctx.add(
                 Switcher::new(toggled_index)
                     .child(primary_icon)
@@ -623,7 +653,7 @@ impl fern_core::widget::Widget for IconButton {
         } else {
             let icon = std::mem::replace(&mut self.icon, IconWidget::from_path(Path::new(), 0.0))
                 .icon_size(icon_size)
-                .bind_color(icon_role);
+                .bind_color(icon_color);
             ctx.add(icon)
         };
 

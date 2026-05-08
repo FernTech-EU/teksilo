@@ -581,18 +581,32 @@ publish for their own browser tabs.
 
 ## Theme tokens
 
-| Surface                     | Role                                                       |
-|-----------------------------|------------------------------------------------------------|
-| tab background (all states) | `tab_background` ColorProp (settable, default transparent) |
-| label text — selected       | `TextRole::Primary`                                        |
-| label text — idle           | `TextRole::Secondary`                                      |
-| label text — disabled       | `TextRole::Disabled`                                       |
-| accent indicator (selected) | `theme.components.tab.underline_active`                    |
-| bar bottom separator        | `BorderRole::DividerStrong`                                |
-| close button hover          | `SurfaceRole::Hover`                                       |
-| drop indicator line         | `TextRole::Accent`                                         |
-| overflow popover surface    | `SurfaceRole::Raised`                                      |
-| overflow popover border     | `BorderRole::Default`                                      |
+| Surface                     | Role                                    |
+|-----------------------------|-----------------------------------------|
+| bar backdrop + tab fills    | `tab_surface_role` (settable)           |
+| label text — selected       | `selected_text_role` (settable)         |
+| label text — idle           | `idle_text_role` (settable)             |
+| label text — disabled       | `TextRole::Disabled` (always)           |
+| accent indicator (selected) | `theme.components.tab.underline_active` |
+| bar bottom separator        | `BorderRole::DividerStrong`             |
+| close button hover          | `SurfaceRole::Hover`                    |
+| drop indicator line         | `TextRole::Accent`                      |
+| overflow popover surface    | `SurfaceRole::Raised`                   |
+| overflow popover border     | `BorderRole::Default`                   |
+
+`tab_surface_role` defaults to transparent and accepts any `Color`,
+`SurfaceRole`, or `Signal<Color>` (via [`ColorProp`]). When set, the
+bar paints it as a uniform backdrop covering the whole strip — leading
+slot, pinned strip, scroll arrows, headers row, overflow dropdown, and
+trailing slot all share the surface, so the bar reads as a single
+plane regardless of how the chrome is composed.
+
+`selected_text_role` defaults to `TextRole::Primary` (the Int UI
+editor-strip convention); `idle_text_role` defaults to
+`TextRole::Secondary`. Override either to e.g. `TextRole::Accent` /
+`TextRole::Tertiary` when the strip sits over a tinted surface and
+the default cascade reads with insufficient contrast. Disabled tabs
+always render at `TextRole::Disabled`.
 
 Static numbers come from `theme.components.tab`
 ([`TabStyle`](../crates/fern-tokens/src/components.rs)):
@@ -603,16 +617,16 @@ Static numbers come from `theme.components.tab`
 - `underline_active` — accent color for the selection indicator.
 
 The accent indicator paints at the **top edge** in horizontal bars and
-the **leading edge** in vertical bars. Tabs use a uniform background
-across all states (`tab_background`); selection is conveyed by the
+the **leading edge** in vertical bars. Tabs use a uniform surface
+across all states (`tab_surface_role`); selection is conveyed by the
 accent indicator and the label-color shift only — Int UI editor-strip
 convention.
 
 ```rust
 TabWidget::new(selected)
-    .tab_background(SurfaceRole::Content)   // role-driven, theme-aware
-    // or:
-    .tab_background(Color::rgb(0.96, 0.96, 0.96));   // frozen literal
+    .tab_surface_role(SurfaceRole::Content)        // role-driven, theme-aware
+    .selected_text_role(TextRole::Primary)         // override the selected label color
+    .idle_text_role(TextRole::Secondary);          // override the idle label color
 ```
 
 ---
