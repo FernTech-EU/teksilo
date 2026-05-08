@@ -11,7 +11,8 @@
       "Bash(rtk proxy cargo build *)",
       "Bash(cargo doc *)",
       "Bash(cargo clippy *)",
-      "Bash(cargo tree *)"
+      "Bash(cargo tree *)",
+      "Bash(python3 tools/extract_widget_api.py *)"
     ]
   }
 }

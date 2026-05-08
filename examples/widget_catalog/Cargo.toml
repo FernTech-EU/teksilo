@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 fern-ui = { workspace = true, features = ["rich-text", "system-emoji"] }
+jiff = { workspace = true }
 
 [dev-dependencies]
 fern-render = { workspace = true }

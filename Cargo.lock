@@ -6290,6 +6290,7 @@ version = "0.2.0"
 dependencies = [
  "fern-render",
  "fern-ui",
+ "jiff",
  "pollster",
  "wgpu",
 ]
