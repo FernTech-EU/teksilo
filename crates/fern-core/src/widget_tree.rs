@@ -10,8 +10,10 @@ use crate::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPla
 use crate::widget_id::WidgetId;
 
 mod accessibility_impl;
+mod drag_drop_impl;
 mod event_dispatch_impl;
 mod focus_impl;
+mod gesture_dispatch_impl;
 mod layout_impl;
 mod overlay_impl;
 mod query_impl;
