@@ -16,6 +16,7 @@ pub mod padding;
 pub mod rect_widget;
 pub mod spacer;
 pub mod switcher;
+pub mod twist_arrow;
 /// `TextInputField` — raw editable text surface primitive. Gated
 /// behind the `rich-text` feature because it depends on the
 /// `text-typeset` / `text-document` stack. Consumed by
@@ -52,6 +53,7 @@ pub use switcher::Switcher;
 #[cfg(feature = "rich-text")]
 pub use text_input_field::TextInputField;
 pub use text_widget::TextWidget;
+pub use twist_arrow::TwistArrow;
 #[cfg(feature = "rich-text")]
 pub use validation_strip::ValidationStrip;
 pub use vstack::VStack;

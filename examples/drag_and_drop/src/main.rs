@@ -17,8 +17,8 @@ use fern_ui::core::WidgetPlacement;
 use fern_ui::data::{ListModel, SelectionMode, SelectionModel, TreeModel};
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Button, Divider, Expand, HStack, ListView, Padding, Panel, RectWidget, Spacer, TextWidget,
-    Toolbar, TreeView, VStack, ZStack,
+    Button, Divider, Expand, HStack, ListView, Padding, Panel, Spacer, StandardListItem,
+    StandardTreeItem, TextWidget, Toolbar, TreeView, VStack,
 };
 
 fn dark_mode_toolbar() -> impl Widget {
@@ -113,7 +113,6 @@ impl Root {
     fn build_songs_panel(&self, theme: &Theme) -> impl Widget + 'static {
         let songs = self.songs.clone();
         let selection = self.song_selection.clone();
-        let body = theme.typography.body.clone();
         let body_bold = theme.typography.body_bold.clone();
         let small = theme.typography.small.clone();
         let text_primary = theme.colors.text_primary;
@@ -142,34 +141,15 @@ impl Root {
             .child(
                 Expand::vertical().child(
                     ListView::new(songs, move |index, title, selected| {
-                        let row_body = body.clone();
-                        let bg = if selected {
-                            Color::from_rgba(0.25, 0.47, 0.85, 0.25)
-                        } else if index % 2 == 0 {
-                            Color::from_rgba(0.0, 0.0, 0.0, 0.03)
-                        } else {
-                            Color::TRANSPARENT
-                        };
                         Box::new(
-                            ZStack::new().child(RectWidget::new().background(bg)).child(
-                                Padding::symmetric(6.0, 16.0).child(
-                                    HStack::new()
-                                        .spacing(12.0)
-                                        .child(
-                                            TextWidget::new_literal(
-                                                format!("{:>2}.", index + 1).leak() as &str,
-                                            )
-                                            .color(Color::from_rgba(0.5, 0.5, 0.5, 1.0))
-                                            .style(row_body.clone()),
-                                        )
-                                        .child(
-                                            TextWidget::new_literal(title.as_str())
-                                                .color(text_primary)
-                                                .style(row_body),
-                                        )
-                                        .child(Spacer::new()),
+                            StandardListItem::new_literal(title.clone())
+                                .selected(selected)
+                                .leading_slot(
+                                    TextWidget::new_literal(
+                                        format!("{:>2}.", index + 1).leak() as &str,
+                                    )
+                                    .color(TextRole::Secondary),
                                 ),
-                            ),
                         )
                     })
                     .item_height(32.0)
@@ -182,7 +162,6 @@ impl Root {
     fn build_folders_panel(&self, theme: &Theme) -> impl Widget + 'static {
         let folders = self.folders.clone();
         let selection = self.folder_selection.clone();
-        let body = theme.typography.body.clone();
         let body_bold = theme.typography.body_bold.clone();
         let small = theme.typography.small.clone();
         let text_primary = theme.colors.text_primary;
@@ -210,42 +189,18 @@ impl Root {
             )
             .child(
                 Expand::vertical().child(
-                    TreeView::new(folders, move |name, entry, selected| {
-                        let row_body = body.clone();
-                        let indent = entry.depth as f32 * 16.0;
-                        let arrow = if entry.has_children {
-                            if entry.is_expanded { "v" } else { ">" }
-                        } else {
-                            " "
-                        };
-                        let bg = if selected {
-                            Color::from_rgba(0.25, 0.47, 0.85, 0.25)
-                        } else {
-                            Color::TRANSPARENT
-                        };
+                    TreeView::new_with_context(folders, move |name, entry, selected, ctx| {
                         Box::new(
-                            ZStack::new().child(RectWidget::new().background(bg)).child(
-                                Padding::new(4.0, 12.0, 4.0, indent + 12.0).child(
-                                    HStack::new()
-                                        .spacing(8.0)
-                                        .child(
-                                            TextWidget::new_literal(arrow)
-                                                .color(Color::from_rgba(0.5, 0.5, 0.5, 1.0))
-                                                .style(row_body.clone()),
-                                        )
-                                        .child(
-                                            TextWidget::new_literal(name.as_str())
-                                                .color(text_primary)
-                                                .style(row_body),
-                                        )
-                                        .child(Spacer::new()),
-                                ),
-                            ),
+                            StandardTreeItem::new_literal(name.clone())
+                                .from_entry(entry)
+                                .selected(selected)
+                                .on_toggle_rc(ctx.toggle_callback()),
                         )
                     })
                     .item_height(28.0)
                     .selection(selection)
-                    .reorderable(true),
+                    .reorderable(true)
+                    .row_click_expands(false),
                 ),
             )
     }

@@ -41,8 +41,8 @@ use crate::{
     Accordion, Avatar, AvatarPresence, AvatarShape, AvatarSize, Badge, Breadcrumb, BreadcrumbItem,
     Button, ButtonVariant, Card, Checkbox, ComboBox, GroupBox, GroupHeader, IconButton,
     IconButtonSize, Link, ListView, MenuItem, MenuList, Panel, ProgressBar, RadioButton,
-    RadioGroup, ScrollArea, SegmentedControl, Slider, Snackbar, SplitButton, SplitView, StatusBar,
-    TabWidget, Toggle, ToolBox, Toolbar, TreeView,
+    RadioGroup, ScrollArea, SegmentedControl, Slider, Snackbar, SplitButton, SplitView,
+    StandardListItem, StandardTreeItem, StatusBar, TabWidget, Toggle, ToolBox, Toolbar, TreeView,
 };
 
 // ---------------------------------------------------------------------------
@@ -1414,13 +1414,10 @@ impl WidgetCatalog for ListView<String> {
                 FixedSize::new()
                     .bind_width(280.0_f32)
                     .bind_height(220.0_f32)
-                    .child(ListView::new(model, |_idx, item, _selected| {
+                    .child(ListView::new(model, |_idx, item, selected| {
                         Box::new(
-                            Padding::symmetric(6.0, 12.0).child(
-                                TextWidget::new_literal(item.clone())
-                                    .style(TextStyleRole::Body)
-                                    .color(TextRole::Primary),
-                            ),
+                            StandardListItem::new_literal(item.clone())
+                                .selected(selected),
                         )
                     })),
             )
@@ -1461,16 +1458,17 @@ impl WidgetCatalog for TreeView<String> {
                 FixedSize::new()
                     .bind_width(280.0_f32)
                     .bind_height(220.0_f32)
-                    .child(TreeView::new(model, |item, entry, _selected| {
-                        let indent = entry.depth as f32 * 16.0;
-                        Box::new(
-                            Padding::new(4.0, 8.0, 4.0, indent + 8.0).child(
-                                TextWidget::new_literal(item.clone())
-                                    .style(TextStyleRole::Body)
-                                    .color(TextRole::Primary),
-                            ),
-                        )
-                    })),
+                    .child(TreeView::new_with_context(
+                        model,
+                        |item, entry, selected, ctx| {
+                            Box::new(
+                                StandardTreeItem::new_literal(item.clone())
+                                    .from_entry(entry)
+                                    .selected(selected)
+                                    .on_toggle_rc(ctx.toggle_callback()),
+                            )
+                        },
+                    )),
             )
         }
         vec![PreviewVariant::scenario("default", build_default)]
@@ -1480,6 +1478,160 @@ impl WidgetCatalog for TreeView<String> {
     }
 }
 register_widget_catalog_at!("crates/fern-widgets/src/tree_view.rs", TreeView<String>);
+
+// ---------------------------------------------------------------------------
+// StandardListItem
+// ---------------------------------------------------------------------------
+
+impl WidgetCatalog for StandardListItem {
+    fn id() -> &'static str {
+        "standard_list_item"
+    }
+    fn group() -> &'static str {
+        "Data"
+    }
+    fn display_name() -> &'static str {
+        "StandardListItem"
+    }
+    fn variants() -> Vec<PreviewVariant> {
+        fn build_single_line() -> Box<dyn Widget> {
+            Box::new(StandardListItem::new_literal("Single-line item"))
+        }
+        fn build_with_all_primary_slots() -> Box<dyn Widget> {
+            Box::new(
+                StandardListItem::new_literal("With every primary slot")
+                    .leading_slot(TextWidget::new_literal("●").color(TextRole::Accent))
+                    .center_slot(TextWidget::new_literal("•").color(TextRole::Secondary))
+                    .trailing_slot(TextWidget::new_literal("12").color(TextRole::Secondary)),
+            )
+        }
+        fn build_two_line_with_subtitle_slots() -> Box<dyn Widget> {
+            Box::new(
+                StandardListItem::new_literal("Title line")
+                    .subtitle_literal("Subtitle line")
+                    .leading_slot(TextWidget::new_literal("●").color(TextRole::Accent))
+                    .subtitle_leading_slot(
+                        TextWidget::new_literal("•").color(TextRole::Secondary),
+                    )
+                    .subtitle_trailing_slot(
+                        TextWidget::new_literal("just now").color(TextRole::Secondary),
+                    )
+                    .trailing_slot(TextWidget::new_literal("∗").color(TextRole::Accent)),
+            )
+        }
+        fn build_with_checkbox() -> Box<dyn Widget> {
+            let checked = Signal::new(true);
+            Box::new(StandardListItem::new_literal("With two-state checkbox").checkbox(checked))
+        }
+        fn build_with_tristate_checkbox() -> Box<dyn Widget> {
+            use fern_data::CheckState;
+            let s = Signal::new(CheckState::Indeterminate);
+            Box::new(
+                StandardListItem::new_literal("With tristate checkbox").tristate_checkbox(s),
+            )
+        }
+        fn build_selected() -> Box<dyn Widget> {
+            Box::new(StandardListItem::new_literal("Selected").selected(true))
+        }
+        fn build_disabled() -> Box<dyn Widget> {
+            Box::new(StandardListItem::new_literal("Disabled").enabled(false))
+        }
+        vec![
+            PreviewVariant::scenario("single_line", build_single_line),
+            PreviewVariant::scenario("all_primary_slots", build_with_all_primary_slots),
+            PreviewVariant::scenario("two_line", build_two_line_with_subtitle_slots),
+            PreviewVariant::scenario("checkbox", build_with_checkbox),
+            PreviewVariant::scenario("tristate_checkbox", build_with_tristate_checkbox),
+            PreviewVariant::scenario("selected", build_selected),
+            PreviewVariant::scenario("disabled", build_disabled),
+        ]
+    }
+    fn build(variant: &str, _knobs: &KnobValues) -> Box<dyn Widget> {
+        scenario_for::<Self>(variant)
+    }
+}
+register_widget_catalog_at!(
+    "crates/fern-widgets/src/standard_item.rs",
+    StandardListItem
+);
+
+// ---------------------------------------------------------------------------
+// StandardTreeItem
+// ---------------------------------------------------------------------------
+
+impl WidgetCatalog for StandardTreeItem {
+    fn id() -> &'static str {
+        "standard_tree_item"
+    }
+    fn group() -> &'static str {
+        "Data"
+    }
+    fn display_name() -> &'static str {
+        "StandardTreeItem"
+    }
+    fn variants() -> Vec<PreviewVariant> {
+        fn build_collapsed_branch() -> Box<dyn Widget> {
+            Box::new(
+                StandardTreeItem::new_literal("Folder (collapsed)")
+                    .depth(0)
+                    .has_children(true)
+                    .is_expanded(false),
+            )
+        }
+        fn build_expanded_branch() -> Box<dyn Widget> {
+            Box::new(
+                StandardTreeItem::new_literal("Folder (expanded)")
+                    .depth(0)
+                    .has_children(true)
+                    .is_expanded(true),
+            )
+        }
+        fn build_leaf_indented() -> Box<dyn Widget> {
+            Box::new(
+                StandardTreeItem::new_literal("Deep leaf")
+                    .depth(2)
+                    .has_children(false),
+            )
+        }
+        fn build_with_tristate_checkbox() -> Box<dyn Widget> {
+            use fern_data::CheckState;
+            let s = Signal::new(CheckState::Indeterminate);
+            Box::new(
+                StandardTreeItem::new_literal("Folder with tristate")
+                    .depth(1)
+                    .has_children(true)
+                    .is_expanded(true)
+                    .tristate_checkbox(s),
+            )
+        }
+        fn build_two_line() -> Box<dyn Widget> {
+            Box::new(
+                StandardTreeItem::new_literal("Folder")
+                    .subtitle_literal("3 items · last week")
+                    .depth(0)
+                    .has_children(true)
+                    .is_expanded(false)
+                    .subtitle_trailing_slot(
+                        TextWidget::new_literal("3").color(TextRole::Secondary),
+                    ),
+            )
+        }
+        vec![
+            PreviewVariant::scenario("collapsed_branch", build_collapsed_branch),
+            PreviewVariant::scenario("expanded_branch", build_expanded_branch),
+            PreviewVariant::scenario("leaf_indented", build_leaf_indented),
+            PreviewVariant::scenario("tristate_checkbox", build_with_tristate_checkbox),
+            PreviewVariant::scenario("two_line", build_two_line),
+        ]
+    }
+    fn build(variant: &str, _knobs: &KnobValues) -> Box<dyn Widget> {
+        scenario_for::<Self>(variant)
+    }
+}
+register_widget_catalog_at!(
+    "crates/fern-widgets/src/standard_item.rs",
+    StandardTreeItem
+);
 
 // ---------------------------------------------------------------------------
 // MenuList

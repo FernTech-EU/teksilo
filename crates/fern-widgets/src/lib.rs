@@ -83,6 +83,7 @@ pub mod spin_box;
 pub mod spinner;
 pub mod split_button;
 pub mod split_view;
+pub mod standard_item;
 pub mod status_bar;
 pub mod tab_widget;
 pub mod table_view;
@@ -116,7 +117,8 @@ pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
 pub use button::{Button, ButtonVariant, IconLocation};
 pub use calendar::{Calendar, DateRange, WeekNumberDisplay};
 pub use card::Card;
-pub use checkbox::{CheckState, Checkbox};
+pub use checkbox::Checkbox;
+pub use fern_data::CheckState;
 #[cfg(feature = "rich-text")]
 pub use color_edit::ColorEdit;
 #[cfg(feature = "rich-text")]
@@ -180,6 +182,7 @@ pub use spin_box::{
 pub use spinner::Spinner;
 pub use split_button::SplitButton;
 pub use split_view::SplitView;
+pub use standard_item::{StandardListItem, StandardTreeItem};
 pub use status_bar::StatusBar;
 pub use tab_widget::{
     ContextMenuFactory, IconFactory as TabIconFactory, STATIC_KIND, StaticContentFactory, TabBar,
@@ -199,7 +202,7 @@ pub use toggle::Toggle;
 pub use tool_box::{ToolBox, ToolBoxItem};
 pub use toolbar::Toolbar;
 pub use tree_table::TreeTable;
-pub use tree_view::TreeView;
+pub use tree_view::{TreeRowContext, TreeView};
 pub use wizard::{Wizard, WizardStep};
 
 /// The framework bundle: fern-widgets' own translatable strings, grouped

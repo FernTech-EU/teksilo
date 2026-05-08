@@ -436,6 +436,60 @@ impl Default for TreeListStyle {
     }
 }
 
+/// Tokens for `StandardListItem` / `StandardTreeItem` — the canonical
+/// row layout used by `ListView`/`TreeView`/etc. delegates. Selection
+/// background mirrors `MenuStyle`/`ComboBoxStyle` (rounded, inset).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct StandardItemStyle {
+    /// Default size for the primary leading IconWidget.
+    pub icon_size: f32,
+    /// Default size for the subtitle-line leading IconWidget.
+    pub subtitle_icon_size: f32,
+    /// Gap between primary-line slots (checkbox / leading / center / label / trailing).
+    pub slot_gap: f32,
+    /// Gap between subtitle-line slots.
+    pub subtitle_slot_gap: f32,
+    /// Vertical gap between the label line and the subtitle line.
+    pub label_subtitle_gap: f32,
+    pub padding_horizontal: f32,
+    pub padding_vertical: f32,
+    pub min_height_single_line: f32,
+    pub min_height_two_line: f32,
+    /// Width of the always-reserved chevron column in tree rows
+    /// (including leaves, so labels at the same depth align).
+    pub chevron_column_width: f32,
+    /// Per-depth indent step for tree rows. Independent of
+    /// `TreeListStyle.indent_per_level` so callers can tune the two
+    /// systems separately.
+    pub tree_indent_step: f32,
+    /// Corner radius of the selection / hover / pressed background
+    /// rect. Matches `MenuStyle.item_corner_radius`.
+    pub item_corner_radius: f32,
+    /// Outer horizontal margin so the rounded corners are visible
+    /// (the bg rect doesn't touch the row edge).
+    pub bg_horizontal_inset: f32,
+}
+
+impl Default for StandardItemStyle {
+    fn default() -> Self {
+        Self {
+            icon_size: 16.0,
+            subtitle_icon_size: 12.0,
+            slot_gap: 8.0,
+            subtitle_slot_gap: 6.0,
+            label_subtitle_gap: 2.0,
+            padding_horizontal: 8.0,
+            padding_vertical: 4.0,
+            min_height_single_line: 28.0,
+            min_height_two_line: 44.0,
+            chevron_column_width: 16.0,
+            tree_indent_step: 16.0,
+            item_corner_radius: 8.0,
+            bg_horizontal_inset: 4.0,
+        }
+    }
+}
+
 // ─── Surfaces ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -1353,6 +1407,7 @@ pub struct ComponentStyles {
     pub composite_tooltip: CompositeTooltipStyle,
     pub scrollbar: ScrollBarStyle,
     pub tree_list: TreeListStyle,
+    pub standard_item: StandardItemStyle,
     pub dialog: DialogStyle,
     pub notification: NotificationStyle,
     pub panel: PanelStyle,

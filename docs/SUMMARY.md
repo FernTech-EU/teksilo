@@ -73,7 +73,9 @@ directory; in-progress design work lives separately under [plans/](plans/).
 ## Data, persistence, telemetry
 
 - [data-models.md](data-models.md) — `ListModel`, `TreeModel`,
-  `SelectionModel`, sort/filter projections; the model layer that sits
+  `SelectionModel`, `CheckedModel` / `TreeCheckedModel` (per-row
+  checkbox state with optional descendant→ancestor tristate
+  aggregation), sort/filter projections; the model layer that sits
   above the widget tree.
 - [settings.md](settings.md) — reactive end-to-end persistence:
   `SettingsStore`, `SettingsFile<T>`, `MruList<T>`, window-state auto

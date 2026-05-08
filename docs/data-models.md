@@ -1,7 +1,7 @@
 # Reactive Data Models
 
 **Companion to:** [fern-ui-architecture.md](fern-ui-architecture.md)
-**Scope:** The `fern-data` crate — `ListModel`, `TreeModel`, `TreeSlice`, `SelectionModel`, `ListDataSource`, and the change-notification enums that connect them to data-driven widgets (`ListView`, `TreeView`, `Repeater`).
+**Scope:** The `fern-data` crate — `ListModel`, `TreeModel`, `TreeSlice`, `SelectionModel`, `CheckedModel`, `TreeCheckedModel`, `CheckState`, `ListDataSource`, and the change-notification enums that connect them to data-driven widgets (`ListView`, `TreeView`, `Repeater`).
 
 ---
 
@@ -129,7 +129,77 @@ In `None` mode every operation is a no-op; widgets can construct a disabled sele
 
 The selection is stored as flat indices into the view. For a `TreeView`, those are indices into the `TreeSlice`'s flat list — which means expanding or collapsing a parent changes which `NodeId`s those indices correspond to. Widgets translate at interaction time (e.g., on Ctrl+click): take the clicked `FlatEntry.node_id`, find its current flat index via the slice, then call `selection.toggle(index)`. Alternative designs where selection stores `NodeId`s directly have their own trade-offs (expansion doesn't lose selection, but the signal type changes per-widget); keeping selection index-based keeps the type uniform.
 
-## 6. MVVM flow
+## 6. `CheckedModel` and `TreeCheckedModel` — per-row checkbox state
+
+Selection (where the cursor is) and checkedness (which rows are *marked*) are orthogonal axes — Outlook / Files-app convention. So checkbox state lives in its own type pair, parallel to `SelectionModel`:
+
+```rust
+// Flat-list checkbox state.
+pub struct CheckedModel {
+    checked: Signal<BTreeSet<usize>>,
+    per_index: Rc<RefCell<HashMap<usize, Signal<bool>>>>,
+}
+
+impl CheckedModel {
+    pub fn new() -> Self;
+    pub fn signal_for(&self, index: usize) -> Signal<bool>;   // shared per index
+    pub fn checked_indices(&self) -> Vec<usize>;
+    pub fn check(&self, index: usize);
+    pub fn uncheck(&self, index: usize);
+    pub fn toggle(&self, index: usize);
+    pub fn check_all(&self, count: usize);
+    pub fn clear(&self);
+}
+
+// Tree checkbox state with optional descendant→ancestor aggregation.
+pub enum AggregateMode { None, DescendantsDriveAncestors }
+
+pub struct TreeCheckedModel<T: 'static> { /* per-NodeId Signal<CheckState> */ }
+
+impl<T: 'static> TreeCheckedModel<T> {
+    pub fn new(tree: TreeModel<T>) -> Self;
+    pub fn with_mode(tree: TreeModel<T>, mode: AggregateMode) -> Self;
+    pub fn signal_for(&self, node: NodeId) -> Signal<CheckState>;  // tristate per node
+    pub fn check(&self, node: NodeId);
+    pub fn uncheck(&self, node: NodeId);
+    pub fn toggle(&self, node: NodeId);
+    pub fn checked_nodes(&self) -> Vec<NodeId>;                    // Checked only — Indeterminate excluded
+    pub fn aggregate_mode(&self) -> AggregateMode;
+    pub fn set_aggregate_mode(&self, mode: AggregateMode);
+}
+```
+
+`signal_for(...)` is **cached per key**: repeat calls with the same index/`NodeId` return signals sharing the same root, so widgets bound to it re-render whenever the model is mutated through any other accessor.
+
+`TreeCheckedModel` defaults to `DescendantsDriveAncestors`: a parent's `CheckState` is `Checked` when all descendants are, `Unchecked` when none are, `Indeterminate` otherwise. Setting a parent cascades to all descendants. The `None` mode disables aggregation when nodes own their state independently.
+
+The `CheckState` enum (`Unchecked | Checked | Indeterminate`) lives in `fern-data` (re-exported from `fern_ui::widgets::CheckState` for convenience). The `Checkbox` widget consumes it via `Checkbox::tristate(Signal<CheckState>)`; `StandardListItem.tristate_checkbox(...)` and `StandardTreeItem.tristate_checkbox(...)` accept the same signal.
+
+Wiring with the new row widgets:
+
+```rust
+let checks: CheckedModel = state.app_state();
+ListView::new(model, move |idx, item, _sel| {
+    Box::new(
+        StandardListItem::new_literal(&item.name)
+            .checkbox(checks.signal_for(idx))
+    )
+})
+
+let tree_checks: TreeCheckedModel<Item> = state.app_state();
+TreeView::new_with_context(tree, move |item, entry, _sel, ctx| {
+    Box::new(
+        StandardTreeItem::new_literal(&item.title)
+            .from_entry(entry)
+            .tristate_checkbox(tree_checks.signal_for(entry.node_id))
+            .on_toggle_rc(ctx.toggle_callback())
+    )
+})
+```
+
+Path A (ad-hoc `Signal<bool>` stored on each row's view-model item) remains valid — it's the right answer for fixed dialog lists and small settings panels. Reach for `CheckedModel` / `TreeCheckedModel` once item types are domain models you don't want to retrofit a signal field onto.
+
+## 7. MVVM flow
 
 Typical data flow for a list-backed view:
 
@@ -153,7 +223,7 @@ Typical data flow for a list-backed view:
 
 The view never mutates the model directly. The intent/action split means "what the user did" and "what the app does about it" are separable layers — testable independently, replaceable independently, reconfigurable via `Action::enabled_when`.
 
-## 7. `Repeater` vs `ListView` — when to use which
+## 8. `Repeater` vs `ListView` — when to use which
 
 The widget catalog provides two data-driven collection consumers; pick by the size and scroll behavior of the collection.
 
@@ -183,13 +253,13 @@ Use `ListView` for **unbounded or large collections that scroll**:
 
 `ListView` accepts both `ListModel<T>` and `ListDataSource` via separate constructors. Selection is driven by a shared `SelectionModel`. Drag-and-drop (intra-widget reorder) produces insertion-line feedback and emits typed reorder commands; see §8.
 
-## 8. Drag-and-drop integration
+## 9. Drag-and-drop integration
 
 `ListView` and `TreeView` are drag sources and drop targets out of the box. Intra-widget reorder routes through `ListModel::move_item(from, to)` / `TreeModel::move_node(node, new_parent, new_index)`; the widget produces visual feedback (insertion lines, depth-tinted highlight on tree drop targets) and emits typed reorder intents. Cross-widget and cross-app drag flows through `DragPayload` — see [fern-ui-architecture.md §14 Drag and Drop](fern-ui-architecture.md) for the full picture.
 
 The relevant fern-data hook is the `DataChange::ItemsMoved { from, to, count }` / `TreeChange::NodeMoved { node, old_parent, new_parent, new_index }` notifications. The source widget emits the mutation on the model; every observer of the model — including other `ListView`s sharing the data — receives the notification and updates consistently.
 
-## 9. Qleany and adjacent-app integration
+## 10. Qleany and adjacent-app integration
 
 For applications that already have a Clean Architecture split, fern-data sits naturally at the ViewModel layer:
 
@@ -201,7 +271,7 @@ The architecture doc's `EntityListModel` example shows the shape: a wrapper that
 
 Nothing in fern-data requires Qleany. An application that uses `diesel` + raw structs, or one that streams events off a Kafka topic, follows the same pattern with whatever domain-layer types it prefers.
 
-## 10. Testing patterns
+## 11. Testing patterns
 
 fern-data is headless. Tests hold models, mutate them, and assert observer callbacks received the right `DataChange` / `TreeChange`:
 
@@ -227,7 +297,7 @@ assert_eq!(events, vec![
 
 Widget-tree tests that want a representative model use `ListModel::from_vec(vec![...])` and pass the model clone to the `ListView` under test. Selection tests construct a `SelectionModel::new(SelectionMode::Multi)` and drive it with `select` / `toggle` / `extend_to` calls, asserting on `selection_signal().get()`.
 
-## 11. Design rules in one list
+## 12. Design rules in one list
 
 - Models are `Rc<RefCell<…>>` internally and `Clone`-friendly. Share by cloning; there's no ownership transfer cost.
 - Every mutation notifies observers *after* dropping the mutable borrow, so observer callbacks can freely read the model.

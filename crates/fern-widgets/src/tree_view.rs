@@ -20,7 +20,7 @@ use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 
 use fern_data::selection_model::SelectionModel;
-use fern_data::tree_slice::{FlatEntry, TreeSlice};
+use fern_data::tree_slice::{FlatEntry, TreeSlice, TreeSliceHandle};
 use fern_data::{NodeId, TreeModel};
 
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
@@ -48,9 +48,47 @@ struct TreeViewDragData {
 /// })
 /// .item_height(28.0)
 /// ```
+/// Per-row context passed to a 4-arg TreeView delegate. Carries a
+/// reference to the slice handle and the row's `NodeId` so the
+/// delegate can wire chevron toggles and other tree-aware behavior
+/// without manually cloning state outside the closure.
+///
+/// Created internally by [`TreeView::new_with_context`]. Not
+/// constructed directly by user code.
+pub struct TreeRowContext<'a, T: 'static> {
+    slice: &'a TreeSliceHandle<T>,
+    node_id: fern_data::NodeId,
+}
+
+impl<'a, T: 'static> TreeRowContext<'a, T> {
+    /// Toggle callback for this row's chevron. Wires in one line:
+    /// `.on_toggle_rc(ctx.toggle_callback())`.
+    pub fn toggle_callback(&self) -> std::rc::Rc<dyn Fn()> {
+        let slice = self.slice.clone();
+        let node = self.node_id;
+        std::rc::Rc::new(move || slice.toggle_expand(node))
+    }
+
+    /// Cloned handle to the slice — call `.toggle_expand(node)`,
+    /// `.expand(node)`, `.collapse(node)` directly.
+    pub fn slice_handle(&self) -> TreeSliceHandle<T> {
+        self.slice.clone()
+    }
+
+    pub fn node_id(&self) -> fern_data::NodeId {
+        self.node_id
+    }
+}
+
+/// Internal delegate type: takes the inputs the 3-arg form gets plus
+/// the optional `TreeRowContext`. Both the 3-arg `new` and the 4-arg
+/// `new_with_context` produce a closure of this shape.
+type TreeDelegate<T> =
+    dyn Fn(&T, &FlatEntry, bool, &TreeRowContext<'_, T>) -> Box<dyn Widget>;
+
 pub struct TreeView<T: 'static> {
     tree_slice: TreeSlice<T>,
-    delegate: Rc<dyn Fn(&T, &FlatEntry, bool) -> Box<dyn Widget>>,
+    delegate: Rc<TreeDelegate<T>>,
     item_height: f32,
     selection: Option<SelectionModel>,
 
@@ -59,6 +97,14 @@ pub struct TreeView<T: 'static> {
 
     /// Enable intra-widget drag reordering.
     reorderable: bool,
+
+    /// Whether a row-body PointerUp on a branch row auto-toggles its
+    /// expansion. Defaults to `true` (legacy behavior — convenient
+    /// for hand-built delegates without an explicit chevron). Set to
+    /// `false` when the delegate provides its own chevron tap target
+    /// (e.g. `StandardTreeItem`) to avoid the auto-toggle firing in
+    /// addition to the chevron's own click and cancelling out.
+    row_click_expands: bool,
 
     /// Active drop feedback (set by on_drag_hover, cleared by on_drag_leave,
     /// read by paint). Reactive Signal — bound at `RepaintOnly` so any
@@ -87,16 +133,48 @@ impl<T: 'static> TreeView<T> {
         model: TreeModel<T>,
         delegate: impl Fn(&T, &FlatEntry, bool) -> Box<dyn Widget> + 'static,
     ) -> Self {
+        // Adapt the 3-arg delegate to the internal 4-arg shape by
+        // discarding the context.
+        let adapted = move |item: &T, entry: &FlatEntry, sel: bool, _ctx: &TreeRowContext<'_, T>| {
+            delegate(item, entry, sel)
+        };
+        Self::new_internal(model, Rc::new(adapted))
+    }
+
+    /// Like [`new`](Self::new), but the delegate also receives a
+    /// [`TreeRowContext`] from which `.toggle_callback()` can be
+    /// pulled in a single line — eliminating the need to manually
+    /// clone the slice handle outside the closure.
+    ///
+    /// ```ignore
+    /// TreeView::new_with_context(model, |item, entry, selected, ctx| {
+    ///     Box::new(
+    ///         StandardTreeItem::new_literal(&item.title)
+    ///             .from_entry(entry)
+    ///             .selected(selected)
+    ///             .on_toggle_rc(ctx.toggle_callback())
+    ///     )
+    /// })
+    /// ```
+    pub fn new_with_context(
+        model: TreeModel<T>,
+        delegate: impl Fn(&T, &FlatEntry, bool, &TreeRowContext<'_, T>) -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        Self::new_internal(model, Rc::new(delegate))
+    }
+
+    fn new_internal(model: TreeModel<T>, delegate: Rc<TreeDelegate<T>>) -> Self {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
         let tree_slice = TreeSlice::new(model);
         Self {
             tree_slice,
-            delegate: Rc::new(delegate),
+            delegate,
             item_height: DEFAULT_ITEM_HEIGHT,
             selection: None,
             focused_index: Rc::new(Cell::new(None)),
             reorderable: false,
+            row_click_expands: true,
             drop_feedback: Signal::new(None),
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
@@ -111,6 +189,17 @@ impl<T: 'static> TreeView<T> {
     /// Set the fixed height per row (default 28.0).
     pub fn item_height(mut self, height: f32) -> Self {
         self.item_height = height;
+        self
+    }
+
+    /// Whether a row-body PointerUp on a branch row auto-toggles its
+    /// expansion (default `true`). Set to `false` when the delegate
+    /// provides its own chevron tap target (e.g. `StandardTreeItem`)
+    /// — without this, the auto-toggle fires in addition to the
+    /// chevron's own click and they cancel out, leaving the row
+    /// expanded only on body clicks.
+    pub fn row_click_expands(mut self, b: bool) -> Self {
+        self.row_click_expands = b;
         self
     }
 
@@ -767,10 +856,17 @@ impl<T: 'static> Widget for TreeView<T> {
             // Get entry metadata for accessibility
             let entry_meta = self.tree_slice.entry_at(i);
             let item_has_children = entry_meta.as_ref().is_some_and(|e| e.has_children);
-            if let Some(widget) = self
-                .tree_slice
-                .with_entry(i, |item, entry| (self.delegate)(item, entry, selected))
-            {
+            // Borrow a fresh handle once per row so we can build a
+            // TreeRowContext for the delegate. The handle is cheap
+            // (Rc-only) and goes out of scope after the closure runs.
+            let slice_handle = self.tree_slice.handle();
+            if let Some(widget) = self.tree_slice.with_entry(i, |item, entry| {
+                let row_ctx = TreeRowContext {
+                    slice: &slice_handle,
+                    node_id: entry.node_id,
+                };
+                (self.delegate)(item, entry, selected, &row_ctx)
+            }) {
                 let inner_id = ctx.add_boxed(widget);
                 let (level, position_1based, total_siblings, expanded_opt) =
                     if let Some(ref e) = entry_meta {
@@ -809,7 +905,7 @@ impl<T: 'static> Widget for TreeView<T> {
                     let sel_click = self.selection.clone();
                     let click_index = i;
                     let tsh_click = self.tree_slice.handle();
-                    let has_children = item_has_children;
+                    let has_children = item_has_children && self.row_click_expands;
                     let node_for_toggle = self.tree_slice.visible_node_id(i);
 
                     ctx.apply_handlers(
@@ -886,10 +982,14 @@ impl<T: 'static> Widget for TreeView<T> {
                                 let entry_meta = tsh_for_preview.entry_at(flat_idx);
                                 let preview_opt = entry_meta.and_then(|entry| {
                                     tree_model_for_preview.with_item(node_id, |item| {
+                                        let preview_ctx = TreeRowContext {
+                                            slice: &tsh_for_preview,
+                                            node_id,
+                                        };
                                         Box::new(crate::drag_preview::DragPreview::new(
                                             PREVIEW_WIDTH,
                                             h,
-                                            delegate(item, &entry, false),
+                                            delegate(item, &entry, false, &preview_ctx),
                                         ))
                                             as Box<dyn Widget>
                                     })
@@ -1515,6 +1615,40 @@ mod tests {
             wtree.children(tv_id).len() - 1,
             3,
             "Second click should collapse A back to 3 visible roots"
+        );
+    }
+
+    #[test]
+    fn row_click_expands_false_disables_auto_toggle() {
+        // With `.row_click_expands(false)` set, clicking a branch
+        // row's body must NOT toggle its expansion. This is the
+        // contract used by `StandardTreeItem`, which provides its
+        // own chevron tap target — without this opt-out, body clicks
+        // would still toggle (and chevron clicks would toggle twice,
+        // cancelling out).
+        let tree = sample_tree();
+        let mut wtree = WidgetTree::new();
+        let tv_id = wtree.add(
+            TreeView::new(tree, |_item, entry, _selected| {
+                Box::new(FixedLeaf(100.0 + entry.depth as f32 * 20.0, 28.0))
+            })
+            .item_height(28.0)
+            .row_click_expands(false),
+        );
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        assert_eq!(wtree.children(tv_id).len() - 1, 3);
+
+        // Click A (a branch with children). Body click should NOT
+        // expand it.
+        let children = wtree.children(tv_id);
+        wtree.click(children[0]);
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        assert_eq!(
+            wtree.children(tv_id).len() - 1,
+            3,
+            "row body click on a branch must not auto-expand when row_click_expands=false"
         );
     }
 

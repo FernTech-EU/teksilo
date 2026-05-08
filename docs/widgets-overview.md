@@ -153,9 +153,27 @@ Backed by the `fern-data` reactive collections. See [data-models.md](data-models
 
 - [Repeater](../crates/fern-widgets/src/repeater.rs) — non-virtualized siblings driven by `ListModel<T>` change notifications; for small bounded collections.
 - [ListView](../crates/fern-widgets/src/list_view.rs) — virtualized vertical list for large/unbounded collections.
-- [TreeView](../crates/fern-widgets/src/tree_view.rs) — hierarchical list with twist-arrow expand/collapse.
+- [TreeView](../crates/fern-widgets/src/tree_view.rs) — hierarchical list with twist-arrow expand/collapse. The 4-arg [`new_with_context`](../crates/fern-widgets/src/tree_view.rs) variant passes a `TreeRowContext` carrying a one-line `toggle_callback()` for chevron wiring.
+- [StandardListItem](../crates/fern-widgets/src/standard_item.rs) — canonical row layout for `ListView` delegates: `[checkbox?] [leading_slot?] [center_slot?] [label] [Spacer] [trailing_slot?]`, plus an optional subtitle line with its own `[subtitle_leading_slot?] [subtitle] [Spacer] [subtitle_trailing_slot?]`. Selection / hover / pressed background routes through `SurfaceRole::Selected` / `AccentSubtle` / `Pressed` (theme-driven, rounded `item_corner_radius: 8.0`, mirrors `MenuItem` / `ComboBox`). Optional two-state (`Signal<bool>`) or tri-state (`Signal<CheckState>`) checkbox at the start of the row, independent of row selection. See the worked example in [examples/data_collections/src/main.rs](../examples/data_collections/src/main.rs).
+- [StandardTreeItem](../crates/fern-widgets/src/standard_item.rs) — `StandardListItem` plus depth-driven indent and a chevron column (always reserved, even for leaves, so labels at the same depth align). `.from_entry(&FlatEntry)` sets depth + has_children + is_expanded in one call; `.on_toggle(...)` / `.on_toggle_rc(...)` wires the chevron tap to a `TreeSliceHandle::toggle_expand` callback (cleanest with `TreeView::new_with_context`).
 - [TableView](../crates/fern-widgets/src/table_view.rs) — multi-column, virtualized; sort/filter via `SortFilterListModel`, drag-resize and drag-reorder columns, pinned Leading/Trailing, cell + row selection, edit hooks, row drag-drop reorder, full `Role::Table` AT tree. See [table-view.md](table-view.md).
 - [TreeTable](../crates/fern-widgets/src/tree_table.rs) — hierarchical multi-column variant of TableView; `Role::TreeGrid`.
+
+Worked TreeView delegate using both new pieces:
+
+```rust
+let tree_checks: TreeCheckedModel<Item> = state.app_state();
+TreeView::new_with_context(model, move |item, entry, selected, ctx| {
+    let mut row = StandardTreeItem::new_literal(&item.title)
+        .from_entry(entry)
+        .selected(selected)
+        .on_toggle_rc(ctx.toggle_callback());
+    if entry.has_children {
+        row = row.tristate_checkbox(tree_checks.signal_for(entry.node_id));
+    }
+    Box::new(row)
+})
+```
 
 ## Charts — `crates/fern-charts/src/`
 

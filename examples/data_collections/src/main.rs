@@ -16,11 +16,14 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use fern_ui::core::widget::WidgetPlacement;
-use fern_ui::data::{ListModel, SelectionMode, SelectionModel, TreeModel};
+use fern_ui::data::{
+    CheckedModel, ListModel, SelectionMode, SelectionModel, TreeCheckedModel, TreeModel,
+};
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Button, ButtonVariant, Card, Expand, HStack, ListView, Padding, Panel, RectWidget, Repeater,
-    Spacer, TabId, TabInfo, TabWidget, TextWidget, Toolbar, TreeView, VStack, ZStack,
+    Button, ButtonVariant, Card, Expand, HStack, ListView, Padding, Panel, Repeater, Spacer,
+    StandardListItem, StandardTreeItem, TabId, TabInfo, TabWidget, TextWidget, Toolbar, TreeView,
+    VStack,
 };
 
 fn dark_mode_toolbar() -> impl Widget {
@@ -50,6 +53,8 @@ struct Root {
     tree_model: TreeModel<String>,
     list_selection: SelectionModel,
     tree_selection: SelectionModel,
+    list_checks: CheckedModel,
+    tree_checks: TreeCheckedModel<String>,
     tag_counter: Rc<Cell<usize>>,
     list_counter: Rc<Cell<usize>>,
     tree_counter: Rc<Cell<usize>>,
@@ -61,6 +66,7 @@ impl Root {
         list_items: ListModel<String>,
         tree_model: TreeModel<String>,
     ) -> Self {
+        let tree_checks = TreeCheckedModel::new(tree_model.clone());
         Self {
             root_child_id: None,
             tags,
@@ -68,6 +74,8 @@ impl Root {
             tree_model,
             list_selection: SelectionModel::new(SelectionMode::Multi),
             tree_selection: SelectionModel::new(SelectionMode::Single),
+            list_checks: CheckedModel::new(),
+            tree_checks,
             tag_counter: Rc::new(Cell::new(5)),
             list_counter: Rc::new(Cell::new(201)),
             tree_counter: Rc::new(Cell::new(1)),
@@ -156,8 +164,7 @@ impl Root {
         let items_remove = self.list_items.clone();
         let selection = self.list_selection.clone();
         let counter = self.list_counter.clone();
-        let on_surface = theme.colors.text_primary;
-        let body_style = theme.typography.body.clone();
+        let checks = self.list_checks.clone();
 
         VStack::new()
             .spacing(0.0)
@@ -205,38 +212,35 @@ impl Root {
             )
             .child(
                 ListView::new(items, move |index, item, selected| {
-                    // Alternating row background + selection highlight
-                    let bg = if selected {
-                        Color::from_rgba(0.25, 0.47, 0.85, 0.25)
-                    } else if index % 2 == 0 {
-                        Color::from_rgba(0.0, 0.0, 0.0, 0.03)
+                    // Half the rows show subtitle + subtitle slots so
+                    // the two-line / subtitle-slot path is exercised
+                    // visually. The remaining rows are single-line
+                    // with a checkbox so the two-state checkbox path
+                    // and selection-highlight rendering are both
+                    // visible at once.
+                    let is_two_line = index % 2 == 0;
+                    let mut row = StandardListItem::new_literal(item.clone())
+                        .selected(selected)
+                        .leading_slot(
+                            TextWidget::new_literal(format!("{:>4}", index + 1).leak() as &str)
+                                .color(TextRole::Secondary),
+                        );
+                    if is_two_line {
+                        row = row
+                            .subtitle_literal(format!("Item #{} · category", index + 1))
+                            .subtitle_leading_slot(
+                                TextWidget::new_literal("•").color(TextRole::Accent),
+                            )
+                            .subtitle_trailing_slot(
+                                TextWidget::new_literal("just now")
+                                    .color(TextRole::Secondary),
+                            );
                     } else {
-                        Color::TRANSPARENT
-                    };
-
-                    Box::new(
-                        ZStack::new().child(RectWidget::new().background(bg)).child(
-                            Padding::symmetric(6.0, 16.0).child(
-                                HStack::new()
-                                    .spacing(12.0)
-                                    .child(
-                                        TextWidget::new_literal(
-                                            format!("{:>4}", index + 1).leak() as &str
-                                        )
-                                        .color(Color::from_rgba(0.5, 0.5, 0.5, 1.0))
-                                        .style(body_style.clone()),
-                                    )
-                                    .child(
-                                        TextWidget::new_literal(item.as_str())
-                                            .color(on_surface)
-                                            .style(body_style.clone()),
-                                    )
-                                    .child(Spacer::new()),
-                            ),
-                        ),
-                    )
+                        row = row.checkbox(checks.signal_for(index));
+                    }
+                    Box::new(row)
                 })
-                .item_height(32.0)
+                .item_height(48.0)
                 .selection(selection)
                 .reorderable(true),
             )
@@ -250,9 +254,7 @@ impl Root {
         let tree_remove = self.tree_model.clone();
         let selection = self.tree_selection.clone();
         let counter = self.tree_counter.clone();
-        let on_surface = theme.colors.text_primary;
-        let body_style = theme.typography.body.clone();
-        let label_style = theme.typography.small.clone();
+        let tree_checks = self.tree_checks.clone();
 
         VStack::new()
             .spacing(0.0)
@@ -303,48 +305,27 @@ impl Root {
                 ),
             )
             .child(
-                TreeView::new(tree, move |item, entry, selected| {
-                    let indent = entry.depth as f32 * 20.0;
-                    let arrow = if entry.has_children {
-                        if entry.is_expanded { "v " } else { "> " }
+                TreeView::new_with_context(tree, move |item, entry, selected, ctx| {
+                    let mut row = StandardTreeItem::new_literal(item.clone())
+                        .from_entry(entry)
+                        .selected(selected)
+                        .on_toggle_rc(ctx.toggle_callback());
+                    if entry.has_children {
+                        // Branches: tristate so `Indeterminate` is
+                        // visible when descendants are mixed.
+                        row = row.tristate_checkbox(tree_checks.signal_for(entry.node_id));
                     } else {
-                        "  "
-                    };
-                    let is_folder = entry.has_children;
-
-                    let bg = if selected {
-                        Color::from_rgba(0.25, 0.47, 0.85, 0.25)
-                    } else {
-                        Color::TRANSPARENT
-                    };
-
-                    Box::new(
-                        ZStack::new().child(RectWidget::new().background(bg)).child(
-                            Padding::new(2.0, 8.0, 2.0, indent + 8.0).child(
-                                HStack::new()
-                                    .spacing(4.0)
-                                    .child(
-                                        TextWidget::new_literal(arrow.to_string().leak() as &str)
-                                            .color(Color::from_rgba(0.4, 0.4, 0.4, 1.0))
-                                            .style(label_style.clone()),
-                                    )
-                                    .child(
-                                        TextWidget::new_literal(item.as_str())
-                                            .color(on_surface)
-                                            .style(if is_folder {
-                                                body_style.clone()
-                                            } else {
-                                                label_style.clone()
-                                            }),
-                                    )
-                                    .child(Spacer::new()),
-                            ),
-                        ),
-                    )
+                        // Leaves: two-state via the bidirectional
+                        // bool bridge. The model still recomputes
+                        // ancestors on writes through this signal.
+                        row = row.checkbox(tree_checks.bool_signal_for(entry.node_id));
+                    }
+                    Box::new(row)
                 })
                 .item_height(28.0)
                 .selection(selection)
-                .reorderable(true),
+                .reorderable(true)
+                .row_click_expands(false),
             )
     }
 }

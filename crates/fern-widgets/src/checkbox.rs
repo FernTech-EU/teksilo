@@ -16,50 +16,13 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
+use fern_data::CheckState;
 use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole, TextStyleRole, VAlignment};
 
 use crate::button::InteractionState;
 use crate::primitives::{
     FixedSize, HStack, IconWidget, MinSize, RectWidget, TextWidget, VStack, ZStack,
 };
-
-// ---------------------------------------------------------------------------
-// CheckState
-// ---------------------------------------------------------------------------
-
-/// The three possible states of a tristate checkbox.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CheckState {
-    Unchecked,
-    Checked,
-    Indeterminate,
-}
-
-impl CheckState {
-    /// Whether the box shows a filled background (checked or indeterminate).
-    pub fn is_filled(self) -> bool {
-        self != CheckState::Unchecked
-    }
-
-    /// Cycle to the next state: Unchecked → Checked → Indeterminate → Unchecked.
-    pub fn next_tristate(self) -> Self {
-        match self {
-            CheckState::Unchecked => CheckState::Checked,
-            CheckState::Checked => CheckState::Indeterminate,
-            CheckState::Indeterminate => CheckState::Unchecked,
-        }
-    }
-}
-
-impl From<bool> for CheckState {
-    fn from(checked: bool) -> Self {
-        if checked {
-            CheckState::Checked
-        } else {
-            CheckState::Unchecked
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Internal state wrapper
@@ -99,8 +62,20 @@ impl CheckKind {
                 s.set(!current);
             }
             CheckKind::TriState(s) => {
+                // User clicks toggle Checked ↔ Unchecked. The
+                // `Indeterminate` state is reserved for external
+                // sources (e.g. `TreeCheckedModel` aggregation when
+                // descendants are mixed) — the user can't *set* a
+                // checkbox to "half"; clicking from Indeterminate
+                // checks the whole. This matches the Outlook /
+                // Files-app folder-checkbox semantic.
                 let current = s.get();
-                s.set(current.next_tristate());
+                let next = if matches!(current, CheckState::Checked) {
+                    CheckState::Unchecked
+                } else {
+                    CheckState::Checked
+                };
+                s.set(next);
             }
         }
     }
@@ -125,6 +100,13 @@ pub struct Checkbox {
     caption: Option<String>,
     kind: CheckKind,
     enabled: bool,
+    /// When true, the checkbox renders only the box (no visual label /
+    /// caption next to it) AND its `accessibility(builder)` skips the
+    /// missing-label `debug_assert` — the parent composite is responsible
+    /// for providing the AT name (typically via its own `set_name(...)`
+    /// or an `access_label*` override). Used by `StandardListItem` /
+    /// `StandardTreeItem`.
+    labels_hidden: bool,
     tooltip_text: Option<String>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn fern_core::widget::Widget>>,
@@ -140,6 +122,7 @@ impl Checkbox {
             caption: None,
             kind: CheckKind::TwoState(checked),
             enabled: true,
+            labels_hidden: false,
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
@@ -158,12 +141,34 @@ impl Checkbox {
             caption: None,
             kind: CheckKind::TriState(state),
             enabled: true,
+            labels_hidden: false,
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
             interaction: None,
             root_child_id: None,
         }
+    }
+
+    /// Suppress the visual label/caption AND the debug-time
+    /// "missing accessible label" assertion. Use this **only** when
+    /// the checkbox is embedded inside a composite that owns the
+    /// row's accessible name (e.g. `StandardListItem` /
+    /// `StandardTreeItem`, where the row's `accessibility(builder)`
+    /// calls `set_name(...)` with the row label).
+    ///
+    /// **A11y contract:** when `labels_hidden(true)` is set, the
+    /// caller MUST guarantee that an addressable AT ancestor
+    /// provides the name — either via that ancestor's own
+    /// `accessibility()` impl or a builder-level
+    /// `.access_label*` override. Without it the AT tree exposes a
+    /// `Role::CheckBox` node with no name; screen readers announce
+    /// "checkbox, checked" with no context. The Outlook /
+    /// Files-app row pattern (where the row label covers the
+    /// embedded checkbox) is the supported use case.
+    pub fn labels_hidden(mut self, hidden: bool) -> Self {
+        self.labels_hidden = hidden;
+        self
     }
 
     pub fn label(mut self, label: impl Into<fern_i18n::LocalizedString>) -> Self {
@@ -399,7 +404,7 @@ impl Widget for Checkbox {
         let mut row = HStack::new()
             .spacing(cb_style.label_gap)
             .add_child(check_box);
-        if let Some(ref label) = self.label {
+        if !self.labels_hidden && let Some(ref label) = self.label {
             let label_widget = TextWidget::new_literal(label)
                 .style(TextStyleRole::Body)
                 .color(TextRole::Primary)
@@ -569,10 +574,12 @@ impl Widget for Checkbox {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         debug_assert!(
-            self.label.is_some(),
+            self.label.is_some() || self.labels_hidden,
             "Checkbox is missing an accessible label — \
              screen readers will announce \"checkbox\" with no context. \
-             Call .label(...) when constructing the widget."
+             Call .label(...) when constructing the widget, or \
+             .labels_hidden(true) when embedded in a composite that \
+             owns the AT name."
         );
         builder.set_role(fern_core::accesskit::Role::CheckBox);
         if let Some(ref label) = self.label {
