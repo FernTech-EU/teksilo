@@ -29,6 +29,7 @@ use std::rc::Rc;
 
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::color_prop::ColorProp;
 use fern_core::widget::{
     EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
     WidgetTreeView,
@@ -75,8 +76,8 @@ pub struct TitleBar {
     center: Option<PendingChild>,
     trailing: Option<PendingChild>,
     height: f32,
-    background: Color,
-    border_color: Color,
+    background: ColorProp,
+    border_color: ColorProp,
     border_width: f32,
     /// Optional override for the close button. When set, the close
     /// button invokes this closure instead of `ctx.close_window()`.
@@ -116,8 +117,8 @@ impl TitleBar {
             center: None,
             trailing: None,
             height: 40.0,
-            background: Color::TRANSPARENT,
-            border_color: Color::TRANSPARENT,
+            background: ColorProp::Static(Color::TRANSPARENT),
+            border_color: ColorProp::Static(Color::TRANSPARENT),
             border_width: 0.0,
             close_action: None,
             root_child_id: None,
@@ -134,15 +135,23 @@ impl TitleBar {
 
     /// Fill the title bar with a solid background color. Default:
     /// transparent (the window's clear color shows through).
-    pub fn background(mut self, color: Color) -> Self {
-        self.background = color;
+    ///
+    /// Accepts a `Color`, a `Signal<Color>`, or any of the role types
+    /// (`SurfaceRole`, `TextRole`, `BorderRole`, or their `Signal<…>`
+    /// variants). Role values resolve at paint time, so the title bar
+    /// retints live across `ctx.set_theme(...)` switches.
+    pub fn background(mut self, color: impl Into<ColorProp>) -> Self {
+        self.background = color.into();
         self
     }
 
     /// Draw a 1px-or-thicker bottom border separating the title bar from
     /// the body.
-    pub fn border(mut self, color: Color, width: f32) -> Self {
-        self.border_color = color;
+    ///
+    /// Color accepts the same range as [`Self::background`]; pair with
+    /// `BorderRole::Default` for a theme-tracking divider.
+    pub fn border(mut self, color: impl Into<ColorProp>, width: f32) -> Self {
+        self.border_color = color.into();
         self.border_width = width;
         self
     }
@@ -201,6 +210,16 @@ impl TitleBar {
 
 impl Widget for TitleBar {
     fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
+        // Register repaint-on-change for any signal-bearing ColorProp.
+        // Static + role-only variants need no registration — `set_theme`
+        // already mark-all-dirties the tree.
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        self.background
+            .register_if_bound(self_id, registry, fern_core::binding::BindingLevel::RepaintOnly);
+        self.border_color
+            .register_if_bound(self_id, registry, fern_core::binding::BindingLevel::RepaintOnly);
+
         let leading_inset = self.host.reserved_leading_inset();
         let trailing_inset = self.host.reserved_trailing_inset();
         let renders_controls = self.host.renders_custom_controls();
@@ -314,12 +333,16 @@ impl Widget for TitleBar {
         }
     }
 
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
-        if self.background.a() > 0.0 {
-            canvas.fill_rounded_rect(bounds, CornerRadius::ZERO, self.background);
+    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        let bg = self.background.resolve(ctx.theme);
+        if bg.a() > 0.0 {
+            canvas.fill_rounded_rect(bounds, CornerRadius::ZERO, bg);
         }
-        if self.border_width > 0.0 && self.border_color.a() > 0.0 {
-            canvas.draw_border_bottom(bounds, self.border_color, self.border_width);
+        if self.border_width > 0.0 {
+            let border = self.border_color.resolve(ctx.theme);
+            if border.a() > 0.0 {
+                canvas.draw_border_bottom(bounds, border, self.border_width);
+            }
         }
     }
 

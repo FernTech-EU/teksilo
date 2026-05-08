@@ -343,7 +343,7 @@ impl Widget for ColorEdit {
         // — every value mutation refreshes the visible text and the
         // AT name reactively via Button's `bind_label` plumbing.
         let trigger = if let Some(ls) = self.label.take() {
-            Button::new_literal(ls.resolve_now())
+            Button::new(ls)
         } else {
             Button::new_literal("").bind_label(label_signal)
         };

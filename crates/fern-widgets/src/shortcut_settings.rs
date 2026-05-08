@@ -38,7 +38,7 @@ use fern_core::widget_id::WidgetId;
 use crate::button::Button;
 use crate::keystroke_format::format_keystroke;
 use crate::primitives::{HStack, Spacer, TextWidget, VStack};
-use fern_tokens::TextStyleRole;
+use fern_tokens::{TextRole, TextStyleRole};
 
 /// Which keystroke slot a capture/rebind targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,15 +112,6 @@ impl std::fmt::Debug for ShortcutSettings {
 
 impl Widget for ShortcutSettings {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        // Snapshot the theme once for static style access. Full theme
-        // reactivity would require threading theme_signal into every
-        // helper; since ShortcutSettings already rebuilds on shortcut
-        // registry changes (bind below), a theme-change triggered
-        // rebuild is also cheap — but we leave that to the framework
-        // dirty pass (mark_all_dirty in set_theme) rather than forcing
-        // a rebuild binding here.
-        let theme = ctx.theme_signal().get();
-
         // Rebuild on any registry change (register, rebind, clear).
         ctx.shortcut_version().bind_to(
             ctx.self_id(),
@@ -180,10 +171,10 @@ impl Widget for ShortcutSettings {
         let mut last_category: Option<Option<&'static str>> = None;
         for row in rows {
             if last_category != Some(row.category) {
-                column = column.child(category_header(&theme, row.category));
+                column = column.child(category_header(row.category));
                 last_category = Some(row.category);
             }
-            column = column.child(self.build_row(&theme, &row, capturing));
+            column = column.child(self.build_row(&row, capturing));
         }
 
         let root = ctx.add(column);
@@ -237,15 +228,15 @@ impl Widget for ShortcutSettings {
 #[derive(Debug)]
 struct LiveStatusText {
     text: String,
-    color: fern_tokens::Color,
+    role: TextRole,
     child_id: Option<WidgetId>,
 }
 
 impl LiveStatusText {
-    fn new(text: impl Into<String>, color: fern_tokens::Color) -> Self {
+    fn new(text: impl Into<String>, role: TextRole) -> Self {
         Self {
             text: text.into(),
-            color,
+            role,
             child_id: None,
         }
     }
@@ -255,7 +246,7 @@ impl Widget for LiveStatusText {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let id = ctx.add(
             TextWidget::new_literal(&self.text)
-                .color(self.color)
+                .color(self.role)
                 .single_line()
                 .a11y_hidden(),
         );
@@ -308,52 +299,35 @@ struct ShortcutRowData {
     has_override: bool,
 }
 
-fn category_header(
-    theme: &fern_tokens::Theme,
-    category: Option<&'static str>,
-) -> impl Widget + 'static {
+fn category_header(category: Option<&'static str>) -> impl Widget + 'static {
     let label = category.unwrap_or("General");
     TextWidget::new_literal(label)
         .style(TextStyleRole::BodyBold)
-        .color(theme.colors.text_primary)
+        .color(TextRole::Primary)
         .single_line()
 }
 
 impl ShortcutSettings {
     fn build_row(
         &self,
-        theme: &fern_tokens::Theme,
         row: &ShortcutRowData,
         capturing: Option<CaptureTarget>,
     ) -> impl Widget + 'static {
         let id = row.id;
-        let label_color = if row.enabled {
-            theme.colors.text_primary
+        let label_role = if row.enabled {
+            TextRole::Primary
         } else {
-            theme.colors.text_disabled
+            TextRole::Disabled
         };
-        let accent = theme.colors.accent;
 
         let name_widget = TextWidget::new_literal(&row.name)
-            .color(label_color)
+            .color(label_role)
             .single_line();
 
-        let primary_slot = self.slot_widget(
-            id,
-            SlotKind::Primary,
-            row.primary,
-            capturing,
-            label_color,
-            accent,
-        );
-        let secondary_slot = self.slot_widget(
-            id,
-            SlotKind::Secondary,
-            row.secondary,
-            capturing,
-            label_color,
-            accent,
-        );
+        let primary_slot =
+            self.slot_widget(id, SlotKind::Primary, row.primary, capturing, label_role);
+        let secondary_slot =
+            self.slot_widget(id, SlotKind::Secondary, row.secondary, capturing, label_role);
 
         let reset_button = Button::new_literal("Reset")
             .enabled(row.has_override)
@@ -376,8 +350,7 @@ impl ShortcutSettings {
         slot: SlotKind,
         keystroke: Option<KeyStroke>,
         capturing: Option<CaptureTarget>,
-        label_color: fern_tokens::Color,
-        accent: fern_tokens::Color,
+        label_role: TextRole,
     ) -> impl Widget + 'static {
         let is_capturing_here = capturing == Some(CaptureTarget { id, slot });
         let keystroke_text = if is_capturing_here {
@@ -418,11 +391,11 @@ impl ShortcutSettings {
         // on focus, not as a live change.
         let row = HStack::new().spacing(4.0);
         let row = if is_capturing_here {
-            row.child(LiveStatusText::new(keystroke_text, accent))
+            row.child(LiveStatusText::new(keystroke_text, TextRole::Accent))
         } else {
             row.child(
                 TextWidget::new_literal(&keystroke_text)
-                    .color(label_color)
+                    .color(label_role)
                     .single_line(),
             )
         };

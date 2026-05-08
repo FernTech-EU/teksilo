@@ -114,8 +114,15 @@ impl Widget for Switcher {
             out.borrow_mut().clear();
         }
 
-        // Add each child to the tree and bind visibility to the selected index
-        let mut zstack = ZStack::new();
+        // Add each child to the tree and bind visibility to the selected index.
+        //
+        // Top-leading alignment matches Switcher's typical use: tab panels,
+        // mode toggles, wizard steps — content that anchors at the top of the
+        // available area, not at the center. ZStack's default `CENTER` would
+        // vertically center the active page when its intrinsic height is less
+        // than the Switcher's bounds (e.g. a short panel inside a tall tab
+        // body), opening a gap above the visible content.
+        let mut zstack = ZStack::new().alignment(fern_tokens::Alignment::TOP_LEADING);
         for (i, page) in children.into_iter().enumerate() {
             let child_id = match page {
                 PendingPage::Deferred(w) => ctx.add_boxed(w),
