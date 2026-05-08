@@ -693,7 +693,19 @@ impl Widget for ScrollArea {
         let scroll_x = self.scroll_x.get();
 
         // --- Step 3: Place content ---
-        children[0].origin = Point::new(bounds.x - scroll_x, bounds.y - scroll_y);
+        // RTL: anchor the content at the trailing (right) edge of the
+        // bounds. With `scroll_x = 0` and content narrower than the
+        // viewport, this puts the content flush-right — matching how
+        // the surrounding RTL-aware stacks place their children.
+        // Without this mirror, narrow content sits flush-left in both
+        // directions (visible on widget-catalog tabs whose demos have
+        // intrinsic widths smaller than the scroll viewport).
+        let content_x = if ctx.is_rtl() {
+            bounds.right() - placed_content_size.width + scroll_x
+        } else {
+            bounds.x - scroll_x
+        };
+        children[0].origin = Point::new(content_x, bounds.y - scroll_y);
         children[0].size = placed_content_size;
 
         // --- Step 4: Place vertical scrollbar ---
@@ -1647,6 +1659,58 @@ mod tests {
             target_after.bottom(),
             viewport_top,
             viewport_bottom
+        );
+    }
+
+    /// A leaf with a fixed intrinsic size that ignores the proposal —
+    /// needed to test ScrollArea behavior with content narrower than
+    /// the viewport. `TallLeaf` accepts the proposed width, which would
+    /// always make content match viewport width and hide RTL bugs.
+    #[derive(Debug)]
+    struct FixedLeaf(f32, f32);
+    impl Widget for FixedLeaf {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_core::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
+        }
+    }
+
+    #[test]
+    fn rtl_anchors_narrow_content_to_trailing_edge() {
+        // Reproduces the widget-catalog "tab content pushed left in RTL"
+        // bug: a ScrollArea wrapping content narrower than the viewport
+        // used to place the content at bounds.x in both directions.
+        let mut tree = WidgetTree::new();
+        let content = tree.add(FixedLeaf(120.0, 80.0));
+        let _scroll = tree.add(ScrollArea::from_id(content));
+
+        tree.set_layout_direction(fern_core::environment::LayoutDirection::RightToLeft);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        let cb = tree.bounds(content);
+        assert!(
+            (cb.x - (400.0 - 120.0)).abs() < 0.01,
+            "RTL content should be flush-right at x=280, got {}",
+            cb.x
+        );
+    }
+
+    #[test]
+    fn ltr_anchors_narrow_content_to_leading_edge() {
+        let mut tree = WidgetTree::new();
+        let content = tree.add(FixedLeaf(120.0, 80.0));
+        let _scroll = tree.add(ScrollArea::from_id(content));
+
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        let cb = tree.bounds(content);
+        assert!(
+            cb.x.abs() < 0.01,
+            "LTR content should be flush-left at x=0, got {}",
+            cb.x
         );
     }
 }
