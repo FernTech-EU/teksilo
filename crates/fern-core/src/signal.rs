@@ -681,7 +681,7 @@ impl Signal<f32> {
 
     /// Start a looping animation from the current value to `target`,
     /// repeating with the given period. Runs until cancelled.
-    /// Frame updates are capped at `frame_interval` (default ~30fps).
+    /// Frame updates are capped at `frame_interval` (default 60 Hz).
     pub fn animate_looping(
         &self,
         target: f32,

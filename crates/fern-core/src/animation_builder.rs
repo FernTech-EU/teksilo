@@ -14,7 +14,7 @@
 //! ```
 //!
 //! `looping()` quietly enables sub-perceptual quantization
-//! (epsilon = 1/255) and a 30 Hz frame interval by default — the two
+//! (epsilon = 1/255) and a 60 Hz frame interval by default — the two
 //! settings every continuous loop should have but that the bare
 //! `Signal::animate_looping` API makes opt-in.
 
@@ -26,9 +26,13 @@ use crate::animation::AnimationRequest;
 use crate::signal::Signal;
 
 /// Frame interval used when `looping()` is enabled and no explicit
-/// override is set. ~30 Hz, matches the scheduler default and is fast
-/// enough that progress sweeps and spinners read as continuous motion.
-const DEFAULT_LOOP_FRAME_INTERVAL: Duration = Duration::from_millis(33);
+/// override is set. 60 Hz (16.667 ms), matches the scheduler default
+/// and the most common display refresh rate so a continuous loop
+/// advances once per vsync on a 60 Hz panel and every other frame on
+/// 120 Hz. Slower loops where the eye can't resolve sub-30-Hz detail
+/// (e.g. `ProgressBar::indeterminate` at 15 Hz) override via
+/// `frame_interval(d)` to halve wgpu submits.
+const DEFAULT_LOOP_FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
 
 /// Sub-perceptual epsilon for looping color/opacity/position
 /// animations. 1/255 ≈ one 8-bit channel step — below this, the
@@ -159,9 +163,10 @@ impl AnimationSpec {
     // -- loop / frame interval / quantization ---------------------------------
 
     /// Switch to looping mode. Sets a sub-perceptual epsilon (1/255)
-    /// and a 30 Hz frame interval **only if not already overridden**,
-    /// so a continuous bar / spinner won't hit `Signal::set` more
-    /// often than the eye can resolve.
+    /// and a 60 Hz frame interval **only if not already overridden**,
+    /// so a continuous bar / spinner advances once per vsync on a
+    /// 60 Hz panel without forcing higher-refresh displays into
+    /// extra `Signal::set` calls (`==`-equal values short-circuit).
     pub fn looping(self) -> Self {
         self.set_looping_defaults()
     }
@@ -180,7 +185,8 @@ impl AnimationSpec {
     /// Throttle scheduler ticks to at most one per `interval`. Use to
     /// drop a 60 Hz signal animation to 15-30 Hz when the eye can't
     /// resolve the difference and every doubled frame costs a wgpu
-    /// submit.
+    /// submit (e.g. `ProgressBar::indeterminate`'s wide sweep, set to
+    /// 15 Hz via `Duration::from_millis(66)`).
     pub fn frame_interval(mut self, interval: Duration) -> Self {
         self.frame_interval = Some(interval);
         self

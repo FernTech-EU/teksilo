@@ -172,15 +172,16 @@ pub struct AnimatedQuadRegistry {
     /// without this, the `ControlFlow::WaitUntil` path never fires
     /// and the animation only advances on unrelated events.
     last_tick_at: Option<Instant>,
-    /// Frame interval for shader-driven animations. 33 ms (~30 Hz)
-    /// by default — same cadence as the signal-based animation
-    /// scheduler's `DEFAULT_FRAME_INTERVAL`. Per-frame cost on the
-    /// shader path is just `queue.write_buffer(64 B) + draw_indexed`,
-    /// so driving at 30 Hz is cheap even with many animated quads.
+    /// Frame interval for shader-driven animations. 16.667 ms
+    /// (60 Hz) by default — same cadence as the signal-based
+    /// animation scheduler's `DEFAULT_FRAME_INTERVAL`. Per-frame
+    /// cost on the shader path is just
+    /// `queue.write_buffer(64 B) + draw_indexed`, so driving at
+    /// 60 Hz is cheap even with many animated quads.
     frame_interval: Duration,
 }
 
-const DEFAULT_SHADER_FRAME_INTERVAL: Duration = Duration::from_millis(33);
+const DEFAULT_SHADER_FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
 
 impl AnimatedQuadRegistry {
     pub fn new() -> Self {
@@ -395,8 +396,9 @@ impl std::fmt::Debug for AnimatedQuadRegistry {
 // treat a never-painted widget (`last_painted_epoch = 0`,
 // `paint_epoch = 1`) as visible forever, driving the event loop at
 // animation frame rate for quads that are actually off-screen. With
-// `==`, freshly-visible widgets miss exactly one tick (~33 ms,
-// imperceptible). Same primitive consumed by `FrameTickScheduler`.
+// `==`, freshly-visible widgets miss exactly one tick (~17 ms at the
+// 60 Hz default, imperceptible). Same primitive consumed by
+// `FrameTickScheduler`.
 use crate::motion_visibility::painted_this_frame as widget_visible;
 
 fn compute_params(entry: &AnimatedQuadEntry, now: Instant, theme: &Theme) -> AnimParams {
@@ -652,18 +654,19 @@ mod tests {
         );
 
         // After a tick at time t, deadline moves to t + frame_interval.
+        let interval = Duration::from_micros(16_667);
         reg.tick(start, &arena, 0, &theme);
         let d1 = reg.next_deadline(&arena, 0).expect("must stay scheduled");
         assert_eq!(
             d1,
-            start + Duration::from_millis(33),
+            start + interval,
             "deadline must advance by frame_interval after each tick"
         );
 
-        // Another tick 33ms later → deadline pushes another 33ms.
-        reg.tick(start + Duration::from_millis(33), &arena, 0, &theme);
+        // Another tick one interval later → deadline pushes another interval.
+        reg.tick(start + interval, &arena, 0, &theme);
         let d2 = reg.next_deadline(&arena, 0).expect("still scheduled");
-        assert_eq!(d2, start + Duration::from_millis(66));
+        assert_eq!(d2, start + 2 * interval);
     }
 
     #[test]

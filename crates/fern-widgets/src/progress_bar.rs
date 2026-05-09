@@ -194,10 +194,10 @@ impl Widget for ProgressBar {
             // `sweep()` reads `duration_indeterminate_sweep` from
             // theme motion tokens AND switches the spec to looping
             // mode with a sub-perceptual epsilon and the default
-            // 30 Hz frame interval. Override to 15 Hz here: the
+            // 60 Hz frame interval. Override to 15 Hz here: the
             // sweep is wide and slow enough that the eye can't
-            // resolve the difference, and every doubled frame is a
-            // wgpu submit.
+            // resolve the difference, and every quadrupled frame is
+            // a wgpu submit (60 Hz → 15 Hz cuts CPU/GPU 4×).
             ctx.animate()
                 .sweep()
                 .linear()

@@ -3,7 +3,7 @@
 ## The rule
 
 **An idle app must draw zero frames.** Not "almost zero". Not "a
-cheap 30 Hz". Zero — `rendered_frames == 0` in the
+cheap 60 Hz". Zero — `rendered_frames == 0` in the
 `FERN_IDLE_TRACE=1` trace, `ControlFlow::Wait` in winit, no GPU submit,
 no CPU wake, no battery drain.
 
@@ -18,7 +18,7 @@ bug. Track it down.
 
 ## Why so absolute
 
-FernUI is meant for long-running desktop apps. A 30 Hz idle pump costs CPU, GPU, battery, fan noise, and — on laptops — holds the package out of deep C-states. Compounded
+FernUI is meant for long-running desktop apps. A 60 Hz idle pump costs CPU, GPU, battery, fan noise, and — on laptops — holds the package out of deep C-states. Compounded
 across every running animation, every unfocused window, every
 background process, it is the difference between "I left it open" and
 "my battery is dead".
@@ -330,7 +330,7 @@ workloads.
 
 **Revisit when any of these trigger:**
 
-- 60 Hz or 120 Hz looping animations become common (we're 30 Hz).
+- 120 Hz looping animations become common (we're 60 Hz).
 - Target display resolution goes 4K / multi-monitor.
 - Many simultaneous animated widgets (dozens of spinners across a
   dashboard).

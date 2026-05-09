@@ -210,7 +210,7 @@ slide.to_or_snap(&sidebar_width, 0.0);   // snaps under prefers-reduced-motion
 **Recommended API (looping with sub-perceptual epsilon):**
 ```rust
 // `sweep()` reads `duration_indeterminate_sweep` AND turns on looping
-// mode with epsilon = 1/255 + 30 Hz frame interval defaults.
+// mode with epsilon = 1/255 + 60 Hz frame interval defaults.
 ctx.animate().sweep().linear().to(&sweep_pos, 1.0);
 ```
 
@@ -227,7 +227,7 @@ ctx.animate().sweep().linear().to(&sweep_pos, 1.0);
 | `.duration(d)` | explicit `Duration` |
 | `.standard()` | `easing_standard` (the Int-UI mild ease-out) |
 | `.linear()` / `.ease_in_out()` / etc. | explicit `Easing` |
-| `.looping()` | sub-perceptual `epsilon = 1/255` + 30 Hz frame interval |
+| `.looping()` | sub-perceptual `epsilon = 1/255` + 60 Hz frame interval |
 | `.frame_interval(d)` | throttle ticks (e.g. 66 ms = 15 Hz for slow sweeps) |
 
 Application:

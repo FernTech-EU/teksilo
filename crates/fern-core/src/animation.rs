@@ -85,10 +85,14 @@ struct ActiveAnimation {
     max_duration: Option<Duration>,
 }
 
-/// Default frame interval for animations: ~30 fps. Smooth enough for
-/// UI transitions while keeping CPU/GPU usage low. Individual
-/// animations can override via `animate_with_frame_interval`.
-const DEFAULT_FRAME_INTERVAL: Duration = Duration::from_millis(33);
+/// Default frame interval for animations: 60 Hz (16.667 ms). Matches
+/// the most common display refresh rate, so a tween advances once per
+/// vsync on a 60 Hz panel and every other frame on 120 Hz. Individual
+/// animations can override via `animate_with_frame_interval` — slow
+/// or wide loops where the eye can't resolve sub-30-Hz detail (e.g.
+/// `ProgressBar::indeterminate` at 15 Hz) deliberately throttle to
+/// halve wgpu submits.
+const DEFAULT_FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
 
 /// Manages active animations and advances them each frame.
 pub struct AnimationScheduler {

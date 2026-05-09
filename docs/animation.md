@@ -120,12 +120,12 @@ let spec = ctx.animate().fast().standard();
 spec.to_or_snap(&knob_position, target);
 //                ^^^^^^^^^^^^ snaps without tween under prefers-reduced-motion
 
-// Looping with sub-perceptual epsilon and 30 Hz throttle baked in:
+// Looping with sub-perceptual epsilon and 60 Hz throttle baked in:
 ctx.animate().sweep().linear().to(&sweep_pos, 1.0);
 //             ^^^^^^^ implies looping(), reads duration_indeterminate_sweep
 ```
 
-Duration presets (`fast()` / `normal()` / `slow()` / `collapse()` / `sweep()` / `instant()`) all read from the live theme's `MotionTokens` — no hardcoded `Duration::from_millis(...)` literals at the call site. Easing presets (`standard()` / `linear()` / `ease_in_out()` / etc.) similarly pull `easing_standard` from tokens. `looping()` flips on sub-perceptual ε = 1/255 and a 30 Hz frame interval — the safe defaults for paint-bound loops; `frame_interval(d)` overrides for slower loops (e.g. 66 ms = 15 Hz for a long sweep). `to(&signal, target)` always tweens; `to_or_snap(&signal, target)` snaps without tween when `prefers_reduced_motion` is true.
+Duration presets (`fast()` / `normal()` / `slow()` / `collapse()` / `sweep()` / `instant()`) all read from the live theme's `MotionTokens` — no hardcoded `Duration::from_millis(...)` literals at the call site. Easing presets (`standard()` / `linear()` / `ease_in_out()` / etc.) similarly pull `easing_standard` from tokens. `looping()` flips on sub-perceptual ε = 1/255 and a 60 Hz frame interval (16.667 ms) — the safe defaults for paint-bound loops, matching the most common display refresh rate so a continuous loop advances once per vsync; `frame_interval(d)` overrides for slower loops (e.g. 66 ms = 15 Hz for a wide sweep where the eye can't resolve faster motion). `to(&signal, target)` always tweens; `to_or_snap(&signal, target)` snaps without tween when `prefers_reduced_motion` is true.
 
 `AnimationSpec` is a thin façade — it constructs an `AnimationRequest` and calls `Signal<f32>::try_animate_with_options`. The lower-level `animate_to` / `animate_looping` paths remain public; reach for them only when you need control the spec doesn't expose (custom epsilon for non-pixel signals, `max_duration` for indefinite loops with a bounded budget). Source: [crates/fern-core/src/animation_builder.rs](../crates/fern-core/src/animation_builder.rs).
 
