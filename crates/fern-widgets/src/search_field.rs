@@ -1,7 +1,9 @@
 //! SearchField — a [`TextInput`](crate::text_input::TextInput) preset
 //! configured for search workflows: leading magnifier glyph, default-on
-//! clear-X, and an optional inline suggestions popup with keyboard
+//! clear-X, and an optional anchored suggestions popover with keyboard
 //! navigation and the ARIA combobox-with-listbox accessibility pattern.
+//! The popover is shown via `OverlayRequest` so it floats above sibling
+//! content and escapes ancestor clipping (same pattern as `ComboBox`).
 //!
 //! ```ignore
 //! let query = ctx.signal(String::new());
@@ -47,13 +49,16 @@
 //! `set_position_in_set(idx + 1)`, and `set_size_of_set(total)` so
 //! screen readers can announce "Apple, 1 of 5".
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
+use fern_core::overlay::{
+    DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
+};
 use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::{HandlerSet, WidgetBuilder};
@@ -101,15 +106,18 @@ pub struct SearchField {
     /// Slot the SuggestionPanel writes its inner ListBox WidgetId into,
     /// so SearchField's `accessibility()` can publish `set_controls`.
     listbox_id_slot: Rc<Cell<Option<WidgetId>>>,
-    /// Tracks whether any descendant of this SearchField currently has
-    /// focus — used to drive popup visibility. The framework writes
-    /// this signal when focus enters or leaves the subtree.
-    focus_within: Signal<bool>,
-    /// User-visible popup-open state — read by `accessibility()`.
-    /// `RefCell<Option<...>>` because the derived signal is built
-    /// during the first `build()` call and can't be created in `new()`
-    /// (the upstream signals don't exist yet).
-    is_open: std::cell::RefCell<Option<Signal<bool>>>,
+    /// Pre-created suggestions panel content. Inserted as a dormant
+    /// arena root in `build()` and shown as an overlay anchored to
+    /// the field via `OverlayRequest`. Tracked across rebuilds so the
+    /// previous subtree can be torn down — the framework's rebuild
+    /// destroys this widget's direct children but not arena roots.
+    panel_content_id: Option<WidgetId>,
+    /// Whether the suggestions overlay is currently shown. Set true
+    /// when the open helper fires `ctx.show_overlay`, set false by the
+    /// dismiss callback registered on every `OverlayRequest`. Read by
+    /// `accessibility()` to drive `set_expanded`. Built in `build()`,
+    /// reused across rebuilds.
+    overlay_open: RefCell<Option<Signal<bool>>>,
 }
 
 impl SearchField {
@@ -126,8 +134,8 @@ impl SearchField {
             on_submit: None,
             root_child_id: None,
             listbox_id_slot: Rc::new(Cell::new(None)),
-            focus_within: Signal::new(false),
-            is_open: std::cell::RefCell::new(None),
+            panel_content_id: None,
+            overlay_open: RefCell::new(None),
         }
     }
 
@@ -270,34 +278,16 @@ impl Widget for SearchField {
             });
         }
 
-        // Resetting `dismissed` when focus enters the subtree gives
-        // users a clean second pass: pick a suggestion → popup hides;
-        // come back to the field → popup re-opens if there's still a
-        // matching list.
-        let dismissed_for_focus = dismissed.clone();
-        ctx.effect(&self.focus_within, move |gained| {
-            if *gained {
-                dismissed_for_focus.set(false);
-            }
-        });
-
-        // ── Derived popup-open signal ───────────────────────────────
-        // Visible iff focus is in the subtree, suggestions exist, and
-        // the user hasn't explicitly dismissed via Escape / select.
-        // Three-way zip: (focus, dismissed, suggestions). Each
-        // upstream root is registered in the binding registry so the
-        // panel's `visible_when` re-evaluates on any change.
-        let is_open_derived = self
-            .focus_within
-            .zip(&dismissed)
-            .zip(&suggestions)
-            .map(|((focus, dismissed), list)| *focus && !*dismissed && !list.is_empty());
-        // Stash the derived signal so `accessibility()` can read its
-        // value for `set_expanded`. Cleared and rebuilt on every
-        // `build()` call so the upstream signal graph stays fresh.
-        *self.is_open.borrow_mut() = Some(is_open_derived.clone());
-
-        // ── Suggestions panel (in-tree sibling, not overlay) ────────
+        // ── Suggestions panel (overlay content, anchored to the field) ─
+        // Tear down a previous panel subtree before building a fresh
+        // one — the panel is registered as an arena root via
+        // `ctx.add(..)` + `ctx.set_dormant(..)`, so the framework's
+        // rebuild path (which only destroys direct arena children)
+        // would leave it as an orphan otherwise. Same dance ComboBox
+        // does for its dropdown.
+        if let Some(old_id) = self.panel_content_id.take() {
+            ctx.destroy_subtree(old_id);
+        }
         let panel = SuggestionPanel {
             text: self.text.clone(),
             suggestions: suggestions.clone(),
@@ -308,30 +298,76 @@ impl Widget for SearchField {
             root_child_id: None,
         };
         let panel_id = ctx.add(panel);
-        ctx.visible_when(panel_id, is_open_derived);
+        ctx.set_dormant(panel_id);
+        self.panel_content_id = Some(panel_id);
+
+        // ── Open / dismiss state ────────────────────────────────────
+        // `overlay_open` mirrors the live overlay state: set to true by
+        // the open helper before `ctx.show_overlay`, set to false by
+        // the dismiss callback the overlay manager invokes (Escape,
+        // outside click, programmatic dismiss). Read by
+        // `accessibility()` for `set_expanded`.
+        let overlay_open = ctx.signal(false);
+        *self.overlay_open.borrow_mut() = Some(overlay_open.clone());
+
+        let dismiss_callback: OverlayDismissCallback = {
+            let overlay_open = overlay_open.clone();
+            let dismissed = dismissed.clone();
+            let highlighted = highlighted.clone();
+            Rc::new(move || {
+                overlay_open.set(false);
+                // The dismiss arrived from the framework (Escape /
+                // outside click). Suppress re-opening until the user
+                // resumes typing or arrows back into the list — same
+                // semantics the explicit Escape handler used to have.
+                dismissed.set(true);
+                highlighted.set(None);
+            })
+        };
+
+        let self_id = ctx.self_id();
+        let open_overlay: Rc<dyn Fn(&mut EventContext)> = {
+            let overlay_open = overlay_open.clone();
+            let suggestions_open = suggestions.clone();
+            let dismissed_open = dismissed.clone();
+            let dismiss_callback = dismiss_callback.clone();
+            Rc::new(move |ctx: &mut EventContext| {
+                if overlay_open.get() {
+                    return;
+                }
+                if dismissed_open.get() || suggestions_open.get().is_empty() {
+                    return;
+                }
+                overlay_open.set(true);
+                ctx.show_overlay(OverlayRequest {
+                    content_id: panel_id,
+                    anchor: self_id,
+                    placement: OverlayPlacement::BelowPreferred,
+                    dismiss: DismissBehavior::EscapeOrClickOutside,
+                    layer: OverlayLayer::InTree,
+                    parent_overlay: None,
+                    on_dismiss: Some(dismiss_callback.clone()),
+                    fade_duration: None,
+                });
+            })
+        };
 
         // ── Compose ─────────────────────────────────────────────────
-        let column = ctx.add(
-            VStack::new()
-                .spacing(style.input_panel_gap)
-                .add_child(input_id)
-                .add_child(panel_id),
-        );
-        let visible_root = ctx.add(MinSize::new(0.0, 0.0).child_id(column));
+        // The visible subtree is just the TextInput now; the
+        // suggestions panel lives as an overlay anchored to this
+        // widget's own bounds via `OverlayRequest`.
+        let visible_root = ctx.add(MinSize::new(0.0, 0.0).child_id(input_id));
         self.root_child_id = Some(visible_root);
 
         // ── Handlers ───────────────────────────────────────────────
         let suggestions_for_keys = suggestions.clone();
         let highlighted_for_keys = highlighted.clone();
         let dismissed_for_keys = dismissed.clone();
+        let open_for_arrows = open_overlay.clone();
+        let open_for_typing = open_overlay.clone();
 
         let handlers = HandlerSet::new()
-            // `focus_within` is the parent-side mirror: framework
-            // sets it true when any descendant (the TextInput) has
-            // focus. Strict-ancestors-only — the descendant itself
-            // still sees its own focus normally.
-            .focus_within(self.focus_within.clone())
-            .on_key_preview(move |event, _ctx| -> EventResponse {
+            .on_key_preview(move |event, ctx| -> EventResponse {
                 match event {
                     WidgetEvent::KeyDown {
                         key: Key::ArrowDown,
@@ -341,7 +377,7 @@ impl Widget for SearchField {
                         if list_len == 0 {
                             return EventResponse::Ignored;
                         }
-                        // Re-open if user previously dismissed.
+                        // Re-open if the user previously dismissed.
                         dismissed_for_keys.set(false);
                         let next = match highlighted_for_keys.get() {
                             None => 0,
@@ -349,6 +385,7 @@ impl Widget for SearchField {
                             Some(i) => i + 1,
                         };
                         highlighted_for_keys.set(Some(next));
+                        open_for_arrows(ctx);
                         EventResponse::Handled
                     }
                     WidgetEvent::KeyDown {
@@ -365,25 +402,29 @@ impl Widget for SearchField {
                             Some(i) => i - 1,
                         };
                         highlighted_for_keys.set(Some(prev));
-                        EventResponse::Handled
-                    }
-                    WidgetEvent::KeyDown {
-                        key: Key::Escape, ..
-                    } => {
-                        dismissed_for_keys.set(true);
-                        highlighted_for_keys.set(None);
+                        open_for_arrows(ctx);
                         EventResponse::Handled
                     }
                     WidgetEvent::KeyDown { .. } => {
                         // Any other key — character input, Backspace,
                         // Delete, etc — clears the dismissed flag so
                         // the popup can re-appear after the user
-                        // resumes typing.
+                        // resumes typing. The actual `show_overlay`
+                        // call happens in `on_key` below, on the bubble
+                        // pass, by which time `text` has been updated
+                        // and the suggestions provider effect has
+                        // refreshed the list.
                         dismissed_for_keys.set(false);
                         EventResponse::Ignored
                     }
                     _ => EventResponse::Ignored,
                 }
+            })
+            .on_key(move |event, ctx| -> EventResponse {
+                if matches!(event, WidgetEvent::KeyDown { .. }) {
+                    open_for_typing(ctx);
+                }
+                EventResponse::Ignored
             });
 
         ctx.apply_self_handlers(handlers);
@@ -420,10 +461,10 @@ impl Widget for SearchField {
         builder.set_role(fern_core::accesskit::Role::SearchInput);
         builder.set_has_popup(fern_core::accesskit::HasPopup::Listbox);
         builder.set_auto_complete(fern_core::accesskit::AutoComplete::List);
-        if let Some(sig) = self.is_open.borrow().as_ref() {
-            if sig.get() {
-                builder.set_expanded(true);
-            }
+        if let Some(sig) = self.overlay_open.borrow().as_ref()
+            && sig.get()
+        {
+            builder.set_expanded(true);
         }
         if let Some(listbox_id) = self.listbox_id_slot.get() {
             builder.push_controlled(widget_id_to_node_id(listbox_id));
