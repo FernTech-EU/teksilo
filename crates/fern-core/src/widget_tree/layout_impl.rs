@@ -4,7 +4,14 @@ impl WidgetTree {
     /// Process dirty state bindings: mark bound widgets for repaint, relayout,
     /// or rebuild. Called automatically at the start of layout().
     pub(super) fn process_state_changes(&mut self, ops: &mut dyn crate::window::WindowOps) {
-        let dirty_widgets = self.binding_registry.flush_dirty();
+        // One unified flush: both visual buckets and the a11y flag
+        // are drained from the same walk, so a signal bound at both
+        // a visual level and `AccessibilityOnly` (e.g. a Button's
+        // `bind_label` re-registers the same Signal at RepaintOnly
+        // *and* AccessibilityOnly) flips both. Two separate flushes
+        // would race on the shared per-Signal dirty flag and the
+        // second flush would always see it cleared.
+        let (dirty_widgets, a11y_binding_dirty) = self.binding_registry.flush_all_dirty();
         for (id, level) in &dirty_widgets {
             match level {
                 crate::binding::BindingLevel::RepaintOnly => {
@@ -19,9 +26,9 @@ impl WidgetTree {
                     self.arena.mark_ancestors_need_layout(*id);
                 }
                 crate::binding::BindingLevel::AccessibilityOnly => {
-                    // Drained separately below; see `flush_accessibility_dirty`.
-                    // Kept in the match so a future variant addition is a
-                    // compile-time reminder.
+                    // Drained into the boolean below — never appears in
+                    // the visual map, but kept in the match so a future
+                    // variant addition is a compile-time reminder.
                 }
             }
         }
@@ -32,7 +39,7 @@ impl WidgetTree {
         // the AccessKit tree. Decoupled from layout / paint so a text
         // edit that changes no visual geometry still reaches screen
         // readers within one frame.
-        if self.binding_registry.flush_accessibility_dirty() {
+        if a11y_binding_dirty {
             self.a11y_dirty = true;
         }
 
@@ -41,12 +48,23 @@ impl WidgetTree {
 
         let mut to_dormant = Vec::new();
         let mut to_activate = Vec::new();
-        for (id, is_active, should_be_visible) in self.arena.visibility_checks() {
+        for (id, is_active, should_be_visible) in self.arena.visibility_checks_iter() {
             if is_active && !should_be_visible {
                 to_dormant.push(id);
             } else if !is_active && should_be_visible {
                 to_activate.push(id);
             }
+        }
+        // The accessibility walk skips dormant nodes, so any
+        // active↔dormant transition changes the AccessKit tree shape
+        // and must dirty the cached snapshot. Other Relayout-causing
+        // signal flips (e.g. a Switcher visibility binding that doesn't
+        // straddle activation, an opacity change, a text-width change)
+        // do not change the AT tree — Phase 1 of the perf plan removed
+        // the unconditional `a11y_dirty = true` from `layout()` and
+        // delegated to the events that actually change the tree.
+        if !to_dormant.is_empty() || !to_activate.is_empty() {
+            self.a11y_dirty = true;
         }
         for id in to_dormant {
             self.arena.set_dormant(id);
@@ -220,8 +238,6 @@ impl WidgetTree {
             return;
         }
 
-        self.a11y_dirty = true;
-
         let base_theme = self.theme.clone();
 
         let overlay_content_ids = self.overlay_manager.active_content_ids();
@@ -342,11 +358,16 @@ impl WidgetTree {
         // a regression where a scroll-driven ListView rebuild, deferred
         // during a scrollbar thumb drag, was silently dropped — the
         // user saw the thumb move but the list view stayed frozen.
-        for id in self.arena.active_ids() {
+        // Clear `needs_layout` on every active node. Mutation during
+        // iter — pull the snapshot via the reusable scratch.
+        self.arena.fill_active_ids(&mut self.active_ids_scratch);
+        let ids = std::mem::take(&mut self.active_ids_scratch);
+        for &id in &ids {
             if let Some(node) = self.arena.get_mut(id) {
                 node.dirty.needs_layout = false;
             }
         }
+        self.active_ids_scratch = ids;
 
         // Post-layout hover refresh. When a rebuild destroyed the
         // hovered widget, `revalidate_interaction_state` cleared

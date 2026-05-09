@@ -45,6 +45,7 @@ roxmltree = "0.20"
 png = "0.17"
 image-webp = "0.2"
 inventory = "0.3"
+bytemuck = { version = "1", features = ["derive"] }
 # Date/time. Used by Calendar / DateEdit / TimeEdit / DateTimeEdit. `jiff`
 # is the modern BurntSushi-authored crate with a bundled IANA tz database.
 # Default features enable tzdb + tz-system so `Zoned::now()` resolves

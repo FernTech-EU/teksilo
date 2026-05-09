@@ -534,12 +534,35 @@ impl WidgetArena {
     }
 
     /// Iterate over all active widget IDs.
+    ///
+    /// Allocating wrapper around [`Self::active_ids_iter`]. Hot-path
+    /// callers that hold `&self` for the whole iteration should call
+    /// the iterator directly to avoid the per-call `Vec` allocation;
+    /// callers that need an owned snapshot (because they mutate
+    /// arena state inside the loop) should use
+    /// [`Self::fill_active_ids`] with a reusable buffer.
     pub fn active_ids(&self) -> Vec<WidgetId> {
+        self.active_ids_iter().collect()
+    }
+
+    /// Stream all active widget IDs without allocating. The iterator
+    /// borrows the arena, so the caller cannot mutate it while
+    /// iterating — for that case use [`Self::fill_active_ids`].
+    pub fn active_ids_iter(&self) -> impl Iterator<Item = WidgetId> + '_ {
         self.nodes
             .iter()
             .filter(|(_, node)| node.activation == ActivationState::Active)
             .map(|(id, _)| id)
-            .collect()
+    }
+
+    /// Fill `out` with every active widget ID. Clears `out` first so
+    /// callers can reuse a long-lived buffer across calls. Use this
+    /// when the iteration site needs an owned snapshot independent
+    /// of the arena borrow (typically because it mutates per-widget
+    /// state with `arena.get_mut(id)` inside the loop).
+    pub fn fill_active_ids(&self, out: &mut Vec<WidgetId>) {
+        out.clear();
+        out.extend(self.active_ids_iter());
     }
 
     /// Set a widget subtree to dormant state (state preserved, not rendered).
@@ -659,7 +682,15 @@ impl WidgetArena {
     /// Collect widgets that need their `build()` re-run (data-driven rebuild).
     /// Only returns active widgets with `has_built_children == true` and
     /// `needs_rebuild == true`.
+    ///
+    /// Allocating wrapper around [`Self::needs_rebuild_iter`]. Prefer
+    /// the iterator on hot paths.
     pub fn collect_needs_rebuild(&self) -> Vec<WidgetId> {
+        self.needs_rebuild_iter().collect()
+    }
+
+    /// Stream widgets that need `build()` re-run without allocating.
+    pub fn needs_rebuild_iter(&self) -> impl Iterator<Item = WidgetId> + '_ {
         self.nodes
             .iter()
             .filter(|(_, n)| {
@@ -668,21 +699,29 @@ impl WidgetArena {
                     && n.dirty.needs_rebuild
             })
             .map(|(id, _)| id)
-            .collect()
     }
 
     /// Check all widgets with visible_state bindings and return
     /// (id, is_currently_active, should_be_visible) tuples.
+    ///
+    /// Allocating wrapper around [`Self::visibility_checks_iter`].
     pub fn visibility_checks(&self) -> Vec<(WidgetId, bool, bool)> {
-        let mut checks = Vec::new();
-        for (id, node) in self.nodes.iter() {
-            if let Some(ref state) = node.visible_state {
+        self.visibility_checks_iter().collect()
+    }
+
+    /// Stream widgets with `visible_state` bindings without
+    /// allocating. Each entry is `(id, is_currently_active,
+    /// should_be_visible)`.
+    pub fn visibility_checks_iter(
+        &self,
+    ) -> impl Iterator<Item = (WidgetId, bool, bool)> + '_ {
+        self.nodes.iter().filter_map(|(id, node)| {
+            node.visible_state.as_ref().map(|state| {
                 let is_active = node.activation == ActivationState::Active;
                 let should_be_visible = state.get();
-                checks.push((id, is_active, should_be_visible));
-            }
-        }
-        checks
+                (id, is_active, should_be_visible)
+            })
+        })
     }
 
     /// Check if a widget is effectively enabled, walking up the parent chain.

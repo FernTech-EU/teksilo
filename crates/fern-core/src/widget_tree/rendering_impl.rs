@@ -136,11 +136,17 @@ impl WidgetTree {
             );
         }
 
-        for id in self.arena.active_ids() {
+        // Clear `needs_paint` on every active node. Mutation during
+        // iter — fill the reusable scratch first (zero-alloc once
+        // warm), then drive the loop from the snapshot.
+        self.arena.fill_active_ids(&mut self.active_ids_scratch);
+        let ids = std::mem::take(&mut self.active_ids_scratch);
+        for &id in &ids {
             if let Some(node) = self.arena.get_mut(id) {
                 node.dirty.needs_paint = false;
             }
         }
+        self.active_ids_scratch = ids;
 
         if has_animations {
             frame

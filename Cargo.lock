@@ -1347,6 +1347,7 @@ dependencies = [
 name = "fern-canvas"
 version = "0.2.0"
 dependencies = [
+ "bytemuck",
  "fern-tokens",
  "image-webp",
  "png 0.17.16",

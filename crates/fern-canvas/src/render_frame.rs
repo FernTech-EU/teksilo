@@ -462,7 +462,7 @@ pub enum AnimatedQuadClass {
 /// registry and the renderer, and `RenderFrame` is already the
 /// tree→renderer data channel.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct AnimParams {
     /// Discriminator — 0 = IndeterminateSweep, 1 = SpriteCycle,
     /// 2 = SpinnerArc, ... Matches the `kind: u32` constant in the

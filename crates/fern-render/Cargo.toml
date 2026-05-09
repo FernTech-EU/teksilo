@@ -11,7 +11,7 @@ repository.workspace = true
 fern-canvas = { workspace = true }
 wgpu = { workspace = true }
 tiny-skia = { workspace = true }
-bytemuck = { version = "1", features = ["derive"] }
+bytemuck = { workspace = true }
 
 [dev-dependencies]
 fern-tokens = { workspace = true }

@@ -11,8 +11,16 @@ impl WidgetTree {
     /// Checks BOTH handler buckets (own + external) so a recognizer gets
     /// installed whether the handler was attached via
     /// `apply_self_handlers` or via the `WidgetBuilder` chain.
-    pub(crate) fn ensure_gesture_arena(node: &mut crate::arena::WidgetNode) {
+    pub(crate) fn ensure_gesture_arena(
+        node: &mut crate::arena::WidgetNode,
+        id: WidgetId,
+        gesture_owners: &mut std::collections::HashSet<WidgetId>,
+    ) {
         if node.handlers.gesture_arena.is_some() {
+            // Already installed — make sure the owners set is in sync
+            // (covers a widget that re-enters dispatch after a
+            // pre-existing arena was carried across rebuild).
+            gesture_owners.insert(id);
             return;
         }
         let has_tap = node.any_handler(|h| h.on_tap.is_some());
@@ -95,6 +103,7 @@ impl WidgetTree {
             arena.add(crate::gesture::SwipeRecognizer::new());
         }
         node.handlers.gesture_arena = Some(arena);
+        gesture_owners.insert(id);
     }
 
     /// Route a gesture recognized by the arena (or the OS pinch/rotate

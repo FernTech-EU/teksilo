@@ -175,6 +175,25 @@ pub struct WidgetTree {
     current_cursor: crate::widget::CursorIcon,
     /// Delayed overlay requests (e.g., submenu hover-open delay).
     pending_delayed_overlays: Vec<PendingDelayedOverlay>,
+    /// Reusable scratch buffer for active-id snapshots taken on hot
+    /// paths that mutate per-widget state inside the loop
+    /// (`tick_gestures_with_ops`, post-render dirty-bit clear,
+    /// post-layout `needs_layout` clear). Cleared and refilled on
+    /// every use via `WidgetArena::fill_active_ids`. Pre-Phase 2
+    /// these sites called the allocating `arena.active_ids()` per
+    /// frame, which `perf record` ranked at ~13 % of CPU on the
+    /// `widget_catalog --tab animations` scene.
+    active_ids_scratch: Vec<WidgetId>,
+    /// Widgets currently carrying a non-`None` `EventHandlers::gesture_arena`.
+    /// Updated on attach (`ensure_gesture_arena` install) and on
+    /// teardown (rebuild / destroy / handler-clear). Every per-frame
+    /// gesture pass (`tick_gestures_with_ops`, `next_gesture_deadline`)
+    /// iterates this set instead of every active widget — most active
+    /// widgets have `gesture_arena = None`, so the savings come from
+    /// not even visiting them. Filtered by `arena.is_active(id)` at
+    /// iteration time so dormant entries don't fire (a widget can be
+    /// dormant while still holding its handlers).
+    gesture_owners: std::collections::HashSet<WidgetId>,
     /// OS-level accessibility preferences (high contrast, reduced motion, text scale).
     prefers_high_contrast: bool,
     prefers_reduced_motion: bool,
@@ -333,6 +352,8 @@ impl WidgetTree {
             pointer_captured_by: None,
             current_cursor: crate::widget::CursorIcon::Default,
             pending_delayed_overlays: Vec::new(),
+            active_ids_scratch: Vec::new(),
+            gesture_owners: std::collections::HashSet::new(),
             prefers_high_contrast: false,
             prefers_reduced_motion: false,
             text_scale_factor: 1.0,
@@ -1005,8 +1026,22 @@ impl WidgetTree {
         now: std::time::Instant,
         ops: &mut dyn crate::window::WindowOps,
     ) {
-        let ids = self.arena.active_ids();
-        for id in ids {
+        // Snapshot the gesture-owners set into the reusable scratch
+        // (Phase 3 of the perf plan). Pre-Phase 3 this iterated every
+        // active widget; in practice only a tiny fraction carry a
+        // gesture arena, so visiting the rest was pure overhead.
+        // `mem::take` lets the loop borrow `&mut self` for
+        // `make_event_context` etc. without conflicting with the
+        // scratch buffer; we put the storage back at the end.
+        let mut ids = std::mem::take(&mut self.active_ids_scratch);
+        ids.clear();
+        ids.extend(
+            self.gesture_owners
+                .iter()
+                .copied()
+                .filter(|id| self.arena.is_active(*id)),
+        );
+        for &id in &ids {
             let gesture = match self.arena.get_mut(id) {
                 Some(node) => node
                     .handlers
@@ -1024,15 +1059,20 @@ impl WidgetTree {
             self.collect_from_ctx(ctx, id);
             self.arena.mark_needs_paint(id);
         }
+        self.active_ids_scratch = ids;
     }
 
     /// Earliest wall-clock deadline at which any active gesture arena
     /// needs [`WidgetTree::tick_gestures`] called — typically a pending
     /// long-press timeout. Returns `None` when no recognizer is waiting.
     pub fn next_gesture_deadline(&self) -> Option<std::time::Instant> {
-        self.arena
-            .active_ids()
-            .into_iter()
+        // Iterate just the widgets that actually carry a gesture arena
+        // (Phase 3). `filter` for `is_active` skips dormant entries
+        // that may still be in the set after a hide-without-detach.
+        self.gesture_owners
+            .iter()
+            .copied()
+            .filter(|id| self.arena.is_active(*id))
             .filter_map(|id| self.arena.get(id))
             .filter_map(|node| node.handlers.gesture_arena.as_ref())
             .filter_map(|arena| arena.next_deadline())
@@ -1187,6 +1227,15 @@ impl WidgetTree {
         } else {
             Vec::new()
         };
+        // Phase 3: rebuild wiped the OWN handler bucket above (the
+        // gesture arena lived there), so the widget no longer owns any
+        // recognizers. The next pointer hit re-runs
+        // `ensure_gesture_arena` and re-inserts if the new build still
+        // wires gesture handlers. External handlers (set via the
+        // builder chain at creation time) persist, but `external_handlers`
+        // never carries a gesture arena directly — it's always built
+        // by `ensure_gesture_arena` into the OWN bucket.
+        self.gesture_owners.remove(&widget_id);
         // Shortcuts the widget declared are torn down too — they will
         // be re-registered during the upcoming `build()` call. User
         // overrides live in a separate map keyed by id, so user
@@ -1289,6 +1338,10 @@ impl WidgetTree {
         // up so the registry doesn't leak dead entries for the
         // lifetime of the app.
         self.binding_registry.unregister_for_widget(widget_id);
+        // Phase 3: keep `gesture_owners` honest — destroying the
+        // widget tears down its handlers, so the per-frame gesture
+        // pass must stop visiting it.
+        self.gesture_owners.remove(&widget_id);
         // If focus pointed at the widget about to disappear, drop it
         // so later dispatch doesn't anchor intent walks at a dead id
         // (which would silently swallow the intent).
@@ -1530,7 +1583,7 @@ impl WidgetTree {
     /// gate behind a periodic ticker (hourly or on-idle).
     pub fn widget_type_histogram(&self) -> std::collections::HashMap<&'static str, u32> {
         let mut out = std::collections::HashMap::<&'static str, u32>::new();
-        for id in self.arena.active_ids() {
+        for id in self.arena.active_ids_iter() {
             if let Some(node) = self.arena.get(id) {
                 // `Widget::type_name` is monomorphized per impl, so
                 // calling through the vtable correctly resolves to
@@ -1546,7 +1599,7 @@ impl WidgetTree {
     /// Number of active widgets in the arena. Cheap; matches the
     /// totals returned by [`widget_type_histogram`] when summed.
     pub fn active_widget_count(&self) -> usize {
-        self.arena.active_ids().len()
+        self.arena.active_ids_iter().count()
     }
 
     /// Enqueue an intent for dispatch from `source`. Called from

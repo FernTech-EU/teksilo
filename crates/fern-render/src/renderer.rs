@@ -401,15 +401,7 @@ impl Renderer {
                 "AnimParams exceeds MAX_ANIM_SLOTS ({}); tail will be dropped",
                 MAX_ANIM_SLOTS
             );
-            // Safety: `fern_canvas::AnimParams` is `#[repr(C)]` with
-            // explicit padding and only contains `u32`/`f32`/fixed
-            // arrays thereof — layout-compatible with raw bytes.
-            let bytes = unsafe {
-                std::slice::from_raw_parts(
-                    frame.anim_params.as_ptr() as *const u8,
-                    n * std::mem::size_of::<fern_canvas::AnimParams>(),
-                )
-            };
+            let bytes: &[u8] = bytemuck::cast_slice(&frame.anim_params[..n]);
             self.queue.write_buffer(&self.anim_uniform_buffer, 0, bytes);
         }
 

@@ -530,8 +530,13 @@ impl WidgetTree {
         let mut is_target = true;
         while let Some(id) = current {
             let mut ctx = self.make_event_context(&mut *ops);
-            let response = if let Some(node) = self.arena.get_mut(id) {
-                Self::try_handler_bubble(node, event, &mut ctx, is_target)
+            let WidgetTree {
+                arena,
+                gesture_owners,
+                ..
+            } = self;
+            let response = if let Some(node) = arena.get_mut(id) {
+                Self::try_handler_bubble(node, event, &mut ctx, is_target, id, gesture_owners)
                     .unwrap_or(EventResponse::Ignored)
             } else {
                 EventResponse::Ignored
@@ -562,8 +567,14 @@ impl WidgetTree {
         }
 
         let mut ctx = self.make_event_context(&mut *ops);
-        let response = if let Some(node) = self.arena.get_mut(target) {
-            Self::try_handler_bubble(node, event, &mut ctx, true).unwrap_or(EventResponse::Ignored)
+        let WidgetTree {
+            arena,
+            gesture_owners,
+            ..
+        } = self;
+        let response = if let Some(node) = arena.get_mut(target) {
+            Self::try_handler_bubble(node, event, &mut ctx, true, target, gesture_owners)
+                .unwrap_or(EventResponse::Ignored)
         } else {
             EventResponse::Ignored
         };
@@ -632,6 +643,8 @@ impl WidgetTree {
         event: &WidgetEvent,
         ctx: &mut EventContext,
         fire_on_pointer_event: bool,
+        node_id: WidgetId,
+        gesture_owners: &mut std::collections::HashSet<WidgetId>,
     ) -> Option<EventResponse> {
         match event {
             WidgetEvent::PointerEnter => {
@@ -879,7 +892,7 @@ impl WidgetTree {
                         return Some(EventResponse::Handled);
                     }
                 }
-                Self::ensure_gesture_arena(node);
+                Self::ensure_gesture_arena(node, node_id, gesture_owners);
                 if let Some(arena) = node.handlers.gesture_arena.as_mut() {
                     // Implicit capture for the Down..Up sequence so that
                     // moves leaving the widget bounds still reach the
@@ -1089,6 +1102,10 @@ impl WidgetTree {
             }
             let current_focus = self.focused;
             self.overlay_manager.show(req);
+            // Overlay show changes the AT tree shape — mirror the
+            // `WidgetTree::show_overlay` path. The dismissal sibling
+            // (`dismiss_overlay_with_ops`) already flips this.
+            self.a11y_dirty = true;
             if let Some(focus_id) = current_focus {
                 self.overlay_manager.set_top_focus_restore(focus_id);
             }
@@ -1108,6 +1125,7 @@ impl WidgetTree {
             let overlay_id = self.overlay_manager.show_for(req, duration);
             self.overlay_manager
                 .set_shown_at_sim(overlay_id, self.sim_clock);
+            self.a11y_dirty = true;
             if let Some(focus_id) = current_focus {
                 self.overlay_manager.set_top_focus_restore(focus_id);
             }

@@ -290,6 +290,33 @@ discriminator branch in `shaders/anim_procedural.wgsl` (or
 `AnimatedQuadRegistry::compute_params` to populate the shared
 `AnimParams` struct from the kind's fields.
 
+## Framework-level cost at 60 Hz
+
+The shader-driven scenes ([`examples/animations`](../examples/animations/src/main.rs),
+[`examples/animations-kit`](../examples/animations-kit/src/main.rs))
+measure ~5 % CPU per process. The per-frame-effect scenes
+(`Pulse` / `Cycle` chains in `widget_catalog --tab animations`)
+measured **~50 % CPU** at first 60 Hz profile — roughly 10× the
+shader path. The cost was not in the renderer; it was in the widget
+tree's per-frame infrastructure that runs around it.
+
+Profiling at 60 Hz (`perf record -F 999 -g --call-graph fp` on a
+release+debug build) found the framework-level hotspots and the
+optimisation plan
+[plan-for-persistent-mapped-buzzing-shell.md](../.claude/plans/plan-for-persistent-mapped-buzzing-shell.md)
+brought the catalog scene from ~50 % CPU to ~28 % CPU through:
+
+| Phase | What it fixed | Recovery on catalog scene |
+| --- | --- | --- |
+| 1 — A11y dirty-gate | `layout()` was unconditionally setting `a11y_dirty = true` every layout pass; the AT tree was rebuilt every animation tick (`build_accessibility_recursive` walked the whole tree at 60 Hz). Fixed by setting `a11y_dirty` only at events that actually change AT shape (activation transitions, overlay show / dismiss, focus changes, AccessibilityOnly bindings). | ~3.3 pt |
+| 2 — Streaming arena iterators | `WidgetArena::active_ids()` allocated a `Vec<WidgetId>` on every call. Three call sites per frame accounted for ~13 % CPU together. Replaced with `active_ids_iter()` (zero-alloc streaming) for read-only callers and a pooled `active_ids_scratch: Vec<WidgetId>` on `WidgetTree` for the one mutation-during-iter caller (`tick_gestures_with_ops`, post-render dirty clear, post-layout layout-flag clear). | ~13 pt |
+| 3 — Gesture-owners set | Per-frame gesture tick walked every active widget, even though only a handful actually carry a gesture arena. Added `gesture_owners: HashSet<WidgetId>` on `WidgetTree`; `ensure_gesture_arena` inserts on attach, rebuild / destroy paths remove. `tick_gestures_with_ops` and `next_gesture_deadline` now iterate just the owners. | ~3 pt (mostly absorbed by Phase 2) |
+| 4 — Source-indexed binding registry | `BindingRegistry` was a flat `Vec<Binding>` walked linearly each frame; `flush_dirty` called `is_dirty()` per binding, even though many bindings shared one underlying source signal. Replaced with `HashMap<source_id, BindingGroup>` so `is_dirty()` runs once per *unique source* (~30-40 in the catalog) instead of per binding (~100-300+). Phase 4 also unified `flush_dirty` + `flush_accessibility_dirty` into one `flush_all_dirty` call to fix a latent bug where the two flushes raced on a shared per-Signal dirty flag. | ~5 pt |
+
+Total: catalog scene from ~50 % CPU to ~28 % CPU sustained at 60 Hz.
+
+Verification: [bench/perf_post_phase4_summary.md](../bench/perf_post_phase4_summary.md).
+
 ## Damage rects — measured, deferred
 
 A natural next optimisation for shader-driven animations would be
@@ -299,34 +326,21 @@ changed pixels, and pass a damage region to the OS compositor so it
 skips recompositing the rest of the window. Wayland has
 `wl_surface.damage_buffer`; macOS has `CAMetalLayer` dirty rects.
 
-**We measured before committing to this.** With three
-`ProgressBar::indeterminate` on the Animated tab of
-[`examples/animations`](../examples/animations/src/main.rs):
+**We measured before committing to this.** Two profiling rounds:
 
-| Metric | Value |
-| --- | --- |
-| CPU (process) | **1.83 %** of one core |
-| GPU delta vs baseline | **+0 pt** (within sysfs `gpu_busy_percent` noise) |
-| Idle / Static tab CPU | **0.00 %** |
+1. *First round* (8 s window on the Animated tab of `examples/animations`,
+   pre-Phase-1 framework code): the process showed ~1.83 % CPU on
+   one core, dominated by wgpu staging-belt activity for
+   `queue.write_buffer(anim_uniforms, 8 KiB)` and command encoding.
+   None of it was rasterisation time.
 
-Profile breakdown (perf, 8 s window on Animated tab) — the 1.83 %
-is dominated by:
-
-- kernel + amdgpu + vulkan memory allocation via `ioctl` (~3 % of
-  samples) — wgpu's internal staging for
-  `queue.write_buffer(anim_uniforms, 8 KiB)` every frame,
-- `Renderer::render` command encoding (1.28 %),
-- winit event dispatch (0.93 %),
-- miscellaneous one-shot setup (font hinting) that amortises to
-  zero in longer windows.
-
-**None of that is rasterisation time.** Damage rects reduce GPU
-pixel work and compositor recomposite work — neither is on the hot
-path at this scale. Implementing damage rects would require a
-multi-day refactor (persistent swap-chain back buffer, per-widget
-dirty-rect tracking through overlays / clips / DPI changes, per-OS
-compositor integration) for no measurable win on typical UI-sized
-workloads.
+2. *Second round* (60 Hz, full plan-of-record measurement on the
+   catalog `--tab animations` scene): the framework-level path
+   dominated at 50.7 % CPU, with `queue.write_buffer` not in the
+   top 22 hotspots — wgpu's per-queue staging belt amortises it
+   completely. The plan above (Phases 1-4) addressed the actual
+   bottlenecks. Damage rects would still target a small slice
+   (renderer at 1.5-5 % depending on scene) and remain deferred.
 
 **Revisit when any of these trigger:**
 
@@ -337,12 +351,11 @@ workloads.
 - Battery-sensitive hand-held / laptop deployment where every
   milliwatt counts.
 - Real workload profiling shows rasterisation or compositor cost
-  exceeding the CPU cost we measured above.
+  exceeding the framework / renderer cost.
 
-**Cheaper follow-up that would actually help today**: the wgpu
-staging-buffer allocation for the per-frame `queue.write_buffer` is
-the biggest remaining cost. A persistent mapped uniform buffer, or
-writing only the slots that changed since the last tick, would
-directly target the ~3 % kernel-side overhead. Single-file change,
-no architectural lift — the natural next step if the 1.83 % ever
-needs to drop further.
+**Cheaper follow-up that would actually help today**: the
+`AnimatedQuadRegistry` already tracks dirty slot ranges via
+`take_dirty_ranges` (Phase 0 of the plan). A future renderer
+revision can use that to upload only the changed slots instead of
+the full `scratch_slice` — single-call-site change in
+`fern-render`, useful when many quads idle (e.g. paused indicators).

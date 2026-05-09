@@ -240,6 +240,7 @@ impl WidgetTree {
         }
         ready.reverse();
 
+        let any_shown = !ready.is_empty();
         for pending in ready {
             let content_id = pending.request.content_id;
             self.arena.activate(content_id);
@@ -254,6 +255,9 @@ impl WidgetTree {
             {
                 self.focus_ops(focus_target, &mut *ops);
             }
+        }
+        if any_shown {
+            self.a11y_dirty = true;
         }
     }
 
@@ -774,6 +778,14 @@ impl WidgetTree {
         let fade_duration = request.fade_duration;
         let content_id = request.content_id;
         let id = self.overlay_manager.show(request);
+        // The overlay's content subtree just entered the active set;
+        // the AT tree shape changed and the cached snapshot must be
+        // rebuilt. The dismiss path already flips this; we must mirror
+        // it here, otherwise (post Phase 1) a popup show + read AT
+        // sequence returns the pre-popup snapshot. Phase 1 of the perf
+        // plan removed the unconditional `a11y_dirty = true` from
+        // `layout()` which previously masked this gap.
+        self.a11y_dirty = true;
         if let Some(duration) = fade_duration {
             self.attach_overlay_fade(id, content_id, duration);
         }
@@ -798,6 +810,7 @@ impl WidgetTree {
         let content_id = request.content_id;
         let current_focus = self.focused;
         let id = self.overlay_manager.show(request);
+        self.a11y_dirty = true;
         if let Some(focus_id) = current_focus {
             self.overlay_manager.set_top_focus_restore(focus_id);
         }
@@ -816,6 +829,7 @@ impl WidgetTree {
         let content_id = request.content_id;
         let id = self.overlay_manager.show_for(request, duration);
         self.overlay_manager.set_shown_at_sim(id, self.sim_clock);
+        self.a11y_dirty = true;
         if let Some(fade) = fade_duration {
             self.attach_overlay_fade(id, content_id, fade);
         }

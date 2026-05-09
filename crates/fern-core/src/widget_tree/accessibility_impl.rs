@@ -385,20 +385,18 @@ impl WidgetTree {
 
     pub fn find_by_role(&self, role: accesskit::Role) -> Option<WidgetId> {
         self.arena
-            .active_ids()
-            .into_iter()
+            .active_ids_iter()
             .find(|&id| self.build_overridden_builder(id).role() == role)
     }
 
     pub fn find_by_label(&self, label: &str) -> Option<WidgetId> {
         self.arena
-            .active_ids()
-            .into_iter()
+            .active_ids_iter()
             .find(|&id| self.build_overridden_builder(id).name() == Some(label))
     }
 
     pub fn find_by_action(&self, action: accesskit::Action) -> Option<WidgetId> {
-        self.arena.active_ids().into_iter().find(|&id| {
+        self.arena.active_ids_iter().find(|&id| {
             self.build_overridden_builder(id)
                 .actions()
                 .contains(&action)
@@ -751,6 +749,56 @@ mod tests {
         let update = tree.sync_accessibility();
         assert_eq!(update.nodes.len(), 2);
         assert_a11y_tree_valid(&update);
+    }
+
+    /// Regression for Phase 1 of the perf plan: a Relayout-only signal
+    /// flip (no activation change, no role/label/value change, no
+    /// focus change, no overlay activation) must NOT dirty the
+    /// AccessKit cache. Previously `layout()` set `a11y_dirty = true`
+    /// unconditionally on every layout pass, which fired ~60 Hz on
+    /// any scene with a Pulse / Cycle animation.
+    #[test]
+    fn relayout_without_activation_change_does_not_dirty_a11y() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new().label("Static"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        // First sync clears `a11y_dirty` and populates the cache.
+        let _ = tree.sync_accessibility();
+        assert!(
+            !tree.a11y_dirty,
+            "sync_accessibility must clear the dirty flag"
+        );
+
+        // Simulate a Relayout-binding flip: the widget needs
+        // re-layout, but its accessibility shape (active set, focus,
+        // role, label, value) is unchanged.
+        tree.arena.mark_needs_layout(id);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        assert!(
+            !tree.a11y_dirty,
+            "pure Relayout (no activation / focus / overlay / a11y-binding change) must not dirty the AT cache"
+        );
+    }
+
+    /// Companion to the regression above: the dormant→active path
+    /// MUST still dirty the AT cache, because the accessibility walk
+    /// skips dormant nodes.
+    #[test]
+    fn activation_transition_does_dirty_a11y() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new().label("Toggle"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = tree.sync_accessibility();
+        assert!(!tree.a11y_dirty);
+
+        tree.set_dormant(id);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert!(
+            tree.a11y_dirty,
+            "active→dormant transition must dirty the AT cache so the dormant node is removed"
+        );
     }
 
     #[test]

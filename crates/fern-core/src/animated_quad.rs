@@ -46,6 +46,7 @@
 //!   which case the widget doesn't register the quad at all.
 
 use std::collections::HashMap;
+use std::ops::Range;
 use std::time::{Duration, Instant};
 
 use fern_canvas::AnimParams;
@@ -179,6 +180,13 @@ pub struct AnimatedQuadRegistry {
     /// `queue.write_buffer(64 B) + draw_indexed`, so driving at
     /// 60 Hz is cheap even with many animated quads.
     frame_interval: Duration,
+    /// Slots whose `scratch[slot]` value differs from the last value
+    /// observed by `take_dirty_ranges`. Parallel to `scratch` (one
+    /// `bool` per slot, ~128 B at the typical cap). Reserved for a
+    /// future selective-upload path; today's workloads (Spinner /
+    /// ProgressBar at 60 Hz) dirty every slot every frame so a future
+    /// consumer would see a single full-range entry.
+    dirty: Vec<bool>,
 }
 
 const DEFAULT_SHADER_FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
@@ -195,6 +203,7 @@ impl AnimatedQuadRegistry {
             paused_at: None,
             last_tick_at: None,
             frame_interval: DEFAULT_SHADER_FRAME_INTERVAL,
+            dirty: Vec::new(),
         }
     }
 
@@ -227,6 +236,11 @@ impl AnimatedQuadRegistry {
             self.scratch
                 .resize((slot as usize) + 1, AnimParams::default());
         }
+        if (slot as usize) >= self.dirty.len() {
+            self.dirty.resize((slot as usize) + 1, false);
+        }
+        // First upload after register must include this slot.
+        self.dirty[slot as usize] = true;
         AnimatedQuadHandle { slot }
     }
 
@@ -318,16 +332,55 @@ impl AnimatedQuadRegistry {
             self.scratch
                 .resize(self.next_slot as usize, AnimParams::default());
         }
+        if self.dirty.len() < self.scratch.len() {
+            self.dirty.resize(self.scratch.len(), false);
+        }
 
         for (&slot, entry) in self.entries.iter() {
             if !widget_visible(arena, entry.owner, paint_epoch) {
                 continue;
             }
             let params = compute_params(entry, now, theme);
-            self.scratch[slot as usize] = params;
+            let i = slot as usize;
+            if self.scratch[i] != params {
+                self.scratch[i] = params;
+                self.dirty[i] = true;
+            }
         }
         self.last_tick_at = Some(now);
         &self.scratch
+    }
+
+    /// Coalesce contiguous dirty slots into ranges and clear the
+    /// dirty bits. Empty when nothing changed since the last call.
+    ///
+    /// Reserved for a future selective-upload path on the renderer:
+    /// today's workloads dirty every slot every frame so the result
+    /// would be a single full-range entry, but workloads with paused
+    /// or off-screen quads will benefit. Slot-delta tracking ships now
+    /// as principled groundwork; the renderer continues to upload the
+    /// entire `scratch_slice` until a measured workload proves
+    /// per-range upload saves cycles.
+    pub fn take_dirty_ranges(&mut self) -> Vec<Range<usize>> {
+        let mut ranges = Vec::new();
+        let mut start: Option<usize> = None;
+        for (i, &dirty) in self.dirty.iter().enumerate() {
+            match (dirty, start) {
+                (true, None) => start = Some(i),
+                (false, Some(s)) => {
+                    ranges.push(s..i);
+                    start = None;
+                }
+                _ => {}
+            }
+        }
+        if let Some(s) = start {
+            ranges.push(s..self.dirty.len());
+        }
+        for slot in self.dirty.iter_mut() {
+            *slot = false;
+        }
+        ranges
     }
 
     /// Whether any animation is *eligible to advance* on the next tick.
@@ -694,6 +747,103 @@ mod tests {
             reg.next_deadline(&arena, 5).is_none(),
             "offscreen-only registry must not keep the event loop awake"
         );
+    }
+
+    #[test]
+    fn register_marks_slot_dirty() {
+        let mut reg = AnimatedQuadRegistry::new();
+        let (_arena, ids) = arena_with(1);
+        let now = Instant::now();
+
+        reg.register(ids[0], sweep_kind(), now);
+        let ranges = reg.take_dirty_ranges();
+        assert_eq!(ranges.len(), 1, "newly registered slot must be dirty");
+        assert_eq!(ranges[0], 0..1);
+
+        // Second drain returns nothing — bits cleared.
+        assert!(reg.take_dirty_ranges().is_empty());
+    }
+
+    #[test]
+    fn tick_unchanged_params_does_not_dirty() {
+        let mut reg = AnimatedQuadRegistry::new();
+        let (arena, ids) = arena_with(1);
+        let theme = Theme::light_default();
+        let now = Instant::now();
+
+        reg.register(ids[0], sweep_kind(), now);
+
+        // First tick populates scratch with non-default params (sweep_ratio,
+        // colors). Drain so the next tick's dirty flag isolates the
+        // params-changed signal.
+        reg.tick(now, &arena, 0, &theme);
+        let _ = reg.take_dirty_ranges();
+
+        // Second tick at the same instant — phase identical → scratch
+        // unchanged → no dirty.
+        reg.tick(now, &arena, 0, &theme);
+        assert!(
+            reg.take_dirty_ranges().is_empty(),
+            "tick with unchanged params must not flip dirty"
+        );
+    }
+
+    #[test]
+    fn tick_changed_params_marks_dirty() {
+        let mut reg = AnimatedQuadRegistry::new();
+        let (arena, ids) = arena_with(1);
+        let theme = Theme::light_default();
+        let start = Instant::now();
+
+        reg.register(ids[0], sweep_kind(), start);
+        let _ = reg.take_dirty_ranges();
+
+        // Tick a quarter-period later — phase moves from 0 to ~0.25.
+        reg.tick(start + Duration::from_millis(25), &arena, 0, &theme);
+        let ranges = reg.take_dirty_ranges();
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0], 0..1);
+    }
+
+    #[test]
+    fn take_dirty_ranges_coalesces_contiguous_slots() {
+        let mut reg = AnimatedQuadRegistry::new();
+        let (_arena, ids) = arena_with(3);
+        let now = Instant::now();
+
+        reg.register(ids[0], sweep_kind(), now);
+        reg.register(ids[1], sweep_kind(), now);
+        reg.register(ids[2], sweep_kind(), now);
+
+        let ranges = reg.take_dirty_ranges();
+        assert_eq!(
+            ranges,
+            vec![0..3],
+            "three contiguous dirty slots must coalesce into one range"
+        );
+    }
+
+    #[test]
+    fn take_dirty_ranges_splits_non_contiguous() {
+        let mut reg = AnimatedQuadRegistry::new();
+        let (arena, ids) = arena_with(3);
+        let theme = Theme::light_default();
+        let start = Instant::now();
+
+        reg.register(ids[0], sweep_kind(), start);
+        reg.register(ids[1], sweep_kind(), start);
+        reg.register(ids[2], sweep_kind(), start);
+        let _ = reg.take_dirty_ranges();
+
+        // Cancel the middle widget — slot 1 stays at its last value
+        // (default-zeroed slot is fine; the cancel path never writes).
+        reg.cancel_by_widget(ids[1]);
+
+        // Tick → only slots 0 and 2 advance phase; slot 1 is freed and
+        // its scratch keeps its prior value (no dirty flip).
+        reg.tick(start + Duration::from_millis(25), &arena, 0, &theme);
+        let ranges = reg.take_dirty_ranges();
+        assert_eq!(ranges, vec![0..1, 2..3]);
     }
 
     #[test]
