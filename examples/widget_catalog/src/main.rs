@@ -243,6 +243,7 @@ impl Widget for WidgetCatalog {
         // ── TabWidget ────────────────────────────────────────────────
         let mut tw = TabWidget::new(self.selected_tab.clone())
             .vertical()
+            .max_tab_width(180.0)
             .tab_surface_role(SurfaceRole::Sunken);
         for (i, entry) in TABS.iter().enumerate() {
             let id = self.tab_ids[i];

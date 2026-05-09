@@ -164,6 +164,19 @@ pub struct TabBar<T: 'static> {
     paint_state: PaintState,
 
     root_child_id: Option<WidgetId>,
+
+    /// Direct widget-id handles to the bar's natural-width
+    /// contributors. In vertical orientation, `layout_response`
+    /// probes each at unspecified width to compute the bar's
+    /// intrinsic width (max across them), then clamps to
+    /// `[min_tab_width, max_tab_width]`. Bypasses the inner
+    /// `ScrollArea` whose own `layout_response` echoes its
+    /// proposal, which would otherwise let the bar swallow
+    /// whatever cross-axis space the parent gave it.
+    header_row_id: Option<WidgetId>,
+    pinned_strip_id: Option<WidgetId>,
+    bar_leading_slot_id: Option<WidgetId>,
+    bar_trailing_slot_id: Option<WidgetId>,
 }
 
 #[derive(Clone, Default)]
@@ -310,6 +323,10 @@ impl<T: 'static> TabBar<T> {
             panel_ids_buffer: None,
             paint_state: PaintState::default(),
             root_child_id: None,
+            header_row_id: None,
+            pinned_strip_id: None,
+            bar_leading_slot_id: None,
+            bar_trailing_slot_id: None,
         }
     }
 
@@ -320,11 +337,15 @@ impl<T: 'static> TabBar<T> {
     }
 
     /// Minimum width (in dp) any unpinned tab will be drawn at.
-    /// Default: [`DEFAULT_MIN_TAB_WIDTH`]. Applies to horizontal bars
-    /// only — vertical bars use the intrinsic per-tab height
-    /// (`theme.components.tab.editor_tab_height`) regardless of this
-    /// knob, so sidebar pills don't get forced unreasonably tall by
-    /// width-oriented defaults.
+    /// Default: [`DEFAULT_MIN_TAB_WIDTH`].
+    ///
+    /// In **horizontal** orientation this clamps the **per-tab** width.
+    /// In **vertical** orientation every tab is forced to the bar's
+    /// cross-axis width, so the same knob defines the bar's minimum
+    /// width — the sidebar adapts to the widest piece of bar content
+    /// (tab labels or a slot widget) and never shrinks below this floor.
+    /// Vertical pill heights stay at `theme.components.tab.editor_tab_height`
+    /// regardless of this knob.
     pub fn min_tab_width(mut self, dp: f32) -> Self {
         self.min_tab_width = dp.max(0.0);
         self
@@ -332,8 +353,12 @@ impl<T: 'static> TabBar<T> {
 
     /// Maximum width (in dp) any unpinned tab will be drawn at — long
     /// labels truncate with an ellipsis at this width.
-    /// Default: [`DEFAULT_MAX_TAB_WIDTH`]. Applies to horizontal bars
-    /// only (see [`min_tab_width`](Self::min_tab_width)).
+    /// Default: [`DEFAULT_MAX_TAB_WIDTH`].
+    ///
+    /// In **horizontal** orientation this clamps the **per-tab** width.
+    /// In **vertical** orientation it caps the whole sidebar's width —
+    /// see [`min_tab_width`](Self::min_tab_width) for the symmetric
+    /// adapt-to-content rule.
     pub fn max_tab_width(mut self, dp: f32) -> Self {
         self.max_tab_width = dp.max(0.0);
         self
@@ -837,17 +862,17 @@ impl<T: 'static> Widget for TabBar<T> {
             header_bounds_buf: header_bounds_buf.clone(),
             row_bounds_buf: row_bounds_buf.clone(),
         };
+        let row_id = ctx.add(row);
+        self.header_row_id = Some(row_id);
 
         let scroll = match self.orientation {
-            TabBarOrientation::Horizontal => ScrollArea::new()
-                .child(row)
+            TabBarOrientation::Horizontal => ScrollArea::from_id(row_id)
                 .scroll_bar_style(ScrollBarMode::Thin)
                 .vertical_scroll_bar_policy(ScrollBarPolicy::AlwaysOff)
                 .horizontal_scroll_bar_policy(ScrollBarPolicy::AsNeeded)
                 .widget_resizable(true)
                 .preferred_size(0.0, header_min_height),
-            TabBarOrientation::Vertical => ScrollArea::new()
-                .child(row)
+            TabBarOrientation::Vertical => ScrollArea::from_id(row_id)
                 .scroll_bar_style(ScrollBarMode::Overlay)
                 .horizontal_scroll_bar_policy(ScrollBarPolicy::AlwaysOff)
                 .vertical_scroll_bar_policy(ScrollBarPolicy::AsNeeded)
@@ -887,6 +912,7 @@ impl<T: 'static> Widget for TabBar<T> {
                 PendingChild::Id(id) => id,
                 PendingChild::Deferred(w) => ctx.add_boxed(w),
             };
+            self.bar_leading_slot_id = Some(id);
             outer_children.push(id);
         }
 
@@ -911,6 +937,7 @@ impl<T: 'static> Widget for TabBar<T> {
                     ctx.add(pinned)
                 }
             };
+            self.pinned_strip_id = Some(pinned_id);
             outer_children.push(pinned_id);
         }
 
@@ -991,6 +1018,7 @@ impl<T: 'static> Widget for TabBar<T> {
                 PendingChild::Id(id) => id,
                 PendingChild::Deferred(w) => ctx.add_boxed(w),
             };
+            self.bar_trailing_slot_id = Some(id);
             outer_children.push(id);
         }
 
@@ -1229,9 +1257,43 @@ impl<T: 'static> Widget for TabBar<T> {
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
-        self.root_child_id
-            .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+        let Some(root_id) = self.root_child_id else {
+            return proposal.resolve(0.0, 0.0).into();
+        };
+        let final_proposal = match self.orientation {
+            TabBarOrientation::Vertical => {
+                // Adapt the bar's cross-axis (width) to whichever piece
+                // of bar content is widest — tab labels, the pinned
+                // strip, or a leading / trailing slot widget — clamped
+                // to [min_tab_width, max_tab_width]. Probing the inner
+                // ScrollArea would just echo our own proposal back, so
+                // we measure the row directly.
+                let mut intrinsic_w = 0.0_f32;
+                for opt in [
+                    self.header_row_id,
+                    self.pinned_strip_id,
+                    self.bar_leading_slot_id,
+                    self.bar_trailing_slot_id,
+                ] {
+                    if let Some(id) = opt
+                        && let Some(s) = ctx.child_size(id, SizeProposal::unspecified())
+                    {
+                        intrinsic_w = intrinsic_w.max(s.width);
+                    }
+                }
+                let mut target = intrinsic_w.clamp(self.min_tab_width, self.max_tab_width);
+                if let Some(p) = proposal.width {
+                    target = target.min(p).max(self.min_tab_width);
+                }
+                SizeProposal {
+                    width: Some(target),
+                    height: proposal.height,
+                }
+            }
+            TabBarOrientation::Horizontal => proposal,
+        };
+        ctx.child_size(root_id, final_proposal)
+            .unwrap_or_else(|| final_proposal.resolve(0.0, 0.0))
             .into()
     }
 
@@ -1455,9 +1517,20 @@ impl Widget for TabHeaderRow {
                 Size::new(total, height).into()
             }
             TabBarOrientation::Vertical => {
-                // Cross-axis (width) follows the viewport. Each pill
-                // claims the full bar width.
-                let width = proposal.width.unwrap_or(0.0);
+                // Adapt to the longest tab label, clamped to
+                // [min_extent, max_extent]. Without this, the row
+                // would echo `proposal.width` and let the bar swallow
+                // whatever cross-axis space the parent gave it.
+                let intrinsic = self
+                    .header_ids
+                    .iter()
+                    .filter_map(|&id| ctx.child_size(id, SizeProposal::unspecified()))
+                    .map(|s| s.width)
+                    .fold(0.0_f32, f32::max);
+                let mut width = intrinsic.clamp(self.min_extent, self.max_extent);
+                if let Some(proposed) = proposal.width {
+                    width = width.min(proposed).max(self.min_extent);
+                }
                 let extents = self.compute_extents(proposal.height, ctx);
                 let total = extents.iter().sum::<f32>() + total_spacing;
                 Size::new(width, total).into()
