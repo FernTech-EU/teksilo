@@ -184,6 +184,11 @@ struct IdleTrace {
     mouse_wheel_redraw_requests: u64,
     keyboard_redraw_requests: u64,
     resize_redraw_requests: u64,
+    /// Post-render redraw requests caused by `tree.frame_requested()`
+    /// (a widget asked for another frame from a `frame_tick` effect or
+    /// similar). Surfaces the only redraw source that was previously
+    /// invisible to the trace.
+    frame_request_redraws: u64,
     idle_callbacks_run: u64,
     control_flow_wait: u64,
     control_flow_wait_until: u64,
@@ -206,6 +211,7 @@ impl IdleTrace {
                 mouse_wheel_redraw_requests: 0,
                 keyboard_redraw_requests: 0,
                 resize_redraw_requests: 0,
+                frame_request_redraws: 0,
                 idle_callbacks_run: 0,
                 control_flow_wait: 0,
                 control_flow_wait_until: 0,
@@ -272,13 +278,18 @@ impl IdleTrace {
         self.maybe_report();
     }
 
+    fn note_frame_request_redraw(&mut self) {
+        self.frame_request_redraws += 1;
+        self.maybe_report();
+    }
+
     fn maybe_report(&mut self) {
         if self.last_report.elapsed() < Duration::from_secs(1) {
             return;
         }
 
         eprintln!(
-            "fern_idle_trace redraw_requested={} rendered_frames={} resume_time_reached={} request_redraw_all={} input_redraws={{cursor:{},mouse_input:{},mouse_wheel:{},keyboard:{},resize:{}}} idle_callbacks={} control_flow={{wait:{},wait_until:{}}} timers={{windows:{},animations:{},tooltips:{}}}",
+            "fern_idle_trace redraw_requested={} rendered_frames={} resume_time_reached={} request_redraw_all={} input_redraws={{cursor:{},mouse_input:{},mouse_wheel:{},keyboard:{},resize:{},frame_request:{}}} idle_callbacks={} control_flow={{wait:{},wait_until:{}}} timers={{windows:{},animations:{},tooltips:{}}}",
             self.redraw_requested,
             self.rendered_frames,
             self.resume_time_reached,
@@ -288,6 +299,7 @@ impl IdleTrace {
             self.mouse_wheel_redraw_requests,
             self.keyboard_redraw_requests,
             self.resize_redraw_requests,
+            self.frame_request_redraws,
             self.idle_callbacks_run,
             self.control_flow_wait,
             self.control_flow_wait_until,
@@ -306,6 +318,7 @@ impl IdleTrace {
         self.mouse_wheel_redraw_requests = 0;
         self.keyboard_redraw_requests = 0;
         self.resize_redraw_requests = 0;
+        self.frame_request_redraws = 0;
         self.idle_callbacks_run = 0;
         self.control_flow_wait = 0;
         self.control_flow_wait_until = 0;
@@ -896,6 +909,9 @@ impl FernAppHandler {
         }
 
         if managed.tree.frame_requested() {
+            if let Some(trace) = &mut self.idle_trace {
+                trace.note_frame_request_redraw();
+            }
             managed.platform_window.request_redraw();
         }
 

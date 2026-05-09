@@ -388,29 +388,16 @@ impl std::fmt::Debug for AnimatedQuadRegistry {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn widget_visible(arena: &WidgetArena, id: WidgetId, paint_epoch: u64) -> bool {
-    if paint_epoch == 0 {
-        return true;
-    }
-    // Strict equality (NOT `last_painted_epoch + 1 >= paint_epoch` like
-    // the signal scheduler). The signal path dirties its widget on
-    // every tick, which causes a non-cache-hit paint and bumps
-    // paint_epoch — so its `+1` tolerance is self-correcting. The
-    // shader path, by design, never dirties widgets (the fragment
-    // shader reads per-frame state from a uniform); paint_epoch stays
-    // frozen on cache-hit frames, so a `+1` tolerance would treat a
-    // widget that has NEVER been painted (last_painted_epoch = 0,
-    // paint_epoch = 1) as visible forever, driving the event loop at
-    // the animation frame rate for quads that are actually off-screen.
-    //
-    // With `==`, freshly-visible widgets miss exactly one tick (the
-    // one before their first post-scroll paint stamps them); that's
-    // ~33 ms, imperceptible.
-    match arena.get(id) {
-        Some(node) => arena.is_active(id) && node.last_painted_epoch == paint_epoch,
-        None => false,
-    }
-}
+// Strict-equality visibility (NOT the `+1` tolerance the signal
+// scheduler uses). The shader path never dirties widgets — the
+// fragment shader reads per-frame state from a uniform — so
+// `paint_epoch` stays frozen on cache-hit frames. A tolerance would
+// treat a never-painted widget (`last_painted_epoch = 0`,
+// `paint_epoch = 1`) as visible forever, driving the event loop at
+// animation frame rate for quads that are actually off-screen. With
+// `==`, freshly-visible widgets miss exactly one tick (~33 ms,
+// imperceptible). Same primitive consumed by `FrameTickScheduler`.
+use crate::motion_visibility::painted_this_frame as widget_visible;
 
 fn compute_params(entry: &AnimatedQuadEntry, now: Instant, theme: &Theme) -> AnimParams {
     match &entry.kind {

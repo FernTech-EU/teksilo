@@ -65,9 +65,14 @@ impl WidgetTree {
         // caller holds a second Rc clone (e.g. two back-to-back
         // renders without letting the first drop) we fall back to a
         // single deep clone for that frame.
-        if !self.arena.any_needs_paint()
-            && let Some(cached) = self.cached_frame.as_mut()
-        {
+        if !self.arena.any_needs_paint() && self.cached_frame.is_some() {
+            // Cache-hit path. paint_epoch is frozen, so visible
+            // subscribers' `last_painted_epoch == paint_epoch` still
+            // holds. Re-arm the frame-tick chain BEFORE refreshing the
+            // cached frame so we don't tangle borrows.
+            self.arm_frame_tick_for_visible_subscribers();
+
+            let cached = self.cached_frame.as_mut().expect("just checked Some");
             let frame = std::rc::Rc::make_mut(cached);
             if has_animations {
                 let src = self.animated_quads.scratch_slice();
@@ -145,7 +150,25 @@ impl WidgetTree {
         frame.debug_validate_stacks();
         let rc = std::rc::Rc::new(frame);
         self.cached_frame = Some(std::rc::Rc::clone(&rc));
+        // Full-render path: subscribers whose owners were just painted
+        // have `last_painted_epoch == paint_epoch`. Re-arm the
+        // frame-tick chain so per-frame effects keep ticking. When all
+        // subscribers are off-screen this returns false and the chain
+        // dies — exactly the bug fix that motivated this scheduler.
+        self.arm_frame_tick_for_visible_subscribers();
         rc
+    }
+
+    /// Walk the frame-tick subscriber set and arm `frame_tick_requested`
+    /// if any subscriber's owner is currently visible. Called from
+    /// `render_with_ops` (both cache-hit and full-render paths).
+    pub(crate) fn arm_frame_tick_for_visible_subscribers(&self) {
+        if self
+            .frame_tick_scheduler
+            .should_arm_frame_tick(&self.arena, self.paint_epoch)
+        {
+            self.frame_tick_requested.set(true);
+        }
     }
 }
 

@@ -29,6 +29,7 @@ use std::time::Duration;
 use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
+use fern_core::frame_tick_scheduler::FrameTickSubscription;
 use fern_core::signal::Signal;
 use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
@@ -42,6 +43,10 @@ pub struct Cycle {
     period: Duration,
     deferred_children: Vec<Box<dyn Widget>>,
     root_child_id: Option<WidgetId>,
+    /// RAII guard for the per-frame-effect subscription. See
+    /// [`Pulse::frame_tick_sub`](super::pulse::Pulse) for the same
+    /// pattern.
+    frame_tick_sub: Option<FrameTickSubscription>,
 }
 
 impl Cycle {
@@ -51,6 +56,7 @@ impl Cycle {
             period: DEFAULT_PERIOD,
             deferred_children: Vec::new(),
             root_child_id: None,
+            frame_tick_sub: None,
         }
     }
 
@@ -116,9 +122,14 @@ impl Widget for Cycle {
             return vec![root];
         }
 
+        // Discrete index advance via the frame tick. The framework
+        // auto-arms the chain after every render in which `self_id`
+        // was painted (see `BuildContext::subscribe_frame_tick`), so
+        // a Cycle parked inside a non-selected `Switcher` branch
+        // contributes zero idle frames and resumes from `elapsed`
+        // when shown again.
         let period_secs = self.period.as_secs_f32().max(0.001);
         let elapsed = Rc::new(Cell::new(0.0_f32));
-        let frame_request = ctx.frame_request_handle();
         let selected_for_tick = selected;
         ctx.effect(&ctx.frame_tick(), move |&delta| {
             let t = elapsed.get() + delta;
@@ -131,9 +142,9 @@ impl Widget for Cycle {
             } else {
                 elapsed.set(t);
             }
-            frame_request.set(true);
         });
-        ctx.request_frame();
+        self.frame_tick_sub = None;
+        self.frame_tick_sub = Some(ctx.subscribe_frame_tick());
 
         vec![root]
     }

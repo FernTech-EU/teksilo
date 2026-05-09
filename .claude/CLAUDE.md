@@ -265,10 +265,13 @@ Scope nesting order on a single node, outermost to innermost:
 - `Pulse::opacity(min, max).period(d).child(w)` — sine-driven looping
   opacity oscillation. The blinking-red-light / recording-indicator
   pattern. Layout-transparent (same as `Fade`). Reduced motion: pins
-  at midpoint. See [crates/fern-widgets/src/animations/pulse.rs](crates/fern-widgets/src/animations/pulse.rs).
+  at midpoint. Uses the per-frame-effect path
+  (`ctx.subscribe_frame_tick()`) — chain auto-pauses when parked in a
+  hidden Switcher branch, resumes on show. See [crates/fern-widgets/src/animations/pulse.rs](crates/fern-widgets/src/animations/pulse.rs).
 - `Cycle::new().period(d).child(a).child(b)…` — steps through children
   on a fixed period (rotating loading tips, status displays). Internally
-  a `Switcher` driven by a frame-tick effect. See [crates/fern-widgets/src/animations/cycle.rs](crates/fern-widgets/src/animations/cycle.rs).
+  a `Switcher` driven by a frame-tick effect. Same per-frame-effect
+  visibility-aware path as `Pulse`. See [crates/fern-widgets/src/animations/cycle.rs](crates/fern-widgets/src/animations/cycle.rs).
 - `SmoothSize::new().child(w)` — auto-sizes the slot to the child's
   current intrinsic size, *animating* every change. The "empty panel
   that suddenly must grow gracefully to accept new content" case.
@@ -338,9 +341,27 @@ Scope nesting order on a single node, outermost to innermost:
 - `BuildContext::prefers_reduced_motion()` — raw platform pref query
 - `Easing` — `Linear`, `EaseIn`, `EaseOut`, `EaseInOut` (in fern-tokens)
 
+**Three motion subsystems share one visibility primitive.** All
+three sit on `WidgetTree`, all three consult
+[`motion_visibility`](crates/fern-core/src/motion_visibility.rs)
+(`alive` / `painted_this_frame` / `painted_recently`) to decide
+whether their owner widget is visible enough to keep waking the event
+loop. Pick by shape:
+
+| Path | Surface | Use for |
+| --- | --- | --- |
+| Signal-tween — `AnimationScheduler` | `Signal<f32>::animate_to`, `ctx.animate().to_or_snap(...)` | linear tweens (toggle thumbs, scroll offsets, slider fills, dialog scale-in). One-shots and looping. |
+| Shader-quad — `AnimatedQuadRegistry` | `ctx.animated_quad(kind)` | decorative motion that fits a quad + fragment shader (`Spinner`, `ProgressBar::indeterminate`, animated `IconWidget`). `paint()` does not re-run. |
+| Per-frame-effect — `FrameTickScheduler` | `ctx.subscribe_frame_tick()` (returns RAII `FrameTickSubscription`) | hand-rolled per-frame closures (`Pulse` sine oscillation, `Cycle` discrete step). The framework re-arms the chain after every render iff at least one subscriber's owner painted that frame, so a Pulse parked inside a hidden Switcher branch contributes zero idle frames. Drop the guard to unsubscribe. |
+
+The third path replaces the older "manual `frame_request_handle().set(true)` re-arm inside a `frame_tick` effect" pattern for visual continuous animations — the manual re-arm has no visibility gate and was the source of the catalog idle-fps bug. Keep `frame_request_handle` for owner-driven, non-visibility-bound needs (caret blink, drag auto-scroll while pointer captured).
+
 **Files:** [crates/fern-tokens/src/motion.rs](crates/fern-tokens/src/motion.rs),
 [crates/fern-core/src/animation.rs](crates/fern-core/src/animation.rs),
 [crates/fern-core/src/animation_builder.rs](crates/fern-core/src/animation_builder.rs),
+[crates/fern-core/src/animated_quad.rs](crates/fern-core/src/animated_quad.rs),
+[crates/fern-core/src/frame_tick_scheduler.rs](crates/fern-core/src/frame_tick_scheduler.rs),
+[crates/fern-core/src/motion_visibility.rs](crates/fern-core/src/motion_visibility.rs),
 [crates/fern-core/src/signal.rs](crates/fern-core/src/signal.rs),
 [crates/fern-widgets/src/animations/](crates/fern-widgets/src/animations/) (all wrapper widgets).
 Visual showcase: `cargo run -p animations-kit`.
@@ -666,6 +687,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Event types: `crates/fern-core/src/event.rs`
 - Theme: `crates/fern-tokens/src/theme.rs`
 - Color tokens: `crates/fern-tokens/src/color.rs`
+- Motion subsystems: [crates/fern-core/src/animation.rs](crates/fern-core/src/animation.rs) (signal-tween `AnimationScheduler`), [crates/fern-core/src/animated_quad.rs](crates/fern-core/src/animated_quad.rs) (shader-quad `AnimatedQuadRegistry`), [crates/fern-core/src/frame_tick_scheduler.rs](crates/fern-core/src/frame_tick_scheduler.rs) (per-frame-effect `FrameTickScheduler` — `Pulse` / `Cycle`), [crates/fern-core/src/motion_visibility.rs](crates/fern-core/src/motion_visibility.rs) (shared `alive` / `painted_this_frame` / `painted_recently` helpers). Reference: [docs/idle-and-animation.md](docs/idle-and-animation.md), [docs/animation.md](docs/animation.md).
 - Button (reference widget): [crates/fern-widgets/src/button.rs](crates/fern-widgets/src/button.rs)
 - Switcher: [crates/fern-widgets/src/primitives/switcher.rs](crates/fern-widgets/src/primitives/switcher.rs)
 - Layout primitives: [crates/fern-widgets/src/primitives/](crates/fern-widgets/src/primitives/)

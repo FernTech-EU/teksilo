@@ -412,22 +412,7 @@ impl AnimationScheduler {
     }
 }
 
-fn anim_widget_alive(arena: &WidgetArena, id: WidgetId) -> bool {
-    arena.get(id).is_some() && arena.is_active(id)
-}
-
-/// `paint_epoch == 0` means `render()` has never run — common in unit
-/// tests that only call `tree.layout()`. Treat that as "always visible"
-/// so scheduler tests don't regress.
-fn anim_widget_visible(arena: &WidgetArena, id: WidgetId, paint_epoch: u64) -> bool {
-    if paint_epoch == 0 {
-        return true;
-    }
-    match arena.get(id) {
-        Some(node) => node.last_painted_epoch + 1 >= paint_epoch,
-        None => false,
-    }
-}
+use crate::motion_visibility::{alive as anim_widget_alive, painted_recently as anim_widget_visible};
 
 impl Default for AnimationScheduler {
     fn default() -> Self {

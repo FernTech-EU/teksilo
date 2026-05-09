@@ -27,9 +27,27 @@ A framework that draws at idle normalises wasted cycles. We refuse.
 
 ## The machinery that enforces it
 
-Four gates, all in the animation subsystem. Any new source of idle
-wakes must be designed to respect them — or add its own gate with
-equivalent rigor.
+Four gates, applied uniformly across **three** motion subsystems:
+
+- **Signal-tween path** — `Signal<f32>::animate_to` /
+  `animate_looping`, scheduled by
+  [`AnimationScheduler`](../crates/fern-core/src/animation.rs).
+- **Shader-quad path** — `ctx.animated_quad(kind)`, scheduled by
+  [`AnimatedQuadRegistry`](../crates/fern-core/src/animated_quad.rs).
+- **Per-frame-effect path** — `ctx.subscribe_frame_tick()`, scheduled
+  by
+  [`FrameTickScheduler`](../crates/fern-core/src/frame_tick_scheduler.rs).
+  Used by widgets whose tick is neither a linear tween nor a quad
+  uniform — `Pulse` (sine oscillation), `Cycle` (discrete index
+  step), and any future hand-rolled `frame_tick` consumer.
+
+All three consult the same visibility primitives in
+[`motion_visibility`](../crates/fern-core/src/motion_visibility.rs)
+(`alive`, `painted_this_frame`, `painted_recently`) so the
+"is my owner visible enough to keep waking?" decision has one
+canonical answer per scheduler shape. Any new source of idle wakes
+must be designed to respect the gates below — or add its own
+scheduler that consults the same helpers.
 
 1. **Widget-drop / rebuild auto-cancel.** The scheduler holds strong
    `Signal<f32>` clones; without an explicit cancel on widget death,
@@ -51,32 +69,59 @@ equivalent rigor.
    ([app.rs](../crates/fern-app/src/app.rs),
    [window_manager.rs](../crates/fern-app/src/window_manager.rs))
 
-3. **Per-widget paint-epoch visibility (loops only).** `WidgetTree::paint_epoch`
+3. **Per-widget paint-epoch visibility.** `WidgetTree::paint_epoch`
    ticks on every non-cache-hit `render()`. `paint_widget_cached`
    stamps `last_painted_epoch` on each widget whose bounds survive
-   clip intersection. The scheduler skips any **looping** animation
-   whose widget's `last_painted_epoch + 1 < paint_epoch` — a
-   scrolled-off spinner pauses itself. When the widget scrolls back
-   in, the resulting paint re-stamps its epoch and
-   `update_control_flow` re-queries `next_deadline` in `post_event`,
-   re-arming the animation. `paint_epoch == 0` is the "never
-   rendered" sentinel: always visible, so headless unit tests that
-   only call `layout()` don't regress.
+   clip intersection. The shared
+   [`motion_visibility`](../crates/fern-core/src/motion_visibility.rs)
+   helpers turn that into a yes/no for each scheduler:
 
-   **One-shots are *not* gated by visibility.** A widget like
-   [`Collapse`](../crates/fern-widgets/src/collapse.rs) drives a
-   one-shot 0..1 progress signal that determines its own height —
-   so when collapsed, its bounds are zero, it never paints, never
-   re-stamps `last_painted_epoch`, and a visibility gate would
-   chicken-and-egg the expand: never tick, never grow, never paint.
-   Gating only loops keeps the scrolled-off-spinner saving while
-   making widget-driven layout tweens work. The cost is bounded —
-   a one-shot with no observers on screen still completes in
-   `duration` and stops itself, so the worst case is a single
-   tween's worth of background ticks.
+   - **Signal-tween path** uses `painted_recently`
+     (`last_painted_epoch + 1 >= paint_epoch`) — tolerant, because
+     the signal `set` on each tick dirties its widget, which forces
+     a non-cache-hit paint that bumps both values in lockstep; the
+     `+1` slack just rounds out the layout-then-paint adjacency on
+     freshly-visible widgets.
+
+   - **Shader-quad path** and **per-frame-effect path** use
+     `painted_this_frame` (`last_painted_epoch == paint_epoch`) —
+     strict, because their tick does not dirty the widget. The
+     shader path advances per-slot uniforms in a buffer the
+     fragment shader samples; the per-frame-effect path mutates a
+     signal whose binding may or may not propagate to a paint dirty.
+     Tolerance there would treat a never-painted widget
+     (`last_painted_epoch = 0`, `paint_epoch = 1`) as visible
+     forever — the original `Pulse` / `Cycle` bug, where a Pulse
+     parked inside a non-selected `Switcher` branch kept the event
+     loop pumping at full frame rate.
+
+   Result: a scrolled-off spinner, an off-tab Pulse, an oscillating
+   indicator inside a collapsed accordion all stop ticking. When
+   the widget scrolls / switches back in, the resulting paint
+   re-stamps its epoch — `update_control_flow` re-queries
+   `next_deadline` in `post_event` (signal + quad paths) and
+   `WidgetTree::render` re-arms `frame_tick_requested` after every
+   visible-subscriber paint (per-frame-effect path) — and motion
+   resumes phase-continuous.
+
+   **Signal-path one-shots are *not* gated by visibility.** A
+   widget like [`Collapse`](../crates/fern-widgets/src/collapse.rs)
+   drives a one-shot 0..1 progress signal that determines its own
+   height — so when collapsed, its bounds are zero, it never paints,
+   never re-stamps `last_painted_epoch`, and a visibility gate
+   would chicken-and-egg the expand: never tick, never grow, never
+   paint. The signal scheduler gates only **looping** entries; the
+   shader and per-frame-effect schedulers don't ship a one-shot
+   shape, so the loop-only carve-out is signal-only.
+
+   `paint_epoch == 0` is the "never rendered" sentinel: always
+   visible, so headless unit tests that only call `layout()` don't
+   regress.
    ([rendering_impl.rs](../crates/fern-core/src/widget_tree/rendering_impl.rs),
    [arena.rs](../crates/fern-core/src/arena.rs),
-   [animation.rs](../crates/fern-core/src/animation.rs))
+   [animation.rs](../crates/fern-core/src/animation.rs),
+   [animated_quad.rs](../crates/fern-core/src/animated_quad.rs),
+   [frame_tick_scheduler.rs](../crates/fern-core/src/frame_tick_scheduler.rs))
 
 4. **Pixel-stable ε, mandatory terminal bypass.** Each
    `AnimationRequest` can carry an `epsilon` (unit: the signal's own
@@ -131,7 +176,13 @@ the loop. Classify it:
   If it doesn't, the event loop can't decide whether to sleep.
 - **Poll mode forced?** `ControlFlow::Poll` is used for
   `frame_tick_requested` (caret blink, drag auto-scroll). It must
-  clear itself the frame it is no longer needed.
+  clear itself the frame it is no longer needed. **For visual
+  continuous animations** (Pulse, Cycle, …), prefer
+  `ctx.subscribe_frame_tick()` over the raw
+  `frame_request_handle().set(true)` re-arm — the scheduler-backed
+  path automatically pauses the chain when the owner widget is
+  hidden, while the raw handle keeps the event loop pumping
+  regardless of visibility.
 
 When in doubt, bisect: remove widgets from the scene until the idle
 returns to zero. The last removal is the culprit.
@@ -144,20 +195,43 @@ of the four gates. `ctx.prefers_reduced_motion()` is a fifth pre-gate
 for decorative motion: honor it, and you get the zero-motion
 accessibility behavior and a free idle win.
 
-## Two animation paths — signal vs shader
+## Three animation paths — signal vs shader vs per-frame-effect
 
-FernUI carries two animation paths that coexist. Pick by shape:
+FernUI carries three motion paths that coexist. Pick by shape:
 
 | Path | When to use | Cost when visible | `paint()` re-runs per frame? |
 | --- | --- | --- | --- |
-| **`Signal<f32>::animate_to` / `animate_looping`** (via `AnimationScheduler`) | Tweens driving arbitrary values: scroll offsets, sidebar slide, toggle knob, slider fill width, any custom interpolation your `paint()` consumes | CPU: `signal.set` → `paint()` → vertex-buffer rewrite → wgpu submit. Tight but per-frame. | Yes. |
-| **`ctx.animated_quad(kind)`** (via `AnimatedQuadRegistry`) | Decorative motion that fits a quad + shader: `ProgressBar::indeterminate` (procedural sweep), `Spinner` (procedural arc), animated `IconWidget` (sprite-atlas frame cycling), future pulse / shimmer / skeleton | CPU: one `queue.write_buffer` of the `AnimParams` struct (64 B per active quad) + one `draw_indexed` call. `paint()` does not run. | **No.** |
+| **`Signal<f32>::animate_to` / `animate_looping`** (via `AnimationScheduler`) | Tweens driving arbitrary values: scroll offsets, sidebar slide, toggle knob, slider fill width, any custom interpolation your `paint()` consumes. One-shots and looping. | CPU: `signal.set` → `paint()` → vertex-buffer rewrite → wgpu submit. Tight but per-frame. | Yes. |
+| **`ctx.animated_quad(kind)`** (via `AnimatedQuadRegistry`) | Decorative motion that fits a quad + shader: `ProgressBar::indeterminate` (procedural sweep), `Spinner` (procedural arc), animated `IconWidget` (sprite-atlas frame cycling), future shimmer / skeleton | CPU: one `queue.write_buffer` of the `AnimParams` struct (64 B per active quad) + one `draw_indexed` call. `paint()` does not run. | **No.** |
+| **`ctx.subscribe_frame_tick()`** (via `FrameTickScheduler`) | Per-frame-effect closures that don't fit a tween or a quad: `Pulse` (sine opacity), `Cycle` (discrete index advance every period), and similar "I just need a callback every frame while my widget is visible" patterns. | CPU: framework re-arms the chain post-render iff at least one subscriber's owner painted this frame; effect closure mutates state via signals — cost matches whatever the closure does. | Yes (the closure typically dirties bound props, which dirty the widget). |
 
-Use signal when `paint()` needs the current animated value to compute
-its draw commands (e.g., scroll offset shifts every child's
-coordinates). Use shader when the animation's visual is expressible as
-"draw a quad, let a fragment shader decide pixels from a small state
-struct."
+Use **signal** when `paint()` needs the current animated value to
+compute its draw commands (e.g., scroll offset shifts every child's
+coordinates). Use **shader** when the animation's visual is
+expressible as "draw a quad, let a fragment shader decide pixels
+from a small state struct." Use **per-frame-effect** when neither
+fits and you genuinely need a closure called each visible frame.
+
+The widget-level surface for the third path:
+
+```rust
+// On `self`:
+frame_tick_sub: Option<FrameTickSubscription>,
+
+// In `build()`:
+ctx.effect(&ctx.frame_tick(), move |&delta| {
+    // mutate signals, advance phase, …
+});
+self.frame_tick_sub = None;                        // drop the old guard first
+self.frame_tick_sub = Some(ctx.subscribe_frame_tick());
+```
+
+The chain auto-arms while at least one subscriber's owner is
+painted, dies cleanly when all are hidden (parked inside a
+non-selected `Switcher` branch, scrolled off-screen, …), and
+resumes phase-continuous on a hidden→visible transition because
+the `visible_when` flip's `Relayout` dirty triggers a repaint that
+paints the subscriber, which the post-render arm then detects.
 
 **Widget-author surface.** In `build()`:
 
@@ -199,10 +273,16 @@ canvas.draw_animated_quad(bounds, handle.slot(), AnimatedQuadClass::Procedural);
 
 The four gates (pause-on-window-unfocused, per-widget paint-epoch
 visibility, widget-drop/rebuild auto-cancel, `prefers_reduced_motion`)
-apply to both paths in identical shape — the shader path reuses the
-same registry infrastructure as the signal scheduler. The only
-difference is where the animation tick runs: CPU-side for signal,
-shader-side for the quad.
+apply to all three paths in identical shape — they share the
+[`motion_visibility`](../crates/fern-core/src/motion_visibility.rs)
+helpers and rebuild auto-cancel by RAII (the signal scheduler via
+`scheduler.cancel_by_widget(id)`, the shader registry via slot
+deallocation on widget destruction, the frame-tick scheduler via
+the `FrameTickSubscription` Drop guard the widget stores on
+itself). The only difference is where the tick runs: CPU-side
+through a signal for the tween path, shader-side through a uniform
+buffer for the quad path, CPU-side through an arbitrary closure
+for the per-frame-effect path.
 
 Adding a new kind: extend `AnimatedQuadKind`, add a `kind: u32`
 discriminator branch in `shaders/anim_procedural.wgsl` (or

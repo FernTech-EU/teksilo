@@ -144,8 +144,45 @@ impl<'a> BuildContext<'a> {
     /// mutable access to the tree. Used by widgets with continuous
     /// frame needs (caret blink, drag auto-scroll, smooth
     /// animations driven from a tick closure).
+    ///
+    /// **Prefer [`subscribe_frame_tick`](Self::subscribe_frame_tick)**
+    /// for visual-only continuous animations (Pulse, Cycle, …): the
+    /// scheduler-backed path automatically pauses the chain when the
+    /// owner widget is hidden, while this raw handle keeps the event
+    /// loop pumping at full frame rate regardless of visibility.
     pub fn frame_request_handle(&self) -> std::rc::Rc<std::cell::Cell<bool>> {
         self.tree.frame_request_handle()
+    }
+
+    /// Subscribe the widget being built to the per-frame-effect
+    /// scheduler. The returned RAII guard removes the subscription on
+    /// drop — store it on `self` so its lifetime tracks the widget's.
+    ///
+    /// While at least one subscriber's owner is visible, the framework
+    /// auto-arms `frame_tick_requested` after every render. When all
+    /// subscribers are hidden (e.g. parked inside a non-selected
+    /// `Switcher` branch), no re-arm happens and the chain dies, so
+    /// the event loop sleeps. On a hidden→visible transition the
+    /// `visible_when` binding's relayout dirty triggers a repaint that
+    /// paints the subscriber, which the post-render arm then detects
+    /// and resumes the chain.
+    ///
+    /// Replaces the widget-managed `frame_request.set(true)` re-arm
+    /// pattern for visual-only continuous animations. The widget's
+    /// `frame_tick` effect closure no longer needs to call
+    /// `frame_request.set(true)` itself — the scheduler handles it.
+    pub fn subscribe_frame_tick(
+        &self,
+    ) -> crate::frame_tick_scheduler::FrameTickSubscription {
+        let sub = self.tree.subscribe_frame_tick(self.self_id());
+        // Bootstrap: ensure at least one frame runs after registration
+        // so the first paint happens. The post-render re-arm takes over
+        // from there. This is also the resume nudge for the case where
+        // a widget rebuilds (e.g. due to a state change) while still
+        // hidden — the parent's relayout dirty will trigger paint, and
+        // post-render arm will pick up the chain.
+        self.tree.request_frame();
+        sub
     }
 
     /// Clone the shared wake-at deadline cell. Stash it on widget

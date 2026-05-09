@@ -33,6 +33,7 @@ use std::time::Duration;
 use fern_canvas::{Point, Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
+use fern_core::frame_tick_scheduler::FrameTickSubscription;
 use fern_core::widget::{LayoutContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 
@@ -47,6 +48,11 @@ pub struct Pulse {
     period: Option<Duration>,
     pending_child: Option<PendingChild>,
     child_id: Option<WidgetId>,
+    /// RAII guard for the per-frame-effect subscription. Rebuilds
+    /// replace it (the old guard's `Drop` removes the previous entry
+    /// before the new one is registered); widget destruction drops it
+    /// transparently.
+    frame_tick_sub: Option<FrameTickSubscription>,
 }
 
 impl Pulse {
@@ -62,6 +68,7 @@ impl Pulse {
             period: None,
             pending_child: None,
             child_id: None,
+            frame_tick_sub: None,
         }
     }
 
@@ -123,13 +130,18 @@ impl Widget for Pulse {
 
         // Sine-driven pulse via the frame tick. Each tick computes
         // phase = (elapsed / period) * 2π, opacity = mid + amp*sin(phase).
+        // The framework auto-arms the frame chain after every render
+        // in which `self_id` was painted (see
+        // `BuildContext::subscribe_frame_tick`), so the chain dies
+        // automatically when this Pulse sits in a non-selected
+        // `Switcher` branch and resumes when it becomes visible
+        // again — no manual `frame_request.set(true)` re-arm needed.
         let period = self
             .period
             .unwrap_or(ctx.theme().motion.duration_indeterminate_sweep);
         let period_secs = period.as_secs_f32().max(0.001);
         let amp = (self.max - self.min) * 0.5;
         let elapsed = Rc::new(Cell::new(0.0_f32));
-        let frame_request = ctx.frame_request_handle();
         let opacity_for_tick = opacity;
         ctx.effect(&ctx.frame_tick(), move |&delta| {
             let t = (elapsed.get() + delta) % period_secs;
@@ -137,12 +149,12 @@ impl Widget for Pulse {
             let phase = (t / period_secs) * std::f32::consts::TAU;
             let v = mid + amp * phase.sin();
             opacity_for_tick.set(v);
-            // Chain the next frame so the pulse keeps running until
-            // the widget is rebuilt or destroyed (drop of the effect
-            // handle removes the observer).
-            frame_request.set(true);
         });
-        ctx.request_frame();
+        // Replace any prior subscription (rebuild path) with a fresh
+        // one. Drop order matters: the old guard's `Drop` removes its
+        // entry before the new subscription is recorded.
+        self.frame_tick_sub = None;
+        self.frame_tick_sub = Some(ctx.subscribe_frame_tick());
 
         vec![child_id]
     }

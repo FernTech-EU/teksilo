@@ -125,6 +125,16 @@ pub struct WidgetTree {
     /// `AnimParams` are ticked and attached to every `RenderFrame`
     /// produced by `render()` — the renderer reads them from there.
     animated_quads: crate::animated_quad::AnimatedQuadRegistry,
+    /// Per-frame-effect scheduler. Owns the registry of widgets that
+    /// asked for a frame-tick subscription (Pulse, Cycle, …). Sits
+    /// alongside `animation_scheduler` and `animated_quads` as the
+    /// third visibility-aware motion source — they all consult the
+    /// same [`motion_visibility`](crate::motion_visibility) helpers.
+    /// After every `render()` the tree calls
+    /// [`FrameTickScheduler::should_arm_frame_tick`] and re-arms
+    /// `frame_tick_requested` if any subscriber's owner was painted
+    /// this frame.
+    pub(crate) frame_tick_scheduler: crate::frame_tick_scheduler::FrameTickScheduler,
     /// Monotonic counter bumped at the start of each `render()` call.
     /// Each widget's `last_painted_epoch` is set to this value whenever
     /// the paint pass (or the cache-hit early-out) confirms the widget
@@ -313,6 +323,7 @@ impl WidgetTree {
             animation_scheduler: crate::animation::AnimationScheduler::new(),
             animated_values: Vec::new(),
             animated_quads: crate::animated_quad::AnimatedQuadRegistry::new(),
+            frame_tick_scheduler: crate::frame_tick_scheduler::FrameTickScheduler::new(),
             paint_epoch: 0,
             cached_a11y: None,
             a11y_dirty: true,
@@ -453,6 +464,26 @@ impl WidgetTree {
     /// wake-up.
     pub fn frame_requested(&self) -> bool {
         self.frame_tick_requested.get()
+    }
+
+    /// Subscribe `owner` to the per-frame-effect scheduler. The
+    /// returned [`FrameTickSubscription`](crate::frame_tick_scheduler::FrameTickSubscription)
+    /// is an RAII guard — drop it (typically by replacing the field on
+    /// the owning widget on rebuild, or letting the widget's `Drop`
+    /// run) to remove the subscription. While the guard is alive, the
+    /// tree will keep arming `frame_tick_requested` after every render
+    /// in which `owner` was painted, and stop on frames where it
+    /// wasn't — so a subscribed widget hidden inside a non-selected
+    /// `Switcher` branch contributes zero idle frames.
+    ///
+    /// Apps should not call this directly — use
+    /// [`BuildContext::subscribe_frame_tick`](crate::build_context::BuildContext::subscribe_frame_tick)
+    /// from inside `Widget::build`.
+    pub fn subscribe_frame_tick(
+        &self,
+        owner: WidgetId,
+    ) -> crate::frame_tick_scheduler::FrameTickSubscription {
+        self.frame_tick_scheduler.subscribe(owner)
     }
 
     /// Advance the frame tick signal when (and only when) a frame was

@@ -55,7 +55,21 @@ The `Easing::apply(t)` method takes a linear parameter `t ∈ [0, 1]` and return
 
 ## 4. The scheduler — what the framework owns
 
-`AnimationScheduler` lives on `WidgetTree` (one per tree / one per window). Widget code never constructs one directly. Its job is small but non-trivial:
+`AnimationScheduler` is the **signal-tween** scheduler — one of three
+visibility-aware motion subsystems on `WidgetTree`. The other two are
+[`AnimatedQuadRegistry`](../crates/fern-core/src/animated_quad.rs)
+(shader-driven quad uniforms — `Spinner`, `ProgressBar::indeterminate`,
+animated `IconWidget`; see
+[idle-and-animation.md](idle-and-animation.md#three-animation-paths-signal-vs-shader-vs-per-frame-effect))
+and
+[`FrameTickScheduler`](../crates/fern-core/src/frame_tick_scheduler.rs)
+(per-frame-effect closures — `Pulse`, `Cycle`; see §5.6 below). All
+three share the
+[`motion_visibility`](../crates/fern-core/src/motion_visibility.rs)
+helpers so the visibility gate is one canonical primitive.
+
+Widget code never constructs `AnimationScheduler` directly. Its job is
+small but non-trivial:
 
 - **Tick every active animation** on each frame the tree pumps. Current value = `lerp(start, end, easing.apply(t))`; `t` is elapsed/duration clamped to `[0, 1]`.
 - **Stop cleanly** when an animation reaches its target (set exactly the end value on the terminal tick, regardless of epsilon quantization).
@@ -171,7 +185,30 @@ Animation wrappers live under [`crates/fern-widgets/src/animations/`](../crates/
 - **[`Blur`](../crates/fern-widgets/src/animations/blur.rs)** wraps a child and applies a Gaussian-equivalent blur to the entire subtree, driven by a `Prop<f32>` radius (logical pixels). Built on `BuildContext::set_blur` (see §5.7) — the renderer redirects the subtree's draws into an intermediate texture, runs a dual-Kawase chain at the requested radius, and composites the blurred result back at the widget's bounds. Layout-transparent: the child reports its full natural size at all radii. Sub-perceptual radii (`< 0.5`) are short-circuited at the walker — no offscreen pass, no allocation. Use for modal backdrops, click-to-reveal sensitive content (numerics / characters obscured by the blur), out-of-focus emphasis, animated frosted glass on modal show. Pair with an `animated_signal` and `animate_to` for animated enable/disable. See §5.8 for the offscreen-pass cost model.
 - **[`Spinner`](../crates/fern-widgets/src/spinner.rs)** — circular-arc loading indicator backed by `AnimatedQuadKind::SpinnerArc`, the shader-driven path (see [idle-and-animation.md §"Two animation paths — signal vs shader"](idle-and-animation.md#two-animation-paths-signal-vs-shader)). One `queue.write_buffer` of `AnimParams` + one `draw_indexed` per frame; `paint()` does not run while spinning. Edges are anti-aliased via `fwidth` smoothstep ramps in the fragment shader. Honours `prefers-reduced-motion` with a static three-quarter arc fallback.
 
-Other wrappers in the same module — `Pulse`, `Cycle`, `SmoothSize`, `Crossfade`, `Slide`, `Shake` — are documented inline in their source files; run `cargo run -p animations-kit` for a visual showcase of every wrapper.
+**[`Pulse`](../crates/fern-widgets/src/animations/pulse.rs)** and **[`Cycle`](../crates/fern-widgets/src/animations/cycle.rs)** drive their continuous motion through the **per-frame-effect path** rather than `AnimationScheduler` (which only knows linear tweens) or `AnimatedQuadRegistry` (which is paint-time GPU plumbing). They register a closure on `ctx.frame_tick()` for the tick action and a `ctx.subscribe_frame_tick()` RAII guard for visibility-aware chain management — the framework re-arms the frame chain after every render iff at least one subscriber's owner widget was painted in that frame, so a `Pulse` parked inside a non-selected `Switcher` branch contributes zero idle frames and resumes phase-continuous on the next show. The chain bootstrap (request_frame on subscription) and resume (post-render arm after the visible_when-driven repaint) are both handled by the framework. Widget code in the new shape:
+
+```rust
+pub struct Pulse {
+    // …
+    frame_tick_sub: Option<FrameTickSubscription>,
+}
+
+impl Widget for Pulse {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // … set_opacity, reduced-motion early-out, … 
+        ctx.effect(&ctx.frame_tick(), move |&delta| {
+            // mutate opacity from sine of accumulated phase
+        });
+        self.frame_tick_sub = None;                        // drop old guard first
+        self.frame_tick_sub = Some(ctx.subscribe_frame_tick());
+        // …
+    }
+}
+```
+
+If you find yourself reaching for `ctx.frame_request_handle().set(true)` from inside a `frame_tick` effect for a visual continuous animation, prefer `subscribe_frame_tick()` instead — the raw handle keeps the event loop pumping regardless of visibility, while the scheduler-backed path auto-pauses on hidden owners. The raw handle is still the right tool for short-lived, owner-driven needs that aren't visibility-bound (caret blink that depends on focus state, drag auto-scroll while the pointer is captured).
+
+Other wrappers in the same module — `SmoothSize`, `Crossfade`, `Slide`, `Shake` — are documented inline in their source files; run `cargo run -p animations-kit` for a visual showcase of every wrapper.
 
 ### 5.7 Per-node paint scopes
 
