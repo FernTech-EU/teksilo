@@ -303,14 +303,7 @@ impl Widget for WidgetCatalog {
 
 impl WidgetCatalog {
     fn build_mode_toggle(&self) -> impl Widget + 'static {
-        HStack::new()
-            .spacing(6.0)
-            .child(
-                TextWidget::new(tr!(mode_label()))
-                    .style(TextStyleRole::Small)
-                    .color(TextRole::Secondary),
-            )
-            .child(Toggle::new(self.show_fern.clone()).label(tr!(mode_label())))
+        Toggle::new(self.show_fern.clone()).label(tr!(mode_label()))
     }
 
     fn install_cycle(&self, ctx: &mut BuildContext, period: Duration) {
