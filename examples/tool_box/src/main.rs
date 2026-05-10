@@ -94,7 +94,7 @@ impl Widget for Root {
 
         let is_dark = self.is_dark.clone();
         let theme_button = Button::new_literal("Toggle theme")
-            .style(ButtonVariant::Flat)
+            .variant(ButtonVariant::Ghost)
             .on_activate_fn(move |ctx: &mut EventContext| {
                 let next_dark = !is_dark.get();
                 is_dark.set(next_dark);

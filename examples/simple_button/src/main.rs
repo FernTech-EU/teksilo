@@ -16,7 +16,7 @@ fn main() {
                 .root(|tree, _state| {
                     tree.add(
                         Button::new_literal("Click Me")
-                            .style(ButtonVariant::Default)
+                            .variant(ButtonVariant::Filled)
                             .on_activate_fn(|_ctx| {
                                 println!("Button clicked!");
                             })

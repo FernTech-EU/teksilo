@@ -30,7 +30,7 @@ fn widget_catalog_right_content_col() {
 fn widget_catalog_with_closure_in_property() {
     let src = r#"ctx =>
         Button::new_literal("Toggle") {
-            style: ButtonVariant::Regular
+            variant: ButtonVariant::Plain
             on_activate_fn: |ctx| {
                 ctx.send_intent(CatalogIntent::ToggleDarkMode);
             }

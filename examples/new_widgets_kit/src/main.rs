@@ -72,7 +72,7 @@ impl Root {
             .description_literal("Closing the document now will discard your edits.")
             .action(
                 Button::new_literal("Save now")
-                    .style(ButtonVariant::Regular)
+                    .variant(ButtonVariant::Plain)
                     .on_activate_fn(|_| println!("Save now clicked")),
             )
             .on_dismiss({
@@ -95,7 +95,7 @@ impl Root {
         let error_id = ctx.add(Collapse::new(error_visible).child(error_banner));
 
         let restore = Button::new_literal("Restore banners")
-            .style(ButtonVariant::Flat)
+            .variant(ButtonVariant::Ghost)
             .on_activate_fn({
                 let info = self.show_info_banner.clone();
                 let warn = self.show_warn_banner.clone();
@@ -259,7 +259,7 @@ impl Root {
             .color(TextRole::Secondary);
 
         let trigger = Button::new_literal("Rename…")
-            .style(ButtonVariant::Regular)
+            .variant(ButtonVariant::Plain)
             .on_activate_fn({
                 let rename_text = rename_text.clone();
                 let last_action = last_action.clone();

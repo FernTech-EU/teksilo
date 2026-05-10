@@ -77,7 +77,7 @@ impl Widget for FileDialogShowcase {
         let status_for_open = self.status.clone();
         let spinning_for_open = self.spinning.clone();
         let open_btn = Button::new_literal("Open file…")
-            .style(ButtonVariant::Default)
+            .variant(ButtonVariant::Filled)
             .on_activate_fn(move |ctx| {
                 spinning_for_open.set(true);
                 let status = status_for_open.clone();

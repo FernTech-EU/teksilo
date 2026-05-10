@@ -25,7 +25,9 @@ pub mod theme_extension;
 pub mod toggle_style;
 pub mod tooltip_style;
 
-pub use button_style::{ButtonStyle, ButtonStyleConfig, ButtonVariant, SharedButtonStyle};
+pub use button_style::{
+    ButtonRecipe, ButtonStyle, ButtonStyleConfig, ButtonVariant, SharedButtonStyle,
+};
 pub use card_style::{CardStyle, CardStyleConfig, CardVariant, SharedCardStyle};
 pub use checkbox_style::{
     CheckboxState, CheckboxStyle, CheckboxStyleConfig, CheckboxVariant, SharedCheckboxStyle,

@@ -20,7 +20,7 @@
 //!     .item(MenuItem::new_literal("Run Tests").on_activate_fn(|ctx| ctx.send_intent(AppIntent::RunTests)))
 //!     .separator()
 //!     .item(MenuItem::new_literal("Debug").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Debug)))
-//!     .style(ButtonVariant::Regular)
+//!     .variant(ButtonVariant::Plain)
 //! ```
 
 use std::rc::Rc;
@@ -55,7 +55,7 @@ enum Row {
 
 pub struct SplitButton {
     rows: Vec<Row>,
-    style: ButtonVariant,
+    variant: ButtonVariant,
     enabled: bool,
     initial_selected: usize,
     /// Whether picking an item from the dropdown promotes it to the new
@@ -99,7 +99,7 @@ impl SplitButton {
     pub fn new() -> Self {
         Self {
             rows: Vec::new(),
-            style: ButtonVariant::Regular,
+            variant: ButtonVariant::Plain,
             enabled: true,
             initial_selected: 0,
             promote_on_select: true,
@@ -149,8 +149,8 @@ impl SplitButton {
         self
     }
 
-    pub fn style(mut self, variant: ButtonVariant) -> Self {
-        self.style = variant;
+    pub fn variant(mut self, variant: ButtonVariant) -> Self {
+        self.variant = variant;
         self
     }
 
@@ -268,7 +268,7 @@ impl std::fmt::Debug for SplitButton {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SplitButton")
             .field("rows", &self.rows.len())
-            .field("style", &self.style)
+            .field("style", &self.variant)
             .field("enabled", &self.enabled)
             .finish()
     }
@@ -280,43 +280,62 @@ impl std::fmt::Debug for SplitButton {
 // and a SplitButton with the same variant look identical. If Button's
 // color tables ever diverge from these, update both sides.
 
-fn resolve_bg_role(style: ButtonVariant, state: InteractionState) -> SurfaceRole {
-    match (style, state) {
-        (ButtonVariant::Default, InteractionState::Disabled) => SurfaceRole::AccentDisabled,
-        (ButtonVariant::Default, InteractionState::Pressed) => SurfaceRole::AccentPressed,
-        (ButtonVariant::Default, InteractionState::Hovered) => SurfaceRole::AccentHover,
-        (ButtonVariant::Default, _) => SurfaceRole::Accent,
-
-        (ButtonVariant::Regular, InteractionState::Pressed) => SurfaceRole::Pressed,
-        (ButtonVariant::Regular, InteractionState::Hovered) => SurfaceRole::Hover,
-        (ButtonVariant::Regular, _) => SurfaceRole::Main,
-
-        (ButtonVariant::Flat, InteractionState::Pressed) => SurfaceRole::Pressed,
-        (ButtonVariant::Flat, InteractionState::Hovered) => SurfaceRole::Hover,
-        (ButtonVariant::Flat, _) => SurfaceRole::Transparent,
-    }
+// SplitButton has not yet migrated to the trait-driven `ButtonStyle`
+// surface (that's step 6). For now it normalises the new 7-value
+// `ButtonVariant` down to the three buckets it knows how to paint:
+// `Filled` family (Filled / Destructive), `Plain` family (Plain /
+// Tinted / Outlined), `Ghost` family (Ghost / Link).
+#[derive(Copy, Clone, Eq, PartialEq)]
+enum SplitButtonFamily {
+    FilledLike,
+    PlainLike,
+    GhostLike,
 }
 
-fn resolve_text_role(style: ButtonVariant, state: InteractionState) -> TextRole {
-    match (style, state) {
-        (ButtonVariant::Default, InteractionState::Disabled) => TextRole::Disabled,
-        (ButtonVariant::Default, _) => TextRole::OnAccent,
-
-        (ButtonVariant::Regular | ButtonVariant::Flat, InteractionState::Disabled) => {
-            TextRole::Disabled
+fn classify(variant: ButtonVariant) -> SplitButtonFamily {
+    match variant {
+        ButtonVariant::Filled | ButtonVariant::Destructive => SplitButtonFamily::FilledLike,
+        ButtonVariant::Plain | ButtonVariant::Tinted | ButtonVariant::Outlined => {
+            SplitButtonFamily::PlainLike
         }
-        (ButtonVariant::Regular | ButtonVariant::Flat, _) => TextRole::Primary,
+        ButtonVariant::Ghost | ButtonVariant::Link => SplitButtonFamily::GhostLike,
     }
 }
 
-fn resolve_border_role(style: ButtonVariant, state: InteractionState) -> BorderRole {
+fn resolve_bg_role(variant: ButtonVariant, state: InteractionState) -> SurfaceRole {
+    match (classify(variant), state) {
+        (SplitButtonFamily::FilledLike, InteractionState::Disabled) => SurfaceRole::AccentDisabled,
+        (SplitButtonFamily::FilledLike, InteractionState::Pressed) => SurfaceRole::AccentPressed,
+        (SplitButtonFamily::FilledLike, InteractionState::Hovered) => SurfaceRole::AccentHover,
+        (SplitButtonFamily::FilledLike, _) => SurfaceRole::Accent,
+
+        (SplitButtonFamily::PlainLike, InteractionState::Pressed) => SurfaceRole::Pressed,
+        (SplitButtonFamily::PlainLike, InteractionState::Hovered) => SurfaceRole::Hover,
+        (SplitButtonFamily::PlainLike, _) => SurfaceRole::Main,
+
+        (SplitButtonFamily::GhostLike, InteractionState::Pressed) => SurfaceRole::Pressed,
+        (SplitButtonFamily::GhostLike, InteractionState::Hovered) => SurfaceRole::Hover,
+        (SplitButtonFamily::GhostLike, _) => SurfaceRole::Transparent,
+    }
+}
+
+fn resolve_text_role(variant: ButtonVariant, state: InteractionState) -> TextRole {
+    if state == InteractionState::Disabled {
+        return TextRole::Disabled;
+    }
+    match classify(variant) {
+        SplitButtonFamily::FilledLike => TextRole::OnAccent,
+        SplitButtonFamily::PlainLike | SplitButtonFamily::GhostLike => TextRole::Primary,
+    }
+}
+
+fn resolve_border_role(variant: ButtonVariant, state: InteractionState) -> BorderRole {
     if state == InteractionState::Focused {
         return BorderRole::Focused;
     }
-    match style {
-        ButtonVariant::Default | ButtonVariant::Flat => BorderRole::Transparent,
-        ButtonVariant::Regular => match state {
-            InteractionState::Disabled => BorderRole::Default,
+    match classify(variant) {
+        SplitButtonFamily::FilledLike | SplitButtonFamily::GhostLike => BorderRole::Transparent,
+        SplitButtonFamily::PlainLike => match state {
             InteractionState::Hovered | InteractionState::Pressed => BorderRole::Strong,
             _ => BorderRole::Default,
         },
@@ -327,7 +346,7 @@ fn resolve_border_role(style: ButtonVariant, state: InteractionState) -> BorderR
 /// `focus_ring_width` on focus, rests at the variant's normal
 /// width otherwise.
 fn resolve_border_width(
-    style: ButtonVariant,
+    variant: ButtonVariant,
     state: InteractionState,
     normal_bw: f32,
     focus_bw: f32,
@@ -335,9 +354,9 @@ fn resolve_border_width(
     if state == InteractionState::Focused {
         return focus_bw;
     }
-    match style {
-        ButtonVariant::Default | ButtonVariant::Flat => 0.0,
-        ButtonVariant::Regular => normal_bw,
+    match classify(variant) {
+        SplitButtonFamily::FilledLike | SplitButtonFamily::GhostLike => 0.0,
+        SplitButtonFamily::PlainLike => normal_bw,
     }
 }
 
@@ -346,7 +365,7 @@ impl Widget for SplitButton {
         let sb_style = ctx.theme().components.split_button;
         let normal_bw = sb_style.border_width;
         let focus_bw = ctx.theme().shape.focus_ring_width;
-        let style = self.style;
+        let style = self.variant;
         let enabled = self.enabled;
 
         // ---- Extract label / action for each MenuItem and wrap each item's

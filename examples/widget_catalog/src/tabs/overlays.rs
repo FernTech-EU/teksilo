@@ -276,7 +276,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         ),
     );
     let dialog_btn = Button::new(tr!(overlays_open_dialog()))
-        .style(ButtonVariant::Default)
+        .variant(ButtonVariant::Filled)
         .on_activate_fn(|ctx| {
             ctx.present_message_box(
                 MessageBox::information(tr!(overlays_dialog_example()))
@@ -291,7 +291,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         HStack::new()
             .spacing(8.0)
             .child(
-                Button::new(tr!(ovr_mb_info())).style(ButtonVariant::Flat).on_activate_fn(|ctx| {
+                Button::new(tr!(ovr_mb_info())).variant(ButtonVariant::Ghost).on_activate_fn(|ctx| {
                     ctx.present_message_box(
                         MessageBox::information(tr!(ovr_mb_info()))
                             .detailed_text(tr!(overlays_informational_dialog()))
@@ -300,7 +300,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 }),
             )
             .child(
-                Button::new(tr!(ovr_mb_warning())).style(ButtonVariant::Flat).on_activate_fn(|ctx| {
+                Button::new(tr!(ovr_mb_warning())).variant(ButtonVariant::Ghost).on_activate_fn(|ctx| {
                     ctx.present_message_box(
                         MessageBox::warning(tr!(ovr_mb_warning()))
                             .detailed_text(tr!(overlays_disk_is_almost_full()))
@@ -309,7 +309,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 }),
             )
             .child(
-                Button::new(tr!(ovr_mb_error())).style(ButtonVariant::Flat).on_activate_fn(|ctx| {
+                Button::new(tr!(ovr_mb_error())).variant(ButtonVariant::Ghost).on_activate_fn(|ctx| {
                     ctx.present_message_box(
                         MessageBox::critical(tr!(ovr_mb_error()))
                             .detailed_text(tr!(overlays_something_went_wrong()))
@@ -318,7 +318,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 }),
             )
             .child(
-                Button::new(tr!(demo_confirm())).style(ButtonVariant::Flat).on_activate_fn(|ctx| {
+                Button::new(tr!(demo_confirm())).variant(ButtonVariant::Ghost).on_activate_fn(|ctx| {
                     ctx.present_message_box(
                         MessageBox::question(tr!(overlays_are_you_sure()))
                             .detailed_text(tr!(overlays_this_action_cannot_be_undone()))
@@ -334,7 +334,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .content(
                 TextWidget::new(tr!(overlays_file_saved_successfully_2())).style(TextStyleRole::Body),
             )
-            .trigger(Button::new(tr!(overlays_show_snackbar())).style(ButtonVariant::Default))
+            .trigger(Button::new(tr!(overlays_show_snackbar())).variant(ButtonVariant::Filled))
             .auto_dismiss_after(std::time::Duration::from_secs(3)),
     );
     let shadow = section(
@@ -377,7 +377,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .content(
                 TextWidget::new(tr!(overlays_file_saved_successfully_2())).style(TextStyleRole::Body),
             )
-            .trigger(Button::new(tr!(overlays_show_snackbar())).style(ButtonVariant::Default))
+            .trigger(Button::new(tr!(overlays_show_snackbar())).variant(ButtonVariant::Filled))
             .auto_dismiss_after(Duration::from_secs(3)),
     );
 
@@ -439,7 +439,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 Button::new(tr!(overlays_open_dialog())) {
-                    style: ButtonVariant::Default
+                    variant: ButtonVariant::Filled
                     on_activate_fn: |ctx| {
                         ctx.present_message_box(
                             MessageBox::information(tr!(overlays_dialog_example()))
@@ -459,7 +459,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 HStack {
                     spacing: 8.0
                     Button::new(tr!(ovr_mb_info())) {
-                        style: ButtonVariant::Flat
+                        variant: ButtonVariant::Ghost
                         on_activate_fn: |ctx| {
                             ctx.present_message_box(
                                 MessageBox::information(tr!(ovr_mb_info()))
@@ -469,7 +469,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                         }
                     }
                     Button::new(tr!(ovr_mb_warning())) {
-                        style: ButtonVariant::Flat
+                        variant: ButtonVariant::Ghost
                         on_activate_fn: |ctx| {
                             ctx.present_message_box(
                                 MessageBox::warning(tr!(ovr_mb_warning()))
@@ -479,7 +479,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                         }
                     }
                     Button::new(tr!(ovr_mb_error())) {
-                        style: ButtonVariant::Flat
+                        variant: ButtonVariant::Ghost
                         on_activate_fn: |ctx| {
                             ctx.present_message_box(
                                 MessageBox::critical(tr!(ovr_mb_error()))
@@ -489,7 +489,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                         }
                     }
                     Button::new(tr!(demo_confirm())) {
-                        style: ButtonVariant::Flat
+                        variant: ButtonVariant::Ghost
                         on_activate_fn: |ctx| {
                             ctx.present_message_box(
                                 MessageBox::question(tr!(overlays_are_you_sure()))

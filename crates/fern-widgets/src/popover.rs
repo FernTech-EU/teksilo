@@ -239,7 +239,7 @@ impl Widget for PopoverSurface {
 
 pub struct Popover {
     label: String,
-    style: ButtonVariant,
+    variant: ButtonVariant,
     enabled: bool,
     placement: OverlayPlacement,
     dismiss: DismissBehavior,
@@ -260,7 +260,7 @@ impl Popover {
         let ls: fern_i18n::LocalizedString = label.into();
         Self {
             label: ls.resolve_now(),
-            style: ButtonVariant::Regular,
+            variant: ButtonVariant::Plain,
             enabled: true,
             placement: OverlayPlacement::BelowPreferred,
             dismiss: DismissBehavior::EscapeOrClickOutside,
@@ -289,8 +289,8 @@ impl Popover {
         self
     }
 
-    pub fn style(mut self, style: ButtonVariant) -> Self {
-        self.style = style;
+    pub fn variant(mut self, variant: ButtonVariant) -> Self {
+        self.variant = variant;
         self
     }
 
@@ -342,7 +342,7 @@ impl std::fmt::Debug for Popover {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Popover")
             .field("label", &self.label)
-            .field("style", &self.style)
+            .field("style", &self.variant)
             .field("enabled", &self.enabled)
             .finish()
     }
@@ -357,7 +357,7 @@ impl Widget for Popover {
         let dismiss = self.dismiss.clone();
         let show_caret = self.show_caret;
         let caret_size = self.caret_size;
-        let style = self.style;
+        let style = self.variant;
         let initial_focus_slot = self.initial_focus_slot.take();
         // Captured at build time so the open handlers don't need a
         // theme lookup at fire-time. `duration_fast` matches the
@@ -504,7 +504,7 @@ impl Widget for Popover {
             let action_focus = initial_focus_slot;
             ctx.add(
                 Button::new_literal(label)
-                    .style(style)
+                    .variant(style)
                     .enabled(enabled)
                     .has_popup(fern_core::accesskit::HasPopup::Dialog)
                     .expanded_when(is_open.clone())

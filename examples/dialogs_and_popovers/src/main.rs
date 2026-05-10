@@ -56,7 +56,7 @@ impl OverlayDemo {
         // --- unsaved-changes triad (question severity) ---
         let record_save = record.clone();
         let save_btn = Button::new_literal("Save changes?")
-            .style(ButtonVariant::Regular)
+            .variant(ButtonVariant::Plain)
             .on_activate_fn(move |ctx| {
                 let record = record_save.clone();
                 ctx.present_message_box(
@@ -80,7 +80,7 @@ impl OverlayDemo {
         // --- destructive confirmation (critical severity, safe default) ---
         let record_delete = record.clone();
         let delete_btn = Button::new_literal("Delete file?")
-            .style(ButtonVariant::Regular)
+            .variant(ButtonVariant::Plain)
             .on_activate_fn(move |ctx| {
                 let record = record_delete.clone();
                 ctx.present_message_box(
@@ -103,7 +103,7 @@ impl OverlayDemo {
         // --- error-with-retry triad (critical + detailed_text) ---
         let record_open = record.clone();
         let open_btn = Button::new_literal("Could not open file")
-            .style(ButtonVariant::Regular)
+            .variant(ButtonVariant::Plain)
             .on_activate_fn(move |ctx| {
                 let record = record_open.clone();
                 ctx.present_message_box(
@@ -129,7 +129,7 @@ impl OverlayDemo {
         // --- informational + don't-show-again ---
         let record_welcome = record.clone();
         let welcome_btn = Button::new_literal("Welcome")
-            .style(ButtonVariant::Regular)
+            .variant(ButtonVariant::Plain)
             .on_activate_fn(move |ctx| {
                 let record = record_welcome.clone();
                 ctx.present_message_box(
@@ -151,7 +151,7 @@ impl OverlayDemo {
         // --- custom button row (question + Help + Ok) ---
         let record_help = record.clone();
         let help_btn = Button::new_literal("Custom buttons")
-            .style(ButtonVariant::Regular)
+            .variant(ButtonVariant::Plain)
             .on_activate_fn(move |ctx| {
                 let record = record_help.clone();
                 ctx.present_message_box(
@@ -246,7 +246,7 @@ impl Widget for OverlayDemo {
             )
             .child(
                 Button::new_literal("Dismiss")
-                    .style(ButtonVariant::Regular)
+                    .variant(ButtonVariant::Plain)
                     .on_activate_fn(|ctx| ctx.dismiss_top_overlay()),
             );
 
@@ -288,11 +288,11 @@ impl Widget for OverlayDemo {
                         )
                         .footer(
                             Button::new_literal("Close")
-                                .style(ButtonVariant::Default)
+                                .variant(ButtonVariant::Filled)
                                 .on_activate_fn(|ctx| ctx.dismiss_modal()),
                         )
                 })
-                .style(ButtonVariant::Regular),
+                .variant(ButtonVariant::Plain),
         );
 
         let root = ctx.add(
@@ -341,12 +341,12 @@ impl Widget for OverlayDemo {
                                                         .spacing(12.0)
                                                         .child(
                                                             Button::new_literal("Cancel")
-                                                                .style(ButtonVariant::Regular)
+                                                                .variant(ButtonVariant::Plain)
                                                                 .on_activate_fn(|ctx| ctx.dismiss_modal()),
                                                         )
                                                         .child(
                                                             Button::new_literal("Apply")
-                                                                .style(ButtonVariant::Default)
+                                                                .variant(ButtonVariant::Filled)
                                                                 .on_activate_fn(|ctx| ctx.dismiss_modal()),
                                                         ),
                                                 )

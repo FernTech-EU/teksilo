@@ -236,14 +236,14 @@ impl Widget for Root {
         // ----- Toolbar (font size + show/hide paths + clear) ---------
         let smaller_btn = ctx.add(
             Button::new_literal("Smaller font")
-                .style(ButtonVariant::Default)
+                .variant(ButtonVariant::Filled)
                 .on_activate_fn(|ctx: &mut EventContext| {
                     ctx.send_intent(AppIntent::FontShrink);
                 }),
         );
         let bigger_btn = ctx.add(
             Button::new_literal("Bigger font")
-                .style(ButtonVariant::Default)
+                .variant(ButtonVariant::Filled)
                 .on_activate_fn(|ctx: &mut EventContext| {
                     ctx.send_intent(AppIntent::FontGrow);
                 }),
@@ -269,7 +269,7 @@ impl Widget for Root {
         ));
         let clear_btn = ctx.add(
             Button::new_literal("Clear recents")
-                .style(ButtonVariant::Default)
+                .variant(ButtonVariant::Filled)
                 .on_activate_fn(|ctx: &mut EventContext| {
                     ctx.send_intent(AppIntent::ClearRecents);
                 }),
@@ -331,7 +331,7 @@ impl Widget for Root {
                 });
             let path_for_remove = path_str.clone();
             let remove_btn = Button::new_literal("Remove")
-                .style(ButtonVariant::Default)
+                .variant(ButtonVariant::Filled)
                 .on_activate_fn(move |ctx: &mut EventContext| {
                     ctx.send_intent(AppIntent::RemoveRecent(path_for_remove.clone()));
                 });

@@ -153,7 +153,7 @@ fn main() {
                         .child(
                             HStack::new().spacing(8.0).child(Spacer::new()).child(
                                 Button::new_literal("Refresh data")
-                                    .style(ButtonVariant::Default)
+                                    .variant(ButtonVariant::Filled)
                                     .on_activate_fn(move |_ctx| {
                                         let next = counter_for_btn.get().wrapping_add(1);
                                         counter_for_btn.set(next);

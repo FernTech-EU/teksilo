@@ -129,7 +129,7 @@ impl Widget for Root {
         // with a literal "+" glyph reads cleanly in the trailing
         // slot.
         let new_tab_btn = Button::new_literal("+ New tab")
-            .style(ButtonVariant::Flat)
+            .variant(ButtonVariant::Ghost)
             .tooltip(LocalizedString::literal("Open new document tab"))
             .on_activate_fn(move |_ctx: &mut EventContext| {
                 let n = new_tab_n.get();
@@ -139,7 +139,7 @@ impl Widget for Root {
 
         let is_dark = self.is_dark.clone();
         let theme_btn = Button::new_literal("Theme")
-            .style(ButtonVariant::Flat)
+            .variant(ButtonVariant::Ghost)
             .tooltip(LocalizedString::literal("Toggle theme"))
             .on_activate_fn(move |ctx: &mut EventContext| {
                 let next = !is_dark.get();
@@ -153,7 +153,7 @@ impl Widget for Root {
 
         let orientation_for_btn = self.orientation.clone();
         let orient_btn = Button::new_literal("Orient")
-            .style(ButtonVariant::Flat)
+            .variant(ButtonVariant::Ghost)
             .tooltip(LocalizedString::literal("Toggle bar orientation"))
             .on_activate_fn(move |_ctx: &mut EventContext| {
                 let next = match orientation_for_btn.get() {
@@ -165,7 +165,7 @@ impl Widget for Root {
 
         let sizing_for_btn = self.sizing.clone();
         let size_btn = Button::new_literal("Sizing")
-            .style(ButtonVariant::Flat)
+            .variant(ButtonVariant::Ghost)
             .tooltip(LocalizedString::literal(
                 "Toggle Shared (uniform tab widths) ↔ Independent (size to content)",
             ))
@@ -449,7 +449,7 @@ fn static_settings_tab(orientation: Signal<TabBarOrientation>) -> impl Widget + 
     let toggle_orient = {
         let o = orientation.clone();
         Button::new_literal("Toggle orientation")
-            .style(ButtonVariant::Flat)
+            .variant(ButtonVariant::Ghost)
             .on_activate_fn(move |_ctx: &mut EventContext| {
                 let next = match o.get() {
                     TabBarOrientation::Horizontal => TabBarOrientation::Vertical,
@@ -497,7 +497,7 @@ fn doc_pane(state: &DocState) -> impl Widget + 'static {
     let title = state.title.clone();
 
     let edit_btn = Button::new_literal("Make an edit")
-        .style(ButtonVariant::Default)
+        .variant(ButtonVariant::Filled)
         .on_activate_fn({
             let edits = edits.clone();
             move |_ctx: &mut EventContext| edits.set(edits.get() + 1)

@@ -72,13 +72,13 @@ fn build_theme_picker(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
         // the theme signal so clicks restyle without a manual rebuild.
         let style_sig = current.map(move |t| {
             if *t == theme_choice {
-                ButtonVariant::Default
+                ButtonVariant::Filled
             } else {
-                ButtonVariant::Flat
+                ButtonVariant::Ghost
             }
         });
         let style = style_sig.get();
-        let btn = Button::new_literal(label).style(style).on_activate_fn(
+        let btn = Button::new_literal(label).variant(style).on_activate_fn(
             move |ctx: &mut EventContext| {
                 ctx.set_theme(theme_choice.theme());
                 theme_sig.set(theme_choice);
@@ -140,13 +140,13 @@ fn build_locale_picker(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
         let target = locale_str_owned.clone();
         let style_sig = current.map(move |s| {
             if s == &target {
-                ButtonVariant::Default
+                ButtonVariant::Filled
             } else {
-                ButtonVariant::Flat
+                ButtonVariant::Ghost
             }
         });
         let style = style_sig.get();
-        let btn = Button::new_literal(*label).style(style).on_activate_fn(
+        let btn = Button::new_literal(*label).variant(style).on_activate_fn(
             move |ctx: &mut EventContext| {
                 if let Some(ref s) = locale_str_owned {
                     ctx.set_locale(s.clone());

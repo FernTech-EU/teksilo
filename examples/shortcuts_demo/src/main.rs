@@ -336,7 +336,7 @@ impl Widget for Root {
         )
         .for_shortcut("app.save");
         let save_button = Button::new_literal("Save (button)")
-            .style(ButtonVariant::Default)
+            .variant(ButtonVariant::Filled)
             .on_activate_fn(|ctx: &mut EventContext| {
                 ctx.send_intent(AppIntent::Save);
             })

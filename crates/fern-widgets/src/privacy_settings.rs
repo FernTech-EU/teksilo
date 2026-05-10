@@ -404,12 +404,12 @@ fn build_accept_reject(telemetry: &OpenedTelemetry, endpoint: &str) -> HStack {
     let consent_for_accept = telemetry.consent.clone();
 
     let reject = Button::new(tr_widget!(privacy_btn_reject_all()))
-        .style(ButtonVariant::Regular)
+        .variant(ButtonVariant::Plain)
         .on_activate_fn(move |_ctx| {
             let _ = consent_for_reject.deny();
         });
     let accept = Button::new(tr_widget!(privacy_btn_accept_all()))
-        .style(ButtonVariant::Default)
+        .variant(ButtonVariant::Filled)
         .on_activate_fn(move |_ctx| {
             let _ = consent_for_accept.grant(supported, &endpoint);
         });
@@ -432,7 +432,7 @@ fn build_identity_row(telemetry: &OpenedTelemetry) -> Panel {
     let consent_for_erase = telemetry.consent.clone();
     let reporter_for_erase = telemetry.reporter.clone();
     let erase = Button::new(tr_widget!(privacy_btn_erase()))
-        .style(ButtonVariant::Regular)
+        .variant(ButtonVariant::Plain)
         .tooltip(tr_widget!(privacy_btn_erase_tooltip()))
         .on_activate_fn(move |ctx| {
             let consent = consent_for_erase.clone();
@@ -453,7 +453,7 @@ fn build_identity_row(telemetry: &OpenedTelemetry) -> Panel {
     let reporter_for_fetch = telemetry.reporter.clone();
     let install_id_for_fetch = install_id.clone();
     let fetch = Button::new(tr_widget!(privacy_btn_fetch()))
-        .style(ButtonVariant::Default)
+        .variant(ButtonVariant::Filled)
         .tooltip(tr_widget!(privacy_btn_fetch_tooltip()))
         .on_activate_fn(move |ctx| {
             match reporter_for_fetch.fetch_remote_data() {
@@ -624,7 +624,7 @@ fn build_mode_switch(telemetry: &OpenedTelemetry) -> Panel {
     let install_id = telemetry.install_id.clone();
 
     let switch_btn = Button::new(target_label)
-        .style(ButtonVariant::Regular)
+        .variant(ButtonVariant::Plain)
         .on_activate_fn(move |ctx| {
             let reporter = reporter.clone();
             let consent = consent.clone();
@@ -671,7 +671,7 @@ fn build_mode_switch(telemetry: &OpenedTelemetry) -> Panel {
 fn build_footer(telemetry: &OpenedTelemetry) -> HStack {
     let consent = telemetry.consent.clone();
     let withdraw = Button::new(tr_widget!(privacy_btn_withdraw()))
-        .style(ButtonVariant::Regular)
+        .variant(ButtonVariant::Plain)
         .tooltip(tr_widget!(privacy_btn_withdraw_tooltip()))
         .on_activate_fn(move |ctx| {
             let consent = consent.clone();

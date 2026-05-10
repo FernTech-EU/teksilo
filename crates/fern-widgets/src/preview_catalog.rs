@@ -96,11 +96,11 @@ impl WidgetCatalog for Button {
         let enabled = knobs.bool_("enabled").get();
         let tooltip = knobs.opt_text("tooltip").get();
         let style = match variant_idx {
-            0 => ButtonVariant::Default,
-            2 => ButtonVariant::Flat,
-            _ => ButtonVariant::Regular,
+            0 => ButtonVariant::Filled,
+            2 => ButtonVariant::Ghost,
+            _ => ButtonVariant::Plain,
         };
-        let mut b = Button::new_literal(label).style(style).enabled(enabled);
+        let mut b = Button::new_literal(label).variant(style).enabled(enabled);
         if let Some(t) = tooltip {
             b = b.tooltip_literal(t);
         }
@@ -930,8 +930,8 @@ impl WidgetCatalog for Card {
                 HStack::new()
                     .spacing(8.0)
                     .child(Spacer::new())
-                    .child(Button::new_literal("Cancel").style(ButtonVariant::Regular))
-                    .child(Button::new_literal("Save").style(ButtonVariant::Default)),
+                    .child(Button::new_literal("Cancel").variant(ButtonVariant::Plain))
+                    .child(Button::new_literal("Save").variant(ButtonVariant::Filled)),
             );
         }
         Box::new(card)
@@ -1224,9 +1224,9 @@ impl WidgetCatalog for Toolbar {
         fn build_default() -> Box<dyn Widget> {
             Box::new(
                 Toolbar::new()
-                    .child(Button::new_literal("New").style(ButtonVariant::Flat))
-                    .child(Button::new_literal("Open…").style(ButtonVariant::Flat))
-                    .child(Button::new_literal("Save").style(ButtonVariant::Flat)),
+                    .child(Button::new_literal("New").variant(ButtonVariant::Ghost))
+                    .child(Button::new_literal("Open…").variant(ButtonVariant::Ghost))
+                    .child(Button::new_literal("Save").variant(ButtonVariant::Ghost)),
             )
         }
         vec![PreviewVariant::scenario("default", build_default)]

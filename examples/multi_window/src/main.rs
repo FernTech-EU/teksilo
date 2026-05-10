@@ -99,7 +99,7 @@ impl Widget for MainRoot {
                     .root(|tree, _state| {
                         tree.add(
                             Button::new_literal("Close help")
-                                .style(ButtonVariant::Default)
+                                .variant(ButtonVariant::Filled)
                                 .on_activate_fn(|ctx| ctx.close_window()),
                         )
                     }),
@@ -118,7 +118,7 @@ impl Widget for MainRoot {
 
         let btn = ctx.add(
             Button::new_literal("Open help (F1) / Toggle fullscreen (F11)")
-                .style(ButtonVariant::Default)
+                .variant(ButtonVariant::Filled)
                 .on_activate_fn(|ctx| ctx.send_intent(AppIntent::ShowHelp)),
         );
         self.child = Some(btn);

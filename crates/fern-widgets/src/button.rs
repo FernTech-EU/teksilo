@@ -8,47 +8,32 @@
 //! - Bindings auto-registered via register_bindings (no manual bind_to)
 //! - Minimum touch target size from theme
 
+use std::rc::Rc;
+
 use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::signal::Signal;
+use fern_core::styles::{ButtonStyle, ButtonStyleConfig, SharedButtonStyle};
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole};
+use fern_tokens::TextRole;
 
 use crate::primitives::icon_widget::IconWidget;
-use crate::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
+use crate::primitives::{HStack, TextWidget, VStack};
 
-/// Visual role of the button.
+/// Closed enum naming the design-language variants of `Button`. See
+/// [`fern_core::styles::ButtonVariant`] for the canonical definition.
 ///
-/// - [`ButtonVariant::Default`] — the primary action in a dialog or form.
-///   Filled with `accent`, white label, no border. There should be at most
-///   one Default button per dialog (the one that Enter activates).
-/// - [`ButtonVariant::Regular`] — any non-primary button. A visible surface
-///   fill with a 1 dp border and a `text_primary` label. This is the default
-///   because most buttons are not the primary action.
-/// - [`ButtonVariant::Flat`] — a borderless button used in toolbars, action
-///   rows, and inline contexts. Transparent at idle, `surface_hover` on
-///   hover, `text_primary` label.
-///
-/// Int UI does **not** use filled red "destructive" buttons. Destructive
-/// actions in IntelliJ are plain `Regular` buttons ("Delete", "Revert", …)
-/// in confirmation dialogs where the dialog title, icon, and body text
-/// carry the warning — the button itself is not colored. For inline row
-/// actions ("Remove this plugin"), use a `Flat` button or a `Link` widget
-/// with an error-colored label. Do not reintroduce a filled red variant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ButtonVariant {
-    /// Primary action — accent-filled, one per dialog.
-    Default,
-    /// Non-primary action — surface fill with a 1 dp border.
-    #[default]
-    Regular,
-    /// Borderless — toolbar / inline actions.
-    Flat,
-}
+/// Int UI does **not** ship filled red "destructive" buttons —
+/// destructive actions in IntelliJ are plain buttons in confirmation
+/// dialogs where the title/body carry the warning. The IntUI default
+/// `RecipeButtonStyle` collapses `Destructive → Filled`, `Tinted /
+/// Outlined → Plain`, and `Link → Ghost` accordingly. Other design
+/// languages (Material 3, macOS) honour the variants distinctly.
+pub use fern_core::styles::ButtonVariant;
 
 /// Internal interaction state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,7 +67,7 @@ pub enum IconLocation {
 ///
 /// ```ignore
 /// Button::new_literal("Save")
-///     .style(ButtonVariant::Default)
+///     .variant(ButtonVariant::Filled)
 ///     .on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save))
 /// ```
 /// Type-erased activation closure. Stored as `Box<dyn Fn>` so the
@@ -98,7 +83,13 @@ pub struct Button {
     /// node's `set_name` reads the current value via `Prop::get()`,
     /// keeping AT in sync with bound updates.
     label: fern_core::signal::Prop<String>,
-    style: ButtonVariant,
+    /// Tier-1 design-language variant hint (Filled, Plain, Ghost, …).
+    /// The active [`ButtonStyle`] decides what to do with it.
+    variant: ButtonVariant,
+    /// Optional per-call override for the active [`ButtonStyle`]. When
+    /// `None`, falls through to the theme slot (step 8) or the
+    /// built-in [`crate::styles::RecipeButtonStyle`] default.
+    style_override: Option<SharedButtonStyle>,
     action: Option<CommandFactory>,
     enabled: bool,
     icon: Option<IconWidget>,
@@ -164,9 +155,10 @@ impl Button {
         let ls: fern_i18n::LocalizedString = label.into();
         Self {
             label: fern_core::signal::Prop::Static(ls.resolve_now()),
-            // Int UI default is a Regular (non-primary) button; the caller
-            // opts into `ButtonVariant::Default` for the one primary action.
-            style: ButtonVariant::Regular,
+            // Int UI default is a Plain (non-primary) button; the caller
+            // opts into `ButtonVariant::Filled` for the one primary action.
+            variant: ButtonVariant::Plain,
+            style_override: None,
             action: None,
             enabled: true,
             icon: None,
@@ -187,10 +179,10 @@ impl Button {
 
     /// Returns the configured visual variant. Used by wrappers like
     /// [`PopoverButton`](crate::popover_button::PopoverButton) that
-    /// derive their own chrome colors from the same role-resolution
+    /// derive their own chrome colors from the same recipe-resolution
     /// path the inner Button uses.
-    pub fn variant(&self) -> ButtonVariant {
-        self.style
+    pub fn current_variant(&self) -> ButtonVariant {
+        self.variant
     }
 
     /// Bind the button's internal interaction state to a caller-owned
@@ -218,8 +210,20 @@ impl Button {
         Self::new(fern_i18n::LocalizedString::literal(label))
     }
 
-    pub fn style(mut self, style: ButtonVariant) -> Self {
-        self.style = style;
+    /// Set the Tier-1 design-language variant. The active
+    /// [`ButtonStyle`] decides whether to honour or remap it (the IntUI
+    /// default `RecipeButtonStyle` collapses Destructive → Filled,
+    /// Tinted/Outlined → Plain, Link → Ghost).
+    pub fn variant(mut self, variant: ButtonVariant) -> Self {
+        self.variant = variant;
+        self
+    }
+
+    /// Override the active [`ButtonStyle`] for this widget instance
+    /// only. Useful for one-off custom-painted buttons (glassmorphism
+    /// CTA, Material-3 ripple, etc.) without forking the Button.
+    pub fn style(mut self, style: impl ButtonStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
         self
     }
 
@@ -397,88 +401,44 @@ impl std::fmt::Debug for Button {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Button")
             .field("label", &self.label.get())
-            .field("style", &self.style)
+            .field("variant", &self.variant)
             .field("enabled", &self.enabled)
             .finish()
     }
 }
 
-// --- Color resolution: variant × state × theme (resolved at paint time) ---
+// --- Label / icon color resolution ---
 //
-// Per the Int UI reference (v2 §1), emphasis comes from fill color not from
-// border thickness or stroke style. Each variant maps to a distinct surface
-// role; only Default uses the accent family.
+// The active `ButtonStyle` owns chrome (background fill, border, focus
+// ring) but the inner content (label + icon) belongs to the Button
+// itself, so it picks the text role. The mapping is intentionally
+// minimal: `OnAccent` for variants that paint an accent fill, `Primary`
+// for everything else, `Disabled` when the button is disabled. Custom
+// `ButtonStyle` impls that paint a different background can request
+// the Button to use a specific text role via `Button::text_role(...)`.
 
-fn resolve_bg_role(style: ButtonVariant, state: InteractionState) -> SurfaceRole {
-    match (style, state) {
-        (ButtonVariant::Default, InteractionState::Disabled) => SurfaceRole::AccentDisabled,
-        (ButtonVariant::Default, InteractionState::Pressed) => SurfaceRole::AccentPressed,
-        (ButtonVariant::Default, InteractionState::Hovered) => SurfaceRole::AccentHover,
-        (ButtonVariant::Default, _) => SurfaceRole::Accent,
-
-        (ButtonVariant::Regular, InteractionState::Pressed) => SurfaceRole::Pressed,
-        (ButtonVariant::Regular, InteractionState::Hovered) => SurfaceRole::Hover,
-        (ButtonVariant::Regular, _) => SurfaceRole::Main,
-
-        (ButtonVariant::Flat, InteractionState::Pressed) => SurfaceRole::Pressed,
-        (ButtonVariant::Flat, InteractionState::Hovered) => SurfaceRole::Hover,
-        (ButtonVariant::Flat, _) => SurfaceRole::Transparent,
+pub(crate) fn resolve_text_role(variant: ButtonVariant, state: InteractionState) -> TextRole {
+    if state == InteractionState::Disabled {
+        return TextRole::Disabled;
     }
-}
-
-pub(crate) fn resolve_text_role(style: ButtonVariant, state: InteractionState) -> TextRole {
-    match (style, state) {
-        (ButtonVariant::Default, InteractionState::Disabled) => TextRole::Disabled,
-        (ButtonVariant::Default, _) => TextRole::OnAccent,
-        (ButtonVariant::Regular | ButtonVariant::Flat, InteractionState::Disabled) => {
-            TextRole::Disabled
-        }
-        (ButtonVariant::Regular | ButtonVariant::Flat, _) => TextRole::Primary,
-    }
-}
-
-fn resolve_border_role(style: ButtonVariant, state: InteractionState) -> BorderRole {
-    // Int UI convention: the border IS the focus indicator (accent color,
-    // thicker stroke) — no external ring.
-    if state == InteractionState::Focused {
-        return BorderRole::Focused;
-    }
-    match style {
-        ButtonVariant::Default | ButtonVariant::Flat => BorderRole::Transparent,
-        ButtonVariant::Regular => match state {
-            InteractionState::Hovered | InteractionState::Pressed => BorderRole::Strong,
-            _ => BorderRole::Default,
-        },
-    }
-}
-
-/// Resolve the button's border width. Focused → `focus_ring_width`
-/// so the accent border is visually distinct; otherwise the
-/// variant-specific rest width (0 dp for Default/Flat, 1 dp for
-/// Regular).
-fn resolve_border_width(
-    style: ButtonVariant,
-    state: InteractionState,
-    normal_bw: f32,
-    focus_bw: f32,
-) -> f32 {
-    if state == InteractionState::Focused {
-        return focus_bw;
-    }
-    match style {
-        ButtonVariant::Default | ButtonVariant::Flat => 0.0,
-        ButtonVariant::Regular => normal_bw,
+    match variant {
+        ButtonVariant::Filled | ButtonVariant::Destructive => TextRole::OnAccent,
+        ButtonVariant::Tinted
+        | ButtonVariant::Outlined
+        | ButtonVariant::Plain
+        | ButtonVariant::Ghost => TextRole::Primary,
+        ButtonVariant::Link => TextRole::Link,
     }
 }
 
 impl fern_core::widget::Widget for Button {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // `button_style` is a one-time snapshot of layout constants
-        // (padding, icon size, corner radius, min width, height). These are
-        // typography/shape tokens that don't vary between light and dark
-        // themes; colors are driven reactively through role signals below.
+        // for the inner content (icon size, icon-label gap). The chrome
+        // (padding, corner radius, fill, border) lives on the active
+        // `ButtonStyle` impl — see step 5 of the styling refactor.
         let button_style = ctx.theme_signal().get().components.button;
-        let style = self.style;
+        let variant = self.variant;
         let enabled = self.enabled;
 
         // Create interaction signal — caller-supplied via
@@ -528,28 +488,24 @@ impl fern_core::widget::Widget for Button {
             fern_core::binding::BindingLevel::AccessibilityOnly,
         );
 
-        // Derived reactive roles — map interaction state to semantic roles,
-        // resolved against the current theme at paint time. Signal<Role>
-        // replaces the older `interaction.zip(&theme_signal).map(...)` zip
-        // and drops the explicit theme-signal plumbing.
-        let bg_role = interaction.map(move |s| resolve_bg_role(style, *s));
         // Label/icon color: a caller-supplied override wins over the
         // auto cascade. The override replaces ALL states (idle / hover /
         // press / focus / disabled) — chrome that uses this opts out of
         // interaction-driven color feedback in exchange for matching a
         // host's enforced text role. Both label and icon read this same
         // prop, so a one-line override re-tints the whole button.
+        //
+        // Chrome (background fill, border, focus ring) is no longer
+        // resolved here — the active `ButtonStyle` owns it via
+        // `make_body(cfg, ctx)` below. This widget only resolves the
+        // CONTENT color (label + icon) since that's part of the inner
+        // subtree we hand to the style as `cfg.label`.
         let text_role: fern_core::color_prop::ColorProp =
             if let Some(ref over) = self.text_role_override {
                 over.clone()
             } else {
-                interaction.map(move |s| resolve_text_role(style, *s)).into()
+                interaction.map(move |s| resolve_text_role(variant, *s)).into()
             };
-        let border_role = interaction.map(move |s| resolve_border_role(style, *s));
-        let normal_bw = button_style.border_width;
-        let focus_bw = ctx.theme_signal().get().shape.focus_ring_width;
-        let border_width =
-            interaction.map(move |s| resolve_border_width(style, *s, normal_bw, focus_bw));
 
         // Build the content (icon + label) based on icon_location
         let content_id = match self.icon_location {
@@ -650,32 +606,28 @@ impl fern_core::widget::Widget for Button {
             content_id
         };
 
-        let padding = Padding::symmetric(
-            button_style.padding_vertical,
-            button_style.padding_horizontal,
-        )
-        .child_id(content_id);
-        let padding_id = ctx.add(padding);
-
-        // Int UI convention: the button's own border is the focus
-        // indicator. Border width reacts to focus via
-        // `resolve_border_width`; color reacts via `resolve_border`.
-        // No external ring.
-        let rect = RectWidget::new()
-            .bind_background(bg_role)
-            .bind_border_color(border_role)
-            .bind_border_width(border_width)
-            .corner_radius(CornerRadius::uniform(button_style.corner_radius));
-        let rect_id = ctx.add(rect);
-
-        let zstack = ZStack::new().add_child(rect_id).add_child(padding_id);
-        let zstack_id = ctx.add(zstack);
-
-        // Int UI buttons are 24 dp tall with a 72 dp minimum width.
-        let root_id = ctx.add(
-            crate::primitives::MinSize::new(button_style.min_width, button_style.height)
-                .child_id(zstack_id),
-        );
+        // Delegate chrome (background fill, border, focus ring,
+        // padding, min size) to the active `ButtonStyle`. The four
+        // boolean signals derive from the local `interaction` state
+        // signal so the style can `.zip` them and pick a per-state
+        // recipe slot.
+        let style: SharedButtonStyle = self
+            .style_override
+            .clone()
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeButtonStyle::default()));
+        let is_pressed = interaction.map(|s| matches!(s, InteractionState::Pressed));
+        let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));
+        let is_focused = interaction.map(|s| matches!(s, InteractionState::Focused));
+        let is_disabled = interaction.map(|s| matches!(s, InteractionState::Disabled));
+        let cfg = ButtonStyleConfig {
+            label: content_id,
+            is_pressed,
+            is_hovered,
+            is_focused,
+            is_disabled,
+            variant,
+        };
+        let root_id = style.make_body(&cfg, ctx);
 
         // Attach tooltip if configured. The three setters
         // (`tooltip`, `rich_tooltip*`, `composite_tooltip`) are

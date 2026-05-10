@@ -55,7 +55,7 @@
 //! - `default_button` — activated by Enter (widget-scoped shortcut) and
 //!   receives initial focus on open (via `ModalRequest::focus_target`
 //!   plus `Widget::initial_focus_hint`). Styled with
-//!   `ButtonVariant::Default`.
+//!   `ButtonVariant::Filled`.
 //! - `escape_button` — activated by Escape. The fallback logic (for
 //!   presets with no explicit `escape_button`) picks: explicit
 //!   `escape_button` → first `Reject`-role button → `Cancel` → last
@@ -822,14 +822,14 @@ impl Widget for MessageBox {
             let kind = button_cfg.kind;
             let label = button_cfg.resolved_label();
             let variant = if Some(kind) == self.default_button {
-                ButtonVariant::Default
+                ButtonVariant::Filled
             } else {
-                ButtonVariant::Regular
+                ButtonVariant::Plain
             };
             let state_for_btn = state.clone();
             let btn_id = ctx.add(
                 Button::new(label)
-                    .style(variant)
+                    .variant(variant)
                     .on_activate_fn(move |ctx| {
                         state_for_btn.fire(kind, false, ctx);
                     }),

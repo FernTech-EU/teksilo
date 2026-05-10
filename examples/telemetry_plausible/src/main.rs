@@ -74,17 +74,17 @@ impl Widget for DemoRoot {
         }
 
         let click_btn = Button::new_literal("Fire 'click' intent")
-            .style(ButtonVariant::Default)
+            .variant(ButtonVariant::Filled)
             .on_activate_fn(|ctx| {
                 ctx.send_intent(fern_ui::core::Intent::new("app.demo.click"));
             });
         let save_btn = Button::new_literal("Fire 'save' intent")
-            .style(ButtonVariant::Default)
+            .variant(ButtonVariant::Filled)
             .on_activate_fn(|ctx| {
                 ctx.send_intent(fern_ui::core::Intent::new("app.demo.save"));
             });
         let about_btn = Button::new_literal("Fire 'about' intent")
-            .style(ButtonVariant::Default)
+            .variant(ButtonVariant::Filled)
             .on_activate_fn(|ctx| {
                 ctx.send_intent(fern_ui::core::Intent::new("app.demo.about"));
             });

@@ -504,7 +504,7 @@ impl Widget for Root {
                 )
                 .child(
                     PopoverButton::new(
-                        Button::new_literal("View options").style(ButtonVariant::Regular),
+                        Button::new_literal("View options").variant(ButtonVariant::Plain),
                     )
                     .show_disclosure_caret(true)
                     .content(
@@ -619,7 +619,7 @@ impl Widget for Root {
                             .item(
                                 Padding::symmetric(6.0, 10.0).child(
                                     Button::new_literal("Advanced settings…")
-                                        .style(ButtonVariant::Flat)
+                                        .variant(ButtonVariant::Ghost)
                                         .on_activate_fn(|_| println!("AdvancedSettings")),
                                 ),
                             )
@@ -651,7 +651,7 @@ impl Widget for Root {
                     .child(Spacer::new())
                     .child(
                         Button::new_literal("Toggle Dark Mode")
-                            .style(ButtonVariant::Regular)
+                            .variant(ButtonVariant::Plain)
                             .on_activate_fn(|ctx| {
                                 ctx.send_intent(AppIntent::ToggleDarkMode);
                             }),
@@ -773,7 +773,7 @@ impl Widget for Root {
                 })
                 .trailing_slot(
                     Button::new_literal("Settings")
-                        .style(ButtonVariant::Flat)
+                        .variant(ButtonVariant::Ghost)
                         .on_activate_fn(|_| println!("Settings")),
                 ),
         );

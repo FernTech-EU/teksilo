@@ -342,7 +342,7 @@ impl Widget for WizardFooter {
 
             let back_id = ctx.add(
                 Button::new_literal(self.back_label.clone())
-                    .style(ButtonVariant::Regular)
+                    .variant(ButtonVariant::Plain)
                     .on_activate_fn({
                         let current_step = current_step.clone();
                         let next_focus_id = next_focus_id.clone();
@@ -361,13 +361,13 @@ impl Widget for WizardFooter {
 
             let cancel_id = ctx.add(
                 Button::new_literal(self.cancel_label.clone())
-                    .style(ButtonVariant::Flat)
+                    .variant(ButtonVariant::Ghost)
                     .on_activate_fn(|ctx| ctx.dismiss_modal()),
             );
 
             let next_id = ctx.add(
                 Button::new_literal(self.next_label.clone())
-                    .style(ButtonVariant::Default)
+                    .variant(ButtonVariant::Filled)
                     .on_activate_fn({
                         let current_step = current_step.clone();
                         let next_focus_id = next_focus_id.clone();
@@ -394,7 +394,7 @@ impl Widget for WizardFooter {
             let finish_action = self.finish_action.clone();
             let finish_id = ctx.add(
                 Button::new_literal(self.finish_label.clone())
-                    .style(ButtonVariant::Default)
+                    .variant(ButtonVariant::Filled)
                     .on_activate_fn(move |ctx| {
                         if let Some(action) = &finish_action {
                             action(ctx);
@@ -587,7 +587,7 @@ impl Widget for WizardFlow {
 
 pub struct Wizard {
     label: String,
-    style: ButtonVariant,
+    variant: ButtonVariant,
     enabled: bool,
     presentation: ModalPresentation,
     close_behavior: ModalCloseBehavior,
@@ -607,7 +607,7 @@ impl Wizard {
         let ls: fern_i18n::LocalizedString = label.into();
         Self {
             label: ls.resolve_now(),
-            style: ButtonVariant::Default,
+            variant: ButtonVariant::Filled,
             enabled: true,
             presentation: ModalPresentation::Auto,
             close_behavior: ModalCloseBehavior::Manual,
@@ -639,8 +639,8 @@ impl Wizard {
         self
     }
 
-    pub fn style(mut self, style: ButtonVariant) -> Self {
-        self.style = style;
+    pub fn variant(mut self, variant: ButtonVariant) -> Self {
+        self.variant = variant;
         self
     }
 
@@ -731,7 +731,7 @@ impl std::fmt::Debug for Wizard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Wizard")
             .field("label", &self.label)
-            .field("style", &self.style)
+            .field("style", &self.variant)
             .field("enabled", &self.enabled)
             .field("steps", &self.steps.len())
             .finish()
@@ -741,7 +741,7 @@ impl std::fmt::Debug for Wizard {
 impl Widget for Wizard {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let enabled = self.enabled;
-        let style = self.style;
+        let style = self.variant;
         let presentation = self.presentation;
         let close_behavior = self.close_behavior;
         let size = self.size;
@@ -852,7 +852,7 @@ impl Widget for Wizard {
         } else {
             ctx.add(
                 Button::new_literal(self.label.clone())
-                    .style(style)
+                    .variant(style)
                     .enabled(enabled)
                     .on_activate_fn({
                         let label = self.label.clone();

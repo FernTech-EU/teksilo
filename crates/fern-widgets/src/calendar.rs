@@ -789,7 +789,7 @@ fn build_footer(
         let cb_on_sel = on_selection_changed.clone();
         let cb_on_month = on_month_changed.clone();
         let today_btn = Button::new_literal(today_label)
-            .style(ButtonVariant::Default)
+            .variant(ButtonVariant::Filled)
             .on_activate_fn(move |ctx_evt| {
                 let today = today_local();
                 let new_month = YearMonth::from_date(today);

@@ -1698,7 +1698,7 @@ fn build_overflow_dropdown(
 ) -> WidgetId {
     let icon_size = ctx.theme().components.button.icon_size;
     let trigger = Button::new(LocalizedString::literal(""))
-        .style(ButtonVariant::Flat)
+        .variant(ButtonVariant::Ghost)
         .text_role(icon_role)
         .icon(IconWidget::chevron_down(icon_size), IconLocation::Leading)
         .tooltip(LocalizedString::literal("Show all tabs"));
@@ -1715,7 +1715,7 @@ fn build_overflow_dropdown(
         let sel = selected_for_delegate.clone();
         Box::new(
             Button::new(label)
-                .style(ButtonVariant::Flat)
+                .variant(ButtonVariant::Ghost)
                 .enabled(enabled)
                 .on_activate_fn(move |ctx: &mut EventContext| {
                     sel.set(Some(entry_id));

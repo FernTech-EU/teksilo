@@ -112,7 +112,7 @@ impl Root {
                             .spacing(8.0)
                             .child(
                                 Button::new_literal("+ Add Tag")
-                                    .style(ButtonVariant::Default)
+                                    .variant(ButtonVariant::Filled)
                                     .on_activate_fn(move |_ctx| {
                                         let n = counter.get();
                                         counter.set(n + 1);
@@ -122,7 +122,7 @@ impl Root {
                             .child({
                                 let tags = tags_remove.clone();
                                 Button::new_literal("- Remove Last")
-                                    .style(ButtonVariant::Regular)
+                                    .variant(ButtonVariant::Plain)
                                     .on_activate_fn(move |_ctx| {
                                         if !tags.is_empty() {
                                             tags.remove(tags.len() - 1);
@@ -191,7 +191,7 @@ impl Root {
                                 .spacing(8.0)
                                 .child(
                                     Button::new_literal("+ Add Item")
-                                        .style(ButtonVariant::Default)
+                                        .variant(ButtonVariant::Filled)
                                         .on_activate_fn(move |_ctx| {
                                             let n = counter.get();
                                             counter.set(n + 1);
@@ -200,7 +200,7 @@ impl Root {
                                 )
                                 .child(
                                     Button::new_literal("- Remove First")
-                                        .style(ButtonVariant::Regular)
+                                        .variant(ButtonVariant::Plain)
                                         .on_activate_fn(move |_ctx| {
                                             if !items_remove.is_empty() {
                                                 items_remove.remove(0);
@@ -281,7 +281,7 @@ impl Root {
                                 .spacing(8.0)
                                 .child(
                                     Button::new_literal("+ Add Root")
-                                        .style(ButtonVariant::Default)
+                                        .variant(ButtonVariant::Filled)
                                         .on_activate_fn(move |_ctx| {
                                             let n = counter.get();
                                             counter.set(n + 1);
@@ -292,7 +292,7 @@ impl Root {
                                 )
                                 .child(
                                     Button::new_literal("- Remove Last Root")
-                                        .style(ButtonVariant::Regular)
+                                        .variant(ButtonVariant::Plain)
                                         .on_activate_fn(move |_ctx| {
                                             let count = tree_remove.root_count();
                                             if count > 0 {

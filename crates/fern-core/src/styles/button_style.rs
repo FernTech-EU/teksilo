@@ -6,10 +6,12 @@
 
 use std::rc::Rc;
 
+use fern_canvas::{EdgeInsets, Size};
 use serde::{Deserialize, Serialize};
 
 use crate::build_context::BuildContext;
 use crate::signal::Signal;
+use crate::styles::recipe::{BorderRecipe, FillRecipe, PerStateRecipe, ShadowRecipe, ShapeRecipe};
 use crate::widget_id::WidgetId;
 
 /// Closed enum naming the design-language variants of `Button`. Set
@@ -63,3 +65,21 @@ pub trait ButtonStyle: 'static {
 /// Shared handle for a `ButtonStyle` impl. Cheap to clone; one shared
 /// `Rc` is used per theme slot and per-call override.
 pub type SharedButtonStyle = Rc<dyn ButtonStyle>;
+
+/// Tier-2 paint-recipe for one variant of `Button`. The default
+/// [`crate::styles::ButtonStyle`] impl shipped in `fern-widgets`
+/// (`RecipeButtonStyle`) holds a `HashMap<ButtonVariant, ButtonRecipe>`
+/// and looks up the recipe at paint time.
+///
+/// Custom `ButtonStyle` impls can ignore recipes entirely (paint a
+/// glassmorphism gradient, run their own canvas code, etc.); the
+/// recipe layer is the *default* surface, not an obligation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ButtonRecipe {
+    pub shape: ShapeRecipe,
+    pub fill: PerStateRecipe<FillRecipe>,
+    pub border: PerStateRecipe<BorderRecipe>,
+    pub shadow: PerStateRecipe<Option<ShadowRecipe>>,
+    pub padding: EdgeInsets,
+    pub min_size: Size,
+}

@@ -240,7 +240,7 @@ impl Widget for InputDialogBody {
         let fired_cancel = self.fired.clone();
         let cancel_label = self.cancel_label.clone();
         let cancel_btn = Button::new(cancel_label)
-            .style(ButtonVariant::Regular)
+            .variant(ButtonVariant::Plain)
             .on_activate_fn(move |ctx| {
                 Self::fire(&on_result_cancel, &fired_cancel, None, ctx);
             });
@@ -250,7 +250,7 @@ impl Widget for InputDialogBody {
         let text_for_ok = self.text.clone();
         let ok_label = self.ok_label.clone();
         let ok_btn = Button::new(ok_label)
-            .style(ButtonVariant::Default)
+            .variant(ButtonVariant::Filled)
             .on_activate_fn(move |ctx| {
                 let value = text_for_ok.get();
                 Self::fire(&on_result_ok, &fired_ok, Some(value), ctx);

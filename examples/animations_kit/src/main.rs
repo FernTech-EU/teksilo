@@ -155,7 +155,7 @@ fn build_kit(
         ))
         .child(
             Button::new_literal("Hover me")
-                .style(ButtonVariant::Default)
+                .variant(ButtonVariant::Filled)
                 .tooltip_literal("I fade in and out over `motion.duration_fast` (~120 ms)."),
         )
         .child(Divider::new())
@@ -228,7 +228,7 @@ fn build_kit(
         ))
         .child(
             Button::new_literal("Next page")
-                .style(ButtonVariant::Regular)
+                .variant(ButtonVariant::Plain)
                 .on_activate_fn({
                     let key = crossfade_key.clone();
                     move |_| key.set((key.get() + 1) % 3)
@@ -272,7 +272,7 @@ fn build_kit(
                 ))
                 .child(
                     Button::new_literal("Submit")
-                        .style(ButtonVariant::Regular)
+                        .variant(ButtonVariant::Plain)
                         .on_activate_fn(move |_| {
                             shake_trigger.set(shake_trigger.get() + 1);
                         }),
@@ -342,7 +342,7 @@ fn build_kit(
                 .child({
                     let angle = rotate_angle.clone();
                     Button::new_literal("Rotate 90°")
-                        .style(ButtonVariant::Regular)
+                        .variant(ButtonVariant::Plain)
                         .on_activate_fn(move |_| {
                             let target = angle.get() + std::f32::consts::FRAC_PI_2;
                             angle.animate_to(
@@ -368,7 +368,7 @@ fn build_kit(
                 .spacing(12.0)
                 .child(
                     Button::new_literal("Reveal / Hide")
-                        .style(ButtonVariant::Regular)
+                        .variant(ButtonVariant::Plain)
                         .on_activate_fn(move |_| {
                             let now_obscured = !obscured.get();
                             obscured.set(now_obscured);
@@ -407,7 +407,7 @@ fn caption(text: &str) -> impl Widget + 'static {
 fn toggle_button(label: &str, signal: Signal<bool>) -> impl Widget + 'static {
     let label = label.to_string();
     Button::new_literal(label)
-        .style(ButtonVariant::Regular)
+        .variant(ButtonVariant::Plain)
         .on_activate_fn(move |_ctx| {
             signal.set(!signal.get());
         })

@@ -154,13 +154,13 @@ fn build_title_bar(host: Rc<dyn PlatformTitleBarHost>, _theme: &Theme) -> impl W
     // doesn't fit (its `Signal<usize>` mutates from inside the widget,
     // not via a callback that hands you `&mut EventContext`).
     let en_btn = Button::new(tr!(locale_en()))
-        .style(ButtonVariant::Flat)
+        .variant(ButtonVariant::Ghost)
         .on_activate_fn(|ctx| ctx.set_locale("en-US"));
     let fr_btn = Button::new(tr!(locale_fr()))
-        .style(ButtonVariant::Flat)
+        .variant(ButtonVariant::Ghost)
         .on_activate_fn(|ctx| ctx.set_locale("fr-FR"));
     let ar_btn = Button::new(tr!(locale_ar()))
-        .style(ButtonVariant::Flat)
+        .variant(ButtonVariant::Ghost)
         .on_activate_fn(|ctx| ctx.set_locale("ar-SA"));
 
     // Theme toggle — flips between light and dark. Tracks state in a
@@ -168,7 +168,7 @@ fn build_title_bar(host: Rc<dyn PlatformTitleBarHost>, _theme: &Theme) -> impl W
     // back. Matches the title_bar_demo / internationalization patterns.
     let is_dark = Signal::new(false);
     let theme_btn = Button::new(tr!(theme_label()))
-        .style(ButtonVariant::Flat)
+        .variant(ButtonVariant::Ghost)
         .tooltip(tr!(theme_tooltip()))
         .on_activate_fn(move |ctx| {
             let next = !is_dark.get();

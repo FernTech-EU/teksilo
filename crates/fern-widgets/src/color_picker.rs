@@ -575,14 +575,14 @@ impl Widget for ColorPicker {
             if let Some(cb) = self.on_cancel.clone() {
                 let cancel_btn =
                     Button::new(resolve_message_widget("color-picker-cancel-label", &[]))
-                        .style(ButtonVariant::Regular)
+                        .variant(ButtonVariant::Plain)
                         .enabled(enabled)
                         .on_activate_fn(move |ctx_evt| cb(ctx_evt));
                 row = row.child(cancel_btn);
             }
             if let Some(cb) = self.on_done.clone() {
                 let done_btn = Button::new(resolve_message_widget("color-picker-done-label", &[]))
-                    .style(ButtonVariant::Default)
+                    .variant(ButtonVariant::Filled)
                     .enabled(enabled)
                     .on_activate_fn(move |ctx_evt| cb(ctx_evt));
                 row = row.child(done_btn);

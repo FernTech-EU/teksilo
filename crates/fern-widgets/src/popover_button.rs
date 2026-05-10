@@ -20,7 +20,7 @@
 //!
 //! PopoverButton::new(
 //!     Button::new_literal("Choose…")
-//!         .style(ButtonVariant::Regular)
+//!         .variant(ButtonVariant::Plain)
 //!         .trailing(IconWidget::chevron_down(12.0).access_hidden(true)),
 //! )
 //! .content(my_picker_widget)
@@ -281,7 +281,7 @@ impl Widget for PopoverButton {
         // caret's color tracks the label's exactly. Without a caret,
         // Button allocates its own signal as before.
         if self.show_disclosure_caret {
-            let variant = trigger.variant();
+            let variant = trigger.current_variant();
             let interaction = ctx.signal(InteractionState::Idle);
             let role_signal = interaction.map(move |s| resolve_text_role(variant, *s));
             let trigger = trigger

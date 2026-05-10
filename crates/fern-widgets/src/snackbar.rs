@@ -166,7 +166,7 @@ impl Widget for SnackbarSurface {
 
 pub struct Snackbar {
     label: String,
-    style: ButtonVariant,
+    variant: ButtonVariant,
     enabled: bool,
     dismiss: DismissBehavior,
     auto_dismiss_after: Option<Duration>,
@@ -184,7 +184,7 @@ impl Snackbar {
         let ls: fern_i18n::LocalizedString = label.into();
         Self {
             label: ls.resolve_now(),
-            style: ButtonVariant::Regular,
+            variant: ButtonVariant::Plain,
             enabled: true,
             dismiss: DismissBehavior::ClickOutside,
             auto_dismiss_after: Some(DEFAULT_AUTO_DISMISS),
@@ -211,8 +211,8 @@ impl Snackbar {
         self
     }
 
-    pub fn style(mut self, style: ButtonVariant) -> Self {
-        self.style = style;
+    pub fn variant(mut self, variant: ButtonVariant) -> Self {
+        self.variant = variant;
         self
     }
 
@@ -271,7 +271,7 @@ impl std::fmt::Debug for Snackbar {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Snackbar")
             .field("label", &self.label)
-            .field("style", &self.style)
+            .field("style", &self.variant)
             .field("enabled", &self.enabled)
             .finish()
     }
@@ -284,7 +284,7 @@ impl Widget for Snackbar {
         let enabled = self.enabled;
         let dismiss = self.dismiss.clone();
         let auto_dismiss_after = self.auto_dismiss_after;
-        let style = self.style;
+        let style = self.variant;
         // Captured at build time so the present-snackbar handlers
         // don't need a theme lookup at fire-time. `duration_normal`
         // matches the snackbar's typical "notification slide"
@@ -372,7 +372,7 @@ impl Widget for Snackbar {
         } else {
             ctx.add(
                 Button::new_literal(label)
-                    .style(style)
+                    .variant(style)
                     .enabled(enabled)
                     .on_tap(open_on_tap)
                     .on_key({

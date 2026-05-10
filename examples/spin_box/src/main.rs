@@ -274,7 +274,7 @@ impl Widget for Root {
                             HStack {
                                 spacing: 8.0
                                 Button::new_literal("Reset all") {
-                                    style: ButtonVariant::Regular
+                                    variant: ButtonVariant::Plain
                                     on_activate_fn: move |_ctx| {
                                         reset_font.set(12);
                                         reset_gain.set(0.0);

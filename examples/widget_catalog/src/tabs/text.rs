@@ -117,7 +117,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
             .placeholder(tr!(txt_file_placeholder()).resolve_now()),
     );
     let trigger = Button::new(tr!(txt_input_dialog_trigger()))
-        .style(ButtonVariant::Default)
+        .variant(ButtonVariant::Filled)
         .on_activate_fn(|ctx| {
             InputDialog::new(tr!(txt_input_dialog_title()))
                 .prompt(tr!(txt_input_dialog_prompt()))
@@ -230,7 +230,7 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 Button::new(tr!(txt_input_dialog_trigger())) {
-                    style: ButtonVariant::Default
+                    variant: ButtonVariant::Filled
                     on_activate_fn: |ctx| {
                         InputDialog::new(tr!(txt_input_dialog_title()))
                             .prompt(tr!(txt_input_dialog_prompt()))

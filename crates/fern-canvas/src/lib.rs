@@ -11,7 +11,7 @@ pub mod text_backend;
 
 pub use animated::AnimatedIcon;
 pub use canvas::Canvas;
-pub use geometry::{Point, Rect, Size, SizeProposal, Transform2D, Vec2};
+pub use geometry::{EdgeInsets, Point, Rect, Size, SizeProposal, Transform2D, Vec2};
 pub use paint::{GradientStop, ImageHandle, LineCap, Paint, StrokeStyle};
 pub use path::{Path, PathCommand};
 pub use raster::{ImageDecodeError, RasterIcon};

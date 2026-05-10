@@ -35,17 +35,17 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .spacing(8.0)
             .child(
                 Button::new(tr!(btn_default()))
-                    .style(ButtonVariant::Default)
+                    .variant(ButtonVariant::Filled)
                     .on_activate_fn(|_| println!("Default")),
             )
             .child(
                 Button::new(tr!(btn_regular()))
-                    .style(ButtonVariant::Regular)
+                    .variant(ButtonVariant::Plain)
                     .on_activate_fn(|_| println!("Regular")),
             )
             .child(
                 Button::new(tr!(btn_flat()))
-                    .style(ButtonVariant::Flat)
+                    .variant(ButtonVariant::Ghost)
                     .on_activate_fn(|_| println!("Flat")),
             ),
     );
@@ -54,9 +54,9 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         "Button — disabled state",
         HStack::new()
             .spacing(8.0)
-            .child(Button::new(tr!(btn_default())).style(ButtonVariant::Default).enabled(false))
-            .child(Button::new(tr!(btn_regular())).style(ButtonVariant::Regular).enabled(false))
-            .child(Button::new(tr!(btn_flat())).style(ButtonVariant::Flat).enabled(false)),
+            .child(Button::new(tr!(btn_default())).variant(ButtonVariant::Filled).enabled(false))
+            .child(Button::new(tr!(btn_regular())).variant(ButtonVariant::Plain).enabled(false))
+            .child(Button::new(tr!(btn_flat())).variant(ButtonVariant::Ghost).enabled(false)),
     );
     let with_icon = section(
         ctx,
@@ -66,12 +66,12 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .child(
                 Button::new(tr!(btn_confirm_label()))
                     .icon(IconWidget::checkmark(16.0), IconLocation::Leading)
-                    .style(ButtonVariant::Default),
+                    .variant(ButtonVariant::Filled),
             )
             .child(
                 Button::new(tr!(demo_next()))
                     .icon(IconWidget::chevron_right(16.0), IconLocation::Trailing)
-                    .style(ButtonVariant::Regular),
+                    .variant(ButtonVariant::Plain),
             ),
     );
     let icon_btns = section(
@@ -124,7 +124,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .item(MenuItem::new(tr!(buttons_save_as())))
             .separator()
             .item(MenuItem::new_literal("Export"))
-            .style(ButtonVariant::Default),
+            .variant(ButtonVariant::Filled),
     );
 
     ctx.add(
@@ -150,12 +150,12 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let icon_btn_confirm = ctx.add(
         Button::new(tr!(btn_confirm_label()))
             .icon(IconWidget::checkmark(16.0), IconLocation::Leading)
-            .style(ButtonVariant::Default),
+            .variant(ButtonVariant::Filled),
     );
     let icon_btn_next = ctx.add(
         Button::new(tr!(demo_next()))
             .icon(IconWidget::chevron_right(16.0), IconLocation::Trailing)
-            .style(ButtonVariant::Regular),
+            .variant(ButtonVariant::Plain),
     );
     let popover_btn_widget = ctx.add(
         PopoverButton::new(Button::new(tr!(btn_popover_trigger()))).content(popover_surface(
@@ -196,15 +196,15 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 HStack {
                     spacing: 8.0
                     Button::new(tr!(btn_default())) {
-                        style: ButtonVariant::Default
+                        variant: ButtonVariant::Filled
                         on_activate_fn: |_| println!("Default")
                     }
                     Button::new(tr!(btn_regular())) {
-                        style: ButtonVariant::Regular
+                        variant: ButtonVariant::Plain
                         on_activate_fn: |_| println!("Regular")
                     }
                     Button::new(tr!(btn_flat())) {
-                        style: ButtonVariant::Flat
+                        variant: ButtonVariant::Ghost
                         on_activate_fn: |_| println!("Flat")
                     }
                 }
@@ -218,9 +218,9 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 }
                 HStack {
                     spacing: 8.0
-                    Button::new(tr!(btn_default())) { style: ButtonVariant::Default enabled: false }
-                    Button::new(tr!(btn_regular())) { style: ButtonVariant::Regular enabled: false }
-                    Button::new(tr!(btn_flat())) { style: ButtonVariant::Flat enabled: false }
+                    Button::new(tr!(btn_default())) { variant: ButtonVariant::Filled enabled: false }
+                    Button::new(tr!(btn_regular())) { variant: ButtonVariant::Plain enabled: false }
+                    Button::new(tr!(btn_flat())) { variant: ButtonVariant::Ghost enabled: false }
                 }
             }
 
@@ -297,7 +297,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 SplitButton {
                     item: MenuItem::new(tr!(demo_save()))
                     item: MenuItem::new(tr!(buttons_save_as()))
-                    style: ButtonVariant::Default
+                    variant: ButtonVariant::Filled
                 }
             }
         }

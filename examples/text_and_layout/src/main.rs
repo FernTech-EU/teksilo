@@ -58,7 +58,7 @@ impl Widget for RootContent {
                             .child({
                                 let is_dark = std::rc::Rc::new(std::cell::Cell::new(false));
                                 Button::new_literal("Toggle Dark Mode")
-                                    .style(ButtonVariant::Regular)
+                                    .variant(ButtonVariant::Plain)
                                     .on_activate_fn(move |ctx: &mut EventContext| {
                                         let next = !is_dark.get();
                                         is_dark.set(next);

@@ -164,7 +164,7 @@ impl Widget for CalendarHeader {
         let mode_for_action = self.mode.clone();
         let title_btn = crate::button::Button::new_literal("")
             .bind_label(label_signal)
-            .style(crate::button::ButtonVariant::Flat)
+            .variant(crate::button::ButtonVariant::Ghost)
             .on_activate_fn(move |ctx_evt| {
                 let cur = mode_for_action.get();
                 let next = cur.demote();

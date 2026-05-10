@@ -29,10 +29,72 @@ impl Vec2 {
 }
 
 /// A 2D size in logical pixels.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Size {
     pub width: f32,
     pub height: f32,
+}
+
+/// Per-edge inset distances in logical pixels. RTL-aware (`leading` /
+/// `trailing` instead of `left` / `right`).
+///
+/// Lives in fern-canvas (not fern-tokens) because it's a generic
+/// geometry primitive, not a design token. Used by per-widget
+/// recipes (`ButtonRecipe::padding`), the [`crate::Padding`] widget
+/// primitive in fern-widgets, and any caller that needs to describe
+/// a rectangular inset. Pure data — `Send + Sync + Serialize`.
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct EdgeInsets {
+    pub top: f32,
+    pub trailing: f32,
+    pub bottom: f32,
+    pub leading: f32,
+}
+
+impl EdgeInsets {
+    pub const ZERO: EdgeInsets = EdgeInsets {
+        top: 0.0,
+        trailing: 0.0,
+        bottom: 0.0,
+        leading: 0.0,
+    };
+
+    pub const fn new(top: f32, trailing: f32, bottom: f32, leading: f32) -> Self {
+        Self {
+            top,
+            trailing,
+            bottom,
+            leading,
+        }
+    }
+
+    pub const fn uniform(value: f32) -> Self {
+        Self {
+            top: value,
+            trailing: value,
+            bottom: value,
+            leading: value,
+        }
+    }
+
+    /// `horizontal` applies to leading + trailing; `vertical` applies
+    /// to top + bottom.
+    pub const fn symmetric(horizontal: f32, vertical: f32) -> Self {
+        Self {
+            top: vertical,
+            trailing: horizontal,
+            bottom: vertical,
+            leading: horizontal,
+        }
+    }
+
+    pub fn horizontal(self) -> f32 {
+        self.leading + self.trailing
+    }
+
+    pub fn vertical(self) -> f32 {
+        self.top + self.bottom
+    }
 }
 
 impl Size {

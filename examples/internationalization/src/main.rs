@@ -136,17 +136,17 @@ impl Widget for Root {
 
         let en_btn = ctx.add(
             Button::new(tr!(lang_english()))
-                .style(ButtonVariant::Regular)
+                .variant(ButtonVariant::Plain)
                 .on_activate_fn(|ctx| ctx.set_locale("en-US")),
         );
         let fr_btn = ctx.add(
             Button::new(tr!(lang_french()))
-                .style(ButtonVariant::Regular)
+                .variant(ButtonVariant::Plain)
                 .on_activate_fn(|ctx| ctx.set_locale("fr-FR")),
         );
         let ar_btn = ctx.add(
             Button::new(tr!(lang_arabic()))
-                .style(ButtonVariant::Regular)
+                .variant(ButtonVariant::Plain)
                 .on_activate_fn(|ctx| ctx.set_locale("ar-SA")),
         );
 
@@ -164,9 +164,9 @@ impl Widget for Root {
         // `ar-SA`, `tree.set_layout_direction(RightToLeft)` changes how
         // `HStack` resolves leading/trailing, visibly reversing the
         // button order on screen.
-        let leading_btn = ctx.add(Button::new(tr!(leading_button())).style(ButtonVariant::Regular));
+        let leading_btn = ctx.add(Button::new(tr!(leading_button())).variant(ButtonVariant::Plain));
         let trailing_btn =
-            ctx.add(Button::new(tr!(trailing_button())).style(ButtonVariant::Regular));
+            ctx.add(Button::new(tr!(trailing_button())).variant(ButtonVariant::Plain));
         let direction_row = ctx.add(
             HStack::new()
                 .spacing(12.0)
@@ -259,7 +259,7 @@ impl Widget for Root {
         );
         let price_minus = ctx.add(
             Button::new_literal("− 100")
-                .style(ButtonVariant::Regular)
+                .variant(ButtonVariant::Plain)
                 .on_activate_fn({
                     let price = self.price.clone();
                     move |_| price.set(price.get() - 100.0)
@@ -267,7 +267,7 @@ impl Widget for Root {
         );
         let price_plus = ctx.add(
             Button::new_literal("+ 100")
-                .style(ButtonVariant::Regular)
+                .variant(ButtonVariant::Plain)
                 .on_activate_fn({
                     let price = self.price.clone();
                     move |_| price.set(price.get() + 100.0)
@@ -288,7 +288,7 @@ impl Widget for Root {
         );
         let count_minus = ctx.add(
             Button::new_literal("− 1")
-                .style(ButtonVariant::Regular)
+                .variant(ButtonVariant::Plain)
                 .on_activate_fn({
                     let count = self.count.clone();
                     move |_| count.set((count.get() - 1).max(0))
@@ -296,7 +296,7 @@ impl Widget for Root {
         );
         let count_plus = ctx.add(
             Button::new_literal("+ 1")
-                .style(ButtonVariant::Regular)
+                .variant(ButtonVariant::Plain)
                 .on_activate_fn({
                     let count = self.count.clone();
                     move |_| count.set(count.get() + 1)

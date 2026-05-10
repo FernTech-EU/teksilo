@@ -27,7 +27,7 @@ fn make_wizard() -> Wizard {
         .step(WizardStep::new(tr!(chr_wizard_step3())).content(|| {
             TextWidget::new(tr!(chr_wizard_step3_body())).style(TextStyleRole::Body)
         }))
-        .trigger(Button::new(tr!(chr_wizard_trigger())).style(ButtonVariant::Default))
+        .trigger(Button::new(tr!(chr_wizard_trigger())).variant(ButtonVariant::Filled))
 }
 
 pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
@@ -38,9 +38,9 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         Toolbar::new().child(
             HStack::new()
                 .spacing(6.0)
-                .child(Button::new(tr!(demo_new())).style(ButtonVariant::Flat))
-                .child(Button::new(tr!(demo_open())).style(ButtonVariant::Flat))
-                .child(Button::new(tr!(demo_save())).style(ButtonVariant::Flat)),
+                .child(Button::new(tr!(demo_new())).variant(ButtonVariant::Ghost))
+                .child(Button::new(tr!(demo_open())).variant(ButtonVariant::Ghost))
+                .child(Button::new(tr!(demo_save())).variant(ButtonVariant::Ghost)),
         ),
     );
     let status_bar = section(
@@ -118,9 +118,9 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 Toolbar {
                     HStack {
                         spacing: 6.0
-                        Button::new(tr!(demo_new())) { style: ButtonVariant::Flat }
-                        Button::new(tr!(demo_open())) { style: ButtonVariant::Flat }
-                        Button::new(tr!(demo_save())) { style: ButtonVariant::Flat }
+                        Button::new(tr!(demo_new())) { variant: ButtonVariant::Ghost }
+                        Button::new(tr!(demo_open())) { variant: ButtonVariant::Ghost }
+                        Button::new(tr!(demo_save())) { variant: ButtonVariant::Ghost }
                     }
                 }
             }

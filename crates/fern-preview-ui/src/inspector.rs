@@ -244,7 +244,7 @@ impl InspectorBody {
         let widget_id = entry.id();
         let st = self.state.clone();
         let reset_btn = Button::new_literal("Reset")
-            .style(ButtonVariant::Flat)
+            .variant(ButtonVariant::Ghost)
             .on_activate_fn(move |_ctx| {
                 st.reset_knobs(widget_id, variant_name);
             });
@@ -269,7 +269,7 @@ impl InspectorBody {
         let header = section_header(ctx, "Export");
         let st = self.state.clone();
         let save_btn = Button::new_literal("Save PNG…")
-            .style(ButtonVariant::Regular)
+            .variant(ButtonVariant::Plain)
             .on_activate_fn(move |_ctx| {
                 if let Err(e) = crate::png_export::export_current(&st) {
                     eprintln!("PNG export failed: {}", e);

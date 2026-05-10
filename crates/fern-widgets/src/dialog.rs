@@ -378,7 +378,7 @@ impl Widget for DialogContent {
 
 pub struct Dialog {
     label: String,
-    style: ButtonVariant,
+    variant: ButtonVariant,
     enabled: bool,
     presentation: ModalPresentation,
     close_behavior: ModalCloseBehavior,
@@ -392,7 +392,7 @@ impl Dialog {
         let ls: fern_i18n::LocalizedString = label.into();
         Self {
             label: ls.resolve_now(),
-            style: ButtonVariant::Default,
+            variant: ButtonVariant::Filled,
             enabled: true,
             presentation: ModalPresentation::Auto,
             close_behavior: ModalCloseBehavior::EscapeOrClickOutside,
@@ -419,8 +419,8 @@ impl Dialog {
         self
     }
 
-    pub fn style(mut self, style: ButtonVariant) -> Self {
-        self.style = style;
+    pub fn variant(mut self, variant: ButtonVariant) -> Self {
+        self.variant = variant;
         self
     }
 
@@ -454,7 +454,7 @@ impl std::fmt::Debug for Dialog {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Dialog")
             .field("label", &self.label)
-            .field("style", &self.style)
+            .field("style", &self.variant)
             .field("enabled", &self.enabled)
             .finish()
     }
@@ -466,7 +466,7 @@ impl Widget for Dialog {
         let enabled = self.enabled;
         let close_behavior = self.close_behavior;
         let presentation = self.presentation;
-        let style = self.style;
+        let style = self.variant;
         let content_factory = self
             .content_factory
             .clone()
@@ -571,7 +571,7 @@ impl Widget for Dialog {
             let action_dismiss = dismiss_callback.clone();
             ctx.add(
                 Button::new_literal(label)
-                    .style(style)
+                    .variant(style)
                     .enabled(enabled)
                     .has_popup(fern_core::accesskit::HasPopup::Dialog)
                     .expanded_when(is_open.clone())

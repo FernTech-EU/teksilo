@@ -9,6 +9,8 @@
 //! composition over the `FooStyle` trait — no `paint()` method on
 //! any themable widget.
 
+pub mod recipe_button_style;
 pub mod recipe_toggle_style;
 
+pub use recipe_button_style::RecipeButtonStyle;
 pub use recipe_toggle_style::RecipeToggleStyle;
