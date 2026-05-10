@@ -23,7 +23,7 @@ use crate::theme::ColorTokens;
 use crate::typography::TypographyTokens;
 
 /// Semantic text-foreground role. Resolved against `ColorTokens` at paint time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize)]
 pub enum TextRole {
     /// Default body / primary text.
     #[default]
@@ -78,7 +78,7 @@ impl TextRole {
 }
 
 /// Semantic surface / background role.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize)]
 pub enum SurfaceRole {
     /// Main window / panel background.
     #[default]
@@ -170,7 +170,7 @@ impl SurfaceRole {
 }
 
 /// Semantic border / divider role.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize)]
 pub enum BorderRole {
     /// Default 1 dp border.
     #[default]
@@ -225,7 +225,7 @@ impl BorderRole {
 /// Use this in `TextWidget::style(...)` and similar surfaces so that a theme
 /// change (which may ship different font sizes or weights) re-lays text
 /// without rebuilding the widget.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize)]
 pub enum TextStyleRole {
     /// Default UI text — button labels, field text, body copy.
     #[default]

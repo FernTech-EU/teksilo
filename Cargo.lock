@@ -1352,6 +1352,7 @@ dependencies = [
  "image-webp",
  "png 0.17.16",
  "roxmltree",
+ "serde",
  "thiserror 2.0.18",
 ]
 

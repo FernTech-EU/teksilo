@@ -14,7 +14,7 @@ impl Point {
 }
 
 /// A 2D vector.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Vec2 {
     pub x: f32,
     pub y: f32,
