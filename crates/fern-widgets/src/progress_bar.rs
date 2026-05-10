@@ -326,7 +326,7 @@ impl Widget for ProgressBar {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn progress_bar_size() {
@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn progress_bar_paints_track_and_fill() {
-        let mut tree = WidgetTree::new().with_theme(fern_tokens::Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(ProgressBar::new(0.5));
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let frame = tree.render();
@@ -353,7 +353,7 @@ mod tests {
 
     #[test]
     fn progress_bar_fill_width_proportional() {
-        let mut tree = WidgetTree::new().with_theme(fern_tokens::Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let _pb = tree.add(ProgressBar::new(0.5).fill_color(Color::RED));
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let frame = tree.render();
@@ -376,7 +376,7 @@ mod tests {
 
     #[test]
     fn zero_value_no_fill() {
-        let mut tree = WidgetTree::new().with_theme(fern_tokens::Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(ProgressBar::new(0.0).fill_color(Color::RED));
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let frame = tree.render();
@@ -405,7 +405,7 @@ mod tests {
         // lives in `frame.anim_params`. The widget's own `paint()`
         // does not re-run between frames — the shader samples live
         // params from the uniform buffer.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(ProgressBar::indeterminate());
 
         tree.layout(SizeProposal::exact(200.0, 40.0));

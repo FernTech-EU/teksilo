@@ -813,10 +813,10 @@ mod tests {
     use super::*;
     use fern_canvas::SizeProposal;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     fn theme() -> Theme {
-        Theme::light_default()
+        fern_core::presets::intui::light()
     }
 
     #[test]

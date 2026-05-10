@@ -539,7 +539,7 @@ mod tests {
 
     #[test]
     fn focus_survives_theme_switch() {
-        use fern_tokens::Theme;
+        use crate::styles::Theme;
         let mut tree = WidgetTree::new();
         let a = tree.add(FillWidget::new().focusable());
         let _b = tree.add(FillWidget::new().focusable());
@@ -548,7 +548,7 @@ mod tests {
         tree.focus(a);
         assert_eq!(tree.focused(), Some(a));
 
-        tree.set_theme(Theme::dark_default());
+        tree.set_theme(crate::presets::intui::dark());
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
         assert_eq!(

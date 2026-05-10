@@ -165,7 +165,8 @@ mod tests {
     use crate::primitives::{FixedSize, RectWidget};
     use fern_core::signal::Signal;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::{Color, Theme};
+    use fern_core::Theme;
+use fern_tokens::Color;
 
     fn collect_blur_radii(frame: &fern_canvas::RenderFrame) -> Vec<f32> {
         frame
@@ -180,7 +181,7 @@ mod tests {
 
     #[test]
     fn static_radius_emits_begin_end_pair() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Blur::new(8.0_f32).child(RectWidget::new().background(Color::RED)));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let frame = tree.render();
@@ -200,7 +201,7 @@ mod tests {
     fn subperceptual_radius_skipped() {
         // Below the 0.5 threshold: walker emits no Begin/End pair so
         // animated 0→target patterns have zero cost when fully off.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Blur::new(0.0_f32).child(RectWidget::new().background(Color::RED)));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let frame = tree.render();
@@ -210,7 +211,7 @@ mod tests {
     #[test]
     fn dynamic_radius_signal_drives_emitted_value() {
         let radius = Signal::new(4.0_f32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Blur::new(radius.clone()).child(RectWidget::new().background(Color::RED)));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let frame = tree.render();
@@ -225,7 +226,7 @@ mod tests {
     #[test]
     fn layout_size_unchanged_by_blur() {
         let radius = Signal::new(0.0_f32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             Blur::new(radius.clone()).child(
                 FixedSize::new()
@@ -263,7 +264,7 @@ mod tests {
         // never lifts).
         use std::time::Duration;
         let radius = Signal::new_animated(12.0_f32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(
             Blur::new(radius.clone()).child(
                 FixedSize::new()
@@ -289,7 +290,7 @@ mod tests {
         // widget's actual placed bounds — that's what the renderer uses
         // to size the intermediate texture and to position the
         // composite blit.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             Blur::new(8.0_f32).child(
                 FixedSize::new()

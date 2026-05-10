@@ -75,12 +75,12 @@ impl ModalContainer {
         self
     }
 
-    fn resolved_padding(&self, theme: &fern_tokens::Theme) -> f32 {
+    fn resolved_padding(&self, theme: &fern_core::Theme) -> f32 {
         self.padding_override
             .unwrap_or(theme.components.dialog.content_padding)
     }
 
-    fn resolved_min_width(&self, theme: &fern_tokens::Theme) -> f32 {
+    fn resolved_min_width(&self, theme: &fern_core::Theme) -> f32 {
         self.min_width_override
             .unwrap_or(theme.components.dialog.min_width)
     }
@@ -680,7 +680,7 @@ mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
     use fern_core::{ModalContent, ModalPresentation};
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
@@ -697,7 +697,7 @@ mod tests {
 
     #[test]
     fn access_click_opens_centered_dialog_overlay() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Dialog::new_literal("Open dialog").content(|| FixedLeaf(220.0, 120.0)));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -724,7 +724,7 @@ mod tests {
 
     #[test]
     fn dialog_surface_exposes_dialog_role() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Dialog::new_literal("Open dialog").content(|| FixedLeaf(220.0, 120.0)));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -759,7 +759,7 @@ mod tests {
         // caller didn't set an explicit title on the container,
         // the title should propagate automatically via
         // `Widget::accessible_title_hint`.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let container = tree.add(ModalContainer::new(
             DialogContent::new()
                 .title_literal("Delete file?")
@@ -775,7 +775,7 @@ mod tests {
     fn modal_container_explicit_title_wins_over_hint() {
         // An explicit `.title(...)` on ModalContainer takes
         // precedence over whatever the content suggests.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let container = tree.add(
             ModalContainer::new(
                 DialogContent::new()
@@ -791,7 +791,7 @@ mod tests {
 
     #[test]
     fn modal_container_preserves_shell_sizing_defaults() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let container = tree.add(ModalContainer::new(FixedLeaf(220.0, 120.0)));
         tree.layout(SizeProposal {
             width: None,
@@ -807,7 +807,7 @@ mod tests {
 
     #[test]
     fn modal_container_custom_padding_changes_layout() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let container = tree.add(
             ModalContainer::new(FixedLeaf(220.0, 120.0))
                 .padding(12.0)
@@ -825,7 +825,7 @@ mod tests {
 
     #[test]
     fn custom_trigger_opens_dialog_overlay() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(
             Dialog::new_literal("Open dialog")
                 .content(|| FixedLeaf(220.0, 120.0))
@@ -846,7 +846,7 @@ mod tests {
 
     #[test]
     fn dialog_content_helper_builds_dialog_sections() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Dialog::new_literal("Open dialog").content(|| {
             DialogContent::new()
                 .title_literal("Review Changes")
@@ -881,7 +881,7 @@ mod tests {
 
     #[test]
     fn dialog_presentation_can_be_overridden() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(
             Dialog::new_literal("Open dialog")
                 .content(|| FixedLeaf(220.0, 120.0))
@@ -904,7 +904,7 @@ mod tests {
 
     #[test]
     fn dialog_close_behavior_can_be_overridden() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(
             Dialog::new_literal("Open dialog")
                 .content(|| FixedLeaf(220.0, 120.0))
@@ -931,7 +931,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Dialog requires .content(...)")]
     fn dialog_without_content_panics_on_build() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Dialog::new_literal("Open dialog"));
         tree.layout(SizeProposal::exact(800.0, 600.0));
     }

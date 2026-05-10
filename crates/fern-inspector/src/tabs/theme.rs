@@ -17,9 +17,8 @@ use fern_core::signal::Signal;
 use fern_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_platform::ClipboardHandle;
-use fern_tokens::{
-    Color, ColorTokens, ComponentStyles, ShapeTokens, TextRole, TextStyleRole, Theme,
-};
+use fern_core::Theme;
+use fern_tokens::{Color, ColorTokens, ComponentStyles, ShapeTokens, TextRole, TextStyleRole};
 use fern_widgets::primitives::{HStack, Padding, Spacer, VStack};
 use fern_widgets::{Button, ColorEdit, ScrollArea, Slider, TextWidget};
 
@@ -291,9 +290,9 @@ impl Widget for ThemeTab {
 
         // Preset buttons.
         let light_btn =
-            Button::new_literal("Light").on_activate_fn(|c| c.set_theme(Theme::light_default()));
+            Button::new_literal("Light").on_activate_fn(|c| c.set_theme(fern_core::presets::intui::light()));
         let dark_btn =
-            Button::new_literal("Dark").on_activate_fn(|c| c.set_theme(Theme::dark_default()));
+            Button::new_literal("Dark").on_activate_fn(|c| c.set_theme(fern_core::presets::intui::dark()));
 
         // Apply: fold every draft back into a fresh theme and commit.
         let drafts_for_apply = drafts.clone();

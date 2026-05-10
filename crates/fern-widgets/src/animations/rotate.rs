@@ -220,12 +220,12 @@ mod tests {
     use super::*;
     use crate::primitives::TextWidget;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn zero_angle_emits_identity_skip() {
         let angle = Signal::new(0.0_f32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Rotate::new(angle).child(TextWidget::new_literal("x")));
         tree.layout(SizeProposal {
             width: Some(200.0),
@@ -243,7 +243,7 @@ mod tests {
     #[test]
     fn nonzero_angle_emits_rotation_matrix() {
         let angle = Signal::new(std::f32::consts::FRAC_PI_2); // 90°
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Rotate::new(angle).child(TextWidget::new_literal("x")));
         tree.layout(SizeProposal {
             width: Some(200.0),
@@ -275,7 +275,7 @@ mod tests {
         // animation infrastructure needed; the assertion here is
         // about layout size, not animation timing.
         let angle = Signal::new(0.0_f32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(Rotate::new(angle.clone()).child(TextWidget::new_literal("hello")));
         tree.layout(SizeProposal {
             width: Some(300.0),
@@ -301,7 +301,7 @@ mod tests {
         // (the matrix being pushed must reflect the new angle).
         use std::time::Duration;
         let angle = Signal::new_animated(0.0_f32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Rotate::new(angle.clone()).child(TextWidget::new_literal("x")));
         tree.layout(SizeProposal {
             width: Some(200.0),
@@ -368,7 +368,7 @@ mod tests {
         use fern_tokens::Color;
         use std::time::Duration;
         let angle = Signal::new_animated(0.0_f32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(
             FixedSize::new().bind_width(80.0).bind_height(80.0).child(
                 ZStack::new()
@@ -475,7 +475,7 @@ mod tests {
         use fern_tokens::Color;
         use std::time::Duration;
         let angle = Signal::new_animated(0.0_f32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(
             ScrollArea::new().child(
                 Padding::uniform(24.0).child(
@@ -560,7 +560,7 @@ mod tests {
         use fern_tokens::Color;
         use std::time::Duration;
         let angle = Signal::new_animated(0.0_f32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         // Mirror animations-kit: lots of vertical content above the
         // Rotate row, so the cube lives at a non-trivial y offset.
         tree.add(
@@ -665,7 +665,7 @@ mod tests {
         use crate::primitives::{FixedSize, HStack, RectWidget};
         use fern_tokens::Color;
         let angle = Signal::new(std::f32::consts::FRAC_PI_2); // 90°
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         // Build an HStack with a 28x28 cube AND a much taller sibling
         // so the row's cross-axis stretches past 28.
         tree.add(
@@ -754,7 +754,7 @@ mod tests {
         // angle.
         use std::time::Duration;
         let angle = Signal::new_animated(0.0_f32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Rotate::new(angle.clone()).child(TextWidget::new_literal("x")));
         tree.layout(SizeProposal {
             width: Some(200.0),
@@ -782,7 +782,7 @@ mod tests {
         // Bumping the angle signal must update the next frame's
         // PushTransform value — no rebuild required.
         let angle = Signal::new(0.0_f32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Rotate::new(angle.clone()).child(TextWidget::new_literal("x")));
         tree.layout(SizeProposal {
             width: Some(200.0),

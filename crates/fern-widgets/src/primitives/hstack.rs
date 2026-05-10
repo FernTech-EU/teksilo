@@ -345,7 +345,7 @@ mod tests {
     fn intrinsic_size_sums_children() {
         let stack = HStack::new().spacing(5.0);
         // Without arena, size_that_fits falls back to proposal
-        let theme = fern_tokens::Theme::light_default();
+        let theme = fern_core::presets::intui::light();
         let ctx = LayoutContext::for_testing(&theme);
         let size = stack
             .layout_response(SizeProposal::exact(100.0, 50.0), &ctx)

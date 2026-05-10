@@ -624,7 +624,7 @@ impl SplitView {
     /// `keyboard_step_px` is theme-only (not user-overridable). Panes
     /// and handle all share this resolution path so they stay in sync
     /// when the theme changes.
-    fn resolved_style(&self, theme: &fern_tokens::Theme) -> ResolvedStyle {
+    fn resolved_style(&self, theme: &fern_core::Theme) -> ResolvedStyle {
         let s = theme.components.split_view;
         ResolvedStyle {
             min_first_size: self.min_first_size.unwrap_or(s.min_pane_size),
@@ -885,7 +885,7 @@ mod tests {
     use super::*;
     use fern_core::event::Modifiers;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
@@ -903,7 +903,7 @@ mod tests {
     #[test]
     fn horizontal_split_places_panes_and_divider() {
         let split = Signal::new(0.25_f32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let root = tree.add(
             SplitView::new(split)
                 .first(FixedLeaf(100.0, 40.0))
@@ -926,7 +926,7 @@ mod tests {
     #[test]
     fn drag_updates_split_fraction() {
         let split = Signal::new(0.5_f32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let root = tree.add(
             SplitView::new(split.clone())
                 .first(FixedLeaf(100.0, 40.0))
@@ -950,7 +950,7 @@ mod tests {
     #[test]
     fn keyboard_resizes_focused_splitter() {
         let split = Signal::new(0.5_f32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let root = tree.add(
             SplitView::new(split.clone())
                 .first(FixedLeaf(100.0, 40.0))
@@ -970,7 +970,7 @@ mod tests {
     #[test]
     fn minimum_sizes_clamp_fraction() {
         let split = Signal::new(0.05_f32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let root = tree.add(
             SplitView::new(split)
                 .min_first_size(120.0)
@@ -990,7 +990,7 @@ mod tests {
     #[test]
     fn vertical_split_places_panes_and_divider() {
         let split = Signal::new(0.25_f32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let root = tree.add(
             SplitView::new(split)
                 .orientation(Orientation::Vertical)
@@ -1016,7 +1016,7 @@ mod tests {
         // Vertical orientation stacks along the Y axis, which is not
         // affected by layout direction — RTL only mirrors horizontal.
         let split = Signal::new(0.5_f32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.set_layout_direction(fern_core::environment::LayoutDirection::RightToLeft);
         let root = tree.add(
             SplitView::new(split)
@@ -1043,7 +1043,7 @@ mod tests {
         // first/second children should each have exactly one child —
         // the user's widget — sitting underneath the clip.
         let split = Signal::new(0.5_f32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let root = tree.add(
             SplitView::new(split)
                 .first(FixedLeaf(500.0, 40.0))
@@ -1069,7 +1069,7 @@ mod tests {
     #[test]
     fn splitter_exposes_accessibility_role() {
         let split = Signal::new(0.5_f32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(
             SplitView::new(split)
                 .first(FixedLeaf(100.0, 40.0))

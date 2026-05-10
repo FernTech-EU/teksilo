@@ -24,9 +24,11 @@ pub mod intent;
 pub mod modal;
 pub mod motion_visibility;
 pub mod overlay;
+pub mod presets;
 pub mod raw_handle;
 pub mod shortcut;
 pub mod signal;
+pub mod styles;
 pub mod telemetry;
 pub mod widget;
 pub mod widget_builder;
@@ -81,6 +83,7 @@ pub use shortcut::{
     ShortcutBuilder, ShortcutOnActivate, ShortcutRegistry, ShortcutScope, SlotOverride,
 };
 pub use signal::{ObserverHandle, Prop, Signal, SignalAccessError};
+pub use styles::{Theme, ThemeAppearance, ThemeExtensions};
 pub use widget::{
     CursorIcon, EventContext, LayoutContext, LayoutResponse, PaintContext, PendingChild, Widget,
     WidgetPlacement,

@@ -24,7 +24,8 @@
 use fern_ui::core::WidgetPlacement;
 use fern_ui::i18n::I18nConfig;
 use fern_ui::prelude::*;
-use fern_ui::tokens::{Color, Theme};
+use fern_ui::prelude::Theme;
+use fern_ui::tokens::Color;
 use fern_ui::widgets::{
     Button, ColorEdit, ColorPicker, ColorPickerLayout, Expand, HStack, HexColorInput, Padding,
     Panel, ScrollArea, Spacer, TextWidget, Toolbar, VStack,
@@ -37,9 +38,9 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                Theme::dark_default()
+                fern_ui::presets::intui::dark()
             } else {
-                Theme::light_default()
+                fern_ui::presets::intui::light()
             });
         }),
     ))
@@ -239,7 +240,7 @@ fn material_palette() -> Vec<Color> {
 fn main() {
     FernAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(Theme::light_default())
+        .theme(fern_ui::presets::intui::light())
         // Register fern-widgets' own translatable strings so internal
         // labels (Role::Slider names, swatch hex readouts, etc.) resolve
         // instead of falling back to literal Fluent keys.

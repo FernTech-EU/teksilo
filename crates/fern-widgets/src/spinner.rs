@@ -204,11 +204,11 @@ mod tests {
     use super::*;
     use fern_canvas::DrawCommand;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn spinner_size() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(Spinner::new(32.0));
         // Pass `None` for both axes so the layout pass uses the
         // spinner's natural (square) `size_that_fits` instead of
@@ -224,7 +224,7 @@ mod tests {
 
     #[test]
     fn spinner_emits_one_animated_quad_when_motion_allowed() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Spinner::new(24.0));
         tree.layout(SizeProposal::exact(64.0, 64.0));
         let frame = tree.render();
@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn spinner_emits_static_path_under_reduced_motion() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         // high_contrast = false, reduced_motion = true, text_scale = 1.0
         tree.set_accessibility_preferences(false, true, 1.0);
         tree.add(Spinner::new(24.0));
@@ -271,7 +271,7 @@ mod tests {
         // Same shape as ProgressBar's animation test: the per-slot
         // phase must change between frames so the shader actually
         // animates without paint() re-running.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Spinner::new(24.0));
         tree.layout(SizeProposal::exact(64.0, 64.0));
 

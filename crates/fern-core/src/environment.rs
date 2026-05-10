@@ -1,4 +1,4 @@
-use fern_tokens::Theme;
+use crate::styles::Theme;
 
 /// Layout direction for RTL/LTR support.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -43,7 +43,7 @@ impl Environment {
 
 impl Default for Environment {
     fn default() -> Self {
-        Self::new(Theme::light_default())
+        Self::new(crate::presets::intui::light())
     }
 }
 

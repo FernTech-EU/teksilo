@@ -146,11 +146,11 @@ impl Widget for Toolbar {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn toolbar_builds() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let tb = tree.add(Toolbar::new());
         tree.layout(SizeProposal::exact(400.0, 50.0));
         let b = tree.bounds(tb);
@@ -160,7 +160,7 @@ mod tests {
     #[test]
     fn toolbar_with_children() {
         use crate::Button;
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let btn = tree.add(Button::new_literal("Action"));
         let tb = tree.add(Toolbar::new().add_child(btn));
         tree.layout(SizeProposal::exact(400.0, 50.0));
@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn toolbar_accessibility() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let tb = tree.add(Toolbar::new());
         tree.layout(SizeProposal::exact(400.0, 50.0));
         let info = tree.accessibility_node(tb);
@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn toolbar_custom_label_overrides_default() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let tb = tree.add(Toolbar::new().label_literal("Formatting"));
         tree.layout(SizeProposal::exact(400.0, 50.0));
         let info = tree.accessibility_node(tb);
@@ -192,7 +192,7 @@ mod tests {
 
     #[test]
     fn toolbar_has_no_group_wrapper_in_a11y_tree() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let _tb = tree.add(Toolbar::new());
         tree.layout(SizeProposal::exact(400.0, 50.0));
         let update = tree.sync_accessibility();

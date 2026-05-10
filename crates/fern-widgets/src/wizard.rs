@@ -928,7 +928,7 @@ mod tests {
     use fern_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
     use fern_core::widget_tree::WidgetTree;
     use fern_core::{ModalContent, ModalPresentation};
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
@@ -945,7 +945,7 @@ mod tests {
 
     #[test]
     fn wizard_queues_modal_request() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(
             Wizard::new_literal("Open wizard")
                 .step(WizardStep::new_literal("Details").content(|| FixedLeaf(220.0, 120.0))),
@@ -978,7 +978,7 @@ mod tests {
         let finished = Rc::new(RefCell::new(false));
         let finished_flag = finished.clone();
 
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let trigger = tree.add(Button::new_literal("Anchor"));
         tree.add(
             Wizard::new_literal("Launch")
@@ -1053,7 +1053,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "requires .content(...)")]
     fn wizard_step_without_content_panics_on_modal_build() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Wizard::new_literal("Open wizard").step(WizardStep::new_literal("Details")));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 

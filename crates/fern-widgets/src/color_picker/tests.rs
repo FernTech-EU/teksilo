@@ -8,7 +8,8 @@ use fern_core::accesskit::Role;
 use fern_core::event::{Key, Modifiers};
 use fern_core::signal::Signal;
 use fern_core::widget_tree::WidgetTree;
-use fern_tokens::{Color, Theme};
+use fern_core::Theme;
+use fern_tokens::Color;
 
 use super::*;
 use crate::color_picker::alpha_strip::AlphaStrip;
@@ -21,7 +22,7 @@ use crate::color_picker::swatch_grid::SwatchGrid;
 #[test]
 fn builds_with_default_options() {
     let value = Signal::new(Color::RED);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(ColorPicker::new(value));
     tree.layout(SizeProposal::exact(800.0, 600.0));
     // No panic = pass; assert the root has bounds.
@@ -33,7 +34,7 @@ fn builds_with_default_options() {
 #[test]
 fn builds_with_alpha_enabled() {
     let value = Signal::new(Color::from_rgba(1.0, 0.0, 0.0, 0.5));
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(ColorPicker::new(value).alpha_enabled(true));
     tree.layout(SizeProposal::exact(800.0, 600.0));
 }
@@ -41,7 +42,7 @@ fn builds_with_alpha_enabled() {
 #[test]
 fn builds_with_compact_layout() {
     let value = Signal::new(Color::BLUE);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(ColorPicker::new(value).layout(ColorPickerLayout::Compact));
     tree.layout(SizeProposal::exact(400.0, 400.0));
 }
@@ -49,7 +50,7 @@ fn builds_with_compact_layout() {
 #[test]
 fn builds_with_wide_layout() {
     let value = Signal::new(Color::GREEN);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         ColorPicker::new(value)
             .alpha_enabled(true)
@@ -62,7 +63,7 @@ fn builds_with_wide_layout() {
 #[test]
 fn builds_with_nullable_value() {
     let value: Signal<Option<Color>> = Signal::new(Some(Color::RED));
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(ColorPicker::nullable(value));
     tree.layout(SizeProposal::exact(800.0, 600.0));
 }
@@ -70,7 +71,7 @@ fn builds_with_nullable_value() {
 #[test]
 fn builds_with_nullable_none() {
     let value: Signal<Option<Color>> = Signal::new(None);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(ColorPicker::nullable(value));
     tree.layout(SizeProposal::exact(800.0, 600.0));
 }
@@ -78,7 +79,7 @@ fn builds_with_nullable_none() {
 #[test]
 fn root_accessibility_emits_group_role() {
     let value = Signal::new(Color::RED);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(ColorPicker::new(value));
     tree.layout(SizeProposal::exact(800.0, 600.0));
     let node = tree.accessibility_node(id);
@@ -89,7 +90,7 @@ fn root_accessibility_emits_group_role() {
 fn setting_red_preserves_alpha() {
     let value = Signal::new(Color::from_rgba(0.5, 0.5, 0.5, 0.8));
     // ColorComponents must run inside a widget build to register effects.
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(ColorPicker::new(value.clone()).alpha_enabled(true));
     tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -106,7 +107,7 @@ fn signal_drives_picker_components() {
     // BuildContext (effect registration), which we get by building any
     // widget that uses it.
     let value = Signal::new(Color::from_rgba(1.0, 0.0, 0.5, 1.0));
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(ColorPicker::new(value.clone()));
     tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -157,7 +158,7 @@ fn color_components_red_setter_writes_back() {
 
     let value = Signal::new(Color::from_rgb(0.1, 0.2, 0.3));
     let captured: Rc<RefCell<Option<Rc<dyn Fn(f32)>>>> = Rc::new(RefCell::new(None));
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(Probe {
         value: value.clone(),
         captured: captured.clone(),
@@ -181,7 +182,7 @@ fn hue_strip_emits_slider_with_correct_range() {
         Rc::new(move |h| hue.set(h))
     };
     let dragging = Rc::new(std::cell::Cell::new(false));
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(HueStrip::new(hue.clone(), setter, dragging).label("Hue"));
     tree.layout(SizeProposal::exact(20.0, 200.0));
     let node = tree.accessibility_node(id);
@@ -197,7 +198,7 @@ fn alpha_strip_emits_slider() {
         Rc::new(move |a| alpha.set(a))
     };
     let dragging = Rc::new(std::cell::Cell::new(false));
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(AlphaStrip::new(color, alpha, setter, dragging).label("Opacity"));
     tree.layout(SizeProposal::exact(20.0, 200.0));
     let node = tree.accessibility_node(id);
@@ -212,7 +213,7 @@ fn hue_strip_keyboard_steps() {
         Rc::new(move |h| hue.set(h))
     };
     let dragging = Rc::new(std::cell::Cell::new(false));
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(HueStrip::new(hue.clone(), setter, dragging));
     tree.layout(SizeProposal::exact(20.0, 200.0));
     tree.focus(id);
@@ -228,7 +229,7 @@ fn hue_strip_keyboard_steps() {
 
 #[test]
 fn swatch_emits_color_well_with_color_value() {
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(ColorSwatch::new(Color::RED));
     tree.layout(SizeProposal::exact(40.0, 40.0));
     let node = tree.accessibility_node(id);
@@ -240,7 +241,7 @@ fn swatch_grid_emits_grid_role() {
     let swatches = Signal::new(vec![Color::RED, Color::GREEN, Color::BLUE]);
     let selected = Signal::new(Color::RED);
     let on_select: Rc<dyn Fn(Color, &mut fern_core::widget::EventContext)> = Rc::new(|_, _| {});
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(SwatchGrid::new(swatches, selected, 6, on_select));
     tree.layout(SizeProposal::exact(400.0, 200.0));
     let node = tree.accessibility_node(id);
@@ -254,7 +255,7 @@ fn hsv_canvas_emits_placeholder_role() {
     let val = Signal::new(1.0_f32);
     let set_hsv: Rc<dyn Fn(f32, f32, f32)> = Rc::new(|_, _, _| {});
     let dragging = Rc::new(std::cell::Cell::new(false));
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(HsvCanvas::new(hue, sat, val, set_hsv, dragging));
     tree.layout(SizeProposal::exact(224.0, 192.0));
     let node = tree.accessibility_node(id);
@@ -275,7 +276,7 @@ fn default_swatches_palette_has_twelve_colors() {
 fn color_edit_builds_with_default_options() {
     use crate::color_edit::ColorEdit;
     let value = Signal::new(Color::RED);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(ColorEdit::new(value));
     tree.layout(SizeProposal::exact(200.0, 40.0));
     let bounds = tree.bounds(id);
@@ -286,7 +287,7 @@ fn color_edit_builds_with_default_options() {
 fn color_edit_builds_nullable() {
     use crate::color_edit::ColorEdit;
     let value: Signal<Option<Color>> = Signal::new(None);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(ColorEdit::nullable(value));
     tree.layout(SizeProposal::exact(200.0, 40.0));
 }
@@ -299,7 +300,7 @@ fn color_edit_emits_button_role() {
     // descendant to find the trigger and check its role.
     use crate::color_edit::ColorEdit;
     let value = Signal::new(Color::from_hex("#3584E4"));
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(ColorEdit::new(value));
     tree.layout(SizeProposal::exact(200.0, 40.0));
     let trigger = tree
@@ -318,7 +319,7 @@ fn external_value_change_propagates_through_picker() {
     // can confirm the bridge `Signal<u8>` cells move by walking the
     // value→bridge effect chain.
     let value = Signal::new(Color::from_rgba(0.0, 0.0, 0.0, 1.0));
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         ColorPicker::new(value.clone())
             .alpha_enabled(true)
@@ -341,7 +342,7 @@ fn external_value_change_propagates_through_picker() {
 fn color_edit_clicking_trigger_opens_popover() {
     use crate::color_edit::ColorEdit;
     let value = Signal::new(Color::BLUE);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(ColorEdit::new(value));
     tree.layout(SizeProposal::exact(200.0, 40.0));
     tree.render(); // cache bounds for tap
@@ -371,7 +372,7 @@ fn color_picker_footer_invokes_done_callback() {
     use std::cell::Cell;
     use std::rc::Rc;
     let value = Signal::new(Color::RED);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let calls = Rc::new(Cell::new(0_u32));
     let calls_for_picker = calls.clone();
     let picker_id = tree.add(
@@ -403,7 +404,7 @@ fn color_edit_cancel_restores_value_to_open_time_snapshot() {
     // the value that was bound at popover-open time (RED).
     use crate::color_edit::ColorEdit;
     let value = Signal::new(Color::RED);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(ColorEdit::new(value.clone()));
     tree.layout(SizeProposal::exact(200.0, 40.0));
     tree.render();

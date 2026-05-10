@@ -188,11 +188,11 @@ mod tests {
     use super::*;
     use crate::primitives::TextWidget;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn cycle_builds_with_children() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             Cycle::new()
                 .child(TextWidget::new_literal("A"))
@@ -206,7 +206,7 @@ mod tests {
 
     #[test]
     fn empty_cycle_is_safe() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Cycle::new());
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let _ = tree.render();
@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn single_child_cycle_does_not_animate() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Cycle::new().child(TextWidget::new_literal("only")));
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let _ = tree.render();
@@ -226,7 +226,7 @@ mod tests {
 
     #[test]
     fn reduced_motion_pins_first_child() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.set_accessibility_preferences(false, true, 1.0);
         tree.add(
             Cycle::new()

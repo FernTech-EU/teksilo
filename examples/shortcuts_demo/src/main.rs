@@ -35,9 +35,9 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                Theme::dark_default()
+                fern_ui::presets::intui::dark()
             } else {
-                Theme::light_default()
+                fern_ui::presets::intui::light()
             });
         }),
     ))
@@ -419,7 +419,7 @@ impl Widget for Root {
 fn main() {
     FernAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(Theme::light_default())
+        .theme(fern_ui::presets::intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("FernUI — Shortcuts Demo")
@@ -552,7 +552,7 @@ mod dispatch_tests {
         // the Root so our log-actions live on the outer root widget.
         let log: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
 
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_ui::presets::intui::light());
         // Add Root (installs its own Actions on the Root node).
         let _ = tree.add(Root::new());
         tree.layout(SizeProposal::exact(1100.0, 720.0));

@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use fern_canvas::{Canvas, Point, Rect, RenderFrame, SizeProposal};
-use fern_tokens::Theme;
+use crate::styles::Theme;
 
 use crate::arena::WidgetArena;
 use crate::event::{EventResponse, Key, Modifiers, PointerButton, WidgetEvent};
@@ -315,7 +315,7 @@ struct PendingDelayedOverlay {
 
 impl WidgetTree {
     pub fn new() -> Self {
-        let initial_theme = Theme::light_default();
+        let initial_theme = crate::presets::intui::light();
         Self {
             arena: WidgetArena::new(),
             theme: initial_theme.clone(),
@@ -815,7 +815,7 @@ impl WidgetTree {
         // `TextInputField` resetting the rich-text engine's default
         // text colour) would otherwise see the constructor's
         // `light_default()` initial value forever, even when
-        // `FernAppBuilder.theme(Theme::dark_default())` was used.
+        // `FernAppBuilder.theme(crate::presets::intui::dark())` was used.
         // `set_theme` already does this; `with_theme` was the
         // builder-time analogue that forgot to keep them aligned.
         self.theme = theme.clone();
@@ -2069,7 +2069,7 @@ impl WidgetTree {
     pub fn set_theme_override(
         &mut self,
         id: WidgetId,
-        f: impl Fn(&mut fern_tokens::Theme) + 'static,
+        f: impl Fn(&mut crate::styles::Theme) + 'static,
     ) {
         let had_override = self
             .arena
@@ -2086,7 +2086,7 @@ impl WidgetTree {
     }
 
     /// Get the resolved theme for a specific widget (applying ancestor overrides).
-    pub fn resolved_theme(&self, id: WidgetId) -> fern_tokens::Theme {
+    pub fn resolved_theme(&self, id: WidgetId) -> crate::styles::Theme {
         self.arena.resolve_theme(id, &self.theme)
     }
 }

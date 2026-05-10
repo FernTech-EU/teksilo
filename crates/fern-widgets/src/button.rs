@@ -877,7 +877,7 @@ mod tests {
     use super::*;
     use fern_core::event::{Modifiers, WidgetEvent};
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -887,7 +887,7 @@ mod tests {
         // consumes Enter's KeyDown (dismissing the modal and restoring
         // focus to the trigger button), the trailing KeyUp must not
         // re-activate the trigger.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let fired = Rc::new(Cell::new(0_u32));
         let fired_for_btn = fired.clone();
         let btn = tree.add(Button::new_literal("T").on_activate_fn(move |_ctx| {
@@ -930,7 +930,7 @@ mod tests {
         // signal changes — without rebuilding the parent.
         use fern_core::accessibility::widget_id_to_node_id;
         let label = Signal::new("May 2026".to_string());
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             Button::new_literal("")
                 .bind_label(label.clone())
@@ -971,7 +971,7 @@ mod tests {
         // would otherwise mask the slot contribution on the plain
         // button.
         use crate::primitives::MinSize;
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let plain = tree.add(Button::new_literal("X").on_activate_fn(|_| {}));
         let with_slots = tree.add(
             Button::new_literal("X")
@@ -995,7 +995,7 @@ mod tests {
         // tab-specific `primary_click_activates_tab_secondary_does_not`
         // regression to every widget that wires `on_tap`.
         use fern_core::event::PointerButton;
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let fired = Rc::new(Cell::new(0_u32));
         let fired_for_btn = fired.clone();
         let btn = tree.add(Button::new_literal("T").on_activate_fn(move |_ctx| {
@@ -1025,7 +1025,7 @@ mod tests {
         // activates.
         use fern_core::event::{ButtonMask, PointerButton};
         use fern_core::widget_builder::WidgetBuilder;
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let fired = Rc::new(Cell::new(0_u32));
         let fired_for_btn = fired.clone();
         let btn = tree.add(
@@ -1065,7 +1065,7 @@ mod tests {
         use fern_core::accesskit::Role;
         use fern_core::widget_builder::WidgetBuilder;
         use fern_tokens::Color;
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             Button::new_literal("Pick")
                 .leading(ColorSwatch::new(Color::RED).access_hidden(true))

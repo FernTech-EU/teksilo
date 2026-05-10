@@ -357,14 +357,14 @@ mod tests {
     use super::*;
     use crate::primitives::TextWidget;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn starts_visible_when_signal_true_emits_identity_skip() {
         // Initial visible=true → progress=1 → scale matrix = identity →
         // walker should NOT emit a PushTransform pair (identity skip).
         let visible = Signal::new(true);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Scale::new(visible).child(TextWidget::new_literal("hello")));
         tree.layout(SizeProposal {
             width: Some(200.0),
@@ -389,7 +389,7 @@ mod tests {
         // factor 0 (degenerate). PushTransform should emit with that
         // matrix.
         let visible = Signal::new(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Scale::new(visible).child(TextWidget::new_literal("hello")));
         tree.layout(SizeProposal {
             width: Some(200.0),
@@ -415,7 +415,7 @@ mod tests {
         // With reflow=true, the wrapper's bounds shrink as progress
         // ticks toward 0.
         let visible = Signal::new(true);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             Scale::new(visible.clone())
                 .reflow(true)
@@ -460,7 +460,7 @@ mod tests {
         // Default (reflow=false): wrapper bounds stay at natural at
         // all progress values; only the visual scales.
         let visible = Signal::new(true);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             Scale::new(visible.clone())
                 .duration(Duration::from_millis(100))
@@ -492,7 +492,7 @@ mod tests {
     #[test]
     fn reduced_motion_snaps_scale() {
         let visible = Signal::new(true);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.set_accessibility_preferences(false, true, 1.0);
         tree.add(Scale::new(visible.clone()).child(TextWidget::new_literal("x")));
         tree.layout(SizeProposal {

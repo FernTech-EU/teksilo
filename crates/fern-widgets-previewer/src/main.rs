@@ -155,7 +155,7 @@ mod tests {
     fn every_catalog_variant_lays_out_without_panic() {
         use fern_canvas::SizeProposal;
         use fern_core::widget_tree::WidgetTree;
-        use fern_tokens::Theme;
+        use fern_core::Theme;
 
         let mut failures: Vec<String> = Vec::new();
         for entry in iter_entries() {
@@ -168,7 +168,7 @@ mod tests {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let knobs = fern_preview::KnobValues::from_spec(&entry.knobs(), None);
                     let widget = entry.build(variant.name(), &knobs);
-                    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+                    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
                     let _ = tree.add_boxed(widget);
                     tree.layout(SizeProposal::exact(800.0, 600.0));
                 }));

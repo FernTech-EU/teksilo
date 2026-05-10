@@ -4,10 +4,10 @@ use crate::common::datetime::Date;
 use fern_canvas::SizeProposal;
 use fern_core::signal::Signal;
 use fern_core::widget_tree::WidgetTree;
-use fern_tokens::Theme;
+use fern_core::Theme;
 
 fn light_tree() -> WidgetTree {
-    WidgetTree::new().with_theme(Theme::light_default())
+    WidgetTree::new().with_theme(fern_core::presets::intui::light())
 }
 
 #[test]

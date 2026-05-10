@@ -343,12 +343,12 @@ impl Widget for Accordion {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn accordion_builds_collapsed() {
         let expanded = Signal::new(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let acc = tree.add(Accordion::new_literal("Section", expanded.clone()));
         tree.layout(SizeProposal::exact(300.0, 200.0));
         let b = tree.bounds(acc);
@@ -358,7 +358,7 @@ mod tests {
     #[test]
     fn click_toggles_expanded_state() {
         let expanded = Signal::new(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let acc = tree.add(Accordion::new_literal("Section", expanded.clone()));
         tree.layout(SizeProposal::exact(300.0, 200.0));
 
@@ -372,7 +372,7 @@ mod tests {
     fn accordion_with_content() {
         use crate::primitives::TextWidget;
         let expanded = Signal::new(true);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let content = tree.add(TextWidget::new_literal("Content text"));
         let acc = tree.add(Accordion::new_literal("Details", expanded.clone()).content_id(content));
         tree.layout(SizeProposal::exact(300.0, 200.0));
@@ -383,7 +383,7 @@ mod tests {
     #[test]
     fn accessibility() {
         let expanded = Signal::new(true);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let acc = tree.add(Accordion::new_literal("Details", expanded));
         tree.layout(SizeProposal::exact(300.0, 200.0));
         let info = tree.accessibility_node(acc);
@@ -400,7 +400,7 @@ mod tests {
         use std::time::Duration;
 
         let expanded = Signal::new(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let content = tree.add(TextWidget::new_literal("Some content"));
         let acc = tree.add(Accordion::new_literal("Section", expanded.clone()).content_id(content));
         tree.layout(SizeProposal {
@@ -431,7 +431,7 @@ mod tests {
         use std::time::Duration;
 
         let expanded = Signal::new(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let content = tree.add(TextWidget::new_literal("Some content"));
         let acc = tree.add(Accordion::new_literal("Section", expanded.clone()).content_id(content));
         tree.layout(SizeProposal {
@@ -472,7 +472,7 @@ mod tests {
         use std::time::Duration;
 
         let expanded = Signal::new(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let content = tree.add(TextWidget::new_literal("Some content text here"));
         let acc = tree.add(Accordion::new_literal("Section", expanded.clone()).content_id(content));
         tree.layout(SizeProposal {

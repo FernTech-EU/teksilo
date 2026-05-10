@@ -95,7 +95,7 @@ impl Card {
         self
     }
 
-    fn resolve_padding(&self, theme: &fern_tokens::Theme) -> f32 {
+    fn resolve_padding(&self, theme: &fern_core::Theme) -> f32 {
         self.padding
             .as_ref()
             .map(|p| p.get())
@@ -264,7 +264,7 @@ impl Widget for Card {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
@@ -280,7 +280,7 @@ mod tests {
 
     #[test]
     fn card_renders_shadow_and_background() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let _content = tree.add(FixedLeaf(100.0, 50.0));
         tree.add(Card::new().content(FixedLeaf(100.0, 50.0)));
         tree.layout(SizeProposal::exact(200.0, 200.0));
@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     fn card_with_header_and_content() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(
             Card::new()
                 .header(FixedLeaf(100.0, 30.0))

@@ -4,7 +4,7 @@ use fern_canvas::SizeProposal;
 use fern_core::event::{Key, Modifiers};
 use fern_core::signal::Signal;
 use fern_core::widget_tree::WidgetTree;
-use fern_tokens::theme::Theme;
+use fern_core::Theme;
 
 use super::{SpinBox, StepType, WheelMode, WrapMode};
 
@@ -20,7 +20,7 @@ fn setup_int(
     max: i32,
 ) -> (WidgetTree, Signal<i32>, fern_core::widget_id::WidgetId) {
     let value = Signal::new(initial);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(SpinBox::new(value.clone(), min, max));
     tree.layout(SizeProposal::exact(300.0, 60.0));
     tick(&mut tree);
@@ -47,7 +47,7 @@ fn constructs_and_lays_out() {
 #[test]
 fn builder_chains_compile() {
     let value = Signal::new(50.0_f64);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let _id = tree.add(
         SpinBox::new(value, 0.0, 100.0)
             .single_step(0.5)
@@ -92,7 +92,7 @@ fn arrow_down_decrements() {
 #[test]
 fn page_up_uses_page_step() {
     let value = Signal::new(10_i32);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(SpinBox::new(value.clone(), 0, 100).page_step(25));
     tree.layout(SizeProposal::exact(300.0, 60.0));
     tick(&mut tree);
@@ -105,7 +105,7 @@ fn page_up_uses_page_step() {
 #[test]
 fn page_step_defaults_to_ten_times_single_step() {
     let value = Signal::new(10_i32);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(SpinBox::new(value.clone(), 0, 1000).single_step(3));
     tree.layout(SizeProposal::exact(300.0, 60.0));
     tick(&mut tree);
@@ -142,7 +142,7 @@ fn clamp_mode_blocks_below_min() {
 #[test]
 fn wrap_mode_wraps_past_max() {
     let value = Signal::new(9_i32);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(SpinBox::new(value.clone(), 0, 9).wrap_mode(WrapMode::Wrap));
     tree.layout(SizeProposal::exact(300.0, 60.0));
     tick(&mut tree);
@@ -155,7 +155,7 @@ fn wrap_mode_wraps_past_max() {
 #[test]
 fn wrap_mode_wraps_past_min() {
     let value = Signal::new(0_i32);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(SpinBox::new(value.clone(), 0, 9).wrap_mode(WrapMode::Wrap));
     tree.layout(SizeProposal::exact(300.0, 60.0));
     tick(&mut tree);
@@ -170,7 +170,7 @@ fn wrap_mode_wraps_past_min() {
 #[test]
 fn read_only_blocks_keyboard_step() {
     let value = Signal::new(10_i32);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(SpinBox::new(value.clone(), 0, 100).read_only(true));
     tree.layout(SizeProposal::exact(300.0, 60.0));
     tick(&mut tree);
@@ -186,7 +186,7 @@ fn read_only_blocks_keyboard_step() {
 fn adaptive_step_scales_to_magnitude() {
     // value ∈ [100, 999) → step = 100
     let value = Signal::new(250_i32);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(
         SpinBox::new(value.clone(), 0, 10_000)
             .single_step(1)
@@ -203,7 +203,7 @@ fn adaptive_step_scales_to_magnitude() {
 #[test]
 fn adaptive_step_small_values_use_base_step() {
     let value = Signal::new(3_i32);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(
         SpinBox::new(value.clone(), 0, 1000)
             .single_step(1)
@@ -222,7 +222,7 @@ fn adaptive_step_small_values_use_base_step() {
 #[test]
 fn external_value_set_reformats_text() {
     let value = Signal::new(0_i32);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let _id = tree.add(SpinBox::new(value.clone(), 0, 100));
     tree.layout(SizeProposal::exact(300.0, 60.0));
     tick(&mut tree);
@@ -257,7 +257,7 @@ fn disabled_blocks_keyboard_step() {
     // do guarantee is that the step paths short-circuit when
     // `enabled = false`; the value signal stays put.
     let value = Signal::new(10_i32);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(SpinBox::new(value.clone(), 0, 100).enabled(false));
     tree.layout(SizeProposal::exact(300.0, 60.0));
     tick(&mut tree);
@@ -278,7 +278,7 @@ fn disabled_blocks_keyboard_step() {
 #[test]
 fn float_type_formats_with_decimals() {
     let value = Signal::new(0.25_f64);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let _id = tree.add(
         SpinBox::new(value.clone(), 0.0, 1.0)
             .single_step(0.05)
@@ -295,7 +295,7 @@ fn float_type_formats_with_decimals() {
 #[test]
 fn float_arrow_steps_by_single_step() {
     let value = Signal::new(0.5_f32);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(
         SpinBox::new(value.clone(), 0.0, 1.0)
             .single_step(0.1)
@@ -318,7 +318,7 @@ fn on_value_changed_fires_on_step() {
     let value = Signal::new(0_i32);
     let fired = Rc::new(Cell::new(0_i32));
     let c = fired.clone();
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id =
         tree.add(SpinBox::new(value.clone(), 0, 100).on_value_changed(move |v, _ctx| c.set(v)));
     tree.layout(SizeProposal::exact(300.0, 60.0));
@@ -337,7 +337,7 @@ fn hidden_buttons_still_step_via_keyboard() {
     // (and wheel) must still work.
     use super::ButtonLayout;
     let value = Signal::new(10_i32);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(SpinBox::new(value.clone(), 0, 100).button_layout(ButtonLayout::Hidden));
     tree.layout(SizeProposal::exact(300.0, 60.0));
     tick(&mut tree);
@@ -353,7 +353,7 @@ fn show_buttons_sugar_matches_button_layout() {
     // Both builders must produce the same behavior.
     let a = Signal::new(0_i32);
     let b = Signal::new(0_i32);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let ia = tree.add(SpinBox::new(a.clone(), 0, 10).show_buttons(false));
     let ib = tree.add(SpinBox::new(b.clone(), 0, 10).button_layout(ButtonLayout::Hidden));
     tree.layout(SizeProposal::exact(300.0, 120.0));
@@ -388,7 +388,7 @@ fn show_buttons_sugar_matches_button_layout() {
 #[test]
 fn suffix_and_special_value_text_build() {
     let value = Signal::new(0_i32);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let _id = tree.add(
         SpinBox::new(value, 0, 60)
             .suffix(" s")
@@ -403,7 +403,7 @@ fn suffix_and_special_value_text_build() {
 #[test]
 fn a11y_numeric_value_matches_signal() {
     let value = Signal::new(42_i32);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(SpinBox::new(value.clone(), 0, 100).single_step(2));
     tree.layout(SizeProposal::exact(300.0, 60.0));
     tick(&mut tree);
@@ -434,7 +434,7 @@ fn a11y_numeric_value_matches_signal() {
 #[test]
 fn a11y_name_uses_label() {
     let value = Signal::new(0_i32);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(SpinBox::new(value, 0, 100).label("Font size"));
     tree.layout(SizeProposal::exact(300.0, 60.0));
     tick(&mut tree);
@@ -466,7 +466,7 @@ fn a11y_name_uses_label() {
 #[test]
 fn reactive_suffix_survives_value_transitions() {
     let value = Signal::new(0_i32);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(
         SpinBox::new(value.clone(), 0, 3600)
             .suffix(" s")

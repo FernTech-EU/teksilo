@@ -193,11 +193,11 @@ mod tests {
     use fern_canvas::SizeProposal;
     use fern_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn tooltip_widget_emits_shadow() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let _ = tree.add(TooltipWidget::new_literal("hello"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let frame = tree.render();
@@ -212,7 +212,7 @@ mod tests {
         // End-to-end-ish: anchor + tooltip overlay with a fade scope
         // applied (the production overlay path). Shadow must still
         // land in the rendered frame.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let anchor = tree.add(TooltipWidget::new_literal("anchor"));
         let tip = tree.add(TooltipWidget::new_literal("hello"));
         tree.set_dormant(tip);

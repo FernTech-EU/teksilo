@@ -101,7 +101,7 @@ impl Panel {
         self
     }
 
-    fn resolve_padding(&self, theme: &fern_tokens::Theme) -> f32 {
+    fn resolve_padding(&self, theme: &fern_core::Theme) -> f32 {
         self.padding
             .as_ref()
             .map(|p| p.get())
@@ -245,7 +245,7 @@ impl Widget for Panel {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
@@ -261,7 +261,7 @@ mod tests {
 
     #[test]
     fn panel_adds_padding_to_child_size() {
-        let theme = Theme::light_default();
+        let theme = fern_core::presets::intui::light();
         let mut tree = WidgetTree::new().with_theme(theme.clone());
         let child = tree.add(FixedLeaf(80.0, 40.0));
         let panel = tree.add(Panel::new().padding(10.0).child_id(child));
@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn panel_child_positioned_with_padding() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let child = tree.add(FixedLeaf(80.0, 40.0));
         let _panel = tree.add(Panel::new().padding(12.0).child_id(child));
         tree.layout(SizeProposal::exact(200.0, 100.0));
@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     fn panel_paints_background() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let child = tree.add(FixedLeaf(50.0, 30.0));
         let _panel = tree.add(
             Panel::new()

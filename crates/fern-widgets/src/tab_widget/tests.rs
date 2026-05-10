@@ -9,7 +9,7 @@ use fern_core::widget::{LayoutContext, LayoutResponse, Widget};
 use fern_core::widget_id::WidgetId;
 use fern_core::widget_tree::WidgetTree;
 use fern_data::ListModel;
-use fern_tokens::Theme;
+use fern_core::Theme;
 
 use crate::tab_widget::{
     TabBar, TabBarOrientation, TabDelegate, TabHandle, TabId, TabInfo, TabSizing, TabWidget,
@@ -76,7 +76,7 @@ fn label(s: &str) -> fern_i18n::LocalizedString {
 #[test]
 fn static_only_widget_builds_without_panic() {
     let selected: Signal<Option<TabId>> = Signal::new(None);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TabWidget::new(selected.clone())
             .static_tab(
@@ -96,7 +96,7 @@ fn static_only_widget_builds_without_panic() {
 #[test]
 fn static_tab_initial_selection_lands_on_first_tab() {
     let selected: Signal<Option<TabId>> = Signal::new(None);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TabWidget::new(selected.clone())
             .static_tab(TabInfo::new().title(label("A")), FixedLeaf(120.0, 48.0))
@@ -125,7 +125,7 @@ fn static_tabs_dormancy_preserved_across_switches() {
 
     let first_builds = Rc::new(Cell::new(0));
     let second_builds = Rc::new(Cell::new(0));
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TabWidget::new(selected.clone())
             .static_tab_with_id(
@@ -177,7 +177,7 @@ fn static_tab_pane_survives_dynamic_model_push() {
     let static_builds = Rc::new(Cell::new(0));
     let model: ListModel<TabHandle> = ListModel::new();
 
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TabWidget::new(selected.clone())
             .static_tab(
@@ -225,7 +225,7 @@ fn static_tab_id_survives_rebuild() {
     // referring to that id across rebuilds.
     let selected: Signal<Option<TabId>> = Signal::new(None);
     let model: ListModel<TabHandle> = ListModel::new();
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let content_id = tree.add(FixedLeaf(120.0, 48.0));
     tree.add(
         TabWidget::new(selected.clone())
@@ -301,7 +301,7 @@ fn bar_trailing_slot_survives_rebuild() {
     // memoization the slot's WidgetId must remain reachable.
     let selected: Signal<Option<TabId>> = Signal::new(None);
     let model: ListModel<TabHandle> = ListModel::new();
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
 
     #[derive(Debug)]
     struct MarkerLeaf;
@@ -378,7 +378,7 @@ fn dynamic_tab_pane_state_survives_reorder() {
     let factory_calls: Rc<Cell<usize>> = Rc::new(Cell::new(0));
     let fc = factory_calls.clone();
 
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TabWidget::new(selected.clone())
             .dynamic_tab::<()>("doc", move |_h, _s| {
@@ -432,7 +432,7 @@ fn reorder_preserves_selected_id() {
         TabHandle::dynamic(id_c, "doc", TabInfo::new().title(label("C")), ()),
     ]);
 
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TabWidget::new(selected.clone())
             .dynamic_tab::<()>("doc", |_h, _s| {
@@ -487,7 +487,7 @@ fn dynamic_pane_dropped_when_tab_removed() {
 
     let factory_calls: Rc<Cell<usize>> = Rc::new(Cell::new(0));
     let fc = factory_calls.clone();
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TabWidget::new(selected.clone())
             .dynamic_tab::<()>("doc", move |_h, _s| {
@@ -544,7 +544,7 @@ fn locale_change_retitles_live_tabs() {
     let selected: Signal<Option<TabId>> = Signal::new(None);
     let title: LocalizedString = localized(|| resolve_message("tab-greeting", &[]));
 
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TabWidget::new(selected.clone())
             .static_tab(TabInfo::new().title(title), FixedLeaf(120.0, 48.0))
@@ -618,7 +618,7 @@ fn cross_boundary_default_reorder_silently_dropped() {
         .filter_map(|i| model.with_item(i, |h| h.id))
         .collect();
 
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let widget_id = tree.add(
         TabWidget::new(selected)
             .static_tab_with_id(
@@ -675,7 +675,7 @@ fn on_pin_toggle_handler_fires_with_tab_id() {
 
     let captured: Rc<Cell<Option<(TabId, bool)>>> = Rc::new(Cell::new(None));
     let cap = captured.clone();
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let widget_id = tree.add(
         TabWidget::new(selected)
             .dynamic_tab::<()>("doc", |_h, _s| {
@@ -713,7 +713,7 @@ fn empty_model_after_close_drains_selection() {
         (),
     )]);
 
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let widget_id = tree.add(
         TabWidget::new(selected.clone())
             .dynamic_tab::<()>("doc", |_h, _s| {
@@ -741,7 +741,7 @@ fn empty_model_after_close_drains_selection() {
 #[test]
 fn static_tab_disabled_skipped_by_arrow_keys() {
     let selected: Signal<Option<TabId>> = Signal::new(None);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TabWidget::new(selected.clone())
             .static_tab(TabInfo::new().title(label("A")), FixedLeaf(120.0, 48.0))
@@ -826,7 +826,7 @@ fn dynamic_tab_factory_dispatches_on_kind() {
     let dc = doc_calls.clone();
     let ic = img_calls.clone();
 
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TabWidget::new(selected)
             .dynamic_tab::<DocState>("plain-text-doc", move |_h, _s| {
@@ -851,7 +851,7 @@ fn dynamic_tab_factory_dispatches_on_kind() {
 fn dynamic_model_push_triggers_rebuild_with_new_tab() {
     let selected: Signal<Option<TabId>> = Signal::new(None);
     let model: ListModel<TabHandle> = ListModel::new();
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TabWidget::new(selected.clone())
             .dynamic_tab::<DocState>("plain-text-doc", |_h, _s| {
@@ -905,7 +905,7 @@ fn dynamic_default_close_removes_from_model() {
     ]);
     let model_for_assert = model.clone();
 
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let widget_id = tree.add(
         TabWidget::new(selected.clone())
             .dynamic_tab::<()>("doc", |_h, _s| {
@@ -943,7 +943,7 @@ fn primary_click_activates_tab_secondary_does_not() {
     let selected: Signal<Option<TabId>> = Signal::new(None);
     let id_a = TabId::fresh();
     let id_b = TabId::fresh();
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let widget_id = tree.add(
         TabWidget::new(selected.clone())
             .static_tab_with_id(
@@ -1026,7 +1026,7 @@ fn explicit_on_close_receives_tab_id() {
     let captured: Rc<Cell<Option<TabId>>> = Rc::new(Cell::new(None));
     let cap = captured.clone();
 
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let widget_id = tree.add(
         TabWidget::new(selected.clone())
             .dynamic_tab::<()>("doc", |_h, _s| {
@@ -1065,7 +1065,7 @@ fn payload_kind_mismatch_panics_with_clear_message() {
         }, // wrong kind!
     )]);
 
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TabWidget::new(selected)
             // Register "image" with payload type ImageState.
@@ -1095,7 +1095,7 @@ fn static_then_dynamic_renders_in_order() {
         },
     )]);
 
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let widget_id = tree.add(
         TabWidget::new(selected)
             .static_tab(
@@ -1158,7 +1158,7 @@ fn tab_bar_shared_sizing_divides_viewport_equally() {
     ]);
     let delegate =
         TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let bar_id = tree.add(
         TabBar::horizontal(model, delegate, selected, |_, h: &TabHandle| h.id)
             .tab_sizing(TabSizing::Shared)
@@ -1207,7 +1207,7 @@ fn pinned_tab_renders_in_leading_strip() {
         TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")))
             .pinned(|_, h: &TabHandle| h.info.pinned);
 
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let bar_id = tree.add(
         TabBar::horizontal(model, delegate, selected, |_, h: &TabHandle| h.id)
             .pinned_tab_width(36.0)
@@ -1280,7 +1280,7 @@ fn vertical_bar_lays_out_pills_top_to_bottom() {
     let delegate =
         TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
 
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let bar_id = tree.add(
         TabBar::vertical(model, delegate, selected, |_, h: &TabHandle| h.id)
             .show_scroll_arrows(false)
@@ -1312,7 +1312,7 @@ fn vertical_shared_sizing_uses_intrinsic_pill_height() {
     ]);
     let delegate =
         TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
-    let theme = Theme::light_default();
+    let theme = fern_core::presets::intui::light();
     let intrinsic = theme.components.tab.editor_tab_height;
     let mut tree = WidgetTree::new().with_theme(theme);
     let bar_id = tree.add(
@@ -1347,7 +1347,7 @@ fn vertical_shared_sizing_uses_intrinsic_pill_height() {
 #[test]
 fn tab_widget_vertical_compose_lays_bar_on_leading_edge() {
     let selected: Signal<Option<TabId>> = Signal::new(None);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let widget_id = tree.add(
         TabWidget::new(selected.clone())
             .vertical()
@@ -1388,7 +1388,7 @@ fn enabled_reorderable_tabs_advertise_move_custom_actions() {
         TabHandle::dynamic(id_c, "doc", TabInfo::new().title(label("C")), ()),
     ]);
 
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TabWidget::new(selected.clone())
             .dynamic_tab::<()>("doc", |_h, _s| {
@@ -1441,7 +1441,7 @@ fn non_reorderable_tabs_do_not_advertise_move_actions() {
     use accesskit::Role;
 
     let selected: Signal<Option<TabId>> = Signal::new(None);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TabWidget::new(selected.clone())
             .static_tab(TabInfo::new().title(label("A")), FixedLeaf(120.0, 48.0))
@@ -1477,7 +1477,7 @@ fn tab_bar_internal_bridge_sets_selected_id_when_initial_is_none() {
     ]);
     let delegate =
         TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TabBar::horizontal(model, delegate, selected.clone(), |_, h: &TabHandle| h.id)
             .show_scroll_arrows(false)
@@ -1506,7 +1506,7 @@ fn tab_bar_internal_bridge_drops_selection_when_target_id_disappears() {
     ]);
     let delegate =
         TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TabBar::horizontal(
             model.clone(),
@@ -1543,7 +1543,7 @@ fn tab_bar_drains_selection_to_none_when_model_emptied() {
     )]);
     let delegate =
         TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TabBar::horizontal(
             model.clone(),

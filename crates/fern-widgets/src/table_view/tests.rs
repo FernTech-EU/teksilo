@@ -18,7 +18,7 @@ use fern_core::signal::Signal;
 use fern_core::widget_id::WidgetId;
 use fern_core::widget_tree::WidgetTree;
 use fern_data::{ListModel, SelectionMode, SelectionModel};
-use fern_tokens::Theme;
+use fern_core::Theme;
 
 use super::{CellContext, Column, ColumnWidth, SortDirection, TableSelectionMode, TableView};
 use crate::primitives::TextWidget;
@@ -57,7 +57,7 @@ fn name_col() -> Column<Row> {
 /// Simple two-column table over `n` rows. Returns the tree + the table id.
 fn build_table(n: u32) -> (WidgetTree, WidgetId, ListModel<Row>) {
     let model = rows(n);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let table = tree.add(
         TableView::new(model.clone())
             .add_column(id_col())
@@ -109,7 +109,7 @@ fn fixed_plus_flex_split_pane_minus_scrollbar() {
 #[test]
 fn no_scrollbar_when_content_fits() {
     // 5 rows * 20 = 100 px content, viewport 200 — no scrollbar reserved.
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let model = rows(5);
     let table = tree.add(
         TableView::new(model)
@@ -206,7 +206,7 @@ fn rebuild_on_scroll_past_buffer() {
 fn selection_signal_reflects_select() {
     let model = rows(10);
     let sel = SelectionModel::new(SelectionMode::Multi);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let _table = tree.add(
         TableView::new(model)
             .add_column(id_col())
@@ -230,7 +230,7 @@ fn selection_signal_reflects_select() {
 fn selection_auto_adjusts_on_insert() {
     let model = rows(10);
     let sel = SelectionModel::new(SelectionMode::Multi);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let _table = tree.add(
         TableView::new(model.clone())
             .add_column(id_col())
@@ -261,7 +261,7 @@ fn selection_auto_adjusts_on_insert() {
 fn selection_auto_adjusts_on_remove() {
     let model = rows(10);
     let sel = SelectionModel::new(SelectionMode::Multi);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let _table = tree.add(
         TableView::new(model.clone())
             .add_column(id_col())
@@ -384,7 +384,7 @@ fn header_strip_renders_one_column_header_per_column() {
 
 #[test]
 fn header_can_be_hidden() {
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let _table = tree.add(
         TableView::new(rows(5))
             .add_column(id_col())
@@ -425,7 +425,7 @@ fn header_label_appears_in_a11y_tree() {
 #[test]
 fn sort_cycle_none_asc_desc_none() {
     let model = rows(5);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let table = tree.add(
         TableView::new(model)
             .add_column(id_col().sortable(true))
@@ -574,7 +574,7 @@ fn declared_order_is_default_display_order() {
 #[test]
 fn pinned_leading_moves_to_front() {
     let model = rows(3);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let table = tree.add(
         TableView::new(model)
             // Declaration: id, name. Trailing-pinned `id` should still
@@ -611,7 +611,7 @@ fn pinned_leading_moves_to_front() {
 fn set_column_order_reorders_display() {
     // Three columns: id (decl 0), name (decl 1), extra (decl 2).
     let model = rows(3);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let table = tree.add(
         TableView::new(model)
             .add_column(id_col()) // 60
@@ -706,7 +706,7 @@ fn cycle_pinning_back_to_none_via_signal_clear() {
 #[test]
 fn column_order_signal_persists_after_data_change() {
     let model = rows(3);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let table = tree.add(
         TableView::new(model.clone())
             .add_column(id_col())
@@ -833,7 +833,7 @@ fn ctrl_home_end_jump_to_corners() {
 fn page_down_advances_focus_and_scroll() {
     // 100 rows × 20 px in a 200 px viewport: 10 rows per page.
     let model = rows(100);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let table = tree.add(
         TableView::new(model)
             .add_column(id_col())
@@ -872,7 +872,7 @@ fn page_down_advances_focus_and_scroll() {
 fn space_toggles_row_selection_at_focus() {
     let model = rows(5);
     let sel = SelectionModel::new(SelectionMode::Multi);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let table = tree.add(
         TableView::new(model)
             .add_column(id_col())
@@ -896,7 +896,7 @@ fn space_toggles_row_selection_at_focus() {
 fn shift_arrow_extends_multi_row_selection() {
     let model = rows(10);
     let sel = SelectionModel::new(SelectionMode::Multi);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let table = tree.add(
         TableView::new(model)
             .add_column(id_col())
@@ -923,7 +923,7 @@ fn shift_arrow_extends_multi_row_selection() {
 fn ctrl_a_selects_all_rows_in_multi_mode() {
     let model = rows(5);
     let sel = SelectionModel::new(SelectionMode::Multi);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let table = tree.add(
         TableView::new(model)
             .add_column(id_col())
@@ -975,7 +975,7 @@ fn shift_tab_moves_to_prev_cell_with_row_wrap() {
 fn cell_selection_mode_tracks_pairs() {
     let model = rows(5);
     let cs = super::CellSelectionModel::new(TableSelectionMode::MultiCell);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let table = tree.add(
         TableView::new(model)
             .add_column(id_col())
@@ -1019,7 +1019,7 @@ fn f2_triggers_edit_request() {
     use std::rc::Rc;
     let fired_for: Rc<RefCell<Option<(usize, String)>>> = Rc::new(RefCell::new(None));
     let f = fired_for.clone();
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let table = tree.add(
         TableView::new(rows(5))
             .add_column(id_col())
@@ -1045,7 +1045,7 @@ fn typing_triggers_edit_request_in_f2_or_type_mode() {
     use std::rc::Rc;
     let fired = Rc::new(Cell::new(0));
     let f = fired.clone();
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let table = tree.add(
         TableView::new(rows(5))
             // Mark the focused column editable; the gate keeps F2 /
@@ -1071,7 +1071,7 @@ fn typing_does_not_trigger_edit_when_only_f2() {
     use std::rc::Rc;
     let fired = Rc::new(Cell::new(0));
     let f = fired.clone();
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let table = tree.add(
         TableView::new(rows(5))
             .add_column(id_col())
@@ -1091,7 +1091,7 @@ fn typing_does_not_trigger_edit_when_only_f2() {
 
 #[test]
 fn escape_ends_edit_before_clearing_focus() {
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let table = tree.add(
         TableView::new(rows(5))
             .add_column(id_col())
@@ -1147,7 +1147,7 @@ fn enter_invokes_on_row_activate() {
     use std::rc::Rc;
     let activated = Rc::new(Cell::new(None::<usize>));
     let a = activated.clone();
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let table = tree.add(
         TableView::new(rows(5))
             .add_column(id_col())
@@ -1171,7 +1171,7 @@ fn reorderable_rows_requires_list_model_source() {
     // is None for ListDataSource sources, so the actual reorder is
     // a no-op. This test documents the contract — the table compiles
     // and lays out cleanly.
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let table = tree.add(
         TableView::new(rows(5))
             .add_column(id_col())
@@ -1192,7 +1192,7 @@ fn reorderable_rows_requires_list_model_source() {
 #[test]
 fn empty_view_renders_when_no_rows() {
     let model: ListModel<Row> = ListModel::new();
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let _table = tree.add(
         TableView::new(model)
             .add_column(id_col())
@@ -1231,7 +1231,7 @@ fn filterable_column_exposes_filter_trigger_in_a11y_tree() {
     // The filter glyph is wrapped in a `Popover` whose default name
     // is "Filter" — locating it via `find_by_label` confirms the
     // affordance is present for filterable columns.
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TableView::new(rows(5))
             .add_column(id_col())
@@ -1251,7 +1251,7 @@ fn filterable_column_exposes_filter_trigger_in_a11y_tree() {
 
 #[test]
 fn non_filterable_column_does_not_expose_filter_trigger() {
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TableView::new(rows(5))
             .add_column(id_col())
@@ -1273,7 +1273,7 @@ fn non_filterable_column_does_not_expose_filter_trigger() {
 fn filter_popover_opens_via_trigger_click() {
     use fern_core::accesskit::Action;
     use fern_core::event::WidgetEvent;
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TableView::new(rows(5))
             .add_column(id_col())
@@ -1308,7 +1308,7 @@ fn filter_popover_content_hosts_a_text_input() {
     // exercised indirectly via the data-grid example and via
     // `filters_signal_is_writable` for the upstream side.
     let content = FilterPopoverContent::new("seed");
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(content);
     tree.layout(SizeProposal {
         width: Some(280.0),
@@ -1345,7 +1345,7 @@ fn resize_drag_right_grows_column_for_non_first_column() {
     use fern_canvas::Point;
     use fern_core::event::{Modifiers, PointerButton, WidgetEvent};
 
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let table = tree.add(
         TableView::new(rows(5))
             .add_column(id_col()) // Fixed(60), display_pos 0
@@ -1402,7 +1402,7 @@ fn resize_pointer_down_in_filter_zone_does_not_start_resize() {
     use fern_canvas::Point;
     use fern_core::event::{Modifiers, PointerButton, WidgetEvent};
 
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let table = tree.add(
         TableView::new(rows(5))
             .add_column(id_col())
@@ -1453,7 +1453,7 @@ fn resize_pointer_down_in_filter_zone_does_not_start_resize() {
 fn filter_popover_editor_gains_focus_on_mouse_click() {
     use fern_core::accesskit::Action;
     use fern_core::event::WidgetEvent;
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TableView::new(rows(5))
             .add_column(id_col())
@@ -1508,7 +1508,7 @@ fn header_resize_works_when_table_is_nested_in_panel() {
     use fern_canvas::Point;
     use fern_core::event::{Modifiers, PointerButton, WidgetEvent};
 
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let table = TableView::new(rows(5))
         .add_column(id_col())
         .add_column(name_col())
@@ -1572,7 +1572,7 @@ fn cursor_resets_to_default_when_pointer_leaves_resize_zone() {
     use fern_core::event::WidgetEvent;
     use fern_core::widget::CursorIcon;
 
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let _table = tree.add(
         TableView::new(rows(5))
             .add_column(id_col())
@@ -1634,7 +1634,7 @@ fn header_resizing_works_in_full_data_grid_layout() {
         .filterable(true)
     }
 
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let table = TableView::new(rows(50))
         .add_column(id_c())
         .add_column(name_c())
@@ -1705,7 +1705,7 @@ fn body_row_does_not_paint_over_header_after_scroll() {
     // listed before the header in `children()` and the framework
     // paints children in order. With the fixed z-order (header last),
     // the header always ends up on top.
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let table = tree.add(
         TableView::new(rows(50))
             .add_column(id_col())

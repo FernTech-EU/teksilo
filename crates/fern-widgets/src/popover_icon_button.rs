@@ -367,7 +367,7 @@ mod tests {
     use fern_core::accesskit::{HasPopup, Role};
     use fern_core::event::{Key, Modifiers, WidgetEvent};
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     fn dummy_content() -> impl Widget {
         MinSize::new(40.0, 40.0).child(RectWidget::new())
@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn build_does_not_panic_with_minimum_config() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(PopoverIconButton::new(IconButton::add()).content(dummy_content()));
         tree.layout(SizeProposal::exact(300.0, 80.0));
     }
@@ -383,14 +383,14 @@ mod tests {
     #[test]
     #[should_panic(expected = "PopoverIconButton::content")]
     fn build_panics_without_content() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(PopoverIconButton::new(IconButton::add()));
         tree.layout(SizeProposal::exact(300.0, 80.0));
     }
 
     #[test]
     fn trigger_announces_button_role_haspopup_menu_collapsed() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(PopoverIconButton::new(IconButton::add()).content(dummy_content()));
         tree.layout(SizeProposal::exact(300.0, 80.0));
         let update = tree.sync_accessibility();
@@ -414,7 +414,7 @@ mod tests {
 
     #[test]
     fn enter_key_opens_popover_and_flips_open_signal() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let pib = PopoverIconButton::new(IconButton::add()).content(dummy_content());
         let open_signal = pib.open_signal();
         let id = tree.add(pib);
@@ -441,7 +441,7 @@ mod tests {
         // With caret disabled, the root child is the IconButton
         // directly — no wrapping ZStack. We verify by checking the
         // tree has only one descendant chain, not two siblings.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             PopoverIconButton::new(IconButton::add())
                 .show_disclosure_caret(false)
@@ -464,7 +464,7 @@ mod tests {
         // Aim at the bottom-right quadrant of the IconButton itself
         // (where the caret paints) so we exercise the overlap region.
         use fern_core::event::PointerButton;
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let pib = PopoverIconButton::new(IconButton::add().toolbar()).content(dummy_content());
         let open_signal = pib.open_signal();
         let id = tree.add(pib);
@@ -489,7 +489,7 @@ mod tests {
     fn compact_size_skips_caret_even_when_requested() {
         // Compact (22 dp) is too small for the caret; the wrapper
         // skips it regardless of `show_disclosure_caret(true)`.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             PopoverIconButton::new(IconButton::add().size(IconButtonSize::Compact))
                 .content(dummy_content()),

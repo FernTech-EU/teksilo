@@ -350,11 +350,11 @@ mod tests {
     use fern_core::accesskit::Role;
     use fern_core::event::{Key, Modifiers, WidgetEvent};
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn build_does_not_panic_with_minimum_config() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(
             PopoverButton::new(Button::new_literal("Open"))
                 .content(MinSize::new(40.0, 40.0).child(RectWidget::new())),
@@ -365,14 +365,14 @@ mod tests {
     #[test]
     #[should_panic(expected = "PopoverButton::content")]
     fn build_panics_without_content() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(PopoverButton::new(Button::new_literal("Open")));
         tree.layout(SizeProposal::exact(300.0, 80.0));
     }
 
     #[test]
     fn trigger_node_announces_button_role_and_haspopup() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             PopoverButton::new(Button::new_literal("Open"))
                 .content(MinSize::new(40.0, 40.0).child(RectWidget::new())),
@@ -404,7 +404,7 @@ mod tests {
 
     #[test]
     fn enter_key_opens_popover_and_flips_open_signal() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let pb = PopoverButton::new(Button::new_literal("Open"))
             .content(MinSize::new(40.0, 40.0).child(RectWidget::new()));
         let open_signal = pb.open_signal();
@@ -436,7 +436,7 @@ mod tests {
         // keyboard activation. Aim at the bottom-right quadrant of the
         // Button (where the caret paints).
         use fern_core::event::PointerButton;
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let pb = PopoverButton::new(Button::new_literal("Open"))
             .show_disclosure_caret(true)
             .content(MinSize::new(40.0, 40.0).child(RectWidget::new()));

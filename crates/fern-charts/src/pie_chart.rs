@@ -563,7 +563,7 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
     fn draw_slice_label(
         &self,
         canvas: &mut Canvas,
-        theme: &fern_tokens::Theme,
+        theme: &fern_core::Theme,
         center: Point,
         outer: f32,
         bisector_rad: f32,
@@ -665,7 +665,7 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
     fn draw_hover(
         &self,
         canvas: &mut Canvas,
-        theme: &fern_tokens::Theme,
+        theme: &fern_core::Theme,
         plot: Rect,
         center: Point,
         outer: f32,
@@ -837,7 +837,7 @@ mod tests {
     use super::*;
     use fern_canvas::SizeProposal;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     fn three_slices() -> Vec<ChartDatum<String>> {
         vec![
@@ -849,7 +849,7 @@ mod tests {
 
     #[test]
     fn three_slices_three_paths() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(PieChart::new(three_slices()));
         tree.layout(SizeProposal::exact(400.0, 300.0));
         let frame = tree.render();
@@ -863,7 +863,7 @@ mod tests {
 
     #[test]
     fn donut_inner_radius_creates_hollow_wedges() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(PieChart::new(three_slices()).donut(0.5));
         tree.layout(SizeProposal::exact(400.0, 300.0));
         let frame = tree.render();
@@ -871,7 +871,7 @@ mod tests {
         // commands (outer arc + line + inner arc + close).
         assert_eq!(frame.paths.len(), 3);
         let cmds_pie = {
-            let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+            let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
             tree.add(PieChart::new(three_slices()));
             tree.layout(SizeProposal::exact(400.0, 300.0));
             let f = tree.render();
@@ -885,7 +885,7 @@ mod tests {
 
     #[test]
     fn empty_data_does_not_panic() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(PieChart::<String>::new(Vec::<ChartDatum<String>>::new()));
         tree.layout(SizeProposal::exact(400.0, 300.0));
         let _ = tree.render();
@@ -897,7 +897,7 @@ mod tests {
             ChartDatum::new("A".into(), 0.0),
             ChartDatum::new("B".into(), 0.0),
         ];
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(PieChart::new(data));
         tree.layout(SizeProposal::exact(400.0, 300.0));
         let _ = tree.render();
@@ -905,7 +905,7 @@ mod tests {
 
     #[test]
     fn accessibility_role_is_graphics_document() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(PieChart::new(three_slices()));
         tree.layout(SizeProposal::exact(400.0, 300.0));
         let info = tree.accessibility_node(id);
@@ -918,7 +918,7 @@ mod tests {
         // and verify the chart does not panic and the center child has
         // zero placement size when rendered.
         use fern_widgets::TextWidget;
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let pie = PieChart::new(three_slices()).center(TextWidget::new_literal("$100"));
         let id = tree.add(pie);
         tree.layout(SizeProposal::exact(400.0, 300.0));
@@ -933,7 +933,7 @@ mod tests {
     #[test]
     fn donut_center_slot_has_inscribed_size() {
         use fern_widgets::TextWidget;
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let donut = PieChart::new(three_slices())
             .donut(0.6)
             .center(TextWidget::new_literal("$100"));
@@ -956,7 +956,7 @@ mod tests {
         // Now both go through compute_plot_rect, so the center widget
         // sits inside the actually-rendered disc.
         use fern_widgets::TextWidget;
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             PieChart::new(three_slices())
                 .donut(0.6)
@@ -1006,7 +1006,7 @@ mod tests {
     #[test]
     fn slice_color_overrides_palette() {
         use fern_tokens::Color;
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(
             PieChart::new(three_slices())
                 .slice_color(0, Color::RED)

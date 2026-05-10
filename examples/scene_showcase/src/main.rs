@@ -895,9 +895,9 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                Theme::dark_default()
+                fern_ui::presets::intui::dark()
             } else {
-                Theme::light_default()
+                fern_ui::presets::intui::light()
             });
         }),
     ))
@@ -917,7 +917,7 @@ fn build_root() -> impl Widget + 'static {
 fn main() {
     FernAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(Theme::light_default())
+        .theme(fern_ui::presets::intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("FernUI — fern-scene showcase")
@@ -940,7 +940,7 @@ mod tests {
 
     #[test]
     fn showcase_root_lays_out_without_panicking() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_ui::presets::intui::light());
         let _root = tree.add(build_root());
         tree.layout(SizeProposal::exact(1500.0, 950.0));
     }
@@ -949,7 +949,7 @@ mod tests {
     fn outer_scene_has_two_heavyweight_children() {
         // 1 ScrollArea (§4, wraps 3 cards as ScrollArea descendants)
         // + 1 inner SceneView (§7) = 2 direct heavyweight children.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_ui::presets::intui::light());
         let view_id = tree.add(build_showcase_view());
         tree.layout(SizeProposal::exact(1500.0, 950.0));
         let kids = tree.children(view_id);

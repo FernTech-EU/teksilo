@@ -126,11 +126,11 @@ impl Widget for StatusBar {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn status_bar_builds() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let sb = tree.add(StatusBar::new());
         tree.layout(SizeProposal::exact(400.0, 50.0));
         let b = tree.bounds(sb);
@@ -139,7 +139,7 @@ mod tests {
 
     #[test]
     fn status_bar_accessibility() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let sb = tree.add(StatusBar::new());
         tree.layout(SizeProposal::exact(400.0, 50.0));
         let info = tree.accessibility_node(sb);
@@ -149,7 +149,7 @@ mod tests {
 
     #[test]
     fn status_bar_tree_has_polite_live_region_and_no_group_wrapper() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let sb = tree.add(StatusBar::new());
         tree.layout(SizeProposal::exact(400.0, 50.0));
         let update = tree.sync_accessibility();

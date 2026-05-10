@@ -309,7 +309,7 @@ mod tests {
     fn minimap_default_layout_response_is_capped() {
         let viewport = Signal::new(Rect::new(0.0, 0.0, 100.0, 75.0));
         let mm = SceneMinimap::new(Rect::new(0.0, 0.0, 1000.0, 750.0), viewport);
-        let theme = fern_tokens::Theme::light_default();
+        let theme = fern_core::presets::intui::light();
         let ctx = LayoutContext::for_testing(&theme);
         // Unspecified proposal → falls back to self.size = 200×150.
         let lr = mm.layout_response(SizeProposal::unspecified(), &ctx);
@@ -325,7 +325,7 @@ mod tests {
     fn minimap_size_override_changes_layout_response() {
         let viewport = Signal::new(Rect::new(0.0, 0.0, 100.0, 75.0));
         let mm = SceneMinimap::new(Rect::new(0.0, 0.0, 1000.0, 750.0), viewport).size(120.0, 80.0);
-        let theme = fern_tokens::Theme::light_default();
+        let theme = fern_core::presets::intui::light();
         let ctx = LayoutContext::for_testing(&theme);
         let lr = mm.layout_response(SizeProposal::unspecified(), &ctx);
         assert_eq!(lr.size.width, 120.0);

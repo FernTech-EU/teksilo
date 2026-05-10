@@ -187,7 +187,7 @@ fn paint_widget_cached(
     arena: &mut WidgetArena,
     id: WidgetId,
     frame: &mut RenderFrame,
-    base_theme: &fern_tokens::Theme,
+    base_theme: &crate::styles::Theme,
     text_backend: &Option<Rc<RefCell<dyn fern_canvas::TextBackend>>>,
     clip_bounds: Option<Rect>,
     a11y_prefs: &A11yPaintPrefs,
@@ -436,7 +436,8 @@ fn paint_widget_cached(
 mod tests {
     use super::*;
     use crate::test_widgets::{FillWidget, StackWidget};
-    use fern_tokens::{Color, CornerRadius, Theme};
+    use crate::styles::Theme;
+    use fern_tokens::{Color, CornerRadius};
 
     #[derive(Debug)]
     struct ThemeAwareWidget;
@@ -466,7 +467,7 @@ mod tests {
 
     #[test]
     fn fill_widget_produces_shape_in_frame() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
         tree.add(
             FillWidget::new()
                 .background(Color::RED)
@@ -540,7 +541,7 @@ mod tests {
 
     #[test]
     fn set_theme_marks_all_dirty() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
         tree.add(FillWidget::new().background(Color::RED));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         tree.render();
@@ -548,20 +549,20 @@ mod tests {
         assert!(!tree.needs_layout());
         assert!(!tree.needs_paint());
 
-        tree.set_theme(Theme::dark_default());
+        tree.set_theme(crate::presets::intui::dark());
         assert!(tree.needs_layout());
         assert!(tree.needs_paint());
     }
 
     #[test]
     fn set_theme_changes_rendered_colors() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
         tree.add(ThemeAwareWidget);
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let light_frame = tree.render();
         let light_color = light_frame.shapes[0].color;
 
-        tree.set_theme(Theme::dark_default());
+        tree.set_theme(crate::presets::intui::dark());
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let dark_frame = tree.render();
         let dark_color = dark_frame.shapes[0].color;
@@ -571,7 +572,7 @@ mod tests {
 
     #[test]
     fn subtree_theme_override() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
         let parent = tree.add(ThemeAwareWidget);
         let _child = tree.add_child(parent, ThemeAwareWidget);
 
@@ -589,7 +590,7 @@ mod tests {
 
     #[test]
     fn theme_override_only_affects_subtree() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
 
         let _unaffected = tree.add(ThemeAwareWidget);
         let overridden = tree.add(ThemeAwareWidget);
@@ -610,7 +611,7 @@ mod tests {
 
     #[test]
     fn resolved_theme_reflects_overrides() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
 
         let parent = tree.add(FillWidget::new());
         let child = tree.add_child(parent, FillWidget::new());
@@ -634,7 +635,7 @@ mod tests {
         // own paint AND its children's paint inside a SetOpacity /
         // RestoreOpacity pair, so the canvas's stacked-opacity model
         // multiplies through.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
         let parent = tree.add(StackWidget::new());
         let _child = tree.add_child(parent, FillWidget::new().background(Color::RED));
         tree.set_opacity(parent, 0.5_f32);
@@ -661,7 +662,7 @@ mod tests {
     fn opacity_prop_zero_skips_subtree_entirely() {
         // Sub-perceptual opacity (< 1/512) returns early — no
         // SetOpacity, no children draw commands. Saves a blend pass.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
         let parent = tree.add(StackWidget::new());
         tree.add_child(parent, FillWidget::new().background(Color::RED));
         tree.set_opacity(parent, 0.0_f32);
@@ -690,7 +691,7 @@ mod tests {
         // both its own paint AND its children's paint inside a
         // PushTransform / PopTransform pair, mirroring the opacity
         // pattern.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
         let parent = tree.add(StackWidget::new());
         let _child = tree.add_child(parent, FillWidget::new().background(Color::RED));
         let scale_2x = fern_canvas::Transform2D::scale(2.0, 2.0);
@@ -722,7 +723,7 @@ mod tests {
         // walker should NOT emit a PushTransform / PopTransform pair
         // for the rest pose. Saves a flush per identity wrapper per
         // frame (Scale at full visibility, Rotate at angle=0).
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
         let parent = tree.add(StackWidget::new());
         tree.add_child(parent, FillWidget::new().background(Color::RED));
         tree.set_transform(parent, fern_canvas::Transform2D::IDENTITY);
@@ -747,7 +748,7 @@ mod tests {
         // same node, the framework's contract is opacity OUTER and
         // transform INNER. This pins down the order so future
         // refactors don't silently flip composability.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
         let parent = tree.add(StackWidget::new());
         tree.add_child(parent, FillWidget::new().background(Color::RED));
         tree.set_opacity(parent, 0.7_f32);
@@ -788,7 +789,7 @@ mod tests {
         // / EndBlurredSubtree pair, mirroring the opacity and transform
         // patterns. The Begin command carries the widget's bounds and
         // the requested radius.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
         let parent = tree.add(StackWidget::new());
         let _child = tree.add_child(parent, FillWidget::new().background(Color::RED));
         tree.set_blur(parent, 8.0_f32);
@@ -818,7 +819,7 @@ mod tests {
         // blur_prop = Some(Static(0.2)) is below the 0.5 threshold —
         // the walker emits no Begin/End pair so animated 0→target
         // patterns have zero per-frame cost when fully off.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
         let parent = tree.add(StackWidget::new());
         tree.add_child(parent, FillWidget::new().background(Color::RED));
         tree.set_blur(parent, 0.2_f32);
@@ -845,7 +846,7 @@ mod tests {
         //   Begin → SetOpacity → PushTransform → ...paint...
         // Order on exit (LIFO):
         //   PopTransform → RestoreOpacity → End
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
         let parent = tree.add(StackWidget::new());
         tree.add_child(parent, FillWidget::new().background(Color::RED));
         tree.set_blur(parent, 8.0_f32);
@@ -886,7 +887,7 @@ mod tests {
 
     #[test]
     fn nested_theme_overrides_compose() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
 
         let grandparent = tree.add(FillWidget::new());
         let parent = tree.add_child(grandparent, FillWidget::new());

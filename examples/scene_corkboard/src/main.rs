@@ -75,9 +75,9 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                Theme::dark_default()
+                fern_ui::presets::intui::dark()
             } else {
-                Theme::light_default()
+                fern_ui::presets::intui::light()
             });
         }),
     ))
@@ -241,7 +241,7 @@ fn build_corkboard() -> SceneView {
 fn main() {
     FernAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(Theme::light_default())
+        .theme(fern_ui::presets::intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("FernUI — Scene Corkboard (Phase 5b: cards auto-grafted into Act groups)")
@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     fn corkboard_lays_out_nine_cards_at_scene_coords() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_ui::presets::intui::light());
         let view_id = tree.add(build_corkboard());
         tree.layout(SizeProposal::exact(900.0, 600.0));
 

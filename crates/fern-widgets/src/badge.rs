@@ -139,11 +139,11 @@ impl Widget for Badge {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn badge_builds_and_renders() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let badge = tree.add(Badge::new_literal("New"));
         tree.layout(SizeProposal::exact(200.0, 50.0));
         let b = tree.bounds(badge);
@@ -153,7 +153,7 @@ mod tests {
 
     #[test]
     fn badge_accessibility() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let badge = tree.add(Badge::new_literal("3"));
         tree.layout(SizeProposal::exact(200.0, 50.0));
         let info = tree.accessibility_node(badge);

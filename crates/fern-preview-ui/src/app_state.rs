@@ -96,22 +96,22 @@ impl CanvasTheme {
     /// *adopts* the OS palette rather than picking between FernUI's
     /// built-in Int UI light/dark — this is what gives a visibly
     /// distinct result from clicking Light/Dark on most desktops.
-    pub fn theme(self) -> fern_tokens::Theme {
+    pub fn theme(self) -> fern_core::Theme {
         match self {
             CanvasTheme::Native => {
                 let os = fern_platform::os_theme::query_os_theme_colors();
                 let base = if os.color_scheme.is_dark() {
-                    fern_tokens::Theme::dark_default()
+                    fern_core::presets::intui::dark()
                 } else {
-                    fern_tokens::Theme::light_default()
+                    fern_core::presets::intui::light()
                 };
-                fern_tokens::Theme {
+                fern_core::Theme {
                     colors: fern_tokens::ColorTokens::from_os_colors(&os),
                     ..base
                 }
             }
-            CanvasTheme::Light => fern_tokens::Theme::light_default(),
-            CanvasTheme::Dark => fern_tokens::Theme::dark_default(),
+            CanvasTheme::Light => fern_core::presets::intui::light(),
+            CanvasTheme::Dark => fern_core::presets::intui::dark(),
         }
     }
 }

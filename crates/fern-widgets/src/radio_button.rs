@@ -459,13 +459,13 @@ mod tests {
     use super::*;
     use fern_core::event::Modifiers;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn selecting_one_deselects_others() {
         use crate::primitives::VStack;
         let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let r0 = tree.add(RadioButton::new(0, selected.clone()).label_literal("A"));
         let r1 = tree.add(RadioButton::new(1, selected.clone()).label_literal("B"));
         let r2 = tree.add(RadioButton::new(2, selected.clone()).label_literal("C"));
@@ -484,7 +484,7 @@ mod tests {
     #[test]
     fn space_selects() {
         let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let _r0 = tree.add(RadioButton::new(0, selected.clone()).label_literal("A"));
         let r1 = tree.add(RadioButton::new(1, selected.clone()).label_literal("B"));
         tree.layout(SizeProposal::exact(200.0, 200.0));
@@ -497,7 +497,7 @@ mod tests {
     #[test]
     fn accessibility() {
         let selected = Signal::new(1_usize);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let r0 = tree.add(RadioButton::new(0, selected.clone()).label_literal("A"));
         let r1 = tree.add(RadioButton::new(1, selected.clone()).label_literal("B"));
         tree.layout(SizeProposal::exact(200.0, 200.0));
@@ -513,7 +513,7 @@ mod tests {
     #[test]
     fn accessibility_has_actions() {
         let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let r0 = tree.add(RadioButton::new(0, selected).label_literal("A"));
         tree.layout(SizeProposal::exact(200.0, 200.0));
         let info = tree.accessibility_node(r0);

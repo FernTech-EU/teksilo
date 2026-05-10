@@ -205,12 +205,12 @@ mod tests {
     use super::*;
     use crate::primitives::TextWidget;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn starts_collapsed_when_signal_is_false() {
         let expanded = Signal::new(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree
             .add(Collapse::new(expanded.clone()).child(TextWidget::new_literal("hidden content")));
         tree.layout(SizeProposal {
@@ -227,7 +227,7 @@ mod tests {
     #[test]
     fn starts_expanded_when_signal_is_true() {
         let expanded = Signal::new(true);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree
             .add(Collapse::new(expanded.clone()).child(TextWidget::new_literal("visible content")));
         tree.layout(SizeProposal {
@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn flipping_signal_drives_animation() {
         let expanded = Signal::new(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             Collapse::new(expanded.clone())
                 .child(TextWidget::new_literal("content with some natural height")),
@@ -281,7 +281,7 @@ mod tests {
         // the animation (the bug where max_h tweens against a 10000
         // sentinel).
         let expanded = Signal::new(true);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let root =
             tree.add(Collapse::new(expanded.clone()).child(TextWidget::new_literal("content")));
         tree.layout(SizeProposal {
@@ -319,7 +319,7 @@ mod tests {
     #[test]
     fn collapse_height_monotonically_decreases() {
         let expanded = Signal::new(true);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let root =
             tree.add(Collapse::new(expanded.clone()).child(TextWidget::new_literal("content")));
         tree.layout(SizeProposal {
@@ -359,7 +359,7 @@ mod tests {
     #[test]
     fn animation_is_active_mid_tween() {
         let expanded = Signal::new(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Collapse::new(expanded.clone()).child(TextWidget::new_literal("content")));
         tree.layout(SizeProposal {
             width: Some(300.0),

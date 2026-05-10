@@ -631,7 +631,7 @@ impl Widget for Popover {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
@@ -648,7 +648,7 @@ mod tests {
 
     #[test]
     fn access_click_opens_popover_overlay() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Popover::new_literal("Show popover").content(FixedLeaf(140.0, 60.0)));
         tree.layout(SizeProposal::exact(480.0, 320.0));
 
@@ -665,7 +665,7 @@ mod tests {
 
     #[test]
     fn escape_dismisses_popover_overlay() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Popover::new_literal("Show popover").content(FixedLeaf(140.0, 60.0)));
         tree.layout(SizeProposal::exact(480.0, 320.0));
 
@@ -687,7 +687,7 @@ mod tests {
         // set_expanded(true) while its panel is shown and
         // set_expanded(false) after it's dismissed — including
         // framework-level dismiss paths (via on_dismiss callback).
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Popover::new_literal("Show popover").content(FixedLeaf(140.0, 60.0)));
         tree.layout(SizeProposal::exact(480.0, 320.0));
         let trigger = tree.find_by_label("Show popover").unwrap();
@@ -724,7 +724,7 @@ mod tests {
 
     #[test]
     fn custom_trigger_opens_popover_overlay() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(
             Popover::new_literal("Show popover")
                 .content(FixedLeaf(140.0, 60.0))
@@ -745,7 +745,7 @@ mod tests {
 
     #[test]
     fn caret_increases_popover_height_for_below_placement() {
-        let mut plain_tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut plain_tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         plain_tree.add(
             Popover::new_literal("Show popover")
                 .content(FixedLeaf(140.0, 60.0))
@@ -763,7 +763,7 @@ mod tests {
         plain_tree.layout(SizeProposal::exact(480.0, 320.0));
         let plain_bounds = plain_tree.bounds(plain_tree.overlay_manager().active_content_ids()[0]);
 
-        let mut caret_tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut caret_tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         caret_tree.add(
             Popover::new_literal("Show popover")
                 .content(FixedLeaf(140.0, 60.0))
@@ -787,7 +787,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Popover requires .content(...)")]
     fn popover_without_content_panics_on_build() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Popover::new_literal("Show popover"));
         tree.layout(SizeProposal::exact(480.0, 320.0));
     }

@@ -63,9 +63,9 @@ impl Widget for RootContent {
                                         let next = !is_dark.get();
                                         is_dark.set(next);
                                         ctx.set_theme(if next {
-                                            Theme::dark_default()
+                                            fern_ui::presets::intui::dark()
                                         } else {
-                                            Theme::light_default()
+                                            fern_ui::presets::intui::light()
                                         });
                                     })
                             }),
@@ -195,7 +195,7 @@ fn build_color_box(color: impl Into<fern_ui::core::ColorProp>, label: &str) -> P
 fn main() {
     FernAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(Theme::light_default())
+        .theme(fern_ui::presets::intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("FernUI — Text & Layout")
@@ -240,7 +240,7 @@ mod tests {
 
     #[test]
     fn text_widget_measures_correctly_without_backend() {
-        let theme = Theme::light_default();
+        let theme = fern_ui::presets::intui::light();
         let w = TextWidget::new_literal("Hello World").style(theme.typography.body.clone());
         let ctx = LayoutContext::for_testing(&theme);
         let size = w.layout_response(SizeProposal::unspecified(), &ctx).size;
@@ -250,8 +250,8 @@ mod tests {
 
     #[test]
     fn theme_swap_changes_color_tokens() {
-        let light = Theme::light_default();
-        let dark = Theme::dark_default();
+        let light = fern_ui::presets::intui::light();
+        let dark = fern_ui::presets::intui::dark();
         assert_ne!(
             light.colors.surface_main.to_array(),
             dark.colors.surface_main.to_array()
@@ -284,13 +284,13 @@ mod tests {
     fn composite_rebuild_on_theme_change() {
         use super::RootContent;
 
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_ui::presets::intui::light());
         let _root = tree.add(RootContent::new());
         tree.layout(SizeProposal::exact(600.0, 500.0));
         let frame_light = tree.render();
 
         // Switch to dark theme — triggers composite rebuild
-        tree.set_theme(Theme::dark_default());
+        tree.set_theme(fern_ui::presets::intui::dark());
         tree.layout(SizeProposal::exact(600.0, 500.0));
         let frame_dark = tree.render();
 

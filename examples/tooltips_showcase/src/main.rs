@@ -219,7 +219,7 @@ fn root() -> impl Widget {
 
 fn main() {
     FernAppBuilder::new()
-        .theme(Theme::dark_default())
+        .theme(fern_ui::presets::intui::dark())
         .register_tooltips(build_tooltip_registry())
         .initial_window(
             WindowConfig::new()

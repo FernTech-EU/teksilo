@@ -863,7 +863,7 @@ impl WidgetArena {
     /// Resolve the effective theme for a widget by walking ancestors and
     /// applying any theme overrides encountered along the way.
     /// The base theme is the tree-level default.
-    pub fn resolve_theme(&self, id: WidgetId, base: &fern_tokens::Theme) -> fern_tokens::Theme {
+    pub fn resolve_theme(&self, id: WidgetId, base: &crate::styles::Theme) -> crate::styles::Theme {
         // Fast path: if no widget has a theme override, skip the ancestor walk.
         if self.theme_override_count == 0 {
             return base.clone();

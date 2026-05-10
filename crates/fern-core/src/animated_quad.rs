@@ -50,10 +50,11 @@ use std::ops::Range;
 use std::time::{Duration, Instant};
 
 use fern_canvas::AnimParams;
-use fern_tokens::{Color, Easing, Theme};
+use fern_tokens::{Color, Easing};
 
 use crate::arena::WidgetArena;
 use crate::color_prop::ColorProp;
+use crate::styles::Theme;
 use crate::widget_id::WidgetId;
 
 // ---------------------------------------------------------------------------
@@ -603,7 +604,7 @@ mod tests {
         let mut reg = AnimatedQuadRegistry::new();
         let (arena, ids) = arena_with(1);
         let start = Instant::now();
-        let theme = Theme::light_default();
+        let theme = crate::presets::intui::light();
 
         let h = reg.register(ids[0], sweep_kind(), start);
 
@@ -626,7 +627,7 @@ mod tests {
         let mut reg = AnimatedQuadRegistry::new();
         let (arena, ids) = arena_with(1);
         let start = Instant::now();
-        let theme = Theme::light_default();
+        let theme = crate::presets::intui::light();
 
         let h = reg.register(ids[0], sweep_kind(), start);
         // paint_epoch=5 but the widget's last_painted_epoch stays at 0 —
@@ -645,7 +646,7 @@ mod tests {
         let mut reg = AnimatedQuadRegistry::new();
         let (arena, ids) = arena_with(1);
         let start = Instant::now();
-        let theme = Theme::light_default();
+        let theme = crate::presets::intui::light();
 
         let h = reg.register(ids[0], sweep_kind(), start);
         reg.set_window_active(false, start);
@@ -660,7 +661,7 @@ mod tests {
         let mut reg = AnimatedQuadRegistry::new();
         let (arena, ids) = arena_with(1);
         let start = Instant::now();
-        let theme = Theme::light_default();
+        let theme = crate::presets::intui::light();
 
         let h = reg.register(ids[0], sweep_kind(), start);
 
@@ -692,7 +693,7 @@ mod tests {
         // step staircase.
         let mut reg = AnimatedQuadRegistry::new();
         let (arena, ids) = arena_with(1);
-        let theme = Theme::light_default();
+        let theme = crate::presets::intui::light();
         let start = Instant::now();
 
         reg.register(ids[0], sweep_kind(), start);
@@ -768,7 +769,7 @@ mod tests {
     fn tick_unchanged_params_does_not_dirty() {
         let mut reg = AnimatedQuadRegistry::new();
         let (arena, ids) = arena_with(1);
-        let theme = Theme::light_default();
+        let theme = crate::presets::intui::light();
         let now = Instant::now();
 
         reg.register(ids[0], sweep_kind(), now);
@@ -792,7 +793,7 @@ mod tests {
     fn tick_changed_params_marks_dirty() {
         let mut reg = AnimatedQuadRegistry::new();
         let (arena, ids) = arena_with(1);
-        let theme = Theme::light_default();
+        let theme = crate::presets::intui::light();
         let start = Instant::now();
 
         reg.register(ids[0], sweep_kind(), start);
@@ -827,7 +828,7 @@ mod tests {
     fn take_dirty_ranges_splits_non_contiguous() {
         let mut reg = AnimatedQuadRegistry::new();
         let (arena, ids) = arena_with(3);
-        let theme = Theme::light_default();
+        let theme = crate::presets::intui::light();
         let start = Instant::now();
 
         reg.register(ids[0], sweep_kind(), start);

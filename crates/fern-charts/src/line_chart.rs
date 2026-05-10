@@ -497,7 +497,7 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
     fn draw_axes(
         &self,
         canvas: &mut Canvas,
-        theme: &fern_tokens::Theme,
+        theme: &fern_core::Theme,
         plot: Rect,
         y_ticks: &[f32],
         x_labels: &[String],
@@ -594,7 +594,7 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
     fn draw_hover(
         &self,
         canvas: &mut Canvas,
-        theme: &fern_tokens::Theme,
+        theme: &fern_core::Theme,
         plot: Rect,
         hit: &PointHit,
         label_style: &fern_tokens::TextStyle,
@@ -685,7 +685,7 @@ fn measure_max_label_width(
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     fn one_series() -> Vec<ChartSeries<String>> {
         let mut s = ChartSeries::<String>::new("Trend");
@@ -710,7 +710,7 @@ mod tests {
 
     #[test]
     fn size_fills_proposal() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(LineChart::new(one_series()));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let b = tree.bounds(id);
@@ -720,7 +720,7 @@ mod tests {
 
     #[test]
     fn one_path_per_series() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(LineChart::new(two_series()));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let frame = tree.render();
@@ -735,7 +735,7 @@ mod tests {
 
     #[test]
     fn area_fill_doubles_path_count() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(LineChart::new(two_series()).area_fill(true));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let frame = tree.render();
@@ -745,7 +745,7 @@ mod tests {
 
     #[test]
     fn points_emit_circles() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(LineChart::new(one_series()).points(true));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let frame = tree.render();
@@ -759,7 +759,7 @@ mod tests {
 
     #[test]
     fn points_off_yields_no_circles() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(LineChart::new(one_series()).points(false));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let frame = tree.render();
@@ -769,7 +769,7 @@ mod tests {
 
     #[test]
     fn empty_data_does_not_panic() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(LineChart::<String>::new(Vec::<ChartSeries<String>>::new()));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let _ = tree.render();
@@ -777,7 +777,7 @@ mod tests {
 
     #[test]
     fn accessibility_role_is_graphics_document() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(LineChart::new(one_series()));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let info = tree.accessibility_node(id);
@@ -792,7 +792,7 @@ mod tests {
 
     #[test]
     fn hover_marker_renders_when_hover_set() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         // Build the chart first.
         let chart = LineChart::new(one_series()).hover_tooltip(true);
         // Capture the hover signal before we hand the chart to the tree.
@@ -827,7 +827,7 @@ mod tests {
         s2.push("A".into(), 3.0);
         s2.push("B".into(), 4.0);
         s2.visible.set(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(LineChart::new(vec![s1, s2]));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let frame = tree.render();

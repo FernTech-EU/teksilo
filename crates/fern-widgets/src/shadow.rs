@@ -172,7 +172,7 @@ fn max_extent(a: &Shadow, b: &Shadow, dir: Direction) -> f32 {
 mod tests {
     use super::*;
     use fern_canvas::{DrawCommand, RenderFrame};
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     fn capture_frame<F: FnOnce(&mut Canvas)>(f: F) -> RenderFrame {
         let mut canvas = Canvas::new();
@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn full_density_emits_two_shadows_no_clip() {
-        let theme = Theme::light_default();
+        let theme = fern_core::presets::intui::light();
         let frame = capture_frame(|c| {
             paint_layered_shadow(
                 c,
@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn zero_density_skips_inner() {
-        let theme = Theme::light_default();
+        let theme = fern_core::presets::intui::light();
         let frame = capture_frame(|c| {
             paint_layered_shadow(
                 c,
@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn attached_side_emits_clip() {
-        let theme = Theme::light_default();
+        let theme = fern_core::presets::intui::light();
         for side in [
             AttachedSide::Top,
             AttachedSide::Bottom,
@@ -268,7 +268,7 @@ mod tests {
         // A shadow with offset=0 reaches `blur` past every side. A Top
         // suppression must keep the body in the clip and exclude the
         // region above it.
-        let theme = Theme::light_default();
+        let theme = fern_core::presets::intui::light();
         let bounds = Rect::new(10.0, 100.0, 80.0, 40.0);
         let frame = capture_frame(|c| {
             paint_layered_shadow(

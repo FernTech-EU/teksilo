@@ -298,7 +298,7 @@ pub(crate) fn paint_embedded_legend<T: Clone + 'static>(
     series_vec: &[ChartSeries<T>],
     palette: &ChartPalette,
     orientation: LegendOrientation,
-    theme: &fern_tokens::Theme,
+    theme: &fern_core::Theme,
 ) {
     if series_vec.is_empty() || band.width <= 0.0 || band.height <= 0.0 {
         return;
@@ -421,7 +421,7 @@ pub(crate) fn paint_embedded_legend<T: Clone + 'static>(
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     fn three_series() -> Vec<ChartSeries<String>> {
         vec![
@@ -433,7 +433,7 @@ mod tests {
 
     #[test]
     fn one_swatch_per_series() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(ChartLegend::new(three_series()));
         tree.layout(SizeProposal::exact(300.0, 30.0));
         let frame = tree.render();
@@ -443,7 +443,7 @@ mod tests {
 
     #[test]
     fn empty_legend_has_zero_size() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(ChartLegend::new(Vec::<ChartSeries<String>>::new()));
         tree.layout(SizeProposal::unspecified());
         let b = tree.bounds(id);
@@ -453,7 +453,7 @@ mod tests {
 
     #[test]
     fn vertical_orientation_changes_height() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id =
             tree.add(ChartLegend::new(three_series()).orientation(LegendOrientation::Vertical));
         tree.layout(SizeProposal::unspecified());

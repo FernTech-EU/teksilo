@@ -29,5 +29,8 @@ pub use os_theme_colors::{ColorSchemePreference, OsThemeColors};
 pub use roles::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
 pub use shape::{CornerRadius, Shadow, ShapeTokens};
 pub use text_style::{FontWeight, TextStyle};
-pub use theme::{ColorTokens, Theme};
+pub use theme::ColorTokens;
+// Theme aggregator lives in `fern-core` (so it can co-locate with the
+// per-widget style trait protocols and the typed slot bag). Apps reach
+// it via `use fern_core::Theme` or the umbrella `use fern_ui::prelude::*`.
 pub use typography::TypographyTokens;

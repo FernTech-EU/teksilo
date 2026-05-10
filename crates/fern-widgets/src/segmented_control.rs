@@ -147,7 +147,7 @@ impl SegmentedControl {
     /// The inset-by-focus-ring-envelope bounds where the frame and
     /// segment row actually paint. Computed identically in
     /// `paint` and `place_children` so geometry never drifts.
-    fn compute_visual(&self, bounds: Rect, theme: &fern_tokens::Theme) -> Rect {
+    fn compute_visual(&self, bounds: Rect, theme: &fern_core::Theme) -> Rect {
         let envelope = theme.shape.focus_ring_offset + theme.shape.focus_ring_width;
         Rect::new(
             bounds.x + envelope,
@@ -529,12 +529,12 @@ mod tests {
     use super::*;
     use fern_core::event::Modifiers;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn click_selects_segment_by_position() {
         let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let sc = tree.add(SegmentedControl::new(
             vec!["A".into(), "B".into(), "C".into()],
             selected.clone(),
@@ -557,7 +557,7 @@ mod tests {
         // must select that slice.
         use fern_core::event::PointerButton;
         let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let sc = tree.add(SegmentedControl::new(
             vec!["A".into(), "B".into(), "C".into()],
             selected.clone(),
@@ -585,7 +585,7 @@ mod tests {
     #[test]
     fn keyboard_navigation() {
         let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let sc = tree.add(SegmentedControl::new(
             vec!["A".into(), "B".into(), "C".into()],
             selected.clone(),
@@ -604,7 +604,7 @@ mod tests {
     #[test]
     fn keyboard_wraps_around() {
         let selected = Signal::new(2_usize);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let sc = tree.add(SegmentedControl::new(
             vec!["A".into(), "B".into(), "C".into()],
             selected.clone(),
@@ -621,7 +621,7 @@ mod tests {
     #[test]
     fn accessibility() {
         let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let sc = tree.add(SegmentedControl::new(
             vec!["A".into(), "B".into()],
             selected,
@@ -634,7 +634,7 @@ mod tests {
     #[test]
     fn paints_selected_segment_with_accent_when_focused() {
         let selected = Signal::new(1_usize);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let sc = tree.add(SegmentedControl::new(
             vec!["A".into(), "B".into(), "C".into()],
             selected,
@@ -642,7 +642,7 @@ mod tests {
         tree.layout(SizeProposal::exact(300.0, 60.0));
         tree.focus(sc);
         let frame = tree.render();
-        let accent = Theme::light_default().colors.accent.to_array();
+        let accent = fern_core::presets::intui::light().colors.accent.to_array();
         assert!(
             frame.shapes.iter().any(|s| s.color == accent),
             "focused selected segment should render with accent color"
@@ -652,15 +652,15 @@ mod tests {
     #[test]
     fn unfocused_selected_segment_uses_inactive_surface() {
         let selected = Signal::new(1_usize);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(SegmentedControl::new(
             vec!["A".into(), "B".into(), "C".into()],
             selected,
         ));
         tree.layout(SizeProposal::exact(300.0, 60.0));
         let frame = tree.render();
-        let accent = Theme::light_default().colors.accent.to_array();
-        let inactive = Theme::light_default()
+        let accent = fern_core::presets::intui::light().colors.accent.to_array();
+        let inactive = fern_core::presets::intui::light()
             .colors
             .surface_selected_inactive
             .to_array();
@@ -677,7 +677,7 @@ mod tests {
     #[test]
     fn accessibility_has_actions() {
         let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let sc = tree.add(SegmentedControl::new(
             vec!["A".into(), "B".into()],
             selected,

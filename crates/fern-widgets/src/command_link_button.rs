@@ -347,11 +347,11 @@ impl Widget for CommandLinkButton {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn builds_with_title_and_description() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             CommandLinkButton::new_literal("Create new project")
                 .description_literal("Start with a blank workspace."),
@@ -362,7 +362,7 @@ mod tests {
         });
         let b = tree.bounds(id);
         assert!(b.width > 0.0);
-        let min_height = Theme::light_default()
+        let min_height = fern_core::presets::intui::light()
             .components
             .command_link_button
             .min_height;
@@ -371,7 +371,7 @@ mod tests {
 
     #[test]
     fn a11y_role_is_button_with_combined_name() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             CommandLinkButton::new_literal("Create new project")
                 .description_literal("Start blank."),
@@ -388,7 +388,7 @@ mod tests {
         use std::rc::Rc;
         let fired = Rc::new(Cell::new(0usize));
         let fired_clone = fired.clone();
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             CommandLinkButton::new_literal("Open existing project")
                 .on_activate_fn(move |_| fired_clone.set(fired_clone.get() + 1)),

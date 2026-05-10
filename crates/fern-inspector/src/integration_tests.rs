@@ -15,7 +15,7 @@ use std::rc::Rc;
 use fern_canvas::{Point, SizeProposal};
 use fern_core::widget_id::WidgetId;
 use fern_core::widget_tree::WidgetTree;
-use fern_tokens::Theme;
+use fern_core::Theme;
 use fern_widgets::Button;
 
 use crate::shell::InspectorShell;
@@ -23,7 +23,7 @@ use crate::state::InspectorState;
 
 #[test]
 fn click_passes_through_inspector_shell_to_user_button() {
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
 
     let clicked = Rc::new(Cell::new(false));
     let c = clicked.clone();
@@ -54,7 +54,7 @@ fn click_passes_through_inspector_shell_to_user_button() {
 
 #[test]
 fn picker_click_populates_chain_with_button_ancestor() {
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let button = tree.add(Button::new_literal("Click Me").on_activate_fn(|_| {}));
     let state = InspectorState::new(false);
     let shell_id = tree.add(InspectorShell::new(button, state.clone()));
@@ -160,7 +160,7 @@ fn picker_click_populates_chain_with_button_ancestor() {
 
 #[test]
 fn panel_fills_window_width_when_open() {
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let button = tree.add(Button::new_literal("X").on_activate_fn(|_| {}));
     let state = InspectorState::new(true); // start with panel open
     let shell_id = tree.add(InspectorShell::new(button, state.clone()));
@@ -200,7 +200,7 @@ fn panel_fills_window_width_when_open() {
 
 #[test]
 fn tab_content_fills_panel_width() {
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let button = tree.add(Button::new_literal("X").on_activate_fn(|_| {}));
     let state = InspectorState::new(true);
     let shell_id = tree.add(InspectorShell::new(button, state.clone()));
@@ -297,7 +297,7 @@ fn tab_content_fills_panel_width() {
 fn panel_resize_handle_tracks_cursor_one_to_one() {
     use fern_core::event::PointerButton;
 
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let button = tree.add(Button::new_literal("X").on_activate_fn(|_| {}));
     let state = InspectorState::new(true);
     let shell_id = tree.add(InspectorShell::new(button, state.clone()));
@@ -368,7 +368,7 @@ fn panel_resize_handle_tracks_cursor_one_to_one() {
 
 #[test]
 fn tree_tab_renders_rows_for_user_root() {
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let button = tree.add(Button::new_literal("X").on_activate_fn(|_| {}));
     let state = InspectorState::new(true); // panel open
     let shell_id = tree.add(InspectorShell::new(button, state.clone()));
@@ -416,7 +416,7 @@ fn tree_tab_renders_rows_for_user_root() {
 
 #[test]
 fn click_at_window_center_reaches_button_bounds() {
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
 
     let clicked = Rc::new(Cell::new(false));
     let c = clicked.clone();

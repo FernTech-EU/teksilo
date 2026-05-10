@@ -172,11 +172,11 @@ impl Widget for GroupHeader {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn builds_and_lays_out_with_proposed_width() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let header = tree.add(GroupHeader::new_literal("Appearance"));
         tree.layout(SizeProposal {
             width: Some(400.0),
@@ -200,7 +200,7 @@ mod tests {
         // The header's root HStack child is `[label, expand(divider)]`.
         // Walk the tree to the Expand and verify its bounds consume the
         // remaining width, not the natural 0-width of a bare Divider.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let header = tree.add(GroupHeader::new_literal("X"));
         tree.layout(SizeProposal {
             width: Some(300.0),
@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     fn accessibility_role_and_name() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let header = tree.add(GroupHeader::new_literal("Appearance"));
         tree.layout(SizeProposal {
             width: Some(400.0),
@@ -257,14 +257,14 @@ mod tests {
             panic!("no divider found");
         }
 
-        let mut tree_default = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree_default = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let h0 = tree_default.add(GroupHeader::new_literal("Section").gap(0.0));
         tree_default.layout(SizeProposal {
             width: Some(400.0),
             height: None,
         });
 
-        let mut tree_wide = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree_wide = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let h60 = tree_wide.add(GroupHeader::new_literal("Section").gap(60.0));
         tree_wide.layout(SizeProposal {
             width: Some(400.0),

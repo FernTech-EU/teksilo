@@ -1173,14 +1173,14 @@ mod tests {
         // registry, so subsequent hovers found nothing to show. Theme
         // changes don't rebuild widgets (they only update the theme
         // signal), so the registry must be preserved.
-        let mut tree = WidgetTree::new().with_theme(fern_tokens::Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
         let anchor = tree.add(FillWidget::new());
         let tooltip = tree.add(FillWidget::new().label("Tip"));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         tree.attach_tooltip(anchor, tooltip, std::time::Duration::from_millis(500));
 
-        tree.set_theme(fern_tokens::Theme::dark_default());
+        tree.set_theme(crate::presets::intui::dark());
 
         tree.pointer_move(tree.bounds(anchor).center());
         tree.advance_time(std::time::Duration::from_millis(600));

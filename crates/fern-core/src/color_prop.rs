@@ -21,10 +21,11 @@
 //! `mark_all_dirty` call inside `set_theme` already forces a repaint on every
 //! node.
 
-use fern_tokens::{BorderRole, Color, SurfaceRole, TextRole, Theme};
+use fern_tokens::{BorderRole, Color, SurfaceRole, TextRole};
 
 use crate::binding::{BindingLevel, BindingRegistry};
 use crate::signal::{Prop, Signal};
+use crate::styles::Theme;
 use crate::widget_id::WidgetId;
 
 /// A color value that may be static, reactive, or driven by a theme role.

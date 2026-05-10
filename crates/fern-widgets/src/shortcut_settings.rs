@@ -452,11 +452,11 @@ mod tests {
     use super::*;
     use fern_core::shortcut::Shortcut;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn shortcut_settings_builds_a_row_per_registered_shortcut() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.save")
                 .name("Save")
@@ -578,7 +578,7 @@ mod tests {
 
     #[test]
     fn filter_narrows_visible_rows_by_name_or_category() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.save")
                 .name("Save")
@@ -626,7 +626,7 @@ mod tests {
 
     #[test]
     fn rebind_through_capture_mode_updates_registry() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.shortcut_registry_mut().register(
             Shortcut::new("app.save")
                 .name("Save")

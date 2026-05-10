@@ -51,9 +51,9 @@ impl Widget for Root {
                 let dark = !is_dark_for_action.get();
                 is_dark_for_action.set(dark);
                 ctx.set_theme(if dark {
-                    Theme::dark_default()
+                    fern_ui::presets::intui::dark()
                 } else {
-                    Theme::light_default()
+                    fern_ui::presets::intui::light()
                 });
             },
         ));
@@ -814,7 +814,7 @@ impl Widget for Root {
 fn main() {
     FernAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(Theme::light_default())
+        .theme(fern_ui::presets::intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("FernUI — Menus & Dropdowns (Milestone 4)")

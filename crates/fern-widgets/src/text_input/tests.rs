@@ -4,13 +4,13 @@ use fern_canvas::SizeProposal;
 use fern_core::event::{Key, Modifiers};
 use fern_core::signal::Signal;
 use fern_core::widget_tree::WidgetTree;
-use fern_tokens::theme::Theme;
+use fern_core::Theme;
 
 use super::TextInput;
 
 fn setup(initial: &str) -> (WidgetTree, Signal<String>, fern_core::widget_id::WidgetId) {
     let text = Signal::new(initial.to_string());
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(TextInput::new(text.clone()).placeholder("Type here..."));
     tree.layout(SizeProposal::exact(300.0, 40.0));
     tick(&mut tree);
@@ -42,7 +42,7 @@ fn initial_text_propagates() {
 fn placeholder_text_set() {
     // Smoke test — placeholder is configured, build succeeds.
     let text = Signal::new(String::new());
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let _id = tree.add(
         TextInput::new(text)
             .placeholder("Search...")
@@ -55,7 +55,7 @@ fn placeholder_text_set() {
 #[test]
 fn builder_methods_chain() {
     let text = Signal::new(String::new());
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let _id = tree.add(
         TextInput::new(text)
             .placeholder("Enter value")
@@ -72,7 +72,7 @@ fn builder_methods_chain() {
 #[test]
 fn disabled_builds_without_panic() {
     let text = Signal::new("disabled".to_string());
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let _id = tree.add(TextInput::new(text).enabled(false));
     tree.layout(SizeProposal::exact(300.0, 40.0));
     tick(&mut tree);
@@ -81,7 +81,7 @@ fn disabled_builds_without_panic() {
 #[test]
 fn read_only_builds_without_panic() {
     let text = Signal::new("read only".to_string());
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let _id = tree.add(TextInput::new(text).read_only(true));
     tree.layout(SizeProposal::exact(300.0, 40.0));
     tick(&mut tree);
@@ -102,7 +102,7 @@ fn with_leading_slot() {
     use crate::primitives::icon_widget::IconWidget;
     let icon = IconWidget::checkmark(12.0);
     let text = Signal::new(String::new());
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let _id = tree.add(TextInput::new(text).leading_slot(icon));
     tree.layout(SizeProposal::exact(300.0, 40.0));
     tick(&mut tree);
@@ -113,7 +113,7 @@ fn with_trailing_slot() {
     use crate::primitives::icon_widget::IconWidget;
     let icon = IconWidget::chevron_down(12.0);
     let text = Signal::new(String::new());
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let _id = tree.add(TextInput::new(text).trailing_slot(icon));
     tree.layout(SizeProposal::exact(300.0, 40.0));
     tick(&mut tree);
@@ -135,7 +135,7 @@ fn focus_field(tree: &mut WidgetTree, outer: fern_core::widget_id::WidgetId) {
 #[test]
 fn char_filter_rejects_disallowed_keystrokes() {
     let text = Signal::new(String::new());
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(TextInput::new(text.clone()).char_filter(|c| c.is_ascii_digit()));
     tree.layout(SizeProposal::exact(300.0, 40.0));
     tick(&mut tree);
@@ -151,7 +151,7 @@ fn char_filter_rejects_disallowed_keystrokes() {
 #[test]
 fn char_filter_admits_allowed_keystrokes() {
     let text = Signal::new(String::new());
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(
         TextInput::new(text.clone()).char_filter(|c| c.is_ascii_digit() || c == '.' || c == '-'),
     );
@@ -170,7 +170,7 @@ fn char_filter_composes_with_max_length() {
     // document length (see `keyboard.rs`), so this test ticks after
     // each character to match real-world typing cadence.
     let text = Signal::new(String::new());
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(
         TextInput::new(text.clone())
             .char_filter(|c| c.is_ascii_digit())
@@ -197,7 +197,7 @@ fn on_blur_fires_when_focus_is_lost() {
     let text = Signal::new("hello".to_string());
     let fired = Rc::new(Cell::new(0u32));
     let fired_c = fired.clone();
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(TextInput::new(text).on_blur_fn(move |_| fired_c.set(fired_c.get() + 1)));
     // A focusable sibling button we can park focus on to force blur.
     let sink = tree.add(crate::button::Button::new_literal("sink").on_activate_fn(|_| {}));
@@ -227,7 +227,7 @@ fn on_blur_and_on_submit_coexist() {
     let submitted = Rc::new(Cell::new(false));
     let b = blurred.clone();
     let s = submitted.clone();
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(
         TextInput::new(text)
             .on_submit_fn(move |_| s.set(true))
@@ -253,7 +253,7 @@ fn on_blur_and_on_submit_coexist() {
 #[test]
 fn suffix_builds_without_panic() {
     let text = Signal::new("42".to_string());
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let _id = tree.add(TextInput::new(text).suffix(" %"));
     tree.layout(SizeProposal::exact(300.0, 40.0));
     tick(&mut tree);
@@ -262,7 +262,7 @@ fn suffix_builds_without_panic() {
 #[test]
 fn suffix_layout_stays_single_line() {
     let text = Signal::new("123".to_string());
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let id = tree.add(TextInput::new(text).suffix(" kg"));
     tree.layout(SizeProposal::exact(300.0, 40.0));
     tick(&mut tree);

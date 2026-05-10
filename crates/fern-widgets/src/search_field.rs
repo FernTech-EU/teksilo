@@ -733,11 +733,11 @@ impl Widget for SuggestionRow {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn search_field_builds() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let q = Signal::new(String::new());
         let id = tree.add(SearchField::new(q.clone()).placeholder("Search docs"));
         tree.layout(SizeProposal {
@@ -751,7 +751,7 @@ mod tests {
 
     #[test]
     fn search_field_a11y_role() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             SearchField::new(Signal::new(String::new())).with_suggestions(|q| {
                 if q.is_empty() {
@@ -771,7 +771,7 @@ mod tests {
 
     #[test]
     fn suggestions_provider_runs_on_text_change() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let q = Signal::new(String::new());
         let calls: Rc<Cell<usize>> = Rc::new(Cell::new(0));
         let calls_clone = calls.clone();

@@ -409,7 +409,7 @@ fn severity_icon(severity: MessageBoxSeverity) -> Option<Path> {
     }
 }
 
-fn severity_color(theme: &fern_tokens::Theme, severity: MessageBoxSeverity) -> Color {
+fn severity_color(theme: &fern_core::Theme, severity: MessageBoxSeverity) -> Color {
     match severity {
         MessageBoxSeverity::None => theme.colors.text_secondary,
         MessageBoxSeverity::Information => theme.colors.status_info_fg,
@@ -983,7 +983,7 @@ mod tests {
     use fern_core::ModalContent;
     use fern_core::event::WidgetEvent;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     /// Mirrors the focus resolution `fern_app::present_in_tree_modal_request`
     /// applies after the modal content subtree is built. Reproduced here
@@ -1023,7 +1023,7 @@ mod tests {
 
     #[test]
     fn present_queues_modal_request() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let mb = MessageBox::information_literal("t")
             .text_literal("x")
             .buttons(MessageBoxButtons::Ok);
@@ -1034,7 +1034,7 @@ mod tests {
     #[test]
     fn critical_uses_escape_only_close_behavior() {
         use crate::button::Button as Btn;
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let mb_cell: Rc<RefCell<Option<MessageBox>>> = Rc::new(RefCell::new(Some(
             MessageBox::critical_literal("Fatal")
                 .text_literal("Boom")
@@ -1059,7 +1059,7 @@ mod tests {
 
     #[test]
     fn alert_dialog_role_exposed() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let mb = MessageBox::warning_literal("Title")
             .text_literal("Body")
             .buttons(MessageBoxButtons::Ok);
@@ -1072,7 +1072,7 @@ mod tests {
 
     #[test]
     fn ok_button_fires_result_with_correct_kind() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let captured: Rc<RefCell<Option<MessageBoxResult>>> = Rc::new(RefCell::new(None));
         let captured_for_handler = captured.clone();
         let mb = MessageBox::information_literal("t")
@@ -1099,7 +1099,7 @@ mod tests {
 
     #[test]
     fn default_button_is_focused_on_open() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let mb = MessageBox::question_literal("t")
             .text_literal("x")
             .buttons(MessageBoxButtons::YesNoCancel)
@@ -1113,7 +1113,7 @@ mod tests {
 
     #[test]
     fn enter_fires_default_button_from_any_focus() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let captured: Rc<RefCell<Option<MessageBoxResult>>> = Rc::new(RefCell::new(None));
         let captured_for_handler = captured.clone();
         let mb = MessageBox::question_literal("t")
@@ -1135,7 +1135,7 @@ mod tests {
 
     #[test]
     fn escape_fires_escape_button_and_marks_dismissed() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let captured: Rc<RefCell<Option<MessageBoxResult>>> = Rc::new(RefCell::new(None));
         let captured_for_handler = captured.clone();
         let mb = MessageBox::question_literal("t")
@@ -1153,7 +1153,7 @@ mod tests {
 
     #[test]
     fn checkbox_state_reported_in_result() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let shared_state = Signal::new(false);
         let captured: Rc<RefCell<Option<MessageBoxResult>>> = Rc::new(RefCell::new(None));
         let captured_for_handler = captured.clone();
@@ -1181,7 +1181,7 @@ mod tests {
 
     #[test]
     fn accessible_title_hint_propagates_to_container() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let mb = MessageBox::information_literal("Title propagation test")
             .text_literal("Body")
             .buttons(MessageBoxButtons::Ok);

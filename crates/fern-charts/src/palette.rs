@@ -7,7 +7,8 @@
 //!    which reads `theme.colors.chart_palette` — Okabe-Ito by default).
 //! 3. Black, as the last-resort fallback if both are empty.
 
-use fern_tokens::{Color, Theme};
+use fern_core::Theme;
+use fern_tokens::Color;
 
 /// A series color palette. `FromTheme` is the typical choice — it tracks
 /// the active theme's `chart_palette`. `Custom` lets a chart override
@@ -44,7 +45,7 @@ mod tests {
 
     #[test]
     fn from_theme_reads_okabe_ito() {
-        let theme = Theme::light_default();
+        let theme = fern_core::presets::intui::light();
         let palette = ChartPalette::FromTheme;
         // Series 0 = Okabe-Ito orange (#E69F00)
         let c0 = palette.color_for(0, &theme);
@@ -53,7 +54,7 @@ mod tests {
 
     #[test]
     fn wraps_when_index_exceeds_palette_len() {
-        let theme = Theme::light_default();
+        let theme = fern_core::presets::intui::light();
         let palette = ChartPalette::FromTheme;
         let len = theme.colors.chart_palette.len();
         // index = len wraps to 0
@@ -62,7 +63,7 @@ mod tests {
 
     #[test]
     fn custom_overrides_theme() {
-        let theme = Theme::light_default();
+        let theme = fern_core::presets::intui::light();
         let palette = ChartPalette::Custom(vec![Color::RED, Color::BLUE]);
         assert_eq!(palette.color_for(0, &theme), Color::RED);
         assert_eq!(palette.color_for(1, &theme), Color::BLUE);
@@ -71,7 +72,7 @@ mod tests {
 
     #[test]
     fn empty_custom_falls_back_to_black() {
-        let theme = Theme::light_default();
+        let theme = fern_core::presets::intui::light();
         let palette = ChartPalette::Custom(vec![]);
         assert_eq!(palette.color_for(0, &theme), Color::BLACK);
     }

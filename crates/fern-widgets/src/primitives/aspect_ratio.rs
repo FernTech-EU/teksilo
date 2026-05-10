@@ -176,7 +176,7 @@ mod tests {
     #[test]
     fn width_only_proposal() {
         let ar = AspectRatio::new(4.0 / 3.0);
-        let theme = fern_tokens::Theme::light_default();
+        let theme = fern_core::presets::intui::light();
         let ctx = LayoutContext::for_testing(&theme);
         let size = ar
             .layout_response(

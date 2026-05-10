@@ -74,7 +74,7 @@ impl From<Size> for LayoutResponse {
 
 /// Context available during layout.
 pub struct LayoutContext<'a> {
-    pub theme: &'a fern_tokens::Theme,
+    pub theme: &'a crate::styles::Theme,
     pub layout_direction: crate::environment::LayoutDirection,
     /// Text backend for accurate text measurement during layout.
     pub text_backend: Option<&'a std::rc::Rc<std::cell::RefCell<dyn fern_canvas::TextBackend>>>,
@@ -99,7 +99,7 @@ pub(crate) struct LayoutExtras<'a> {
 
 impl<'a> LayoutContext<'a> {
     /// Create a LayoutContext for testing (no arena access).
-    pub fn for_testing(theme: &'a fern_tokens::Theme) -> Self {
+    pub fn for_testing(theme: &'a crate::styles::Theme) -> Self {
         Self {
             theme,
             layout_direction: crate::environment::LayoutDirection::LeftToRight,
@@ -204,7 +204,7 @@ impl<'a> LayoutContext<'a> {
 
 /// Context available during painting.
 pub struct PaintContext<'a> {
-    pub theme: &'a fern_tokens::Theme,
+    pub theme: &'a crate::styles::Theme,
     pub scale_factor: f32,
     /// Active layout direction. Used by widgets that have to resolve
     /// Leading/Trailing semantics into geometric Left/Right at paint
@@ -592,7 +592,7 @@ pub struct EventContext<'ops> {
     pub(crate) cancel_drag: bool,
     /// Replace the tree-level theme. Drained after dispatch; triggers a
     /// composite-widget rebuild and full repaint.
-    pub(crate) theme_request: Option<fern_tokens::Theme>,
+    pub(crate) theme_request: Option<crate::styles::Theme>,
     /// Replace the tree-level locale identifier. Drained after dispatch;
     /// triggers a composite-widget rebuild and full repaint.
     pub(crate) locale_request: Option<String>,
@@ -1202,7 +1202,7 @@ impl<'ops> EventContext<'ops> {
     /// Replace the tree-level theme. Composite widgets are rebuilt so any
     /// derived values they captured at build time pick up the new tokens,
     /// and all widgets are marked dirty for repaint.
-    pub fn set_theme(&mut self, theme: fern_tokens::Theme) {
+    pub fn set_theme(&mut self, theme: crate::styles::Theme) {
         self.theme_request = Some(theme);
     }
 

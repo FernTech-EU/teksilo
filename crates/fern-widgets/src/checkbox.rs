@@ -619,14 +619,14 @@ mod tests {
     use super::*;
     use fern_core::event::Modifiers;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     // --- Two-state tests ---
 
     #[test]
     fn click_toggles_bool_state() {
         let checked = Signal::new(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let cb = tree.add(Checkbox::new(checked.clone()).label_literal("Accept"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
@@ -640,7 +640,7 @@ mod tests {
     #[test]
     fn space_toggles_bool_state() {
         let checked = Signal::new(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let cb = tree.add(Checkbox::new(checked.clone()).label_literal("Accept"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
@@ -654,7 +654,7 @@ mod tests {
     #[test]
     fn disabled_ignores_click() {
         let checked = Signal::new(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let cb = tree.add(
             Checkbox::new(checked.clone())
                 .label_literal("Accept")
@@ -669,7 +669,7 @@ mod tests {
     #[test]
     fn two_state_accessibility() {
         let checked = Signal::new(true);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let cb = tree.add(Checkbox::new(checked).label_literal("Accept"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
@@ -684,7 +684,7 @@ mod tests {
     #[test]
     fn tristate_cycles_through_all_states() {
         let state = Signal::new(CheckState::Unchecked);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let cb = tree.add(Checkbox::tristate(state.clone()).label_literal("Select All"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
@@ -700,7 +700,7 @@ mod tests {
     #[test]
     fn tristate_space_cycles() {
         let state = Signal::new(CheckState::Unchecked);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let cb = tree.add(Checkbox::tristate(state.clone()).label_literal("Select All"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
@@ -715,11 +715,11 @@ mod tests {
     fn tristate_indeterminate_shows_filled_background() {
         // Indeterminate is_filled() == true, so it should have a primary background
         let state = Signal::new(CheckState::Indeterminate);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Checkbox::tristate(state).label_literal("Partial"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let frame = tree.render();
-        let primary = Theme::light_default().colors.accent.to_array();
+        let primary = fern_core::presets::intui::light().colors.accent.to_array();
         assert!(
             frame.shapes.iter().any(|s| s.color == primary),
             "indeterminate checkbox should have primary-colored background"
@@ -738,7 +738,7 @@ mod tests {
     #[test]
     fn disabled_has_disabled_colors() {
         let checked = Signal::new(true);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(
             Checkbox::new(checked)
                 .label_literal("Disabled")
@@ -746,7 +746,7 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let frame = tree.render();
-        let disabled_fill = Theme::light_default().colors.accent_disabled.to_array();
+        let disabled_fill = fern_core::presets::intui::light().colors.accent_disabled.to_array();
         assert!(
             frame.shapes.iter().any(|s| s.color == disabled_fill),
             "disabled checkbox should render with disabled_fill color"
@@ -756,7 +756,7 @@ mod tests {
     #[test]
     fn accessibility_has_actions() {
         let checked = Signal::new(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let cb = tree.add(Checkbox::new(checked).label_literal("Accept"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let info = tree.accessibility_node(cb);

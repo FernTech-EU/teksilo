@@ -399,7 +399,7 @@ fn layout_widget_recursive(
     id: WidgetId,
     parent_bounds: Rect,
     proposal: SizeProposal,
-    base_theme: &fern_tokens::Theme,
+    base_theme: &crate::styles::Theme,
     layout_direction: crate::environment::LayoutDirection,
     text_backend: Option<&std::rc::Rc<std::cell::RefCell<dyn fern_canvas::TextBackend>>>,
     extras: Option<crate::widget::LayoutExtras<'_>>,

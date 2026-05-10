@@ -305,13 +305,13 @@ impl Widget for InputDialogBody {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn input_dialog_body_builds() {
         // Smoke test: the body widget renders without panic when added
         // standalone (without going through present_modal).
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let dlg = InputDialog::new_literal("Rename")
             .prompt_literal("Choose a new name:")
             .default_text("untitled");

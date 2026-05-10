@@ -197,13 +197,13 @@ mod tests {
     use super::*;
     use crate::primitives::TextWidget;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn pulse_starts_at_midpoint() {
         // First layout pass, before any frame tick: opacity should be
         // the midpoint between min and max.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Pulse::opacity(0.2, 1.0).child(TextWidget::new_literal("●")));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let frame = tree.render();
@@ -227,7 +227,7 @@ mod tests {
 
     #[test]
     fn pulse_pins_to_midpoint_under_reduced_motion() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.set_accessibility_preferences(false, true, 1.0);
         tree.add(Pulse::opacity(0.0, 1.0).child(TextWidget::new_literal("●")));
         tree.layout(SizeProposal::exact(100.0, 50.0));
@@ -254,7 +254,7 @@ mod tests {
 
     #[test]
     fn pulse_does_not_change_layout() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(Pulse::opacity(0.0, 1.0).child(TextWidget::new_literal("hello")));
         tree.layout(SizeProposal {
             width: Some(300.0),
@@ -272,7 +272,7 @@ mod tests {
     #[test]
     fn pulse_clamps_inverted_min_max() {
         // Pulse::opacity(0.9, 0.1) should still produce a valid range.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Pulse::opacity(0.9, 0.1).child(TextWidget::new_literal("●")));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let _ = tree.render();

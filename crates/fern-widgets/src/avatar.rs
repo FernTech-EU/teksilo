@@ -575,7 +575,7 @@ fn derive_initials(name: &str) -> String {
 /// Pick a colour from the theme's chart palette deterministically from
 /// `seed`. Empty palette falls back to a neutral grey so the widget
 /// still renders.
-fn hash_pick_palette_color(seed: &str, theme: &fern_tokens::Theme) -> Color {
+fn hash_pick_palette_color(seed: &str, theme: &fern_core::Theme) -> Color {
     let palette = &theme.colors.chart_palette;
     if palette.is_empty() {
         return Color::from_rgb(0.5, 0.5, 0.5);
@@ -594,7 +594,7 @@ fn auto_contrast_text(bg: Color) -> Color {
     }
 }
 
-fn presence_color(p: &AvatarPresence, theme: &fern_tokens::Theme) -> Color {
+fn presence_color(p: &AvatarPresence, theme: &fern_core::Theme) -> Color {
     match p {
         AvatarPresence::Online => theme.colors.status_success_fg,
         AvatarPresence::Offline => theme.colors.text_disabled,
@@ -1178,7 +1178,7 @@ struct InitialsLeaf {
 impl InitialsLeaf {
     /// Recompute the bg colour the parent Avatar will paint. Must
     /// stay in lock-step with `Avatar::paint`'s bg branch.
-    fn resolve_bg(&self, theme: &fern_tokens::Theme) -> Color {
+    fn resolve_bg(&self, theme: &fern_core::Theme) -> Color {
         match &self.background {
             Some(prop) => prop.resolve(theme),
             None => hash_pick_palette_color(&self.seed, theme),
@@ -1255,7 +1255,7 @@ mod tests {
     use super::*;
     use fern_core::widget::LayoutContext;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     // ── helpers ────────────────────────────────────────────────────────
 
@@ -1327,7 +1327,7 @@ mod tests {
 
     #[test]
     fn hash_distributes_over_palette() {
-        let theme = Theme::light_default();
+        let theme = fern_core::presets::intui::light();
         let mut buckets = [0_u32; 8];
         for i in 0..200 {
             let seed = format!("user_{i}");
@@ -1353,7 +1353,7 @@ mod tests {
 
     #[test]
     fn size_default_is_medium_32px() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(Avatar::with_initials_literal("JD"));
         tree.layout(SizeProposal {
             width: None,
@@ -1366,7 +1366,7 @@ mod tests {
 
     #[test]
     fn size_custom_passes_through() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(Avatar::with_initials_literal("JD").size(AvatarSize::Custom(40.0)));
         tree.layout(SizeProposal {
             width: None,
@@ -1385,7 +1385,7 @@ mod tests {
         // root's bounds to the proposal regardless, so we exercise
         // `size_that_fits` directly.)
         let widget = Avatar::with_initials_literal("JD");
-        let theme = Theme::light_default();
+        let theme = fern_core::presets::intui::light();
         let ctx = LayoutContext::for_testing(&theme);
         let s = widget
             .layout_response(SizeProposal::exact(400.0, 400.0), &ctx)
@@ -1396,7 +1396,7 @@ mod tests {
 
     #[test]
     fn small_medium_large_xlarge_sizes() {
-        let theme = Theme::light_default();
+        let theme = fern_core::presets::intui::light();
         let cases = [
             (AvatarSize::Small, theme.components.avatar.size_small),
             (AvatarSize::Medium, theme.components.avatar.size_medium),
@@ -1426,7 +1426,7 @@ mod tests {
         use std::cell::RefCell;
         use std::rc::Rc;
         let mut tree = WidgetTree::new()
-            .with_theme(Theme::light_default())
+            .with_theme(fern_core::presets::intui::light())
             .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
         tree.add(avatar);
         tree.layout(SizeProposal::exact(64.0, 64.0));
@@ -1511,7 +1511,7 @@ mod tests {
 
     #[test]
     fn accessibility_initials_default_role_is_label() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(Avatar::with_initials_literal("JD"));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         let info = tree.accessibility_node(id);
@@ -1522,7 +1522,7 @@ mod tests {
     #[test]
     fn accessibility_image_default_role_is_image() {
         let icon = rgba_solid(8, [10, 20, 30, 255]);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(Avatar::with_image(&icon).alt_literal("Jane Doe"));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         let info = tree.accessibility_node(id);
@@ -1532,7 +1532,7 @@ mod tests {
 
     #[test]
     fn accessibility_clickable_becomes_button() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             Avatar::with_initials_literal("JD")
                 .label_literal("Open user menu")
@@ -1554,7 +1554,7 @@ mod tests {
 
     #[test]
     fn accessibility_a11y_hidden_does_not_set_role() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(Avatar::with_initials_literal("JD").a11y_hidden());
         tree.layout(SizeProposal::exact(32.0, 32.0));
         let info = tree.accessibility_node(id);
@@ -1565,7 +1565,7 @@ mod tests {
 
     #[test]
     fn accessibility_label_overrides_initials() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(Avatar::with_initials_literal("JD").label_literal("Jane Doe (offline)"));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         let info = tree.accessibility_node(id);
@@ -1574,7 +1574,7 @@ mod tests {
 
     #[test]
     fn accessibility_presence_appears_in_description() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(Avatar::with_initials_literal("JD").presence(AvatarPresence::Online));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         // Just verify it builds — `description` isn't surfaced by the
@@ -1594,7 +1594,7 @@ mod tests {
 
         let icon = rgba_solid(8, [10, 20, 30, 255]);
         let visible = Signal::new(true);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             Avatar::with_image(&icon)
                 .alt_literal("Jane")
@@ -1737,7 +1737,7 @@ mod tests {
         use fern_core::signal::Signal;
         let open = Signal::new(false);
         let mut tree = WidgetTree::new()
-            .with_theme(Theme::light_default())
+            .with_theme(fern_core::presets::intui::light())
             .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
                 fern_canvas::MockTextBackend::new(),
             )));
@@ -1765,7 +1765,7 @@ mod tests {
         // builder is a no-op functionally without an action handler,
         // but we want `accessibility()` to safely surface it for
         // wrappers that supply external state.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             Avatar::with_initials_literal("JD").has_popup(fern_core::accesskit::HasPopup::Menu),
         );
@@ -1785,7 +1785,7 @@ mod tests {
         // clickable avatar, then drive the focus signal directly.
 
         let mut tree = WidgetTree::new()
-            .with_theme(Theme::light_default())
+            .with_theme(fern_core::presets::intui::light())
             .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
                 fern_canvas::MockTextBackend::new(),
             )));
@@ -1813,7 +1813,7 @@ mod tests {
     #[test]
     fn focus_ring_uses_theme_focus_ring_color() {
         let mut tree = WidgetTree::new()
-            .with_theme(Theme::light_default())
+            .with_theme(fern_core::presets::intui::light())
             .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
                 fern_canvas::MockTextBackend::new(),
             )));
@@ -1826,7 +1826,7 @@ mod tests {
         tree.focus(id);
         tree.layout(SizeProposal::exact(64.0, 64.0));
         let frame = tree.render();
-        let target = Theme::light_default().colors.focus_ring;
+        let target = fern_core::presets::intui::light().colors.focus_ring;
         assert!(
             shape_colors(&frame)
                 .iter()
@@ -1841,7 +1841,7 @@ mod tests {
         // and even if focus_ring drawing tried to fire, the `focused`
         // signal would be `None` and the branch is skipped.
         let mut tree = WidgetTree::new()
-            .with_theme(Theme::light_default())
+            .with_theme(fern_core::presets::intui::light())
             .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
                 fern_canvas::MockTextBackend::new(),
             )));
@@ -1865,7 +1865,7 @@ mod tests {
         // Inner ImageWidget is `a11y_hidden()` so the avatar is only
         // announced once. The parent carries the canonical name.
         let icon = rgba_solid(8, [10, 20, 30, 255]);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let parent = tree.add(Avatar::with_image(&icon).alt_literal("Jane"));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         let info = tree.accessibility_node(parent);
@@ -1881,7 +1881,7 @@ mod tests {
         // ordering: setting the shape after `with_image` works.
         let icon = rgba_solid(16, [10, 20, 30, 255]);
         let a = Avatar::with_image(&icon).alt_literal("X");
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let _ = tree.add(a.shape(AvatarShape::Square));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         let _ = tree.render();
@@ -1897,7 +1897,7 @@ mod tests {
         use std::rc::Rc as StdRc;
         let name = Signal::new(String::new()); // logged-out
         let mut tree = WidgetTree::new()
-            .with_theme(Theme::light_default())
+            .with_theme(fern_core::presets::intui::light())
             .with_text_backend(StdRc::new(RefCell::new(MockTextBackend::new())));
         let id = tree.add(Avatar::with_initials_literal("?").bind_name(name.clone()));
         tree.layout(SizeProposal::exact(32.0, 32.0));
@@ -1921,7 +1921,7 @@ mod tests {
         let icon = rgba_solid(8, [10, 20, 30, 255]);
         let image: Signal<Option<Rc<RasterIcon>>> = Signal::new(None);
         let mut tree = WidgetTree::new()
-            .with_theme(Theme::light_default())
+            .with_theme(fern_core::presets::intui::light())
             .with_text_backend(StdRc::new(RefCell::new(MockTextBackend::new())));
         let _id = tree.add(
             Avatar::with_initials_literal("JD")
@@ -1964,7 +1964,7 @@ mod tests {
         let icon = rgba_solid(8, [10, 20, 30, 255]);
         let image: Signal<Option<Rc<RasterIcon>>> = Signal::new(None);
         let mut tree = WidgetTree::new()
-            .with_theme(Theme::light_default())
+            .with_theme(fern_core::presets::intui::light())
             .with_text_backend(StdRc::new(RefCell::new(MockTextBackend::new())));
         let _id = tree.add(
             Avatar::with_image(&icon)
@@ -1986,7 +1986,7 @@ mod tests {
         let icon = rgba_solid(8, [10, 20, 30, 255]);
         let alt = Signal::new(Some("Jane Doe".to_string()));
         let mut tree = WidgetTree::new()
-            .with_theme(Theme::light_default())
+            .with_theme(fern_core::presets::intui::light())
             .with_text_backend(StdRc::new(RefCell::new(MockTextBackend::new())));
         let id = tree.add(Avatar::with_image(&icon).bind_alt(alt.clone()));
         tree.layout(SizeProposal::exact(32.0, 32.0));
@@ -2001,7 +2001,7 @@ mod tests {
     fn bind_label_updates_a11y_name_on_initials_avatar() {
         use fern_core::signal::Signal;
         let label = Signal::new(Some("Profile".to_string()));
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(Avatar::with_initials_literal("JD").bind_label(label.clone()));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         assert_eq!(tree.accessibility_node(id).name(), Some("Profile"));
@@ -2016,13 +2016,13 @@ mod tests {
         use fern_core::signal::Signal;
         let presence: Signal<Option<AvatarPresence>> = Signal::new(Some(AvatarPresence::Online));
         let mut tree = WidgetTree::new()
-            .with_theme(Theme::light_default())
+            .with_theme(fern_core::presets::intui::light())
             .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
                 fern_canvas::MockTextBackend::new(),
             )));
         let id = tree.add(Avatar::with_initials_literal("JD").bind_presence(presence.clone()));
         tree.layout(SizeProposal::exact(32.0, 32.0));
-        let online_color = Theme::light_default().colors.status_success_fg;
+        let online_color = fern_core::presets::intui::light().colors.status_success_fg;
         assert!(
             shape_colors(&tree.render())
                 .iter()
@@ -2034,7 +2034,7 @@ mod tests {
         // Flip to Busy.
         presence.set(Some(AvatarPresence::Busy));
         tree.layout(SizeProposal::exact(32.0, 32.0));
-        let busy_color = Theme::light_default().colors.status_error_fg;
+        let busy_color = fern_core::presets::intui::light().colors.status_error_fg;
         assert!(
             shape_colors(&tree.render())
                 .iter()
@@ -2066,7 +2066,7 @@ mod tests {
         use std::rc::Rc as StdRc;
         let name = Signal::new("Jane Doe".to_string());
         let mut tree = WidgetTree::new()
-            .with_theme(Theme::light_default())
+            .with_theme(fern_core::presets::intui::light())
             .with_text_backend(StdRc::new(RefCell::new(MockTextBackend::new())));
         let _id = tree.add(Avatar::with_initials_literal("?").bind_name(name.clone()));
         tree.layout(SizeProposal::exact(32.0, 32.0));

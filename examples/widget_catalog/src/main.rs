@@ -68,7 +68,7 @@ fn main() {
         .install_inspector_in_debug()
         .install_file_dialog()
         .register_tooltips(build_tooltip_registry())
-        .theme(Theme::light_default())
+        .theme(fern_ui::presets::intui::light())
         .i18n(i18n)
         .initial_window(
             WindowConfig::new()
@@ -174,9 +174,9 @@ fn build_title_bar(host: Rc<dyn PlatformTitleBarHost>, _theme: &Theme) -> impl W
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                Theme::dark_default()
+                fern_ui::presets::intui::dark()
             } else {
-                Theme::light_default()
+                fern_ui::presets::intui::light()
             });
         });
 

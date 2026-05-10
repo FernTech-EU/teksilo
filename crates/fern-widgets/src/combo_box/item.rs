@@ -27,7 +27,7 @@ use crate::primitives::{HStack, Padding, RectWidget, Spacer, TextWidget, ZStack}
 pub(super) fn build_default_item(
     ctx: &mut BuildContext,
     label: &str,
-    theme: &fern_tokens::Theme,
+    theme: &fern_core::Theme,
 ) -> WidgetId {
     let text = TextWidget::new_literal(label)
         .style(TextStyleRole::Body)

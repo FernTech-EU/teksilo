@@ -528,7 +528,7 @@ mod tests {
     #[test]
     fn track_click_sets_value() {
         let value = Signal::new(0.0_f32);
-        let mut tree = WidgetTree::new().with_theme(fern_tokens::Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let s = tree.add(Slider::new(value.clone(), 0.0, 100.0));
         tree.layout(SizeProposal::exact(200.0, 60.0));
         // Render to trigger paint() which caches bounds for event handling
@@ -572,7 +572,7 @@ mod tests {
 
     #[test]
     fn thumb_drag_updates_value() {
-        let theme = fern_tokens::Theme::light_default();
+        let theme = fern_core::presets::intui::light();
         let thumb_radius = theme.components.slider.thumb_diameter * 0.5;
         let value = Signal::new(50.0_f32);
         let mut tree = WidgetTree::new().with_theme(theme);

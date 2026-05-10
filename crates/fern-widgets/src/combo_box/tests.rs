@@ -1,12 +1,12 @@
 use super::*;
 use fern_core::widget_tree::WidgetTree;
 use fern_data::ListModel;
-use fern_tokens::Theme;
+use fern_core::Theme;
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
 fn light_tree() -> WidgetTree {
-    WidgetTree::new().with_theme(Theme::light_default())
+    WidgetTree::new().with_theme(fern_core::presets::intui::light())
 }
 
 fn fruits() -> Vec<&'static str> {

@@ -1,12 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::color::Color;
-use crate::components::ComponentStyles;
-use crate::layout::LayoutTokens;
-use crate::motion::MotionTokens;
 use crate::os_theme_colors::OsThemeColors;
-use crate::shape::ShapeTokens;
-use crate::typography::TypographyTokens;
 
 /// Semantic color tokens for a theme, structured around the JetBrains Int UI design system.
 ///
@@ -515,63 +510,19 @@ fn okabe_ito_palette(dark: bool) -> Vec<Color> {
     ]
 }
 
-/// The complete theme containing all design tokens.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Theme {
-    pub colors: ColorTokens,
-    pub layout: LayoutTokens,
-    pub typography: TypographyTokens,
-    pub shape: ShapeTokens,
-    pub motion: MotionTokens,
-    pub components: ComponentStyles,
-}
-
-impl Theme {
-    pub fn light_default() -> Self {
-        Self {
-            colors: ColorTokens::light_default(),
-            layout: LayoutTokens::default(),
-            typography: TypographyTokens::default(),
-            shape: ShapeTokens::light_default(),
-            motion: MotionTokens::default(),
-            components: ComponentStyles::default(),
-        }
-    }
-
-    pub fn dark_default() -> Self {
-        Self {
-            colors: ColorTokens::dark_default(),
-            layout: LayoutTokens::default(),
-            typography: TypographyTokens::default(),
-            // Dark-theme shadows use ~4× stronger alphas (Int UI v2 §3).
-            shape: ShapeTokens::dark_default(),
-            motion: MotionTokens::default(),
-            components: ComponentStyles::default(),
-        }
-    }
-}
+// `Theme` aggregator lives in `fern-core` (not here) so it can co-locate
+// with the per-widget style trait protocols and the typed `Arc<dyn …Style>`
+// `ComponentStyles` slot bag. fern-tokens stays a pure-data leaf crate.
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn light_default_has_distinct_accent_and_surface() {
-        let theme = Theme::light_default();
-        assert_ne!(theme.colors.accent, theme.colors.surface_main);
-    }
-
-    #[test]
-    fn dark_default_has_distinct_accent_and_surface() {
-        let theme = Theme::dark_default();
-        assert_ne!(theme.colors.accent, theme.colors.surface_main);
-    }
-
-    #[test]
     fn light_and_dark_have_different_surfaces() {
-        let light = Theme::light_default();
-        let dark = Theme::dark_default();
-        assert_ne!(light.colors.surface_main, dark.colors.surface_main);
+        let light = ColorTokens::light_default();
+        let dark = ColorTokens::dark_default();
+        assert_ne!(light.surface_main, dark.surface_main);
     }
 
     #[test]
@@ -579,10 +530,10 @@ mod tests {
         // TableView / TreeTable zebra striping needs a perceptible delta
         // between alternating rows and the body background. If a future
         // refactor accidentally aliases these, regression here.
-        let light = Theme::light_default();
-        let dark = Theme::dark_default();
-        assert_ne!(light.colors.surface_alt_row, light.colors.surface_content);
-        assert_ne!(dark.colors.surface_alt_row, dark.colors.surface_content);
+        let light = ColorTokens::light_default();
+        let dark = ColorTokens::dark_default();
+        assert_ne!(light.surface_alt_row, light.surface_content);
+        assert_ne!(dark.surface_alt_row, dark.surface_content);
     }
 
     #[test]
@@ -590,15 +541,6 @@ mod tests {
         use crate::roles::SurfaceRole;
         let colors = ColorTokens::light_default();
         assert_eq!(SurfaceRole::AltRow.resolve(&colors), colors.surface_alt_row);
-    }
-
-    #[test]
-    fn theme_serde_roundtrip() {
-        let theme = Theme::light_default();
-        let json = serde_json::to_string(&theme).unwrap();
-        let deserialized: Theme = serde_json::from_str(&json).unwrap();
-        assert_eq!(theme.colors.accent, deserialized.colors.accent);
-        assert_eq!(theme.layout, deserialized.layout);
     }
 
     #[test]

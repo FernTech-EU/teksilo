@@ -224,12 +224,12 @@ mod tests {
     use super::*;
     use fern_core::signal::Signal;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn group_publishes_radio_group_role_and_name() {
         let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let rg = tree.add(
             RadioGroup::new()
                 .label_literal("Theme")
@@ -252,7 +252,7 @@ mod tests {
         // that the tree has the expected number of RadioButton
         // nodes beneath the group.
         let selected = Signal::new(1_usize);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(
             RadioGroup::new()
                 .radio(RadioButton::new(0, selected.clone()).label_literal("A"))

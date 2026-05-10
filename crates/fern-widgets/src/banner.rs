@@ -50,7 +50,7 @@ impl BannerSeverity {
         }
     }
 
-    fn glyph_color(self, theme: &fern_tokens::Theme) -> fern_tokens::Color {
+    fn glyph_color(self, theme: &fern_core::Theme) -> fern_tokens::Color {
         match self {
             Self::Info => theme.colors.status_info_fg,
             Self::Success => theme.colors.status_success_fg,
@@ -341,11 +341,11 @@ impl Widget for Banner {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn banner_builds_and_lays_out() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             Banner::warning_literal("Unsaved changes")
                 .description_literal("Close will discard your edits."),
@@ -361,7 +361,7 @@ mod tests {
 
     #[test]
     fn banner_a11y_role_and_name() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(Banner::info_literal("Heads up"));
         tree.layout(SizeProposal {
             width: Some(400.0),
@@ -379,7 +379,7 @@ mod tests {
         // collapse to its content width inside a normal VStack parent.
         // Banner's `layout_response` overrides the width to the proposal.
         use crate::primitives::VStack;
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let banner = Banner::warning_literal("Unsaved changes")
             .description_literal("Close will discard your edits.");
         let stack_id = tree.add(VStack::new().spacing(8.0).child(banner));
@@ -414,7 +414,7 @@ mod tests {
         use std::rc::Rc;
         let dismissed = Rc::new(Cell::new(false));
         let dismissed_clone = dismissed.clone();
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(
             Banner::error_literal("Disk almost full")
                 .on_dismiss(move |_| dismissed_clone.set(true)),

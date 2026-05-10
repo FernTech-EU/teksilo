@@ -319,7 +319,7 @@ mod tests {
 
     #[test]
     fn flex_default_is_one() {
-        let theme = fern_tokens::Theme::light_default();
+        let theme = fern_core::presets::intui::light();
         let ctx = LayoutContext::for_testing(&theme);
         let r = Expand::new().layout_response(SizeProposal::unspecified(), &ctx);
         assert_eq!(r.flex, 1.0);
@@ -327,7 +327,7 @@ mod tests {
 
     #[test]
     fn flex_zero_opts_out() {
-        let theme = fern_tokens::Theme::light_default();
+        let theme = fern_core::presets::intui::light();
         let ctx = LayoutContext::for_testing(&theme);
         let r = Expand::new()
             .flex(0.0)

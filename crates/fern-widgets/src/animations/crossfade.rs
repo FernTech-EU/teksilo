@@ -182,7 +182,7 @@ mod tests {
     use crate::primitives::TextWidget;
     use fern_canvas::Size;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     fn count_set_opacity(frame: &fern_canvas::RenderFrame) -> Vec<f32> {
         frame
@@ -198,7 +198,7 @@ mod tests {
     #[test]
     fn first_build_shows_initial_key_at_full_opacity() {
         let key = Signal::new(0_u32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Crossfade::new(key, |k| {
             Box::new(TextWidget::new_literal(format!("page {k}")))
         }));
@@ -217,7 +217,7 @@ mod tests {
     #[test]
     fn key_change_starts_overlap_with_two_opacity_scopes() {
         let key = Signal::new(0_u32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Crossfade::new(key.clone(), |k| {
             Box::new(TextWidget::new_literal(format!("page {k}")))
         }));
@@ -276,7 +276,7 @@ mod tests {
         }
 
         let key = Signal::new(0_u32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         // Wrap so we can read the wrapper's bounds (which equal the
         // Crossfade's reported size).
         let id = tree.add(FixedSize::new().child(Crossfade::new(
@@ -323,7 +323,7 @@ mod tests {
     #[test]
     fn reduced_motion_snaps_instantly() {
         let key = Signal::new(0_u32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.set_accessibility_preferences(false, true, 1.0);
         tree.add(Crossfade::new(key.clone(), |k| {
             Box::new(TextWidget::new_literal(format!("page {k}")))

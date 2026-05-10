@@ -6,6 +6,12 @@ pub use fern_platform as platform;
 pub use fern_settings as settings;
 pub use fern_tokens as tokens;
 
+// Theme presets (`intui::light()` / `intui::dark()` etc.) live in
+// fern-core. Re-exported here so examples can call
+// `fern_ui::presets::intui::light()` without depending on fern-core
+// directly.
+pub use fern_core::presets;
+
 /// The `fern!` DSL macro. See `docs/fern-language-spec-v3.md` for the
 /// surface language. Re-exported from `fern-ui-macros` so consuming
 /// crates only need `fern-ui` in `[dependencies]`.
@@ -79,8 +85,17 @@ pub mod prelude {
 
     // Tokens
     pub use fern_tokens::{
-        BorderRole, Color, CornerRadius, SurfaceRole, TextRole, TextStyleRole, Theme,
+        BorderRole, Color, CornerRadius, SurfaceRole, TextRole, TextStyleRole,
     };
+
+    // Theme + appearance + extensions live in fern-core (so they can
+    // co-locate with the per-widget style trait protocols and the typed
+    // `Arc<dyn FooStyle>` slots).
+    pub use fern_core::{Theme, ThemeAppearance, ThemeExtensions};
+
+    // Theme presets — apps explicitly pick one (no Theme::default()):
+    //   let theme = intui::light();
+    pub use fern_core::presets::intui;
 
     // Reactive color / style props — unified input types for widget builders.
     pub use fern_core::color_prop::{ColorProp, TextStyleProp};

@@ -9,7 +9,8 @@ use fern_core::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest}
 use fern_core::{WidgetId, WidgetTree};
 use fern_i18n::{I18nConfig, I18nManager, LanguageIdentifier};
 use fern_platform::event_translation;
-use fern_tokens::{ColorTokens, Theme};
+use fern_core::Theme;
+use fern_tokens::ColorTokens;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -1147,8 +1148,8 @@ impl FernAppHandler {
             ThemeMode::Manual => {} // ignore OS theme changes
             ThemeMode::FollowSystem => {
                 let theme = match winit_theme {
-                    winit::window::Theme::Dark => Theme::dark_default(),
-                    winit::window::Theme::Light => Theme::light_default(),
+                    winit::window::Theme::Dark => fern_core::presets::intui::dark(),
+                    winit::window::Theme::Light => fern_core::presets::intui::light(),
                 };
                 self.wm.set_theme(theme);
             }
@@ -1156,9 +1157,9 @@ impl FernAppHandler {
                 // Re-query OS colors and rebuild theme
                 let os = fern_platform::os_theme::query_os_theme_colors();
                 let base = if os.color_scheme.is_dark() {
-                    Theme::dark_default()
+                    fern_core::presets::intui::dark()
                 } else {
-                    Theme::light_default()
+                    fern_core::presets::intui::light()
                 };
                 let theme = Theme {
                     colors: ColorTokens::from_os_colors(&os),
@@ -1440,7 +1441,7 @@ pub struct FernAppBuilder {
 impl FernAppBuilder {
     pub fn new() -> Self {
         Self {
-            theme: Theme::light_default(),
+            theme: fern_core::presets::intui::light(),
             theme_mode: ThemeMode::Manual,
             #[cfg(feature = "text")]
             typesetter: None,
@@ -1657,7 +1658,7 @@ impl FernAppBuilder {
     ///
     /// ```ignore
     /// FernAppBuilder::new()
-    ///     .theme(Theme::light_default())
+    ///     .theme(fern_core::presets::intui::light())
     ///     .initial_window(
     ///         WindowConfig::new()
     ///             .title("My App")
@@ -2105,7 +2106,7 @@ mod tests {
     #[test]
     fn builder_accepts_theme() {
         let app = FernAppBuilder::new()
-            .theme(Theme::light_default())
+            .theme(fern_core::presets::intui::light())
             .build_headless();
         assert_ne!(app.theme().colors.accent, Color::TRANSPARENT);
     }
@@ -2202,7 +2203,7 @@ mod tests {
 
     #[test]
     fn present_in_tree_modal_request_shows_centered_overlay() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let source = tree.add(Button::new_literal("Trigger"));
         let content = tree.add(Button::new_literal("Modal content"));
         tree.set_dormant(content);
@@ -2221,7 +2222,7 @@ mod tests {
 
     #[test]
     fn present_in_tree_modal_request_builds_deferred_content() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let source = tree.add(Button::new_literal("Trigger"));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -2239,7 +2240,7 @@ mod tests {
 
     #[test]
     fn present_in_tree_modal_request_moves_focus_into_modal() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let source = tree.add(Button::new_literal("Trigger"));
         tree.layout(SizeProposal::exact(800.0, 600.0));
         tree.focus(source);
@@ -2310,7 +2311,7 @@ mod tests {
         // When `focus_target` is None, the framework must consult the
         // content widget's `initial_focus_hint` before falling back to
         // `first_focusable_descendant`.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let source = tree.add(Button::new_literal("Trigger"));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -2342,7 +2343,7 @@ mod tests {
     fn present_in_tree_modal_falls_back_to_first_focusable_without_hint() {
         // Baseline: content without an initial_focus_hint gets the first
         // focusable descendant, matching prior behavior.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let source = tree.add(Button::new_literal("Trigger"));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -2373,7 +2374,7 @@ mod tests {
         // A focus_target pointing at a widget that exists but is NOT a
         // descendant of content_id must be rejected. The framework falls
         // back to initial_focus_hint → first_focusable_descendant.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let source = tree.add(Button::new_literal("Trigger"));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 

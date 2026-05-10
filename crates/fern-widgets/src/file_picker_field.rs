@@ -286,11 +286,11 @@ fn apply_result(result: &FileDialogResult, text: &Signal<String>, kind: FilePick
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn file_picker_builds() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let path = Signal::new(String::new());
         let id = tree.add(
             FilePickerField::new(path)

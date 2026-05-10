@@ -406,7 +406,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
     fn paint_single(
         &self,
         canvas: &mut Canvas,
-        theme: &fern_tokens::Theme,
+        theme: &fern_core::Theme,
         plot: Rect,
         visible: &[&ChartSeries<T>],
         categories: &[&T],
@@ -489,7 +489,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
     fn paint_grouped(
         &self,
         canvas: &mut Canvas,
-        theme: &fern_tokens::Theme,
+        theme: &fern_core::Theme,
         plot: Rect,
         visible: &[&ChartSeries<T>],
         categories: &[&T],
@@ -585,7 +585,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
     fn draw_value_labels(
         &self,
         canvas: &mut Canvas,
-        theme: &fern_tokens::Theme,
+        theme: &fern_core::Theme,
         plot: Rect,
         visible: &[&ChartSeries<T>],
         categories: &[&T],
@@ -694,7 +694,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
     fn draw_axes_with_x_labels(
         &self,
         canvas: &mut Canvas,
-        theme: &fern_tokens::Theme,
+        theme: &fern_core::Theme,
         plot: Rect,
         y_ticks: &[f32],
         x_labels: &[String],
@@ -824,7 +824,7 @@ fn measure_max_label_width(
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     fn sample_series() -> Vec<ChartSeries<String>> {
         let mut s = ChartSeries::new("Revenue");
@@ -837,7 +837,7 @@ mod tests {
 
     #[test]
     fn size_fills_proposal() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(BarChart::new(sample_series()));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let b = tree.bounds(id);
@@ -847,7 +847,7 @@ mod tests {
 
     #[test]
     fn fallback_size_when_proposal_unbounded() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(BarChart::new(sample_series()));
         tree.layout(SizeProposal::unspecified());
         let b = tree.bounds(id);
@@ -857,7 +857,7 @@ mod tests {
 
     #[test]
     fn one_decoration_per_bar() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(BarChart::new(sample_series()));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let frame = tree.render();
@@ -872,7 +872,7 @@ mod tests {
 
     #[test]
     fn empty_series_does_not_panic() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(BarChart::<String>::new(Vec::<ChartSeries<String>>::new()));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let _ = tree.render();
@@ -880,7 +880,7 @@ mod tests {
 
     #[test]
     fn accessibility_role_is_graphics_document() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(BarChart::new(sample_series()));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let info = tree.accessibility_node(id);
@@ -889,7 +889,7 @@ mod tests {
 
     #[test]
     fn horizontal_orientation_swaps_axes() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(BarChart::new(sample_series()).orientation(BarOrientation::Horizontal));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let frame = tree.render();
@@ -904,7 +904,7 @@ mod tests {
         let mut b = ChartSeries::<String>::new("B");
         b.push("Q1".into(), 3.0);
         b.push("Q2".into(), 4.0);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(BarChart::new(vec![a, b]).grouping(BarGrouping::Grouped));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let frame = tree.render();
@@ -914,7 +914,7 @@ mod tests {
 
     #[test]
     fn legend_band_reserved_when_show_legend() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(
             BarChart::new(sample_series())
                 .legend(true)
@@ -942,14 +942,14 @@ mod tests {
             Rc::new(RefCell::new(MockTextBackend::new()));
 
         let mut tree_off = WidgetTree::new()
-            .with_theme(Theme::light_default())
+            .with_theme(fern_core::presets::intui::light())
             .with_text_backend(backend.clone());
         tree_off.add(BarChart::new(sample_series()).value_labels(false));
         tree_off.layout(SizeProposal::exact(400.0, 200.0));
         let off_glyphs = tree_off.render().glyphs.len();
 
         let mut tree_on = WidgetTree::new()
-            .with_theme(Theme::light_default())
+            .with_theme(fern_core::presets::intui::light())
             .with_text_backend(backend.clone());
         tree_on.add(BarChart::new(sample_series()).value_labels(true));
         tree_on.layout(SizeProposal::exact(400.0, 200.0));
@@ -961,7 +961,7 @@ mod tests {
         let _ = (off_glyphs, on_glyphs);
         let off_keys = {
             let mut t = WidgetTree::new()
-                .with_theme(Theme::light_default())
+                .with_theme(fern_core::presets::intui::light())
                 .with_text_backend(backend.clone());
             t.add(BarChart::new(sample_series()).value_labels(false));
             t.layout(SizeProposal::exact(400.0, 200.0));
@@ -969,7 +969,7 @@ mod tests {
         };
         let on_keys = {
             let mut t = WidgetTree::new()
-                .with_theme(Theme::light_default())
+                .with_theme(fern_core::presets::intui::light())
                 .with_text_backend(backend.clone());
             t.add(BarChart::new(sample_series()).value_labels(true));
             t.layout(SizeProposal::exact(400.0, 200.0));
@@ -989,7 +989,7 @@ mod tests {
         s.push("a".into(), 1.0);
         s.push("b".into(), 2.0);
         s.visible.set(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(BarChart::new(vec![s]));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let frame = tree.render();

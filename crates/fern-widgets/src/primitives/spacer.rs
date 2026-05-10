@@ -123,7 +123,7 @@ mod tests {
 
     #[test]
     fn flex_factor_is_one() {
-        let theme = fern_tokens::Theme::light_default();
+        let theme = fern_core::presets::intui::light();
         let ctx = LayoutContext::for_testing(&theme);
         let r = Spacer::new().layout_response(SizeProposal::unspecified(), &ctx);
         assert_eq!(r.flex, 1.0);

@@ -17,7 +17,8 @@ use fern_platform::AccessibilityPreferences;
 use fern_platform::PlatformWindow;
 use fern_platform::create_title_bar_host;
 use fern_platform::event_translation::TranslationState;
-use fern_tokens::{ColorTokens, Theme};
+use fern_core::Theme;
+use fern_tokens::ColorTokens;
 #[allow(unused_imports)]
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::UserAttentionType;
@@ -379,15 +380,15 @@ impl WindowManager {
         let initial_theme = match self.theme_mode {
             ThemeMode::Manual => self.theme.clone(),
             ThemeMode::FollowSystem => match window.theme() {
-                Some(winit::window::Theme::Dark) => Theme::dark_default(),
-                _ => Theme::light_default(),
+                Some(winit::window::Theme::Dark) => fern_core::presets::intui::dark(),
+                _ => fern_core::presets::intui::light(),
             },
             ThemeMode::Native => {
                 let os = fern_platform::os_theme::query_os_theme_colors();
                 let base = if os.color_scheme.is_dark() {
-                    Theme::dark_default()
+                    fern_core::presets::intui::dark()
                 } else {
-                    Theme::light_default()
+                    fern_core::presets::intui::light()
                 };
                 Theme {
                     colors: ColorTokens::from_os_colors(&os),

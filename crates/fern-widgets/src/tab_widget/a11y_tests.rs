@@ -4,7 +4,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::Widget;
 use fern_core::widget_tree::WidgetTree;
 use fern_data::ListModel;
-use fern_tokens::Theme;
+use fern_core::Theme;
 
 use crate::tab_widget::{TabHandle, TabId, TabInfo, TabWidget};
 
@@ -23,7 +23,7 @@ impl Widget for FixedLeaf {
 
 fn make_tree(n: usize) -> (WidgetTree, Signal<Option<TabId>>) {
     let selected: Signal<Option<TabId>> = Signal::new(None);
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     let mut widget = TabWidget::new(selected.clone())
         .show_scroll_arrows(false)
         .show_overflow_dropdown(false);
@@ -140,7 +140,7 @@ fn dynamic_model_tab_count_is_reflected() {
         ),
     ]);
 
-    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TabWidget::new(selected)
             .dynamic_tab::<()>("doc", |_h, _s| Box::new(FixedLeaf) as Box<dyn Widget>)

@@ -52,7 +52,7 @@ impl Divider {
         self
     }
 
-    fn resolved_thickness(&self, theme: &fern_tokens::Theme) -> f32 {
+    fn resolved_thickness(&self, theme: &fern_core::Theme) -> f32 {
         self.thickness.unwrap_or(theme.components.divider.thickness)
     }
 }

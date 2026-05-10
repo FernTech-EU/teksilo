@@ -461,7 +461,7 @@ impl Widget for Snackbar {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
@@ -478,7 +478,7 @@ mod tests {
 
     #[test]
     fn access_click_opens_bottom_center_snackbar() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Snackbar::new_literal("Show snackbar").content(FixedLeaf(220.0, 40.0)));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -501,7 +501,7 @@ mod tests {
 
     #[test]
     fn custom_trigger_opens_snackbar() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(
             Snackbar::new_literal("Show snackbar")
                 .content(FixedLeaf(180.0, 36.0))
@@ -522,7 +522,7 @@ mod tests {
 
     #[test]
     fn snackbar_auto_dismisses_after_duration() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(
             Snackbar::new_literal("Show snackbar")
                 .content(FixedLeaf(220.0, 40.0))
@@ -549,7 +549,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Snackbar requires .content(...)")]
     fn snackbar_without_content_panics_on_build() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Snackbar::new_literal("Show snackbar"));
         tree.layout(SizeProposal::exact(800.0, 600.0));
     }

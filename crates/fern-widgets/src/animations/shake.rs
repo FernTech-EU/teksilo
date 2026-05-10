@@ -222,12 +222,12 @@ mod tests {
     use super::*;
     use crate::primitives::TextWidget;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn shake_starts_at_rest() {
         let trigger = Signal::new(0_u32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Shake::new(trigger).child(TextWidget::new_literal("oops")));
         tree.layout(SizeProposal {
             width: Some(200.0),
@@ -242,7 +242,7 @@ mod tests {
     #[test]
     fn bumping_trigger_starts_shake() {
         let trigger = Signal::new(0_u32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Shake::new(trigger.clone()).child(TextWidget::new_literal("oops")));
         tree.layout(SizeProposal {
             width: Some(200.0),
@@ -260,7 +260,7 @@ mod tests {
     #[test]
     fn shake_completes() {
         let trigger = Signal::new(0_u32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Shake::new(trigger.clone()).child(TextWidget::new_literal("oops")));
         tree.layout(SizeProposal {
             width: Some(200.0),
@@ -279,7 +279,7 @@ mod tests {
     #[test]
     fn reduced_motion_swallows_trigger() {
         let trigger = Signal::new(0_u32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.set_accessibility_preferences(false, true, 1.0);
         tree.add(Shake::new(trigger.clone()).child(TextWidget::new_literal("oops")));
         tree.layout(SizeProposal {

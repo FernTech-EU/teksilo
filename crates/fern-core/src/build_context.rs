@@ -215,7 +215,7 @@ impl<'a> BuildContext<'a> {
     }
 
     /// Get the current theme.
-    pub fn theme(&self) -> &fern_tokens::Theme {
+    pub fn theme(&self) -> &crate::styles::Theme {
         self.tree.theme()
     }
 
@@ -225,7 +225,7 @@ impl<'a> BuildContext<'a> {
     /// instead of cloning tokens from `self.theme()` — for example,
     /// `ctx.theme_signal().map(|t| t.colors.primary)` or combining with
     /// interaction state via `zip(...)`.
-    pub fn theme_signal(&self) -> crate::signal::Signal<fern_tokens::Theme> {
+    pub fn theme_signal(&self) -> crate::signal::Signal<crate::styles::Theme> {
         self.tree.theme_signal().clone()
     }
 

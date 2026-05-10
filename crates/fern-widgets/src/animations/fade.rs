@@ -173,7 +173,8 @@ mod tests {
     use super::*;
     use crate::primitives::{RectWidget, TextWidget};
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::{Color, Theme};
+    use fern_core::Theme;
+use fern_tokens::Color;
 
     fn count_set_opacity(frame: &fern_canvas::RenderFrame) -> Vec<f32> {
         frame
@@ -189,7 +190,7 @@ mod tests {
     #[test]
     fn starts_hidden_when_signal_is_false() {
         let visible = Signal::new(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Fade::new(visible.clone()).child(RectWidget::new().background(Color::RED)));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let frame = tree.render();
@@ -208,7 +209,7 @@ mod tests {
     #[test]
     fn starts_visible_when_signal_is_true() {
         let visible = Signal::new(true);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Fade::new(visible.clone()).child(RectWidget::new().background(Color::RED)));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let frame = tree.render();
@@ -223,7 +224,7 @@ mod tests {
     #[test]
     fn flipping_signal_drives_animation() {
         let visible = Signal::new(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Fade::new(visible.clone()).child(TextWidget::new_literal("payload")));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
@@ -245,7 +246,7 @@ mod tests {
     #[test]
     fn animation_completes_at_target() {
         let visible = Signal::new(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Fade::new(visible.clone()).child(TextWidget::new_literal("payload")));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
@@ -267,7 +268,7 @@ mod tests {
         // The wrapped child reports its natural size; the wrapper
         // bounds match it regardless of opacity.
         let visible = Signal::new(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(Fade::new(visible.clone()).child(TextWidget::new_literal("hello")));
         tree.layout(SizeProposal {
             width: Some(300.0),
@@ -296,7 +297,7 @@ mod tests {
         // no observer registered, no animation kick-off, just a
         // static fully-visible scope. Verify the wrapper still works
         // (renders the child) but that no animation is queued.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(Fade::new(true).child(RectWidget::new().background(Color::RED)));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let _ = tree.render();

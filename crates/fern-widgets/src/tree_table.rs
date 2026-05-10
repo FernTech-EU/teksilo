@@ -1154,7 +1154,7 @@ mod tests {
     use fern_core::accesskit::Role;
     use fern_core::widget_tree::WidgetTree;
     use fern_data::{SortFilterTreeModel, TreeFilterMode, TreeModel};
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     fn sample_tree() -> TreeModel<&'static str> {
         let t = TreeModel::new();
@@ -1193,7 +1193,7 @@ mod tests {
         use fern_data::{SelectionMode, SelectionModel};
         let proxy = SortFilterTreeModel::new(sample_tree());
         let selection = SelectionModel::new(SelectionMode::Single);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(
             TreeTable::from_projection(proxy.clone())
                 .add_column(name_col())
@@ -1239,7 +1239,7 @@ mod tests {
     #[test]
     fn role_is_treegrid() {
         let proxy = SortFilterTreeModel::new(sample_tree());
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             TreeTable::from_projection(proxy)
                 .add_column(name_col())
@@ -1257,7 +1257,7 @@ mod tests {
     #[test]
     fn initial_state_shows_only_roots() {
         let proxy = SortFilterTreeModel::new(sample_tree());
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let _id = tree.add(
             TreeTable::from_projection(proxy.clone())
                 .add_column(name_col())
@@ -1274,7 +1274,7 @@ mod tests {
     fn expand_via_widget_reveals_children() {
         let proxy = SortFilterTreeModel::new(sample_tree());
         let docs = proxy.tree().root(0);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             TreeTable::from_projection(proxy.clone())
                 .add_column(name_col())
@@ -1295,7 +1295,7 @@ mod tests {
     #[test]
     fn arrow_right_expands_and_left_collapses_on_tree_column() {
         let proxy = SortFilterTreeModel::new(sample_tree());
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             TreeTable::from_projection(proxy.clone())
                 .add_column(name_col())
@@ -1331,7 +1331,7 @@ mod tests {
         let proxy = SortFilterTreeModel::new(sample_tree());
         let docs = proxy.tree().root(0);
         proxy.expand(docs);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             TreeTable::from_projection(proxy)
                 .add_column(name_col())
@@ -1369,7 +1369,7 @@ mod tests {
             });
         proxy.expand_all();
         proxy.set_filter("name", "main");
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let _id = tree.add(
             TreeTable::from_projection(proxy.clone())
                 .add_column(name_col())
@@ -1386,7 +1386,7 @@ mod tests {
     #[test]
     fn collapse_all_then_expand_all_round_trips() {
         let proxy = SortFilterTreeModel::new(sample_tree());
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             TreeTable::from_projection(proxy.clone())
                 .add_column(name_col())
@@ -1413,7 +1413,7 @@ mod tests {
     #[test]
     fn row_count_in_a11y_includes_header() {
         let proxy = SortFilterTreeModel::new(sample_tree());
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             TreeTable::from_projection(proxy)
                 .add_column(name_col())

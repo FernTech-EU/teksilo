@@ -916,10 +916,10 @@ mod tests {
     use fern_core::accesskit;
     use fern_core::event::Modifiers;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     fn tree() -> WidgetTree {
-        WidgetTree::new().with_theme(Theme::light_default())
+        WidgetTree::new().with_theme(fern_core::presets::intui::light())
     }
 
     /// Walks the ToolBox widget tree to return the `ToolBoxHeader` id for

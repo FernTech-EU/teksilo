@@ -1470,7 +1470,7 @@ mod tests {
 
     #[test]
     fn scroll_survives_theme_switch_at_root() {
-        use fern_tokens::Theme;
+        use fern_core::Theme;
         let mut tree = WidgetTree::new();
         let scroll = tree.add(
             ScrollArea::new()
@@ -1496,7 +1496,7 @@ mod tests {
         );
 
         // Switch theme — should NOT reset scroll
-        tree.set_theme(Theme::dark_default());
+        tree.set_theme(fern_core::presets::intui::dark());
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let content = tree.children(scroll)[0];
@@ -1557,7 +1557,7 @@ mod tests {
 
     #[test]
     fn scroll_survives_theme_switch_inside_composite() {
-        use fern_tokens::Theme;
+        use fern_core::Theme;
         let mut tree = WidgetTree::new();
         let parent = tree.add(ScrollParent::new());
         tree.layout(SizeProposal::exact(200.0, 100.0));
@@ -1578,7 +1578,7 @@ mod tests {
             y_before
         );
 
-        tree.set_theme(Theme::dark_default());
+        tree.set_theme(fern_core::presets::intui::dark());
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let scroll_after = tree.children(parent)[0];

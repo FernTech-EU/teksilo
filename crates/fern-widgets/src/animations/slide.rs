@@ -220,12 +220,12 @@ mod tests {
     use super::*;
     use crate::primitives::TextWidget;
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn starts_visible_when_signal_is_true() {
         let visible = Signal::new(true);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(Slide::new(visible.clone()).child(TextWidget::new_literal("hello")));
         tree.layout(SizeProposal {
             width: Some(300.0),
@@ -238,7 +238,7 @@ mod tests {
     #[test]
     fn flipping_signal_drives_slide_progress() {
         let visible = Signal::new(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(
             Slide::new(visible.clone())
                 .from(SlideEdge::Bottom)
@@ -261,7 +261,7 @@ mod tests {
     #[test]
     fn slide_does_not_change_layout_size() {
         let visible = Signal::new(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             Slide::new(visible.clone())
                 .from(SlideEdge::Leading)
@@ -299,7 +299,7 @@ mod tests {
         // mapping in `place_children`.
         use fern_core::environment::LayoutDirection;
         let visible = Signal::new(true);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.set_layout_direction(LayoutDirection::RightToLeft);
         let id = tree.add(
             Slide::new(visible.clone())
@@ -328,7 +328,7 @@ mod tests {
     #[test]
     fn reduced_motion_snaps_progress() {
         let visible = Signal::new(false);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.set_accessibility_preferences(false, true, 1.0);
         tree.add(Slide::new(visible.clone()).child(TextWidget::new_literal("snap")));
         tree.layout(SizeProposal {

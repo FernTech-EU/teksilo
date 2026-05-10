@@ -323,7 +323,7 @@ mod tests {
     fn size_that_fits_preserves_aspect_ratio() {
         let icon = RasterIcon::from_raw(vec![255; 800], 20, 10); // 2:1 aspect
         let widget = ImageWidget::new(&icon);
-        let theme = fern_tokens::Theme::light_default();
+        let theme = fern_core::presets::intui::light();
         let ctx = LayoutContext::for_testing(&theme);
         // Width constrained to 100, no height constraint → 100x50
         let size = widget

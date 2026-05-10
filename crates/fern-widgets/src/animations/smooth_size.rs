@@ -282,7 +282,7 @@ mod tests {
     use super::*;
     use crate::primitives::{FixedSize, TextWidget};
     use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
+    use fern_core::Theme;
 
     #[test]
     fn first_measurement_snaps_to_natural_no_grow_in_animation() {
@@ -290,7 +290,7 @@ mod tests {
         // its very first appearance, producing a visible "grow from
         // nothing" glitch. The first measurement must snap to the
         // child's natural size; only *changes* should tween.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             SmoothSize::new()
                 .duration(Duration::from_millis(500))
@@ -321,7 +321,7 @@ mod tests {
         // size (here driven through a Signal-bound FixedSize) must
         // trigger an in-flight animation rather than another snap.
         let width_signal = Signal::new(100.0_f32);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             SmoothSize::new()
                 .duration(Duration::from_millis(200))
@@ -382,7 +382,7 @@ mod tests {
 
     #[test]
     fn reduced_motion_snaps_to_natural() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.set_accessibility_preferences(false, true, 1.0);
         let id =
             tree.add(SmoothSize::new().child(FixedSize::new().bind_width(150.0).bind_height(60.0)));
@@ -412,7 +412,7 @@ mod tests {
 
     #[test]
     fn empty_smooth_size_is_safe() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         tree.add(SmoothSize::new());
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let _ = tree.render();
@@ -421,7 +421,7 @@ mod tests {
     #[test]
     fn axes_width_only_pins_height() {
         // With axes=Width, height should snap to natural; width animates.
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let id = tree.add(
             SmoothSize::new()
                 .axes(SmoothSizeAxes::Width)
