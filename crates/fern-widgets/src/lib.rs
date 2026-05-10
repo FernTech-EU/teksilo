@@ -85,6 +85,7 @@ pub mod split_button;
 pub mod split_view;
 pub mod standard_item;
 pub mod status_bar;
+pub mod styles;
 pub mod tab_widget;
 pub mod table_view;
 #[cfg(feature = "rich-text")]

@@ -1,39 +1,58 @@
 //! Toggle — an animated on/off switch.
 //!
-//! Level 2 widget that paints a track and knob directly. The knob position
-//! is animated via `Signal<f32>::animate_to()`.
+//! The widget itself is a thin event-handler wrapper that delegates
+//! all painting and chrome composition to a [`ToggleStyle`] impl. The
+//! IntUI default ([`crate::styles::RecipeToggleStyle`]) ships out of
+//! the box; apps install a different look per-call via
+//! `Toggle::style(...)` or theme-wide via the `ComponentStyles.toggle`
+//! slot (step 8 of the styling refactor).
+//!
+//! No `paint()` method on this widget — the only canvas work happens
+//! inside the active `ToggleStyle::make_body` subtree.
 
-use fern_canvas::{Canvas, Rect, Size, SizeProposal};
+use std::rc::Rc;
+
+use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::binding::BindingLevel;
+use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::focus::FocusOrigin;
 use fern_core::signal::Signal;
-use fern_core::widget::{CursorIcon, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::styles::{SharedToggleStyle, ToggleStyle, ToggleStyleConfig};
+use fern_core::widget::{CursorIcon, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, CornerRadius};
+
+// Re-export the variant enum at module top so callers can write
+// `Toggle::new(...).variant(ToggleVariant::Pill)` without a deeper
+// import path. Same pattern as `Button` re-exporting `ButtonVariant`.
+pub use fern_core::styles::ToggleVariant;
 
 /// An animated toggle switch bound to a `Signal<bool>`.
 pub struct Toggle {
     on: Signal<bool>,
-    knob_position: Signal<f32>,
     label: Option<String>,
     enabled: bool,
+    variant: ToggleVariant,
+    style: Option<SharedToggleStyle>,
     hovered: Signal<bool>,
+    focused: Signal<bool>,
     focus_origin: Signal<Option<FocusOrigin>>,
+    body_id: Option<WidgetId>,
 }
 
 impl Toggle {
     pub fn new(on: Signal<bool>) -> Self {
-        let initial = if on.get() { 1.0 } else { 0.0 };
         Self {
             on,
-            knob_position: Signal::new_animated(initial),
             label: None,
             enabled: true,
+            variant: ToggleVariant::default(),
+            style: None,
             hovered: Signal::new(false),
+            focused: Signal::new(false),
             focus_origin: Signal::new(None),
+            body_id: None,
         }
     }
 
@@ -55,11 +74,22 @@ impl Toggle {
         self
     }
 
-    fn knob_x(&self, track: Rect, knob_size: f32, inset: f32) -> f32 {
-        let t = self.knob_position.get().clamp(0.0, 1.0);
-        let min_x = track.x + inset;
-        let max_x = track.x + track.width - knob_size - inset;
-        fern_tokens::lerp(min_x, max_x, t)
+    /// Pick a Tier-1 design-language variant
+    /// ([`ToggleVariant::Switch`] / `Pill` / `Square` / `Inset`). The
+    /// active [`ToggleStyle`] decides what to do with the hint —
+    /// IntUI's default impl honours all four; a custom impl might
+    /// ignore the variant entirely.
+    pub fn variant(mut self, variant: ToggleVariant) -> Self {
+        self.variant = variant;
+        self
+    }
+
+    /// Override the active [`ToggleStyle`] for this widget instance
+    /// only. Useful for one-off custom-painted toggles in a single
+    /// view.
+    pub fn style(mut self, style: impl ToggleStyle) -> Self {
+        self.style = Some(Rc::new(style));
+        self
     }
 }
 
@@ -67,43 +97,65 @@ impl std::fmt::Debug for Toggle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Toggle")
             .field("enabled", &self.enabled)
+            .field("variant", &self.variant)
             .finish()
     }
 }
 
 impl Widget for Toggle {
-    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
-        // Re-create animated knob_position signal (registered with scheduler)
-        let initial = if self.on.get() { 1.0 } else { 0.0 };
-        self.knob_position = ctx.animated_signal(initial);
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Resolve the active style: per-call override > theme slot >
+        // built-in `RecipeToggleStyle` default. Theme-slot lookup
+        // ships in step 8; for now per-call override falls through
+        // to the recipe default.
+        let style: SharedToggleStyle = self
+            .style
+            .clone()
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeToggleStyle));
 
-        // Register bindings
-        let id = ctx.self_id();
-        let registry = ctx.binding_registry();
-        self.knob_position
-            .bind_to(id, registry, BindingLevel::RepaintOnly);
-        self.on.bind_to(id, registry, BindingLevel::RepaintOnly);
+        // Build the visual body via the active style. The body is a
+        // child subtree we'll lay out to the bounds we get.
+        let cfg = ToggleStyleConfig {
+            is_on: self.on.clone(),
+            is_hovered: self.hovered.clone(),
+            is_focused: self.focused.clone(),
+            is_disabled: Signal::new(!self.enabled),
+            variant: self.variant,
+        };
+        let body_id = style.make_body(&cfg, ctx);
 
-        // Tween spec for the knob slide. `to_or_snap` skips the
-        // tween when the platform reports `prefers-reduced-motion`.
-        let knob_anim = ctx.animate().fast().standard();
+        // Wrap body + optional label in an HStack so the label paints
+        // alongside the body without this widget needing a `paint()`
+        // method. label_gap is small (6 dp default in IntUI); a fixed
+        // `HStack::spacing` is plenty without a per-theme token here.
+        let root = if let Some(ref label) = self.label {
+            use crate::primitives::{HStack, TextWidget};
+            use fern_tokens::TextStyleRole;
+            let label_widget = TextWidget::new_literal(label.clone()).style(TextStyleRole::Body);
+            let label_id = ctx.add(label_widget);
+            ctx.add(
+                HStack::new()
+                    .spacing(6.0)
+                    .add_child(body_id)
+                    .add_child(label_id),
+            )
+        } else {
+            body_id
+        };
+        self.body_id = Some(root);
 
-        // Set up handlers
+        // Wire up the toggle's interactive behaviour. The body owns
+        // paint; the wrapper owns input handling.
         let on = self.on.clone();
-        let knob_position = self.knob_position.clone();
         let hovered = self.hovered.clone();
+        let focused = self.focused.clone();
         let focus_origin = self.focus_origin.clone();
         let enabled = self.enabled;
 
         let toggle = {
             let on = on.clone();
-            let knob_position = knob_position.clone();
-            let knob_anim = knob_anim.clone();
             move || {
-                let new_on = !on.get();
-                on.set(new_on);
-                let target = if new_on { 1.0 } else { 0.0 };
-                knob_anim.to_or_snap(&knob_position, target);
+                on.set(!on.get());
             }
         };
 
@@ -111,7 +163,6 @@ impl Widget for Toggle {
             .focusable(enabled)
             .cursor(CursorIcon::Pointer);
 
-        // Tap handler
         {
             let toggle = toggle.clone();
             handlers = handlers.on_tap(move |_pos, _ctx| {
@@ -120,16 +171,12 @@ impl Widget for Toggle {
                 }
             });
         }
-
-        // Hover handler
         {
             let hovered = hovered.clone();
             handlers = handlers.on_hover(move |entered, _ctx| {
                 hovered.set(entered);
             });
         }
-
-        // Key handler
         {
             let toggle = toggle.clone();
             handlers = handlers.on_key(move |event, _ctx| {
@@ -150,28 +197,23 @@ impl Widget for Toggle {
                 }
             });
         }
-
-        // Focus handler
-        // Infer origin from hover state: if hovered when focus is gained, it was
-        // via pointer click (no focus ring needed). Otherwise it was keyboard/programmatic.
         {
+            let focused = focused.clone();
             let focus_origin = focus_origin.clone();
             let hovered_for_focus = hovered.clone();
             handlers = handlers.on_focus(move |gained, _ctx| {
+                focused.set(gained);
                 if gained {
-                    let origin = if hovered_for_focus.get() {
+                    focus_origin.set(Some(if hovered_for_focus.get() {
                         FocusOrigin::Pointer
                     } else {
                         FocusOrigin::Keyboard
-                    };
-                    focus_origin.set(Some(origin));
+                    }));
                 } else {
                     focus_origin.set(None);
                 }
             });
         }
-
-        // Access action handler
         {
             let toggle = toggle.clone();
             handlers = handlers.on_access_action(move |action, _ctx| {
@@ -186,125 +228,31 @@ impl Widget for Toggle {
 
         ctx.apply_self_handlers(handlers);
 
-        vec![] // leaf widget — no children
+        vec![body_id]
     }
 
-    fn layout_response(
-        &self,
-        _proposal: SizeProposal,
-        ctx: &LayoutContext,
-    ) -> fern_core::widget::LayoutResponse {
-        let style = ctx.theme.components.toggle;
-        // Reserve a 24 dp hit-area row but draw the track centered within it.
-        let row_h = style.track_height.max(24.0);
-        if let Some(ref label) = self.label {
-            let label_w = if let Some(backend) = ctx.text_backend {
-                let mut b = backend.borrow_mut();
-                let layout = b.layout_single_line(label, &ctx.theme.typography.body, None);
-                layout.width
-            } else {
-                label.len() as f32 * 8.0
-            };
-            Size::new(style.track_width + style.label_gap + label_w, row_h)
-        } else {
-            Size::new(style.track_width, row_h)
-        }
-        .into()
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        self.body_id
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
         &self,
-        _bounds: Rect,
+        bounds: Rect,
         _proposal: SizeProposal,
-        _children: &mut [WidgetPlacement],
+        children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
+        if let Some(child) = children.first_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
     }
 
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let colors = &ctx.theme.colors;
-        let style = ctx.theme.components.toggle;
-        let track_w = style.track_width;
-        let track_h = style.track_height;
-        let knob_size = style.thumb_diameter;
-        let knob_inset = style.thumb_inset;
-
-        // Center the track within the (possibly larger) hit-area row.
-        let track_x = bounds.x + (bounds.width - track_w).max(0.0) * 0.0;
-        let track_y = bounds.y + (bounds.height - track_h) / 2.0;
-        let track_rect = Rect::new(track_x, track_y, track_w, track_h);
-
-        // Track color based on on-state
-        let t = self.knob_position.get();
-        let track_color = if !self.enabled {
-            colors.accent_disabled
-        } else {
-            // Interpolate between off and on colors
-            let off = colors.surface_sunken;
-            let on = colors.accent;
-            Color::new(
-                fern_tokens::lerp(off.r(), on.r(), t),
-                fern_tokens::lerp(off.g(), on.g(), t),
-                fern_tokens::lerp(off.b(), on.b(), t),
-                fern_tokens::lerp(off.a(), on.a(), t),
-            )
-        };
-        canvas.fill_rounded_rect(
-            track_rect,
-            CornerRadius::uniform(track_h / 2.0),
-            track_color,
-        );
-
-        // Focus ring — only for keyboard navigation, not pointer clicks.
-        // Drawn with the theme's focus_ring_offset outside the track.
-        if self.focus_origin.get() == Some(FocusOrigin::Keyboard) {
-            let offset = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width / 2.0;
-            let ring_rect = Rect::new(
-                track_rect.x - offset,
-                track_rect.y - offset,
-                track_rect.width + offset * 2.0,
-                track_rect.height + offset * 2.0,
-            );
-            canvas.stroke_rounded_rect(
-                ring_rect,
-                CornerRadius::uniform(track_h / 2.0 + offset),
-                colors.focus_ring,
-                ctx.theme.shape.focus_ring_width,
-            );
-        }
-
-        // Knob
-        let knob_x = self.knob_x(track_rect, knob_size, knob_inset);
-        let knob_y = track_y + (track_h - knob_size) / 2.0;
-        let knob_rect = Rect::new(knob_x, knob_y, knob_size, knob_size);
-        let knob_color = if !self.enabled {
-            colors.text_disabled
-        } else {
-            Color::WHITE
-        };
-        canvas.fill_rounded_rect(
-            knob_rect,
-            CornerRadius::uniform(knob_size / 2.0),
-            knob_color,
-        );
-
-        // Label text (drawn to the right of the track)
-        if let Some(ref label) = self.label {
-            let text_color = if self.enabled {
-                colors.text_primary
-            } else {
-                colors.text_disabled
-            };
-            let gap = style.label_gap;
-            let text_x = track_x + track_w + gap;
-            let text_rect = Rect::new(
-                text_x,
-                bounds.y,
-                (bounds.width - track_w - gap).max(0.0),
-                bounds.height,
-            );
-            canvas.draw_text(label, text_rect, &ctx.theme.typography.body, text_color);
-        }
+    fn children(&self) -> Vec<WidgetId> {
+        self.body_id.into_iter().collect()
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
@@ -361,23 +309,21 @@ mod tests {
     }
 
     #[test]
-    fn animation_interpolates_knob_position() {
+    fn animation_runs_after_toggle() {
         let on = Signal::new(false);
         let mut tree = WidgetTree::new();
         let t = tree.add(Toggle::new(on.clone()));
         tree.layout(SizeProposal::exact(100.0, 60.0));
 
-        tree.click(t); // toggles on, starts animation to 1.0
+        tree.click(t); // toggles on, body's effect tweens knob
         assert!(on.get());
 
-        // At midpoint, knob_position should be between 0 and 1
+        // Mid-flight: animation should still be running.
         tree.tick_animations(Duration::from_millis(75));
-        // We can't easily read knob_position from outside, but the animation
-        // should still be running (not yet at 1.0)
         assert!(tree.has_active_animations());
 
-        // After full duration, animation should be complete
-        tree.tick_animations(Duration::from_millis(100));
+        // After the full duration, animation completes.
+        tree.tick_animations(Duration::from_millis(200));
         assert!(!tree.has_active_animations());
     }
 
