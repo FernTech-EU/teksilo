@@ -133,8 +133,11 @@ impl Checkbox {
 
     /// Create a tristate checkbox bound to a `Signal<CheckState>`.
     ///
-    /// Clicking cycles: Unchecked → Checked → Indeterminate → Unchecked.
-    /// Useful for parent checkboxes in tree views.
+    /// User clicks toggle Checked ↔ Unchecked (clicking from Indeterminate
+    /// checks the whole). The `Indeterminate` state is reserved for external
+    /// sources — `TreeCheckedModel` aggregation when descendants are mixed,
+    /// "select all" indicators, etc. Matches the Outlook / Files-app
+    /// folder-checkbox semantic. Useful for parent checkboxes in tree views.
     pub fn tristate(state: Signal<CheckState>) -> Self {
         Self {
             label: None,
@@ -682,7 +685,11 @@ mod tests {
     // --- Tristate tests ---
 
     #[test]
-    fn tristate_cycles_through_all_states() {
+    fn tristate_user_click_toggles_two_states() {
+        // User clicks only toggle Checked ↔ Unchecked. Indeterminate is
+        // reserved for external sources (TreeCheckedModel aggregation, etc.)
+        // — clicking from Indeterminate checks the whole. Outlook / Files-app
+        // folder-checkbox semantic.
         let state = Signal::new(CheckState::Unchecked);
         let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let cb = tree.add(Checkbox::tristate(state.clone()).label_literal("Select All"));
@@ -692,13 +699,16 @@ mod tests {
         tree.click(cb);
         assert_eq!(state.get(), CheckState::Checked);
         tree.click(cb);
-        assert_eq!(state.get(), CheckState::Indeterminate);
-        tree.click(cb);
         assert_eq!(state.get(), CheckState::Unchecked);
+
+        // Clicking from Indeterminate checks the whole, NOT cycles.
+        state.set(CheckState::Indeterminate);
+        tree.click(cb);
+        assert_eq!(state.get(), CheckState::Checked);
     }
 
     #[test]
-    fn tristate_space_cycles() {
+    fn tristate_space_toggles_two_states() {
         let state = Signal::new(CheckState::Unchecked);
         let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let cb = tree.add(Checkbox::tristate(state.clone()).label_literal("Select All"));
@@ -708,7 +718,7 @@ mod tests {
         tree.press_key(Key::Space, Modifiers::NONE);
         assert_eq!(state.get(), CheckState::Checked);
         tree.press_key(Key::Space, Modifiers::NONE);
-        assert_eq!(state.get(), CheckState::Indeterminate);
+        assert_eq!(state.get(), CheckState::Unchecked);
     }
 
     #[test]
