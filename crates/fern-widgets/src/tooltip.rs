@@ -41,15 +41,19 @@ pub use registry::{
 };
 pub use rich::RichTooltipWidget;
 
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::build_context::BuildContext;
 use fern_core::overlay::OverlayId;
-use fern_core::widget::{LayoutContext, PaintContext, Widget};
+use fern_core::styles::{SharedTooltipStyle, TooltipStyleConfig};
+use fern_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
-use fern_tokens::CornerRadius;
+use fern_tokens::{CornerRadius, TextRole, TextStyleRole};
 
+use crate::primitives::TextWidget;
 use crate::shadow::paint_layered_shadow;
 
 /// Tooltip-specific wrapper around [`paint_layered_shadow`] — pulls the
@@ -93,9 +97,25 @@ pub(crate) fn paint_composite_tooltip_shadows(
 }
 
 /// A tooltip content widget — a themed rounded rect with text.
-#[derive(Debug)]
+///
+/// Composes a `TextWidget` with `Small` typography in `tooltip_text` color,
+/// then delegates the chrome (shadow, dark background, corner radius,
+/// padding) to the active `TooltipStyle` (default
+/// [`crate::styles::RecipeTooltipStyle`]). Apps install per-call
+/// (`TooltipWidget::new(...).style(impl TooltipStyle)`) or theme-wide
+/// (step 8's `ComponentStyles.tooltip = Rc::new(MyTooltip)`).
 pub struct TooltipWidget {
     text: String,
+    style_override: Option<SharedTooltipStyle>,
+    root_child_id: Option<WidgetId>,
+}
+
+impl std::fmt::Debug for TooltipWidget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TooltipWidget")
+            .field("text", &self.text)
+            .finish()
+    }
 }
 
 impl TooltipWidget {
@@ -103,6 +123,8 @@ impl TooltipWidget {
         let ls: fern_i18n::LocalizedString = text.into();
         Self {
             text: ls.resolve_now(),
+            style_override: None,
+            root_child_id: None,
         }
     }
 
@@ -111,51 +133,66 @@ impl TooltipWidget {
     pub fn new_literal(text: impl Into<String>) -> Self {
         Self::new(fern_i18n::LocalizedString::literal(text))
     }
+
+    /// Per-call style override. Replaces the theme-wide default
+    /// `TooltipStyle` for just this TooltipWidget instance.
+    pub fn style(mut self, style: impl fern_core::styles::TooltipStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
+    }
 }
 
 impl Widget for TooltipWidget {
-    fn layout_response(
-        &self,
-        _proposal: SizeProposal,
-        ctx: &LayoutContext,
-    ) -> fern_core::widget::LayoutResponse {
-        let style = ctx.theme.components.tooltip;
-        let pad_h = style.padding_horizontal;
-        let pad_v = style.padding_vertical;
-        if let Some(backend) = ctx.text_backend {
-            let mut backend = backend.borrow_mut();
-            let layout = backend.layout_single_line(&self.text, &ctx.theme.typography.small, None);
-            Size::new(layout.width + pad_h * 2.0, layout.height + pad_v * 2.0)
-        } else {
-            let text_width = self.text.len() as f32 * 7.0;
-            let text_height = ctx.theme.typography.small.size;
-            Size::new(text_width + pad_h * 2.0, text_height + pad_v * 2.0)
-        }
-        .into()
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let text = TextWidget::new_literal(&self.text)
+            .style(TextStyleRole::Small)
+            .color(TextRole::TooltipText)
+            .single_line();
+        let text_id = ctx.add(text);
+
+        let style: SharedTooltipStyle = self
+            .style_override
+            .clone()
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTooltipStyle::default()));
+        let cfg = TooltipStyleConfig { content: text_id };
+        let root_id = style.make_body(&cfg, ctx);
+        self.root_child_id = Some(root_id);
+        vec![root_id]
     }
 
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let style = ctx.theme.components.tooltip;
-        let radius = CornerRadius::uniform(style.corner_radius);
-        paint_tooltip_shadows(canvas, bounds, radius, ctx);
-        canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.tooltip_bg);
-        let text_bounds = Rect::new(
-            bounds.x + style.padding_horizontal,
-            bounds.y + style.padding_vertical,
-            bounds.width - style.padding_horizontal * 2.0,
-            bounds.height - style.padding_vertical * 2.0,
-        );
-        canvas.draw_text(
-            &self.text,
-            text_bounds,
-            &ctx.theme.typography.small,
-            ctx.theme.colors.tooltip_text,
-        );
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
+        if let Some(root) = self.root_child_id
+            && let Some(size) = ctx.child_size(root, proposal)
+        {
+            return size.into();
+        }
+        proposal.resolve(0.0, 0.0).into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = fern_canvas::Point::new(bounds.x, bounds.y);
+            child.size = Size::new(bounds.width, bounds.height);
+        }
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::Tooltip);
         builder.set_name(&self.text);
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.root_child_id.into_iter().collect()
     }
 }
 
