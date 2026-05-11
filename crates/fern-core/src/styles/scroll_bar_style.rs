@@ -17,23 +17,43 @@ pub enum ScrollBarOrientation {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
 pub enum ScrollBarVariant {
-    /// Translucent overlay scrollbar that thickens on hover (IntUI
-    /// default).
+    /// Full track + thumb, always visible. The classic always-on scroll
+    /// bar; reserves layout space when used inside a parent that honours
+    /// its full thickness. The widget's historical default.
     #[default]
+    Permanent,
+    /// Thin resting indicator at idle, cross-fades to the full track +
+    /// thumb on hover or drag. macOS / Ubuntu / IntUI overlay style.
     Overlay,
-    /// Always-visible plain scrollbar (legacy / accessibility setting).
-    Plain,
+    /// Thin resting indicator only — never reveals the full bar.
+    /// A passive scroll-position display for minimal UIs; interaction
+    /// (drag, track click, keyboard) still works against the full slot
+    /// bounds even though only the thin strip is painted.
+    Thin,
 }
 
 #[derive(Clone, Debug)]
 pub struct ScrollBarStyleConfig {
-    /// Track range as a fraction of the visible area: `0.0..=1.0`.
-    pub thumb_start: Signal<f32>,
-    pub thumb_end: Signal<f32>,
+    /// Normalized `0.0..=1.0` scroll position: `0.0` at the start of the
+    /// content, `1.0` at the end. Re-renders the body on every scroll.
+    pub scroll_ratio: Signal<f32>,
+    /// Visible viewport as a fraction of total content
+    /// (`viewport_size / content_size`). Drives the thumb size.
+    pub viewport_ratio: Signal<f32>,
+    /// `true` whenever the pointer is over the scroll bar's slot.
     pub is_hovered: Signal<bool>,
+    /// `true` while the user is drag-pressing the thumb.
     pub is_dragging: Signal<bool>,
+    /// `true` whenever the content is non-scrollable (`max_scroll == 0`).
+    /// Default IntUI paints nothing in this case; custom impls may choose
+    /// to keep a faint placeholder.
+    pub is_idle: Signal<bool>,
     pub orientation: ScrollBarOrientation,
     pub variant: ScrollBarVariant,
+    /// Minimum thumb length in logical pixels. Sourced from
+    /// `theme.components.scroll_bar.min_thumb_length` by default; apps
+    /// override per-instance via `ScrollBar::min_thumb_length(...)`.
+    pub min_thumb_length: f32,
 }
 
 pub trait ScrollBarStyle: 'static {

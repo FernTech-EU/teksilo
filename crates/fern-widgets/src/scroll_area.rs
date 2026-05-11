@@ -290,7 +290,6 @@ impl Widget for ScrollArea {
             ScrollBarMode::Thin => ScrollBarVisual::Thin,
         };
         let thickness = self.scroll_bar_thickness; // full thickness for all modes
-        let track = visual == ScrollBarVisual::Permanent;
 
         // Create vertical scrollbar
         let v_scrollbar = ScrollBar::new(
@@ -300,7 +299,6 @@ impl Widget for ScrollArea {
             self.viewport_ratio_y.clone(),
         )
         .thickness(thickness)
-        .show_track(track)
         .visual(visual);
         let v_id = ctx.add(v_scrollbar);
         ids.push(v_id);
@@ -313,7 +311,6 @@ impl Widget for ScrollArea {
             self.viewport_ratio_x.clone(),
         )
         .thickness(thickness)
-        .show_track(track)
         .visual(visual);
         let h_id = ctx.add(h_scrollbar);
         ids.push(h_id);
