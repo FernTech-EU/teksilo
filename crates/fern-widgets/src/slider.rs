@@ -1,24 +1,35 @@
 //! Slider — a draggable value selector.
 //!
-//! Level 2 widget with track, filled portion, and draggable thumb.
-//! Supports keyboard adjustment and accessibility.
+//! The widget itself owns input handling (drag, keyboard, accessibility
+//! actions) and delegates all visual chrome to a [`SliderStyle`] impl.
+//! The IntUI default ([`crate::styles::RecipeSliderStyle`]) ships out
+//! of the box; apps install a different look per-call via
+//! `Slider::style(...)` or theme-wide via `theme.style_slots.slider`.
+//!
+//! No `paint()` method on this widget — the only canvas work happens
+//! inside the active `SliderStyle::make_body` subtree.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
-use fern_canvas::{Canvas, Rect, Size, SizeProposal};
+use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, Key, PointerButton, WidgetEvent};
 use fern_core::focus::FocusOrigin;
 use fern_core::gesture::DragPhase;
 use fern_core::signal::Signal;
-use fern_core::widget::{CursorIcon, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::styles::{
+    SharedSliderStyle, SliderOrientation, SliderStyle, SliderStyleConfig, SliderVariant,
+};
+use fern_core::widget::{CursorIcon, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
-use fern_tokens::{CornerRadius, Orientation};
+use fern_core::widget_id::WidgetId;
+use fern_tokens::Orientation;
 
-/// Minimum cross-axis size of the slider row, in dp. Sized to accommodate
-/// the thumb plus the focus-ring envelope.
-const MIN_CROSS_SIZE: f32 = 24.0;
+// Re-export the variant enum at module top so callers can write
+// `Slider::new(...).variant(SliderVariant::Discrete)` without a deeper
+// import path.
+pub use fern_core::styles::SliderVariant as SliderVariantExport;
 
 /// A slider that drives a `Signal<f32>` between min and max.
 pub struct Slider {
@@ -30,10 +41,14 @@ pub struct Slider {
     enabled: bool,
     /// Accessible name, announced by screen readers as the control's label.
     label: Option<String>,
-    hovered: Rc<Cell<bool>>,
-    dragging: Rc<Cell<bool>>,
-    focus_origin: Rc<Cell<Option<FocusOrigin>>>,
+    variant: SliderVariant,
+    tick_count: Option<u32>,
+    style_override: Option<SharedSliderStyle>,
+    hovered: Signal<bool>,
+    dragging: Signal<bool>,
+    focus_origin: Signal<Option<FocusOrigin>>,
     cached_bounds: Rc<Cell<Rect>>,
+    body_id: Option<WidgetId>,
 }
 
 impl Slider {
@@ -46,10 +61,14 @@ impl Slider {
             orientation: Orientation::Horizontal,
             enabled: true,
             label: None,
-            hovered: Rc::new(Cell::new(false)),
-            dragging: Rc::new(Cell::new(false)),
-            focus_origin: Rc::new(Cell::new(None)),
+            variant: SliderVariant::default(),
+            tick_count: None,
+            style_override: None,
+            hovered: Signal::new(false),
+            dragging: Signal::new(false),
+            focus_origin: Signal::new(None),
             cached_bounds: Rc::new(Cell::new(Rect::ZERO)),
+            body_id: None,
         }
     }
 
@@ -68,6 +87,32 @@ impl Slider {
         self
     }
 
+    /// Pick a Tier-1 design-language variant
+    /// ([`SliderVariant::Continuous`] / `Discrete` / `Range`). The
+    /// active [`SliderStyle`] decides what to do with the hint —
+    /// IntUI's default impl paints ticks for `Discrete` and ignores
+    /// `Range` (the widget itself doesn't yet wire dual-thumb
+    /// behaviour).
+    pub fn variant(mut self, variant: SliderVariant) -> Self {
+        self.variant = variant;
+        self
+    }
+
+    /// Configure the tick count for a `Discrete` slider. The
+    /// IntUI default paints `n` evenly spaced tick marks above the
+    /// track (or to the leading side for vertical orientation).
+    pub fn tick_count(mut self, count: u32) -> Self {
+        self.tick_count = Some(count);
+        self
+    }
+
+    /// Override the active [`SliderStyle`] for this widget instance
+    /// only.
+    pub fn style(mut self, style: impl SliderStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
+    }
+
     /// Set an accessible name for the slider, announced by screen readers.
     /// ARIA requires sliders to have a label; when none is set here the
     /// caller is responsible for labelling via a wrapping element.
@@ -83,36 +128,6 @@ impl Slider {
         self.label = Some(label.into());
         self
     }
-
-    /// Primary axis length of the slider.
-    fn primary_length(&self, bounds: Rect) -> f32 {
-        match self.orientation {
-            Orientation::Horizontal => bounds.width,
-            Orientation::Vertical => bounds.height,
-        }
-    }
-
-    /// Primary axis start of bounds.
-    fn primary_start(&self, bounds: Rect) -> f32 {
-        match self.orientation {
-            Orientation::Horizontal => bounds.x,
-            Orientation::Vertical => bounds.y,
-        }
-    }
-
-    fn normalized(&self) -> f32 {
-        let range = self.max - self.min;
-        if range <= 0.0 {
-            return 0.0;
-        }
-        ((self.value.get() - self.min) / range).clamp(0.0, 1.0)
-    }
-
-    /// Thumb center position on the primary axis.
-    fn thumb_center(&self, bounds: Rect, thumb_radius: f32) -> f32 {
-        let usable = self.primary_length(bounds) - thumb_radius * 2.0;
-        self.primary_start(bounds) + thumb_radius + usable * self.normalized()
-    }
 }
 
 impl std::fmt::Debug for Slider {
@@ -121,6 +136,7 @@ impl std::fmt::Debug for Slider {
             .field("min", &self.min)
             .field("max", &self.max)
             .field("enabled", &self.enabled)
+            .field("variant", &self.variant)
             .finish()
     }
 }
@@ -130,29 +146,57 @@ impl Widget for Slider {
         &mut self,
         ctx: &mut fern_core::build_context::BuildContext,
     ) -> Vec<fern_core::widget_id::WidgetId> {
-        let self_id = ctx.self_id();
-        let registry = ctx.binding_registry();
-        self.value.bind_to(
-            self_id,
-            registry,
-            fern_core::binding::BindingLevel::RepaintOnly,
-        );
+        // Resolve the active style: per-call override > theme slot >
+        // built-in `RecipeSliderStyle` default.
+        let style: SharedSliderStyle = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.slider.clone())
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeSliderStyle));
 
-        // Capture the thumb radius at build time. The event handlers need
-        // it for hit-testing, but they only receive `EventContext` and can't
-        // reach the theme at event time. Theme changes between builds
-        // would give a slightly stale hit region (single-digit pixels);
-        // paint-time reads via `ctx.theme` keep the rendered thumb
-        // correct. Trade-off accepted here rather than threading
-        // `theme_signal` through every event handler closure.
+        // Derived `value_normalized` signal — re-renders the body
+        // whenever the user-visible value changes.
+        let min = self.min;
+        let max = self.max;
+        let value_normalized = self.value.map(move |v| {
+            let range = max - min;
+            if range <= 0.0 {
+                0.0
+            } else {
+                ((*v - min) / range).clamp(0.0, 1.0)
+            }
+        });
+
+        let orientation = match self.orientation {
+            Orientation::Horizontal => SliderOrientation::Horizontal,
+            Orientation::Vertical => SliderOrientation::Vertical,
+        };
+
+        let cfg = SliderStyleConfig {
+            value_normalized,
+            is_hovered: self.hovered.clone(),
+            is_dragging: self.dragging.clone(),
+            is_disabled: Signal::new(!self.enabled),
+            focus_origin: self.focus_origin.clone(),
+            orientation,
+            tick_count: self.tick_count,
+            variant: self.variant,
+        };
+        let body_id = style.make_body(&cfg, ctx);
+        self.body_id = Some(body_id);
+
+        // Capture the thumb radius at build time. The event handlers
+        // need it for value computation, but they only receive
+        // `EventContext` and can't reach the theme at event time.
+        // Theme changes between builds would give a slightly stale
+        // hit region (single-digit pixels); the body re-paints from
+        // the current theme so the rendered thumb stays correct.
         let thumb_radius = ctx.theme_signal().get().components.slider.thumb_diameter * 0.5;
 
         let value = self.value.clone();
-        let min = self.min;
-        let max = self.max;
         let step = self.step;
-        let orientation = self.orientation;
         let enabled = self.enabled;
+        let orientation = self.orientation;
         let hovered = self.hovered.clone();
         let dragging = self.dragging.clone();
         let focus_origin = self.focus_origin.clone();
@@ -203,12 +247,7 @@ impl Widget for Slider {
             .focusable(enabled)
             .cursor(CursorIcon::Pointer);
 
-        // Thumb drag — routed through the typed gesture API. The
-        // framework auto-captures the pointer at `DragPhase::Started`
-        // and releases it at `DragPhase::Ended`, so the slider keeps
-        // receiving `Moved` events even when the cursor leaves its
-        // bounds (the old `on_pointer_event` path silently stopped
-        // updating when the pointer moved off the slider).
+        // Thumb drag — routed through the typed gesture API.
         {
             let dragging = dragging.clone();
             let set_value = set_value_from_position.clone();
@@ -235,10 +274,7 @@ impl Widget for Slider {
             });
         }
 
-        // Track click — jump the value to the click position without
-        // entering a drag. A press+release without movement past the
-        // 5 px drag threshold lands here; a longer press that slides
-        // past threshold goes to `on_drag` instead.
+        // Track click — jump the value to the click position.
         {
             let set_value = set_value_from_position.clone();
             handlers = handlers.on_tap(move |event, _ctx| {
@@ -326,138 +362,33 @@ impl Widget for Slider {
 
         ctx.apply_self_handlers(handlers);
 
-        Vec::new()
+        vec![body_id]
     }
 
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        ctx: &LayoutContext,
-    ) -> fern_core::widget::LayoutResponse {
-        let style = ctx.theme.components.slider;
-        let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
-        // Reserve the focus-ring envelope around the thumb plus a dp of slack
-        // so the row has a comfortable hit area (matches the 24 dp Int UI
-        // control-row height).
-        let cross = (style.thumb_diameter + envelope * 2.0).max(MIN_CROSS_SIZE);
-        match self.orientation {
-            Orientation::Horizontal => {
-                let width = proposal.width.unwrap_or(200.0);
-                Size::new(width, cross)
-            }
-            Orientation::Vertical => {
-                let height = proposal.height.unwrap_or(200.0);
-                Size::new(cross, height)
-            }
-        }
-        .into()
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        self.body_id
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
         &self,
         bounds: Rect,
         _proposal: SizeProposal,
-        _children: &mut [WidgetPlacement],
+        children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
-        // Cache bounds for event handling (needed before paint)
+        // Cache bounds for event handling (needed before paint).
         self.cached_bounds.set(bounds);
+        if let Some(child) = children.first_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
     }
 
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let colors = &ctx.theme.colors;
-        let shape = &ctx.theme.shape;
-        let style = ctx.theme.components.slider;
-        let track_height = style.track_height;
-        let thumb_diameter = style.thumb_diameter;
-        let thumb_radius = thumb_diameter * 0.5;
-        self.cached_bounds.set(bounds);
-
-        let radius = CornerRadius::uniform(track_height * 0.5);
-        let track_color = if self.enabled {
-            colors.surface_sunken
-        } else {
-            colors.accent_disabled
-        };
-        let fill_color = if self.enabled {
-            colors.accent
-        } else {
-            colors.text_disabled
-        };
-        let thumb_pos = self.thumb_center(bounds, thumb_radius);
-
-        let (track_rect, fill_rect, thumb_cx, thumb_cy) = match self.orientation {
-            Orientation::Horizontal => {
-                let ty = bounds.y + (bounds.height - track_height) * 0.5;
-                let track = Rect::new(
-                    bounds.x + thumb_radius,
-                    ty,
-                    bounds.width - thumb_radius * 2.0,
-                    track_height,
-                );
-                let fill_w = thumb_pos - track.x;
-                let fill = Rect::new(track.x, ty, fill_w.max(0.0), track_height);
-                (track, fill, thumb_pos, bounds.y + bounds.height * 0.5)
-            }
-            Orientation::Vertical => {
-                let tx = bounds.x + (bounds.width - track_height) * 0.5;
-                let track = Rect::new(
-                    tx,
-                    bounds.y + thumb_radius,
-                    track_height,
-                    bounds.height - thumb_radius * 2.0,
-                );
-                let fill_h = thumb_pos - track.y;
-                let fill = Rect::new(tx, track.y, track_height, fill_h.max(0.0));
-                (track, fill, bounds.x + bounds.width * 0.5, thumb_pos)
-            }
-        };
-
-        canvas.fill_rounded_rect(track_rect, radius, track_color);
-        if fill_rect.width > 0.0 && fill_rect.height > 0.0 {
-            canvas.fill_rounded_rect(fill_rect, radius, fill_color);
-        }
-
-        // Thumb
-        let thumb_color = if !self.enabled {
-            colors.text_disabled
-        } else if self.dragging.get() {
-            colors.accent_pressed
-        } else if self.hovered.get() {
-            colors.accent_hover
-        } else {
-            colors.accent
-        };
-        let thumb_rect = Rect::new(
-            thumb_cx - thumb_radius,
-            thumb_cy - thumb_radius,
-            thumb_diameter,
-            thumb_diameter,
-        );
-        canvas.fill_rounded_rect(thumb_rect, CornerRadius::uniform(thumb_radius), thumb_color);
-
-        // Focus ring — drawn outside the thumb using theme offset/width.
-        if self.focus_origin.get() == Some(FocusOrigin::Keyboard) {
-            let offset = shape.focus_ring_offset;
-            let half_stroke = shape.focus_ring_width * 0.5;
-            // Ring rect: outer edge at `thumb + offset + half_stroke`, drawn
-            // with stroke width `focus_ring_width` centered on that rect
-            // boundary. The stroke's outer edge lands at
-            // `thumb + offset + focus_ring_width`.
-            let ring_inset = offset + half_stroke;
-            let ring_rect = Rect::new(
-                thumb_rect.x - ring_inset,
-                thumb_rect.y - ring_inset,
-                thumb_rect.width + ring_inset * 2.0,
-                thumb_rect.height + ring_inset * 2.0,
-            );
-            canvas.stroke_rounded_rect(
-                ring_rect,
-                CornerRadius::uniform(thumb_radius + ring_inset),
-                colors.focus_ring,
-                shape.focus_ring_width,
-            );
-        }
+    fn children(&self) -> Vec<WidgetId> {
+        self.body_id.into_iter().collect()
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

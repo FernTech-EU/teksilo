@@ -50,7 +50,9 @@ pub use scroll_bar_style::{
     ScrollBarOrientation, ScrollBarStyle, ScrollBarStyleConfig, ScrollBarVariant,
     SharedScrollBarStyle,
 };
-pub use slider_style::{SharedSliderStyle, SliderStyle, SliderStyleConfig, SliderVariant};
+pub use slider_style::{
+    SharedSliderStyle, SliderOrientation, SliderStyle, SliderStyleConfig, SliderVariant,
+};
 pub use standard_item_style::{
     SharedStandardItemStyle, StandardItemStyle, StandardItemStyleConfig,
 };
