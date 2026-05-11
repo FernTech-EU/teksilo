@@ -21,6 +21,7 @@ pub mod recipe_radio_style;
 pub mod recipe_scroll_bar_style;
 pub mod recipe_slider_style;
 pub mod recipe_standard_item_style;
+pub mod recipe_text_input_style;
 pub mod recipe_toggle_style;
 pub mod recipe_tooltip_style;
 
@@ -36,5 +37,6 @@ pub use recipe_radio_style::RecipeRadioStyle;
 pub use recipe_scroll_bar_style::RecipeScrollBarStyle;
 pub use recipe_slider_style::RecipeSliderStyle;
 pub use recipe_standard_item_style::RecipeStandardItemStyle;
+pub use recipe_text_input_style::RecipeTextInputStyle;
 pub use recipe_toggle_style::RecipeToggleStyle;
 pub use recipe_tooltip_style::RecipeTooltipStyle;

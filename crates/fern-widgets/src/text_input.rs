@@ -26,20 +26,30 @@
 #[cfg(test)]
 mod tests;
 
+use std::rc::Rc;
+
 use fern_canvas::{Point, Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::signal::Signal;
+use fern_core::styles::{
+    SharedTextInputStyle, TextInputStyle, TextInputStyleConfig, TextInputValidationLevel,
+};
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole, TextStyleRole};
+use fern_tokens::{TextRole, TextStyleRole};
 
 use crate::button::InteractionState;
 use crate::primitives::text_input_field::{TextInputField, ValidationFeedback};
 use crate::primitives::validation_strip::ValidationStrip;
-use crate::primitives::{Expand, HStack, MinSize, Padding, RectWidget, TextWidget, VStack, ZStack};
+use crate::primitives::{Expand, HStack, MinSize, Padding, TextWidget, VStack, ZStack};
 use crate::tooltip::{self, RichTooltipSource};
+
+// Re-export the variant enum at module top so callers can write
+// `TextInput::new(text).variant(TextInputVariant::Filled)` without a
+// deeper import path.
+pub use fern_core::styles::TextInputVariant;
 
 /// Validation state for the text input field.
 #[derive(Debug, Clone, Default)]
@@ -115,6 +125,13 @@ pub struct TextInput {
     rich_tooltip_source: Option<RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn fern_core::widget::Widget>>,
 
+    /// Tier-1 design-language variant. Drives which chrome the active
+    /// `TextInputStyle` paints around the editor (Outlined / Filled /
+    /// Underline / Bare).
+    variant: TextInputVariant,
+    /// Per-call style override.
+    style_override: Option<SharedTextInputStyle>,
+
     // ── Internal (set during build) ─────────────────────────────────
     interaction: Signal<InteractionState>,
     root_child_id: Option<WidgetId>,
@@ -157,9 +174,31 @@ impl TextInput {
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
+            variant: TextInputVariant::default(),
+            style_override: None,
             interaction: Signal::new(InteractionState::Idle),
             root_child_id: None,
         }
+    }
+
+    /// Pick a Tier-1 design-language variant
+    /// ([`TextInputVariant::Outlined`] / `Filled` / `Underline` / `Bare`).
+    /// The IntUI default ([`crate::styles::RecipeTextInputStyle`]) honours
+    /// `Outlined`, `Filled`, and `Bare`; `Underline` falls back to
+    /// `Outlined` until per-side stroke recipes land.
+    pub fn variant(mut self, variant: TextInputVariant) -> Self {
+        self.variant = variant;
+        self
+    }
+
+    /// Override the active [`TextInputStyle`] for this widget instance
+    /// only. The widget keeps responsibility for caret blinking, IME
+    /// composition, the placeholder layering, the leading / trailing
+    /// slots and the validation strip — the style only paints the
+    /// frame (border / fill / corner radius).
+    pub fn style(mut self, style: impl TextInputStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
     }
 
     // ── Builder methods ─────────────────────────────────────────────
@@ -379,8 +418,6 @@ impl Widget for TextInput {
         // paint-time role resolver without riding through a zip here.
         let theme = ctx.theme();
         let field_style = theme.components.text_field;
-        let field_border_width = field_style.border_width;
-        let focus_ring_width = theme.shape.focus_ring_width;
         let interaction = self.interaction.clone();
         let validation = self.validation.clone();
 
@@ -545,49 +582,42 @@ impl Widget for TextInput {
 
         let row_id = ctx.add(row);
 
-        // Horizontal-only padding around the row.
-        let padded_id = ctx.add(
-            Padding::new(
-                0.0,
-                field_style.padding_horizontal,
-                0.0,
-                field_style.padding_horizontal,
-            )
-            .child_id(row_id),
-        );
-
-        // Border color + width depend on interaction state AND validation
-        // state. `zip` produces a derived signal that registers both upstream
-        // roots with the binding registry, so the border refreshes whenever
-        // either source changes.
-        //
-        // This is the Int UI text-field convention (Section 7 of the v2
-        // reference): emphasis lives in the field's own border — thicker
-        // and accent-colored when focused — rather than in a separate ring
-        // wrapping the control. A validation `Error` / `Warning` state
-        // overrides the focus color so a user can't miss a broken field.
-        let combined = interaction.zip(&validation);
-        let border_role = derive_border_role(combined.clone());
-        let border_width = combined.map(move |(state, _val)| {
-            if *state == InteractionState::Focused {
-                focus_ring_width
-            } else {
-                field_border_width
-            }
+        // Derive the cfg signals the style needs. Map our internal
+        // `InteractionState` (5-way) to the trait's 3 boolean signals,
+        // and the composite `ValidationState` (carries a message) to
+        // the trait's flat `TextInputValidationLevel` enum.
+        let is_focused = interaction.map(|s| *s == InteractionState::Focused);
+        let is_hovered = interaction.map(|s| *s == InteractionState::Hovered);
+        let is_disabled = interaction.map(|s| *s == InteractionState::Disabled);
+        let validation_level = validation.map(|v| match v {
+            ValidationState::None => TextInputValidationLevel::None,
+            ValidationState::Error(_) => TextInputValidationLevel::Error,
+            ValidationState::Warning(_) => TextInputValidationLevel::Warning,
+            ValidationState::Corrected(_) => TextInputValidationLevel::Corrected,
         });
 
-        let bg = RectWidget::new()
-            .background(SurfaceRole::Content)
-            .border_color(border_role)
-            .border_width(border_width)
-            .corner_radius(CornerRadius::uniform(field_style.corner_radius));
-        let bg_id = ctx.add(bg);
+        // Resolve the active style: per-call override > theme slot >
+        // built-in `RecipeTextInputStyle` default. The style paints the
+        // bordered/filled frame + the corner radius + the horizontal
+        // padding around the editor row.
+        let style: SharedTextInputStyle = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.text_input.clone())
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTextInputStyle));
 
-        let zstack = ZStack::new().add_child(bg_id).add_child(padded_id);
-        let zstack_id = ctx.add(zstack);
+        let cfg = TextInputStyleConfig {
+            editor: row_id,
+            is_focused,
+            is_hovered,
+            is_disabled,
+            validation: validation_level,
+            variant: self.variant,
+        };
+        let chrome_id = style.make_body(&cfg, ctx);
 
         let min_w = self.min_width.unwrap_or(65.0);
-        let frame_id = ctx.add(MinSize::new(min_w, field_style.height).child_id(zstack_id));
+        let frame_id = ctx.add(MinSize::new(min_w, field_style.height).child_id(chrome_id));
 
         // ── Inline validation strip ────────────────────────────────
         // Maps `Signal<ValidationState>` to the `Signal<ValidationFeedback>`
@@ -748,22 +778,3 @@ fn feedback_to_state(fb: &ValidationFeedback) -> ValidationState {
     }
 }
 
-/// Derive the border role from interaction state and validation state.
-/// The paint-time resolver converts the role to a `Color` against the
-/// current theme, so runtime theme switches refresh the border without
-/// riding through a zip here.
-fn derive_border_role(combined: Signal<(InteractionState, ValidationState)>) -> Signal<BorderRole> {
-    combined.map(|(state, val)| match val {
-        ValidationState::Error(_) => BorderRole::Error,
-        ValidationState::Warning(_) => BorderRole::Warning,
-        // Corrected: tint accent (matches Int UI's "we changed
-        // something — look here briefly" cue). The plan describes a
-        // ~1.5 s decay; until that pulse animation is wired, this
-        // simply persists while the composite holds Corrected.
-        ValidationState::Corrected(_) => BorderRole::Focused,
-        ValidationState::None => match *state {
-            InteractionState::Focused => BorderRole::Focused,
-            _ => BorderRole::Default,
-        },
-    })
-}
