@@ -8,21 +8,21 @@
 //!
 //! V2 attached handlers — no event() override.
 
-use fern_canvas::{Path, Point, Rect, Size, SizeProposal};
+use std::rc::Rc;
+
+use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::signal::Signal;
+use fern_core::styles::{CheckboxState, CheckboxStyleConfig, CheckboxVariant, SharedCheckboxStyle};
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_data::CheckState;
-use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole, TextStyleRole, VAlignment};
+use fern_tokens::{TextRole, TextStyleRole, VAlignment};
 
-use crate::button::InteractionState;
-use crate::primitives::{
-    FixedSize, HStack, IconWidget, MinSize, RectWidget, TextWidget, VStack, ZStack,
-};
+use crate::primitives::{HStack, MinSize, TextWidget, VStack};
 
 // ---------------------------------------------------------------------------
 // Internal state wrapper
@@ -110,7 +110,8 @@ pub struct Checkbox {
     tooltip_text: Option<String>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn fern_core::widget::Widget>>,
-    interaction: Option<Signal<InteractionState>>,
+    variant: CheckboxVariant,
+    style_override: Option<SharedCheckboxStyle>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -126,7 +127,8 @@ impl Checkbox {
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
-            interaction: None,
+            variant: CheckboxVariant::default(),
+            style_override: None,
             root_child_id: None,
         }
     }
@@ -148,7 +150,8 @@ impl Checkbox {
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
-            interaction: None,
+            variant: CheckboxVariant::default(),
+            style_override: None,
             root_child_id: None,
         }
     }
@@ -205,6 +208,23 @@ impl Checkbox {
 
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+
+    /// Pick the design-language variant. Default `Square`. The active
+    /// `CheckboxStyle` impl decides what the variant means visually
+    /// (the IntUI `RecipeCheckboxStyle` honours all three variants
+    /// directly via corner-shape changes).
+    pub fn variant(mut self, variant: CheckboxVariant) -> Self {
+        self.variant = variant;
+        self
+    }
+
+    /// Per-call style override. Replaces the theme-wide default
+    /// `CheckboxStyle` for just this Checkbox instance — same role as
+    /// `Button::style(...)`.
+    pub fn style(mut self, style: impl fern_core::styles::CheckboxStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
         self
     }
 
@@ -268,145 +288,66 @@ impl std::fmt::Debug for Checkbox {
 }
 
 // ---------------------------------------------------------------------------
-// Color resolution
-// ---------------------------------------------------------------------------
-
-fn resolve_box_bg_role(state: InteractionState, check: CheckState) -> SurfaceRole {
-    match state {
-        InteractionState::Disabled => SurfaceRole::AccentDisabled,
-        _ if check.is_filled() => match state {
-            InteractionState::Hovered => SurfaceRole::AccentHover,
-            InteractionState::Pressed => SurfaceRole::AccentPressed,
-            _ => SurfaceRole::Accent,
-        },
-        _ => SurfaceRole::Transparent,
-    }
-}
-
-fn resolve_box_border_role(state: InteractionState, check: CheckState) -> BorderRole {
-    // Focus wins over every other state: even a filled
-    // (Checked / Indeterminate) checkbox still shows the accent
-    // border when keyboard-focused, because that's the only
-    // focus indicator — there is no external ring.
-    match state {
-        InteractionState::Focused => BorderRole::Focused,
-        InteractionState::Disabled => BorderRole::AccentDisabled,
-        _ if check.is_filled() => BorderRole::Transparent,
-        InteractionState::Hovered => BorderRole::Strong,
-        _ => BorderRole::Default,
-    }
-}
-
-fn resolve_icon_role(state: InteractionState) -> TextRole {
-    if state == InteractionState::Disabled {
-        TextRole::Disabled
-    } else {
-        TextRole::OnAccent
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Icons
-// ---------------------------------------------------------------------------
-
-/// A horizontal dash icon for the indeterminate state.
-fn indeterminate_icon(size: f32) -> IconWidget {
-    let mut path = Path::new();
-    let s = size;
-    path.move_to(Point::new(s * 0.2, s * 0.5));
-    path.line_to(Point::new(s * 0.8, s * 0.5));
-    IconWidget::from_path(path, size)
-}
-
-// ---------------------------------------------------------------------------
 // Widget
 // ---------------------------------------------------------------------------
 
+/// Internal interaction state — local to this widget's handlers; the
+/// active `CheckboxStyle` only sees the four derived boolean signals
+/// (is_hovered, is_pressed, is_focused, is_disabled).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InteractionState {
+    Idle,
+    Hovered,
+    Pressed,
+    Focused,
+    Disabled,
+}
+
 impl Widget for Checkbox {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme();
-        let cb_style = theme.components.checkbox;
-        let focus_ring_width = theme.shape.focus_ring_width;
-        let border_width = theme.shape.border_width;
+        let cb_style = ctx.theme().components.checkbox;
         let kind = self.kind.clone();
         let enabled = self.enabled;
+        let variant = self.variant;
 
         let interaction = ctx.signal(if enabled {
             InteractionState::Idle
         } else {
             InteractionState::Disabled
         });
-        self.interaction = Some(interaction.clone());
 
-        // Derive box roles from interaction state AND check state. `zip` on
-        // the two registers both upstream roots so the visuals refresh on
-        // click or external check-state flips; theme switches repaint via
-        // `mark_all_dirty` without needing a separate zip here.
-        let check_state = kind.check_state_signal();
-        let bg_role = interaction
-            .zip(&check_state)
-            .map(|(s, cs)| resolve_box_bg_role(*s, *cs));
-        let border_role = interaction
-            .zip(&check_state)
-            .map(|(s, cs)| resolve_box_border_role(*s, *cs));
+        // Bridge the widget-side `CheckState` (fern-data) to the style-
+        // protocol-side `CheckboxState` (fern-core). The mapping is 1-to-1;
+        // `.map()` registers the upstream root so the body repaints when
+        // the check state flips.
+        let style_state = kind
+            .check_state_signal()
+            .map(|cs| match *cs {
+                CheckState::Unchecked => CheckboxState::Unchecked,
+                CheckState::Checked => CheckboxState::Checked,
+                CheckState::Indeterminate => CheckboxState::Indeterminate,
+            });
 
-        let icon_size = cb_style.box_visual_size * 0.75;
+        let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));
+        let is_pressed = interaction.map(|s| matches!(s, InteractionState::Pressed));
+        let is_focused = interaction.map(|s| matches!(s, InteractionState::Focused));
+        let is_disabled = interaction.map(|s| matches!(s, InteractionState::Disabled));
 
-        // Border width — Int UI focus convention: thicken the
-        // existing border to `focus_ring_width` on focus, instead of
-        // wrapping the box in a separate ring.
-        let border_width_signal = interaction.map(move |s| match *s {
-            InteractionState::Focused => focus_ring_width,
-            _ => border_width,
-        });
+        let style: SharedCheckboxStyle = self
+            .style_override
+            .clone()
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeCheckboxStyle::default()));
+        let cfg = CheckboxStyleConfig {
+            state: style_state,
+            is_hovered,
+            is_pressed,
+            is_focused,
+            is_disabled,
+            variant,
+        };
+        let body_id = style.make_body(&cfg, ctx);
 
-        let box_rect = RectWidget::new()
-            .bind_background(bg_role)
-            .bind_border_color(border_role)
-            .bind_border_width(border_width_signal)
-            .corner_radius(CornerRadius::uniform(cb_style.corner_radius));
-        let box_id = ctx.add(box_rect);
-        let box_sized = ctx.add(
-            FixedSize::new()
-                .bind_width(cb_style.box_visual_size)
-                .bind_height(cb_style.box_visual_size)
-                .child_id(box_id),
-        );
-
-        let icon_role = interaction.map(|s| resolve_icon_role(*s));
-
-        let checkmark = IconWidget::checkmark(icon_size).bind_color(icon_role.clone());
-        let checkmark_id = ctx.add(checkmark);
-
-        let dash = indeterminate_icon(icon_size).bind_color(icon_role);
-        let dash_id = ctx.add(dash);
-
-        match &self.kind {
-            CheckKind::TwoState(checked) => {
-                ctx.visible_when(checkmark_id, checked.clone());
-                ctx.visible_when(dash_id, false);
-            }
-            CheckKind::TriState(state) => {
-                ctx.visible_when(checkmark_id, state.map(|v| *v == CheckState::Checked));
-                ctx.visible_when(dash_id, state.map(|v| *v == CheckState::Indeterminate));
-            }
-        }
-
-        // Compose the visual box with checkmark/dash icons on top.
-        // No external focus ring — the box's own border is the
-        // focus indicator (thickened + accent-colored) per the Int
-        // UI text-field convention, applied uniformly to every
-        // input widget with a resting border.
-        let check_box = ctx.add(
-            ZStack::new()
-                .add_child(box_sized)
-                .add_child(checkmark_id)
-                .add_child(dash_id),
-        );
-
-        let mut row = HStack::new()
-            .spacing(cb_style.label_gap)
-            .add_child(check_box);
+        let mut row = HStack::new().spacing(cb_style.label_gap).add_child(body_id);
         if !self.labels_hidden && let Some(ref label) = self.label {
             let label_widget = TextWidget::new_literal(label)
                 .style(TextStyleRole::Body)

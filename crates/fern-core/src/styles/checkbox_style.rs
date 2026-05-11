@@ -33,12 +33,9 @@ pub enum CheckboxState {
 pub struct CheckboxStyleConfig {
     pub state: Signal<CheckboxState>,
     pub is_hovered: Signal<bool>,
+    pub is_pressed: Signal<bool>,
     pub is_focused: Signal<bool>,
     pub is_disabled: Signal<bool>,
-    /// Optional pre-built label subtree; `None` for an unlabelled box
-    /// (the style typically lays out a row `box + label_gap + label`
-    /// when present).
-    pub label: Option<WidgetId>,
     pub variant: CheckboxVariant,
 }
 
