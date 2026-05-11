@@ -13,6 +13,40 @@ For per-subsystem docs (data binding, accessibility overrides,
 animation, drag-and-drop, multi-window, settings, i18n, theming,
 shortcuts/intents/actions), see [SUMMARY.md](SUMMARY.md).
 
+## Styling status
+
+Widgets migrated to the four-tier styling system
+([docs/styling-system.md](styling-system.md)) ship a `*Style` trait
+in `fern-core::styles::*` plus a default `Recipe*Style` impl in
+`fern-widgets/src/styles/*`. Each takes a per-call `.style(impl
+FooStyle)` builder, falls back to `theme.style_slots.<slot>` for
+theme-wide installs, then to the recipe default. The remaining
+widgets keep their existing self-paint chrome until follow-up
+commits migrate them; their trait protocols are reserved in
+`fern-core::styles::*` so the typed slot surface stays additive.
+
+| Widget | Variant enum | Style trait | Slot |
+| --- | --- | --- | --- |
+| `Toggle` | `ToggleVariant` (Switch/Pill/Square/Inset) | `ToggleStyle` | `style_slots.toggle` |
+| `Button` | `ButtonVariant` (Filled/Tinted/Outlined/Plain/Ghost/Link/Destructive) | `ButtonStyle` | `style_slots.button` |
+| `Checkbox` | `CheckboxVariant` (Square/Rounded/Circle) | `CheckboxStyle` | `style_slots.checkbox` |
+| `RadioButton` | `RadioVariant` (Circle/Square/Rounded) | `RadioStyle` | `style_slots.radio` |
+| `IconButton` | `IconButtonSize` (Compact/Default/Toolbar/Large/Hero) | `IconButtonStyle` | `style_slots.icon_button` |
+| `Panel` | `PanelVariant` (Plain/Sunken/Raised/Highlighted) | `PanelStyle` | `style_slots.panel` |
+| `Card` | `CardVariant` (Plain/Elevated/Outlined/Filled) | `CardStyle` | `style_slots.card` |
+| `TooltipWidget` | — | `TooltipStyle` | `style_slots.tooltip` |
+| `MenuItem` | — | `MenuItemStyle` | `style_slots.menu_item` |
+| `StandardListItem` / `StandardTreeItem` | — | `StandardItemStyle` | `style_slots.standard_item` |
+| `Popover` | `PopoverVariant` (Default/Menu/Tooltip) — surface | `PopoverStyle` | `style_slots.popover` |
+
+Deferred (trait + slot reserved but widget still self-paints):
+`ScrollBar`, `TabBar`, `ComboBox`, `Slider`, `TextInput`. Their
+recipe defaults land in follow-up commits as part of the same
+refactor.
+
+End-to-end demo of the slot bag + per-call override: see
+[`examples/theme_styles/`](../examples/theme_styles/).
+
 ---
 
 ## Layout primitives — `crates/fern-widgets/src/primitives/`
