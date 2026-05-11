@@ -12,13 +12,13 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::signal::Signal;
+use fern_core::styles::{RadioStyleConfig, RadioVariant, SharedRadioStyle};
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole, TextStyleRole, VAlignment};
+use fern_tokens::{TextRole, TextStyleRole, VAlignment};
 
-use crate::button::InteractionState;
-use crate::primitives::{FixedSize, HStack, MinSize, RectWidget, TextWidget, VStack, ZStack};
+use crate::primitives::{HStack, MinSize, TextWidget, VStack};
 
 /// A radio button that sets a shared `Signal<usize>` to its value when selected.
 pub struct RadioButton {
@@ -30,7 +30,8 @@ pub struct RadioButton {
     tooltip_text: Option<String>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn fern_core::widget::Widget>>,
-    interaction: Option<Signal<InteractionState>>,
+    variant: RadioVariant,
+    style_override: Option<SharedRadioStyle>,
     root_child_id: Option<WidgetId>,
     /// Shared radio-group sibling id buffer populated by an enclosing
     /// `RadioGroup`. When set, `accessibility()` emits
@@ -52,7 +53,8 @@ impl RadioButton {
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
-            interaction: None,
+            variant: RadioVariant::default(),
+            style_override: None,
             root_child_id: None,
             group_ids: None,
         }
@@ -97,6 +99,20 @@ impl RadioButton {
 
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+
+    /// Pick the design-language variant. Default `Circle`. The active
+    /// `RadioStyle` impl decides what the variant means visually.
+    pub fn variant(mut self, variant: RadioVariant) -> Self {
+        self.variant = variant;
+        self
+    }
+
+    /// Per-call style override. Replaces the theme-wide default
+    /// `RadioStyle` for just this RadioButton instance.
+    pub fn style(mut self, style: impl fern_core::styles::RadioStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
         self
     }
 
@@ -158,103 +174,55 @@ impl std::fmt::Debug for RadioButton {
     }
 }
 
-fn resolve_circle_border_role(state: InteractionState, selected: bool) -> BorderRole {
-    // Focus wins: a keyboard-focused radio always draws the
-    // accent ring, even when selected or disabled — it's the only
-    // focus indicator (no external ring).
-    match state {
-        InteractionState::Focused => BorderRole::Focused,
-        InteractionState::Disabled => BorderRole::AccentDisabled,
-        _ if selected => BorderRole::Accent,
-        InteractionState::Hovered => BorderRole::Strong,
-        _ => BorderRole::Default,
-    }
-}
-
-fn resolve_dot_role(state: InteractionState) -> SurfaceRole {
-    // Jewel renders the radio (and its disabled state) as a pre-baked
-    // SVG icon, so there is no canonical token for "disabled dot" to
-    // mirror. We pick `AccentDisabled` because the outer ring already
-    // uses it in the Disabled state, making the whole widget read as
-    // one desaturated-accent block. The previous mapping (`text_disabled`)
-    // left the dot a neutral gray against an accent-disabled ring — a
-    // two-color disabled state that was inconsistent with the rest of
-    // the widget chrome.
-    if state == InteractionState::Disabled {
-        SurfaceRole::AccentDisabled
-    } else {
-        SurfaceRole::Accent
-    }
+/// Internal interaction state — local to this widget's handlers; the
+/// active `RadioStyle` only sees the four derived boolean signals
+/// (is_hovered, is_pressed, is_focused, is_disabled) plus is_selected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InteractionState {
+    Idle,
+    Hovered,
+    Pressed,
+    Focused,
+    Disabled,
 }
 
 impl Widget for RadioButton {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme();
-        let radio_style = theme.components.radio;
-        let radius_pill = theme.shape.radius_pill;
-        let focus_ring_width = theme.shape.focus_ring_width;
-        let border_width = theme.shape.border_width;
+        let radio_style = ctx.theme().components.radio;
         let selected = self.selected.clone();
         let value = self.value;
         let enabled = self.enabled;
+        let variant = self.variant;
 
         let interaction = ctx.signal(if enabled {
             InteractionState::Idle
         } else {
             InteractionState::Disabled
         });
-        self.interaction = Some(interaction.clone());
 
-        // Border role depends on `interaction` and group selection. `zip`
-        // registers both upstream roots; the paint layer resolves the
-        // role against the current theme, so runtime theme switches
-        // refresh colors for free without a third zip.
         let is_selected = selected.map(move |s| *s == value);
-        let border_role = interaction
-            .zip(&is_selected)
-            .map(|(s, sel)| resolve_circle_border_role(*s, *sel));
-        // Int UI focus convention: thicken the existing border to
-        // `focus_ring_width` on focus, instead of wrapping the circle
-        // in a separate ring.
-        let border_width_signal = interaction.map(move |s| match *s {
-            InteractionState::Focused => focus_ring_width,
-            _ => border_width,
-        });
-        let outer = RectWidget::new()
-            .bind_border_color(border_role)
-            .bind_border_width(border_width_signal)
-            .corner_radius(CornerRadius::uniform(radius_pill));
-        let outer_id = ctx.add(outer);
-        let outer_sized = ctx.add(
-            FixedSize::new()
-                .bind_width(radio_style.visual_size)
-                .bind_height(radio_style.visual_size)
-                .child_id(outer_id),
-        );
+        let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));
+        let is_pressed = interaction.map(|s| matches!(s, InteractionState::Pressed));
+        let is_focused = interaction.map(|s| matches!(s, InteractionState::Focused));
+        let is_disabled = interaction.map(|s| matches!(s, InteractionState::Disabled));
 
-        let dot_role = interaction.map(|s| resolve_dot_role(*s));
-        let dot = RectWidget::new()
-            .bind_background(dot_role)
-            .corner_radius(CornerRadius::uniform(radius_pill));
-        let dot_id = ctx.add(dot);
-        let dot_sized = ctx.add(
-            FixedSize::new()
-                .bind_width(radio_style.inner_dot_size)
-                .bind_height(radio_style.inner_dot_size)
-                .child_id(dot_id),
-        );
-
-        ctx.visible_when(dot_sized, selected.map(move |s| *s == value));
-
-        // Compose the visual circle with the inner dot. No
-        // external focus ring — the circle's own border is the
-        // focus indicator (thickened + accent-colored) per the
-        // Int UI convention applied uniformly across widgets.
-        let radio = ctx.add(ZStack::new().add_child(outer_sized).add_child(dot_sized));
+        let style: SharedRadioStyle = self
+            .style_override
+            .clone()
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeRadioStyle::default()));
+        let cfg = RadioStyleConfig {
+            is_selected,
+            is_hovered,
+            is_pressed,
+            is_focused,
+            is_disabled,
+            variant,
+        };
+        let body_id = style.make_body(&cfg, ctx);
 
         let mut row = HStack::new()
             .spacing(radio_style.label_gap)
-            .add_child(radio);
+            .add_child(body_id);
         if let Some(ref label) = self.label {
             let label_widget = TextWidget::new_literal(label)
                 .style(TextStyleRole::Body)

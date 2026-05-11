@@ -24,9 +24,9 @@ pub enum RadioVariant {
 pub struct RadioStyleConfig {
     pub is_selected: Signal<bool>,
     pub is_hovered: Signal<bool>,
+    pub is_pressed: Signal<bool>,
     pub is_focused: Signal<bool>,
     pub is_disabled: Signal<bool>,
-    pub label: Option<WidgetId>,
     pub variant: RadioVariant,
 }
 
