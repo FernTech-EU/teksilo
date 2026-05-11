@@ -589,19 +589,51 @@ Three wgpu pipelines: `rect_pipeline`, `sdf_pipeline`, `quad_pipeline`.
 
 ## Theming
 
-`Theme` struct with five token groups (`ColorTokens`, `LayoutTokens`, `TypographyTokens`, `ShapeTokens`, `MotionTokens`) plus `ComponentStyles`. Built-in presets: `Theme::light_default()`, `Theme::dark_default()`. Runtime switching via `ctx.set_theme(new)` or `tree.set_theme(new)`.
+Four-tier ladder: **tokens → variants → recipes → style protocols**. Full reference at [docs/styling-system.md](../docs/styling-system.md).
+
+**Theme construction.** No `Theme::default()` / `Theme::*_default()` — apps explicitly pick a preset:
+
+```rust
+use fern_ui::prelude::intui;
+let theme = intui::light();   // or intui::dark()
+```
+
+`appearance: ThemeAppearance::{Light, Dark}` is a required field on every theme. Drives shadow density, OS-theme matching, and asset variant selection.
+
+`Theme` (in `fern-core::styles`) carries five token groups (`ColorTokens`, `LayoutTokens`, `TypographyTokens`, `ShapeTokens`, `MotionTokens`), `ComponentStyles` (legacy dim structs, will be deleted once Step 7 lands), `ComponentStyleSlots` (typed `Rc<dyn FooStyle>` slot bag for theme-wide style overrides), and `ThemeExtensions` (typed app registry).
 
 **Theme is reactive.** `set_theme` updates an internal `Signal<Theme>` and dirty-marks every node — no rebuild. Focus, scroll offsets, and all interaction state survive theme changes.
 
-Three knobs that matter in widget code:
+**Tier 1 — Variants** (per themable widget):
 
-1. **Roles** — `TextRole`, `SurfaceRole`, `BorderRole`, `TextStyleRole` in `fern-tokens`. Name *what* a value represents, not which literal. Resolved against the current theme at paint/layout.
-2. **`ColorProp`** — unified color-builder input: `Static(Color) | Bound(Signal<Color>) | TextRole | SurfaceRole | BorderRole | DynamicTextRole(Signal<TextRole>) | DynamicSurfaceRole(..) | DynamicBorderRole(..)`. Widget builders accept `impl Into<ColorProp>`.
-3. **`TextStyleProp`** — same idea for typography: `Static(TextStyle) | Role(TextStyleRole)`.
+```rust
+Button::new(tr!("save")).variant(ButtonVariant::Filled)        // primary action
+Toggle::new(on).variant(ToggleVariant::Switch)                  // default
+```
 
-Defaults: `TextWidget::new("...")` is `TextRole::Primary` + `TextStyleRole::Body`; `Panel::new()` is `SurfaceRole::Main` + `BorderRole::Default` when unset.
+`ButtonVariant {Filled, Tinted, Outlined, Plain, Ghost, Link, Destructive}` — default `Plain`. IntUI maps `Destructive` → Filled, `Tinted`/`Outlined` → Plain, `Link` → Ghost. Other widgets follow the same shape (see styling-system.md).
 
-Interaction-driven colors use the `Signal<Role>` pattern — no `theme_signal` zip:
+**Tier 2 — Recipes** (paint vocabulary): `ShapeRecipe`, `FillRecipe` (Solid/LinearGradient/RadialGradient), `BorderRecipe` (with `BorderStyle`/`BorderPosition`), `ShadowRecipe`, `PerStateRecipe<T>` (FernUI's answer to Flutter's `WidgetStateProperty<T>` — explicit fallback chain `pressed → hover → idle`), `WidgetState`. All in `fern_core::styles::*`. Recipes use `RecipeColor` (plain data) instead of `ColorProp` so they serialize cleanly.
+
+**Tier 3 — Style protocols** (the escape hatch):
+
+```rust
+pub trait ButtonStyle: 'static {
+    fn make_body(&self, cfg: &ButtonStyleConfig, ctx: &mut BuildContext) -> WidgetId;
+}
+```
+
+Three precedence levels (highest wins):
+
+1. **Per-call:** `Button::new("X").style(MyGlow)` — instance override.
+2. **Theme-wide:** `theme.style_slots.button = Some(Rc::new(MyGlow))` — applies to every Button using the active theme.
+3. **Default:** `RecipeButtonStyle::default()` shipped in `fern-widgets/src/styles/` reading IntUI tokens.
+
+Migration status (as of this branch): `Toggle`, `Button`, `Checkbox`, `RadioButton`, `IconButton`, `Panel`, `Card`, `TooltipWidget` are migrated to Tier 3. `MenuItem`, `Popover`, `ScrollBar`, `StandardListItem/TreeItem`, `TabBar`, `ComboBox`, `Slider`, `TextInput` still self-paint — their trait + slot are reserved; migration lands in follow-up commits. Step 7 (delete dim structs) is gated on every themable widget being migrated.
+
+**Roles** stay relevant — they name *what* a value represents (`TextRole::Primary`, `SurfaceRole::Hover`), resolved against the current theme at paint time. Widget builders accept `impl Into<ColorProp>` so any of `Color | Signal<Color> | TextRole | SurfaceRole | BorderRole | DynamicTextRole(Signal<TextRole>) | DynamicSurfaceRole(..) | DynamicBorderRole(..)` works.
+
+Interaction-driven colors use the `Signal<Role>` pattern:
 
 ```rust
 let bg_role = interaction.map(|s| match s {
@@ -612,7 +644,7 @@ let bg_role = interaction.map(|s| match s {
 RectWidget::new().background(bg_role)
 ```
 
-`ctx.theme_signal()` / `ctx.locale_signal()` are still available for the cases no role covers (alpha blends, rich-text engine palette sync, layout-constant snapshots) — use them sparingly. Full reference: [docs/reactive-theme.md](../docs/reactive-theme.md).
+`ctx.theme_signal()` / `ctx.locale_signal()` are still available for the cases no role covers. Use sparingly. Reactive-theme details: [docs/reactive-theme.md](../docs/reactive-theme.md).
 
 ## Testing Patterns
 
@@ -639,7 +671,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Signal-based reactivity (Signal, Prop, ObserverHandle, scoped effects)
 - Gesture recognition (UIKit-style state machines, auto-wired from handlers)
 - Overlay system (OverlayManager, OverlayRequest, positioning)
-- Design tokens (full Theme system)
+- Design tokens (full Theme system) + four-tier styling ladder (tokens → variants → recipes → style protocols). `ThemeAppearance::{Light, Dark}` required field. `presets::intui::{light, dark}` shipped in `fern-core`; no `Theme::default()` / `Theme::*_default()`. Recipe types (`ShapeRecipe`, `FillRecipe`, `BorderRecipe`, `ShadowRecipe`, `PerStateRecipe<T>`, `WidgetState`) in `fern_core::styles`. Per-widget style traits (`ButtonStyle`, `ToggleStyle`, `CheckboxStyle`, `RadioStyle`, `IconButtonStyle`, `PanelStyle`, `CardStyle`, `TooltipStyle`, plus reserved slots for `MenuItem`/`Popover`/`Slider`/`TextInput`/`ComboBox`/`ScrollBar`/`StandardItem`/`TabBar`) with default `Recipe*Style` impls in `fern-widgets/src/styles/`. The 8 migrated widgets delegate visual chrome via `style.make_body(cfg, ctx)`; apps install per-call (`.style(impl …Style)`) or theme-wide (`theme.style_slots.<widget> = Some(Rc::new(...))`). Reference: [docs/styling-system.md](docs/styling-system.md).
 - Window management (multi-window, modal dialogs, custom title bar — Wayland + macOS + Windows; X11 falls back to native decorations)
 - GPU rendering (3 pipelines, glyph atlas, path atlas)
 - All ~21 layout primitives (including Grid, Wrap, AspectRatio, Switcher, MasonryLayout, FormLayout)
