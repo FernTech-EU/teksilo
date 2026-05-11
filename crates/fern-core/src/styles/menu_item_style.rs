@@ -14,6 +14,7 @@ pub struct MenuItemStyleConfig {
     /// Optional trailing slot (shortcut chip, submenu chevron).
     pub trailing: Option<WidgetId>,
     pub is_hovered: Signal<bool>,
+    pub is_pressed: Signal<bool>,
     pub is_focused: Signal<bool>,
     pub is_disabled: Signal<bool>,
     /// Bound to keyboard-arrow navigation within the parent menu.

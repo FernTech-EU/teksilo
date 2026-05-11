@@ -12,13 +12,14 @@ use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
 use fern_core::signal::Signal;
+use fern_core::styles::{MenuItemStyleConfig, SharedMenuItemStyle};
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{CornerRadius, SurfaceRole, TextRole, TextStyleRole};
+use fern_tokens::{TextRole, TextStyleRole};
 
 use crate::keystroke_format::format_keystroke;
-use crate::primitives::{HStack, IconWidget, Padding, RectWidget, Spacer, TextWidget, ZStack};
+use crate::primitives::{HStack, IconWidget, Spacer, TextWidget};
 
 /// Type-erased command factory. Stored as `Rc` (not `Box`) so the closure
 /// can be cloned and shared — in particular with SplitButton, which reads
@@ -77,6 +78,10 @@ pub struct MenuItem {
     /// `set_keyboard_shortcut`, so screen readers announce the chord
     /// that the visual trailing label shows.
     resolved_shortcut: Option<String>,
+    /// Per-call style override. When `None`, falls back to the
+    /// theme-wide slot (`theme.style_slots.menu_item`) and finally to
+    /// the IntUI default `RecipeMenuItemStyle`.
+    style_override: Option<SharedMenuItemStyle>,
     root_child_id: Option<WidgetId>,
     submenu_content_id: Option<WidgetId>,
 }
@@ -99,6 +104,7 @@ impl MenuItem {
             interaction: Signal::new(MenuItemState::Idle),
             submenu_open: Signal::new(false),
             resolved_shortcut: None,
+            style_override: None,
             root_child_id: None,
             submenu_content_id: None,
         }
@@ -166,6 +172,13 @@ impl MenuItem {
 
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+
+    /// Per-call style override. Replaces the theme-wide default
+    /// `MenuItemStyle` for just this MenuItem instance.
+    pub fn style(mut self, style: impl fern_core::styles::MenuItemStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
         self
     }
 
@@ -239,6 +252,7 @@ impl MenuItem {
             interaction: Signal::new(MenuItemState::Idle),
             submenu_open: Signal::new(false),
             resolved_shortcut: None,
+            style_override: None,
             root_child_id: None,
             submenu_content_id: None,
         }
@@ -275,14 +289,6 @@ impl std::fmt::Debug for MenuItem {
     }
 }
 
-fn resolve_bg_role(state: MenuItemState) -> SurfaceRole {
-    match state {
-        MenuItemState::Idle | MenuItemState::Disabled => SurfaceRole::Transparent,
-        MenuItemState::Hovered => SurfaceRole::AccentSubtle,
-        MenuItemState::Pressed => SurfaceRole::Pressed,
-    }
-}
-
 fn resolve_text_role(state: MenuItemState) -> TextRole {
     match state {
         MenuItemState::Disabled => TextRole::Disabled,
@@ -309,83 +315,41 @@ impl Widget for MenuItem {
         });
         self.interaction = interaction.clone();
 
-        let bg_role = interaction.map(|s| resolve_bg_role(*s));
         let text_role = interaction.map(|s| resolve_text_role(*s));
 
-        // Row layout:
-        //   [icon column][gap][label][Spacer][shortcut?][chevron column]
+        // Build the three slots fed to the active `MenuItemStyle`.
+        // The style decides the row layout (and chrome); the widget
+        // owns the slot contents.
         //
-        // HStack spacing is 0 — we insert an explicit `icon_label_gap`
-        // only between the icon column and the label. Nothing else in the
-        // row should have inter-child gaps: the Spacer handles stretch,
-        // the chevron column handles the trailing padding, and the
-        // shortcut (when present) sits directly adjacent to the chevron
-        // column. Using HStack::spacing here would inject extra gaps
-        // around the Spacer and shortcut, pushing the shortcut visibly
-        // away from the trailing edge — which is why "Ctrl+X" used to
-        // land short of where regular items had their right padding.
-        //
-        // * `icon column` is always reserved at `icon_column_width`, even
-        //   when the item has no icon, so labels line up vertically
-        //   between icon'd and icon-less items.
-        //
-        // * `chevron column` is always reserved at `item_padding_horizontal`
-        //   width. For submenu items it contains the chevron; for regular
-        //   items it's empty. Because the outer wrapper sets right
-        //   padding = 0, the chevron column visually IS the right
-        //   padding — regular items and submenu items share the same
-        //   trailing edge.
-        let mut row = HStack::new().spacing(0.0);
-
-        // Icon column — fixed width, optional IconWidget inside.
-        let icon_child_id = if let Some(icon) = self.icon.take() {
-            ctx.add(icon.bind_color(text_role.clone()))
-        } else {
-            ctx.add(Spacer::new())
+        // Leading: icon column — always reserved at `icon_column_width`,
+        // even when the item has no icon, so labels line up vertically
+        // between icon'd and icon-less items.
+        let leading = {
+            let icon_child_id = if let Some(icon) = self.icon.take() {
+                ctx.add(icon.bind_color(text_role.clone()))
+            } else {
+                ctx.add(Spacer::new())
+            };
+            ctx.add(
+                crate::primitives::FixedSize::new()
+                    .bind_width(menu_style.icon_column_width)
+                    .bind_height(menu_style.icon_column_width)
+                    .child_id(icon_child_id),
+            )
         };
-        let icon_column = ctx.add(
-            crate::primitives::FixedSize::new()
-                .bind_width(menu_style.icon_column_width)
-                .bind_height(menu_style.icon_column_width)
-                .child_id(icon_child_id),
+
+        // Label.
+        let label = ctx.add(
+            TextWidget::new_literal(&self.label)
+                .style(TextStyleRole::Body)
+                .bind_color(text_role.clone())
+                .single_line()
+                .a11y_hidden(),
         );
-        row = row.add_child(icon_column);
 
-        // Explicit icon-to-label gap (rendered as a fixed-width Spacer
-        // rather than HStack::spacing to avoid injecting gaps around the
-        // other children).
-        let icon_label_spacer = ctx.add(Spacer::new());
-        let icon_label_gap = ctx.add(
-            crate::primitives::FixedSize::new()
-                .bind_width(menu_style.icon_label_gap)
-                .bind_height(1.0_f32)
-                .child_id(icon_label_spacer),
-        );
-        row = row.add_child(icon_label_gap);
-
-        // Label
-        let label = TextWidget::new_literal(&self.label)
-            .style(TextStyleRole::Body)
-            .bind_color(text_role.clone())
-            .single_line()
-            .a11y_hidden();
-        row = row.child(label);
-
-        // Stretch spacer — pushes trailing content to the right edge.
-        row = row.child(Spacer::new());
-
-        // Shortcut label — the manual label wins; otherwise, if the
-        // item was bound to a shortcut id via `.for_shortcut(id)`, the
-        // effective primary keystroke is pulled from the tree's
-        // `ShortcutRegistry`. The registry's `version` signal is
-        // bound to this widget at the `Relayout` level so user
-        // rebindings (or late registrations) refresh the label on
-        // the next pass.
-        //
-        // A fixed-width gap (`shortcut_left_gap`, 24 dp) is inserted
-        // between the stretch Spacer and the shortcut label so that even
-        // when the row is packed tight (Spacer stretch = 0), there is
-        // always a visible gap between label and shortcut.
+        // Resolve the trailing shortcut text — manual label wins;
+        // otherwise pull from the registry by id. Bind the registry's
+        // version signal so a rebind triggers a Rebuild on this widget.
         let resolved_shortcut = self.shortcut_label.clone().or_else(|| {
             self.shortcut_id.and_then(|id| {
                 ctx.effective_shortcut(id)
@@ -394,33 +358,11 @@ impl Widget for MenuItem {
         });
         self.resolved_shortcut = resolved_shortcut.clone();
         if self.shortcut_id.is_some() {
-            // Rebuild (not Relayout) because the shortcut label is
-            // read from the registry by value during build() — a
-            // rebind must re-enter build() to pick up the new chord.
             ctx.shortcut_version().bind_to(
                 ctx.self_id(),
                 ctx.binding_registry(),
                 fern_core::binding::BindingLevel::Rebuild,
             );
-        }
-        if let Some(ref shortcut_text) = resolved_shortcut {
-            // Fixed minimum gap, always present.
-            let shortcut_gap_spacer = ctx.add(Spacer::new());
-            let shortcut_gap = ctx.add(
-                crate::primitives::FixedSize::new()
-                    .bind_width(menu_style.shortcut_left_gap)
-                    .bind_height(1.0_f32)
-                    .child_id(shortcut_gap_spacer),
-            );
-            row = row.add_child(shortcut_gap);
-
-            let shortcut_role = interaction.map(|s| resolve_shortcut_role(*s));
-            let shortcut = TextWidget::new_literal(shortcut_text)
-                .style(TextStyleRole::Body)
-                .bind_color(shortcut_role)
-                .single_line()
-                .a11y_hidden();
-            row = row.child(shortcut);
         }
 
         // Pre-create submenu content if this is a submenu trigger. Kept
@@ -435,48 +377,68 @@ impl Widget for MenuItem {
             None
         };
 
-        // Chevron column — always reserved at `item_padding_horizontal`
-        // width so submenu and regular items share the same trailing edge.
-        let chevron_child_id = if submenu_content_id.is_some() {
-            ctx.add(IconWidget::chevron_right(12.0).bind_color(text_role.clone()))
-        } else {
-            ctx.add(Spacer::new())
+        // Trailing slot — combines (optional shortcut + fixed gap +
+        // optional chevron column). The chevron column is always
+        // reserved at `item_padding_horizontal` so submenu and
+        // regular items share the same trailing edge.
+        let trailing = {
+            let mut trailing_row = HStack::new().spacing(0.0);
+            if let Some(ref shortcut_text) = resolved_shortcut {
+                let shortcut_role = interaction.map(|s| resolve_shortcut_role(*s));
+                let shortcut = TextWidget::new_literal(shortcut_text)
+                    .style(TextStyleRole::Body)
+                    .bind_color(shortcut_role)
+                    .single_line()
+                    .a11y_hidden();
+                trailing_row = trailing_row.child(shortcut);
+            }
+            // Chevron column. Always reserved (Spacer when no submenu)
+            // so the row's right edge sits at exactly the same X
+            // regardless of submenu-ness.
+            let chevron_child_id = if submenu_content_id.is_some() {
+                ctx.add(IconWidget::chevron_right(12.0).bind_color(text_role.clone()))
+            } else {
+                ctx.add(Spacer::new())
+            };
+            let chevron_column = ctx.add(
+                crate::primitives::FixedSize::new()
+                    .bind_width(menu_style.item_padding_horizontal)
+                    .bind_height(menu_style.icon_column_width)
+                    .child_id(chevron_child_id),
+            );
+            trailing_row = trailing_row.add_child(chevron_column);
+            ctx.add(trailing_row)
         };
-        let chevron_column = ctx.add(
-            crate::primitives::FixedSize::new()
-                .bind_width(menu_style.item_padding_horizontal)
-                .bind_height(menu_style.icon_column_width)
-                .child_id(chevron_child_id),
-        );
-        row = row.add_child(chevron_column);
 
-        let row_id = ctx.add(row);
+        // Derive the four boolean signals the trait wants.
+        let is_hovered = interaction.map(|s| matches!(s, MenuItemState::Hovered));
+        let is_pressed = interaction.map(|s| matches!(s, MenuItemState::Pressed));
+        let is_disabled = interaction.map(|s| matches!(s, MenuItemState::Disabled));
 
-        // Padding: vertical derived so the row has the full `item_height`.
-        // Compare against the rendered text line (`size * line_height`),
-        // not the bare font size — TextWidget lays out at the line height,
-        // so using `size` alone over-pads by ~`size * (line_height - 1)`
-        // (e.g. 13 × 0.4 = 5.2 dp, pushing a nominal 24 dp row to ~29 dp).
-        let body = &ctx.theme().typography.body;
-        let body_line = body.size * body.line_height;
-        let pad_v = ((menu_style.item_height - body_line) * 0.5).max(0.0);
-        let padding = Padding::new(
-            pad_v,                              // top
-            0.0,                                // right — chevron column fills this
-            pad_v,                              // bottom
-            menu_style.item_padding_horizontal, // left
-        )
-        .child_id(row_id);
-        let padding_id = ctx.add(padding);
+        // MenuItem doesn't track focus/highlight separately today —
+        // hovered already covers the keyboard-arrow case in the
+        // existing dispatcher. Wire is_focused to a constant false
+        // signal; is_highlighted reads the same as is_hovered for
+        // the IntUI default (the recipe `or`s them anyway).
+        let is_focused = ctx.signal(false);
+        let is_highlighted = is_hovered.clone();
 
-        // Background rect
-        let rect = RectWidget::new()
-            .bind_background(bg_role)
-            .corner_radius(CornerRadius::uniform(menu_style.item_corner_radius));
-        let rect_id = ctx.add(rect);
-
-        let zstack = ZStack::new().add_child(rect_id).add_child(padding_id);
-        let root_id = ctx.add(zstack);
+        let style: SharedMenuItemStyle = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.menu_item.clone())
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeMenuItemStyle::default()));
+        let cfg = MenuItemStyleConfig {
+            label,
+            leading: Some(leading),
+            trailing: Some(trailing),
+            is_hovered,
+            is_pressed,
+            is_focused,
+            is_disabled,
+            is_highlighted,
+        };
+        let root_id = style.make_body(&cfg, ctx);
 
         self.root_child_id = Some(root_id);
 
