@@ -16,7 +16,7 @@ use fern_tokens::{
     ColorTokens, ComponentStyles, LayoutTokens, MotionTokens, ShapeTokens, TypographyTokens,
 };
 
-use crate::styles::{Theme, ThemeAppearance, ThemeExtensions};
+use crate::styles::{ComponentStyleSlots, Theme, ThemeAppearance, ThemeExtensions};
 
 /// IntUI light theme.
 pub fn light() -> Theme {
@@ -28,6 +28,7 @@ pub fn light() -> Theme {
         shape: ShapeTokens::light_default(),
         motion: MotionTokens::default(),
         components: ComponentStyles::default(),
+        style_slots: ComponentStyleSlots::default(),
         extensions: ThemeExtensions::new(),
     }
 }
@@ -43,6 +44,7 @@ pub fn dark() -> Theme {
         shape: ShapeTokens::dark_default(),
         motion: MotionTokens::default(),
         components: ComponentStyles::default(),
+        style_slots: ComponentStyleSlots::default(),
         extensions: ThemeExtensions::new(),
     }
 }

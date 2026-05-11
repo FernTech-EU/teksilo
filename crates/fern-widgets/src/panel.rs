@@ -168,6 +168,7 @@ impl Widget for Panel {
         let style: SharedPanelStyle = self
             .style_override
             .clone()
+            .or_else(|| ctx.theme().style_slots.panel.clone())
             .unwrap_or_else(|| Rc::new(crate::styles::RecipePanelStyle::default()));
         let cfg = PanelStyleConfig {
             content,

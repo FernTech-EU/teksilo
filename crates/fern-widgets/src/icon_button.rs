@@ -611,6 +611,7 @@ impl fern_core::widget::Widget for IconButton {
         let style: SharedIconButtonStyle = self
             .style_override
             .clone()
+            .or_else(|| ctx.theme().style_slots.icon_button.clone())
             .unwrap_or_else(|| Rc::new(crate::styles::RecipeIconButtonStyle::default()));
         let is_pressed = interaction.map(|s| matches!(s, InteractionState::Pressed));
         let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));

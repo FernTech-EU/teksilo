@@ -153,6 +153,7 @@ impl Widget for TooltipWidget {
         let style: SharedTooltipStyle = self
             .style_override
             .clone()
+            .or_else(|| ctx.theme().style_slots.tooltip.clone())
             .unwrap_or_else(|| Rc::new(crate::styles::RecipeTooltipStyle::default()));
         let cfg = TooltipStyleConfig { content: text_id };
         let root_id = style.make_body(&cfg, ctx);

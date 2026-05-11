@@ -25,6 +25,7 @@ use fern_tokens::{
     ColorTokens, ComponentStyles, LayoutTokens, MotionTokens, ShapeTokens, TypographyTokens,
 };
 
+use crate::styles::component_style_slots::ComponentStyleSlots;
 use crate::styles::theme_appearance::ThemeAppearance;
 use crate::styles::theme_extension::ThemeExtensions;
 
@@ -37,6 +38,13 @@ pub struct Theme {
     pub shape: ShapeTokens,
     pub motion: MotionTokens,
     pub components: ComponentStyles,
+    /// Typed `Rc<dyn FooStyle>` slot bag for theme-wide style
+    /// installations. `None` per slot means "use the widget's local
+    /// `Recipe*Style` default"; apps install per-theme overrides via
+    /// `theme.style_slots.button = Some(Rc::new(MyButton))`. Per-call
+    /// `.style(...)` on a widget always wins over the slot.
+    #[serde(skip, default)]
+    pub style_slots: ComponentStyleSlots,
     #[serde(skip, default)]
     pub extensions: ThemeExtensions,
 }
@@ -63,6 +71,7 @@ impl Theme {
             shape,
             motion,
             components,
+            style_slots: ComponentStyleSlots::default(),
             extensions: ThemeExtensions::new(),
         }
     }

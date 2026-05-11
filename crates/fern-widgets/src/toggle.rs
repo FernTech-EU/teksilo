@@ -105,12 +105,11 @@ impl std::fmt::Debug for Toggle {
 impl Widget for Toggle {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // Resolve the active style: per-call override > theme slot >
-        // built-in `RecipeToggleStyle` default. Theme-slot lookup
-        // ships in step 8; for now per-call override falls through
-        // to the recipe default.
+        // built-in `RecipeToggleStyle` default.
         let style: SharedToggleStyle = self
             .style
             .clone()
+            .or_else(|| ctx.theme().style_slots.toggle.clone())
             .unwrap_or_else(|| Rc::new(crate::styles::RecipeToggleStyle));
 
         // Build the visual body via the active style. The body is a

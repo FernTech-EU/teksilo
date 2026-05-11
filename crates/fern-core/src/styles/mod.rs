@@ -8,6 +8,7 @@ pub mod button_style;
 pub mod card_style;
 pub mod checkbox_style;
 pub mod combo_box_style;
+pub mod component_style_slots;
 pub mod icon_button_style;
 pub mod menu_item_style;
 pub mod panel_style;
@@ -33,6 +34,7 @@ pub use checkbox_style::{
     CheckboxState, CheckboxStyle, CheckboxStyleConfig, CheckboxVariant, SharedCheckboxStyle,
 };
 pub use combo_box_style::{ComboBoxStyle, ComboBoxStyleConfig, SharedComboBoxStyle};
+pub use component_style_slots::ComponentStyleSlots;
 pub use icon_button_style::{
     IconButtonSize, IconButtonStyle, IconButtonStyleConfig, SharedIconButtonStyle,
 };

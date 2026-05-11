@@ -336,6 +336,7 @@ impl Widget for Checkbox {
         let style: SharedCheckboxStyle = self
             .style_override
             .clone()
+            .or_else(|| ctx.theme().style_slots.checkbox.clone())
             .unwrap_or_else(|| Rc::new(crate::styles::RecipeCheckboxStyle::default()));
         let cfg = CheckboxStyleConfig {
             state: style_state,

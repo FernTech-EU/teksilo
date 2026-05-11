@@ -209,6 +209,7 @@ impl Widget for RadioButton {
         let style: SharedRadioStyle = self
             .style_override
             .clone()
+            .or_else(|| ctx.theme().style_slots.radio.clone())
             .unwrap_or_else(|| Rc::new(crate::styles::RecipeRadioStyle::default()));
         let cfg = RadioStyleConfig {
             is_selected,

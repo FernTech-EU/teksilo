@@ -194,6 +194,7 @@ impl Widget for Card {
         let style: SharedCardStyle = self
             .style_override
             .clone()
+            .or_else(|| ctx.theme().style_slots.card.clone())
             .unwrap_or_else(|| Rc::new(crate::styles::RecipeCardStyle::default()));
         let cfg = CardStyleConfig {
             content,
