@@ -17,7 +17,7 @@ use crate::overlay_trigger::OverlayTrigger;
 
 const SURFACE_PADDING: f32 = 16.0;
 
-struct PopoverSurface {
+pub(crate) struct PopoverSurface {
     content_id: Option<WidgetId>,
     pending_content: Option<PendingChild>,
     placement: OverlayPlacement,
@@ -28,7 +28,7 @@ struct PopoverSurface {
 }
 
 impl PopoverSurface {
-    fn new(
+    pub(crate) fn new(
         content: PendingChild,
         placement: OverlayPlacement,
         show_caret: bool,
@@ -247,6 +247,15 @@ pub struct Popover {
     pending_trigger: Option<PendingChild>,
     show_caret: bool,
     caret_size: f32,
+    /// Visual variant of the popover surface. Default `Default`.
+    /// Distinct from the trigger-button's `ButtonVariant` (which lives
+    /// in `self.variant` for legacy reasons; we'd rename it to
+    /// `trigger_variant` if breakage budget allowed).
+    surface_variant: fern_core::styles::PopoverVariant,
+    /// Per-call override for the popover surface chrome. Replaces the
+    /// theme-wide `style_slots.popover` and the IntUI default
+    /// `RecipePopoverStyle` for just this Popover instance.
+    style_override: Option<fern_core::styles::SharedPopoverStyle>,
     /// When set, the popover requests focus on the given widget
     /// immediately after showing the overlay, so the user can type
     /// without clicking again. Populated by callers that embed a
@@ -268,9 +277,29 @@ impl Popover {
             pending_trigger: None,
             show_caret: true,
             caret_size: 10.0,
+            surface_variant: fern_core::styles::PopoverVariant::default(),
+            style_override: None,
             initial_focus_slot: None,
             root_child_id: None,
         }
+    }
+
+    /// Pick the popover surface's design-language variant. Default
+    /// `Default`. The active `PopoverStyle` decides what each variant
+    /// means (the IntUI default ships one chrome shape across all
+    /// variants and lets the inner content distinguish them; custom
+    /// styles can branch on the variant for distinct surfaces).
+    pub fn surface_variant(mut self, variant: fern_core::styles::PopoverVariant) -> Self {
+        self.surface_variant = variant;
+        self
+    }
+
+    /// Per-call style override for the popover surface chrome.
+    /// Replaces the theme-wide default `PopoverStyle` for just this
+    /// Popover instance.
+    pub fn style(mut self, style: impl fern_core::styles::PopoverStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
     }
 
     /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in `LocalizedString::literal`.
@@ -367,15 +396,34 @@ impl Widget for Popover {
         } else {
             Some(ctx.theme().motion.duration_fast)
         };
-        let content_id = ctx.add(PopoverSurface::new(
-            self.pending_content
-                .take()
-                .expect("Popover requires .content(...) — no content was set"),
-            placement.clone(),
+        // Materialize the inner content first so the style sees a
+        // ready WidgetId. The content was either inline-deferred or
+        // pre-registered by id; either way we land on a single id.
+        let inner_content_id = match self
+            .pending_content
+            .take()
+            .expect("Popover requires .content(...) — no content was set")
+        {
+            PendingChild::Id(id) => id,
+            PendingChild::Deferred(w) => ctx.add_boxed(w),
+        };
+
+        // Resolve the active surface style: per-call > theme slot >
+        // built-in `RecipePopoverStyle` default.
+        let surface_style: fern_core::styles::SharedPopoverStyle = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.popover.clone())
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle::default()));
+        let surface_cfg = fern_core::styles::PopoverStyleConfig {
+            content: inner_content_id,
+            variant: self.surface_variant,
+            name: label.clone(),
+            placement: placement.clone(),
             show_caret,
             caret_size,
-            label.clone(),
-        ));
+        };
+        let content_id = surface_style.make_body(&surface_cfg, ctx);
         ctx.set_dormant(content_id);
 
         // Popover-is-open signal drives the trigger's `set_expanded`
