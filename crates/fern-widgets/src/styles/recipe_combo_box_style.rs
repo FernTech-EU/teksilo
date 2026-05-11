@@ -35,6 +35,14 @@ use fern_tokens::{BorderRole, CornerRadius, SurfaceRole};
 
 use crate::primitives::{FixedSize, HStack, IconWidget, Padding, RectWidget, Spacer, ZStack};
 
+// IntUI design tokens for ComboBox. Moved here in Step 7 of the
+// styling refactor — the recipe owns its own dimensions instead of
+// reading from `theme.components.combo_box`.
+pub const COMBO_BOX_HEIGHT: f32 = 28.0;
+pub const COMBO_BOX_PADDING_HORIZONTAL: f32 = 9.0;
+pub const COMBO_BOX_ARROW_COLUMN_WIDTH: f32 = 23.0;
+pub const COMBO_BOX_CORNER_RADIUS: f32 = 4.0;
+
 /// Default `ComboBoxStyle` shipped with FernUI.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RecipeComboBoxStyle;
@@ -42,12 +50,11 @@ pub struct RecipeComboBoxStyle;
 impl ComboBoxStyle for RecipeComboBoxStyle {
     fn make_body(&self, cfg: &ComboBoxStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         let theme = ctx.theme();
-        let combo_style = theme.components.combo_box;
         let border_width = theme.shape.border_width;
         let focus_ring_width = theme.shape.focus_ring_width;
-        let divider_height = combo_style.height * 0.6;
-        let padding_h = combo_style.padding_horizontal;
-        let corner_radius = combo_style.corner_radius;
+        let divider_height = COMBO_BOX_HEIGHT * 0.6;
+        let padding_h = COMBO_BOX_PADDING_HORIZONTAL;
+        let corner_radius = COMBO_BOX_CORNER_RADIUS;
 
         // Plain variant — no chrome at all. Hand the label back
         // wrapped only in the min-height enforcement; callers using
@@ -57,7 +64,7 @@ impl ComboBoxStyle for RecipeComboBoxStyle {
             let padded_id =
                 ctx.add(Padding::symmetric(padding_h * 0.5, padding_h).child_id(row_id));
             return ctx
-                .add(crate::primitives::MinSize::new(0.0, combo_style.height).child_id(padded_id));
+                .add(crate::primitives::MinSize::new(0.0, COMBO_BOX_HEIGHT).child_id(padded_id));
         }
 
         // Derived role signals. Roles encode "what this colour means";
@@ -129,7 +136,7 @@ impl ComboBoxStyle for RecipeComboBoxStyle {
         let bg_id = ctx.add(bg);
 
         let visual_id = ctx.add(ZStack::new().add_child(bg_id).add_child(padding_id));
-        ctx.add(crate::primitives::MinSize::new(0.0, combo_style.height).child_id(visual_id))
+        ctx.add(crate::primitives::MinSize::new(0.0, COMBO_BOX_HEIGHT).child_id(visual_id))
     }
 }
 

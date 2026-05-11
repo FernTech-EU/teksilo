@@ -53,7 +53,6 @@ pub(super) fn build_static_item_list<T: Clone + PartialEq + 'static>(
     item_label: &Rc<dyn Fn(&T) -> String>,
     render_item: &Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
     max_visible_items: usize,
-    menu_style: &fern_tokens::MenuStyle,
 ) -> WidgetId {
     let total = source.len();
     if total <= max_visible_items {
@@ -83,7 +82,6 @@ pub(super) fn build_static_item_list<T: Clone + PartialEq + 'static>(
         item_label,
         render_item,
         max_visible_items,
-        menu_style,
         None,
     )
 }
@@ -102,10 +100,10 @@ fn build_virtualized_list<T: Clone + PartialEq + 'static>(
     item_label: &Rc<dyn Fn(&T) -> String>,
     render_item: &Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
     max_visible_items: usize,
-    menu_style: &fern_tokens::MenuStyle,
     filtered_indices: Option<Vec<usize>>,
 ) -> WidgetId {
-    let item_height = menu_style.item_height;
+    use crate::styles::recipe_menu_item_style as menu;
+    let item_height = menu::MENU_ITEM_HEIGHT;
     let viewport_height = max_visible_items as f32 * item_height;
 
     // Either address the raw source directly (unfiltered, saves an
@@ -370,7 +368,6 @@ impl<T: Clone + PartialEq + 'static> Widget for FilteredItemList<T> {
             keep
         };
         let visible_count = visible_indices.len();
-        let menu_style = theme.components.menu;
 
         // Large filtered result — hand off to the shared virtualized
         // path so only the visible rows are materialized even when the
@@ -383,7 +380,6 @@ impl<T: Clone + PartialEq + 'static> Widget for FilteredItemList<T> {
                 &self.item_label,
                 &self.render_item,
                 self.max_visible_items,
-                &menu_style,
                 Some(visible_indices),
             )
         } else {
@@ -451,8 +447,8 @@ impl<T: Clone + PartialEq + 'static> std::fmt::Debug for DropdownPanel<T> {
 
 impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme_signal = ctx.theme_signal();
-        let menu_style = theme_signal.get().components.menu;
+        use crate::styles::recipe_menu_item_style as menu;
+        let _theme_signal = ctx.theme_signal();
 
         // In non-searchable mode the panel itself binds the model-version
         // signal so the item list rebuilds on mutation. In searchable mode
@@ -501,7 +497,6 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
                         &self.item_label,
                         &self.render_item,
                         self.max_visible_items,
-                        &menu_style,
                     )
                 }
             }
@@ -514,7 +509,6 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
                     &self.item_label,
                     &self.render_item,
                     self.max_visible_items,
-                    &menu_style,
                 )
             }
         };
@@ -574,8 +568,8 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
         let bg = RectWidget::new()
             .background(SurfaceRole::Raised)
             .border_color(BorderRole::Default)
-            .bind_border_width(menu_style.popup_border_width)
-            .corner_radius(CornerRadius::uniform(menu_style.popup_corner_radius));
+            .bind_border_width(menu::MENU_POPUP_BORDER_WIDTH)
+            .corner_radius(CornerRadius::uniform(menu::MENU_POPUP_CORNER_RADIUS));
         let bg_id = ctx.add(bg);
 
         let zstack = ZStack::new().add_child(bg_id).add_child(content_id);
@@ -739,14 +733,15 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
         // along its top edge to the combo's input box. Suppress the
         // top-side shadow so the panel reads as a vertical extension
         // of the trigger.
-        let radius = CornerRadius::uniform(ctx.theme.components.menu.popup_corner_radius);
+        use crate::styles::recipe_menu_item_style as menu;
+        let radius = CornerRadius::uniform(menu::MENU_POPUP_CORNER_RADIUS);
         crate::shadow::paint_layered_shadow(
             canvas,
             bounds,
             radius,
             &ctx.theme.shape.shadow_sm,
             &ctx.theme.shape.shadow_inner_sm,
-            ctx.theme.components.menu.shadow_density,
+            menu::MENU_SHADOW_DENSITY,
             Some(crate::shadow::AttachedSide::Top),
         );
     }

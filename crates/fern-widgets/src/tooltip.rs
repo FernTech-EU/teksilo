@@ -71,7 +71,7 @@ pub(crate) fn paint_tooltip_shadows(
         radius,
         &ctx.theme.shape.shadow_xs,
         &ctx.theme.shape.shadow_inner_xs,
-        ctx.theme.components.tooltip.shadow_density,
+        crate::styles::recipe_tooltip_style::TOOLTIP_SHADOW_DENSITY,
         None,
     );
 }
@@ -91,7 +91,7 @@ pub(crate) fn paint_composite_tooltip_shadows(
         radius,
         &ctx.theme.shape.shadow_md,
         &ctx.theme.shape.shadow_inner_md,
-        ctx.theme.components.composite_tooltip.shadow_density,
+        crate::styles::recipe_tooltip_style::COMPOSITE_TOOLTIP_SHADOW_DENSITY,
         None,
     );
 }

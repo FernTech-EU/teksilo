@@ -1313,7 +1313,7 @@ fn vertical_shared_sizing_uses_intrinsic_pill_height() {
     let delegate =
         TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")));
     let theme = fern_core::presets::intui::light();
-    let intrinsic = theme.components.tab.editor_tab_height;
+    let intrinsic = crate::styles::recipe_tab_style::TAB_EDITOR_HEIGHT;
     let mut tree = WidgetTree::new().with_theme(theme);
     let bar_id = tree.add(
         TabBar::vertical(model, delegate, selected, |_, h: &TabHandle| h.id)

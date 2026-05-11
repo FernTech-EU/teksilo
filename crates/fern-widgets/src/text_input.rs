@@ -416,8 +416,8 @@ impl Widget for TextInput {
         // placeholder, clear-icon tint, and border/width are driven by
         // roles and state signals, so theme switches repaint via the
         // paint-time role resolver without riding through a zip here.
-        let theme = ctx.theme();
-        let field_style = theme.components.text_field;
+        let _theme = ctx.theme();
+        use crate::styles::recipe_text_input_style as field_dims;
         let interaction = self.interaction.clone();
         let validation = self.validation.clone();
 
@@ -426,8 +426,10 @@ impl Widget for TextInput {
         // The inner field owns the bound text signal, the document,
         // engine, caret, clipboard, context menu — everything
         // interactive. The composite just styles it.
-        let inner_height = (field_style.height - 2.0 * field_style.border_width).max(0.0);
-        let text_area_height = (inner_height - 2.0 * field_style.padding_vertical).max(0.0);
+        let inner_height =
+            (field_dims::TEXT_FIELD_HEIGHT - 2.0 * field_dims::TEXT_FIELD_BORDER_WIDTH).max(0.0);
+        let text_area_height =
+            (inner_height - 2.0 * field_dims::TEXT_FIELD_PADDING_VERTICAL).max(0.0);
 
         let mut field = TextInputField::new(self.text.clone())
             .enabled(self.enabled)
@@ -482,9 +484,9 @@ impl Widget for TextInput {
         // (IconButton etc.) sit flush against top/bottom of the
         // inner border area and are vertically centered by the HStack.
         let padded_field = Padding::new(
-            field_style.padding_vertical,
+            field_dims::TEXT_FIELD_PADDING_VERTICAL,
             0.0,
-            field_style.padding_vertical,
+            field_dims::TEXT_FIELD_PADDING_VERTICAL,
             0.0,
         )
         .child(field);
@@ -617,7 +619,8 @@ impl Widget for TextInput {
         let chrome_id = style.make_body(&cfg, ctx);
 
         let min_w = self.min_width.unwrap_or(65.0);
-        let frame_id = ctx.add(MinSize::new(min_w, field_style.height).child_id(chrome_id));
+        let frame_id =
+            ctx.add(MinSize::new(min_w, field_dims::TEXT_FIELD_HEIGHT).child_id(chrome_id));
 
         // ── Inline validation strip ────────────────────────────────
         // Maps `Signal<ValidationState>` to the `Signal<ValidationFeedback>`
@@ -640,7 +643,7 @@ impl Widget for TextInput {
         // Wrap frame + strip in a VStack with the configured gap.
         let root_id = ctx.add(
             VStack::new()
-                .spacing(field_style.validation_strip_gap)
+                .spacing(field_dims::TEXT_FIELD_VALIDATION_STRIP_GAP)
                 .add_child(frame_id)
                 .add_child(strip_id),
         );

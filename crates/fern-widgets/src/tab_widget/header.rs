@@ -223,7 +223,7 @@ impl TabHeader {
     }
 
     fn estimate_natural_width(&self, ctx: &LayoutContext) -> f32 {
-        let pad_h = ctx.theme.components.tab.padding_horizontal;
+        let pad_h = crate::styles::recipe_tab_style::TAB_PADDING_HORIZONTAL;
         // Resolve the label once for measurement. Cheap: a literal
         // resolves to a clone; a translated key looks up Fluent.
         let label = self
@@ -239,27 +239,28 @@ impl TabHeader {
         } else {
             label.len() as f32 * FALLBACK_CHAR_WIDTH
         };
+        use crate::styles::recipe_button_style as btn;
         let icon_size = self
             .icon
             .as_ref()
-            .map(|_| ctx.theme.components.button.icon_size + INNER_GAP)
+            .map(|_| btn::BUTTON_ICON_SIZE + INNER_GAP)
             .unwrap_or(0.0);
         let leading_size = self
             .leading_slot
             .as_ref()
-            .map(|_| ctx.theme.components.button.icon_size + INNER_GAP)
+            .map(|_| btn::BUTTON_ICON_SIZE + INNER_GAP)
             .unwrap_or(0.0);
         let trailing_size = self
             .trailing_slot
             .as_ref()
-            .map(|_| ctx.theme.components.button.icon_size + INNER_GAP)
+            .map(|_| btn::BUTTON_ICON_SIZE + INNER_GAP)
             .unwrap_or(0.0);
         // Bounds == visual rect now (no focus-ring envelope), so
         // natural width is purely content + horizontal padding.
         (text_width + icon_size + leading_size + trailing_size + pad_h * 2.0).max(NATURAL_MIN_WIDTH)
     }
 
-    pub(crate) fn intrinsic_height(ctx: &LayoutContext) -> f32 {
+    pub(crate) fn intrinsic_height(_ctx: &LayoutContext) -> f32 {
         // `editor_tab_height` is the **outer** measurement (the
         // total bounds height of one tab header). The focus-ring
         // envelope is reserved *inside* this — not added on top —
@@ -267,7 +268,7 @@ impl TabHeader {
         // regardless of focus-ring tokens. The visible pill rect
         // inside the bounds is `editor_tab_height - envelope*2`,
         // which `place_children` and `paint` shrink to.
-        ctx.theme.components.tab.editor_tab_height
+        crate::styles::recipe_tab_style::TAB_EDITOR_HEIGHT
     }
 }
 
@@ -410,7 +411,7 @@ impl Widget for TabHeader {
         //   padding would push the icon off-center). Wrap in
         //   `Center` so the icon sits exactly in the middle of the
         //   bounds regardless of the pill width.
-        let pad_h = ctx.theme().components.tab.padding_horizontal;
+        let pad_h = crate::styles::recipe_tab_style::TAB_PADDING_HORIZONTAL;
         let inner_id = if self.pinned {
             let centered = crate::primitives::Center::new().child(row);
             let padded = crate::Padding::symmetric(HEADER_PADDING_V, 0.0).child(centered);

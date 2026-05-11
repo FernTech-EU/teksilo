@@ -509,8 +509,8 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // borrow of `ctx`. A `ctx.theme()` borrow would hold `ctx`
         // immutable across those calls and fail the borrow checker.
         let theme = ctx.theme_signal().get();
-        let field_style = theme.components.text_field;
-        let field_border_width = field_style.border_width;
+        use crate::styles::recipe_text_input_style as field_dims;
+        let field_border_width = field_dims::TEXT_FIELD_BORDER_WIDTH;
         let focus_ring_width = theme.shape.focus_ring_width;
 
         // Capture configuration into owned clones for the effect
@@ -751,8 +751,8 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // overlay is reproduced here around both the field and the
         // buttons in one shared frame, instead of framing the text
         // by itself.
-        let inner_height = (field_style.height - 2.0 * field_style.border_width).max(0.0);
-        let text_area_height = (inner_height - 2.0 * field_style.padding_vertical).max(0.0);
+        let inner_height = (field_dims::TEXT_FIELD_HEIGHT - 2.0 * field_dims::TEXT_FIELD_BORDER_WIDTH).max(0.0);
+        let text_area_height = (inner_height - 2.0 * field_dims::TEXT_FIELD_PADDING_VERTICAL).max(0.0);
 
         let mut field = TextInputField::new(self.text_signal.clone())
             .enabled(enabled)
@@ -872,9 +872,9 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // Wrap field in vertical padding so it aligns inside the frame.
         let padded_field_id = ctx.add(
             Padding::new(
-                field_style.padding_vertical,
+                field_dims::TEXT_FIELD_PADDING_VERTICAL,
                 0.0,
-                field_style.padding_vertical,
+                field_dims::TEXT_FIELD_PADDING_VERTICAL,
                 0.0,
             )
             .child_id(field_id),
@@ -896,8 +896,8 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                 self.can_step_up.clone(),
                 self.can_step_down.clone(),
                 enabled && !read_only,
-                field_style.height,
-                field_style.corner_radius,
+                field_dims::TEXT_FIELD_HEIGHT,
+                field_dims::TEXT_FIELD_CORNER_RADIUS,
             ))
         } else {
             None
@@ -930,9 +930,9 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         let padded_row_id = ctx.add(
             Padding::new(
                 0.0,
-                field_style.padding_horizontal,
+                field_dims::TEXT_FIELD_PADDING_HORIZONTAL,
                 0.0,
-                field_style.padding_horizontal,
+                field_dims::TEXT_FIELD_PADDING_HORIZONTAL,
             )
             .child_id(row_id),
         );
@@ -969,7 +969,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             .background(SurfaceRole::Content)
             .border_color(border_role)
             .border_width(border_width_signal)
-            .corner_radius(CornerRadius::uniform(field_style.corner_radius));
+            .corner_radius(CornerRadius::uniform(field_dims::TEXT_FIELD_CORNER_RADIUS));
         let bg_id = ctx.add(bg);
 
         let zstack_id = ctx.add(ZStack::new().add_child(bg_id).add_child(padded_row_id));
@@ -1005,7 +1005,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                 };
                 // 2 dp slack so the caret and a trailing zero never
                 // paint flush against the right edge.
-                let chrome = field_style.padding_horizontal * 2.0 + button_chrome + 2.0;
+                let chrome = field_dims::TEXT_FIELD_PADDING_HORIZONTAL * 2.0 + button_chrome + 2.0;
                 Some((digits_w + suffix_w + chrome).max(min_width))
             }
         };
@@ -1021,7 +1021,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         //   half of the focus-state border stroke against the
         //   widget's own shape quad (visible as a ring clipped on
         //   all four sides).
-        let sized_id = ctx.add(MinSize::new(min_width, field_style.height).child_id(zstack_id));
+        let sized_id = ctx.add(MinSize::new(min_width, field_dims::TEXT_FIELD_HEIGHT).child_id(zstack_id));
         // Stash the resolved cap + floor on `self` for
         // `size_that_fits` to read at layout time.
         self.pixel_cap = pixel_cap;

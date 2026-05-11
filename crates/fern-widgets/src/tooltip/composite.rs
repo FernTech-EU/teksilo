@@ -162,7 +162,7 @@ impl CompositeTooltipWidget {
 impl Widget for CompositeTooltipWidget {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme_signal().get();
-        let style = theme.components.composite_tooltip;
+        use crate::styles::recipe_tooltip_style as tt;
         let self_id = ctx.self_id();
 
         // Body — taken out of self once and laid into the arena. If
@@ -184,7 +184,11 @@ impl Widget for CompositeTooltipWidget {
         );
 
         let padded = ctx.add(
-            Padding::symmetric(style.padding_vertical, style.padding_horizontal).child_id(scrolled),
+            Padding::symmetric(
+                tt::COMPOSITE_TOOLTIP_PADDING_VERTICAL,
+                tt::COMPOSITE_TOOLTIP_PADDING_HORIZONTAL,
+            )
+            .child_id(scrolled),
         );
 
         let indicator = ctx.add(DwellIndicator::new(
@@ -234,12 +238,13 @@ impl Widget for CompositeTooltipWidget {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> fern_core::widget::LayoutResponse {
+        use crate::styles::recipe_tooltip_style as tt;
         let max_w = self
             .max_width_override
-            .unwrap_or(ctx.theme.components.composite_tooltip.max_width);
+            .unwrap_or(tt::COMPOSITE_TOOLTIP_MAX_WIDTH);
         let max_h = self
             .max_height_override
-            .unwrap_or(ctx.theme.components.composite_tooltip.max_height);
+            .unwrap_or(tt::COMPOSITE_TOOLTIP_MAX_HEIGHT);
         let clamped = SizeProposal {
             width: Some(proposal.width.map(|w| w.min(max_w)).unwrap_or(max_w)),
             height: Some(proposal.height.map(|h| h.min(max_h)).unwrap_or(max_h)),
@@ -251,8 +256,10 @@ impl Widget for CompositeTooltipWidget {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let style = ctx.theme.components.composite_tooltip;
-        let radius = CornerRadius::uniform(style.corner_radius);
+        let radius = CornerRadius::uniform(
+            crate::styles::recipe_tooltip_style::COMPOSITE_TOOLTIP_CORNER_RADIUS,
+        );
+        let _ = ctx;
         super::paint_composite_tooltip_shadows(canvas, bounds, radius, ctx);
         canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.tooltip_bg);
         // paint() is the visibility hook — only invoked while the

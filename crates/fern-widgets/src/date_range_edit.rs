@@ -237,7 +237,7 @@ impl DateRangeEdit {
 impl Widget for DateRangeEdit {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme_signal().get();
-        let field_style = theme.components.text_field;
+        use crate::styles::recipe_text_input_style as field_dims;
         let date_style = theme.components.date_edit;
         let focus_ring_width = theme.shape.focus_ring_width;
         let enabled = self.enabled;
@@ -314,7 +314,6 @@ impl Widget for DateRangeEdit {
             HalfKind::Start,
             pattern_rc.clone(),
             &mask_string,
-            field_style,
             min,
             max,
         );
@@ -323,18 +322,17 @@ impl Widget for DateRangeEdit {
             HalfKind::End,
             pattern_rc.clone(),
             &mask_string,
-            field_style,
             min,
             max,
         );
 
         // ── Painted arrow separator ────────────────────────────
-        let separator_icon = arrow_right_icon(field_style.height * 0.45)
+        let separator_icon = arrow_right_icon(field_dims::TEXT_FIELD_HEIGHT * 0.45)
             .bind_color(fern_tokens::TextRole::Secondary);
         let separator_id = ctx.add(
             FixedSize::new()
-                .bind_width(field_style.height * 0.65)
-                .bind_height(field_style.height)
+                .bind_width(field_dims::TEXT_FIELD_HEIGHT * 0.65)
+                .bind_height(field_dims::TEXT_FIELD_HEIGHT)
                 .child(Center::new().child(separator_icon)),
         );
 
@@ -415,9 +413,9 @@ impl Widget for DateRangeEdit {
         let row_id = ctx.add(
             Padding::new(
                 0.0,
-                field_style.padding_horizontal,
+                field_dims::TEXT_FIELD_PADDING_HORIZONTAL,
                 0.0,
-                field_style.padding_horizontal,
+                field_dims::TEXT_FIELD_PADDING_HORIZONTAL,
             )
             .child_id(inline_row_id),
         );
@@ -448,17 +446,17 @@ impl Widget for DateRangeEdit {
                     if *focused || matches!(fb, ValidationFeedback::Invalid { .. }) {
                         focus_ring_width
                     } else {
-                        field_style.border_width
+                        field_dims::TEXT_FIELD_BORDER_WIDTH
                     }
                 });
         let bg = RectWidget::new()
             .background(SurfaceRole::Content)
             .border_color(border_role)
             .border_width(border_width_signal)
-            .corner_radius(CornerRadius::uniform(field_style.corner_radius));
+            .corner_radius(CornerRadius::uniform(field_dims::TEXT_FIELD_CORNER_RADIUS));
         let bg_id = ctx.add(bg);
         let framed_id = ctx.add(ZStack::new().add_child(bg_id).add_child(row_id));
-        let sized_id = ctx.add(MinSize::new(0.0, field_style.height).child_id(framed_id));
+        let sized_id = ctx.add(MinSize::new(0.0, field_dims::TEXT_FIELD_HEIGHT).child_id(framed_id));
 
         // ── Inline validation strip below the frame ───────────
         let strip_id = ctx.add(crate::primitives::ValidationStrip::new(
@@ -466,7 +464,7 @@ impl Widget for DateRangeEdit {
         ));
         let root_with_strip = ctx.add(
             VStack::new()
-                .spacing(field_style.validation_strip_gap)
+                .spacing(field_dims::TEXT_FIELD_VALIDATION_STRIP_GAP)
                 .add_child(sized_id)
                 .add_child(strip_id),
         );
@@ -598,10 +596,10 @@ impl DateRangeEdit {
         kind: HalfKind,
         pattern_rc: Rc<ParsedPattern>,
         mask_string: &str,
-        field_style: fern_tokens::TextFieldStyle,
         min: Option<Date>,
         max: Option<Date>,
     ) -> WidgetId {
+        use crate::styles::recipe_text_input_style as field_dims;
         let (text_signal, date_signal, placeholder, other_date) = match kind {
             HalfKind::Start => (
                 self.start_text.clone(),
@@ -668,8 +666,8 @@ impl DateRangeEdit {
             })
         };
 
-        let inner_height = (field_style.height - 2.0 * field_style.border_width).max(0.0);
-        let text_area_height = (inner_height - 2.0 * field_style.padding_vertical).max(0.0);
+        let inner_height = (field_dims::TEXT_FIELD_HEIGHT - 2.0 * field_dims::TEXT_FIELD_BORDER_WIDTH).max(0.0);
+        let text_area_height = (inner_height - 2.0 * field_dims::TEXT_FIELD_PADDING_VERTICAL).max(0.0);
 
         let pattern_for_filter = pattern_rc.clone();
         let mut field = TextInputField::new(text_signal.clone())
@@ -748,9 +746,9 @@ impl DateRangeEdit {
         // separator icon and trigger button.
         let padded_field_id = ctx.add(
             Padding::new(
-                field_style.padding_vertical,
+                field_dims::TEXT_FIELD_PADDING_VERTICAL,
                 4.0,
-                field_style.padding_vertical,
+                field_dims::TEXT_FIELD_PADDING_VERTICAL,
                 4.0,
             )
             .child_id(field_id),

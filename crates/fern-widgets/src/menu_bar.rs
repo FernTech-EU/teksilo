@@ -132,8 +132,8 @@ struct MenuBarTrigger {
 impl Widget for MenuBarTrigger {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme();
-        let menu_style = theme.components.menu;
         let radius_control = theme.shape.radius_control;
+        use crate::styles::recipe_menu_item_style as menu;
         let index = self.index;
         let menu_ctx = self.menu_ctx.clone();
 
@@ -172,7 +172,7 @@ impl Widget for MenuBarTrigger {
         let label_id = ctx.add(label);
 
         let padding =
-            Padding::symmetric(4.0, menu_style.item_padding_horizontal).child_id(label_id);
+            Padding::symmetric(4.0, menu::MENU_ITEM_PADDING_HORIZONTAL).child_id(label_id);
         let padding_id = ctx.add(padding);
 
         let bg = RectWidget::new()

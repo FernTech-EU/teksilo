@@ -25,6 +25,17 @@ use fern_tokens::{BorderRole, Color, CornerRadius, SurfaceRole};
 
 use crate::primitives::{MinSize, Padding, RectWidget, ZStack};
 
+// IntUI design tokens for Button. Moved here in Step 7 of the
+// styling refactor — the recipe / its consumers own these constants
+// instead of reading from `theme.components.button`. Most button
+// dimensions live inside per-variant `ButtonRecipe`s (padding, min
+// size, etc.); the constants below cover globals (icon size, the
+// icon ↔ label gap) that aren't variant-specific.
+pub const BUTTON_HEIGHT: f32 = 24.0;
+pub const BUTTON_MIN_WIDTH: f32 = 72.0;
+pub const BUTTON_ICON_SIZE: f32 = 16.0;
+pub const BUTTON_ICON_LABEL_GAP: f32 = 4.0;
+
 /// Default `ButtonStyle` shipped with FernUI.
 ///
 /// Holds a `HashMap<ButtonVariant, ButtonRecipe>`. Variants that

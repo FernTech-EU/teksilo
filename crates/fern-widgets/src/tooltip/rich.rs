@@ -184,7 +184,7 @@ impl Widget for RichTooltipWidget {
         // it's re-shown (or immediately for the signal-bound colors).
         let theme_signal = ctx.theme_signal();
         let theme = theme_signal.get();
-        let style = theme.components.tooltip;
+        use crate::styles::recipe_tooltip_style as tt;
         let self_id = ctx.self_id();
 
         // Pre-create dormant RichTooltipWidgets for every :key URL
@@ -345,7 +345,7 @@ impl Widget for RichTooltipWidget {
         // tokens so RichTooltipWidget drops into the same chrome the
         // plain TooltipWidget uses.
         let padded = ctx.add(
-            Padding::symmetric(style.padding_vertical, style.padding_horizontal)
+            Padding::symmetric(tt::TOOLTIP_PADDING_VERTICAL, tt::TOOLTIP_PADDING_HORIZONTAL)
                 .child_id(root_content),
         );
 
@@ -379,7 +379,7 @@ impl Widget for RichTooltipWidget {
     ) -> fern_core::widget::LayoutResponse {
         // Clamp proposal width to the tooltip max_width token so long
         // bodies wrap rather than stretching the surface.
-        let max_w = ctx.theme.components.tooltip.max_width;
+        let max_w = crate::styles::recipe_tooltip_style::TOOLTIP_MAX_WIDTH;
         let clamped = SizeProposal {
             width: Some(proposal.width.map(|w| w.min(max_w)).unwrap_or(max_w)),
             height: proposal.height,
@@ -391,8 +391,8 @@ impl Widget for RichTooltipWidget {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let style = ctx.theme.components.tooltip;
-        let radius = CornerRadius::uniform(style.corner_radius);
+        let radius =
+            CornerRadius::uniform(crate::styles::recipe_tooltip_style::TOOLTIP_CORNER_RADIUS);
         super::paint_tooltip_shadows(canvas, bounds, radius, ctx);
         canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.tooltip_bg);
         // paint() is the visibility hook — only called when the

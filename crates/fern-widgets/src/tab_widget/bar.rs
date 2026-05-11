@@ -854,7 +854,7 @@ impl<T: 'static> Widget for TabBar<T> {
             // inside (see `TabHeader::intrinsic_height`), so the
             // bar's preferred row height is exactly the token.
             (
-                theme.components.tab.editor_tab_height,
+                crate::styles::recipe_tab_style::TAB_EDITOR_HEIGHT,
                 theme.motion.duration_normal,
                 theme.motion.easing_standard,
             )

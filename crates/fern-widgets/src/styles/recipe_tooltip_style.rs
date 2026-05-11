@@ -19,9 +19,27 @@ use fern_core::widget::{
 use fern_core::widget_id::WidgetId;
 use fern_tokens::CornerRadius;
 
-/// Default `TooltipStyle` shipped with FernUI. Reads dimensions from
-/// `theme.components.tooltip` (padding + corner_radius) and chrome
-/// from `theme.colors.tooltip_bg` + the `xs` shadow tier.
+// IntUI design tokens for plain Tooltip + CompositeTooltip. Moved here
+// in Step 7 of the styling refactor — the recipe + tooltip widget own
+// these constants instead of reading from `theme.components.tooltip` /
+// `composite_tooltip`.
+pub const TOOLTIP_PADDING_HORIZONTAL: f32 = 10.0;
+pub const TOOLTIP_PADDING_VERTICAL: f32 = 6.0;
+pub const TOOLTIP_CORNER_RADIUS: f32 = 8.0;
+pub const TOOLTIP_MAX_WIDTH: f32 = 320.0;
+/// 0..=1 multiplier on `shape.shadow_inner_xs.color.a` at paint time.
+pub const TOOLTIP_SHADOW_DENSITY: f32 = 1.0;
+
+pub const COMPOSITE_TOOLTIP_PADDING_HORIZONTAL: f32 = 12.0;
+pub const COMPOSITE_TOOLTIP_PADDING_VERTICAL: f32 = 12.0;
+pub const COMPOSITE_TOOLTIP_CORNER_RADIUS: f32 = 8.0;
+pub const COMPOSITE_TOOLTIP_MAX_WIDTH: f32 = 480.0;
+pub const COMPOSITE_TOOLTIP_MAX_HEIGHT: f32 = 480.0;
+/// 0..=1 multiplier on `shape.shadow_inner_md.color.a` at paint time.
+pub const COMPOSITE_TOOLTIP_SHADOW_DENSITY: f32 = 0.7;
+
+/// Default `TooltipStyle` shipped with FernUI. Chrome from
+/// `theme.colors.tooltip_bg` + the `xs` shadow tier.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RecipeTooltipStyle;
 
@@ -62,9 +80,8 @@ impl Widget for TooltipFrame {
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
-        let style = ctx.theme.components.tooltip;
-        let pad_h = style.padding_horizontal;
-        let pad_v = style.padding_vertical;
+        let pad_h = TOOLTIP_PADDING_HORIZONTAL;
+        let pad_v = TOOLTIP_PADDING_VERTICAL;
         let inset_w = pad_h * 2.0;
         let inset_h = pad_v * 2.0;
         if let Some(child_id) = self.child_id {
@@ -84,11 +101,10 @@ impl Widget for TooltipFrame {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        ctx: &LayoutContext,
+        _ctx: &LayoutContext,
     ) {
-        let style = ctx.theme.components.tooltip;
-        let pad_h = style.padding_horizontal;
-        let pad_v = style.padding_vertical;
+        let pad_h = TOOLTIP_PADDING_HORIZONTAL;
+        let pad_v = TOOLTIP_PADDING_VERTICAL;
         for child in children.iter_mut() {
             child.origin = fern_canvas::Point::new(bounds.x + pad_h, bounds.y + pad_v);
             child.size = Size::new(
@@ -99,8 +115,7 @@ impl Widget for TooltipFrame {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let style = ctx.theme.components.tooltip;
-        let radius = CornerRadius::uniform(style.corner_radius);
+        let radius = CornerRadius::uniform(TOOLTIP_CORNER_RADIUS);
         crate::tooltip::paint_tooltip_shadows(canvas, bounds, radius, ctx);
         canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.tooltip_bg);
     }

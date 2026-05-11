@@ -35,6 +35,22 @@ use fern_tokens::{BorderRole, CornerRadius, SurfaceRole};
 
 use crate::primitives::{MinSize, Padding, RectWidget, ZStack};
 
+// IntUI design tokens for TextInput / TextInputField (also used by
+// SpinBox, DateEdit, DateRangeEdit, DateTimeEdit since they share the
+// same form-field baseline). Moved here in Step 7 of the styling
+// refactor — the recipe and form-field composers own these constants
+// instead of reading from `theme.components.text_field`.
+pub const TEXT_FIELD_HEIGHT: f32 = 28.0;
+pub const TEXT_FIELD_PADDING_HORIZONTAL: f32 = 4.0;
+pub const TEXT_FIELD_PADDING_VERTICAL: f32 = 4.0;
+pub const TEXT_FIELD_BORDER_WIDTH: f32 = 1.0;
+pub const TEXT_FIELD_CORNER_RADIUS: f32 = 4.0;
+pub const TEXT_FIELD_CARET_WIDTH: f32 = 1.0;
+pub const TEXT_FIELD_VALIDATION_STRIP_GAP: f32 = 4.0;
+pub const TEXT_FIELD_ERROR_PULSE_DURATION_MS: u32 = 240;
+pub const TEXT_FIELD_CORRECTED_PULSE_DURATION_MS: u32 = 1500;
+pub const TEXT_FIELD_MASK_PLACEHOLDER_CHAR: char = '_';
+
 /// Default `TextInputStyle` shipped with FernUI.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RecipeTextInputStyle;
@@ -42,12 +58,11 @@ pub struct RecipeTextInputStyle;
 impl TextInputStyle for RecipeTextInputStyle {
     fn make_body(&self, cfg: &TextInputStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         let theme = ctx.theme();
-        let field_style = theme.components.text_field;
-        let border_width = field_style.border_width;
+        let border_width = TEXT_FIELD_BORDER_WIDTH;
         let focus_ring_width = theme.shape.focus_ring_width;
-        let padding_h = field_style.padding_horizontal;
-        let corner_radius = field_style.corner_radius;
-        let height = field_style.height;
+        let padding_h = TEXT_FIELD_PADDING_HORIZONTAL;
+        let corner_radius = TEXT_FIELD_CORNER_RADIUS;
+        let height = TEXT_FIELD_HEIGHT;
 
         // Bare variant: no chrome at all. Just hand the editor back
         // wrapped in a MinSize so consumers still get a predictable

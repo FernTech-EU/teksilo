@@ -29,6 +29,16 @@ use fern_tokens::CornerRadius;
 
 use crate::primitives::{HStack, ZStack};
 
+// IntUI design tokens for Tab. Moved here in Step 7 of the styling
+// refactor — the recipe + parent TabHeader own their own dimensions
+// instead of reading from `theme.components.tab`.
+pub const TAB_EDITOR_HEIGHT: f32 = 50.0;
+pub const TAB_TOOL_WINDOW_HEIGHT: f32 = 28.0;
+pub const TAB_PADDING_HORIZONTAL: f32 = 12.0;
+pub const TAB_UNDERLINE_ACTIVE: f32 = 3.0;
+pub const TAB_UNDERLINE_HOVER: f32 = 2.0;
+pub const TAB_CLOSE_BUTTON_SIZE: f32 = 16.0;
+
 /// Default `TabStyle` shipped with FernUI.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RecipeTabStyle;
@@ -121,7 +131,7 @@ impl Widget for TabBodyPainter {
         //   - Vertical bar → indicator on the LEADING edge (sidebar
         //     / IDE perspective look — the tab "points into" the
         //     content panel on the trailing side).
-        let indicator_thickness = ctx.theme.components.tab.underline_active;
+        let indicator_thickness = TAB_UNDERLINE_ACTIVE;
         if active && !disabled {
             let indicator = match self.orientation {
                 TabBarOrientation::Horizontal => {

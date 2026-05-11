@@ -299,7 +299,7 @@ impl DateTimeEdit {
 impl Widget for DateTimeEdit {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme_signal().get();
-        let field_style = theme.components.text_field;
+        use crate::styles::recipe_text_input_style as field_dims;
         let date_style = theme.components.date_edit;
         let focus_ring_width = theme.shape.focus_ring_width;
         let enabled = self.enabled;
@@ -413,7 +413,6 @@ impl Widget for DateTimeEdit {
             ctx,
             date_pattern_rc.clone(),
             &date_mask,
-            field_style,
             date_min,
             date_max,
         );
@@ -421,7 +420,6 @@ impl Widget for DateTimeEdit {
             ctx,
             time_pattern_rc.clone(),
             &time_mask,
-            field_style,
             time_min,
             time_max,
         );
@@ -432,19 +430,19 @@ impl Widget for DateTimeEdit {
         // string as styled text instead.
         let separator_id = match self.separator.as_deref() {
             None => {
-                let dot = middle_dot_icon(field_style.height * 0.4)
+                let dot = middle_dot_icon(field_dims::TEXT_FIELD_HEIGHT * 0.4)
                     .bind_color(fern_tokens::TextRole::Secondary);
                 ctx.add(
                     FixedSize::new()
-                        .bind_width(field_style.height * 0.55)
-                        .bind_height(field_style.height)
+                        .bind_width(field_dims::TEXT_FIELD_HEIGHT * 0.55)
+                        .bind_height(field_dims::TEXT_FIELD_HEIGHT)
                         .child(Center::new().child(dot)),
                 )
             }
             Some(s) if s.is_empty() => ctx.add(
                 FixedSize::new()
                     .bind_width(0.0_f32)
-                    .bind_height(field_style.height),
+                    .bind_height(field_dims::TEXT_FIELD_HEIGHT),
             ),
             Some(s) => {
                 let text = TextWidget::new_literal(s)
@@ -566,9 +564,9 @@ impl Widget for DateTimeEdit {
         let row_id = ctx.add(
             Padding::new(
                 0.0,
-                field_style.padding_horizontal,
+                field_dims::TEXT_FIELD_PADDING_HORIZONTAL,
                 0.0,
-                field_style.padding_horizontal,
+                field_dims::TEXT_FIELD_PADDING_HORIZONTAL,
             )
             .child_id(inline_row_id),
         );
@@ -599,17 +597,17 @@ impl Widget for DateTimeEdit {
                     if *focused || matches!(fb, ValidationFeedback::Invalid { .. }) {
                         focus_ring_width
                     } else {
-                        field_style.border_width
+                        field_dims::TEXT_FIELD_BORDER_WIDTH
                     }
                 });
         let bg = RectWidget::new()
             .background(SurfaceRole::Content)
             .border_color(border_role)
             .border_width(border_width_signal)
-            .corner_radius(CornerRadius::uniform(field_style.corner_radius));
+            .corner_radius(CornerRadius::uniform(field_dims::TEXT_FIELD_CORNER_RADIUS));
         let bg_id = ctx.add(bg);
         let framed_id = ctx.add(ZStack::new().add_child(bg_id).add_child(row_id));
-        let sized_id = ctx.add(MinSize::new(0.0, field_style.height).child_id(framed_id));
+        let sized_id = ctx.add(MinSize::new(0.0, field_dims::TEXT_FIELD_HEIGHT).child_id(framed_id));
 
         // ── Inline validation strip below the frame ───────────
         let strip_id = ctx.add(crate::primitives::ValidationStrip::new(
@@ -617,7 +615,7 @@ impl Widget for DateTimeEdit {
         ));
         let root_with_strip = ctx.add(
             VStack::new()
-                .spacing(field_style.validation_strip_gap)
+                .spacing(field_dims::TEXT_FIELD_VALIDATION_STRIP_GAP)
                 .add_child(sized_id)
                 .add_child(strip_id),
         );
@@ -748,10 +746,10 @@ impl DateTimeEdit {
         ctx: &mut BuildContext,
         pattern_rc: Rc<ParsedPattern>,
         mask_string: &str,
-        field_style: fern_tokens::TextFieldStyle,
         min: Option<Date>,
         max: Option<Date>,
     ) -> WidgetId {
+        use crate::styles::recipe_text_input_style as field_dims;
         let validator =
             build_date_validator(pattern_rc.clone(), min, max, self.validation_behavior);
 
@@ -800,7 +798,6 @@ impl DateTimeEdit {
         self.build_field(
             ctx,
             text_signal.clone(),
-            field_style,
             mask_string,
             validator,
             self.placeholder.clone(),
@@ -823,10 +820,10 @@ impl DateTimeEdit {
         ctx: &mut BuildContext,
         pattern_rc: Rc<ParsedPattern>,
         mask_string: &str,
-        field_style: fern_tokens::TextFieldStyle,
         min: Option<Time>,
         max: Option<Time>,
     ) -> WidgetId {
+        use crate::styles::recipe_text_input_style as field_dims;
         let validator =
             build_time_validator(pattern_rc.clone(), min, max, self.validation_behavior);
 
@@ -875,7 +872,6 @@ impl DateTimeEdit {
         self.build_field(
             ctx,
             text_signal.clone(),
-            field_style,
             mask_string,
             validator,
             String::new(),
@@ -902,7 +898,6 @@ impl DateTimeEdit {
         &self,
         ctx: &mut BuildContext,
         text_signal: Signal<String>,
-        field_style: fern_tokens::TextFieldStyle,
         mask_string: &str,
         validator: crate::primitives::text_input_field::ValidatorFn,
         placeholder: String,
@@ -911,8 +906,9 @@ impl DateTimeEdit {
         a11y_role: Role,
         kind: DateTimeHalfKind,
     ) -> WidgetId {
-        let inner_height = (field_style.height - 2.0 * field_style.border_width).max(0.0);
-        let text_area_height = (inner_height - 2.0 * field_style.padding_vertical).max(0.0);
+        use crate::styles::recipe_text_input_style as field_dims;
+        let inner_height = (field_dims::TEXT_FIELD_HEIGHT - 2.0 * field_dims::TEXT_FIELD_BORDER_WIDTH).max(0.0);
+        let text_area_height = (inner_height - 2.0 * field_dims::TEXT_FIELD_PADDING_VERTICAL).max(0.0);
 
         let pattern_for_filter = match &kind {
             DateTimeHalfKind::Date { pattern, .. } => pattern.clone(),
@@ -980,9 +976,9 @@ impl DateTimeEdit {
 
         let padded_field_id = ctx.add(
             Padding::new(
-                field_style.padding_vertical,
+                field_dims::TEXT_FIELD_PADDING_VERTICAL,
                 4.0,
-                field_style.padding_vertical,
+                field_dims::TEXT_FIELD_PADDING_VERTICAL,
                 4.0,
             )
             .child_id(field_id),

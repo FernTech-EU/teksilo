@@ -21,17 +21,32 @@ use fern_tokens::{CornerRadius, SurfaceRole};
 
 use crate::primitives::{FixedSize, HStack, Padding, RectWidget, Spacer, ZStack};
 
-/// Default `MenuItemStyle` shipped with FernUI. Reads dimensions from
-/// `theme.components.menu` (`item_height`, `item_padding_horizontal`,
-/// `icon_label_gap`, `item_corner_radius`) and chrome roles from the
-/// active theme.
+// IntUI design tokens for MenuItem / MenuList / menu popups.
+// Moved here in Step 7 of the styling refactor — the recipe owns
+// its own dimensions instead of reading from `theme.components.menu`.
+// The MenuList / MenuBar / ComboBox panel widgets import these
+// constants when they need menu-related dimensions (separator
+// height, popup corner radius, shadow density).
+pub const MENU_ITEM_HEIGHT: f32 = 24.0;
+pub const MENU_ITEM_PADDING_HORIZONTAL: f32 = 12.0;
+pub const MENU_ICON_COLUMN_WIDTH: f32 = 16.0;
+pub const MENU_ICON_LABEL_GAP: f32 = 6.0;
+pub const MENU_SHORTCUT_LEFT_GAP: f32 = 24.0;
+pub const MENU_SEPARATOR_HEIGHT: f32 = 9.0;
+pub const MENU_POPUP_CORNER_RADIUS: f32 = 8.0;
+pub const MENU_POPUP_BORDER_WIDTH: f32 = 1.0;
+/// Corner radius of the per-row hover / pressed highlight rect.
+pub const MENU_ITEM_CORNER_RADIUS: f32 = 8.0;
+/// 0..=1 multiplier on `shape.shadow_inner_sm.color.a` at paint time.
+pub const MENU_SHADOW_DENSITY: f32 = 0.5;
+
+/// Default `MenuItemStyle` shipped with FernUI. Chrome roles come from
+/// the active theme.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RecipeMenuItemStyle;
 
 impl MenuItemStyle for RecipeMenuItemStyle {
     fn make_body(&self, cfg: &MenuItemStyleConfig, ctx: &mut BuildContext) -> WidgetId {
-        let menu_style = ctx.theme().components.menu;
-
         // Row composition: leading | gap | label | Spacer | trailing.
         // HStack spacing is 0 — the only inter-child gap is between
         // leading and label (`icon_label_gap`); everything else is
@@ -46,7 +61,7 @@ impl MenuItemStyle for RecipeMenuItemStyle {
             let gap_spacer = ctx.add(Spacer::new());
             let gap = ctx.add(
                 FixedSize::new()
-                    .bind_width(menu_style.icon_label_gap)
+                    .bind_width(MENU_ICON_LABEL_GAP)
                     .bind_height(1.0_f32)
                     .child_id(gap_spacer),
             );
@@ -69,13 +84,13 @@ impl MenuItemStyle for RecipeMenuItemStyle {
         // MenuItem semantic so submenu and regular items line up).
         let body = &ctx.theme().typography.body;
         let body_line = body.size * body.line_height;
-        let pad_v = ((menu_style.item_height - body_line) * 0.5).max(0.0);
+        let pad_v = ((MENU_ITEM_HEIGHT - body_line) * 0.5).max(0.0);
         let padding = ctx.add(
             Padding::new(
                 pad_v,
                 0.0,
                 pad_v,
-                menu_style.item_padding_horizontal,
+                MENU_ITEM_PADDING_HORIZONTAL,
             )
             .child_id(row_id),
         );
@@ -92,7 +107,7 @@ impl MenuItemStyle for RecipeMenuItemStyle {
         let bg = ctx.add(
             RectWidget::new()
                 .bind_background(bg_role)
-                .corner_radius(CornerRadius::uniform(menu_style.item_corner_radius)),
+                .corner_radius(CornerRadius::uniform(MENU_ITEM_CORNER_RADIUS)),
         );
 
         ctx.add(ZStack::new().add_child(bg).add_child(padding))

@@ -34,8 +34,13 @@ impl Widget for MenuSeparator {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> fern_core::widget::LayoutResponse {
+        let _ = ctx;
         let width = proposal.width.unwrap_or(0.0);
-        Size::new(width, ctx.theme.components.menu.separator_height).into()
+        Size::new(
+            width,
+            crate::styles::recipe_menu_item_style::MENU_SEPARATOR_HEIGHT,
+        )
+        .into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut fern_canvas::Canvas, ctx: &PaintContext) {
@@ -245,8 +250,8 @@ impl std::fmt::Debug for MenuList {
 
 impl Widget for MenuList {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme_signal = ctx.theme_signal();
-        let menu_style = theme_signal.get().components.menu;
+        use crate::styles::recipe_menu_item_style as menu;
+        let _theme_signal = ctx.theme_signal();
 
         // Keyboard-focused item index (shared with the key handler and wrappers).
         // The binding registry propagates repaints when this changes.
@@ -296,7 +301,7 @@ impl Widget for MenuList {
         // matter.
         let visible_cap_id = match self.max_visible_items {
             Some(cap) if self.item_widget_ids.len() > cap => {
-                let max_height = cap as f32 * menu_style.item_height + 8.0;
+                let max_height = cap as f32 * menu::MENU_ITEM_HEIGHT + 8.0;
                 let scrollable = ScrollArea::from_id(padding_id).preferred_size(0.0, max_height);
                 let scrollable_id = ctx.add(scrollable);
                 ctx.add(MaxSize::height(max_height).child_id(scrollable_id))
@@ -309,8 +314,8 @@ impl Widget for MenuList {
         let bg = RectWidget::new()
             .background(SurfaceRole::Raised)
             .border_color(BorderRole::Default)
-            .bind_border_width(menu_style.popup_border_width)
-            .corner_radius(CornerRadius::uniform(menu_style.popup_corner_radius));
+            .bind_border_width(menu::MENU_POPUP_BORDER_WIDTH)
+            .corner_radius(CornerRadius::uniform(menu::MENU_POPUP_CORNER_RADIUS));
         let bg_id = ctx.add(bg);
 
         let zstack = ZStack::new().add_child(bg_id).add_child(visible_cap_id);
@@ -439,14 +444,15 @@ impl Widget for MenuList {
         // Drop shadow underneath the menu surface. The bg + border
         // themselves are painted by a child `RectWidget` set up in
         // `build()`, so this method only contributes the shadow.
-        let radius = CornerRadius::uniform(ctx.theme.components.menu.popup_corner_radius);
+        use crate::styles::recipe_menu_item_style as menu;
+        let radius = CornerRadius::uniform(menu::MENU_POPUP_CORNER_RADIUS);
         crate::shadow::paint_layered_shadow(
             canvas,
             bounds,
             radius,
             &ctx.theme.shape.shadow_sm,
             &ctx.theme.shape.shadow_inner_sm,
-            ctx.theme.components.menu.shadow_density,
+            menu::MENU_SHADOW_DENSITY,
             self.attached_side,
         );
     }

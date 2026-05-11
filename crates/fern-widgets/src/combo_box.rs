@@ -814,7 +814,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> fern_core::widget::LayoutResponse {
-        let min_height = ctx.theme.components.combo_box.height;
+        let min_height = crate::styles::recipe_combo_box_style::COMBO_BOX_HEIGHT;
         match self.root_child_id {
             Some(id) => {
                 let child_size = ctx

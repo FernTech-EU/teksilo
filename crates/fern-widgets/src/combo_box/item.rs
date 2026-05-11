@@ -45,15 +45,16 @@ pub(super) fn build_default_item(
         .child(Spacer::new());
     let row_id = ctx.add(row);
 
-    let menu_style = theme.components.menu;
+    use crate::styles::recipe_menu_item_style as menu;
     // Compare against the rendered text line (`size * line_height`), not
     // the bare font size — TextWidget lays out at the line height, so
     // using `size` alone over-pads and pushes a nominal 24 dp row to
     // ~28 dp.
     let body = &theme.typography.body;
     let body_line = body.size * body.line_height;
-    let pad_v = ((menu_style.item_height - body_line) * 0.5).max(0.0);
-    let padding = Padding::symmetric(pad_v, menu_style.item_padding_horizontal).child_id(row_id);
+    let pad_v = ((menu::MENU_ITEM_HEIGHT - body_line) * 0.5).max(0.0);
+    let padding =
+        Padding::symmetric(pad_v, menu::MENU_ITEM_PADDING_HORIZONTAL).child_id(row_id);
     ctx.add(padding)
 }
 
@@ -122,10 +123,10 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
             None => build_default_item(ctx, &self.label, &theme),
         };
 
-        let menu_style = theme.components.menu;
+        use crate::styles::recipe_menu_item_style as menu;
         let bg = RectWidget::new()
             .background(bg_role)
-            .corner_radius(CornerRadius::uniform(menu_style.item_corner_radius));
+            .corner_radius(CornerRadius::uniform(menu::MENU_ITEM_CORNER_RADIUS));
         let bg_id = ctx.add(bg);
 
         let zstack = ZStack::new().add_child(bg_id).add_child(inner_id);
@@ -155,7 +156,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> fern_core::widget::LayoutResponse {
-        let min_h = ctx.theme.components.menu.item_height;
+        let min_h = crate::styles::recipe_menu_item_style::MENU_ITEM_HEIGHT;
         // Forward the width proposal so each row stretches the full panel
         // width instead of collapsing to its text's intrinsic width —
         // ZStack::size_that_fits queries children with `unspecified`,
