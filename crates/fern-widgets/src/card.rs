@@ -1,15 +1,29 @@
 //! Card — a Panel with shadow and optional header/content/footer slots.
+//!
+//! Card composes its chrome (shadow + background + corner radius +
+//! padding) via the `CardStyle` trait protocol. The default
+//! `RecipeCardStyle` honours all four `CardVariant` values (Plain,
+//! Elevated, Outlined, Filled) plus per-call manual overrides
+//! (background, corner_radius, padding, shadow). Apps that want a
+//! different chrome (frosted-glass card, brutalist box, neumorphic
+//! raised surface) plug their own `impl CardStyle` per-call
+//! (`.style(...)`) or theme-wide (step 8's
+//! `ComponentStyles.card = Rc::new(MyCard)`).
 
-use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal};
+use std::rc::Rc;
+
+use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::color_prop::ColorProp;
 use fern_core::signal::Prop;
-use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
+use fern_core::styles::{CardStyleConfig, CardVariant, SharedCardStyle};
+use fern_core::widget::{LayoutContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{CornerRadius, Shadow};
+use fern_tokens::Shadow;
+
+use crate::primitives::VStack;
 
 /// A card container with shadow, background, and optional header/content/footer.
-#[derive(Debug)]
 pub struct Card {
     header_id: Option<WidgetId>,
     content_id: Option<WidgetId>,
@@ -21,6 +35,17 @@ pub struct Card {
     background: Option<ColorProp>,
     corner_radius: Option<Prop<f32>>,
     padding: Option<Prop<f32>>,
+    variant: CardVariant,
+    style_override: Option<SharedCardStyle>,
+    root_child_id: Option<WidgetId>,
+}
+
+impl std::fmt::Debug for Card {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Card")
+            .field("variant", &self.variant)
+            .finish()
+    }
 }
 
 impl Card {
@@ -36,6 +61,9 @@ impl Card {
             background: None,
             corner_radius: None,
             padding: None,
+            variant: CardVariant::default(),
+            style_override: None,
+            root_child_id: None,
         }
     }
 
@@ -74,14 +102,15 @@ impl Card {
         self
     }
 
-    /// Override the background. Default (unset) is `SurfaceRole::Main`.
-    /// Accepts `Color`, a role (`SurfaceRole`, …), or `Signal<Color>`.
+    /// Override the background. Default (unset) is the variant's default
+    /// (`SurfaceRole::Main` for Plain/Outlined/Elevated, `SurfaceRole::Raised`
+    /// for Filled). Accepts `Color`, a role, or `Signal<Color>`.
     pub fn background(mut self, color: impl Into<ColorProp>) -> Self {
         self.background = Some(color.into());
         self
     }
 
-    /// Override the corner radius (default: theme `shape.radius_popup`).
+    /// Override the corner radius (default: theme `components.card.corner_radius`).
     /// Accepts a static `f32` or a reactive `Signal<f32>`.
     pub fn corner_radius(mut self, radius: impl Into<Prop<f32>>) -> Self {
         self.corner_radius = Some(radius.into());
@@ -92,6 +121,23 @@ impl Card {
     /// Accepts a static `f32` or a reactive `Signal<f32>`.
     pub fn padding(mut self, padding: impl Into<Prop<f32>>) -> Self {
         self.padding = Some(padding.into());
+        self
+    }
+
+    /// Pick the design-language variant. Default `Plain`. The active
+    /// `CardStyle` decides what each variant means visually (the IntUI
+    /// default maps Plain → no shadow + surface_main, Elevated →
+    /// shadow_md + surface_main, Outlined → border + surface_main,
+    /// Filled → shadow_md + surface_raised).
+    pub fn variant(mut self, variant: CardVariant) -> Self {
+        self.variant = variant;
+        self
+    }
+
+    /// Per-call style override. Replaces the theme-wide default
+    /// `CardStyle` for just this Card instance.
+    pub fn style(mut self, style: impl fern_core::styles::CardStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
         self
     }
 
@@ -129,34 +175,38 @@ impl Widget for Card {
                 PendingChild::Deferred(w) => ctx.add_boxed(w),
             });
         }
-        // Register reactive props for dirty-tracking.
-        let self_id = ctx.self_id();
-        let registry = ctx.binding_registry();
-        if let Some(p) = &self.background {
-            p.register_if_bound(
-                self_id,
-                registry,
-                fern_core::binding::BindingLevel::RepaintOnly,
-            );
-        }
-        if let Some(p) = &self.corner_radius {
-            p.register_if_bound(
-                self_id,
-                registry,
-                fern_core::binding::BindingLevel::RepaintOnly,
-            );
-        }
-        if let Some(p) = &self.padding {
-            p.register_if_bound(
-                self_id,
-                registry,
-                fern_core::binding::BindingLevel::Relayout,
-            );
-        }
-        [self.header_id, self.content_id, self.footer_id]
+
+        // Compose the three slots into a single content widget — a VStack
+        // with `padding/2` spacing between sections (mirrors the
+        // pre-refactor in-card section spacing). Empty if all three are
+        // None (the style still gets a `content: WidgetId` to wrap).
+        let pad = self.resolve_padding(ctx.theme());
+        let spacing = pad * 0.5;
+        let mut stack = VStack::new().spacing(spacing);
+        for slot in [self.header_id, self.content_id, self.footer_id]
             .into_iter()
             .flatten()
-            .collect()
+        {
+            stack = stack.add_child(slot);
+        }
+        let content = ctx.add(stack);
+
+        let style: SharedCardStyle = self
+            .style_override
+            .clone()
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeCardStyle::default()));
+        let cfg = CardStyleConfig {
+            content,
+            is_hovered: None,
+            variant: self.variant,
+            background_override: self.background.clone(),
+            corner_radius_override: self.corner_radius.clone(),
+            padding_override: self.padding.clone(),
+            shadow_override: self.shadow,
+        };
+        let root_id = style.make_body(&cfg, ctx);
+        self.root_child_id = Some(root_id);
+        vec![root_id]
     }
 
     fn layout_response(
@@ -164,33 +214,12 @@ impl Widget for Card {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> fern_core::widget::LayoutResponse {
-        let pad = self.resolve_padding(ctx.theme);
-        let inset = pad * 2.0;
-        let inner_width = proposal.width.map(|w| (w - inset).max(0.0));
-
-        let mut total_height = 0.0_f32;
-        let children = [self.header_id, self.content_id, self.footer_id];
-        let mut child_count = 0;
-
-        for child_id in children.into_iter().flatten() {
-            let child_proposal = SizeProposal {
-                width: inner_width,
-                height: None,
-            };
-            if let Some(child_size) = ctx.child_size(child_id, child_proposal) {
-                total_height += child_size.height;
-                child_count += 1;
-            }
+        if let Some(root) = self.root_child_id
+            && let Some(size) = ctx.child_size(root, proposal)
+        {
+            return (size).into();
         }
-
-        // Add spacing between sections
-        if child_count > 1 {
-            total_height += (child_count as f32 - 1.0) * pad * 0.5;
-        }
-
-        let width = proposal.width.unwrap_or(inset);
-        let height = total_height + inset;
-        Size::new(width, height).into()
+        proposal.resolve(0.0, 0.0).into()
     }
 
     fn place_children(
@@ -198,54 +227,12 @@ impl Widget for Card {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        ctx: &LayoutContext,
+        _ctx: &LayoutContext,
     ) {
-        let pad = self.resolve_padding(ctx.theme);
-        let inner_width = (bounds.width - pad * 2.0).max(0.0);
-        let spacing = pad * 0.5;
-        let mut y = bounds.y + pad;
-
         for child in children.iter_mut() {
-            let child_proposal = SizeProposal {
-                width: Some(inner_width),
-                height: None,
-            };
-            let child_size = ctx
-                .child_size(child.id, child_proposal)
-                .unwrap_or(Size::ZERO);
-            child.origin = Point::new(bounds.x + pad, y);
-            child.size = Size::new(inner_width, child_size.height);
-            y += child_size.height + spacing;
+            child.origin = Point::new(bounds.x, bounds.y);
+            child.size = Size::new(bounds.width, bounds.height);
         }
-    }
-
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let radius = self
-            .corner_radius
-            .as_ref()
-            .map(|p| p.get())
-            .unwrap_or(ctx.theme.shape.radius_popup);
-        let cr = CornerRadius::uniform(radius);
-
-        // Shadow — outer + inner pair from theme, density from CardStyle.
-        let outer = self.shadow.unwrap_or(ctx.theme.shape.shadow_md);
-        crate::shadow::paint_layered_shadow(
-            canvas,
-            bounds,
-            cr,
-            &outer,
-            &ctx.theme.shape.shadow_inner_md,
-            ctx.theme.components.card.shadow_density,
-            None,
-        );
-
-        // Background
-        let bg = self
-            .background
-            .as_ref()
-            .map(|p| p.resolve(ctx.theme))
-            .unwrap_or(ctx.theme.colors.surface_main);
-        canvas.fill_rounded_rect(bounds, cr, bg);
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
@@ -253,10 +240,7 @@ impl Widget for Card {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        [self.header_id, self.content_id, self.footer_id]
-            .into_iter()
-            .flatten()
-            .collect()
+        self.root_child_id.into_iter().collect()
     }
 }
 
@@ -282,7 +266,11 @@ mod tests {
     fn card_renders_shadow_and_background() {
         let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
         let _content = tree.add(FixedLeaf(100.0, 50.0));
-        tree.add(Card::new().content(FixedLeaf(100.0, 50.0)));
+        tree.add(
+            Card::new()
+                .variant(CardVariant::Elevated)
+                .content(FixedLeaf(100.0, 50.0)),
+        );
         tree.layout(SizeProposal::exact(200.0, 200.0));
         let frame = tree.render();
         // Should have shapes for shadow + background

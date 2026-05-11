@@ -10,6 +10,7 @@
 //! any themable widget.
 
 pub mod recipe_button_style;
+pub mod recipe_card_style;
 pub mod recipe_checkbox_style;
 pub mod recipe_icon_button_style;
 pub mod recipe_panel_style;
@@ -17,6 +18,7 @@ pub mod recipe_radio_style;
 pub mod recipe_toggle_style;
 
 pub use recipe_button_style::RecipeButtonStyle;
+pub use recipe_card_style::RecipeCardStyle;
 pub use recipe_checkbox_style::RecipeCheckboxStyle;
 pub use recipe_icon_button_style::RecipeIconButtonStyle;
 pub use recipe_panel_style::RecipePanelStyle;
