@@ -23,12 +23,18 @@ pub enum IconButtonSize {
 
 #[derive(Clone, Debug)]
 pub struct IconButtonStyleConfig {
-    /// Pre-built icon subtree.
+    /// Pre-built icon subtree (color-bound by the host widget so the
+    /// style stays neutral on icon coloring policy — embedded vs
+    /// standalone vs caller override).
     pub icon: WidgetId,
     pub is_pressed: Signal<bool>,
     pub is_hovered: Signal<bool>,
     pub is_focused: Signal<bool>,
     pub is_disabled: Signal<bool>,
+    /// Bistate-toggle source. When present, the style paints the
+    /// `Selected` surface tint while `is_on == true`; absent → plain
+    /// flat treatment for every state.
+    pub is_on: Option<Signal<bool>>,
     pub size: IconButtonSize,
 }
 

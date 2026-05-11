@@ -61,6 +61,7 @@
 //!     )
 //! ```
 
+use std::rc::Rc;
 use std::sync::OnceLock;
 
 use fern_canvas::{Path, Rect, SizeProposal};
@@ -69,39 +70,22 @@ use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::signal::Signal;
+use fern_core::styles::{IconButtonStyleConfig, SharedIconButtonStyle};
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole};
+use fern_tokens::TextRole;
+
+use crate::primitives::icon_widget::IconWidget;
+use crate::primitives::Switcher;
+
+/// Size variant for [`IconButton`]. See [`fern_core::styles::IconButtonSize`]
+/// for the canonical definition. Variants are calibrated to the
+/// IntelliJ Int UI scale (Compact 22 dp, Default 24 dp, Toolbar 30 dp,
+/// Large 40 dp, Hero 50 dp).
+pub use fern_core::styles::IconButtonSize;
 
 use crate::button::InteractionState;
-use crate::primitives::icon_widget::IconWidget;
-use crate::primitives::{Center, FixedSize, RectWidget, Switcher, ZStack};
-
-/// Size variant for [`IconButton`], mapping to [`IconButtonStyle`] token
-/// dimensions. Listed in ascending size order, calibrated to the
-/// IntelliJ Int UI scale:
-///
-/// - `Compact` (22 dp) — buttons inside tool windows / inspector panels.
-/// - `Default` (24 dp) — TextInput / ComboBox / SearchField trailing slots.
-/// - `Toolbar` (30 dp) — side-toolbar density (left / right / top edges).
-/// - `Large` (40 dp) — emphasized stand-alone buttons in rich menus.
-/// - `Hero` (50 dp) — hero / landing-screen CTAs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum IconButtonSize {
-    /// 22 dp — `icon_button.size_compact`. Tool-window density.
-    Compact,
-    /// 24 dp — `icon_button.size_default`. Default size; trailing-slot density.
-    #[default]
-    Default,
-    /// 30 dp — `icon_button.size_toolbar`. Side-toolbar density
-    /// (the IntelliJ left / right / top window-edge buttons).
-    Toolbar,
-    /// 40 dp — `icon_button.size_large`. Emphasized stand-alone use.
-    Large,
-    /// 50 dp — `icon_button.size_hero`. Hero / landing-screen CTAs.
-    Hero,
-}
 
 /// Type-erased action factory — captures the concrete command type.
 type ActionFactory = Box<dyn Fn(&mut EventContext)>;
@@ -162,6 +146,10 @@ pub struct IconButton {
     /// inheriting `idle_text_role`).
     icon_role_override: Option<fern_core::color_prop::ColorProp>,
 
+    /// Per-call style override. When `None`, falls back to the IntUI
+    /// default `RecipeIconButtonStyle`.
+    style_override: Option<SharedIconButtonStyle>,
+
     // Build state (set in build())
     interaction: Signal<InteractionState>,
     root_child_id: Option<WidgetId>,
@@ -190,9 +178,19 @@ impl IconButton {
             expanded_signal: None,
             shared_interaction: None,
             icon_role_override: None,
+            style_override: None,
             interaction: Signal::new(InteractionState::Idle),
             root_child_id: None,
         }
+    }
+
+    /// Per-call style override. Replaces the theme-wide default
+    /// `IconButtonStyle` for just this IconButton instance — same role
+    /// as `Button::style(...)`. The override fully owns the background +
+    /// border + size composition; icon coloring stays on the widget.
+    pub fn style(mut self, style: impl fern_core::styles::IconButtonStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
     }
 
     /// Returns the configured size variant. Used by wrappers like
@@ -468,36 +466,13 @@ impl std::fmt::Debug for IconButton {
     }
 }
 
-// ── Color resolution ────────────────────────────────────────────────────────
+// ── Icon coloring ───────────────────────────────────────────────────────────
 //
-// All IconButtons are flat: transparent idle, hover/press surface tint.
-// Icon coloring depends on the `embedded` flag — embedded mode dims to
-// `Secondary` at rest (the JetBrains "built-in" look), stand-alone mode
-// stays at `Primary` always so toolbar / menu icons read at full weight.
-
-fn resolve_bg_role_plain(state: InteractionState) -> SurfaceRole {
-    match state {
-        InteractionState::Idle | InteractionState::Focused | InteractionState::Disabled => {
-            SurfaceRole::Transparent
-        }
-        InteractionState::Hovered => SurfaceRole::Hover,
-        InteractionState::Pressed => SurfaceRole::Pressed,
-    }
-}
-
-/// Bistate background. While `on == true` the surface reads as
-/// `Selected` (with a Pressed flash on press). Off branch matches the
-/// regular flat treatment.
-fn resolve_bg_role_toggled(state: InteractionState, on: bool) -> SurfaceRole {
-    if on {
-        match state {
-            InteractionState::Pressed => SurfaceRole::Pressed,
-            _ => SurfaceRole::Selected,
-        }
-    } else {
-        resolve_bg_role_plain(state)
-    }
-}
+// Background / border / size composition lives in the active
+// `IconButtonStyle` (default: `RecipeIconButtonStyle`). The widget retains
+// only icon coloring policy — embedded mode dims to `Secondary` at rest
+// (the JetBrains "built-in" look), stand-alone mode stays at `Primary`
+// always so toolbar / menu icons read at full weight.
 
 pub(crate) fn resolve_icon_role_embedded(state: InteractionState) -> TextRole {
     match state {
@@ -512,23 +487,6 @@ pub(crate) fn resolve_icon_role_standalone(state: InteractionState) -> TextRole 
     match state {
         InteractionState::Disabled => TextRole::Disabled,
         _ => TextRole::Primary,
-    }
-}
-
-fn resolve_border_role(state: InteractionState) -> BorderRole {
-    match state {
-        InteractionState::Focused => BorderRole::Focused,
-        _ => BorderRole::Transparent,
-    }
-}
-
-fn resolve_size(size: IconButtonSize, style: &fern_tokens::IconButtonStyle) -> f32 {
-    match size {
-        IconButtonSize::Compact => style.size_compact,
-        IconButtonSize::Default => style.size_default,
-        IconButtonSize::Toolbar => style.size_toolbar,
-        IconButtonSize::Large => style.size_large,
-        IconButtonSize::Hero => style.size_hero,
     }
 }
 
@@ -550,10 +508,10 @@ fn resolve_icon_size(size: IconButtonSize, style: &fern_tokens::IconButtonStyle)
 impl fern_core::widget::Widget for IconButton {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let ib_style = ctx.theme().components.icon_button;
-        let focus_ring_width = ctx.theme().shape.focus_ring_width;
         let enabled = self.enabled;
         let embedded = self.embedded;
         let icon_size = resolve_icon_size(self.size, &ib_style);
+        let size = self.size;
 
         // Interaction signal — caller-supplied via `share_interaction`
         // when set (so a wrapping widget's chrome can mirror the icon's
@@ -602,17 +560,6 @@ impl fern_core::widget::Widget for IconButton {
             expanded.bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
         }
 
-        // Derived reactive roles. Background switches between the
-        // standard flat treatment and a Selected-when-on bistate when a
-        // toggle signal is bound. Icon coloring depends on the
-        // `embedded` flag — embedded mode dims at rest, stand-alone
-        // mode keeps full visual weight.
-        let bg_role = match self.toggled.clone() {
-            Some(toggle) => interaction
-                .zip(&toggle)
-                .map(|(s, on)| resolve_bg_role_toggled(*s, *on)),
-            None => interaction.map(|s| resolve_bg_role_plain(*s)),
-        };
         // Icon color: a caller-supplied override wins over the auto
         // cascade. The override replaces ALL states (idle / hover /
         // press / focus / disabled) — chrome that uses this opts out
@@ -657,39 +604,28 @@ impl fern_core::widget::Widget for IconButton {
             ctx.add(icon)
         };
 
-        let centered_id = ctx.add(Center::new().child_id(icon_content_id));
-
-        // Int UI convention: the button's own border is the focus
-        // indicator. At rest there's no visible border (transparent
-        // color + 0 dp width); on focus it snaps to an accent
-        // `focus_ring_width` border. No external ring.
-        let border_role = interaction.map(|s| resolve_border_role(*s));
-        let border_width = interaction.map(move |s| {
-            if *s == InteractionState::Focused {
-                focus_ring_width
-            } else {
-                0.0
-            }
-        });
-
-        let bg_id = ctx.add(
-            RectWidget::new()
-                .bind_background(bg_role)
-                .bind_border_color(border_role)
-                .bind_border_width(border_width)
-                .corner_radius(CornerRadius::uniform(ib_style.corner_radius)),
-        );
-
-        let zstack_id = ctx.add(ZStack::new().add_child(bg_id).add_child(centered_id));
-
-        // Fixed square size
-        let button_dim = resolve_size(self.size, &ib_style);
-        let root_id = ctx.add(
-            FixedSize::new()
-                .bind_width(button_dim)
-                .bind_height(button_dim)
-                .child_id(zstack_id),
-        );
+        // Delegate background + border + size to the active style.
+        // The four boolean signals derive from `interaction`; `is_on` is
+        // populated only when a `toggled` signal is bound (drives the
+        // bistate `Selected` background mode).
+        let style: SharedIconButtonStyle = self
+            .style_override
+            .clone()
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeIconButtonStyle::default()));
+        let is_pressed = interaction.map(|s| matches!(s, InteractionState::Pressed));
+        let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));
+        let is_focused = interaction.map(|s| matches!(s, InteractionState::Focused));
+        let is_disabled = interaction.map(|s| matches!(s, InteractionState::Disabled));
+        let cfg = IconButtonStyleConfig {
+            icon: icon_content_id,
+            is_pressed,
+            is_hovered,
+            is_focused,
+            is_disabled,
+            is_on: self.toggled.clone(),
+            size,
+        };
+        let root_id = style.make_body(&cfg, ctx);
 
         // Tooltip — three mutually-exclusive setters; setters clear
         // the others so exactly one branch runs.
