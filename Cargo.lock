@@ -5173,6 +5173,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "theme-styles"
+version = "0.2.0"
+dependencies = [
+ "fern-ui",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
