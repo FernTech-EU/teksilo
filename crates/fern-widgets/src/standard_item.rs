@@ -72,14 +72,14 @@ use fern_core::signal::Signal;
 use fern_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_data::{CheckState, FlatEntry};
+
+use fern_core::styles::{SharedStandardItemStyle, StandardItemStyleConfig};
 use fern_i18n::LocalizedString;
-use fern_tokens::{CornerRadius, HAlignment, SurfaceRole, TextRole, TextStyleRole, VAlignment};
+use fern_tokens::{HAlignment, TextRole, TextStyleRole, VAlignment};
 
 use crate::button::InteractionState;
 use crate::checkbox::Checkbox;
-use crate::primitives::{
-    Expand, FixedSize, HStack, Padding, RectWidget, Spacer, TextWidget, TwistArrow, VStack, ZStack,
-};
+use crate::primitives::{FixedSize, HStack, Spacer, TextWidget, TwistArrow, VStack};
 
 // ---------------------------------------------------------------------------
 // CheckboxKind — two-state vs tri-state, last-call-wins on the builder.
@@ -111,6 +111,7 @@ pub struct StandardListItem {
     label_style: TextStyleRole,
     subtitle_style: TextStyleRole,
     interaction: Signal<InteractionState>,
+    style_override: Option<SharedStandardItemStyle>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -131,8 +132,16 @@ impl StandardListItem {
             label_style: TextStyleRole::Body,
             subtitle_style: TextStyleRole::Small,
             interaction: Signal::new(InteractionState::Idle),
+            style_override: None,
             root_child_id: None,
         }
+    }
+
+    /// Per-call style override. Replaces the theme-wide default
+    /// `StandardItemStyle` for just this row instance.
+    pub fn style(mut self, style: impl fern_core::styles::StandardItemStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
     }
 
     /// Shim for raw, untranslated strings — `_literal` suffix is the
@@ -269,23 +278,6 @@ impl std::fmt::Debug for StandardListItem {
     }
 }
 
-fn resolve_bg_role(enabled: bool, selected: bool, interaction: InteractionState) -> SurfaceRole {
-    if !enabled {
-        return SurfaceRole::Transparent;
-    }
-    if selected {
-        return match interaction {
-            InteractionState::Pressed => SurfaceRole::Pressed,
-            _ => SurfaceRole::Selected,
-        };
-    }
-    match interaction {
-        InteractionState::Hovered => SurfaceRole::AccentSubtle,
-        InteractionState::Pressed => SurfaceRole::Pressed,
-        _ => SurfaceRole::Transparent,
-    }
-}
-
 fn resolve_label_role(enabled: bool) -> TextRole {
     if enabled {
         TextRole::Primary
@@ -388,67 +380,47 @@ impl StandardListItem {
         ctx.add(row)
     }
 
-    /// Build the rounded selection background (ZStack { padded bg rect,
-    /// padded content }) and return the root id.
-    /// Build the rounded selection background + interaction handler
-    /// around an arbitrary `content_id` and return the outermost
-    /// ZStack id. Shared by `StandardListItem::build` (passing its
-    /// inner row) and `StandardTreeItem::build` (passing the row
-    /// prefixed with indent + chevron columns).
+    /// Wrap an already-composed row content in the active
+    /// `StandardItemStyle` chrome (selection background + corner
+    /// radius + padding) and attach the row-level hover handler.
+    /// Shared by `StandardListItem::build` (passing its inner row)
+    /// and `StandardTreeItem::build` (passing the row prefixed with
+    /// indent + chevron columns).
     fn build_with_background(&mut self, ctx: &mut BuildContext, content_id: WidgetId) -> WidgetId {
-        let style = ctx.theme().components.standard_item;
+        // Derive the cfg's boolean signals from the widget's existing
+        // `interaction` + `selected` + `enabled` signals. The recipe
+        // re-evaluates the bg role on any source change.
+        let is_selected = self.selected.clone();
+        let is_disabled = self.enabled.map(|e| !*e);
+        let is_hovered = self.interaction.map(|s| matches!(s, InteractionState::Hovered));
+        let is_pressed = self.interaction.map(|s| matches!(s, InteractionState::Pressed));
+        // StandardItem doesn't track focus separately today — the
+        // parent ListView / TreeView owns row focus via its own a11y
+        // wiring. Wire a constant-false signal so the recipe sees a
+        // consistent shape.
+        let is_focused = ctx.signal(false);
 
-        // Hover handler drives the interaction state. Tracking the
-        // signal here means the bg role re-evaluates on mouse
-        // enter/leave without a full rebuild.
-        let interaction_for_hover = self.interaction.clone();
-        let interaction_for_widget = self.interaction.clone();
-
-        let bg_role = {
-            let enabled = self.enabled.clone();
-            let selected = self.selected.clone();
-            let interaction = self.interaction.clone();
-            // Triple-zip so the role recomputes on any source change.
-            enabled
-                .zip(&selected)
-                .zip(&interaction)
-                .map(|((e, s), i)| resolve_bg_role(*e, *s, *i))
+        let style: SharedStandardItemStyle = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.standard_item.clone())
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeStandardItemStyle::default()));
+        let cfg = StandardItemStyleConfig {
+            content: content_id,
+            is_selected,
+            is_hovered,
+            is_pressed,
+            is_focused,
+            is_disabled,
         };
-
-        // Padding outside the bg rect — exposes the rounded corners.
-        let bg_rect_id = ctx.add(
-            RectWidget::new()
-                .bind_background(bg_role)
-                .corner_radius(CornerRadius::uniform(style.item_corner_radius)),
-        );
-        let bg_padded_id = ctx.add(
-            Padding::new(0.0, style.bg_horizontal_inset, 0.0, style.bg_horizontal_inset)
-                .child_id(bg_rect_id),
-        );
-
-        // Inner padding so content doesn't touch the bg edges. Wrap
-        // the content in `Expand` so the row claims the full row
-        // width even when its slot widgets have small intrinsic sizes
-        // — without this, ZStack would center the natural-width
-        // content in the row, leaving the chevron column shifted off
-        // the leading edge and breaking selection-bg alignment.
-        let content_expanded_id = ctx.add(Expand::horizontal().child_id(content_id));
-        let content_padded_id = ctx.add(
-            Padding::symmetric(style.padding_vertical, style.padding_horizontal)
-                .child_id(content_expanded_id),
-        );
-
-        let root_id = ctx.add(
-            ZStack::new()
-                .add_child(bg_padded_id)
-                .add_child(content_padded_id),
-        );
+        let root_id = style.make_body(&cfg, ctx);
 
         // Attach hover handler to the row so hovering anywhere in the
         // row updates the interaction signal. Disabled rows still
-        // track hover but `resolve_bg_role` short-circuits to
+        // track hover but the recipe's bg cascade short-circuits to
         // Transparent.
         use fern_core::widget_builder::HandlerSet;
+        let interaction_for_hover = self.interaction.clone();
         let handlers = HandlerSet::new().on_hover(move |entered: bool, _ctx: &mut EventContext| {
             interaction_for_hover.set(if entered {
                 InteractionState::Hovered
@@ -457,7 +429,6 @@ impl StandardListItem {
             });
         });
         ctx.apply_self_handlers(handlers);
-        let _ = interaction_for_widget; // silence unused-clone if optimizer removes it
 
         root_id
     }
@@ -660,6 +631,15 @@ impl StandardTreeItem {
 
     pub fn subtitle_style(mut self, role: TextStyleRole) -> Self {
         self.inner = self.inner.subtitle_style(role);
+        self
+    }
+
+    /// Per-call style override for the row chrome. Forwarded to the
+    /// inner [`StandardListItem`] — see its `style(...)` for the
+    /// precedence rules (per-call > theme.style_slots.standard_item >
+    /// `RecipeStandardItemStyle::default()`).
+    pub fn style(mut self, style: impl fern_core::styles::StandardItemStyle) -> Self {
+        self.inner = self.inner.style(style);
         self
     }
 

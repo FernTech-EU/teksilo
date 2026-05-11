@@ -16,6 +16,7 @@ pub mod recipe_icon_button_style;
 pub mod recipe_menu_item_style;
 pub mod recipe_panel_style;
 pub mod recipe_radio_style;
+pub mod recipe_standard_item_style;
 pub mod recipe_toggle_style;
 pub mod recipe_tooltip_style;
 
@@ -26,5 +27,6 @@ pub use recipe_icon_button_style::RecipeIconButtonStyle;
 pub use recipe_menu_item_style::RecipeMenuItemStyle;
 pub use recipe_panel_style::RecipePanelStyle;
 pub use recipe_radio_style::RecipeRadioStyle;
+pub use recipe_standard_item_style::RecipeStandardItemStyle;
 pub use recipe_toggle_style::RecipeToggleStyle;
 pub use recipe_tooltip_style::RecipeTooltipStyle;

@@ -9,19 +9,22 @@ use crate::widget_id::WidgetId;
 
 #[derive(Clone, Debug)]
 pub struct StandardItemStyleConfig {
-    pub label: WidgetId,
-    /// Optional leading slot (checkbox, icon, drag handle).
-    pub leading: Option<WidgetId>,
-    /// Optional trailing slot (badge, chevron, action button).
-    pub trailing: Option<WidgetId>,
-    /// Optional secondary line beneath the label.
-    pub subtitle: Option<WidgetId>,
+    /// Pre-built row content — typically an HStack of `[checkbox?]
+    /// [leading?] [center?] [label / VStack { label, subtitle row }]
+    /// [Spacer] [trailing?]` composed by the host
+    /// `StandardListItem` / `StandardTreeItem`. The style is
+    /// responsible for the chrome (selection background, corner
+    /// radius, padding) but not for row-internal layout — the
+    /// per-slot composition is StandardItem-specific (subtitle has
+    /// its own sub-row, the checkbox carries `labels_hidden` AT
+    /// metadata, etc.) and would force every custom style to
+    /// reimplement it.
+    pub content: WidgetId,
     pub is_selected: Signal<bool>,
     pub is_hovered: Signal<bool>,
+    pub is_pressed: Signal<bool>,
     pub is_focused: Signal<bool>,
     pub is_disabled: Signal<bool>,
-    /// Tree-row indent depth in logical pixels. `0.0` for flat lists.
-    pub indent: f32,
 }
 
 pub trait StandardItemStyle: 'static {
