@@ -245,8 +245,10 @@ impl Widget for SliderBody {
         }
     }
 
-    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         // Accessibility lives on the parent Slider widget, not the
-        // body. The body is presentational.
+        // body. The body is presentational; mark it hidden so the
+        // walker prunes it rather than emitting a nameless Role::Unknown.
+        builder.set_hidden();
     }
 }
