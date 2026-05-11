@@ -29,7 +29,7 @@
 //! `WidgetId` return so they can compose anything.
 
 use fern_core::build_context::BuildContext;
-use fern_core::styles::{ComboBoxStyle, ComboBoxStyleConfig};
+use fern_core::styles::{ComboBoxStyle, ComboBoxStyleConfig, ComboBoxVariant};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{BorderRole, CornerRadius, SurfaceRole};
 
@@ -49,18 +49,35 @@ impl ComboBoxStyle for RecipeComboBoxStyle {
         let padding_h = combo_style.padding_horizontal;
         let corner_radius = combo_style.corner_radius;
 
+        // Plain variant — no chrome at all. Hand the label back
+        // wrapped only in the min-height enforcement; callers using
+        // this variant are responsible for any surrounding visuals.
+        if matches!(cfg.variant, ComboBoxVariant::Plain) {
+            let row_id = build_inner_row(ctx, cfg.selected_label, border_width, divider_height);
+            let padded_id =
+                ctx.add(Padding::symmetric(padding_h * 0.5, padding_h).child_id(row_id));
+            return ctx
+                .add(crate::primitives::MinSize::new(0.0, combo_style.height).child_id(padded_id));
+        }
+
         // Derived role signals. Roles encode "what this colour means";
         // the theme maps them to concrete colours at paint time, so the
         // result follows theme switches reactively.
         //
-        // bg: Hover whenever the popup is open OR the pointer is over
-        // the trigger; AccentDisabled when disabled; Main otherwise.
+        // bg: Filled variants always use the Hover surface (their idle
+        // and hover states share the same tinted fill — Material 3
+        // convention). Outlined / Underline use Main idle, Hover when
+        // open or hovered. AccentDisabled overrides everything when
+        // disabled.
+        let variant = cfg.variant;
         let bg_role = cfg
             .is_open
             .zip3(&cfg.is_hovered, &cfg.is_disabled)
-            .map(|(open, hovered, disabled)| {
+            .map(move |(open, hovered, disabled)| {
                 if *disabled {
                     SurfaceRole::AccentDisabled
+                } else if matches!(variant, ComboBoxVariant::Filled) {
+                    SurfaceRole::Hover
                 } else if *open || *hovered {
                     SurfaceRole::Hover
                 } else {
@@ -71,12 +88,17 @@ impl ComboBoxStyle for RecipeComboBoxStyle {
         // border: thicker accent ring on focus, dimmed on disabled,
         // default border in any other state. IntUI doesn't paint a
         // separate focus ring around combo boxes — the border itself
-        // is the focus indicator.
+        // is the focus indicator. Filled has no border at all.
         let border_role = cfg
             .is_focused
             .zip(&cfg.is_disabled)
-            .map(|(focused, disabled)| {
-                if *disabled {
+            .map(move |(focused, disabled)| {
+                if matches!(variant, ComboBoxVariant::Filled) {
+                    // The Filled variant never paints a border; the
+                    // role we return here is ignored because
+                    // border_width is forced to 0 below.
+                    BorderRole::Default
+                } else if *disabled {
                     BorderRole::AccentDisabled
                 } else if *focused {
                     BorderRole::Focused
@@ -85,43 +107,18 @@ impl ComboBoxStyle for RecipeComboBoxStyle {
                 }
             });
 
-        let border_width_signal = cfg.is_focused.map(move |focused| {
-            if *focused {
-                focus_ring_width
-            } else {
-                border_width
+        let border_width_signal = cfg.is_focused.map(move |focused| match variant {
+            ComboBoxVariant::Filled => 0.0,
+            _ => {
+                if *focused {
+                    focus_ring_width
+                } else {
+                    border_width
+                }
             }
         });
 
-        // Divider between the selected-value area and the chevron,
-        // mirroring SplitButton's split rule. Label text colour is
-        // bound by the widget on `selected_label` itself (it owns the
-        // TextWidget) — the style only paints the chrome.
-        let divider_fill_id = ctx.add(RectWidget::new().background(BorderRole::Default));
-        let divider_id = ctx.add(
-            FixedSize::new()
-                .bind_width(border_width)
-                .bind_height(divider_height)
-                .child_id(divider_fill_id),
-        );
-
-        // Chevron colour: `text_primary` at 50 % alpha. No role
-        // captures this blend, so we derive a `Signal<Color>` off
-        // theme_signal directly.
-        let chevron_color = ctx
-            .theme_signal()
-            .map(|t| t.colors.text_primary.with_alpha(0.5));
-        let chevron = IconWidget::chevron_down(12.0).bind_color(chevron_color);
-        let chevron_id = ctx.add(chevron);
-
-        let row = HStack::new()
-            .spacing(8.0)
-            .add_child(cfg.selected_label)
-            .child(Spacer::new())
-            .add_child(divider_id)
-            .add_child(chevron_id);
-        let row_id = ctx.add(row);
-
+        let row_id = build_inner_row(ctx, cfg.selected_label, border_width, divider_height);
         let padding_id = ctx.add(Padding::symmetric(padding_h * 0.5, padding_h).child_id(row_id));
 
         let bg = RectWidget::new()
@@ -134,5 +131,41 @@ impl ComboBoxStyle for RecipeComboBoxStyle {
         let visual_id = ctx.add(ZStack::new().add_child(bg_id).add_child(padding_id));
         ctx.add(crate::primitives::MinSize::new(0.0, combo_style.height).child_id(visual_id))
     }
+}
+
+/// Build the trigger's inner row: `[selected_label | Spacer |
+/// vertical divider | chevron icon]`. Shared between every variant —
+/// only the surrounding chrome (bg / border / corner radius) varies.
+fn build_inner_row(
+    ctx: &mut BuildContext,
+    selected_label: WidgetId,
+    border_width: f32,
+    divider_height: f32,
+) -> WidgetId {
+    let divider_fill_id = ctx.add(RectWidget::new().background(BorderRole::Default));
+    let divider_id = ctx.add(
+        FixedSize::new()
+            .bind_width(border_width)
+            .bind_height(divider_height)
+            .child_id(divider_fill_id),
+    );
+
+    // Chevron colour: `text_primary` at 50 % alpha. No role captures
+    // this blend, so we derive a `Signal<Color>` off `theme_signal`
+    // directly.
+    let chevron_color = ctx
+        .theme_signal()
+        .map(|t| t.colors.text_primary.with_alpha(0.5));
+    let chevron = IconWidget::chevron_down(12.0).bind_color(chevron_color);
+    let chevron_id = ctx.add(chevron);
+
+    ctx.add(
+        HStack::new()
+            .spacing(8.0)
+            .add_child(selected_label)
+            .child(Spacer::new())
+            .add_child(divider_id)
+            .add_child(chevron_id),
+    )
 }
 

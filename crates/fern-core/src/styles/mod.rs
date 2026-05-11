@@ -33,7 +33,9 @@ pub use card_style::{CardStyle, CardStyleConfig, CardVariant, SharedCardStyle};
 pub use checkbox_style::{
     CheckboxState, CheckboxStyle, CheckboxStyleConfig, CheckboxVariant, SharedCheckboxStyle,
 };
-pub use combo_box_style::{ComboBoxStyle, ComboBoxStyleConfig, SharedComboBoxStyle};
+pub use combo_box_style::{
+    ComboBoxStyle, ComboBoxStyleConfig, ComboBoxVariant, SharedComboBoxStyle,
+};
 pub use component_style_slots::ComponentStyleSlots;
 pub use icon_button_style::{
     IconButtonSize, IconButtonStyle, IconButtonStyleConfig, SharedIconButtonStyle,

@@ -51,6 +51,10 @@ mod tests;
 use self::panel::DropdownPanel;
 use self::state::{DEFAULT_MAX_VISIBLE_ITEMS, ItemSource, resolve_index};
 
+// Re-export so callers can write `ComboBox::new(...).variant(ComboBoxVariant::Filled)`
+// without reaching into `fern_ui::core::styles`.
+pub use fern_core::styles::ComboBoxVariant;
+
 /// A dropdown selection widget.
 ///
 /// ```ignore
@@ -102,6 +106,12 @@ pub struct ComboBox<T: Clone + PartialEq + 'static> {
     /// keyboard handler and the label-derive closure so both benefit from
     /// the cache across selection changes.
     selected_index_hint: Rc<Cell<Option<usize>>>,
+    /// Tier-1 design-language variant. The active `ComboBoxStyle`
+    /// decides how to paint each variant; IntUI's default ships
+    /// `Outlined` (bordered) and `Plain` (chrome-less) out of the box,
+    /// with `Filled` falling back to `Outlined` until per-variant
+    /// recipes land.
+    variant: ComboBoxVariant,
     /// Per-call style override.
     style_override: Option<SharedComboBoxStyle>,
     // Build state — four mutable signals replace the legacy
@@ -159,6 +169,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
             filter: None,
             #[cfg(feature = "rich-text")]
             search_query: None,
+            variant: ComboBoxVariant::default(),
             style_override: None,
             is_open: Signal::new(false),
             is_hovered: Signal::new(false),
@@ -272,6 +283,16 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
 
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+
+    /// Pick a Tier-1 design-language variant
+    /// ([`ComboBoxVariant::Outlined`] / `Filled` / `Underline` / `Plain`).
+    /// The active [`ComboBoxStyle`] decides what to do with the hint —
+    /// IntUI's default impl honours `Outlined` (default) and `Plain`;
+    /// a custom impl (Material 3, macOS, etc.) might paint differently.
+    pub fn variant(mut self, variant: ComboBoxVariant) -> Self {
+        self.variant = variant;
         self
     }
 
@@ -437,6 +458,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             is_hovered: self.is_hovered.clone(),
             is_focused: self.is_focused.clone(),
             is_disabled: self.is_disabled.clone(),
+            variant: self.variant,
         };
         let root_id = style.make_body(&cfg, ctx);
         self.root_child_id = Some(root_id);
