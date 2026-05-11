@@ -10,20 +10,9 @@ use std::rc::Rc;
 
 use fern_core::ObserverHandle;
 use fern_data::{DataChange, ListDataSource, ListModel};
-use fern_tokens::{BorderRole, SurfaceRole, TextRole};
 
 /// Default maximum number of items shown before the dropdown scrolls.
 pub(super) const DEFAULT_MAX_VISIBLE_ITEMS: usize = 8;
-
-/// Interaction state for the trigger button.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ComboBoxState {
-    Idle,
-    Hovered,
-    Focused,
-    Open,
-    Disabled,
-}
 
 /// Typed accessors shared between the trigger (for keyboard navigation and
 /// label resolution) and the dropdown panel (for item rendering).
@@ -80,35 +69,6 @@ impl<T: Clone + 'static> ItemSource<T> {
             self.item_at.clone(),
             self.observe.clone(),
         )
-    }
-}
-
-pub(super) fn resolve_bg_role(state: ComboBoxState) -> SurfaceRole {
-    // Hovered/Open previously used a hand-mixed `text_primary.with_alpha(0.04)`
-    // wash, which is visually very close to the Int UI `surface_hover` token.
-    // We switch to the role so the widget stays theme-reactive without
-    // re-deriving the blend in every paint.
-    match state {
-        ComboBoxState::Idle | ComboBoxState::Focused => SurfaceRole::Main,
-        ComboBoxState::Hovered | ComboBoxState::Open => SurfaceRole::Hover,
-        ComboBoxState::Disabled => SurfaceRole::AccentDisabled,
-    }
-}
-
-pub(super) fn resolve_border_role(state: ComboBoxState) -> BorderRole {
-    // Int UI convention: the border thickens and switches to the
-    // accent color on focus. There is no separate ring.
-    match state {
-        ComboBoxState::Focused => BorderRole::Focused,
-        ComboBoxState::Disabled => BorderRole::AccentDisabled,
-        _ => BorderRole::Default,
-    }
-}
-
-pub(super) fn resolve_text_role(state: ComboBoxState) -> TextRole {
-    match state {
-        ComboBoxState::Disabled => TextRole::Disabled,
-        _ => TextRole::Primary,
     }
 }
 

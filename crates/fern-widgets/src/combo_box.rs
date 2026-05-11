@@ -32,13 +32,14 @@ use fern_core::overlay::{
     DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
 };
 use fern_core::signal::Signal;
+use fern_core::styles::{ComboBoxStyle, ComboBoxStyleConfig, SharedComboBoxStyle};
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_data::{DataChange, ListDataSource, ListModel};
-use fern_tokens::{CornerRadius, TextStyleRole};
+use fern_tokens::{TextRole, TextStyleRole};
 
-use crate::primitives::{HStack, IconWidget, Padding, RectWidget, Spacer, TextWidget, ZStack};
+use crate::primitives::TextWidget;
 
 mod item;
 mod panel;
@@ -48,10 +49,7 @@ mod state;
 mod tests;
 
 use self::panel::DropdownPanel;
-use self::state::{
-    ComboBoxState, DEFAULT_MAX_VISIBLE_ITEMS, ItemSource, resolve_bg_role, resolve_border_role,
-    resolve_index, resolve_text_role,
-};
+use self::state::{DEFAULT_MAX_VISIBLE_ITEMS, ItemSource, resolve_index};
 
 /// A dropdown selection widget.
 ///
@@ -104,8 +102,18 @@ pub struct ComboBox<T: Clone + PartialEq + 'static> {
     /// keyboard handler and the label-derive closure so both benefit from
     /// the cache across selection changes.
     selected_index_hint: Rc<Cell<Option<usize>>>,
-    // Build state
-    interaction: Signal<ComboBoxState>,
+    /// Per-call style override.
+    style_override: Option<SharedComboBoxStyle>,
+    // Build state — four mutable signals replace the legacy
+    // `ComboBoxState` enum. `is_open` survives until the dropdown
+    // dismisses (overlay callback resets it); `is_focused` /
+    // `is_hovered` flip on the corresponding handlers; `is_disabled`
+    // mirrors `!self.enabled` (snapshotted at build because
+    // `.enabled(bool)` is an immutable builder option).
+    is_open: Signal<bool>,
+    is_hovered: Signal<bool>,
+    is_focused: Signal<bool>,
+    is_disabled: Signal<bool>,
     root_child_id: Option<WidgetId>,
     dropdown_content_id: Option<WidgetId>,
 }
@@ -151,7 +159,11 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
             filter: None,
             #[cfg(feature = "rich-text")]
             search_query: None,
-            interaction: Signal::new(ComboBoxState::Idle),
+            style_override: None,
+            is_open: Signal::new(false),
+            is_hovered: Signal::new(false),
+            is_focused: Signal::new(false),
+            is_disabled: Signal::new(false),
             root_child_id: None,
             dropdown_content_id: None,
             selected_index_hint: Rc::new(Cell::new(None)),
@@ -262,6 +274,15 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
         self.enabled = enabled;
         self
     }
+
+    /// Override the active [`ComboBoxStyle`] for this widget instance
+    /// only. The default IntUI chrome ([`crate::styles::RecipeComboBoxStyle`])
+    /// reads its tokens from `theme.components.combo_box`; custom impls
+    /// can paint anything they want around the selected-label slot.
+    pub fn style(mut self, style: impl ComboBoxStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
+    }
 }
 
 /// Searchable-mode builders. Gated behind the `rich-text` feature
@@ -322,18 +343,16 @@ impl<T: Clone + PartialEq + 'static> std::fmt::Debug for ComboBox<T> {
 
 impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme();
-        let combo_style = theme.components.combo_box;
-        let border_width = theme.shape.border_width;
-        let focus_ring_width = theme.shape.focus_ring_width;
         let enabled = self.enabled;
 
-        let interaction = ctx.signal(if enabled {
-            ComboBoxState::Idle
-        } else {
-            ComboBoxState::Disabled
-        });
-        self.interaction = interaction.clone();
+        // Refresh the four interaction signals every build. `is_disabled`
+        // is determined by the immutable `enabled` builder option; the
+        // other three start in their resting state and flip as the user
+        // interacts.
+        self.is_open.set(false);
+        self.is_hovered.set(false);
+        self.is_focused.set(false);
+        self.is_disabled.set(!enabled);
 
         // Observe model changes so the dropdown panel rebuilds when the
         // backing data mutates, and so selection is cleared when the
@@ -379,11 +398,21 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             None => placeholder.clone(),
         });
 
-        let bg_role = interaction.map(|s| resolve_bg_role(*s));
-        let border_role = interaction.map(|s| resolve_border_role(*s));
-        let text_role = interaction.map(|s| resolve_text_role(*s));
+        // Label colour follows the disabled signal — the chrome style
+        // owns bg / border / focus ring; the widget owns its label.
+        let text_role = self.is_disabled.map(|d| {
+            if *d {
+                TextRole::Disabled
+            } else {
+                TextRole::Primary
+            }
+        });
 
-        // Build trigger: [label | Spacer | divider | chevron]
+        // Build the selected-label subtree the style will host. Wrapped
+        // in `.a11y_hidden()` because the combo box's own
+        // `accessibility(builder)` already announces the selected value
+        // via `set_value`, so a screen reader exposed to the inner text
+        // node would double-announce.
         let label = TextWidget::new_literal("")
             .style(TextStyleRole::Body)
             .bind_text(label_text)
@@ -392,64 +421,24 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             .a11y_hidden();
         let label_id = ctx.add(label);
 
-        // Divider between the selected-value area and the chevron,
-        // matching the `SplitButton` visual pattern — a thin vertical
-        // rule in the `border` token that visually separates the
-        // display region from the dropdown trigger indicator. Width
-        // is snapshotted from the theme: Int UI's 1 dp border width
-        // does not change across themes, so a re-layout on theme
-        // switch is not required here.
-        let divider_fill_id =
-            ctx.add(RectWidget::new().background(fern_tokens::BorderRole::Default));
-        let divider_id = ctx.add(
-            crate::primitives::FixedSize::new()
-                .bind_width(border_width)
-                .bind_height(combo_style.height * 0.6)
-                .child_id(divider_fill_id),
-        );
+        // Resolve the active style: per-call override > theme slot >
+        // built-in `RecipeComboBoxStyle` default. The style produces
+        // the entire trigger chrome (bg + border + padding + divider +
+        // chevron + min-height) around our `selected_label`.
+        let style: SharedComboBoxStyle = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.combo_box.clone())
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeComboBoxStyle));
 
-        // Chevron color: `text_primary` at 50% alpha. No role maps to this
-        // blend, so we build a direct `Signal<Color>` from `theme_signal`.
-        let chevron_color = ctx
-            .theme_signal()
-            .map(|t| t.colors.text_primary.with_alpha(0.5));
-        let chevron = IconWidget::chevron_down(12.0).bind_color(chevron_color);
-        let chevron_id = ctx.add(chevron);
-
-        let row = HStack::new()
-            .spacing(8.0)
-            .add_child(label_id)
-            .child(Spacer::new())
-            .add_child(divider_id)
-            .add_child(chevron_id);
-        let row_id = ctx.add(row);
-
-        let padding = Padding::symmetric(
-            combo_style.padding_horizontal * 0.5,
-            combo_style.padding_horizontal,
-        )
-        .child_id(row_id);
-        let padding_id = ctx.add(padding);
-
-        // Int UI focus convention: thicken the frame border to
-        // `focus_ring_width` and recolor it to the accent on
-        // focus, instead of wrapping in a separate ring.
-        let border_width_signal = interaction.map(move |s| match *s {
-            ComboBoxState::Focused => focus_ring_width,
-            _ => border_width,
-        });
-
-        let bg = RectWidget::new()
-            .bind_background(bg_role)
-            .bind_border_color(border_role)
-            .bind_border_width(border_width_signal)
-            .corner_radius(CornerRadius::uniform(combo_style.corner_radius));
-        let bg_id = ctx.add(bg);
-
-        let visual_zstack = ZStack::new().add_child(bg_id).add_child(padding_id);
-        let visual_id = ctx.add(visual_zstack);
-        let root_id =
-            ctx.add(crate::primitives::MinSize::new(0.0, combo_style.height).child_id(visual_id));
+        let cfg = ComboBoxStyleConfig {
+            selected_label: label_id,
+            is_open: self.is_open.clone(),
+            is_hovered: self.is_hovered.clone(),
+            is_focused: self.is_focused.clone(),
+            is_disabled: self.is_disabled.clone(),
+        };
+        let root_id = style.make_body(&cfg, ctx);
         self.root_child_id = Some(root_id);
 
         // Pre-create the dropdown panel (dormant until opened). On
@@ -504,32 +493,33 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
 
         // --- Handlers ---
         let self_id = ctx.self_id();
-        let int_hover = interaction.clone();
-        let int_focus = interaction.clone();
+        let is_open_h = self.is_open.clone();
+        let is_hovered_h = self.is_hovered.clone();
+        let is_focused_h = self.is_focused.clone();
 
         // Shared dismiss callback — invoked by the overlay manager
         // whenever the dropdown is dismissed, regardless of path
         // (our own Enter/Escape handlers, framework-level
-        // EscapeOrClickOutside, pointer-leave, cascade). Resets
-        // `interaction` back to `Focused` so `set_expanded`
-        // reported by `accessibility()` stays truthful.
+        // EscapeOrClickOutside, pointer-leave, cascade). Flips
+        // `is_open` back to false so `accessibility(builder)` stays
+        // truthful about the popup state.
         let dismiss_callback: OverlayDismissCallback = {
-            let interaction = interaction.clone();
+            let is_open = self.is_open.clone();
             Rc::new(move || {
-                if interaction.get() == ComboBoxState::Open {
-                    interaction.set(ComboBoxState::Focused);
+                if is_open.get() {
+                    is_open.set(false);
                 }
             })
         };
 
         // Helper to open the overlay — used by tap and several key handlers.
         let open_overlay = {
-            let interaction = interaction.clone();
+            let is_open = self.is_open.clone();
             let dismiss_callback = dismiss_callback.clone();
             #[cfg(feature = "rich-text")]
             let search_input_slot = search_input_slot.clone();
             Rc::new(move |ctx: &mut EventContext| {
-                interaction.set(ComboBoxState::Open);
+                is_open.set(true);
                 ctx.activate(dropdown_id);
                 ctx.show_overlay(OverlayRequest {
                     content_id: dropdown_id,
@@ -560,22 +550,24 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                     open_overlay(ctx);
                 }
             })
-            .on_hover(move |entered: bool, _ctx: &mut EventContext| {
-                if !enabled {
-                    return;
-                }
-                let current = int_hover.get();
-                if current == ComboBoxState::Open {
-                    return;
-                }
-                if entered {
-                    int_hover.set(ComboBoxState::Hovered);
-                } else {
-                    int_hover.set(ComboBoxState::Idle);
+            .on_hover({
+                let is_open = is_open_h.clone();
+                let is_hovered = is_hovered_h.clone();
+                move |entered: bool, _ctx: &mut EventContext| {
+                    if !enabled {
+                        return;
+                    }
+                    // Don't churn the hovered signal while the dropdown
+                    // is open — the bg stays in its open colour until
+                    // the overlay dismisses.
+                    if is_open.get() {
+                        return;
+                    }
+                    is_hovered.set(entered);
                 }
             })
             .on_key({
-                let interaction = interaction.clone();
+                let is_open = self.is_open.clone();
                 let selected = self.selected.clone();
                 let source = self.source.clone();
                 let item_label_for_keys = self.item_label.clone();
@@ -609,8 +601,8 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                             key: Key::Enter | Key::Space,
                             ..
                         } => {
-                            if interaction.get() == ComboBoxState::Open {
-                                interaction.set(ComboBoxState::Focused);
+                            if is_open.get() {
+                                is_open.set(false);
                                 ctx.dismiss_all_except_hosts();
                             } else {
                                 open_overlay(ctx);
@@ -620,8 +612,8 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                         WidgetEvent::KeyDown {
                             key: Key::Escape, ..
                         } => {
-                            if interaction.get() == ComboBoxState::Open {
-                                interaction.set(ComboBoxState::Focused);
+                            if is_open.get() {
+                                is_open.set(false);
                                 ctx.dismiss_all_except_hosts();
                                 EventResponse::Handled
                             } else {
@@ -639,8 +631,8 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                         // built-in cycle so nothing else stole focus while
                         // the overlay tore down.
                         WidgetEvent::KeyDown { key: Key::Tab, .. } => {
-                            if interaction.get() == ComboBoxState::Open {
-                                interaction.set(ComboBoxState::Focused);
+                            if is_open.get() {
+                                is_open.set(false);
                                 ctx.dismiss_all_except_hosts();
                                 EventResponse::Handled
                             } else {
@@ -651,7 +643,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                             key: Key::ArrowDown,
                             ..
                         } => {
-                            if interaction.get() != ComboBoxState::Open {
+                            if !is_open.get() {
                                 open_overlay(ctx);
                             }
                             let n = source.len();
@@ -674,7 +666,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                         WidgetEvent::KeyDown {
                             key: Key::ArrowUp, ..
                         } => {
-                            if interaction.get() != ComboBoxState::Open {
+                            if !is_open.get() {
                                 open_overlay(ctx);
                             }
                             let n = source.len();
@@ -721,7 +713,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                             if n == 0 {
                                 return EventResponse::Handled;
                             }
-                            if interaction.get() != ComboBoxState::Open {
+                            if !is_open.get() {
                                 open_overlay(ctx);
                             }
                             let current_idx = selected
@@ -740,7 +732,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                             if n == 0 {
                                 return EventResponse::Handled;
                             }
-                            if interaction.get() != ComboBoxState::Open {
+                            if !is_open.get() {
                                 open_overlay(ctx);
                             }
                             let current_idx = selected
@@ -785,14 +777,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                 }
             })
             .on_focus(move |gained: bool, _ctx: &mut EventContext| {
-                if gained {
-                    let current = int_focus.get();
-                    if current == ComboBoxState::Idle {
-                        int_focus.set(ComboBoxState::Focused);
-                    }
-                } else {
-                    int_focus.set(ComboBoxState::Idle);
-                }
+                is_focused_h.set(gained);
             })
             .focusable(enabled)
             .cursor(CursorIcon::Pointer);
@@ -861,12 +846,12 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             }
         }
 
-        builder.set_expanded(self.interaction.get() == ComboBoxState::Open);
+        builder.set_expanded(self.is_open.get());
 
         // Only set aria-controls when the popup is open — the listbox node is
         // absent from the tree when closed, and pointing at a missing node
         // causes AT crashes (VoiceOver unwrap in linked_ui_elements).
-        if self.interaction.get() == ComboBoxState::Open
+        if self.is_open.get()
             && let Some(popup_id) = self.dropdown_content_id
         {
             builder.push_controlled(widget_id_to_node_id(popup_id));

@@ -12,6 +12,7 @@
 pub mod recipe_button_style;
 pub mod recipe_card_style;
 pub mod recipe_checkbox_style;
+pub mod recipe_combo_box_style;
 pub mod recipe_icon_button_style;
 pub mod recipe_menu_item_style;
 pub mod recipe_panel_style;
@@ -26,6 +27,7 @@ pub mod recipe_tooltip_style;
 pub use recipe_button_style::RecipeButtonStyle;
 pub use recipe_card_style::RecipeCardStyle;
 pub use recipe_checkbox_style::RecipeCheckboxStyle;
+pub use recipe_combo_box_style::RecipeComboBoxStyle;
 pub use recipe_icon_button_style::RecipeIconButtonStyle;
 pub use recipe_menu_item_style::RecipeMenuItemStyle;
 pub use recipe_panel_style::RecipePanelStyle;
