@@ -134,6 +134,9 @@ pub struct TabBar<T: 'static> {
     /// Text role used for the label (and matching icon tint) on idle
     /// tabs (not selected, not disabled). Default: `TextRole::Secondary`.
     idle_text_role: TextRole,
+    /// Per-call style override propagated to every header in the bar.
+    /// `None` means "use the theme slot or the bundled `RecipeTabStyle`".
+    style_override: Option<fern_core::styles::SharedTabStyle>,
 
     bar_leading_slot: Option<PendingChild>,
     bar_trailing_slot: Option<PendingChild>,
@@ -309,6 +312,7 @@ impl<T: 'static> TabBar<T> {
             tab_surface_role: None,
             selected_text_role: TextRole::Primary,
             idle_text_role: TextRole::Secondary,
+            style_override: None,
             bar_leading_slot: None,
             bar_trailing_slot: None,
             show_separator: true,
@@ -405,6 +409,18 @@ impl<T: 'static> TabBar<T> {
     /// [`TextRole::Disabled`] regardless of this setting.
     pub fn idle_text_role(mut self, role: TextRole) -> Self {
         self.idle_text_role = role;
+        self
+    }
+
+    /// Override the active [`TabStyle`](fern_core::styles::TabStyle)
+    /// for every header in this bar. The widget keeps responsibility
+    /// for the label / icon / close button composition, the
+    /// optional `tab_surface_role` background, and all input handling;
+    /// the style only paints the accent indicator and focus ring
+    /// chrome via `make_body`. Per-call override > theme slot >
+    /// built-in `RecipeTabStyle` default.
+    pub fn style(mut self, style: impl fern_core::styles::TabStyle) -> Self {
+        self.style_override = Some(std::rc::Rc::new(style));
         self
     }
 
@@ -800,6 +816,7 @@ impl<T: 'static> Widget for TabBar<T> {
                     tab_surface_role: self.tab_surface_role.clone(),
                     selected_text_role: self.selected_text_role,
                     idle_text_role: self.idle_text_role,
+                    style_override: self.style_override.clone(),
                 }))
             });
             // Should never be `None` for `i < len()`, but defend:

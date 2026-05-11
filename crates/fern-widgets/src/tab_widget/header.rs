@@ -23,21 +23,23 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use fern_canvas::{Canvas, Rect, Size, SizeProposal};
+use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, PointerButton, WidgetEvent};
 use fern_core::focus::FocusOrigin;
 use fern_core::signal::Signal;
+use fern_core::styles::{SharedTabStyle, TabStyleConfig};
 use fern_core::widget::{
-    CursorIcon, EventContext, LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement,
+    CursorIcon, EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement,
 };
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_i18n::LocalizedString;
-use fern_tokens::{Color, CornerRadius, TextRole};
+use fern_tokens::TextRole;
 
+use crate::primitives::{RectWidget, ZStack};
 use crate::{HStack, IconButton, IconButtonSize, IconWidget, TextWidget};
 
 /// Minimum natural width when the label is empty / extremely short.
@@ -138,6 +140,10 @@ pub(crate) struct TabHeader {
     /// `TextRole::Secondary`. Set by the parent [`TabBar`] via
     /// `idle_text_role(...)`.
     idle_text_role: TextRole,
+    /// Per-call style override propagated from the parent `TabBar`'s
+    /// `.style(impl TabStyle)` builder. `None` means "use the theme
+    /// slot or the bundled `RecipeTabStyle`".
+    pub(crate) style_override: Option<SharedTabStyle>,
 
     inner_root_id: Option<WidgetId>,
 }
@@ -180,6 +186,7 @@ pub(crate) struct TabHeaderConfig {
     pub tab_surface_role: Option<fern_core::color_prop::ColorProp>,
     pub selected_text_role: TextRole,
     pub idle_text_role: TextRole,
+    pub style_override: Option<SharedTabStyle>,
 }
 
 impl TabHeader {
@@ -210,6 +217,7 @@ impl TabHeader {
             tab_surface_role: cfg.tab_surface_role,
             selected_text_role: cfg.selected_text_role,
             idle_text_role: cfg.idle_text_role,
+            style_override: cfg.style_override,
             inner_root_id: None,
         }
     }
@@ -411,7 +419,61 @@ impl Widget for TabHeader {
             let padded = crate::Padding::symmetric(HEADER_PADDING_V, pad_h).child(row);
             ctx.add(padded)
         };
-        self.inner_root_id = Some(inner_id);
+
+        // Derive the cfg signals the active TabStyle needs. The
+        // widget's own interaction state is finer-grained (Idle /
+        // Hovered for pointer presence; Some(Pointer) / Some(Keyboard)
+        // for focus), but the trait surface is the four canonical
+        // booleans. `is_focused` flips true only on keyboard focus
+        // because the IntUI focus ring is suppressed for pointer
+        // focus (matches IntelliJ / VS Code convention).
+        let index_for_cfg = self.index;
+        let is_active = self.selected.map(move |sel| *sel == index_for_cfg);
+        let is_hovered = interaction.map(|s| matches!(*s, TabHeaderInteraction::Hovered));
+        let is_focused = focus_origin.map(|o| matches!(o, Some(FocusOrigin::Keyboard)));
+        let is_disabled = Signal::new(!self.enabled);
+        let orientation_for_cfg = match self.orientation {
+            super::delegate::TabBarOrientation::Horizontal => {
+                fern_core::styles::TabBarOrientation::Horizontal
+            }
+            super::delegate::TabBarOrientation::Vertical => {
+                fern_core::styles::TabBarOrientation::Vertical
+            }
+        };
+
+        // Resolve the active style: per-call override > theme slot >
+        // built-in `RecipeTabStyle` default. The style wraps `inner_id`
+        // with the accent indicator + focus ring chrome; the
+        // tab_surface_role background (which the trait config doesn't
+        // carry through) stays as a RectWidget sibling underneath.
+        let style: SharedTabStyle = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.tab.clone())
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTabStyle));
+
+        let cfg = TabStyleConfig {
+            label: inner_id,
+            leading: None,
+            trailing: None,
+            is_active,
+            is_hovered,
+            is_focused,
+            is_disabled,
+            orientation: orientation_for_cfg,
+        };
+        let chrome_id = style.make_body(&cfg, ctx);
+
+        // tab_surface_role: optional uniform background painted under
+        // the chrome. Adjacent tabs sit flush so we don't round the
+        // corners.
+        let root_id = if let Some(ref role) = self.tab_surface_role {
+            let bg_id = ctx.add(RectWidget::new().background(role.clone()));
+            ctx.add(ZStack::new().add_child(bg_id).add_child(chrome_id))
+        } else {
+            chrome_id
+        };
+        self.inner_root_id = Some(root_id);
 
         // Attach handlers: tap selects, hover updates state, focus
         // tracks origin, key handles arrow-nav + Enter/Space.
@@ -631,7 +693,7 @@ impl Widget for TabHeader {
             ctx.attach_tooltip(self_id, tip_id, std::time::Duration::from_millis(400));
         }
 
-        vec![inner_id]
+        vec![root_id]
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
@@ -671,74 +733,6 @@ impl Widget for TabHeader {
         for child in children.iter_mut() {
             child.origin = bounds.origin();
             child.size = bounds.size();
-        }
-    }
-
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let selected = self.selected.get() == self.index;
-        let colors = &ctx.theme.colors;
-        let shape = &ctx.theme.shape;
-        // The visible pill rect IS the bounds — no envelope shrink,
-        // so adjacent tabs sit flush against each other. The focus
-        // ring is painted *inside* the bounds (inset by half the
-        // stroke width) so it never bleeds into the neighbour tab.
-        let visual = bounds;
-
-        // Uniform surface regardless of state — all tabs read
-        // visually identical except for the accent indicator and the
-        // label-color shift. The role is set by the parent `TabBar`
-        // via `tab_surface_role(...)`; default is transparent.
-        let background = if let Some(ref prop) = self.tab_surface_role {
-            prop.resolve(ctx.theme)
-        } else {
-            Color::TRANSPARENT
-        };
-        if background.a() > 0.0 {
-            canvas.fill_rect(visual, background);
-        }
-
-        // Accent indicator on the layout-axis "outside" edge of the
-        // selected, enabled tab. Int UI convention:
-        //   - Horizontal bar → indicator on TOP (browser-tab look,
-        //     selected tab "merges" into the content panel below).
-        //   - Vertical bar → indicator on the LEADING edge (sidebar
-        //     / IDE perspective look — the tab "points into" the
-        //     content panel on the trailing side).
-        // Thickness comes from the `TabStyle::underline_active`
-        // token (3 dp by Int UI default) to match other Int UI
-        // tab variants.
-        let indicator_thickness = ctx.theme.components.tab.underline_active;
-        if selected && self.enabled {
-            let indicator = match self.orientation {
-                super::delegate::TabBarOrientation::Horizontal => {
-                    Rect::new(visual.x, visual.y, visual.width, indicator_thickness)
-                }
-                super::delegate::TabBarOrientation::Vertical => {
-                    Rect::new(visual.x, visual.y, indicator_thickness, visual.height)
-                }
-            };
-            canvas.fill_rect(indicator, colors.accent);
-        }
-
-        // Focus ring — keyboard focus only. Drawn *inside* `bounds`
-        // (inset by `focus_ring_width / 2 + focus_ring_offset`) so
-        // adjacent tabs aren't visually overlapped by the ring.
-        if self.focus_origin.get() == Some(FocusOrigin::Keyboard) {
-            let half_stroke = shape.focus_ring_width * 0.5;
-            let inset = half_stroke + shape.focus_ring_offset;
-            let ring_rect = Rect::new(
-                bounds.x + inset,
-                bounds.y + inset,
-                (bounds.width - inset * 2.0).max(0.0),
-                (bounds.height - inset * 2.0).max(0.0),
-            );
-            let ring_radius = shape.radius_control;
-            canvas.stroke_rounded_rect(
-                ring_rect,
-                CornerRadius::uniform(ring_radius),
-                colors.focus_ring,
-                shape.focus_ring_width,
-            );
         }
     }
 
