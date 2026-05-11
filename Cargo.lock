@@ -1613,6 +1613,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "fern-theme-fluent"
+version = "0.2.0"
+dependencies = [
+ "fern-core",
+ "fern-tokens",
+]
+
+[[package]]
+name = "fern-theme-macos"
+version = "0.2.0"
+dependencies = [
+ "fern-core",
+ "fern-tokens",
+]
+
+[[package]]
+name = "fern-theme-material3"
+version = "0.2.0"
+dependencies = [
+ "fern-core",
+ "fern-tokens",
+]
+
+[[package]]
 name = "fern-tokens"
 version = "0.2.0"
 dependencies = [
@@ -1635,6 +1659,9 @@ dependencies = [
  "fern-resources",
  "fern-settings",
  "fern-text",
+ "fern-theme-fluent",
+ "fern-theme-macos",
+ "fern-theme-material3",
  "fern-tokens",
  "fern-ui-macros",
  "fern-widgets",

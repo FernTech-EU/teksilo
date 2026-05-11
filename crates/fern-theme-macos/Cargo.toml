@@ -1,0 +1,12 @@
+[package]
+name = "fern-theme-macos"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+fern-core = { workspace = true }
+fern-tokens = { workspace = true }

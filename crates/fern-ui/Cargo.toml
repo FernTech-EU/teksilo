@@ -60,6 +60,19 @@ file-dialog-trait = ["fern-app/file-dialog"]
 # pulled in by this feature; apps add them as direct deps.
 telemetry = ["fern-app/telemetry", "fern-widgets?/telemetry"]
 
+# Sibling preset crates — opt-in alternatives to the bundled IntUI
+# preset (`fern_ui::prelude::intui::{light, dark}`). Each is a
+# stub today that returns an IntUI-shaped baseline with TODO markers;
+# the per-tier customisation work lands incrementally as the
+# four-tier styling refactor finishes the remaining widget
+# migrations. Apps that opt in get a stable import path
+# (`fern_ui::prelude::material3::{light, dark}`, etc.) so the
+# refactor's surface stays additive — when the styles fill in,
+# existing code automatically picks them up.
+theme-material3 = ["dep:fern-theme-material3"]
+theme-macos = ["dep:fern-theme-macos"]
+theme-fluent = ["dep:fern-theme-fluent"]
+
 # Font bundle features — forwarded to `fern-text`'s own feature set
 # via the `fern-text?/...` optional-dep syntax. The `?` means the
 # forwarding only activates when `fern-text` itself is in the build
@@ -114,6 +127,9 @@ fern-text = { path = "../fern-text", version = "0.2.0", optional = true, default
 fern-i18n = { workspace = true, optional = true }
 fern-inspector = { workspace = true, optional = true }
 fern-resources = { workspace = true }
+fern-theme-material3 = { workspace = true, optional = true }
+fern-theme-macos = { workspace = true, optional = true }
+fern-theme-fluent = { workspace = true, optional = true }
 
 [dev-dependencies]
 trybuild = "1"

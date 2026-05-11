@@ -97,6 +97,21 @@ pub mod prelude {
     //   let theme = intui::light();
     pub use fern_core::presets::intui;
 
+    // Sibling preset crates — opt-in alternatives to the bundled
+    // IntUI preset. Each is a stub today returning an IntUI-shaped
+    // baseline; per-tier customisation lands incrementally as the
+    // four-tier styling refactor finishes the remaining widget
+    // migrations. Apps opting into a feature get a stable import
+    // path (`material3::light()`, `macos::dark()`, …).
+    #[cfg(feature = "theme-material3")]
+    pub use fern_theme_material3 as material3;
+
+    #[cfg(feature = "theme-macos")]
+    pub use fern_theme_macos as macos;
+
+    #[cfg(feature = "theme-fluent")]
+    pub use fern_theme_fluent as fluent;
+
     // Reactive color / style props — unified input types for widget builders.
     pub use fern_core::color_prop::{ColorProp, TextStyleProp};
 
