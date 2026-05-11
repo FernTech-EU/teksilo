@@ -202,7 +202,7 @@ impl Widget for PopoverSurface {
             radius,
             &ctx.theme.shape.shadow_sm,
             &ctx.theme.shape.shadow_inner_sm,
-            ctx.theme.components.popover.shadow_density,
+            crate::styles::recipe_popover_style::POPOVER_SHADOW_DENSITY,
             self.attached_shadow_side(ctx.layout_direction),
         );
         // The caret extends into the just-suppressed zone (between

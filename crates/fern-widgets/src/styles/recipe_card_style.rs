@@ -25,6 +25,15 @@ use fern_core::widget::{
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{CornerRadius, Shadow};
 
+// IntUI design tokens for Card. Moved here in Step 7 of the styling
+// refactor — the recipe owns its own dimensions instead of reading
+// from `theme.components.card`.
+pub const CARD_PADDING: f32 = 16.0;
+pub const CARD_CORNER_RADIUS: f32 = 8.0;
+pub const CARD_BORDER_WIDTH: f32 = 1.0;
+/// 0..=1 multiplier on `shape.shadow_inner_md.color.a` at paint time.
+pub const CARD_SHADOW_DENSITY: f32 = 0.5;
+
 /// Default `CardStyle` shipped with FernUI. Honours all four
 /// `CardVariant` values via background / shadow / border defaults.
 #[derive(Debug, Default, Clone, Copy)]
@@ -32,8 +41,6 @@ pub struct RecipeCardStyle;
 
 impl CardStyle for RecipeCardStyle {
     fn make_body(&self, cfg: &CardStyleConfig, ctx: &mut BuildContext) -> WidgetId {
-        let card_tokens = ctx.theme().components.card;
-
         let frame = CardFrame {
             child_id: None,
             pending_child: Some(PendingChild::Id(cfg.content)),
@@ -42,11 +49,11 @@ impl CardStyle for RecipeCardStyle {
             corner_radius: cfg
                 .corner_radius_override
                 .clone()
-                .unwrap_or(Prop::Static(card_tokens.corner_radius)),
+                .unwrap_or(Prop::Static(CARD_CORNER_RADIUS)),
             padding: cfg
                 .padding_override
                 .clone()
-                .unwrap_or(Prop::Static(card_tokens.padding)),
+                .unwrap_or(Prop::Static(CARD_PADDING)),
             shadow_override: cfg.shadow_override,
         };
         ctx.add(frame)
@@ -145,7 +152,7 @@ impl Widget for CardFrame {
                 cr,
                 &outer,
                 &ctx.theme.shape.shadow_inner_md,
-                ctx.theme.components.card.shadow_density,
+                CARD_SHADOW_DENSITY,
                 None,
             );
         }
@@ -164,11 +171,8 @@ impl Widget for CardFrame {
         canvas.fill_rounded_rect(bounds, cr, bg);
 
         // Outlined variant draws a 1 dp accent-neutral border.
-        if matches!(self.variant, CardVariant::Outlined) {
-            let border_w = ctx.theme.components.card.border_width;
-            if border_w > 0.0 {
-                canvas.stroke_rounded_rect(bounds, cr, ctx.theme.colors.border, border_w);
-            }
+        if matches!(self.variant, CardVariant::Outlined) && CARD_BORDER_WIDTH > 0.0 {
+            canvas.stroke_rounded_rect(bounds, cr, ctx.theme.colors.border, CARD_BORDER_WIDTH);
         }
     }
 

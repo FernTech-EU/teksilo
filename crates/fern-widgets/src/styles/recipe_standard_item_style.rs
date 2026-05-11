@@ -20,16 +20,29 @@ use fern_tokens::{CornerRadius, SurfaceRole};
 
 use crate::primitives::{Expand, Padding, RectWidget, ZStack};
 
-/// Default `StandardItemStyle` shipped with FernUI. Reads dimensions
-/// from `theme.components.standard_item` (`item_corner_radius`,
-/// `bg_horizontal_inset`, `padding_vertical`, `padding_horizontal`).
+// IntUI design tokens for StandardListItem / StandardTreeItem.
+// Moved here in Step 7 of the styling refactor — the recipe owns its
+// own dimensions instead of reading from `theme.components.standard_item`.
+pub const STANDARD_ITEM_ICON_SIZE: f32 = 16.0;
+pub const STANDARD_ITEM_SUBTITLE_ICON_SIZE: f32 = 12.0;
+pub const STANDARD_ITEM_SLOT_GAP: f32 = 8.0;
+pub const STANDARD_ITEM_SUBTITLE_SLOT_GAP: f32 = 6.0;
+pub const STANDARD_ITEM_LABEL_SUBTITLE_GAP: f32 = 2.0;
+pub const STANDARD_ITEM_PADDING_HORIZONTAL: f32 = 8.0;
+pub const STANDARD_ITEM_PADDING_VERTICAL: f32 = 4.0;
+pub const STANDARD_ITEM_MIN_HEIGHT_SINGLE_LINE: f32 = 28.0;
+pub const STANDARD_ITEM_MIN_HEIGHT_TWO_LINE: f32 = 44.0;
+pub const STANDARD_ITEM_CHEVRON_COLUMN_WIDTH: f32 = 16.0;
+pub const STANDARD_ITEM_TREE_INDENT_STEP: f32 = 16.0;
+pub const STANDARD_ITEM_ITEM_CORNER_RADIUS: f32 = 8.0;
+pub const STANDARD_ITEM_BG_HORIZONTAL_INSET: f32 = 4.0;
+
+/// Default `StandardItemStyle` shipped with FernUI.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RecipeStandardItemStyle;
 
 impl StandardItemStyle for RecipeStandardItemStyle {
     fn make_body(&self, cfg: &StandardItemStyleConfig, ctx: &mut BuildContext) -> WidgetId {
-        let style = ctx.theme().components.standard_item;
-
         // Background — `Selected` (when selected, regardless of hover)
         // > `Pressed` > `AccentSubtle` (hover) > Transparent. Disabled
         // is always Transparent (it shouldn't appear "pickable").
@@ -45,14 +58,14 @@ impl StandardItemStyle for RecipeStandardItemStyle {
         let bg_rect = ctx.add(
             RectWidget::new()
                 .bind_background(bg_role)
-                .corner_radius(CornerRadius::uniform(style.item_corner_radius)),
+                .corner_radius(CornerRadius::uniform(STANDARD_ITEM_ITEM_CORNER_RADIUS)),
         );
         let bg_padded = ctx.add(
             Padding::new(
                 0.0,
-                style.bg_horizontal_inset,
+                STANDARD_ITEM_BG_HORIZONTAL_INSET,
                 0.0,
-                style.bg_horizontal_inset,
+                STANDARD_ITEM_BG_HORIZONTAL_INSET,
             )
             .child_id(bg_rect),
         );
@@ -64,7 +77,7 @@ impl StandardItemStyle for RecipeStandardItemStyle {
         // and leave (e.g.) tree chevrons shifted off the leading edge.
         let content_expanded = ctx.add(Expand::horizontal().child_id(cfg.content));
         let content_padded = ctx.add(
-            Padding::symmetric(style.padding_vertical, style.padding_horizontal)
+            Padding::symmetric(STANDARD_ITEM_PADDING_VERTICAL, STANDARD_ITEM_PADDING_HORIZONTAL)
                 .child_id(content_expanded),
         );
 

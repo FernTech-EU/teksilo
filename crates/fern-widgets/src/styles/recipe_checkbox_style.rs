@@ -23,8 +23,15 @@ use fern_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, Wid
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius};
 
-/// Default `CheckboxStyle` shipped with FernUI. Reads its dimensions
-/// from `theme.components.checkbox` and its colors from
+// IntUI design tokens for Checkbox. Moved here in Step 7 of the
+// styling refactor — the recipe owns its own dimensions instead of
+// reading from `theme.components.checkbox`.
+pub const CHECKBOX_BOX_VISUAL_SIZE: f32 = 19.0;
+pub const CHECKBOX_BOX_HIT_AREA: f32 = 24.0;
+pub const CHECKBOX_LABEL_GAP: f32 = 6.0;
+pub const CHECKBOX_CORNER_RADIUS: f32 = 3.0;
+
+/// Default `CheckboxStyle` shipped with FernUI. Colors come from
 /// `theme.colors.{accent, accent_hover, accent_pressed, accent_disabled,
 /// border, border_strong, border_focused, text_on_accent, text_disabled}`.
 #[derive(Debug, Default, Clone, Copy)]
@@ -89,9 +96,8 @@ impl Widget for CheckboxBody {
         vec![]
     }
 
-    fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
-        let style = ctx.theme.components.checkbox;
-        Size::new(style.box_visual_size, style.box_visual_size).into()
+    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        Size::new(CHECKBOX_BOX_VISUAL_SIZE, CHECKBOX_BOX_VISUAL_SIZE).into()
     }
 
     fn place_children(
@@ -105,7 +111,6 @@ impl Widget for CheckboxBody {
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let colors = &ctx.theme.colors;
-        let style = ctx.theme.components.checkbox;
         let state = self.state.get();
         let is_filled = matches!(state, CheckboxState::Checked | CheckboxState::Indeterminate);
         let disabled = self.is_disabled.get();
@@ -157,9 +162,9 @@ impl Widget for CheckboxBody {
         // Rounded doubles it for a softer look, Circle uses half-size for
         // a perfect circle.
         let corner = match self.variant {
-            CheckboxVariant::Square => CornerRadius::uniform(style.corner_radius),
-            CheckboxVariant::Rounded => CornerRadius::uniform(style.corner_radius * 2.0),
-            CheckboxVariant::Circle => CornerRadius::uniform(style.box_visual_size / 2.0),
+            CheckboxVariant::Square => CornerRadius::uniform(CHECKBOX_CORNER_RADIUS),
+            CheckboxVariant::Rounded => CornerRadius::uniform(CHECKBOX_CORNER_RADIUS * 2.0),
+            CheckboxVariant::Circle => CornerRadius::uniform(CHECKBOX_BOX_VISUAL_SIZE / 2.0),
         };
 
         canvas.fill_rounded_rect(bounds, corner, bg);
@@ -177,7 +182,7 @@ impl Widget for CheckboxBody {
         } else {
             colors.text_on_accent
         };
-        let glyph_size = style.box_visual_size * 0.75;
+        let glyph_size = CHECKBOX_BOX_VISUAL_SIZE * 0.75;
         let glyph_rect = Rect::new(
             bounds.x + (bounds.width - glyph_size) / 2.0,
             bounds.y + (bounds.height - glyph_size) / 2.0,

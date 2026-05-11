@@ -188,10 +188,10 @@ impl Widget for Slider {
         // Capture the thumb radius at build time. The event handlers
         // need it for value computation, but they only receive
         // `EventContext` and can't reach the theme at event time.
-        // Theme changes between builds would give a slightly stale
-        // hit region (single-digit pixels); the body re-paints from
-        // the current theme so the rendered thumb stays correct.
-        let thumb_radius = ctx.theme_signal().get().components.slider.thumb_diameter * 0.5;
+        // The IntUI thumb diameter is the recipe's design constant —
+        // a custom `SliderStyle` impl with a different thumb size
+        // would need its own hit-region logic on the parent widget.
+        let thumb_radius = crate::styles::recipe_slider_style::SLIDER_THUMB_DIAMETER * 0.5;
 
         let value = self.value.clone();
         let step = self.step;
@@ -504,7 +504,8 @@ mod tests {
     #[test]
     fn thumb_drag_updates_value() {
         let theme = fern_core::presets::intui::light();
-        let thumb_radius = theme.components.slider.thumb_diameter * 0.5;
+        let thumb_radius =
+            crate::styles::recipe_slider_style::SLIDER_THUMB_DIAMETER * 0.5;
         let value = Signal::new(50.0_f32);
         let mut tree = WidgetTree::new().with_theme(theme);
         let s = tree.add(Slider::new(value.clone(), 0.0, 100.0));

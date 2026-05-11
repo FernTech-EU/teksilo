@@ -23,18 +23,32 @@ use fern_tokens::{BorderRole, SurfaceRole};
 
 use crate::primitives::{Center, FixedSize, RectWidget, ZStack};
 
-/// Default `IconButtonStyle` shipped with FernUI. Reads its dimensions
-/// from `theme.components.icon_button` and its surface roles from the
-/// active theme's role resolver (so theme-swap repaints for free).
+// IntUI design tokens for IconButton. Moved here in Step 7 of the
+// styling refactor — the recipe owns its own dimensions instead of
+// reading from `theme.components.icon_button`. Sizes follow the
+// IntelliJ IntUI scale (Compact < Default < Toolbar < Large < Hero).
+pub const ICON_BUTTON_SIZE_COMPACT: f32 = 22.0;
+pub const ICON_BUTTON_SIZE_DEFAULT: f32 = 24.0;
+pub const ICON_BUTTON_SIZE_TOOLBAR: f32 = 30.0;
+pub const ICON_BUTTON_SIZE_LARGE: f32 = 40.0;
+pub const ICON_BUTTON_SIZE_HERO: f32 = 50.0;
+pub const ICON_BUTTON_ICON_SIZE: f32 = 16.0;
+pub const ICON_BUTTON_ICON_SIZE_TOOLBAR: f32 = 18.0;
+pub const ICON_BUTTON_ICON_SIZE_LARGE: f32 = 24.0;
+pub const ICON_BUTTON_ICON_SIZE_HERO: f32 = 32.0;
+pub const ICON_BUTTON_CORNER_RADIUS: f32 = 8.0;
+
+/// Default `IconButtonStyle` shipped with FernUI. Surface roles come
+/// from the active theme's role resolver (so theme-swap repaints for
+/// free).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RecipeIconButtonStyle;
 
 impl IconButtonStyle for RecipeIconButtonStyle {
     fn make_body(&self, cfg: &IconButtonStyleConfig, ctx: &mut BuildContext) -> WidgetId {
-        let ib_style = ctx.theme().components.icon_button;
         let focus_ring_width = ctx.theme().shape.focus_ring_width;
-        let corner_radius = ib_style.corner_radius;
-        let button_dim = resolve_size(cfg.size, &ib_style);
+        let corner_radius = ICON_BUTTON_CORNER_RADIUS;
+        let button_dim = resolve_size(cfg.size);
 
         // Background — `Selected` flavor when `is_on == true`, plain
         // flat treatment otherwise. Pressed always wins (the press
@@ -129,12 +143,12 @@ fn bistate_bg_role(
         })
 }
 
-fn resolve_size(size: IconButtonSize, style: &fern_tokens::IconButtonStyle) -> f32 {
+fn resolve_size(size: IconButtonSize) -> f32 {
     match size {
-        IconButtonSize::Compact => style.size_compact,
-        IconButtonSize::Default => style.size_default,
-        IconButtonSize::Toolbar => style.size_toolbar,
-        IconButtonSize::Large => style.size_large,
-        IconButtonSize::Hero => style.size_hero,
+        IconButtonSize::Compact => ICON_BUTTON_SIZE_COMPACT,
+        IconButtonSize::Default => ICON_BUTTON_SIZE_DEFAULT,
+        IconButtonSize::Toolbar => ICON_BUTTON_SIZE_TOOLBAR,
+        IconButtonSize::Large => ICON_BUTTON_SIZE_LARGE,
+        IconButtonSize::Hero => ICON_BUTTON_SIZE_HERO,
     }
 }

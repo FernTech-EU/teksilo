@@ -26,6 +26,16 @@ use fern_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, Wid
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius};
 
+// IntUI design tokens for the Toggle chrome. Used to live in
+// `theme.components.toggle`; moved here as part of Step 7 of the
+// styling refactor — "The recipe IS the new dimension data; no
+// parallel store." Custom design languages override these by
+// providing their own `impl ToggleStyle`.
+pub const TOGGLE_TRACK_WIDTH: f32 = 28.0;
+pub const TOGGLE_TRACK_HEIGHT: f32 = 16.0;
+pub const TOGGLE_THUMB_DIAMETER: f32 = 12.0;
+pub const TOGGLE_THUMB_INSET: f32 = 2.0;
+
 /// Default `ToggleStyle` shipped with FernUI. Reads its dimensions
 /// from `theme.components.toggle` and its colors from
 /// `theme.colors.{accent, surface_sunken, ...}`.
@@ -107,10 +117,9 @@ impl Widget for ToggleBody {
         vec![]
     }
 
-    fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
-        let style = ctx.theme.components.toggle;
-        let row_h = style.track_height.max(24.0);
-        Size::new(style.track_width, row_h).into()
+    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        let row_h = TOGGLE_TRACK_HEIGHT.max(24.0);
+        Size::new(TOGGLE_TRACK_WIDTH, row_h).into()
     }
 
     fn place_children(
@@ -124,11 +133,10 @@ impl Widget for ToggleBody {
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let colors = &ctx.theme.colors;
-        let style = ctx.theme.components.toggle;
-        let track_w = style.track_width;
-        let track_h = style.track_height;
-        let knob_size = style.thumb_diameter;
-        let knob_inset = style.thumb_inset;
+        let track_w = TOGGLE_TRACK_WIDTH;
+        let track_h = TOGGLE_TRACK_HEIGHT;
+        let knob_size = TOGGLE_THUMB_DIAMETER;
+        let knob_inset = TOGGLE_THUMB_INSET;
         let enabled = !self.is_disabled.get();
 
         // Track is centered in the (possibly larger) hit-area row.

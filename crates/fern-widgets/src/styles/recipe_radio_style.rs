@@ -22,8 +22,15 @@ use fern_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, Wid
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius};
 
-/// Default `RadioStyle` shipped with FernUI. Reads its dimensions
-/// from `theme.components.radio` and its colors from
+// IntUI design tokens for RadioButton. Moved here in Step 7 of the
+// styling refactor — the recipe owns its own dimensions instead of
+// reading from `theme.components.radio`.
+pub const RADIO_VISUAL_SIZE: f32 = 19.0;
+pub const RADIO_HIT_AREA: f32 = 24.0;
+pub const RADIO_LABEL_GAP: f32 = 6.0;
+pub const RADIO_INNER_DOT_SIZE: f32 = 7.0;
+
+/// Default `RadioStyle` shipped with FernUI. Colors come from
 /// `theme.colors.{accent, accent_hover, accent_pressed, accent_disabled,
 /// border, border_strong, border_focused}`.
 #[derive(Debug, Default, Clone, Copy)]
@@ -88,9 +95,8 @@ impl Widget for RadioBody {
         vec![]
     }
 
-    fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
-        let style = ctx.theme.components.radio;
-        Size::new(style.visual_size, style.visual_size).into()
+    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        Size::new(RADIO_VISUAL_SIZE, RADIO_VISUAL_SIZE).into()
     }
 
     fn place_children(
@@ -104,7 +110,6 @@ impl Widget for RadioBody {
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let colors = &ctx.theme.colors;
-        let style = ctx.theme.components.radio;
         let selected = self.is_selected.get();
         let disabled = self.is_disabled.get();
         let pressed = self.is_pressed.get();
@@ -133,9 +138,9 @@ impl Widget for RadioBody {
 
         // Variant-specific outer corner shape.
         let outer_corner = match self.variant {
-            RadioVariant::Circle => CornerRadius::uniform(style.visual_size / 2.0),
+            RadioVariant::Circle => CornerRadius::uniform(RADIO_VISUAL_SIZE / 2.0),
             RadioVariant::Square => CornerRadius::uniform(0.0),
-            RadioVariant::Rounded => CornerRadius::uniform(style.visual_size * 0.25),
+            RadioVariant::Rounded => CornerRadius::uniform(RADIO_VISUAL_SIZE * 0.25),
         };
 
         // Outer ring background — transparent (the ring is the border).
@@ -159,7 +164,7 @@ impl Widget for RadioBody {
         } else {
             colors.accent
         };
-        let dot_size = style.inner_dot_size;
+        let dot_size = RADIO_INNER_DOT_SIZE;
         let dot_rect = Rect::new(
             bounds.x + (bounds.width - dot_size) / 2.0,
             bounds.y + (bounds.height - dot_size) / 2.0,

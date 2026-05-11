@@ -292,7 +292,7 @@ impl StandardListItem {
     /// register it. Returns the WidgetId of the content node (not the
     /// surrounding bg + padding).
     fn build_content(&mut self, ctx: &mut BuildContext) -> WidgetId {
-        let style = ctx.theme().components.standard_item;
+        use crate::styles::recipe_standard_item_style as si;
 
         let label_role = self.enabled.map(|e| resolve_label_role(*e));
 
@@ -314,7 +314,7 @@ impl StandardListItem {
 
             // Subtitle HStack: [leading?] subtitle [Spacer] [trailing?].
             let mut sub_row = HStack::new()
-                .spacing(style.subtitle_slot_gap)
+                .spacing(si::STANDARD_ITEM_SUBTITLE_SLOT_GAP)
                 .alignment(VAlignment::Center);
             if let Some(w) = self.subtitle_leading_slot.take() {
                 let id = ctx.add_boxed(w);
@@ -329,7 +329,7 @@ impl StandardListItem {
 
             ctx.add(
                 VStack::new()
-                    .spacing(style.label_subtitle_gap)
+                    .spacing(si::STANDARD_ITEM_LABEL_SUBTITLE_GAP)
                     .alignment(HAlignment::Leading)
                     .add_child(label_id)
                     .add_child(sub_row_id),
@@ -342,7 +342,7 @@ impl StandardListItem {
         // Primary HStack: [checkbox?] [leading?] [center?] label_column
         // [Spacer] [trailing?].
         let mut row = HStack::new()
-            .spacing(style.slot_gap)
+            .spacing(si::STANDARD_ITEM_SLOT_GAP)
             .alignment(VAlignment::Center);
 
         if let Some(kind) = self.checkbox.take() {
@@ -443,11 +443,11 @@ impl Widget for StandardListItem {
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
-        let style = ctx.theme.components.standard_item;
+        use crate::styles::recipe_standard_item_style as si;
         let min_height = if self.subtitle.is_some() {
-            style.min_height_two_line
+            si::STANDARD_ITEM_MIN_HEIGHT_TWO_LINE
         } else {
-            style.min_height_single_line
+            si::STANDARD_ITEM_MIN_HEIGHT_SINGLE_LINE
         };
         let raw = self
             .root_child_id
@@ -710,13 +710,13 @@ impl std::fmt::Debug for StandardTreeItem {
 
 impl Widget for StandardTreeItem {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let style = ctx.theme().components.standard_item;
+        use crate::styles::recipe_standard_item_style as si;
 
         // 1. Build the StandardListItem's inner row (no bg yet).
         let inner_content_id = self.inner.build_content(ctx);
 
         // 2. Indent column — empty FixedSize at `depth * step` width.
-        let indent_width = self.depth as f32 * style.tree_indent_step;
+        let indent_width = self.depth as f32 * si::STANDARD_ITEM_TREE_INDENT_STEP;
         let indent_id = ctx.add(FixedSize::new().bind_width(indent_width));
 
         // 3. Chevron column — always reserved width so siblings at
@@ -726,7 +726,7 @@ impl Widget for StandardTreeItem {
         //    + tap recognizer on its own node) — more direct than
         //    `FixedSize.on_tap`, which routes taps through the column
         //    wrapper and the composed parent chain.
-        let chevron_size = style.chevron_column_width;
+        let chevron_size = si::STANDARD_ITEM_CHEVRON_COLUMN_WIDTH;
         let mut chevron = TwistArrow::new(
             chevron_size,
             self.has_children,
@@ -808,8 +808,8 @@ mod tests {
             height: None,
         });
         let b = tree.bounds(id);
-        let style = theme().components.standard_item;
-        assert!(b.height >= style.min_height_single_line - 0.5);
+        use crate::styles::recipe_standard_item_style as si;
+        assert!(b.height >= si::STANDARD_ITEM_MIN_HEIGHT_SINGLE_LINE - 0.5);
     }
 
     #[test]
@@ -824,12 +824,12 @@ mod tests {
             height: None,
         });
         let b = tree.bounds(id);
-        let style = theme().components.standard_item;
+        use crate::styles::recipe_standard_item_style as si;
         assert!(
-            b.height >= style.min_height_two_line - 0.5,
+            b.height >= si::STANDARD_ITEM_MIN_HEIGHT_TWO_LINE - 0.5,
             "two-line height {} < expected {}",
             b.height,
-            style.min_height_two_line
+            si::STANDARD_ITEM_MIN_HEIGHT_TWO_LINE
         );
     }
 
@@ -1046,11 +1046,12 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(400.0, 60.0));
         let bounds = tree.bounds(id);
-        let style = theme().components.standard_item;
+        use crate::styles::recipe_standard_item_style as si;
         // Checkbox sits at the row's leading edge, just inside the
         // bg_horizontal_inset + padding_horizontal. Tap a few pixels
         // in from there so we land on the box visual.
-        let cb_x = bounds.x + style.bg_horizontal_inset + style.padding_horizontal + 4.0;
+        let cb_x =
+            bounds.x + si::STANDARD_ITEM_BG_HORIZONTAL_INSET + si::STANDARD_ITEM_PADDING_HORIZONTAL + 4.0;
         let cb_y = bounds.y + bounds.height * 0.5;
         dispatch_tap(&mut tree, Point::new(cb_x, cb_y));
         assert!(checked.get(), "tap on checkbox should flip the bound signal");
@@ -1097,11 +1098,11 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(400.0, 60.0));
         let bounds = tree.bounds(id);
-        let style = theme().components.standard_item;
+        use crate::styles::recipe_standard_item_style as si;
         // Inside the row's content padding the chevron column sits at
         // `padding_horizontal` (depth=0 → indent=0). Sample its
         // center.
-        let cx = bounds.x + style.padding_horizontal + style.chevron_column_width * 0.5;
+        let cx = bounds.x + si::STANDARD_ITEM_PADDING_HORIZONTAL + si::STANDARD_ITEM_CHEVRON_COLUMN_WIDTH * 0.5;
         let cy = bounds.y + bounds.height * 0.5;
         dispatch_tap(&mut tree, Point::new(cx, cy));
         assert_eq!(
@@ -1125,8 +1126,8 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(400.0, 60.0));
         let bounds = tree.bounds(id);
-        let style = theme().components.standard_item;
-        let cx = bounds.x + style.padding_horizontal + 8.0;
+        use crate::styles::recipe_standard_item_style as si;
+        let cx = bounds.x + si::STANDARD_ITEM_PADDING_HORIZONTAL + 8.0;
         let cy = bounds.y + bounds.height * 0.5;
         // Click 1: Unchecked → Checked
         dispatch_tap(&mut tree, Point::new(cx, cy));
@@ -1153,8 +1154,8 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(400.0, 60.0));
         let bounds = tree.bounds(id);
-        let style = theme().components.standard_item;
-        let cx = bounds.x + style.padding_horizontal + 8.0;
+        use crate::styles::recipe_standard_item_style as si;
+        let cx = bounds.x + si::STANDARD_ITEM_PADDING_HORIZONTAL + 8.0;
         let cy = bounds.y + bounds.height * 0.5;
         dispatch_tap(&mut tree, Point::new(cx, cy));
         assert_eq!(state.get(), CheckState::Checked);

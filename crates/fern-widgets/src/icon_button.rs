@@ -494,12 +494,13 @@ pub(crate) fn resolve_icon_role_standalone(state: InteractionState) -> TextRole 
 /// Default 24) share the standard `icon_size` (16 dp); Toolbar / Large
 /// / Hero scale up via dedicated tokens so a 50 dp button doesn't
 /// carry a tiny 16 dp glyph.
-fn resolve_icon_size(size: IconButtonSize, style: &fern_tokens::IconButtonStyle) -> f32 {
+fn resolve_icon_size(size: IconButtonSize) -> f32 {
+    use crate::styles::recipe_icon_button_style as icon_dims;
     match size {
-        IconButtonSize::Compact | IconButtonSize::Default => style.icon_size,
-        IconButtonSize::Toolbar => style.icon_size_toolbar,
-        IconButtonSize::Large => style.icon_size_large,
-        IconButtonSize::Hero => style.icon_size_hero,
+        IconButtonSize::Compact | IconButtonSize::Default => icon_dims::ICON_BUTTON_ICON_SIZE,
+        IconButtonSize::Toolbar => icon_dims::ICON_BUTTON_ICON_SIZE_TOOLBAR,
+        IconButtonSize::Large => icon_dims::ICON_BUTTON_ICON_SIZE_LARGE,
+        IconButtonSize::Hero => icon_dims::ICON_BUTTON_ICON_SIZE_HERO,
     }
 }
 
@@ -507,10 +508,9 @@ fn resolve_icon_size(size: IconButtonSize, style: &fern_tokens::IconButtonStyle)
 
 impl fern_core::widget::Widget for IconButton {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let ib_style = ctx.theme().components.icon_button;
         let enabled = self.enabled;
         let embedded = self.embedded;
-        let icon_size = resolve_icon_size(self.size, &ib_style);
+        let icon_size = resolve_icon_size(self.size);
         let size = self.size;
 
         // Interaction signal — caller-supplied via `share_interaction`

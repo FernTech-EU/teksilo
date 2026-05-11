@@ -141,11 +141,11 @@ impl Card {
         self
     }
 
-    fn resolve_padding(&self, theme: &fern_core::Theme) -> f32 {
+    fn resolve_padding(&self, _theme: &fern_core::Theme) -> f32 {
         self.padding
             .as_ref()
             .map(|p| p.get())
-            .unwrap_or(theme.components.card.padding)
+            .unwrap_or(crate::styles::recipe_card_style::CARD_PADDING)
     }
 }
 

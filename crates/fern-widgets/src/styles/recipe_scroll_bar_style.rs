@@ -29,19 +29,27 @@ use fern_tokens::CornerRadius;
 
 use crate::primitives::ZStack;
 
-/// Default `ScrollBarStyle` shipped with FernUI. Reads colors and
-/// dimensions from `theme.components.scroll_bar` and
+// IntUI design tokens for ScrollBar. Moved here in Step 7 of the
+// styling refactor — the recipe owns its own dimensions instead of
+// reading from `theme.components.scrollbar`.
+pub const SCROLLBAR_THICKNESS_IDLE: f32 = 4.0;
+pub const SCROLLBAR_THICKNESS_HOVER: f32 = 8.0;
+pub const SCROLLBAR_MIN_THUMB_LENGTH: f32 = 24.0;
+pub const SCROLLBAR_CORNER_RADIUS: f32 = 2.0;
+
+/// Default `ScrollBarStyle` shipped with FernUI. Colors come from
 /// `theme.colors.scrollbar_*`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RecipeScrollBarStyle;
 
 impl ScrollBarStyle for RecipeScrollBarStyle {
     fn make_body(&self, cfg: &ScrollBarStyleConfig, ctx: &mut BuildContext) -> WidgetId {
-        // Read theme dimensions once at build time. Thickness comes
-        // from the theme; the widget's per-instance override is
-        // already reflected in the bounds we receive.
-        let thickness = ctx.theme().components.scrollbar.thickness_hover;
-        let resting_thickness = ctx.theme().components.scrollbar.thickness_idle;
+        // Thickness values come from the recipe's own design tokens.
+        // The widget's per-instance override (`ScrollBar::thickness`)
+        // is already reflected in the bounds we receive, so these
+        // values only affect the painters' fallback `layout_response`.
+        let thickness = SCROLLBAR_THICKNESS_HOVER;
+        let resting_thickness = SCROLLBAR_THICKNESS_IDLE;
 
         match cfg.variant {
             ScrollBarVariant::Permanent => ctx.add(FullBarPainter {

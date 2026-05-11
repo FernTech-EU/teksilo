@@ -28,6 +28,13 @@ use fern_core::widget::{
 use fern_core::widget_id::WidgetId;
 use fern_tokens::CornerRadius;
 
+// IntUI design tokens for Panel. Moved here in Step 7 of the styling
+// refactor — the recipe owns its own dimensions instead of reading
+// from `theme.components.panel`.
+pub const PANEL_PADDING: f32 = 12.0;
+pub const PANEL_CORNER_RADIUS: f32 = 8.0;
+pub const PANEL_BORDER_WIDTH: f32 = 1.0;
+
 /// Default `PanelStyle` shipped with FernUI. Honours all four
 /// `PanelVariant` values via background / border defaults; honours
 /// caller overrides (background, border, corner radius, padding) when
@@ -37,8 +44,6 @@ pub struct RecipePanelStyle;
 
 impl PanelStyle for RecipePanelStyle {
     fn make_body(&self, cfg: &PanelStyleConfig, ctx: &mut BuildContext) -> WidgetId {
-        let panel_tokens = ctx.theme().components.panel;
-
         let frame = PanelFrame {
             child_id: None,
             pending_child: Some(PendingChild::Id(cfg.content)),
@@ -48,15 +53,15 @@ impl PanelStyle for RecipePanelStyle {
             border_width: cfg
                 .border_width_override
                 .clone()
-                .unwrap_or(Prop::Static(panel_tokens.border_width)),
+                .unwrap_or(Prop::Static(PANEL_BORDER_WIDTH)),
             corner_radius: cfg
                 .corner_radius_override
                 .clone()
-                .unwrap_or(Prop::Static(panel_tokens.corner_radius)),
+                .unwrap_or(Prop::Static(PANEL_CORNER_RADIUS)),
             padding: cfg
                 .padding_override
                 .clone()
-                .unwrap_or(Prop::Static(panel_tokens.padding)),
+                .unwrap_or(Prop::Static(PANEL_PADDING)),
         };
         ctx.add(frame)
     }

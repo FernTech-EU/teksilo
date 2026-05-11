@@ -18,9 +18,18 @@ use fern_core::widget_id::WidgetId;
 
 use crate::popover::PopoverSurface;
 
+// IntUI design tokens for Popover. Moved here in Step 7 of the styling
+// refactor — the recipe / surface own their own dimensions instead of
+// reading from `theme.components.popover`.
+pub const POPOVER_PADDING: f32 = 12.0;
+pub const POPOVER_CORNER_RADIUS: f32 = 8.0;
+pub const POPOVER_BORDER_WIDTH: f32 = 1.0;
+/// 0..=1 multiplier on `shape.shadow_inner_sm.color.a` at paint time.
+pub const POPOVER_SHADOW_DENSITY: f32 = 0.5;
+
 /// Default `PopoverStyle` shipped with FernUI. Reads dimensions from
-/// `theme.shape.radius_popup`, `theme.shape.shadow_sm`, and
-/// `theme.components.popover.shadow_density` at paint time.
+/// `theme.shape.radius_popup` and `theme.shape.shadow_sm` at paint time;
+/// shadow density comes from `POPOVER_SHADOW_DENSITY` (this module).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RecipePopoverStyle;
 

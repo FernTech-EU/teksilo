@@ -28,8 +28,14 @@ use fern_tokens::CornerRadius;
 /// accommodate the thumb plus the focus-ring envelope.
 const MIN_CROSS_SIZE: f32 = 24.0;
 
-/// Default `SliderStyle` shipped with FernUI. Reads its dimensions
-/// from `theme.components.slider` and its colors from
+// IntUI design tokens for Slider. Moved here in Step 7 of the
+// styling refactor — the recipe owns its own dimensions instead of
+// reading from `theme.components.slider`.
+pub const SLIDER_TRACK_HEIGHT: f32 = 4.0;
+pub const SLIDER_THUMB_DIAMETER: f32 = 14.0;
+pub const SLIDER_TICK_SIZE: f32 = 2.0;
+
+/// Default `SliderStyle` shipped with FernUI. Colors come from
 /// `theme.colors.{accent, surface_sunken, ...}`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RecipeSliderStyle;
@@ -90,9 +96,8 @@ impl Widget for SliderBody {
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
-        let style = ctx.theme.components.slider;
         let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
-        let cross = (style.thumb_diameter + envelope * 2.0).max(MIN_CROSS_SIZE);
+        let cross = (SLIDER_THUMB_DIAMETER + envelope * 2.0).max(MIN_CROSS_SIZE);
         match self.orientation {
             SliderOrientation::Horizontal => {
                 let width = proposal.width.unwrap_or(200.0);
@@ -118,9 +123,8 @@ impl Widget for SliderBody {
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let colors = &ctx.theme.colors;
         let shape = &ctx.theme.shape;
-        let style = ctx.theme.components.slider;
-        let track_height = style.track_height;
-        let thumb_diameter = style.thumb_diameter;
+        let track_height = SLIDER_TRACK_HEIGHT;
+        let thumb_diameter = SLIDER_THUMB_DIAMETER;
         let thumb_radius = thumb_diameter * 0.5;
         let enabled = !self.is_disabled.get();
         let t = self.value_normalized.get().clamp(0.0, 1.0);
@@ -181,7 +185,7 @@ impl Widget for SliderBody {
             && let Some(n) = self.tick_count
             && n >= 2
         {
-            let tick_size = style.tick_size.max(2.0);
+            let tick_size = SLIDER_TICK_SIZE.max(2.0);
             let tick_color = if enabled {
                 colors.text_secondary
             } else {
