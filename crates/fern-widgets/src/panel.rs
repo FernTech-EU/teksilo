@@ -3,22 +3,27 @@
 //! Like Qt's QFrame: a single-child wrapper that provides visual framing.
 //! Visual properties come from the theme by default but can be overridden.
 //!
-//! Panel is a Level 2 Widget (not a Widget) because its internal
-//! structure is fixed and doesn't need reactive state or rebuild on theme change.
-//! It reads theme tokens during layout and paint directly from the context.
+//! Panel composes its chrome via the `PanelStyle` trait protocol.
+//! The default `RecipePanelStyle` honours all four `PanelVariant` values
+//! (Plain / Sunken / Raised / Highlighted) plus per-call manual overrides
+//! (background, border_color, border_width, corner_radius, padding).
+//! Apps that want a different chrome (frosted-glass panel, brutalist
+//! frame) plug their own `impl PanelStyle` per-call (`.style(...)`) or
+//! theme-wide (step 8's `ComponentStyles.panel = Rc::new(MyPanel)`).
 
-use fern_canvas::{Canvas, Rect, Size, SizeProposal};
+use std::rc::Rc;
+
+use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::color_prop::ColorProp;
 use fern_core::signal::Prop;
-use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
+use fern_core::styles::{PanelStyleConfig, PanelVariant, SharedPanelStyle};
+use fern_core::widget::{LayoutContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 #[cfg(test)]
 use fern_tokens::Color;
-use fern_tokens::CornerRadius;
 
 /// A themed container with background, border, corner radius, and padding.
-#[derive(Debug)]
 pub struct Panel {
     child_id: Option<WidgetId>,
     pending_child: Option<PendingChild>,
@@ -27,7 +32,19 @@ pub struct Panel {
     border_width: Option<Prop<f32>>,
     corner_radius: Option<Prop<f32>>,
     padding: Option<Prop<f32>>,
+    variant: PanelVariant,
+    style_override: Option<SharedPanelStyle>,
+    root_child_id: Option<WidgetId>,
     a11y_presentational: bool,
+}
+
+impl std::fmt::Debug for Panel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Panel")
+            .field("variant", &self.variant)
+            .field("a11y_presentational", &self.a11y_presentational)
+            .finish()
+    }
 }
 
 impl Panel {
@@ -40,8 +57,32 @@ impl Panel {
             border_width: None,
             corner_radius: None,
             padding: None,
+            variant: PanelVariant::default(),
+            style_override: None,
+            root_child_id: None,
             a11y_presentational: false,
         }
+    }
+
+    /// Pick the design-language variant. Default `Plain`. The active
+    /// `PanelStyle` decides what each variant means visually (the
+    /// IntUI default maps Plain → `surface_main`, Sunken →
+    /// `surface_sunken`, Raised → `surface_raised`, Highlighted →
+    /// `accent_subtle_bg`, with matching border defaults).
+    pub fn variant(mut self, variant: PanelVariant) -> Self {
+        self.variant = variant;
+        self
+    }
+
+    /// Per-call style override. Replaces the theme-wide default
+    /// `PanelStyle` for just this Panel instance — same role as
+    /// `Button::style(...)`. Manual overrides (`background`,
+    /// `border_color`, etc.) are still passed to the style via
+    /// `PanelStyleConfig`; custom styles are free to honour or ignore
+    /// them.
+    pub fn style(mut self, style: impl fern_core::styles::PanelStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
     }
 
     /// Mark the panel as presentational for assistive tech: the panel's
@@ -101,12 +142,6 @@ impl Panel {
         self
     }
 
-    fn resolve_padding(&self, theme: &fern_core::Theme) -> f32 {
-        self.padding
-            .as_ref()
-            .map(|p| p.get())
-            .unwrap_or(theme.components.panel.padding)
-    }
 }
 
 impl Default for Panel {
@@ -123,46 +158,29 @@ impl Widget for Panel {
                 PendingChild::Deferred(w) => ctx.add_boxed(w),
             });
         }
-        // Register dirty-tracking on any reactive props so signal updates
-        // (e.g. theme signal changes) trigger a repaint / relayout.
-        let self_id = ctx.self_id();
-        let registry = ctx.binding_registry();
-        if let Some(p) = &self.background {
-            p.register_if_bound(
-                self_id,
-                registry,
-                fern_core::binding::BindingLevel::RepaintOnly,
-            );
-        }
-        if let Some(p) = &self.border_color {
-            p.register_if_bound(
-                self_id,
-                registry,
-                fern_core::binding::BindingLevel::RepaintOnly,
-            );
-        }
-        if let Some(p) = &self.border_width {
-            p.register_if_bound(
-                self_id,
-                registry,
-                fern_core::binding::BindingLevel::RepaintOnly,
-            );
-        }
-        if let Some(p) = &self.corner_radius {
-            p.register_if_bound(
-                self_id,
-                registry,
-                fern_core::binding::BindingLevel::RepaintOnly,
-            );
-        }
-        if let Some(p) = &self.padding {
-            p.register_if_bound(
-                self_id,
-                registry,
-                fern_core::binding::BindingLevel::Relayout,
-            );
-        }
-        self.child_id.into_iter().collect()
+        let content = match self.child_id {
+            Some(id) => id,
+            // Headless / empty panel — emit a zero-size placeholder so
+            // the style still has a `content: WidgetId` to wrap.
+            None => ctx.add(crate::primitives::FixedSize::new().bind_width(0.0).bind_height(0.0)),
+        };
+
+        let style: SharedPanelStyle = self
+            .style_override
+            .clone()
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipePanelStyle::default()));
+        let cfg = PanelStyleConfig {
+            content,
+            variant: self.variant,
+            background_override: self.background.clone(),
+            border_color_override: self.border_color.clone(),
+            border_width_override: self.border_width.clone(),
+            corner_radius_override: self.corner_radius.clone(),
+            padding_override: self.padding.clone(),
+        };
+        let root_id = style.make_body(&cfg, ctx);
+        self.root_child_id = Some(root_id);
+        vec![root_id]
     }
 
     fn layout_response(
@@ -170,20 +188,12 @@ impl Widget for Panel {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> fern_core::widget::LayoutResponse {
-        let pad = self.resolve_padding(ctx.theme);
-        let inset = pad * 2.0;
-
-        if let Some(child_id) = self.child_id {
-            let inner_proposal = SizeProposal {
-                width: proposal.width.map(|w| (w - inset).max(0.0)),
-                height: proposal.height.map(|h| (h - inset).max(0.0)),
-            };
-            if let Some(child_size) = ctx.child_size(child_id, inner_proposal) {
-                return (Size::new(child_size.width + inset, child_size.height + inset)).into();
-            }
+        if let Some(root) = self.root_child_id
+            && let Some(size) = ctx.child_size(root, proposal)
+        {
+            return (size).into();
         }
-
-        proposal.resolve(inset, inset).into()
+        proposal.resolve(0.0, 0.0).into()
     }
 
     fn place_children(
@@ -191,40 +201,11 @@ impl Widget for Panel {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        ctx: &LayoutContext,
+        _ctx: &LayoutContext,
     ) {
-        let pad = self.resolve_padding(ctx.theme);
         for child in children.iter_mut() {
-            child.origin = fern_canvas::Point::new(bounds.x + pad, bounds.y + pad);
-            child.size = Size::new(
-                (bounds.width - pad * 2.0).max(0.0),
-                (bounds.height - pad * 2.0).max(0.0),
-            );
-        }
-    }
-
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let bg = self
-            .background
-            .as_ref()
-            .map(|p| p.resolve(ctx.theme))
-            .unwrap_or(ctx.theme.colors.surface_main);
-        let radius = self
-            .corner_radius
-            .as_ref()
-            .map(|p| p.get())
-            .unwrap_or(ctx.theme.shape.radius_popup);
-        let border_w = self.border_width.as_ref().map(|p| p.get()).unwrap_or(0.0);
-
-        canvas.fill_rounded_rect(bounds, CornerRadius::uniform(radius), bg);
-
-        if border_w > 0.0 {
-            let border = self
-                .border_color
-                .as_ref()
-                .map(|p| p.resolve(ctx.theme))
-                .unwrap_or(ctx.theme.colors.border);
-            canvas.stroke_rounded_rect(bounds, CornerRadius::uniform(radius), border, border_w);
+            child.origin = fern_canvas::Point::new(bounds.x, bounds.y);
+            child.size = Size::new(bounds.width, bounds.height);
         }
     }
 
@@ -237,7 +218,7 @@ impl Widget for Panel {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        self.child_id.into_iter().collect()
+        self.root_child_id.into_iter().collect()
     }
 }
 
