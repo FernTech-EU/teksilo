@@ -1042,4 +1042,120 @@ mod tests {
             "hidden swatch should not emit a non-hidden ColorWell node",
         );
     }
+
+    #[test]
+    fn theme_slot_supplies_button_style_when_no_override() {
+        // End-to-end check that `theme.style_slots.button = Some(rc)`
+        // actually feeds the widget when no per-call `.style(...)`
+        // override is present. Uses a custom `ButtonStyle` that adds a
+        // sentinel `RectWidget` we can spot in the rendered frame.
+        use fern_core::styles::{ButtonStyle, ButtonStyleConfig};
+        use fern_tokens::Color;
+
+        struct SentinelButton;
+        impl ButtonStyle for SentinelButton {
+            fn make_body(
+                &self,
+                cfg: &ButtonStyleConfig,
+                ctx: &mut fern_core::build_context::BuildContext,
+            ) -> fern_core::widget_id::WidgetId {
+                // Distinctive bright-magenta background nobody else paints.
+                let bg = ctx.add(
+                    crate::primitives::RectWidget::new()
+                        .background(Color::new(1.0, 0.0, 1.0, 1.0))
+                        .corner_radius(fern_tokens::CornerRadius::uniform(0.0)),
+                );
+                ctx.add(
+                    crate::primitives::ZStack::new()
+                        .add_child(bg)
+                        .add_child(cfg.label),
+                )
+            }
+        }
+
+        let mut theme = fern_core::presets::intui::light();
+        theme.style_slots.button = Some(Rc::new(SentinelButton));
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let _btn = tree.add(Button::new_literal("T").on_activate_fn(|_| {}));
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+        let frame = tree.render();
+
+        let sentinel = [1.0_f32, 0.0, 1.0, 1.0];
+        assert!(
+            frame.shapes.iter().any(|s| s.color == sentinel),
+            "the theme's `style_slots.button` impl should drive Button chrome \
+             — saw no sentinel magenta rect in the rendered frame",
+        );
+    }
+
+    #[test]
+    fn per_call_style_override_wins_over_theme_slot() {
+        // When both `Button::style(...)` AND `theme.style_slots.button`
+        // are set, the per-call wins. Verified by installing a sentinel
+        // style on the theme then a *different* sentinel via `.style()`.
+        use fern_core::styles::{ButtonStyle, ButtonStyleConfig};
+        use fern_tokens::Color;
+
+        struct ThemeSentinel;
+        impl ButtonStyle for ThemeSentinel {
+            fn make_body(
+                &self,
+                cfg: &ButtonStyleConfig,
+                ctx: &mut fern_core::build_context::BuildContext,
+            ) -> fern_core::widget_id::WidgetId {
+                let bg = ctx.add(
+                    crate::primitives::RectWidget::new()
+                        .background(Color::new(1.0, 0.0, 1.0, 1.0)) // magenta
+                        .corner_radius(fern_tokens::CornerRadius::uniform(0.0)),
+                );
+                ctx.add(
+                    crate::primitives::ZStack::new()
+                        .add_child(bg)
+                        .add_child(cfg.label),
+                )
+            }
+        }
+
+        struct CallSentinel;
+        impl ButtonStyle for CallSentinel {
+            fn make_body(
+                &self,
+                cfg: &ButtonStyleConfig,
+                ctx: &mut fern_core::build_context::BuildContext,
+            ) -> fern_core::widget_id::WidgetId {
+                let bg = ctx.add(
+                    crate::primitives::RectWidget::new()
+                        .background(Color::new(0.0, 1.0, 0.0, 1.0)) // green
+                        .corner_radius(fern_tokens::CornerRadius::uniform(0.0)),
+                );
+                ctx.add(
+                    crate::primitives::ZStack::new()
+                        .add_child(bg)
+                        .add_child(cfg.label),
+                )
+            }
+        }
+
+        let mut theme = fern_core::presets::intui::light();
+        theme.style_slots.button = Some(Rc::new(ThemeSentinel));
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let _btn = tree.add(
+            Button::new_literal("T")
+                .style(CallSentinel)
+                .on_activate_fn(|_| {}),
+        );
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+        let frame = tree.render();
+
+        let magenta = [1.0_f32, 0.0, 1.0, 1.0];
+        let green = [0.0_f32, 1.0, 0.0, 1.0];
+        assert!(
+            frame.shapes.iter().any(|s| s.color == green),
+            "per-call .style(...) override should drive chrome — no green rect found",
+        );
+        assert!(
+            !frame.shapes.iter().any(|s| s.color == magenta),
+            "theme slot must be ignored when per-call override is set — magenta should not appear",
+        );
+    }
 }
