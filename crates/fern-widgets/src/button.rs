@@ -357,7 +357,7 @@ impl Button {
     /// Insert a widget at the leading edge of the button's content
     /// (left in LTR, right in RTL). Composes with `.icon(...)`: the
     /// final order is `[leading_slot, icon+label, trailing_slot]`,
-    /// separated by `button_style.icon_label_gap`. Single-slot —
+    /// separated by `btn::BUTTON_ICON_LABEL_GAP`. Single-slot —
     /// calling `.leading(...)` again replaces the previous slot.
     /// Stack multiple widgets with an explicit `HStack`.
     ///
@@ -433,11 +433,11 @@ pub(crate) fn resolve_text_role(variant: ButtonVariant, state: InteractionState)
 
 impl fern_core::widget::Widget for Button {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        // `button_style` is a one-time snapshot of layout constants
-        // for the inner content (icon size, icon-label gap). The chrome
+        // Layout constants for the inner content (icon size,
+        // icon-label gap) come from the button recipe. The chrome
         // (padding, corner radius, fill, border) lives on the active
         // `ButtonStyle` impl — see step 5 of the styling refactor.
-        let button_style = ctx.theme_signal().get().components.button;
+        use crate::styles::recipe_button_style as btn;
         let variant = self.variant;
         let enabled = self.enabled;
 
@@ -515,24 +515,24 @@ impl fern_core::widget::Widget for Button {
             }
             IconLocation::IconOnly => {
                 let icon = self.icon.take().unwrap_or_else(|| {
-                    IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size)
+                    IconWidget::from_path(fern_canvas::Path::new(), btn::BUTTON_ICON_SIZE)
                 });
-                let icon = icon.icon_size(button_style.icon_size).bind_color(text_role);
+                let icon = icon.icon_size(btn::BUTTON_ICON_SIZE).bind_color(text_role);
                 ctx.add(icon)
             }
             IconLocation::Leading => {
                 let icon = self.icon.take().unwrap_or_else(|| {
-                    IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size)
+                    IconWidget::from_path(fern_canvas::Path::new(), btn::BUTTON_ICON_SIZE)
                 });
                 let icon_id = ctx.add(
-                    icon.icon_size(button_style.icon_size)
+                    icon.icon_size(btn::BUTTON_ICON_SIZE)
                         .bind_color(text_role.clone()),
                 );
                 let text = self.make_label_text(text_role);
                 let text_id = ctx.add(text);
                 ctx.add(
                     HStack::new()
-                        .spacing(button_style.icon_label_gap)
+                        .spacing(btn::BUTTON_ICON_LABEL_GAP)
                         .add_child(icon_id)
                         .add_child(text_id),
                 )
@@ -541,29 +541,29 @@ impl fern_core::widget::Widget for Button {
                 let text = self.make_label_text(text_role.clone());
                 let text_id = ctx.add(text);
                 let icon = self.icon.take().unwrap_or_else(|| {
-                    IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size)
+                    IconWidget::from_path(fern_canvas::Path::new(), btn::BUTTON_ICON_SIZE)
                 });
-                let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_role));
+                let icon_id = ctx.add(icon.icon_size(btn::BUTTON_ICON_SIZE).bind_color(text_role));
                 ctx.add(
                     HStack::new()
-                        .spacing(button_style.icon_label_gap)
+                        .spacing(btn::BUTTON_ICON_LABEL_GAP)
                         .add_child(text_id)
                         .add_child(icon_id),
                 )
             }
             IconLocation::Top => {
                 let icon = self.icon.take().unwrap_or_else(|| {
-                    IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size)
+                    IconWidget::from_path(fern_canvas::Path::new(), btn::BUTTON_ICON_SIZE)
                 });
                 let icon_id = ctx.add(
-                    icon.icon_size(button_style.icon_size)
+                    icon.icon_size(btn::BUTTON_ICON_SIZE)
                         .bind_color(text_role.clone()),
                 );
                 let text = self.make_label_text(text_role);
                 let text_id = ctx.add(text);
                 ctx.add(
                     VStack::new()
-                        .spacing(button_style.icon_label_gap)
+                        .spacing(btn::BUTTON_ICON_LABEL_GAP)
                         .add_child(icon_id)
                         .add_child(text_id),
                 )
@@ -572,12 +572,12 @@ impl fern_core::widget::Widget for Button {
                 let text = self.make_label_text(text_role.clone());
                 let text_id = ctx.add(text);
                 let icon = self.icon.take().unwrap_or_else(|| {
-                    IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size)
+                    IconWidget::from_path(fern_canvas::Path::new(), btn::BUTTON_ICON_SIZE)
                 });
-                let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_role));
+                let icon_id = ctx.add(icon.icon_size(btn::BUTTON_ICON_SIZE).bind_color(text_role));
                 ctx.add(
                     VStack::new()
-                        .spacing(button_style.icon_label_gap)
+                        .spacing(btn::BUTTON_ICON_LABEL_GAP)
                         .add_child(text_id)
                         .add_child(icon_id),
                 )
@@ -591,7 +591,7 @@ impl fern_core::widget::Widget for Button {
         // node count identical to the pre-slot Button for the common
         // case.
         let content_id = if self.leading.is_some() || self.trailing.is_some() {
-            let mut row = HStack::new().spacing(button_style.icon_label_gap);
+            let mut row = HStack::new().spacing(btn::BUTTON_ICON_LABEL_GAP);
             if let Some(leading) = self.leading.take() {
                 let id = ctx.add_boxed(leading);
                 row = row.add_child(id);

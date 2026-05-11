@@ -33,6 +33,10 @@ use crate::primitives::{MinSize, Padding, RectWidget, ZStack};
 // icon ↔ label gap) that aren't variant-specific.
 pub const BUTTON_HEIGHT: f32 = 24.0;
 pub const BUTTON_MIN_WIDTH: f32 = 72.0;
+pub const BUTTON_PADDING_HORIZONTAL: f32 = 14.0;
+pub const BUTTON_PADDING_VERTICAL: f32 = 0.0;
+pub const BUTTON_CORNER_RADIUS: f32 = 4.0;
+pub const BUTTON_BORDER_WIDTH: f32 = 1.0;
 pub const BUTTON_ICON_SIZE: f32 = 16.0;
 pub const BUTTON_ICON_LABEL_GAP: f32 = 4.0;
 

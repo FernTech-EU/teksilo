@@ -337,7 +337,6 @@ impl<T: Clone + PartialEq + 'static> std::fmt::Debug for FilteredItemList<T> {
 impl<T: Clone + PartialEq + 'static> Widget for FilteredItemList<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         use fern_core::binding::BindingLevel;
-        let theme = ctx.theme_signal().get();
 
         // Rebuild on model mutation AND on query change. Both bindings
         // sit here rather than on the outer panel so the sibling

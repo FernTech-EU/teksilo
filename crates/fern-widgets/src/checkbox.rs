@@ -305,7 +305,7 @@ enum InteractionState {
 
 impl Widget for Checkbox {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let cb_style = ctx.theme().components.checkbox;
+        use crate::styles::recipe_checkbox_style as cb_dims;
         let kind = self.kind.clone();
         let enabled = self.enabled;
         let variant = self.variant;
@@ -348,7 +348,7 @@ impl Widget for Checkbox {
         };
         let body_id = style.make_body(&cfg, ctx);
 
-        let mut row = HStack::new().spacing(cb_style.label_gap).add_child(body_id);
+        let mut row = HStack::new().spacing(cb_dims::CHECKBOX_LABEL_GAP).add_child(body_id);
         if !self.labels_hidden && let Some(ref label) = self.label {
             let label_widget = TextWidget::new_literal(label)
                 .style(TextStyleRole::Body)
@@ -382,7 +382,7 @@ impl Widget for Checkbox {
 
         let row_id = ctx.add(row);
         let root_id =
-            ctx.add(MinSize::new(cb_style.box_hit_area, cb_style.box_hit_area).child_id(row_id));
+            ctx.add(MinSize::new(cb_dims::CHECKBOX_BOX_HIT_AREA, cb_dims::CHECKBOX_BOX_HIT_AREA).child_id(row_id));
 
         if let Some(content) = self.composite_tooltip_content.take() {
             crate::tooltip::attach_composite_tooltip_boxed(

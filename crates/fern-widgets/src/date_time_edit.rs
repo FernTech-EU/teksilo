@@ -749,7 +749,6 @@ impl DateTimeEdit {
         min: Option<Date>,
         max: Option<Date>,
     ) -> WidgetId {
-        use crate::styles::recipe_text_input_style as field_dims;
         let validator =
             build_date_validator(pattern_rc.clone(), min, max, self.validation_behavior);
 
@@ -823,7 +822,6 @@ impl DateTimeEdit {
         min: Option<Time>,
         max: Option<Time>,
     ) -> WidgetId {
-        use crate::styles::recipe_text_input_style as field_dims;
         let validator =
             build_time_validator(pattern_rc.clone(), min, max, self.validation_behavior);
 

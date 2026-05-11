@@ -87,28 +87,15 @@ const SHOWN_SHADOW_ALPHAS: &[F32Access<ShapeTokens>] = &[
     ),
 ];
 
-const SHOWN_DENSITIES: &[F32Access<ComponentStyles>] = &[
-    (
-        "tooltip.shadow_density",
-        |c| c.tooltip.shadow_density,
-        |c, v| c.tooltip.shadow_density = v,
-    ),
-    (
-        "card.shadow_density",
-        |c| c.card.shadow_density,
-        |c, v| c.card.shadow_density = v,
-    ),
-    (
-        "popover.shadow_density",
-        |c| c.popover.shadow_density,
-        |c, v| c.popover.shadow_density = v,
-    ),
-    (
-        "menu.shadow_density",
-        |c| c.menu.shadow_density,
-        |c, v| c.menu.shadow_density = v,
-    ),
-];
+// Step 7 of the styling refactor deleted the per-themable-widget
+// dimension structs in `fern-tokens::components.rs` — including the
+// `shadow_density` fields the Theme tab used to expose. The data now
+// lives as `pub const` declarations in
+// `fern-widgets/src/styles/recipe_<widget>_style.rs`, not editable
+// at runtime through the inspector. Re-introducing the slider UI
+// requires a different mechanism (per-recipe-instance overrides on
+// the active style trait object).
+const SHOWN_DENSITIES: &[F32Access<ComponentStyles>] = &[];
 
 const SHOWN_COLORS: &[ColorAccess] = &[
     ("accent", |t| t.accent, |t, c| t.accent = c),

@@ -143,13 +143,13 @@ impl Widget for CommandLinkButton {
         let icon_role = title_role.clone();
 
         let style = ctx.theme().components.command_link_button;
-        let normal_bw = ctx.theme().components.button.border_width;
+        let normal_bw = crate::styles::recipe_button_style::BUTTON_BORDER_WIDTH;
         let focus_bw = ctx.theme().shape.focus_ring_width;
         let border_width = interaction.map(move |s| match s {
             InteractionState::Focused => focus_bw,
             _ => normal_bw,
         });
-        let corner_radius = ctx.theme().components.button.corner_radius;
+        let corner_radius = crate::styles::recipe_button_style::BUTTON_CORNER_RADIUS;
 
         // Title + optional description column.
         let title_widget = TextWidget::new_literal(&self.title)

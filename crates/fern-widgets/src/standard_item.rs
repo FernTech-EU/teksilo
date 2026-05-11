@@ -1177,8 +1177,9 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(400.0, 60.0));
         let bounds = tree.bounds(id);
-        let style = theme().components.standard_item;
-        let cx = bounds.x + style.padding_horizontal + style.chevron_column_width * 0.5;
+        use crate::styles::recipe_standard_item_style as si;
+        let cx =
+            bounds.x + si::STANDARD_ITEM_PADDING_HORIZONTAL + si::STANDARD_ITEM_CHEVRON_COLUMN_WIDTH * 0.5;
         let cy = bounds.y + bounds.height * 0.5;
         dispatch_tap(&mut tree, Point::new(cx, cy));
         assert_eq!(

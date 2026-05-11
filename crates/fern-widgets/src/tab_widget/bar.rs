@@ -1627,7 +1627,8 @@ fn build_scroll_arrow(
     easing: Easing,
     icon_role: TextRole,
 ) -> WidgetId {
-    let icon_size = ctx.theme().components.button.icon_size;
+    let _ = ctx;
+    let icon_size = crate::styles::recipe_button_style::BUTTON_ICON_SIZE;
     let icon = match (orientation, kind) {
         (TabBarOrientation::Horizontal, ScrollArrowKind::Leading) => {
             IconWidget::chevron_left(icon_size)
@@ -1713,7 +1714,8 @@ fn build_overflow_dropdown(
     entries: Vec<DropdownEntry>,
     icon_role: TextRole,
 ) -> WidgetId {
-    let icon_size = ctx.theme().components.button.icon_size;
+    let _ = ctx;
+    let icon_size = crate::styles::recipe_button_style::BUTTON_ICON_SIZE;
     let trigger = Button::new(LocalizedString::literal(""))
         .variant(ButtonVariant::Ghost)
         .text_role(icon_role)

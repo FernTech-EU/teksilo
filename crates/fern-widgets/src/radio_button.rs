@@ -188,7 +188,7 @@ enum InteractionState {
 
 impl Widget for RadioButton {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let radio_style = ctx.theme().components.radio;
+        use crate::styles::recipe_radio_style as radio_dims;
         let selected = self.selected.clone();
         let value = self.value;
         let enabled = self.enabled;
@@ -222,7 +222,7 @@ impl Widget for RadioButton {
         let body_id = style.make_body(&cfg, ctx);
 
         let mut row = HStack::new()
-            .spacing(radio_style.label_gap)
+            .spacing(radio_dims::RADIO_LABEL_GAP)
             .add_child(body_id);
         if let Some(ref label) = self.label {
             let label_widget = TextWidget::new_literal(label)
@@ -257,7 +257,7 @@ impl Widget for RadioButton {
 
         let row_id = ctx.add(row);
         let root_id =
-            ctx.add(MinSize::new(radio_style.hit_area, radio_style.hit_area).child_id(row_id));
+            ctx.add(MinSize::new(radio_dims::RADIO_HIT_AREA, radio_dims::RADIO_HIT_AREA).child_id(row_id));
 
         if let Some(content) = self.composite_tooltip_content.take() {
             crate::tooltip::attach_composite_tooltip_boxed(

@@ -305,7 +305,7 @@ fn resolve_shortcut_role(state: MenuItemState) -> TextRole {
 
 impl Widget for MenuItem {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let menu_style = ctx.theme().components.menu;
+        use crate::styles::recipe_menu_item_style as menu;
         let enabled = self.enabled;
 
         let interaction = ctx.signal(if enabled {
@@ -332,8 +332,8 @@ impl Widget for MenuItem {
             };
             ctx.add(
                 crate::primitives::FixedSize::new()
-                    .bind_width(menu_style.icon_column_width)
-                    .bind_height(menu_style.icon_column_width)
+                    .bind_width(menu::MENU_ICON_COLUMN_WIDTH)
+                    .bind_height(menu::MENU_ICON_COLUMN_WIDTH)
                     .child_id(icon_child_id),
             )
         };
@@ -402,8 +402,8 @@ impl Widget for MenuItem {
             };
             let chevron_column = ctx.add(
                 crate::primitives::FixedSize::new()
-                    .bind_width(menu_style.item_padding_horizontal)
-                    .bind_height(menu_style.icon_column_width)
+                    .bind_width(menu::MENU_ITEM_PADDING_HORIZONTAL)
+                    .bind_height(menu::MENU_ICON_COLUMN_WIDTH)
                     .child_id(chevron_child_id),
             );
             trailing_row = trailing_row.add_child(chevron_column);

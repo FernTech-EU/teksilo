@@ -10,129 +10,10 @@ use crate::Color;
 
 // ─── Form controls ──────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct ButtonStyle {
-    pub height: f32,
-    pub min_width: f32,
-    pub padding_horizontal: f32,
-    pub padding_vertical: f32,
-    pub corner_radius: f32,
-    pub border_width: f32,
-    pub focus_ring_width: f32,
-    pub focus_ring_offset: f32,
-    pub icon_size: f32,
-    pub icon_label_gap: f32,
-}
-
-impl Default for ButtonStyle {
-    fn default() -> Self {
-        Self {
-            height: 24.0,
-            min_width: 72.0,
-            padding_horizontal: 14.0,
-            padding_vertical: 0.0,
-            corner_radius: 4.0,
-            border_width: 1.0,
-            focus_ring_width: 2.0,
-            focus_ring_offset: 2.0,
-            icon_size: 16.0,
-            icon_label_gap: 4.0,
-        }
-    }
-}
-
-/// Square, icon-only [`IconButton`](crate::icon_button::IconButton)
-/// dimensions. Five sizes calibrated to the IntelliJ Int UI scale,
-/// listed in ascending size order:
-///
-/// - `size_compact` (22 dp) — small buttons inside tool windows
-///   / inspector panels.
-/// - `size_default` (24 dp) — TextInput / ComboBox / SearchField
-///   trailing-slot density.
-/// - `size_toolbar` (30 dp) — side-toolbar buttons (left / right /
-///   top window edges in IntelliJ).
-/// - `size_large` (40 dp) — emphasized stand-alone buttons in rich
-///   menus and detail panes.
-/// - `size_hero` (50 dp) — hero / landing-screen CTAs.
-///
-/// The `icon_size` field applies to the two smallest buttons
-/// (Compact, Default); Toolbar / Large / Hero scale up via the
-/// dedicated `icon_size_toolbar` / `icon_size_large` /
-/// `icon_size_hero` fields so a 50 dp button doesn't carry a tiny
-/// 16 dp glyph.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct IconButtonStyle {
-    pub size_compact: f32,
-    pub size_default: f32,
-    pub size_toolbar: f32,
-    pub size_large: f32,
-    pub size_hero: f32,
-    pub icon_size: f32,
-    pub icon_size_toolbar: f32,
-    pub icon_size_large: f32,
-    pub icon_size_hero: f32,
-    pub corner_radius: f32,
-}
-
-impl Default for IconButtonStyle {
-    fn default() -> Self {
-        Self {
-            size_compact: 22.0,
-            size_default: 24.0,
-            size_toolbar: 30.0,
-            size_large: 40.0,
-            size_hero: 50.0,
-            icon_size: 16.0,
-            icon_size_toolbar: 18.0,
-            icon_size_large: 24.0,
-            icon_size_hero: 32.0,
-            corner_radius: 8.0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct TextFieldStyle {
-    pub height: f32,
-    pub padding_horizontal: f32,
-    pub padding_vertical: f32,
-    pub border_width: f32,
-    pub corner_radius: f32,
-    pub caret_width: f32,
-    /// Vertical gap between the field bottom edge and the inline
-    /// validation-feedback strip. Int UI density convention.
-    pub validation_strip_gap: f32,
-    /// Pulse duration (ms) for the brief border-color attention cue
-    /// on transitions into `Error`. Int UI uses a short single-shot
-    /// pulse rather than a Material-style shake.
-    pub error_pulse_duration_ms: u32,
-    /// Decay window (ms) for the accent border tint + correction text
-    /// after a `Corrected` outcome. After this elapses, the field
-    /// returns to `None` state — the value is correct now, nothing
-    /// to keep flagging.
-    pub corrected_pulse_duration_ms: u32,
-    /// Visible character used for unfilled editable positions when an
-    /// input mask is set. Empty fields with a mask paint this char at
-    /// every editable position — `__/__/____` for `99/99/9999`.
-    pub mask_placeholder_char: char,
-}
-
-impl Default for TextFieldStyle {
-    fn default() -> Self {
-        Self {
-            height: 28.0,
-            padding_horizontal: 4.0,
-            padding_vertical: 4.0,
-            border_width: 1.0,
-            corner_radius: 4.0,
-            caret_width: 1.0,
-            validation_strip_gap: 4.0,
-            error_pulse_duration_ms: 240,
-            corrected_pulse_duration_ms: 1500,
-            mask_placeholder_char: '_',
-        }
-    }
-}
+// `ButtonStyle`, `IconButtonStyle`, and `TextFieldStyle` were deleted
+// in Step 7 of the styling refactor — the dimension data lives in
+// `fern-widgets/src/styles/recipe_<widget>_style.rs` as `pub const`
+// declarations, and the per-widget recipe traits own the chrome.
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct TextAreaStyle {
@@ -153,125 +34,12 @@ impl Default for TextAreaStyle {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct CheckboxStyle {
-    pub box_visual_size: f32,
-    pub box_hit_area: f32,
-    pub label_gap: f32,
-    pub corner_radius: f32,
-}
-
-impl Default for CheckboxStyle {
-    fn default() -> Self {
-        Self {
-            box_visual_size: 19.0,
-            box_hit_area: 24.0,
-            label_gap: 6.0,
-            corner_radius: 3.0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct RadioStyle {
-    pub visual_size: f32,
-    pub hit_area: f32,
-    pub label_gap: f32,
-    pub inner_dot_size: f32,
-}
-
-impl Default for RadioStyle {
-    fn default() -> Self {
-        Self {
-            visual_size: 19.0,
-            hit_area: 24.0,
-            label_gap: 6.0,
-            inner_dot_size: 7.0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct ToggleStyle {
-    pub track_width: f32,
-    pub track_height: f32,
-    pub thumb_diameter: f32,
-    pub thumb_inset: f32,
-    pub label_gap: f32,
-}
-
-impl Default for ToggleStyle {
-    fn default() -> Self {
-        Self {
-            track_width: 28.0,
-            track_height: 16.0,
-            thumb_diameter: 12.0,
-            thumb_inset: 2.0,
-            label_gap: 6.0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct ComboBoxStyle {
-    pub height: f32,
-    pub padding_horizontal: f32,
-    pub arrow_column_width: f32,
-    pub corner_radius: f32,
-}
-
-impl Default for ComboBoxStyle {
-    fn default() -> Self {
-        Self {
-            height: 28.0,
-            padding_horizontal: 9.0,
-            arrow_column_width: 23.0,
-            corner_radius: 4.0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct SliderStyle {
-    pub track_height: f32,
-    pub thumb_diameter: f32,
-    pub tick_size: f32,
-}
-
-impl Default for SliderStyle {
-    fn default() -> Self {
-        Self {
-            track_height: 4.0,
-            thumb_diameter: 14.0,
-            tick_size: 2.0,
-        }
-    }
-}
+// `CheckboxStyle` / `RadioStyle` / `ToggleStyle` / `ComboBoxStyle` /
+// `SliderStyle` deleted in Step 7 — dim data lives in the recipe modules.
 
 // ─── Navigation / chrome ────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct TabStyle {
-    pub editor_tab_height: f32,
-    pub tool_window_tab_height: f32,
-    pub padding_horizontal: f32,
-    pub underline_active: f32,
-    pub underline_hover: f32,
-    pub close_button_size: f32,
-}
-
-impl Default for TabStyle {
-    fn default() -> Self {
-        Self {
-            editor_tab_height: 50.0,
-            tool_window_tab_height: 28.0,
-            padding_horizontal: 12.0,
-            underline_active: 3.0,
-            underline_hover: 2.0,
-            close_button_size: 16.0,
-        }
-    }
-}
+// `TabStyle` deleted in Step 7 — dim data in `recipe_tab_style.rs`.
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ToolbarStyle {
@@ -315,107 +83,9 @@ impl Default for StatusBarStyle {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct MenuStyle {
-    pub item_height: f32,
-    pub item_padding_horizontal: f32,
-    pub icon_column_width: f32,
-    pub icon_label_gap: f32,
-    pub shortcut_left_gap: f32,
-    pub separator_height: f32,
-    pub popup_corner_radius: f32,
-    pub popup_border_width: f32,
-    /// Corner radius of the per-row hover / pressed highlight rect.
-    /// Independent of `popup_corner_radius`, which rounds the menu surface.
-    pub item_corner_radius: f32,
-    /// 0..=1 multiplier on `shape.shadow_inner_sm.color.a` at paint time.
-    /// 1.0 = full theme-token alpha, 0.0 = single-layer outer shadow only.
-    pub shadow_density: f32,
-}
-
-impl Default for MenuStyle {
-    fn default() -> Self {
-        Self {
-            item_height: 24.0,
-            item_padding_horizontal: 12.0,
-            icon_column_width: 16.0,
-            icon_label_gap: 6.0,
-            shortcut_left_gap: 24.0,
-            separator_height: 9.0,
-            popup_corner_radius: 8.0,
-            popup_border_width: 1.0,
-            item_corner_radius: 8.0,
-            shadow_density: 0.5,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct TooltipStyle {
-    pub padding_horizontal: f32,
-    pub padding_vertical: f32,
-    pub corner_radius: f32,
-    pub max_width: f32,
-    /// 0..=1 multiplier on `shape.shadow_inner_xs.color.a` at paint time.
-    /// 1.0 = full theme-token alpha (the punchy tooltip rim), 0.0 =
-    /// single-layer outer shadow only.
-    pub shadow_density: f32,
-}
-
-impl Default for TooltipStyle {
-    fn default() -> Self {
-        Self {
-            padding_horizontal: 10.0,
-            padding_vertical: 6.0,
-            corner_radius: 8.0,
-            max_width: 320.0,
-            shadow_density: 1.0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct CompositeTooltipStyle {
-    pub padding_horizontal: f32,
-    pub padding_vertical: f32,
-    pub corner_radius: f32,
-    pub max_width: f32,
-    pub max_height: f32,
-    /// 0..=1 multiplier on `shape.shadow_inner_md.color.a` at paint time.
-    pub shadow_density: f32,
-}
-
-impl Default for CompositeTooltipStyle {
-    fn default() -> Self {
-        Self {
-            padding_horizontal: 12.0,
-            padding_vertical: 12.0,
-            corner_radius: 8.0,
-            max_width: 480.0,
-            max_height: 480.0,
-            shadow_density: 0.7,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct ScrollBarStyle {
-    pub thickness_idle: f32,
-    pub thickness_hover: f32,
-    pub min_thumb_length: f32,
-    pub corner_radius: f32,
-}
-
-impl Default for ScrollBarStyle {
-    fn default() -> Self {
-        Self {
-            thickness_idle: 4.0,
-            thickness_hover: 8.0,
-            min_thumb_length: 24.0,
-            corner_radius: 2.0,
-        }
-    }
-}
+// `MenuStyle`, `TooltipStyle`, `CompositeTooltipStyle`, `ScrollBarStyle`
+// deleted in Step 7 — dim data lives in `recipe_menu_item_style.rs`,
+// `recipe_tooltip_style.rs`, `recipe_scroll_bar_style.rs`.
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct TreeListStyle {
@@ -436,59 +106,8 @@ impl Default for TreeListStyle {
     }
 }
 
-/// Tokens for `StandardListItem` / `StandardTreeItem` — the canonical
-/// row layout used by `ListView`/`TreeView`/etc. delegates. Selection
-/// background mirrors `MenuStyle`/`ComboBoxStyle` (rounded, inset).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct StandardItemStyle {
-    /// Default size for the primary leading IconWidget.
-    pub icon_size: f32,
-    /// Default size for the subtitle-line leading IconWidget.
-    pub subtitle_icon_size: f32,
-    /// Gap between primary-line slots (checkbox / leading / center / label / trailing).
-    pub slot_gap: f32,
-    /// Gap between subtitle-line slots.
-    pub subtitle_slot_gap: f32,
-    /// Vertical gap between the label line and the subtitle line.
-    pub label_subtitle_gap: f32,
-    pub padding_horizontal: f32,
-    pub padding_vertical: f32,
-    pub min_height_single_line: f32,
-    pub min_height_two_line: f32,
-    /// Width of the always-reserved chevron column in tree rows
-    /// (including leaves, so labels at the same depth align).
-    pub chevron_column_width: f32,
-    /// Per-depth indent step for tree rows. Independent of
-    /// `TreeListStyle.indent_per_level` so callers can tune the two
-    /// systems separately.
-    pub tree_indent_step: f32,
-    /// Corner radius of the selection / hover / pressed background
-    /// rect. Matches `MenuStyle.item_corner_radius`.
-    pub item_corner_radius: f32,
-    /// Outer horizontal margin so the rounded corners are visible
-    /// (the bg rect doesn't touch the row edge).
-    pub bg_horizontal_inset: f32,
-}
-
-impl Default for StandardItemStyle {
-    fn default() -> Self {
-        Self {
-            icon_size: 16.0,
-            subtitle_icon_size: 12.0,
-            slot_gap: 8.0,
-            subtitle_slot_gap: 6.0,
-            label_subtitle_gap: 2.0,
-            padding_horizontal: 8.0,
-            padding_vertical: 4.0,
-            min_height_single_line: 28.0,
-            min_height_two_line: 44.0,
-            chevron_column_width: 16.0,
-            tree_indent_step: 16.0,
-            item_corner_radius: 8.0,
-            bg_horizontal_inset: 4.0,
-        }
-    }
-}
+// `StandardItemStyle` deleted in Step 7 — dim data in
+// `recipe_standard_item_style.rs`.
 
 // ─── Surfaces ───────────────────────────────────────────────────────────────
 
@@ -536,62 +155,9 @@ impl Default for NotificationStyle {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct PanelStyle {
-    pub padding: f32,
-    pub corner_radius: f32,
-    pub border_width: f32,
-}
-
-impl Default for PanelStyle {
-    fn default() -> Self {
-        Self {
-            padding: 12.0,
-            corner_radius: 8.0,
-            border_width: 1.0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct CardStyle {
-    pub padding: f32,
-    pub corner_radius: f32,
-    pub border_width: f32,
-    /// 0..=1 multiplier on `shape.shadow_inner_md.color.a` at paint time.
-    pub shadow_density: f32,
-}
-
-impl Default for CardStyle {
-    fn default() -> Self {
-        Self {
-            padding: 16.0,
-            corner_radius: 8.0,
-            border_width: 1.0,
-            shadow_density: 0.5,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct PopoverStyle {
-    pub padding: f32,
-    pub corner_radius: f32,
-    pub border_width: f32,
-    /// 0..=1 multiplier on `shape.shadow_inner_sm.color.a` at paint time.
-    pub shadow_density: f32,
-}
-
-impl Default for PopoverStyle {
-    fn default() -> Self {
-        Self {
-            padding: 12.0,
-            corner_radius: 8.0,
-            border_width: 1.0,
-            shadow_density: 0.5,
-        }
-    }
-}
+// `PanelStyle`, `CardStyle`, `PopoverStyle` deleted in Step 7 — dim
+// data in `recipe_panel_style.rs`, `recipe_card_style.rs`,
+// `recipe_popover_style.rs`.
 
 // ─── Display widgets ────────────────────────────────────────────────────────
 
@@ -1388,31 +954,23 @@ impl Default for SearchFieldStyle {
 // ─── Aggregate ──────────────────────────────────────────────────────────────
 
 /// All per-component style structs, owned by the [`crate::theme::Theme`].
+///
+/// Step 7 of the styling refactor deleted the 17 themable-widget
+/// dimension structs (Button, IconButton, TextField, Checkbox, Radio,
+/// Toggle, ComboBox, Slider, Tab, Menu, Tooltip, CompositeTooltip,
+/// ScrollBar, StandardItem, Panel, Card, Popover) — their data lives
+/// in `fern-widgets/src/styles/recipe_<widget>_style.rs` as
+/// `pub const` declarations. The remaining slots cover non-themable
+/// widgets whose chrome IS the widget body (Toolbar, Dialog, Chart,
+/// Calendar, ColorPicker, Avatar, …).
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct ComponentStyles {
-    pub button: ButtonStyle,
-    pub icon_button: IconButtonStyle,
-    pub text_field: TextFieldStyle,
     pub text_area: TextAreaStyle,
-    pub checkbox: CheckboxStyle,
-    pub radio: RadioStyle,
-    pub toggle: ToggleStyle,
-    pub combo_box: ComboBoxStyle,
-    pub slider: SliderStyle,
-    pub tab: TabStyle,
     pub toolbar: ToolbarStyle,
     pub status_bar: StatusBarStyle,
-    pub menu: MenuStyle,
-    pub tooltip: TooltipStyle,
-    pub composite_tooltip: CompositeTooltipStyle,
-    pub scrollbar: ScrollBarStyle,
     pub tree_list: TreeListStyle,
-    pub standard_item: StandardItemStyle,
     pub dialog: DialogStyle,
     pub notification: NotificationStyle,
-    pub panel: PanelStyle,
-    pub card: CardStyle,
-    pub popover: PopoverStyle,
     pub accordion: AccordionStyle,
     pub tool_box: ToolBoxStyle,
     pub group_box: GroupBoxStyle,
