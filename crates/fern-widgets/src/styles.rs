@@ -9,6 +9,7 @@
 //! composition over the `FooStyle` trait — no `paint()` method on
 //! any themable widget.
 
+pub mod recipe_banner_style;
 pub mod recipe_button_style;
 pub mod recipe_card_style;
 pub mod recipe_checkbox_style;
@@ -28,6 +29,7 @@ pub mod recipe_text_input_style;
 pub mod recipe_toggle_style;
 pub mod recipe_tooltip_style;
 
+pub use recipe_banner_style::RecipeBannerStyle;
 pub use recipe_button_style::RecipeButtonStyle;
 pub use recipe_card_style::RecipeCardStyle;
 pub use recipe_checkbox_style::RecipeCheckboxStyle;

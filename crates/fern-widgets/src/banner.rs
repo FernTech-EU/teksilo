@@ -14,54 +14,26 @@
 //!     .on_dismiss(|ctx| ctx.send_intent(AppIntent::DismissBanner))
 //! ```
 
+use std::rc::Rc;
+
 use fern_canvas::{Canvas, Path, Point, Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
-use fern_core::color_prop::ColorProp;
+use fern_core::styles::{BannerStyleConfig, SharedBannerStyle};
 use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{CornerRadius, SurfaceRole, TextRole, TextStyleRole, VAlignment};
+use fern_tokens::{TextRole, TextStyleRole, VAlignment};
+
+pub use fern_core::styles::BannerSeverity;
 
 use crate::icon_button::IconButton;
-use crate::primitives::{Expand, HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
-
-/// Banner severity level. Drives the surface tint, glyph color, and
-/// glyph shape. Apps with a "neutral" callout requirement should use
-/// a [`Card`](crate::card::Card) instead.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BannerSeverity {
-    /// Informational notice — accent-tinted background, circle glyph.
-    Info,
-    /// Success / confirmation — green-tinted background, circle glyph.
-    Success,
-    /// Non-fatal warning — amber-tinted background, triangle glyph.
-    Warning,
-    /// Error / critical condition — red-tinted background, circle glyph.
-    Error,
-}
-
-impl BannerSeverity {
-    fn surface(self) -> SurfaceRole {
-        match self {
-            Self::Info => SurfaceRole::StatusInfo,
-            Self::Success => SurfaceRole::StatusSuccess,
-            Self::Warning => SurfaceRole::StatusWarning,
-            Self::Error => SurfaceRole::StatusError,
-        }
-    }
-
-    fn glyph_color(self, theme: &fern_core::Theme) -> fern_tokens::Color {
-        match self {
-            Self::Info => theme.colors.status_info_fg,
-            Self::Success => theme.colors.status_success_fg,
-            Self::Warning => theme.colors.status_warning_fg,
-            Self::Error => theme.colors.status_error_fg,
-        }
-    }
-}
+use crate::primitives::{Expand, HStack, TextWidget, VStack};
+use crate::styles::recipe_banner_style as banner_tokens;
 
 /// Small leaf widget that paints the severity glyph (circle or
-/// triangle). Sized via `BannerStyle::glyph_size` at paint time.
+/// triangle). The glyph is a functional renderer — it draws domain
+/// data (the info/warn/error mark), so it stays widget-owned rather
+/// than moving behind `BannerStyle` (principle 6).
 struct SeverityGlyph {
     severity: BannerSeverity,
     size: f32,
@@ -116,6 +88,8 @@ pub struct Banner {
     description: Option<String>,
     action: Option<Box<dyn Widget>>,
     on_dismiss: Option<Box<dyn Fn(&mut EventContext)>>,
+    /// Per-call override for the banner strip chrome.
+    style_override: Option<SharedBannerStyle>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -128,8 +102,16 @@ impl Banner {
             description: None,
             action: None,
             on_dismiss: None,
+            style_override: None,
             root_child_id: None,
         }
+    }
+
+    /// Per-call style override for the banner strip chrome. Replaces
+    /// the theme-wide default `BannerStyle` for just this instance.
+    pub fn style(mut self, style: impl fern_core::styles::BannerStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
     }
 
     /// Construct an info-severity banner.
@@ -213,21 +195,12 @@ impl std::fmt::Debug for Banner {
 impl Widget for Banner {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let severity = self.severity;
-        let style = ctx.theme().components.banner;
-        let radius = CornerRadius::uniform(style.corner_radius);
 
-        // Background panel — status surface tint, no border (the surface
-        // tokens already encode contrast with the page background).
-        let bg = ctx.add(
-            RectWidget::new()
-                .background(ColorProp::SurfaceRole(severity.surface()))
-                .corner_radius(radius),
-        );
-
-        // Severity glyph.
+        // Severity glyph — a functional renderer, built by the widget
+        // (principle 6) and handed to the style as the leading glyph.
         let glyph = ctx.add(SeverityGlyph {
             severity,
-            size: style.glyph_size,
+            size: banner_tokens::BANNER_GLYPH_SIZE,
         });
 
         // Title + optional description column.
@@ -238,7 +211,7 @@ impl Widget for Banner {
                 .single_line(),
         );
         let mut text_column = VStack::new()
-            .spacing(style.title_description_gap)
+            .spacing(banner_tokens::BANNER_TITLE_DESCRIPTION_GAP)
             .add_child(title);
         if let Some(description) = &self.description {
             let desc = ctx.add(
@@ -250,14 +223,14 @@ impl Widget for Banner {
         }
         let text_column_id = ctx.add(text_column);
 
-        // Row layout: [glyph] [text + spacer expanding] [action] [dismiss]
-        let mut row = HStack::new()
-            .spacing(style.content_gap)
+        // Content row: [text + spacer expanding] [action] [dismiss].
+        // The leading severity glyph is prepended by the `BannerStyle`.
+        let mut content = HStack::new()
+            .spacing(banner_tokens::BANNER_CONTENT_GAP)
             .alignment(VAlignment::Center)
-            .add_child(glyph)
             .add_child(ctx.add(Expand::horizontal().child_id(text_column_id)));
         if let Some(action) = self.action.take() {
-            row = row.add_child(ctx.add_boxed(action));
+            content = content.add_child(ctx.add_boxed(action));
         }
         if let Some(on_dismiss) = self.on_dismiss.take() {
             // IconButton::clear() ships with its own translated
@@ -268,15 +241,26 @@ impl Widget for Banner {
             let btn = IconButton::clear()
                 .embedded()
                 .on_activate_fn(move |c| on_dismiss(c));
-            row = row.add_child(ctx.add(btn));
+            content = content.add_child(ctx.add(btn));
         }
+        let content_id = ctx.add(content);
 
-        let row_id = ctx.add(row);
-        let padded = ctx.add(
-            Padding::symmetric(style.padding_vertical, style.padding_horizontal).child_id(row_id),
+        // The strip chrome (per-severity surface tint, corner radius,
+        // padding, glyph-content arrangement) is owned by the active
+        // `BannerStyle`; this widget keeps its `Role::Status` node.
+        let style: SharedBannerStyle = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.banner.clone())
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeBannerStyle::default()));
+        let root = style.make_body(
+            &BannerStyleConfig {
+                severity,
+                content: content_id,
+                leading_glyph: glyph,
+            },
+            ctx,
         );
-
-        let root = ctx.add(ZStack::new().add_child(bg).add_child(padded));
         self.root_child_id = Some(root);
         vec![root]
     }

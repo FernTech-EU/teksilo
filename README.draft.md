@@ -1,6 +1,6 @@
 # FernUI
 
-A pure-Rust GUI framework for serious desktop applications: writing tools, IDEs, dashboards, consoles. The kind of app where accessibility, internationalization, and rich text aren't add-ons you bolt on later, but things the framework owes you from day one.
+A pure-Rust GUI framework for serious desktop applications: the kind of software a user sits down with for hours at a time and reaches for the keyboard before the mouse. The target use cases are long-lived professional tools: writing applications for novelists, IDEs and code editors, dispatch consoles, course managers, internal business tools. Accessibility, internationalization, and rich text aren't add-ons you bolt on later, but things the framework owes you from day one.
 
 ```rust
 use fern_ui::prelude::*;
@@ -38,7 +38,7 @@ FernUI is a retained-tree framework. Accessibility, internationalization, and th
 
 **Version 0.1, first public release.** Expect breaking changes between 0.x versions.
 
-This is one developer's project: architected and reviewed by one person, with implementation help from Claude Opus and Mistral, built on top of two earlier foundational crates ([text-document](https://github.com/jacquetc/text-document) and [text-typeset](https://github.com/jacquetc/text-typeset)). It moved fast, but it is not a sketch. The test suite is the evidence: roughly 2,600 tests in fern-ui, over 4,000 across the whole stack, and they test behavior, things like event dispatch, layout output, and accessibility-tree structure, rather than implementation snapshots.
+This is one developer's project. Architecture, design reviews, and final acceptance were human; code generation and routine refactoring were LLM-assisted (Claude Opus and Mistral) under that review. It is built on top of two earlier foundational crates ([text-document](https://github.com/jacquetc/text-document) and [text-typeset](https://github.com/jacquetc/text-typeset)). It moved fast, but it is not a sketch. The test suite is the evidence: roughly 2,600 tests in fern-ui, over 4,000 across the whole stack, and they test behavior, things like event dispatch, layout output, and accessibility-tree structure, rather than implementation snapshots. The same widget tree runs under tests without a window, a GPU, or winit, and a simulated clock makes time-dependent behavior deterministic.
 
 It is in production use by FernTech's own applications, including the fern-collector dashboard. That is real but narrow exposure; treat 0.1 accordingly. The honest list of known gaps is at the end of this README.
 
@@ -58,6 +58,8 @@ It is in production use by FernTech's own applications, including the fern-colle
 
 **Accessibility.** AccessKit integration at the trait level, plus a builder-level override surface (`access_label`, `access_description`, `access_subtree`, `access_custom_action`, `access_identifier`, `access_customize`) for when the default mapping isn't what you want.
 
+**Input pipeline.** Widget interactions emit typed `Intent` values that ancestor `Action` handlers consume; keyboard shortcuts map to intent names through a rebindable registry with graveyard semantics. Events from external sources (database notifiers, message buses, file watchers) are a separate concern: widgets subscribe to them directly rather than routing through the typed-intent layer.
+
 **Text.** `text-document` (block/frame/table model, multi-cursor editing, full undo/redo, find/replace, Markdown/HTML/LaTeX/DOCX import-export, `Send + Sync`) and `text-typeset` (HarfBuzz shaping, swash rasterization with color emoji, shelf-packed atlas, UAX #14 line breaking, BiDi, hit testing, 0.1x to 10x zoom without reflow).
 
 **Animations.** `Collapse`, `Fade`, `Pulse`, `Cycle`, `SmoothSize`, `Crossfade`, `Slide`, `Shake`, `Scale`, `Rotate`, and a Kawase dual-pass GPU `Blur`. Each documents its reduced-motion behavior; `to_or_snap()` collapses to instant under `prefers_reduced_motion`.
@@ -66,7 +68,7 @@ It is in production use by FernTech's own applications, including the fern-colle
 
 **Idle discipline.** Retained-tree dirty propagation wired to `winit`'s `ControlFlow::Wait`. A truly idle app emits zero event-loop wake-ups; `FERN_IDLE_TRACE=1` instruments every wake source for regression bisection.
 
-**And also.** A three-tier tooltip system with dwell-to-sticky disclosure; a shortcut/intent/action system with reactive rebinding and graveyard semantics; typed-payload drag and drop; the `fern-settings` crate (K/V store, versioned migrations, window-state restore, generic `MruList<T>`); an opt-in, GDPR-conscious telemetry stack with a schema linter; a pannable and zoomable `fern-scene` canvas; a `fern-charts` crate; a nine-tab debug inspector compiled to nothing in release builds; and a `fern-widgets-previewer` catalog browser.
+**And also.** A three-tier tooltip system with dwell-to-sticky disclosure; typed-payload drag and drop; the `fern-settings` crate (K/V store, versioned migrations, window-state restore, generic `MruList<T>`); an opt-in, GDPR-conscious telemetry stack with a schema linter; a pannable and zoomable `fern-scene` canvas; a `fern-charts` crate; a nine-tab debug inspector compiled to nothing in release builds; and a `fern-widgets-previewer` catalog browser.
 
 For the depth behind any of these, see `docs/`.
 
@@ -114,7 +116,7 @@ What is not yet shipped:
 - **macOS native menu bar.** Menus work; they don't yet live in the system menu bar.
 - **CJK IME composition.** Latin and BiDi input compose correctly; Chinese, Japanese, and Korean input methods don't yet integrate with the input event flow.
 - **Cross-application drag and drop.** Intra-app DnD with typed payloads works fully; cross-app DnD via the OS clipboard needs platform IPC that isn't in place.
-- **X11 custom title bars.** Wayland, Windows, and macOS backends ship; X11 falls back to native server-side decorations.
+- **X11 custom title bars.** Wayland, Windows, and macOS backends ship. On X11 the custom-chrome operations return `PlatformError::Unsupported` rather than failing silently, and the window falls back to native server-side decorations.
 - **Mobile and web.** Linux and Windows are the primary targets; macOS works modulo the menu bar gap. No mobile or web targets.
 - **Typed errors everywhere.** A few subsystems (notably parts of `fern-settings` and some SVG and date-time parsers) still panic on paths that should return typed errors.
 - **A stable API**, and **fast issue response.** This is a one-person project one month past its initial framework work. Please be patient.

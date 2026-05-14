@@ -4,6 +4,7 @@
 //!
 //! See `docs/styling-system.md` for the full four-tier ladder.
 
+pub mod banner_style;
 pub mod button_style;
 pub mod card_style;
 pub mod checkbox_style;
@@ -28,6 +29,9 @@ pub mod theme_extension;
 pub mod toggle_style;
 pub mod tooltip_style;
 
+pub use banner_style::{
+    BannerSeverity, BannerStyle, BannerStyleConfig, SharedBannerStyle,
+};
 pub use button_style::{
     ButtonRecipe, ButtonStyle, ButtonStyleConfig, ButtonVariant, SharedButtonStyle,
 };
