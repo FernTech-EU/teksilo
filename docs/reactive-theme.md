@@ -1,5 +1,12 @@
 # Reactive Theme Reference
 
+> This doc covers the **reactive** layer — how `Theme` flows through
+> `Signal`s, roles, and props so a theme swap repaints without a
+> rebuild. For the broader styling picture (the four-tier ladder:
+> tokens → variants → recipes → style protocols, `Theme` construction,
+> per-widget `*Variant` enums and `*Style` traits), see
+> [`styling-system.md`](styling-system.md).
+
 FernUI runs its theme through three layers of reactive primitives:
 
 | Layer | Type | Lives on | Purpose |
@@ -82,23 +89,28 @@ This only marks the subtree dirty; layout/paint contexts resolve ancestor overri
 
 ## Constructing and loading themes
 
-### Built-in defaults
+### Built-in presets
 
-Two ship in [`fern-tokens`](../crates/fern-tokens/src/theme.rs):
+There is no `Theme::default()` / `Theme::*_default()`. `Theme` lives in
+`fern-core::styles` and is built through a preset constructor:
 
 ```rust
-let light = Theme::light_default();
-let dark  = Theme::dark_default();
+use fern_ui::prelude::intui;
+
+let light = intui::light();   // fern_core::presets::intui::light
+let dark  = intui::dark();
 ```
 
-Both are neutral Int UI baselines — not visually distinctive, designed to be customized. Apps usually start from one of them and override the slots they care about.
+Both are neutral Int UI baselines — not visually distinctive, designed to be customized. Apps usually start from one of them and override the slots they care about. For the full styling picture (variants, recipes, style traits) see [`styling-system.md`](styling-system.md).
 
 ### Programmatic customization via struct spread
 
-`Theme`, `ColorTokens`, `TypographyTokens`, `ShapeTokens`, `LayoutTokens`, `MotionTokens`, and `ComponentStyles` are plain structs. Override the fields you want and spread the rest from the chosen base:
+`Theme` (`fern-core::styles`) and the token structs `ColorTokens`, `TypographyTokens`, `ShapeTokens`, `LayoutTokens`, `MotionTokens`, `ComponentStyles` (`fern-tokens`) are plain structs. Override the fields you want and spread the rest from a preset base:
 
 ```rust
-use fern_tokens::{Theme, ColorTokens, TypographyTokens, TextStyle, Color};
+use fern_core::styles::Theme;
+use fern_tokens::{ColorTokens, TypographyTokens, TextStyle, Color};
+use fern_ui::prelude::intui;
 
 let editor_light = Theme {
     colors: ColorTokens {
@@ -116,32 +128,34 @@ let editor_light = Theme {
         },
         ..TypographyTokens::default()
     },
-    ..Theme::light_default()
+    ..intui::light()
 };
 
 tree.set_theme(editor_light);
 ```
 
+`ColorTokens::light_default()` and the other raw-token defaults still live in `fern-tokens` — only the `Theme`-level constructor moved.
+
 The same pattern works for sub-trees via `set_theme_override(panel_id, |theme| { ... })` (see above).
 
 ### Loading from a file
 
-Every token struct in `fern-tokens` derives `serde::Serialize` and `serde::Deserialize`, so themes round-trip through any serde format the app picks (TOML, JSON, RON, YAML). The runtime cost is one read + one deserialize + one `set_theme` call:
+`Theme` and every token struct derive `serde::Serialize` and `serde::Deserialize`, so themes round-trip through any serde format the app picks (TOML, JSON, RON, YAML). The `style_slots` and `extensions` fields are `#[serde(skip)]` — a deserialized `Theme` gets empty defaults for those, so style-trait overrides are re-installed in code, not loaded from the file. The runtime cost is one read + one deserialize + one `set_theme` call:
 
 ```rust
 use std::fs;
-use fern_tokens::Theme;
+use fern_core::styles::Theme;
 
 let toml = fs::read_to_string("themes/editor-light.toml")?;
 let theme: Theme = toml::from_str(&toml)?;
 tree.set_theme(theme);
 ```
 
-Authoring a theme file is the inverse — `toml::to_string(&Theme::light_default())?` writes a complete starter file the user can edit.
+Authoring a theme file is the inverse — `toml::to_string(&intui::light())?` writes a complete starter file the user can edit.
 
 ### Partial files — current limitation
 
-The token structs **do not** carry `#[serde(default)]` on their fields, so a file missing any field fails to deserialize. To accept hand-edited theme files that only specify a few overrides, the app needs to do the merge itself — typically by deserializing into an `Option`-wrapped or `serde_json::Value` shape, then folding non-null values onto a base produced by `Theme::light_default()`. A future change can add `#[serde(default)]` so partial files merge automatically; until it lands, treat the file format as "all fields required."
+The token structs **do not** carry `#[serde(default)]` on their fields, so a file missing any field fails to deserialize. To accept hand-edited theme files that only specify a few overrides, the app needs to do the merge itself — typically by deserializing into an `Option`-wrapped or `serde_json::Value` shape, then folding non-null values onto a base produced by `intui::light()`. A future change can add `#[serde(default)]` so partial files merge automatically; until it lands, treat the file format as "all fields required."
 
 ---
 

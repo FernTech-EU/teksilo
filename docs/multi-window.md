@@ -35,7 +35,7 @@ use fern_ui::app::FernAppBuilder;
 
 fn main() {
     FernAppBuilder::new()
-        .theme(Theme::light_default())
+        .theme(intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("My App")

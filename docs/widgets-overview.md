@@ -15,15 +15,14 @@ shortcuts/intents/actions), see [SUMMARY.md](SUMMARY.md).
 
 ## Styling status
 
-Widgets migrated to the four-tier styling system
-([docs/styling-system.md](styling-system.md)) ship a `*Style` trait
-in `fern-core::styles::*` plus a default `Recipe*Style` impl in
-`fern-widgets/src/styles/*`. Each takes a per-call `.style(impl
-FooStyle)` builder, falls back to `theme.style_slots.<slot>` for
-theme-wide installs, then to the recipe default. The remaining
-widgets keep their existing self-paint chrome until follow-up
-commits migrate them; their trait protocols are reserved in
-`fern-core::styles::*` so the typed slot surface stays additive.
+All 16 themable widgets are on the four-tier styling system
+([docs/styling-system.md](styling-system.md)): each ships a `*Style`
+trait in `fern-core::styles::*` plus a default `Recipe*Style` impl in
+`fern-widgets/src/styles/*`. The widget builds its parts, hands a
+`*StyleConfig` to the active style, and uses the returned `WidgetId`
+as its root child — no themable widget self-paints. Style resolution
+is per-call `.style(impl FooStyle)` → theme-wide
+`theme.style_slots.<slot>` → recipe default.
 
 | Widget | Variant enum | Style trait | Slot |
 | --- | --- | --- | --- |
@@ -38,11 +37,19 @@ commits migrate them; their trait protocols are reserved in
 | `MenuItem` | — | `MenuItemStyle` | `style_slots.menu_item` |
 | `StandardListItem` / `StandardTreeItem` | — | `StandardItemStyle` | `style_slots.standard_item` |
 | `Popover` | `PopoverVariant` (Default/Menu/Tooltip) — surface | `PopoverStyle` | `style_slots.popover` |
+| `ScrollBar` | `ScrollBarVariant` (Permanent/Overlay/Thin) + `ScrollBarOrientation` | `ScrollBarStyle` | `style_slots.scroll_bar` |
+| `TabBar` | — (carries `TabBarOrientation`) | `TabStyle` | `style_slots.tab` |
+| `ComboBox` | `ComboBoxVariant` (Outlined/Filled/Underline/Plain) | `ComboBoxStyle` | `style_slots.combo_box` |
+| `Slider` | `SliderVariant` (Continuous/Discrete/Range) + `SliderOrientation` | `SliderStyle` | `style_slots.slider` |
+| `TextInput` | `TextInputVariant` (Outlined/Filled/Underline/Bare) | `TextInputStyle` | `style_slots.text_input` |
 
-Deferred (trait + slot reserved but widget still self-paints):
-`ScrollBar`, `TabBar`, `ComboBox`, `Slider`, `TextInput`. Their
-recipe defaults land in follow-up commits as part of the same
-refactor.
+The 17 legacy per-widget dimension structs in `fern-tokens::components`
+were deleted (Step 7); their IntUI constants now live in the matching
+`fern-widgets/src/styles/recipe_*_style.rs` modules. `theme.components`
+still carries dimension data for the *non-themable* widgets (toolbar,
+status bar, dialog, accordion, badge, progress bar, table, …). Image-
+backed styles, the `ImageTheme` TOML loader, and the sibling preset
+crates are still pending.
 
 End-to-end demo of the slot bag + per-call override: see
 [`examples/theme_styles/`](../examples/theme_styles/).
@@ -112,7 +119,7 @@ Themed framing, sectioning, and window-level structure.
 
 ## Buttons
 
-- [Button](../crates/fern-widgets/src/button.rs) — four styles (Filled / Outlined / Flat / Tonal) × five interaction states; `IconLocation` for leading/trailing icon. Reference exemplar — read the source.
+- [Button](../crates/fern-widgets/src/button.rs) — seven `ButtonVariant`s (Filled / Tinted / Outlined / Plain / Ghost / Link / Destructive) × five interaction states; `IconLocation` for leading/trailing icon; chrome via the `ButtonStyle` trait (see Styling status above). Reference exemplar — read the source.
 - [IconButton](../crates/fern-widgets/src/icon_button.rs) — square icon-only button at five `IconButtonSize` steps (Compact / Default / Toolbar / Large / Hero). `.embedded()` mode for trailing-slot use inside fields. Includes `BuiltInIcons` factory.
 - [CommandLinkButton](../crates/fern-widgets/src/command_link_button.rs) — large two-line CTA: leading icon + bold title + secondary description; flat surface.
 - [PopoverButton](../crates/fern-widgets/src/popover_button.rs) — Button preset that opens a Popover when activated.
@@ -123,7 +130,7 @@ Themed framing, sectioning, and window-level structure.
 
 - [Checkbox](../crates/fern-widgets/src/checkbox.rs) — two-state and tristate (`CheckState`).
 - [RadioButton](../crates/fern-widgets/src/radio_button.rs) — single radio, bound to a shared value via [RadioGroup](../crates/fern-widgets/src/radio_group.rs) for mutual exclusion.
-- [Toggle](../crates/fern-widgets/src/toggle.rs) — switch-style on/off control.
+- [Toggle](../crates/fern-widgets/src/toggle.rs) — on/off control; four `ToggleVariant`s (Switch / Pill / Square / Inset) via the `ToggleStyle` trait.
 - [Slider](../crates/fern-widgets/src/slider.rs) — horizontal or vertical, optional stepping.
 - [SegmentedControl](../crates/fern-widgets/src/segmented_control.rs) — `Signal<usize>`-driven segmented chooser; `RadioGroup` AT role.
 - [ComboBox](../crates/fern-widgets/src/combo_box.rs) — selection-only dropdown; virtualized via `ListView` past `max_visible_items`.

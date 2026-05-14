@@ -600,7 +600,7 @@ let theme = intui::light();   // or intui::dark()
 
 `appearance: ThemeAppearance::{Light, Dark}` is a required field on every theme. Drives shadow density, OS-theme matching, and asset variant selection.
 
-`Theme` (in `fern-core::styles`) carries five token groups (`ColorTokens`, `LayoutTokens`, `TypographyTokens`, `ShapeTokens`, `MotionTokens`), `ComponentStyles` (legacy dim structs, will be deleted once Step 7 lands), `ComponentStyleSlots` (typed `Rc<dyn FooStyle>` slot bag for theme-wide style overrides), and `ThemeExtensions` (typed app registry).
+`Theme` (in `fern-core::styles`) carries five token groups (`ColorTokens`, `LayoutTokens`, `TypographyTokens`, `ShapeTokens`, `MotionTokens`), `ComponentStyles` (dimension data for the *non-themable* widgets only — the 17 per-themable-widget dim structs were deleted in Step 7 and folded into the recipe modules), `ComponentStyleSlots` (typed `Rc<dyn FooStyle>` slot bag for theme-wide style overrides), and `ThemeExtensions` (typed app registry).
 
 **Theme is reactive.** `set_theme` updates an internal `Signal<Theme>` and dirty-marks every node — no rebuild. Focus, scroll offsets, and all interaction state survive theme changes.
 
@@ -629,7 +629,7 @@ Three precedence levels (highest wins):
 2. **Theme-wide:** `theme.style_slots.button = Some(Rc::new(MyGlow))` — applies to every Button using the active theme.
 3. **Default:** `RecipeButtonStyle::default()` shipped in `fern-widgets/src/styles/` reading IntUI tokens.
 
-Migration status (as of this branch): `Toggle`, `Button`, `Checkbox`, `RadioButton`, `IconButton`, `Panel`, `Card`, `TooltipWidget` are migrated to Tier 3. `MenuItem`, `Popover`, `ScrollBar`, `StandardListItem/TreeItem`, `TabBar`, `ComboBox`, `Slider`, `TextInput` still self-paint — their trait + slot are reserved; migration lands in follow-up commits. Step 7 (delete dim structs) is gated on every themable widget being migrated.
+Migration status (as of this branch): **all 16 themable widgets are on Tier 3** — `Toggle`, `Button`, `Checkbox`, `RadioButton`, `IconButton`, `Panel`, `Card`, `TooltipWidget`, `MenuItem`, `Popover`, `ScrollBar`, `StandardListItem`/`StandardTreeItem`, `TabBar`, `ComboBox`, `Slider`, `TextInput`. No themable widget self-paints anymore; each delegates chrome to `style.make_body(cfg, ctx)`. Step 7 is done — the per-widget dim structs are deleted and their IntUI constants live in `fern-widgets/src/styles/recipe_*_style.rs`. Still ahead: image-backed styles (Step 9), `ImageTheme` TOML loader (Step 10), sibling preset crates (Step 11).
 
 **Roles** stay relevant — they name *what* a value represents (`TextRole::Primary`, `SurfaceRole::Hover`), resolved against the current theme at paint time. Widget builders accept `impl Into<ColorProp>` so any of `Color | Signal<Color> | TextRole | SurfaceRole | BorderRole | DynamicTextRole(Signal<TextRole>) | DynamicSurfaceRole(..) | DynamicBorderRole(..)` works.
 
@@ -671,7 +671,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Signal-based reactivity (Signal, Prop, ObserverHandle, scoped effects)
 - Gesture recognition (UIKit-style state machines, auto-wired from handlers)
 - Overlay system (OverlayManager, OverlayRequest, positioning)
-- Design tokens (full Theme system) + four-tier styling ladder (tokens → variants → recipes → style protocols). `ThemeAppearance::{Light, Dark}` required field. `presets::intui::{light, dark}` shipped in `fern-core`; no `Theme::default()` / `Theme::*_default()`. Recipe types (`ShapeRecipe`, `FillRecipe`, `BorderRecipe`, `ShadowRecipe`, `PerStateRecipe<T>`, `WidgetState`) in `fern_core::styles`. Per-widget style traits (`ButtonStyle`, `ToggleStyle`, `CheckboxStyle`, `RadioStyle`, `IconButtonStyle`, `PanelStyle`, `CardStyle`, `TooltipStyle`, plus reserved slots for `MenuItem`/`Popover`/`Slider`/`TextInput`/`ComboBox`/`ScrollBar`/`StandardItem`/`TabBar`) with default `Recipe*Style` impls in `fern-widgets/src/styles/`. The 8 migrated widgets delegate visual chrome via `style.make_body(cfg, ctx)`; apps install per-call (`.style(impl …Style)`) or theme-wide (`theme.style_slots.<widget> = Some(Rc::new(...))`). Reference: [docs/styling-system.md](docs/styling-system.md).
+- Design tokens (full Theme system) + four-tier styling ladder (tokens → variants → recipes → style protocols). `ThemeAppearance::{Light, Dark}` required field. `presets::intui::{light, dark}` shipped in `fern-core`; no `Theme::default()` / `Theme::*_default()`. Recipe types (`ShapeRecipe`, `FillRecipe`, `BorderRecipe`, `ShadowRecipe`, `PerStateRecipe<T>`, `WidgetState`) in `fern_core::styles`. Per-widget style traits (`ButtonStyle`, `ToggleStyle`, `CheckboxStyle`, `RadioStyle`, `IconButtonStyle`, `PanelStyle`, `CardStyle`, `TooltipStyle`, `MenuItemStyle`, `PopoverStyle`, `SliderStyle`, `TextInputStyle`, `ComboBoxStyle`, `ScrollBarStyle`, `StandardItemStyle`, `TabStyle`) with default `Recipe*Style` impls in `fern-widgets/src/styles/`. All 16 themable widgets delegate visual chrome via `style.make_body(cfg, ctx)`; apps install per-call (`.style(impl …Style)`) or theme-wide (`theme.style_slots.<widget> = Some(Rc::new(...))`). Step 7 done — the legacy per-widget dim structs are deleted. Image-backed styles + `ImageTheme` manifest loader + sibling preset crates (Material 3 / macOS / Fluent) are still pending. Reference: [docs/styling-system.md](docs/styling-system.md).
 - Window management (multi-window, modal dialogs, custom title bar — Wayland + macOS + Windows; X11 falls back to native decorations)
 - GPU rendering (3 pipelines, glyph atlas, path atlas)
 - All ~21 layout primitives (including Grid, Wrap, AspectRatio, Switcher, MasonryLayout, FormLayout)
@@ -717,14 +717,14 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Widget tree orchestrator: `crates/fern-core/src/widget_tree.rs`
 - State system: `crates/fern-core/src/state.rs`
 - Event types: `crates/fern-core/src/event.rs`
-- Theme: `crates/fern-tokens/src/theme.rs`
+- Theme + styling system: [crates/fern-core/src/styles/](crates/fern-core/src/styles/) (`theme.rs`, `theme_appearance.rs`, `theme_extension.rs`, `recipe.rs`, `component_style_slots.rs`, one `*_style.rs` trait file per themable widget). IntUI preset: [crates/fern-core/src/presets/intui.rs](crates/fern-core/src/presets/intui.rs). Default `Recipe*Style` impls: [crates/fern-widgets/src/styles/](crates/fern-widgets/src/styles/). Reference: [docs/styling-system.md](docs/styling-system.md)
 - Color tokens: `crates/fern-tokens/src/color.rs`
 - Motion subsystems: [crates/fern-core/src/animation.rs](crates/fern-core/src/animation.rs) (signal-tween `AnimationScheduler`), [crates/fern-core/src/animated_quad.rs](crates/fern-core/src/animated_quad.rs) (shader-quad `AnimatedQuadRegistry`), [crates/fern-core/src/frame_tick_scheduler.rs](crates/fern-core/src/frame_tick_scheduler.rs) (per-frame-effect `FrameTickScheduler` — `Pulse` / `Cycle`), [crates/fern-core/src/motion_visibility.rs](crates/fern-core/src/motion_visibility.rs) (shared `alive` / `painted_this_frame` / `painted_recently` helpers). Reference: [docs/idle-and-animation.md](docs/idle-and-animation.md), [docs/animation.md](docs/animation.md).
 - Button (reference widget): [crates/fern-widgets/src/button.rs](crates/fern-widgets/src/button.rs)
 - Switcher: [crates/fern-widgets/src/primitives/switcher.rs](crates/fern-widgets/src/primitives/switcher.rs)
 - Layout primitives: [crates/fern-widgets/src/primitives/](crates/fern-widgets/src/primitives/)
 - Data models: [crates/fern-data/src/](crates/fern-data/src/) (`list_model.rs`, `tree_model.rs`, `selection_model.rs`, `sort_filter_list_model.rs`, `sort_filter_tree_model.rs`, `checked_model.rs`, `tree_checked_model.rs`, `check_state.rs`)
-- Standard row items: [crates/fern-widgets/src/standard_item.rs](crates/fern-widgets/src/standard_item.rs) (`StandardListItem`, `StandardTreeItem`); chevron primitive: [crates/fern-widgets/src/primitives/twist_arrow.rs](crates/fern-widgets/src/primitives/twist_arrow.rs); style tokens: `StandardItemStyle` in [crates/fern-tokens/src/components.rs](crates/fern-tokens/src/components.rs)
+- Standard row items: [crates/fern-widgets/src/standard_item.rs](crates/fern-widgets/src/standard_item.rs) (`StandardListItem`, `StandardTreeItem`); chevron primitive: [crates/fern-widgets/src/primitives/twist_arrow.rs](crates/fern-widgets/src/primitives/twist_arrow.rs); style trait: `StandardItemStyle` in [crates/fern-core/src/styles/standard_item_style.rs](crates/fern-core/src/styles/standard_item_style.rs), default impl + dim constants in [crates/fern-widgets/src/styles/recipe_standard_item_style.rs](crates/fern-widgets/src/styles/recipe_standard_item_style.rs)
 - TableView: [crates/fern-widgets/src/table_view.rs](crates/fern-widgets/src/table_view.rs) + submodules at [crates/fern-widgets/src/table_view/](crates/fern-widgets/src/table_view/) (`column.rs`, `selection.rs`, `a11y.rs`, `body.rs`, `header.rs`, `keyboard.rs`, `layout.rs`, `row_navigator.rs`, `tests.rs`). Demo: [examples/data_grid/src/main.rs](examples/data_grid/src/main.rs)
 - TreeTable: [crates/fern-widgets/src/tree_table.rs](crates/fern-widgets/src/tree_table.rs) (reuses table_view's column/header/keyboard modules; adds `TreeNavigator` + `TwistArrow`). Demo: [examples/tree_table/src/main.rs](examples/tree_table/src/main.rs)
 - i18n runtime: [crates/fern-i18n/src/manager.rs](crates/fern-i18n/src/manager.rs), [crates/fern-i18n/src/localized_string.rs](crates/fern-i18n/src/localized_string.rs)
@@ -862,7 +862,7 @@ translate/debug workflows.
 ```rust
 fn main() {
     FernAppBuilder::new()
-        .theme(Theme::light_default())
+        .theme(intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("My App")

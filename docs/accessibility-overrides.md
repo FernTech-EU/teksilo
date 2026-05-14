@@ -383,8 +383,13 @@ Navigate to the icon-only Save button; confirm the announced name is "Save", the
 
 ---
 
+## Styling never touches accessibility
+
+The Tier-3 styling system (see [styling-system.md](styling-system.md)) lets an app swap a widget's entire chrome — `Button::style(MyGlassButton)`, `theme.style_slots.toggle = Some(...)`, an image-backed theme — but **style trait impls do not participate in the accessibility tree**. A `*Style::make_body` return is decoration only; the widget owns its `accessibility(builder)` output and all `.access_*` overrides regardless of which style is installed. A glassmorphism button and the default `RecipeButtonStyle` button announce identically. This keeps AT identity stable across theme swaps and reskins — switching themes at runtime never disturbs a screen-reader's cursor or the AccessKit node ids.
+
 ## Related references
 
+- [styling-system.md](styling-system.md) — the four-tier styling ladder; style traits decorate, they do not annotate.
 - [shortcut-intent-action.md](shortcut-intent-action.md) — the `Shortcut` / `Intent` / `Action` pipeline that `.access_shortcut_id` binds to.
 - [events-and-gestures.md](events-and-gestures.md) — `on_access_action` and `on_access_action_request` event handlers (what `.access_action` layers on top of).
 - [reactive-theme.md](reactive-theme.md) — how locale and theme changes propagate via composite rebuilds (the same mechanism keeps `.access_label(tr!(...))` translations current).

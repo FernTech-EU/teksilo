@@ -57,7 +57,7 @@ pub struct Theme {
     pub typography: TypographyTokens,
     pub shape: ShapeTokens,
     pub motion: MotionTokens,
-    pub components: ComponentStyles,         // legacy dim structs
+    pub components: ComponentStyles,         // dim structs for the non-themable widgets only
     pub style_slots: ComponentStyleSlots,    // typed Rc<dyn FooStyle> slots
     pub extensions: ThemeExtensions,
 }
@@ -92,17 +92,26 @@ design-language presentations. The variant is **a hint**: the active
 Tier-3 style decides what it means.
 
 ```rust
-ButtonVariant   { Filled, Tinted, Outlined, Plain, Ghost, Link, Destructive }
-ToggleVariant   { Switch, Pill, Square, Inset }
-CheckboxVariant { Square, Rounded, Circle }
-RadioVariant    { Circle, Square, Rounded }
-IconButtonSize  { Compact, Default, Toolbar, Large, Hero }
-CardVariant     { Plain, Elevated, Outlined, Filled }
-PanelVariant    { Plain, Sunken, Raised, Highlighted }
-PopoverVariant  { Default, Menu, Tooltip }
-SliderVariant   { Continuous, Discrete, Range }
-TextInputVariant{ Outlined, Filled, Underline, Bare }
+ButtonVariant    { Filled, Tinted, Outlined, Plain, Ghost, Link, Destructive }
+ToggleVariant    { Switch, Pill, Square, Inset }
+CheckboxVariant  { Square, Rounded, Circle }
+RadioVariant     { Circle, Square, Rounded }
+IconButtonSize   { Compact, Default, Toolbar, Large, Hero }
+CardVariant      { Plain, Elevated, Outlined, Filled }
+PanelVariant     { Plain, Sunken, Raised, Highlighted }
+PopoverVariant   { Default, Menu, Tooltip }
+SliderVariant    { Continuous, Discrete, Range }
+TextInputVariant { Outlined, Filled, Underline, Bare }
+ComboBoxVariant  { Outlined, Filled, Underline, Plain }
+ScrollBarVariant { Permanent, Overlay, Thin }
 ```
+
+`MenuItem`, `StandardListItem` / `StandardTreeItem`, `TabBar`, and
+`TooltipWidget` are themable but variant-free — their style trait takes
+a `*StyleConfig` with no `variant` field. `Slider` and `ScrollBar`
+additionally carry an *orientation* enum (`SliderOrientation`,
+`ScrollBarOrientation`) alongside the variant, since orientation
+changes layout, not just paint.
 
 Set per-call: `Button::new("Save").variant(ButtonVariant::Outlined)`.
 Set per-app via a custom Tier-3 style that *defaults* a variant for
@@ -176,13 +185,16 @@ closures, fully Serde-serialisable, theme-file-friendly.
 recipe stays plain data (serializes cleanly for inspector JSON Export
 and TOML image-theme manifests).
 
-The 8 widgets migrated as of this branch (`Toggle`, `Button`,
-`Checkbox`, `RadioButton`, `IconButton`, `Panel`, `Card`,
-`TooltipWidget`) currently hold recipe-equivalent data inside their
-`Recipe*Style` defaults rather than as standalone Tier-2 structs.
-A future commit will surface that data as `ButtonRecipe`,
-`ToggleRecipe`, etc. so apps can construct custom-dimensioned
-`RecipeFooStyle::new(my_recipe)` without writing a new Tier-3 impl.
+As of this branch every themable widget holds its recipe-equivalent
+data inside its `Recipe*Style` default. The IntUI dimension constants
+that used to live in `fern-tokens::components` per-widget structs were
+deleted (Step 7) and folded directly into the matching
+`fern-widgets/src/styles/recipe_*_style.rs` module as `pub const`
+blocks — the recipe *is* the dimension data now, with no parallel
+store. `ButtonRecipe` is the one standalone Tier-2 struct surfaced so
+far; a future commit will surface `ToggleRecipe`, `CardRecipe`, etc.
+so apps can construct custom-dimensioned `RecipeFooStyle::new(recipe)`
+without writing a new Tier-3 impl.
 
 ## Tier 3 — Style protocols
 
@@ -312,8 +324,8 @@ pub fn brutalist_light() -> Theme {
 
 ## Migration status (as of this branch)
 
-The four-tier refactor lands incrementally. Widgets migrated to the
-Tier-3 trait + recipe-default + slot lookup:
+Every themable widget is now on the Tier-3 trait + recipe-default +
+slot lookup. No themable widget self-paints anymore.
 
 | Widget | Trait | Default impl | Slot |
 | --- | --- | --- | --- |
@@ -325,15 +337,28 @@ Tier-3 trait + recipe-default + slot lookup:
 | `Panel` | `PanelStyle` | `RecipePanelStyle` | `style_slots.panel` |
 | `Card` | `CardStyle` | `RecipeCardStyle` | `style_slots.card` |
 | `TooltipWidget` | `TooltipStyle` | `RecipeTooltipStyle` | `style_slots.tooltip` |
+| `MenuItem` | `MenuItemStyle` | `RecipeMenuItemStyle` | `style_slots.menu_item` |
+| `Popover` | `PopoverStyle` | `RecipePopoverStyle` | `style_slots.popover` |
+| `ScrollBar` | `ScrollBarStyle` | `RecipeScrollBarStyle` | `style_slots.scroll_bar` |
+| `StandardListItem` / `StandardTreeItem` | `StandardItemStyle` | `RecipeStandardItemStyle` | `style_slots.standard_item` |
+| `TabBar` | `TabStyle` | `RecipeTabStyle` | `style_slots.tab` |
+| `ComboBox` | `ComboBoxStyle` | `RecipeComboBoxStyle` | `style_slots.combo_box` |
+| `Slider` | `SliderStyle` | `RecipeSliderStyle` | `style_slots.slider` |
+| `TextInput` | `TextInputStyle` | `RecipeTextInputStyle` | `style_slots.text_input` |
 
-Trait protocol + slot reserved but widget not yet migrated:
-`MenuItem`, `Popover`, `ScrollBar`, `StandardListItem`,
-`StandardTreeItem`, `TabBar`, `ComboBox`, `Slider`, `TextInput`.
-These keep their existing self-paint chrome and will move to the
-trait pattern in follow-up commits. Step 7 (deleting the legacy dim
-structs in `fern-tokens::components`) is gated on every themable
-widget being migrated — until then, `theme.components.*` carries
-the dim data and the migrated widgets read from `theme.style_slots.*`.
+Step 7 is done: the legacy per-widget dimension structs in
+`fern-tokens::components` (`ButtonStyle`, `ToggleStyle`, … 17 structs)
+were deleted and their IntUI constants folded into the matching
+`fern-widgets/src/styles/recipe_*_style.rs` modules. `theme.components`
+(`ComponentStyles`) still exists but now carries dimension data only
+for the *non-themable* widgets (toolbar, status bar, dialog, accordion,
+badge, progress bar, table, calendar, …) — anything that isn't yet on
+a style trait. Migrated widgets read entirely from
+`theme.style_slots.*` plus their `Recipe*Style` defaults.
+
+Still ahead on the styling roadmap: image-backed styles (Step 9),
+the `ImageTheme` TOML manifest loader (Step 10), and the sibling
+preset crates `fern-theme-material3` / `-macos` / `-fluent` (Step 11).
 
 ## Custom widgets and the styling system
 

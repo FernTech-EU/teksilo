@@ -21,7 +21,7 @@ use fern_ui::widgets::{Expand, RectWidget, TextWidget, TitleBar, VStack, ZStack}
 
 fn main() {
     FernAppBuilder::new()
-        .theme(Theme::dark_default())
+        .theme(intui::dark())
         .window_title("My App")
         .window_size(900, 600)
         .custom_chrome(true)                       // opt in

@@ -31,6 +31,10 @@ directory; in-progress design work lives separately under [plans/](plans/).
 - [events-and-gestures.md](events-and-gestures.md) — preview/bubble dispatch,
   attached handlers (`.on_tap`, `.on_hover`, …), `on_key_preview`,
   `focus_within` / `hover_within`, gesture recognizers.
+- [styling-system.md](styling-system.md) — the four-tier styling ladder
+  (tokens → variants → recipes → style protocols); `Theme` aggregator,
+  `ThemeAppearance`, per-widget `*Variant` enums and `*Style` traits,
+  per-call vs theme-wide style installation, writing a custom preset.
 - [reactive-theme.md](reactive-theme.md) — `Signal<Theme>`, role-driven
   colors (`ColorProp`, `TextStyleProp`), reactive switching without rebuild.
 - [animation.md](animation.md) — `Signal<f32>::animate_to`, `MotionTokens`,

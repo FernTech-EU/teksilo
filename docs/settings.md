@@ -49,7 +49,7 @@ fn main() {
         MruList::open(&paths, "recent_projects", 10).unwrap();
 
     FernAppBuilder::new()
-        .theme(Theme::light_default())
+        .theme(intui::light())
         .app_paths(paths)                                // explicit
         // or .application("com", "FernTech", "FernUI") // shortcut
         .settings(

@@ -374,9 +374,13 @@ When the scale factor changes (window dragged to a different monitor), the glyph
 
 ---
 
-## 19. Theming — Design Tokens
+## 19. Theming — the four-tier styling ladder
 
-Full reference: [`reactive-theme.md`](reactive-theme.md). Six token categories (`ColorTokens`, `LayoutTokens`, `TypographyTokens`, `ShapeTokens`, `MotionTokens`, `ComponentStyles`). Built-in `Theme::light_default()` / `Theme::dark_default()` (Int UI palette, neutral baselines). `Signal<Theme>` reactivity — `set_theme` updates the signal and dirty-marks every node, no rebuild; focus, scroll, text-input cursor, expanded sections all survive a switch. Role-based widget surface (`TextRole`, `SurfaceRole`, `BorderRole`, `TextStyleRole`) plus `ColorProp` / `TextStyleProp` wrappers; widgets resolve roles against the current theme at paint/layout time. Subtree theme overrides via `set_theme_override(id, |theme| …)`. Themes derive `Serialize` + `Deserialize` for user-loadable theme files.
+Full references: [`styling-system.md`](styling-system.md) (the four-tier ladder — tokens → variants → recipes → style protocols) and [`reactive-theme.md`](reactive-theme.md) (the `Signal<Theme>` reactive layer).
+
+`Theme` lives in `fern-core::styles` (not `fern-tokens`) so the per-widget style trait protocols and the typed `Rc<dyn FooStyle>` slot bag can sit on the same struct. It carries a required `appearance: ThemeAppearance` ({Light, Dark} — drives shadow density, OS-theme matching, asset selection), five token groups (`ColorTokens`, `LayoutTokens`, `TypographyTokens`, `ShapeTokens`, `MotionTokens`), `ComponentStyles` (dimension data for the not-yet-themable widgets), `ComponentStyleSlots` (typed style-trait overrides), and a `ThemeExtensions` registry. There is no `Theme::default()` / `Theme::*_default()` — apps pick a preset explicitly (`fern_core::presets::intui::{light, dark}`).
+
+Every themable widget composes its chrome through a Tier-3 style trait (`ButtonStyle`, `ToggleStyle`, …) rather than self-painting: the widget builds its parts, hands a `*StyleConfig` to the active style, and uses the returned `WidgetId` as its root child. The style is resolved per-call (`.style(...)`) → theme-wide (`theme.style_slots.<widget>`) → `Recipe*Style` default. `Signal<Theme>` reactivity — `set_theme` updates the signal and dirty-marks every node, no rebuild; focus, scroll, text-input cursor, expanded sections all survive a switch. Role-based widget surface (`TextRole`, `SurfaceRole`, `BorderRole`, `TextStyleRole`) plus `ColorProp` / `TextStyleProp` wrappers; widgets resolve roles against the current theme at paint/layout time. Subtree theme overrides via `set_theme_override(id, |theme| …)`. Themes derive `Serialize` + `Deserialize` for user-loadable theme files (the `style_slots` and `extensions` fields are `#[serde(skip)]`).
 
 ---
 

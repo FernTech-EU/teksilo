@@ -31,7 +31,7 @@ is callable without an extra import or dependency:
 use fern_ui::prelude::*;
 
 FernAppBuilder::new()
-    .theme(Theme::light_default())
+    .theme(intui::light())
     .install_inspector_in_debug()       // no-op in release
     .initial_window(WindowConfig::new()…)
     .run();
