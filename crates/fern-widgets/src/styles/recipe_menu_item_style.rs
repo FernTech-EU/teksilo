@@ -21,24 +21,22 @@ use fern_tokens::{CornerRadius, SurfaceRole};
 
 use crate::primitives::{FixedSize, HStack, Padding, RectWidget, Spacer, ZStack};
 
-// IntUI design tokens for MenuItem / MenuList / menu popups.
+// IntUI design tokens for MenuItem / MenuList rows.
 // Moved here in Step 7 of the styling refactor — the recipe owns
 // its own dimensions instead of reading from `theme.components.menu`.
 // The MenuList / MenuBar / ComboBox panel widgets import these
-// constants when they need menu-related dimensions (separator
-// height, popup corner radius, shadow density).
+// constants when they need menu-related row dimensions (item height,
+// separator height). The menu *panel* surface (corner radius, border,
+// shadow density) is owned by `PopoverStyle` (the `Menu` variant) as
+// of Stage A of the group-5 styling migration.
 pub const MENU_ITEM_HEIGHT: f32 = 24.0;
 pub const MENU_ITEM_PADDING_HORIZONTAL: f32 = 12.0;
 pub const MENU_ICON_COLUMN_WIDTH: f32 = 16.0;
 pub const MENU_ICON_LABEL_GAP: f32 = 6.0;
 pub const MENU_SHORTCUT_LEFT_GAP: f32 = 24.0;
 pub const MENU_SEPARATOR_HEIGHT: f32 = 9.0;
-pub const MENU_POPUP_CORNER_RADIUS: f32 = 8.0;
-pub const MENU_POPUP_BORDER_WIDTH: f32 = 1.0;
 /// Corner radius of the per-row hover / pressed highlight rect.
 pub const MENU_ITEM_CORNER_RADIUS: f32 = 8.0;
-/// 0..=1 multiplier on `shape.shadow_inner_sm.color.a` at paint time.
-pub const MENU_SHADOW_DENSITY: f32 = 0.5;
 
 /// Default `MenuItemStyle` shipped with FernUI. Chrome roles come from
 /// the active theme.
