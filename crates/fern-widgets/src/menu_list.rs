@@ -3,17 +3,21 @@
 //! Provides a themed surface (background, border, corner radius) and
 //! keyboard navigation (ArrowUp/Down, Enter, Escape).
 
+use std::rc::Rc;
+
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
+use fern_core::overlay::OverlayPlacement;
 use fern_core::signal::Signal;
+use fern_core::styles::{PopoverStyleConfig, PopoverVariant};
 use fern_core::widget::{
     EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
 };
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{BorderRole, CornerRadius, SurfaceRole};
+use fern_tokens::SurfaceRole;
 
 use crate::primitives::{MaxSize, Padding, RectWidget, VStack, ZStack};
 use crate::scroll_area::ScrollArea;
@@ -221,6 +225,22 @@ impl MenuList {
         self
     }
 
+    /// Derive the `OverlayPlacement` the `PopoverStyle` needs from the
+    /// caller-supplied `attached_side`. `PopoverSurface` re-resolves the
+    /// concrete suppressed shadow edge from this placement plus the live
+    /// layout direction, so the menu reads as one piece with its trigger.
+    fn derived_placement(&self) -> OverlayPlacement {
+        match self.attached_side {
+            Some(crate::shadow::AttachedSide::Top) => OverlayPlacement::Below,
+            Some(crate::shadow::AttachedSide::Bottom) => OverlayPlacement::Above,
+            // A trigger on the leading edge → menu opens trailing.
+            // `Right` (trigger on the trailing edge, menu opens leading)
+            // has no dedicated placement; fall back to the full halo.
+            Some(crate::shadow::AttachedSide::Left) => OverlayPlacement::TrailingEdge,
+            Some(crate::shadow::AttachedSide::Right) | None => OverlayPlacement::Centered,
+        }
+    }
+
     /// Cap the panel height to roughly `n * item_height` and make the
     /// content scrollable when that height is exceeded. Clamped to at
     /// least 1. Useful for long menus (e.g. a "Recent files" list) —
@@ -309,17 +329,27 @@ impl Widget for MenuList {
             _ => padding_id,
         };
 
-        // Themed surface background — Int UI menus use the popup radius (8 dp)
-        // and a 1 dp border on the raised surface.
-        let bg = RectWidget::new()
-            .background(SurfaceRole::Raised)
-            .border_color(BorderRole::Default)
-            .bind_border_width(menu::MENU_POPUP_BORDER_WIDTH)
-            .corner_radius(CornerRadius::uniform(menu::MENU_POPUP_CORNER_RADIUS));
-        let bg_id = ctx.add(bg);
-
-        let zstack = ZStack::new().add_child(bg_id).add_child(visible_cap_id);
-        let root_id = ctx.add(zstack);
+        // Themed surface — routed through `PopoverStyle` (the
+        // `Menu`-flavoured variant), so the menu panel's background,
+        // border, corner radius, and drop shadow are all owned by the
+        // active popover style instead of a hand-rolled bg `RectWidget`
+        // + `MenuList::paint`. The full-halo vs trigger-attached
+        // shadow choice is derived from `attached_side`.
+        let popover_style: fern_core::styles::SharedPopoverStyle = ctx
+            .theme()
+            .style_slots
+            .popover
+            .clone()
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle::default()));
+        let surface_cfg = PopoverStyleConfig {
+            content: visible_cap_id,
+            variant: PopoverVariant::Menu,
+            name: String::new(),
+            placement: self.derived_placement(),
+            show_caret: false,
+            caret_size: 0.0,
+        };
+        let root_id = popover_style.make_body(&surface_cfg, ctx);
 
         self.root_child_id = Some(root_id);
 
@@ -440,22 +470,9 @@ impl Widget for MenuList {
         }
     }
 
-    fn paint(&self, bounds: Rect, canvas: &mut fern_canvas::Canvas, ctx: &PaintContext) {
-        // Drop shadow underneath the menu surface. The bg + border
-        // themselves are painted by a child `RectWidget` set up in
-        // `build()`, so this method only contributes the shadow.
-        use crate::styles::recipe_menu_item_style as menu;
-        let radius = CornerRadius::uniform(menu::MENU_POPUP_CORNER_RADIUS);
-        crate::shadow::paint_layered_shadow(
-            canvas,
-            bounds,
-            radius,
-            &ctx.theme.shape.shadow_sm,
-            &ctx.theme.shape.shadow_inner_sm,
-            menu::MENU_SHADOW_DENSITY,
-            self.attached_side,
-        );
-    }
+    // No `paint()`: the menu panel's surface (background, border,
+    // corner radius) and drop shadow are owned by the `PopoverStyle`
+    // wrapper resolved in `build()`.
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::Menu);
