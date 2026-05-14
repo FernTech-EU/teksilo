@@ -60,10 +60,11 @@ use fern_core::overlay::{
     DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
 };
 use fern_core::signal::Signal;
+use fern_core::styles::{PopoverStyleConfig, PopoverVariant};
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::{HandlerSet, WidgetBuilder};
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{BorderRole, CornerRadius, HAlignment, SurfaceRole, TextRole, TextStyleRole};
+use fern_tokens::{CornerRadius, HAlignment, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::icon_button::BuiltInIcons;
 use crate::primitives::{
@@ -565,19 +566,33 @@ impl Widget for SuggestionPanel {
             column = column.add_child(row);
         }
 
-        // Listbox surface — themed background + border.
+        // Listbox surface — routed through `PopoverStyle` (the
+        // `Menu`-flavoured variant), so the panel background, border,
+        // corner radius, and the field-attached drop shadow are owned
+        // by the active popover style. The suggestion popup always
+        // opens below the field (`BelowPreferred` in `SearchField`),
+        // so the placement suppresses the top-side shadow.
         let listbox_inner = ctx.add(column);
-        let bg_rect = ctx.add(
-            RectWidget::new()
-                .background(SurfaceRole::Raised)
-                .border_color(BorderRole::Default)
-                .border_width(1.0)
-                .corner_radius(CornerRadius::uniform(style.panel_corner_radius)),
-        );
         let padded = ctx.add(Padding::uniform(style.panel_padding).child_id(listbox_inner));
-        let bordered = ctx.add(ZStack::new().add_child(bg_rect).add_child(padded));
+        let popover_style: fern_core::styles::SharedPopoverStyle = ctx
+            .theme()
+            .style_slots
+            .popover
+            .clone()
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle::default()));
+        let surface = popover_style.make_body(
+            &PopoverStyleConfig {
+                content: padded,
+                variant: PopoverVariant::Menu,
+                name: String::new(),
+                placement: OverlayPlacement::BelowPreferred,
+                show_caret: false,
+                caret_size: 0.0,
+            },
+            ctx,
+        );
 
-        let listbox = ctx.add(SuggestionListBox { inner: bordered });
+        let listbox = ctx.add(SuggestionListBox { inner: surface });
         // Publish the listbox WidgetId so SearchField's a11y can wire
         // `aria-controls`.
         self.listbox_id_slot.set(Some(listbox));
