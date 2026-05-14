@@ -1,20 +1,25 @@
 //! Badge — a pill-shaped label for tags, status indicators, and counts.
 
+use std::rc::Rc;
+
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::color_prop::ColorProp;
+use fern_core::styles::{BadgeStyleConfig, SharedBadgeStyle};
 use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{CornerRadius, TextStyleRole};
+use fern_tokens::TextStyleRole;
 
-use crate::primitives::{Padding, RectWidget, TextWidget, ZStack};
+use crate::primitives::TextWidget;
 
 /// A pill-shaped label for displaying tags, counts, or status.
 pub struct Badge {
     label: String,
     color: Option<ColorProp>,
     text_color: Option<ColorProp>,
+    /// Per-call override for the pill chrome.
+    style_override: Option<SharedBadgeStyle>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -25,8 +30,16 @@ impl Badge {
             label: ls.resolve_now(),
             color: None,
             text_color: None,
+            style_override: None,
             root_child_id: None,
         }
+    }
+
+    /// Per-call style override for the badge pill chrome. Replaces the
+    /// theme-wide default `BadgeStyle` for just this instance.
+    pub fn style(mut self, style: impl fern_core::styles::BadgeStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
     }
 
     /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw string in `LocalizedString::literal`.
@@ -59,22 +72,14 @@ impl std::fmt::Debug for Badge {
 
 impl Widget for Badge {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        use fern_tokens::SurfaceRole;
         let theme_signal = ctx.theme_signal();
-        let snapshot = theme_signal.get();
-        let badge_style = snapshot.components.badge;
 
-        // Defaults: soft accent tint + status_info_fg (reactive via theme
-        // signal). Callers override with `.color(...)` / `.text_color(...)`;
-        // either branch is a reactive `ColorProp`, so roles, signals, and
-        // static colors all work.
-        let bg: ColorProp = self
-            .color
-            .take()
-            .unwrap_or(ColorProp::SurfaceRole(SurfaceRole::AccentSubtle));
+        // Default text color: `status_info_fg` via a derived signal so
+        // theme changes still propagate. Callers override with
+        // `.text_color(...)`. The pill background default
+        // (`AccentSubtle`) lives in the recipe; `.color(...)` reaches
+        // the style as `background_override`.
         let text: ColorProp = self.text_color.take().unwrap_or_else(|| {
-            // No matching role — use a derived signal so theme changes
-            // still propagate.
             ColorProp::Bound(theme_signal.map(|t| t.colors.status_info_fg))
         });
 
@@ -83,18 +88,22 @@ impl Widget for Badge {
             .color(text)
             .single_line()
             .a11y_hidden();
-        let bg_rect = RectWidget::new()
-            .background(bg)
-            .corner_radius(CornerRadius::uniform(badge_style.corner_radius));
+        let content = ctx.add(text_widget);
 
-        let text_id = ctx.add(text_widget);
-        let padding =
-            Padding::symmetric(badge_style.padding_vertical, badge_style.padding_horizontal)
-                .child_id(text_id);
-        let padding_id = ctx.add(padding);
-        let bg_id = ctx.add(bg_rect);
-
-        let root = ctx.add(ZStack::new().add_child(bg_id).add_child(padding_id));
+        // The pill chrome (rounded background + padding inset) is owned
+        // by the active `BadgeStyle`.
+        let style: SharedBadgeStyle = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.badge.clone())
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeBadgeStyle::default()));
+        let root = style.make_body(
+            &BadgeStyleConfig {
+                content,
+                background_override: self.color.take(),
+            },
+            ctx,
+        );
         self.root_child_id = Some(root);
         vec![root]
     }

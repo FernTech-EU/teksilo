@@ -46,29 +46,27 @@ It is in production use by FernTech's own applications, including the fern-colle
 
 ## What's in the box
 
-**Widgets.** Around 100 entries covering the usual surfaces (buttons, lists, tables, trees, tabs, menus, dialogs, popovers, file/color/date pickers, calendar, charts) plus less common ones: a wizard, a breadcrumb, a masonry layout, a tool box, a split button with remember-last-used variants, a three-tier tooltip system, a corkboard-style scene canvas, a custom title bar, and a rich text editor. The `widget-catalog` example is the fastest way to see them all.
+**Widgets.** Around 100, covering the usual desktop surface (buttons, lists, tables, trees, tabs, menus, dialogs, popovers, file/color/date pickers, calendar, charts) plus less common ones: a wizard, a breadcrumb, a masonry layout, a split button, a three-tier tooltip system, a scene canvas, a custom title bar, and a rich text editor. The `widget-catalog` example shows them all.
 
-**Layout.** SwiftUI-style two-phase negotiation: children answer a `SizeProposal` with a `LayoutResponse { size, flex }`, parents place them. Slack distribution is a single rule, so `Spacer` and `Expand` are ordinary widgets that report `flex > 0` rather than engine special-cases. 22 layout primitives.
+**Layout.** A SwiftUI-style system: you describe intent, the framework negotiates sizes and places everything. Spacers and stretch behave like ordinary widgets, with no special cases to learn.
 
-**Reactive state.** One `Signal<T>` primitive for all reactive values, with `map`, `filter`, `zip`, `and`, `or`, and `not` combinators. Widgets bind at four granularities (`Rebuild`, `Layout`, `Repaint`, `AccessibilityOnly`), so a property change costs about what it should.
+**Reactive state.** One reactive value type, used everywhere. Change a value and only what depends on it updates, at the right cost: a color change repaints, a size change re-lays-out, and nothing rebuilds that doesn't need to.
 
-**Themes.** Light and Dark inspired by JetBrains' Int UI, where color, surface, border, and text roles are tokens read at paint time, so a theme switch never rebuilds the tree. On Linux, accent and selection colors come from the XDG portal first, with per-DE config fallbacks. Per-subtree overrides allow differently-styled regions in one window.
+**Themes.** Light and dark out of the box. Switching is instant and keeps focus, scroll position, and selection intact. On Linux, accent colors follow the desktop environment.
 
-**Internationalization.** Fluent files with the compile-time-checked `tr!` and `tr_widget!` macros, reactive `tr_signal!` variants that produce `Signal<String>`, ICU4X-backed number/date/currency formatting, and RTL layout for Arabic and Hebrew including bidirectional text.
+**Internationalization.** Translations are checked at compile time, so a missing or misspelled key is a build error rather than a runtime surprise. Right-to-left layout, locale-aware number and date formatting, and re-rendering on locale change are built in.
 
-**Accessibility.** AccessKit integration at the trait level, plus a builder-level override surface (`access_label`, `access_description`, `access_subtree`, `access_custom_action`, `access_identifier`, `access_customize`) for when the default mapping isn't what you want.
+**Accessibility.** Every widget ships with correct screen-reader semantics. When the default isn't right, a per-widget override surface lets you adjust labels, descriptions, roles, and actions.
 
-**Input pipeline.** Widget interactions emit typed `Intent` values that ancestor `Action` handlers consume; keyboard shortcuts map to intent names through a rebindable registry with graveyard semantics. Events from external sources (database notifiers, message buses, file watchers) are a separate concern: widgets subscribe to them directly rather than routing through the typed-intent layer.
+**Input.** Keyboard shortcuts, menus, and accessibility actions flow through one rebindable pipeline, so a user can remap a key and every surface that mentions it updates. Events from external sources (databases, message buses, file watchers) stay separate: widgets subscribe to those directly.
 
-**Text.** `text-document` (block/frame/table model, multi-cursor editing, full undo/redo, find/replace, Markdown/HTML/LaTeX/DOCX import-export, `Send + Sync`) and `text-typeset` (HarfBuzz shaping, swash rasterization with color emoji, shelf-packed atlas, UAX #14 line breaking, BiDi, hit testing, 0.1x to 10x zoom without reflow).
+**Text.** A full rich-text stack: a document model with tables, lists, and undo/redo, and a typesetting engine with proper shaping, bidirectional text, color emoji, and zoom without reflow. Even the plain text widget routes through it, so any label gets correct shaping and font fallback for free.
 
-**Animations.** `Collapse`, `Fade`, `Pulse`, `Cycle`, `SmoothSize`, `Crossfade`, `Slide`, `Shake`, `Scale`, `Rotate`, and a Kawase dual-pass GPU `Blur`. Each documents its reduced-motion behavior; `to_or_snap()` collapses to instant under `prefers_reduced_motion`.
+**Animations.** Ready-made wrappers for the common cases (collapse, fade, slide, crossfade, blur, and more). Each respects the system "reduce motion" setting.
 
-**Renderer.** A three-tier Canvas (axis-aligned rects direct, intermediate shapes on SDF shaders, arbitrary paths CPU-rasterized and LRU-cached) built around text-typeset's quad output so text and graphics share one pipeline. Target: five draw calls per frame.
+**Rendering.** GPU-accelerated, with text and graphics sharing one pipeline. When nothing is moving, the app is genuinely idle: no wasted frames, near-zero CPU and GPU use.
 
-**Idle discipline.** Retained-tree dirty propagation wired to `winit`'s `ControlFlow::Wait`. A truly idle app emits zero event-loop wake-ups; `FERN_IDLE_TRACE=1` instruments every wake source for regression bisection.
-
-**And also.** A three-tier tooltip system with dwell-to-sticky disclosure; typed-payload drag and drop; the `fern-settings` crate (K/V store, versioned migrations, window-state restore, generic `MruList<T>`); an opt-in, GDPR-conscious telemetry stack with a schema linter; a pannable and zoomable `fern-scene` canvas; a `fern-charts` crate; a nine-tab debug inspector compiled to nothing in release builds; and a `fern-widgets-previewer` catalog browser.
+**And also.** Drag and drop, persistent settings with automatic window-state restore, an opt-in privacy-conscious telemetry stack, a pannable scene canvas, charts, an in-app debug inspector (compiled out of release builds), and a widget catalog browser.
 
 For the depth behind any of these, see `docs/`.
 
