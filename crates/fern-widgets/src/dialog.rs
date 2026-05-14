@@ -1,16 +1,19 @@
-use fern_canvas::{Canvas, Rect, Size, SizeProposal};
+use std::rc::Rc;
+
+use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::modal::{ModalCloseBehavior, ModalPresentation, ModalRequest};
 use fern_core::overlay::OverlayDismissCallback;
 use fern_core::signal::Signal;
+use fern_core::styles::{DialogStyleConfig, SharedDialogStyle};
 use fern_core::widget::{
-    EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
+    EventContext, LayoutContext, PendingChild, Widget, WidgetPlacement,
 };
 use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{CornerRadius, TextRole, TextStyleRole};
+use fern_tokens::{TextRole, TextStyleRole};
 
 use crate::button::{Button, ButtonVariant};
 use crate::overlay_trigger::OverlayTrigger;
@@ -32,6 +35,12 @@ pub struct ModalContainer {
     /// the generic i18n `a11y_dialog_name` string so there's always
     /// a non-empty name for screen readers.
     title: Option<String>,
+    /// Per-call override for the modal panel chrome. Replaces the
+    /// theme-wide `style_slots.dialog` and the IntUI default
+    /// `RecipeDialogStyle` for just this container.
+    style_override: Option<SharedDialogStyle>,
+    /// Build state — the `DialogStyle::make_panel` root.
+    root_child_id: Option<WidgetId>,
 }
 
 impl ModalContainer {
@@ -46,6 +55,8 @@ impl ModalContainer {
             padding_override: None,
             min_width_override: None,
             title: None,
+            style_override: None,
+            root_child_id: None,
         }
     }
 
@@ -56,6 +67,13 @@ impl ModalContainer {
 
     pub fn min_width(mut self, min_width: f32) -> Self {
         self.min_width_override = Some(min_width.max(0.0));
+        self
+    }
+
+    /// Per-call style override for the modal panel chrome. Replaces the
+    /// theme-wide default `DialogStyle` for just this container.
+    pub fn style(mut self, style: impl fern_core::styles::DialogStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
         self
     }
 
@@ -75,15 +93,6 @@ impl ModalContainer {
         self
     }
 
-    fn resolved_padding(&self, theme: &fern_core::Theme) -> f32 {
-        self.padding_override
-            .unwrap_or(theme.components.dialog.content_padding)
-    }
-
-    fn resolved_min_width(&self, theme: &fern_core::Theme) -> f32 {
-        self.min_width_override
-            .unwrap_or(theme.components.dialog.min_width)
-    }
 }
 
 impl std::fmt::Debug for ModalContainer {
@@ -111,7 +120,27 @@ impl Widget for ModalContainer {
             }
             self.content_id = Some(ctx.add_boxed(content));
         }
-        self.children()
+
+        // The panel chrome (rounded surface + border + content
+        // padding) is owned by the active `DialogStyle`; the modal
+        // mounting / dismissal pipeline stays on this widget.
+        let content_id = self
+            .content_id
+            .expect("ModalContainer requires content — none was set");
+        let style: SharedDialogStyle = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.dialog.clone())
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeDialogStyle::default()));
+        let cfg = DialogStyleConfig {
+            content: content_id,
+            has_scrim: true,
+            padding_override: self.padding_override,
+            min_width_override: self.min_width_override,
+        };
+        let root_id = style.make_panel(&cfg, ctx);
+        self.root_child_id = Some(root_id);
+        vec![root_id]
     }
 
     fn layout_response(
@@ -119,23 +148,10 @@ impl Widget for ModalContainer {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> fern_core::widget::LayoutResponse {
-        let pad = self.resolved_padding(ctx.theme);
-        let min_w = self.resolved_min_width(ctx.theme);
-        let inset = pad * 2.0;
-        let content = self
-            .content_id
-            .and_then(|id| {
-                ctx.child_size(
-                    id,
-                    SizeProposal {
-                        width: proposal.width.map(|width| (width - inset).max(0.0)),
-                        height: proposal.height.map(|height| (height - inset).max(0.0)),
-                    },
-                )
-            })
-            .unwrap_or_else(|| proposal.resolve(240.0, 120.0));
-
-        Size::new((content.width + inset).max(min_w), content.height + inset).into()
+        self.root_child_id
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(240.0, 120.0))
+            .into()
     }
 
     fn place_children(
@@ -143,27 +159,12 @@ impl Widget for ModalContainer {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        ctx: &LayoutContext,
+        _ctx: &LayoutContext,
     ) {
-        let pad = self.resolved_padding(ctx.theme);
         for child in children.iter_mut() {
-            child.origin = fern_canvas::Point::new(bounds.x + pad, bounds.y + pad);
-            child.size = Size::new(
-                (bounds.width - pad * 2.0).max(0.0),
-                (bounds.height - pad * 2.0).max(0.0),
-            );
+            child.origin = bounds.origin();
+            child.size = bounds.size();
         }
-    }
-
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let radius = CornerRadius::uniform(ctx.theme.components.dialog.corner_radius);
-        canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.surface_main);
-        canvas.stroke_rounded_rect(
-            bounds,
-            radius,
-            ctx.theme.colors.border_strong,
-            ctx.theme.shape.border_width,
-        );
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
@@ -180,7 +181,7 @@ impl Widget for ModalContainer {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        self.content_id.into_iter().collect()
+        self.root_child_id.into_iter().collect()
     }
 }
 
@@ -678,6 +679,7 @@ impl Widget for Dialog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fern_canvas::Size;
     use fern_core::widget_tree::WidgetTree;
     use fern_core::{ModalContent, ModalPresentation};
     use fern_core::Theme;

@@ -9,6 +9,7 @@ pub mod card_style;
 pub mod checkbox_style;
 pub mod combo_box_style;
 pub mod component_style_slots;
+pub mod dialog_style;
 pub mod icon_button_style;
 pub mod menu_item_style;
 pub mod panel_style;
@@ -37,6 +38,7 @@ pub use combo_box_style::{
     ComboBoxStyle, ComboBoxStyleConfig, ComboBoxVariant, SharedComboBoxStyle,
 };
 pub use component_style_slots::ComponentStyleSlots;
+pub use dialog_style::{DialogStyle, DialogStyleConfig, SharedDialogStyle};
 pub use icon_button_style::{
     IconButtonSize, IconButtonStyle, IconButtonStyleConfig, SharedIconButtonStyle,
 };

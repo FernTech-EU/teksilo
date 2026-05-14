@@ -1064,7 +1064,11 @@ mod tests {
             .text_literal("Body")
             .buttons(MessageBoxButtons::Ok);
         let content = present_and_lay_out(&mut tree, mb);
-        let mb_id = tree.children(content).first().copied().unwrap();
+        // `content` is the `ModalContainer`; its child is now the
+        // `DialogStyle` panel frame, and the `MessageBox` sits one
+        // level below that (Stage B of the group-5 styling migration).
+        let panel = tree.children(content).first().copied().unwrap();
+        let mb_id = tree.children(panel).first().copied().unwrap();
         let info = tree.accessibility_node(mb_id);
         assert_eq!(info.role(), fern_core::accesskit::Role::AlertDialog);
         assert_eq!(info.name(), Some("Title"));
