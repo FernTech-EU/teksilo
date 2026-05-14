@@ -1,14 +1,15 @@
+use std::rc::Rc;
 use std::time::Duration;
 
-use fern_canvas::{Canvas, Rect, Size, SizeProposal};
+use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
-use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
+use fern_core::styles::{SharedSnackbarStyle, SnackbarStyleConfig};
+use fern_core::widget::{LayoutContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::CornerRadius;
 
 use crate::button::{Button, ButtonVariant};
 use crate::overlay_trigger::OverlayTrigger;
@@ -51,6 +52,10 @@ struct SnackbarSurface {
     /// the moment the snackbar appears. Falls back to the
     /// generic `a11y_snackbar_name` when unset.
     announcement: Option<String>,
+    /// Per-call override for the snackbar surface chrome.
+    style_override: Option<SharedSnackbarStyle>,
+    /// Build state — the `SnackbarStyle::make_body` root.
+    root_child_id: Option<WidgetId>,
 }
 
 impl SnackbarSurface {
@@ -59,11 +64,18 @@ impl SnackbarSurface {
             content_id: None,
             pending_content: Some(content),
             announcement: None,
+            style_override: None,
+            root_child_id: None,
         }
     }
 
     fn with_announcement(mut self, text: Option<String>) -> Self {
         self.announcement = text;
+        self
+    }
+
+    fn with_style(mut self, style: Option<SharedSnackbarStyle>) -> Self {
+        self.style_override = style;
         self
     }
 }
@@ -82,7 +94,20 @@ impl Widget for SnackbarSurface {
                 PendingChild::Deferred(w) => ctx.add_boxed(w),
             });
         }
-        self.children()
+        // The surface chrome (dark `tooltip_bg` panel + border + padding
+        // inset) is owned by the active `SnackbarStyle`; this widget
+        // keeps its `Role::Alert` / `Live::Polite` accessibility node.
+        let content_id = self
+            .content_id
+            .expect("SnackbarSurface requires content — none was set");
+        let style: SharedSnackbarStyle = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.snackbar.clone())
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeSnackbarStyle::default()));
+        let root_id = style.make_body(&SnackbarStyleConfig { content: content_id }, ctx);
+        self.root_child_id = Some(root_id);
+        vec![root_id]
     }
 
     fn layout_response(
@@ -90,23 +115,10 @@ impl Widget for SnackbarSurface {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> fern_core::widget::LayoutResponse {
-        let style = ctx.theme.components.notification;
-        let inset_x = style.padding_horizontal * 2.0;
-        let inset_y = style.padding_vertical * 2.0;
-        let content = self
-            .content_id
-            .and_then(|id| {
-                ctx.child_size(
-                    id,
-                    SizeProposal {
-                        width: proposal.width.map(|width| (width - inset_x).max(0.0)),
-                        height: proposal.height.map(|height| (height - inset_y).max(0.0)),
-                    },
-                )
-            })
-            .unwrap_or_else(|| proposal.resolve(220.0, 44.0));
-
-        Size::new(content.width + inset_x, content.height + inset_y).into()
+        self.root_child_id
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(220.0, 44.0))
+            .into()
     }
 
     fn place_children(
@@ -114,32 +126,12 @@ impl Widget for SnackbarSurface {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        ctx: &LayoutContext,
+        _ctx: &LayoutContext,
     ) {
-        let style = ctx.theme.components.notification;
         for child in children.iter_mut() {
-            child.origin = fern_canvas::Point::new(
-                bounds.x + style.padding_horizontal,
-                bounds.y + style.padding_vertical,
-            );
-            child.size = Size::new(
-                (bounds.width - style.padding_horizontal * 2.0).max(0.0),
-                (bounds.height - style.padding_vertical * 2.0).max(0.0),
-            );
+            child.origin = bounds.origin();
+            child.size = bounds.size();
         }
-    }
-
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let style = ctx.theme.components.notification;
-        let radius = CornerRadius::uniform(style.corner_radius);
-        // Notifications use the (dark) tooltip surface for high-contrast popups.
-        canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.tooltip_bg);
-        canvas.stroke_rounded_rect(
-            bounds,
-            radius,
-            ctx.theme.colors.tooltip_border,
-            ctx.theme.shape.border_width,
-        );
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
@@ -160,7 +152,7 @@ impl Widget for SnackbarSurface {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        self.content_id.into_iter().collect()
+        self.root_child_id.into_iter().collect()
     }
 }
 
@@ -176,6 +168,8 @@ pub struct Snackbar {
     /// the `SnackbarSurface`'s a11y node. When set, screen readers
     /// read this as the Alert's name when the snackbar appears.
     announcement: Option<String>,
+    /// Per-call override for the snackbar surface chrome.
+    style_override: Option<SharedSnackbarStyle>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -191,8 +185,17 @@ impl Snackbar {
             pending_content: None,
             pending_trigger: None,
             announcement: None,
+            style_override: None,
             root_child_id: None,
         }
+    }
+
+    /// Per-call style override for the snackbar surface chrome.
+    /// Replaces the theme-wide default `SnackbarStyle` for just this
+    /// instance.
+    pub fn style(mut self, style: impl fern_core::styles::SnackbarStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
     }
 
     /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in `LocalizedString::literal`.
@@ -300,7 +303,8 @@ impl Widget for Snackbar {
                     .take()
                     .expect("Snackbar requires .content(...) — no content was set"),
             )
-            .with_announcement(self.announcement.clone()),
+            .with_announcement(self.announcement.clone())
+            .with_style(self.style_override.clone()),
         );
         ctx.set_dormant(content_id);
 
@@ -460,6 +464,7 @@ impl Widget for Snackbar {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fern_canvas::Size;
     use fern_core::widget_tree::WidgetTree;
     use fern_core::Theme;
 

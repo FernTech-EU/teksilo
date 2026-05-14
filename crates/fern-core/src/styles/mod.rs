@@ -17,6 +17,7 @@ pub mod popover_style;
 pub mod radio_style;
 pub mod recipe;
 pub mod scroll_bar_style;
+pub mod snackbar_style;
 pub mod slider_style;
 pub mod standard_item_style;
 pub mod tab_style;
@@ -57,6 +58,7 @@ pub use scroll_bar_style::{
 pub use slider_style::{
     SharedSliderStyle, SliderOrientation, SliderStyle, SliderStyleConfig, SliderVariant,
 };
+pub use snackbar_style::{SharedSnackbarStyle, SnackbarStyle, SnackbarStyleConfig};
 pub use standard_item_style::{
     SharedStandardItemStyle, StandardItemStyle, StandardItemStyleConfig,
 };
