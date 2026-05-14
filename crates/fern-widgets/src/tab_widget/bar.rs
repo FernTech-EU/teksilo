@@ -16,7 +16,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal};
+use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::DropFeedback;
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::binding::BindingLevel;
@@ -26,8 +26,7 @@ use fern_core::event::{EventResponse, ScrollDelta, WidgetEvent};
 use fern_core::overlay::OverlayPlacement;
 use fern_core::signal::Signal;
 use fern_core::widget::{
-    EventContext, LayoutContext, LayoutResponse, PaintContext, PendingChild, Widget,
-    WidgetPlacement,
+    EventContext, LayoutContext, LayoutResponse, PendingChild, Widget, WidgetPlacement,
 };
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
@@ -72,9 +71,6 @@ const SCROLL_ARROW_STEP: f32 = 120.0;
 /// roughly one tab-width's worth of scrolling so a single notch
 /// scrolls one full tab into view.
 const WHEEL_LINE_PIXELS: f32 = 64.0;
-/// Width (in dp) of the drop-indicator vertical line painted at the
-/// insertion boundary during a drag-reorder.
-const DROP_INDICATOR_WIDTH: f32 = 2.0;
 /// Edge-zone width inside which `on_drag_tick` ramps the auto-scroll
 /// velocity up to [`DRAG_MAX_VELOCITY`].
 const DRAG_EDGE_ZONE: f32 = 32.0;
@@ -182,16 +178,27 @@ pub struct TabBar<T: 'static> {
     bar_trailing_slot_id: Option<WidgetId>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct PaintState {
     /// Drop-indicator x in bar-local coords (`Some(x)`) or `None`
-    /// when no drag is in progress over the bar.
-    drop_indicator_x: Rc<std::cell::Cell<Option<f32>>>,
+    /// when no drag is in progress over the bar. A `Signal` (not a
+    /// bare `Cell`) so the `TabStyle`-built chrome painter can bind
+    /// to it and repaint when a drag updates the insertion point.
+    drop_indicator_x: Signal<Option<f32>>,
     /// Cached bar world bounds recorded by `place_children`. Drop
     /// handlers use the origin to translate world-coords header
     /// bounds into bar-local space, and the size to detect when the
     /// pointer is in the edge auto-scroll zone.
     last_bar_bounds: Rc<std::cell::Cell<Rect>>,
+}
+
+impl Default for PaintState {
+    fn default() -> Self {
+        Self {
+            drop_indicator_x: Signal::new(None),
+            last_bar_bounds: Rc::new(std::cell::Cell::new(Rect::new(0.0, 0.0, 0.0, 0.0))),
+        }
+    }
 }
 
 impl std::fmt::Debug for PaintState {
@@ -386,10 +393,7 @@ impl<T: 'static> TabBar<T> {
     /// idle, and hovered all paint the same fill. Accepts any `Color`,
     /// `SurfaceRole`, or `Signal<Color>` (via [`ColorProp`](fern_core::color_prop::ColorProp)).
     /// Default `None` = transparent.
-    pub fn tab_surface_role(
-        mut self,
-        color: impl Into<fern_core::color_prop::ColorProp>,
-    ) -> Self {
+    pub fn tab_surface_role(mut self, color: impl Into<fern_core::color_prop::ColorProp>) -> Self {
         self.tab_surface_role = Some(color.into());
         self
     }
@@ -1055,7 +1059,25 @@ impl<T: 'static> Widget for TabBar<T> {
                 ctx.add(col)
             }
         };
-        self.root_child_id = Some(root_id);
+        // Resolve the active `TabStyle` and let it wrap the bar
+        // content with the strip chrome — backdrop fill, content-pane
+        // separator, drag-reorder drop indicator. Per-call override >
+        // theme slot > built-in `RecipeTabStyle`. This replaces the
+        // old `TabBar::paint`: the bar is now pure composition.
+        let style: fern_core::styles::SharedTabStyle = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.tab.clone())
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTabStyle));
+        let chrome_cfg = fern_core::styles::TabBarChromeConfig {
+            content: root_id,
+            orientation: self.orientation.into(),
+            show_separator: self.show_separator,
+            surface_role: self.tab_surface_role.clone(),
+            drop_indicator: self.paint_state.drop_indicator_x.clone(),
+        };
+        let bar_root = style.make_bar(&chrome_cfg, ctx);
+        self.root_child_id = Some(bar_root);
 
         // Wheel-mapping handler. Attached via `on_pointer_event`
         // (not `on_scroll`) so the framework fires it in the
@@ -1270,7 +1292,7 @@ impl<T: 'static> Widget for TabBar<T> {
             ctx.apply_self_handlers(drop_handler);
         }
 
-        vec![root_id]
+        vec![bar_root]
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
@@ -1332,75 +1354,10 @@ impl<T: 'static> Widget for TabBar<T> {
         }
     }
 
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        // Uniform backdrop covering the entire bar — leading slot,
-        // pinned strip, scroll arrows, headers row, overflow dropdown,
-        // trailing slot. Painting it here (rather than per-tab) unifies
-        // the gaps between tabs and the chrome regions so the strip
-        // reads as a single surface. Individual tab headers paint the
-        // same role on top, which is visually a no-op.
-        if let Some(ref prop) = self.tab_surface_role {
-            let backdrop = prop.resolve(ctx.theme);
-            if backdrop.a() > 0.0 {
-                canvas.fill_rect(bounds, backdrop);
-            }
-        }
-
-        if self.show_separator {
-            // 1 dp separator: bottom in horizontal mode, trailing
-            // edge (right) in vertical mode. Painted *inside* the
-            // focus-ring envelope reserved by each header so the
-            // selected header's `surface_content` fill overpaints
-            // the separator in its own column (the "tab merges into
-            // content pane" effect).
-            let border_width = ctx.theme.shape.border_width;
-            let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
-            let separator = match self.orientation {
-                TabBarOrientation::Horizontal => Rect::new(
-                    bounds.x,
-                    (bounds.bottom() - envelope - border_width).max(bounds.y),
-                    bounds.width,
-                    border_width,
-                ),
-                TabBarOrientation::Vertical => Rect::new(
-                    (bounds.right() - envelope - border_width).max(bounds.x),
-                    bounds.y,
-                    border_width,
-                    bounds.height,
-                ),
-            };
-            canvas.fill_rect(separator, ctx.theme.colors.border);
-        }
-
-        // Drop indicator: a vertical accent-color line at the
-        // would-be insertion x in horizontal mode, a horizontal line
-        // at the insertion y in vertical mode. The position is the
-        // layout-axis offset stored in bar-local coords by
-        // `on_drag_hover` (x-axis for horizontal, y-axis for vertical).
-        if let Some(local_pos) = self.paint_state.drop_indicator_x.get() {
-            let indicator = match self.orientation {
-                TabBarOrientation::Horizontal => {
-                    let world_x = bounds.x + local_pos;
-                    Rect::new(
-                        (world_x - DROP_INDICATOR_WIDTH * 0.5).max(bounds.x),
-                        bounds.y,
-                        DROP_INDICATOR_WIDTH,
-                        bounds.height,
-                    )
-                }
-                TabBarOrientation::Vertical => {
-                    let world_y = bounds.y + local_pos;
-                    Rect::new(
-                        bounds.x,
-                        (world_y - DROP_INDICATOR_WIDTH * 0.5).max(bounds.y),
-                        bounds.width,
-                        DROP_INDICATOR_WIDTH,
-                    )
-                }
-            };
-            canvas.fill_rect(indicator, ctx.theme.colors.accent);
-        }
-    }
+    // No `paint()`: the bar is pure composition. Backdrop fill,
+    // content-pane separator, and the drag-reorder drop indicator are
+    // all drawn by the active `TabStyle`'s `make_bar` chrome (see
+    // `RecipeTabStyle` / `TabBarChromePainter`).
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::TabList);

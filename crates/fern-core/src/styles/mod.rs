@@ -58,7 +58,9 @@ pub use slider_style::{
 pub use standard_item_style::{
     SharedStandardItemStyle, StandardItemStyle, StandardItemStyleConfig,
 };
-pub use tab_style::{SharedTabStyle, TabBarOrientation, TabStyle, TabStyleConfig};
+pub use tab_style::{
+    SharedTabStyle, TabBarChromeConfig, TabBarOrientation, TabStyle, TabStyleConfig,
+};
 pub use text_input_style::{
     SharedTextInputStyle, TextInputStyle, TextInputStyleConfig, TextInputValidationLevel,
     TextInputVariant,

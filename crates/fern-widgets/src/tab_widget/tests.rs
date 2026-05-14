@@ -2,6 +2,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use fern_canvas::{Size, SizeProposal};
+use fern_core::Theme;
 use fern_core::accesskit;
 use fern_core::event::{Key, Modifiers};
 use fern_core::signal::Signal;
@@ -9,7 +10,6 @@ use fern_core::widget::{LayoutContext, LayoutResponse, Widget};
 use fern_core::widget_id::WidgetId;
 use fern_core::widget_tree::WidgetTree;
 use fern_data::ListModel;
-use fern_core::Theme;
 
 use crate::tab_widget::{
     TabBar, TabBarOrientation, TabDelegate, TabHandle, TabId, TabInfo, TabSizing, TabWidget,
@@ -42,10 +42,22 @@ impl Widget for BuildCountingLeaf {
     }
 }
 
+/// The bar's content row/column. `TabBar`'s direct child is the
+/// `TabStyle::make_bar` chrome container — `[backdrop?, chrome
+/// painter, content]` — so the content (the `row_outer` HStack /
+/// VStack) is the container's last child.
+fn bar_content(tree: &WidgetTree, bar_id: WidgetId) -> WidgetId {
+    let chrome = tree.child_widget(bar_id, 0);
+    *tree
+        .children(chrome)
+        .last()
+        .expect("bar chrome has a content child")
+}
+
 /// Walk a stand-alone `TabBar` (no `TabWidget` wrapper) to the
 /// `TabHeaderRow` containing the unpinned headers.
 fn data_source_header_row(tree: &WidgetTree, bar_id: WidgetId) -> WidgetId {
-    let row_outer = tree.child_widget(bar_id, 0);
+    let row_outer = bar_content(tree, bar_id);
     let expand = expand_in_row_outer(tree, row_outer);
     let scroll = tree.child_widget(expand, 0);
     tree.child_widget(scroll, 0)
@@ -1115,7 +1127,7 @@ fn static_then_dynamic_renders_in_order() {
     // pinned strip; the dynamic Doc1 tab renders in the scrollable
     // row.
     let bar = bar_of(&tree, widget_id);
-    let row_outer = tree.child_widget(bar, 0);
+    let row_outer = bar_content(&tree, bar);
     let pinned_strip_count: usize = tree
         .children(row_outer)
         .iter()

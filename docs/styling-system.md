@@ -113,6 +113,12 @@ additionally carry an *orientation* enum (`SliderOrientation`,
 `ScrollBarOrientation`) alongside the variant, since orientation
 changes layout, not just paint.
 
+`TabStyle` is the one trait with two methods: `make_body` themes a
+single tab header, `make_bar` themes the whole strip (backdrop fill,
+content-pane separator, drag-reorder drop indicator). A custom
+`impl TabStyle` provides both. Every other style trait has a single
+`make_body`.
+
 Set per-call: `Button::new("Save").variant(ButtonVariant::Outlined)`.
 Set per-app via a custom Tier-3 style that *defaults* a variant for
 unspecified callers.

@@ -51,6 +51,15 @@ pub enum TabBarOrientation {
     Vertical,
 }
 
+impl From<TabBarOrientation> for fern_core::styles::TabBarOrientation {
+    fn from(o: TabBarOrientation) -> Self {
+        match o {
+            TabBarOrientation::Horizontal => fern_core::styles::TabBarOrientation::Horizontal,
+            TabBarOrientation::Vertical => fern_core::styles::TabBarOrientation::Vertical,
+        }
+    }
+}
+
 /// Whether the layout-axis extent (width in horizontal bars, height in
 /// vertical bars) is shared across all unpinned tabs or chosen
 /// per-tab from content.

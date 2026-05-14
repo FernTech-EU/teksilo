@@ -13,7 +13,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use fern_canvas::{Rect, SizeProposal};
+use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
@@ -563,7 +563,13 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
             }
         };
 
-        // Dropdown panel — same surface treatment as MenuList (raised + popup radius)
+        // Dropdown panel — same surface treatment as MenuList (raised + popup radius).
+        // Z-order back→front: drop shadow leaf, the raised surface
+        // rect, then the item content. The shadow is a composed leaf
+        // (not a `paint()` on the panel) so the panel stays pure
+        // composition.
+        let shadow_id = ctx.add(DropdownShadow);
+
         let bg = RectWidget::new()
             .background(SurfaceRole::Raised)
             .border_color(BorderRole::Default)
@@ -571,7 +577,10 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
             .corner_radius(CornerRadius::uniform(menu::MENU_POPUP_CORNER_RADIUS));
         let bg_id = ctx.add(bg);
 
-        let zstack = ZStack::new().add_child(bg_id).add_child(content_id);
+        let zstack = ZStack::new()
+            .add_child(shadow_id)
+            .add_child(bg_id)
+            .add_child(content_id);
         let root_id = ctx.add(zstack);
         self.root_child_id = Some(root_id);
 
@@ -726,12 +735,37 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
         }
     }
 
+    // No `paint()`: the panel is pure composition. The drop shadow is
+    // the `DropdownShadow` leaf at the back of the panel's ZStack.
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(fern_core::accesskit::Role::ListBox);
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.root_child_id.into_iter().collect()
+    }
+}
+
+/// Leaf widget that paints the dropdown panel's layered drop shadow.
+/// Combo-box dropdowns always open below (or flip above) the trigger,
+/// so the top-side shadow is suppressed and the panel reads as a
+/// vertical extension of the trigger field. Composed at the back of
+/// `DropdownPanel`'s ZStack rather than painted by the panel itself.
+#[derive(Debug)]
+struct DropdownShadow;
+
+impl Widget for DropdownShadow {
+    fn layout_response(
+        &self,
+        _proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
+        // No intrinsic size — the ZStack hands it the panel bounds.
+        Size::ZERO.into()
+    }
+
     fn paint(&self, bounds: Rect, canvas: &mut fern_canvas::Canvas, ctx: &PaintContext) {
-        // Combo-box dropdowns always open Below (or flip to Above when
-        // there's no room) the trigger field, so the panel is attached
-        // along its top edge to the combo's input box. Suppress the
-        // top-side shadow so the panel reads as a vertical extension
-        // of the trigger.
         use crate::styles::recipe_menu_item_style as menu;
         let radius = CornerRadius::uniform(menu::MENU_POPUP_CORNER_RADIUS);
         crate::shadow::paint_layered_shadow(
@@ -746,10 +780,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(fern_core::accesskit::Role::ListBox);
-    }
-
-    fn children(&self) -> Vec<WidgetId> {
-        self.root_child_id.into_iter().collect()
+        // Presentational only — the parent DropdownPanel carries Role::ListBox.
+        builder.set_hidden();
     }
 }
