@@ -13,18 +13,19 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use fern_canvas::{Rect, Size, SizeProposal};
+use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
+use fern_core::overlay::OverlayPlacement;
 use fern_core::signal::Signal;
-use fern_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::styles::{PopoverStyleConfig, PopoverVariant};
+use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{BorderRole, CornerRadius, SurfaceRole};
 
 use crate::list_view::ListView;
-use crate::primitives::{FixedSize, HStack, Padding, RectWidget, VStack, ZStack};
+use crate::primitives::{FixedSize, HStack, Padding, VStack};
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
 
 use super::item::DropdownItem;
@@ -446,7 +447,6 @@ impl<T: Clone + PartialEq + 'static> std::fmt::Debug for DropdownPanel<T> {
 
 impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        use crate::styles::recipe_menu_item_style as menu;
         let _theme_signal = ctx.theme_signal();
 
         // In non-searchable mode the panel itself binds the model-version
@@ -563,25 +563,28 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
             }
         };
 
-        // Dropdown panel — same surface treatment as MenuList (raised + popup radius).
-        // Z-order back→front: drop shadow leaf, the raised surface
-        // rect, then the item content. The shadow is a composed leaf
-        // (not a `paint()` on the panel) so the panel stays pure
-        // composition.
-        let shadow_id = ctx.add(DropdownShadow);
-
-        let bg = RectWidget::new()
-            .background(SurfaceRole::Raised)
-            .border_color(BorderRole::Default)
-            .bind_border_width(menu::MENU_POPUP_BORDER_WIDTH)
-            .corner_radius(CornerRadius::uniform(menu::MENU_POPUP_CORNER_RADIUS));
-        let bg_id = ctx.add(bg);
-
-        let zstack = ZStack::new()
-            .add_child(shadow_id)
-            .add_child(bg_id)
-            .add_child(content_id);
-        let root_id = ctx.add(zstack);
+        // Dropdown panel surface — routed through `PopoverStyle` (the
+        // `Menu`-flavoured variant). The panel's background, border,
+        // corner radius, and the trigger-attached drop shadow are all
+        // owned by the active popover style; the panel stays pure
+        // composition. Combo dropdowns always open below the trigger
+        // (flipping above when there's no room), so `BelowPreferred`
+        // makes `PopoverSurface` suppress the trigger-side shadow.
+        let popover_style: fern_core::styles::SharedPopoverStyle = ctx
+            .theme()
+            .style_slots
+            .popover
+            .clone()
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle::default()));
+        let surface_cfg = PopoverStyleConfig {
+            content: content_id,
+            variant: PopoverVariant::Menu,
+            name: String::new(),
+            placement: OverlayPlacement::BelowPreferred,
+            show_caret: false,
+            caret_size: 0.0,
+        };
+        let root_id = popover_style.make_body(&surface_cfg, ctx);
         self.root_child_id = Some(root_id);
 
         // Panel-level key handler. Events bubble up from the focused
@@ -747,40 +750,3 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
     }
 }
 
-/// Leaf widget that paints the dropdown panel's layered drop shadow.
-/// Combo-box dropdowns always open below (or flip above) the trigger,
-/// so the top-side shadow is suppressed and the panel reads as a
-/// vertical extension of the trigger field. Composed at the back of
-/// `DropdownPanel`'s ZStack rather than painted by the panel itself.
-#[derive(Debug)]
-struct DropdownShadow;
-
-impl Widget for DropdownShadow {
-    fn layout_response(
-        &self,
-        _proposal: SizeProposal,
-        _ctx: &LayoutContext,
-    ) -> fern_core::widget::LayoutResponse {
-        // No intrinsic size — the ZStack hands it the panel bounds.
-        Size::ZERO.into()
-    }
-
-    fn paint(&self, bounds: Rect, canvas: &mut fern_canvas::Canvas, ctx: &PaintContext) {
-        use crate::styles::recipe_menu_item_style as menu;
-        let radius = CornerRadius::uniform(menu::MENU_POPUP_CORNER_RADIUS);
-        crate::shadow::paint_layered_shadow(
-            canvas,
-            bounds,
-            radius,
-            &ctx.theme.shape.shadow_sm,
-            &ctx.theme.shape.shadow_inner_sm,
-            menu::MENU_SHADOW_DENSITY,
-            Some(crate::shadow::AttachedSide::Top),
-        );
-    }
-
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        // Presentational only — the parent DropdownPanel carries Role::ListBox.
-        builder.set_hidden();
-    }
-}
