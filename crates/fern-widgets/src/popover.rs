@@ -1,7 +1,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use fern_canvas::{Canvas, Path, Point, Rect, Size, SizeProposal};
+use fern_canvas::{Canvas, EdgeInsets, Path, Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
@@ -10,12 +10,10 @@ use fern_core::signal::Signal;
 use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::CornerRadius;
+use fern_tokens::{CornerRadius, SurfaceRole};
 
 use crate::button::{Button, ButtonVariant};
 use crate::overlay_trigger::OverlayTrigger;
-
-const SURFACE_PADDING: f32 = 16.0;
 
 pub(crate) struct PopoverSurface {
     content_id: Option<WidgetId>,
@@ -25,15 +23,33 @@ pub(crate) struct PopoverSurface {
     caret_size: f32,
     /// Accessible name for the dialog node — propagated from the trigger label.
     name: String,
+    /// Inset between the panel edge and the wrapped content. Defaulted
+    /// per `PopoverVariant` by `RecipePopoverStyle` (16 px for
+    /// Default/Tooltip, zero for Menu so menu rows reach the edge).
+    content_padding: EdgeInsets,
+    /// Surface fill role for the panel background + caret.
+    background: SurfaceRole,
+    /// Panel corner radius in logical pixels.
+    corner_radius: f32,
+    /// When true the surface emits no semantic node (`set_hidden`) —
+    /// used by the Menu variant, where the caller (`MenuList`,
+    /// `DropdownPanel`, `SuggestionListBox`) already carries the
+    /// container role. Default/Tooltip surfaces emit `Role::Dialog`.
+    presentational: bool,
 }
 
 impl PopoverSurface {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         content: PendingChild,
         placement: OverlayPlacement,
         show_caret: bool,
         caret_size: f32,
         name: String,
+        content_padding: EdgeInsets,
+        background: SurfaceRole,
+        corner_radius: f32,
+        presentational: bool,
     ) -> Self {
         Self {
             content_id: None,
@@ -42,6 +58,10 @@ impl PopoverSurface {
             show_caret,
             caret_size,
             name,
+            content_padding,
+            background,
+            corner_radius,
+            presentational,
         }
     }
 
@@ -151,24 +171,25 @@ impl Widget for PopoverSurface {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> fern_core::widget::LayoutResponse {
-        let inset = SURFACE_PADDING * 2.0;
+        let inset_w = self.content_padding.leading + self.content_padding.trailing;
+        let inset_h = self.content_padding.top + self.content_padding.bottom;
         let (caret_top, caret_bottom) = self.caret_insets();
         self.content_id
             .and_then(|id| {
                 ctx.child_size(
                     id,
                     SizeProposal {
-                        width: proposal.width.map(|width| (width - inset).max(0.0)),
+                        width: proposal.width.map(|width| (width - inset_w).max(0.0)),
                         height: proposal
                             .height
-                            .map(|height| (height - inset - caret_top - caret_bottom).max(0.0)),
+                            .map(|height| (height - inset_h - caret_top - caret_bottom).max(0.0)),
                     },
                 )
             })
             .map(|size| {
                 Size::new(
-                    size.width + inset,
-                    size.height + inset + caret_top + caret_bottom,
+                    size.width + inset_w,
+                    size.height + inset_h + caret_top + caret_bottom,
                 )
             })
             .unwrap_or_else(|| proposal.resolve(200.0, 80.0))
@@ -183,19 +204,20 @@ impl Widget for PopoverSurface {
         _ctx: &LayoutContext,
     ) {
         let panel = self.panel_bounds(bounds);
+        let pad = self.content_padding;
         for child in children.iter_mut() {
-            child.origin =
-                fern_canvas::Point::new(panel.x + SURFACE_PADDING, panel.y + SURFACE_PADDING);
+            child.origin = fern_canvas::Point::new(panel.x + pad.leading, panel.y + pad.top);
             child.size = Size::new(
-                (panel.width - SURFACE_PADDING * 2.0).max(0.0),
-                (panel.height - SURFACE_PADDING * 2.0).max(0.0),
+                (panel.width - pad.leading - pad.trailing).max(0.0),
+                (panel.height - pad.top - pad.bottom).max(0.0),
             );
         }
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let panel = self.panel_bounds(bounds);
-        let radius = CornerRadius::uniform(ctx.theme.shape.radius_popup);
+        let radius = CornerRadius::uniform(self.corner_radius);
+        let fill = self.background.resolve(&ctx.theme.colors);
         crate::shadow::paint_layered_shadow(
             canvas,
             panel,
@@ -209,7 +231,7 @@ impl Widget for PopoverSurface {
         // panel and trigger). It's painted unshaded below — that's
         // intentional, the caret reads as part of the trigger-attach
         // region, not as a separate elevated surface.
-        canvas.fill_rounded_rect(panel, radius, ctx.theme.colors.surface_main);
+        canvas.fill_rounded_rect(panel, radius, fill);
         canvas.stroke_rounded_rect(
             panel,
             radius,
@@ -217,12 +239,19 @@ impl Widget for PopoverSurface {
             ctx.theme.shape.border_width,
         );
         if let Some(path) = self.caret_path(bounds) {
-            canvas.fill_path(&path, ctx.theme.colors.surface_main);
+            canvas.fill_path(&path, fill);
             canvas.stroke_path(&path, ctx.theme.colors.border, ctx.theme.shape.border_width);
         }
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        if self.presentational {
+            // Menu-variant container: the caller (`MenuList`,
+            // `DropdownPanel`, `SuggestionListBox`) already owns the
+            // semantic role, so the surface contributes nothing.
+            builder.set_hidden();
+            return;
+        }
         // Popover surface is modeled as a non-modal Dialog: ARIA has
         // no dedicated popover role, and Role::Dialog without
         // `set_modal` is the standard fallback for panels that float
