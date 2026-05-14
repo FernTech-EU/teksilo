@@ -56,7 +56,9 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                 VStack::new()
                     .spacing(4.0)
                     .child(Checkbox::new(sigs.cb_sounds.clone()).label(tr!(cnt_cb_sounds())))
-                    .child(Checkbox::new(sigs.cb_disabled_state.clone()).label(tr!(cnt_cb_banner()))),
+                    .child(
+                        Checkbox::new(sigs.cb_disabled_state.clone()).label(tr!(cnt_cb_banner())),
+                    ),
             ),
     );
     let group_header = section(
@@ -73,12 +75,18 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
         VStack::new()
             .spacing(6.0)
             .child(
-                Accordion::new(tr!(cnt_accordion_1_title()), sigs.accordion_expanded.clone())
-                    .content(TextWidget::new(tr!(cnt_accordion_1_body())).style(TextStyleRole::Body)),
+                Accordion::new(
+                    tr!(cnt_accordion_1_title()),
+                    sigs.accordion_expanded.clone(),
+                )
+                .content(TextWidget::new(tr!(cnt_accordion_1_body())).style(TextStyleRole::Body)),
             )
             .child(
-                Accordion::new(tr!(cnt_accordion_2_title()), sigs.accordion2_expanded.clone())
-                    .content(TextWidget::new(tr!(cnt_accordion_2_body())).style(TextStyleRole::Body)),
+                Accordion::new(
+                    tr!(cnt_accordion_2_title()),
+                    sigs.accordion2_expanded.clone(),
+                )
+                .content(TextWidget::new(tr!(cnt_accordion_2_body())).style(TextStyleRole::Body)),
             ),
     );
     let tool_box = section(
@@ -103,15 +111,16 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let scroll_area = section(
         ctx,
         "ScrollArea",
-        FixedSize::new().bind_width(280.0_f32).bind_height(120.0_f32).child(
-            ScrollArea::new().child({
+        FixedSize::new()
+            .bind_width(280.0_f32)
+            .bind_height(120.0_f32)
+            .child(ScrollArea::new().child({
                 let mut col = VStack::new().spacing(4.0);
                 for _ in 0..30 {
                     col = col.child(color_cell(SurfaceRole::AccentSubtle, "row"));
                 }
                 col
-            }),
-        ),
+            })),
     );
     let sb_pos = ctx.signal(0.4_f32);
     let sb_max = ctx.signal(1.0_f32);
@@ -119,28 +128,33 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let scrollbar = section(
         ctx,
         "ScrollBar (standalone)",
-        FixedSize::new().bind_width(280.0_f32).bind_height(14.0_f32).child(
-            ScrollBar::new(ScrollBarOrientation::Horizontal, sb_pos, sb_max, sb_vp),
-        ),
+        FixedSize::new()
+            .bind_width(280.0_f32)
+            .bind_height(14.0_f32)
+            .child(ScrollBar::new(
+                ScrollBarOrientation::Horizontal,
+                sb_pos,
+                sb_max,
+                sb_vp,
+            )),
     );
     let split_value = ctx.signal(0.5_f32);
     let split = section(
         ctx,
         "SplitView",
-        FixedSize::new().bind_width(360.0_f32).bind_height(120.0_f32).child(
-            SplitView::new(split_value)
-                .orientation(Orientation::Horizontal)
-                .first(
-                    Panel::new().background(SurfaceRole::AccentSubtle).child(
+        FixedSize::new()
+            .bind_width(360.0_f32)
+            .bind_height(120.0_f32)
+            .child(
+                SplitView::new(split_value)
+                    .orientation(Orientation::Horizontal)
+                    .first(Panel::new().background(SurfaceRole::AccentSubtle).child(
                         TextWidget::new(tr!(cnt_split_leading())).style(TextStyleRole::Small),
-                    ),
-                )
-                .second(
-                    Panel::new().background(SurfaceRole::Raised).child(
+                    ))
+                    .second(Panel::new().background(SurfaceRole::Raised).child(
                         TextWidget::new(tr!(cnt_split_trailing())).style(TextStyleRole::Small),
-                    ),
-                ),
-        ),
+                    )),
+            ),
     );
 
     ctx.add(
@@ -217,23 +231,21 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
         SplitView::new(split_value)
             .orientation(Orientation::Horizontal)
             .first(
-                Panel::new().background(SurfaceRole::AccentSubtle).child(
-                    TextWidget::new(tr!(cnt_split_leading())).style(TextStyleRole::Small),
-                ),
+                Panel::new()
+                    .background(SurfaceRole::AccentSubtle)
+                    .child(TextWidget::new(tr!(cnt_split_leading())).style(TextStyleRole::Small)),
             )
             .second(
-                Panel::new().background(SurfaceRole::Raised).child(
-                    TextWidget::new(tr!(cnt_split_trailing())).style(TextStyleRole::Small),
-                ),
+                Panel::new()
+                    .background(SurfaceRole::Raised)
+                    .child(TextWidget::new(tr!(cnt_split_trailing())).style(TextStyleRole::Small)),
             ),
     );
 
-    let acc_body_1 = ctx.add(
-        TextWidget::new(tr!(cnt_accordion_1_body())).style(TextStyleRole::Body),
-    );
-    let acc_body_2 = ctx.add(
-        TextWidget::new(tr!(cnt_accordion_2_body())).style(TextStyleRole::Body),
-    );
+    let acc_body_1 =
+        ctx.add(TextWidget::new(tr!(cnt_accordion_1_body())).style(TextStyleRole::Body));
+    let acc_body_2 =
+        ctx.add(TextWidget::new(tr!(cnt_accordion_2_body())).style(TextStyleRole::Body));
     let group_checked = sigs.group_box_notifications_on.clone();
     let cb_sounds = sigs.cb_sounds.clone();
     let cb_banner = sigs.cb_disabled_state.clone();

@@ -24,7 +24,9 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
         "Checkbox",
         VStack::new()
             .spacing(6.0)
-            .child(Checkbox::new(sigs.checkbox_checked.clone()).label(tr!(inp_checkbox_two_state())))
+            .child(
+                Checkbox::new(sigs.checkbox_checked.clone()).label(tr!(inp_checkbox_two_state())),
+            )
             .child(Checkbox::tristate(sigs.tristate.clone()).label(tr!(inp_checkbox_tristate())))
             .child(
                 Checkbox::new(sigs.cb_disabled_state.clone())
@@ -57,9 +59,9 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let slider_h = section(
         ctx,
         "Slider — horizontal",
-        FixedSize::new()
-            .bind_width(300.0_f32)
-            .child(Slider::new(sigs.slider_value.clone(), 0.0, 100.0).label(tr!(inp_slider_volume()))),
+        FixedSize::new().bind_width(300.0_f32).child(
+            Slider::new(sigs.slider_value.clone(), 0.0, 100.0).label(tr!(inp_slider_volume())),
+        ),
     );
     let slider_stepped = section(
         ctx,

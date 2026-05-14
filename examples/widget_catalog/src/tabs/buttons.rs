@@ -54,9 +54,21 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         "Button — disabled state",
         HStack::new()
             .spacing(8.0)
-            .child(Button::new(tr!(btn_default())).variant(ButtonVariant::Filled).enabled(false))
-            .child(Button::new(tr!(btn_regular())).variant(ButtonVariant::Plain).enabled(false))
-            .child(Button::new(tr!(btn_flat())).variant(ButtonVariant::Ghost).enabled(false)),
+            .child(
+                Button::new(tr!(btn_default()))
+                    .variant(ButtonVariant::Filled)
+                    .enabled(false),
+            )
+            .child(
+                Button::new(tr!(btn_regular()))
+                    .variant(ButtonVariant::Plain)
+                    .enabled(false),
+            )
+            .child(
+                Button::new(tr!(btn_flat()))
+                    .variant(ButtonVariant::Ghost)
+                    .enabled(false),
+            ),
     );
     let with_icon = section(
         ctx,
@@ -165,11 +177,9 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 .child(TextWidget::new(tr!(btn_popover_body())).style(TextStyleRole::Small)),
         )),
     );
-    let popover_icon_widget = ctx.add(
-        PopoverIconButton::new(IconButton::add()).content(popover_surface(
-            TextWidget::new(tr!(btn_popover_icon_body())).style(TextStyleRole::Small),
-        )),
-    );
+    let popover_icon_widget = ctx.add(PopoverIconButton::new(IconButton::add()).content(
+        popover_surface(TextWidget::new(tr!(btn_popover_icon_body())).style(TextStyleRole::Small)),
+    ));
 
     fern!(ctx =>
         VStack {

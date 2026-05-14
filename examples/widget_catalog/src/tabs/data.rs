@@ -55,9 +55,10 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         FixedSize::new()
             .bind_width(280.0_f32)
             .bind_height(180.0_f32)
-            .child(ListView::new(make_list_model(), |_idx, item: &String, _sel| {
-                Box::new(StandardListItem::new_literal(item.clone()))
-            })),
+            .child(ListView::new(
+                make_list_model(),
+                |_idx, item: &String, _sel| Box::new(StandardListItem::new_literal(item.clone())),
+            )),
     );
     let standard_list_item = section(
         ctx,

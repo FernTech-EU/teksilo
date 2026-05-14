@@ -102,11 +102,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
             .single_step(1.0)
             .decimals(2),
     );
-    let search = section(
-        ctx,
-        "SearchField",
-        search_field(sigs.search_text.clone()),
-    );
+    let search = section(ctx, "SearchField", search_field(sigs.search_text.clone()));
     let file_path_signal = ctx.signal(String::new());
     let file_picker = section(
         ctx,

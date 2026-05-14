@@ -18,15 +18,21 @@ pub fn refs() -> LocalizedString {
 
 fn make_wizard() -> Wizard {
     Wizard::new(tr!(chr_wizard_title()))
-        .step(WizardStep::new(tr!(chr_wizard_step1())).content(|| {
-            TextWidget::new(tr!(chr_wizard_step1_body())).style(TextStyleRole::Body)
-        }))
-        .step(WizardStep::new(tr!(chr_wizard_step2())).content(|| {
-            TextWidget::new(tr!(chr_wizard_step2_body())).style(TextStyleRole::Body)
-        }))
-        .step(WizardStep::new(tr!(chr_wizard_step3())).content(|| {
-            TextWidget::new(tr!(chr_wizard_step3_body())).style(TextStyleRole::Body)
-        }))
+        .step(
+            WizardStep::new(tr!(chr_wizard_step1())).content(|| {
+                TextWidget::new(tr!(chr_wizard_step1_body())).style(TextStyleRole::Body)
+            }),
+        )
+        .step(
+            WizardStep::new(tr!(chr_wizard_step2())).content(|| {
+                TextWidget::new(tr!(chr_wizard_step2_body())).style(TextStyleRole::Body)
+            }),
+        )
+        .step(
+            WizardStep::new(tr!(chr_wizard_step3())).content(|| {
+                TextWidget::new(tr!(chr_wizard_step3_body())).style(TextStyleRole::Body)
+            }),
+        )
         .trigger(Button::new(tr!(chr_wizard_trigger())).variant(ButtonVariant::Filled))
 }
 
@@ -57,10 +63,21 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         "Banner",
         VStack::new()
             .spacing(8.0)
-            .child(Banner::info(tr!(chr_banner_info_title())).description(tr!(chr_banner_info_body())))
-            .child(Banner::success(tr!(chr_banner_success_title())).description(tr!(chr_banner_success_body())))
-            .child(Banner::warning(tr!(chr_banner_warning_title())).description(tr!(chr_banner_warning_body())))
-            .child(Banner::error(tr!(chr_banner_error_title())).description(tr!(chr_banner_error_body()))),
+            .child(
+                Banner::info(tr!(chr_banner_info_title())).description(tr!(chr_banner_info_body())),
+            )
+            .child(
+                Banner::success(tr!(chr_banner_success_title()))
+                    .description(tr!(chr_banner_success_body())),
+            )
+            .child(
+                Banner::warning(tr!(chr_banner_warning_title()))
+                    .description(tr!(chr_banner_warning_body())),
+            )
+            .child(
+                Banner::error(tr!(chr_banner_error_title()))
+                    .description(tr!(chr_banner_error_body())),
+            ),
     );
     let breadcrumb = section(
         ctx,

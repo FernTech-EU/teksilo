@@ -4,6 +4,18 @@ members = [
     "crates/*",
     "examples/*",
 ]
+# `fern-analytics-fern` + `fern-collector-proto` build protobuf-src from
+# source, which needs a system `cmake` + C++ toolchain. They're opt-in
+# and only consumed by the `telemetry-fern` example, so excluding all
+# three keeps a default `cargo build`/`cargo test` working without that
+# toolchain. Build them explicitly with `-p fern-analytics-fern` (and
+# `--manifest-path examples/telemetry_fern/Cargo.toml`) when cmake is
+# available.
+exclude = [
+    "crates/fern-analytics-fern",
+    "crates/fern-collector-proto",
+    "examples/telemetry_fern",
+]
 
 [workspace.package]
 version = "0.2.0"

@@ -20,9 +20,9 @@ pub fn refs() -> LocalizedString {
 
 fn masonry_tile(height: f32) -> impl Widget + 'static {
     FixedSize::new().bind_height(height).child(
-        Panel::new().background(SurfaceRole::AccentSubtle).child(
-            Center::new().child(TextWidget::new_literal("·").style(TextStyleRole::Small)),
-        ),
+        Panel::new()
+            .background(SurfaceRole::AccentSubtle)
+            .child(Center::new().child(TextWidget::new_literal("·").style(TextStyleRole::Small))),
     )
 }
 
@@ -125,43 +125,59 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let center = section(
         ctx,
         "Center",
-        FixedSize::new().bind_width(180.0_f32).bind_height(60.0_f32).child(
-            ZStack::new()
-                .child(RectWidget::new().background(SurfaceRole::Raised))
-                .child(Center::new().child(
-                    TextWidget::new(tr!(lay_centered())).style(TextStyleRole::SmallBold),
-                )),
-        ),
+        FixedSize::new()
+            .bind_width(180.0_f32)
+            .bind_height(60.0_f32)
+            .child(
+                ZStack::new()
+                    .child(RectWidget::new().background(SurfaceRole::Raised))
+                    .child(Center::new().child(
+                        TextWidget::new(tr!(lay_centered())).style(TextStyleRole::SmallBold),
+                    )),
+            ),
     );
     let expand = section(
         ctx,
         "Expand",
-        FixedSize::new().bind_width(200.0_f32).bind_height(28.0_f32).child(
-            HStack::new()
-                .spacing(0.0)
-                .child(color_cell(SurfaceRole::Sunken, "fixed"))
-                .child(Expand::new().flex(1.0).child(color_cell(SurfaceRole::AltRow, "1fr")))
-                .child(Expand::new().flex(2.0).child(color_cell(SurfaceRole::AccentSubtle, "2fr"))),
-        ),
+        FixedSize::new()
+            .bind_width(200.0_f32)
+            .bind_height(28.0_f32)
+            .child(
+                HStack::new()
+                    .spacing(0.0)
+                    .child(color_cell(SurfaceRole::Sunken, "fixed"))
+                    .child(
+                        Expand::new()
+                            .flex(1.0)
+                            .child(color_cell(SurfaceRole::AltRow, "1fr")),
+                    )
+                    .child(
+                        Expand::new()
+                            .flex(2.0)
+                            .child(color_cell(SurfaceRole::AccentSubtle, "2fr")),
+                    ),
+            ),
     );
     let padding = section(
         ctx,
         "Padding",
         Panel::new().background(SurfaceRole::Raised).child(
-            Padding::uniform(16.0).child(
-                TextWidget::new(tr!(lay_padding_body())).style(TextStyleRole::Small),
-            ),
+            Padding::uniform(16.0)
+                .child(TextWidget::new(tr!(lay_padding_body())).style(TextStyleRole::Small)),
         ),
     );
     let spacer = section(
         ctx,
         "Spacer",
-        FixedSize::new().bind_width(220.0_f32).bind_height(28.0_f32).child(
-            HStack::new()
-                .child(color_cell(SurfaceRole::Sunken, "L"))
-                .child(Spacer::new())
-                .child(color_cell(SurfaceRole::AltRow, "R")),
-        ),
+        FixedSize::new()
+            .bind_width(220.0_f32)
+            .bind_height(28.0_f32)
+            .child(
+                HStack::new()
+                    .child(color_cell(SurfaceRole::Sunken, "L"))
+                    .child(Spacer::new())
+                    .child(color_cell(SurfaceRole::AltRow, "R")),
+            ),
     );
     let divider = section(
         ctx,
@@ -175,39 +191,50 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let fixed_size = section(
         ctx,
         "FixedSize",
-        FixedSize::new().bind_width(140.0_f32).bind_height(40.0_f32).child(
-            Panel::new().background(SurfaceRole::AccentSubtle).child(
-                TextWidget::new(tr!(lay_fixed_size())).style(TextStyleRole::SmallBold),
+        FixedSize::new()
+            .bind_width(140.0_f32)
+            .bind_height(40.0_f32)
+            .child(
+                Panel::new()
+                    .background(SurfaceRole::AccentSubtle)
+                    .child(TextWidget::new(tr!(lay_fixed_size())).style(TextStyleRole::SmallBold)),
             ),
-        ),
     );
     let min_size = section(
         ctx,
         "MinSize",
-        MinSize::new(160.0, 32.0).child(Panel::new().background(SurfaceRole::Raised).child(
-            TextWidget::new(tr!(lay_min_size())).style(TextStyleRole::Small),
-        )),
+        MinSize::new(160.0, 32.0).child(
+            Panel::new()
+                .background(SurfaceRole::Raised)
+                .child(TextWidget::new(tr!(lay_min_size())).style(TextStyleRole::Small)),
+        ),
     );
     let max_size = section(
         ctx,
         "MaxSize",
-        MaxSize::new(240.0, 32.0).child(Panel::new().background(SurfaceRole::Sunken).child(
-            TextWidget::new(tr!(lay_max_size())).style(TextStyleRole::Small),
-        )),
-    );
-    let aspect = section(
-        ctx,
-        "AspectRatio",
-        FixedSize::new().bind_width(180.0_f32).child(
-            AspectRatio::widescreen().child(
-                Panel::new()
-                    .background(SurfaceRole::AltRow)
-                    .child(Center::new().child(
-                        TextWidget::new(tr!(lay_aspect_label())).style(TextStyleRole::SmallBold),
-                    )),
-            ),
+        MaxSize::new(240.0, 32.0).child(
+            Panel::new()
+                .background(SurfaceRole::Sunken)
+                .child(TextWidget::new(tr!(lay_max_size())).style(TextStyleRole::Small)),
         ),
     );
+    let aspect =
+        section(
+            ctx,
+            "AspectRatio",
+            FixedSize::new().bind_width(180.0_f32).child(
+                AspectRatio::widescreen().child(
+                    Panel::new()
+                        .background(SurfaceRole::AltRow)
+                        .child(
+                            Center::new().child(
+                                TextWidget::new(tr!(lay_aspect_label()))
+                                    .style(TextStyleRole::SmallBold),
+                            ),
+                        ),
+                ),
+            ),
+        );
     let switcher_idx = sigs.tool_box_selected.clone();
     let switcher_btn = Button::new(tr!(lay_switcher_next())).on_activate_fn({
         let s = switcher_idx.clone();
@@ -217,12 +244,15 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
         ctx,
         "Switcher",
         VStack::new().spacing(6.0).child(switcher_btn).child(
-            FixedSize::new().bind_width(180.0_f32).bind_height(40.0_f32).child(
-                Switcher::new(switcher_idx)
-                    .child(color_cell(SurfaceRole::AccentSubtle, "page 0"))
-                    .child(color_cell(SurfaceRole::Raised, "page 1"))
-                    .child(color_cell(SurfaceRole::Sunken, "page 2")),
-            ),
+            FixedSize::new()
+                .bind_width(180.0_f32)
+                .bind_height(40.0_f32)
+                .child(
+                    Switcher::new(switcher_idx)
+                        .child(color_cell(SurfaceRole::AccentSubtle, "page 0"))
+                        .child(color_cell(SurfaceRole::Raised, "page 1"))
+                        .child(color_cell(SurfaceRole::Sunken, "page 2")),
+                ),
         ),
     );
     ctx.add(

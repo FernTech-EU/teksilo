@@ -108,11 +108,8 @@ fn main() {
                             show_fern.clone(),
                             selected_tab.clone(),
                         ));
-                        let catalog_filled = tree.add(
-                            Expand::vertical()
-                                .respect_intrinsic()
-                                .child_id(catalog),
-                        );
+                        let catalog_filled =
+                            tree.add(Expand::vertical().respect_intrinsic().child_id(catalog));
 
                         let inner = tree.add(
                             VStack::new()
@@ -125,11 +122,9 @@ fn main() {
                         // it (Wayland). On macOS / Windows / X11 fallback
                         // we skip the frame.
                         match host {
-                            Some(h) if h.needs_custom_resize_handles() => tree.add(
-                                WindowFrame::new(h)
-                                    .thickness(6.0)
-                                    .content_id(inner),
-                            ),
+                            Some(h) if h.needs_custom_resize_handles() => {
+                                tree.add(WindowFrame::new(h).thickness(6.0).content_id(inner))
+                            }
                             _ => inner,
                         }
                     }

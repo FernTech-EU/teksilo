@@ -30,6 +30,7 @@ pub mod menus;
 pub mod overlays;
 pub mod palette;
 pub mod settings;
+pub mod styling;
 pub mod text;
 pub mod visuals;
 
@@ -89,6 +90,13 @@ pub static TABS: &[TabEntry] = &[
         refs_fn: buttons::refs,
         classic: buttons::classic,
         fern: buttons::fern,
+    },
+    TabEntry {
+        lowercase_name: "styling",
+        title_fn: styling::title,
+        refs_fn: styling::refs,
+        classic: styling::classic,
+        fern: styling::fern,
     },
     TabEntry {
         lowercase_name: "inputs",

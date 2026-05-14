@@ -256,11 +256,7 @@ fn text_samples_panel() -> impl Widget + 'static {
                     TextRole::Disabled,
                     "disabled labels",
                 ))
-                .child(text_sample(
-                    "text_link",
-                    TextRole::Link,
-                    "hyperlinks",
-                ))
+                .child(text_sample("text_link", TextRole::Link, "hyperlinks"))
                 .child(text_sample(
                     "text_error",
                     TextRole::Error,
@@ -452,22 +448,102 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 /// caption, foreground role for the printed name). Driven by a `for`
 /// loop in the fern! body.
 const SURFACES: &[(SurfaceRole, &str, &str, TextRole)] = &[
-    (SurfaceRole::Main, "surface_main", "text_primary", TextRole::Primary),
-    (SurfaceRole::Content, "surface_content", "text_primary", TextRole::Primary),
-    (SurfaceRole::Raised, "surface_raised", "text_primary", TextRole::Primary),
-    (SurfaceRole::Sunken, "surface_sunken", "text_secondary", TextRole::Secondary),
-    (SurfaceRole::Hover, "surface_hover", "text_primary", TextRole::Primary),
-    (SurfaceRole::Pressed, "surface_pressed", "text_primary", TextRole::Primary),
-    (SurfaceRole::Selected, "surface_selected", "text_primary", TextRole::Primary),
-    (SurfaceRole::SelectedInactive, "surface_selected_inactive", "text_primary", TextRole::Primary),
-    (SurfaceRole::AltRow, "surface_alt_row", "text_primary", TextRole::Primary),
-    (SurfaceRole::AccentSubtle, "accent_subtle_bg", "text_primary", TextRole::Primary),
-    (SurfaceRole::StatusInfo, "status_info_bg", "text_primary", TextRole::Primary),
-    (SurfaceRole::StatusSuccess, "status_success_bg", "text_primary", TextRole::Success),
-    (SurfaceRole::StatusWarning, "status_warning_bg", "text_primary", TextRole::Warning),
-    (SurfaceRole::StatusError, "status_error_bg", "text_primary", TextRole::Error),
-    (SurfaceRole::Accent, "accent", "text_on_accent", TextRole::OnAccent),
-    (SurfaceRole::AccentHover, "accent_hover", "text_on_accent", TextRole::OnAccent),
+    (
+        SurfaceRole::Main,
+        "surface_main",
+        "text_primary",
+        TextRole::Primary,
+    ),
+    (
+        SurfaceRole::Content,
+        "surface_content",
+        "text_primary",
+        TextRole::Primary,
+    ),
+    (
+        SurfaceRole::Raised,
+        "surface_raised",
+        "text_primary",
+        TextRole::Primary,
+    ),
+    (
+        SurfaceRole::Sunken,
+        "surface_sunken",
+        "text_secondary",
+        TextRole::Secondary,
+    ),
+    (
+        SurfaceRole::Hover,
+        "surface_hover",
+        "text_primary",
+        TextRole::Primary,
+    ),
+    (
+        SurfaceRole::Pressed,
+        "surface_pressed",
+        "text_primary",
+        TextRole::Primary,
+    ),
+    (
+        SurfaceRole::Selected,
+        "surface_selected",
+        "text_primary",
+        TextRole::Primary,
+    ),
+    (
+        SurfaceRole::SelectedInactive,
+        "surface_selected_inactive",
+        "text_primary",
+        TextRole::Primary,
+    ),
+    (
+        SurfaceRole::AltRow,
+        "surface_alt_row",
+        "text_primary",
+        TextRole::Primary,
+    ),
+    (
+        SurfaceRole::AccentSubtle,
+        "accent_subtle_bg",
+        "text_primary",
+        TextRole::Primary,
+    ),
+    (
+        SurfaceRole::StatusInfo,
+        "status_info_bg",
+        "text_primary",
+        TextRole::Primary,
+    ),
+    (
+        SurfaceRole::StatusSuccess,
+        "status_success_bg",
+        "text_primary",
+        TextRole::Success,
+    ),
+    (
+        SurfaceRole::StatusWarning,
+        "status_warning_bg",
+        "text_primary",
+        TextRole::Warning,
+    ),
+    (
+        SurfaceRole::StatusError,
+        "status_error_bg",
+        "text_primary",
+        TextRole::Error,
+    ),
+    (
+        SurfaceRole::Accent,
+        "accent",
+        "text_on_accent",
+        TextRole::OnAccent,
+    ),
+    (
+        SurfaceRole::AccentHover,
+        "accent_hover",
+        "text_on_accent",
+        TextRole::OnAccent,
+    ),
 ];
 
 /// `text_samples_panel` rows: (printed name, foreground role, English
@@ -475,7 +551,11 @@ const SURFACES: &[(SurfaceRole, &str, &str, TextRole)] = &[
 type TextSampleRow = (&'static str, TextRole, &'static str);
 const TEXT_SAMPLES: &[TextSampleRow] = &[
     ("text_primary", TextRole::Primary, "body, main labels"),
-    ("text_secondary", TextRole::Secondary, "hints, captions, placeholders"),
+    (
+        "text_secondary",
+        TextRole::Secondary,
+        "hints, captions, placeholders",
+    ),
     ("text_disabled", TextRole::Disabled, "disabled labels"),
     ("text_link", TextRole::Link, "hyperlinks"),
     ("text_error", TextRole::Error, "validation errors"),
@@ -488,12 +568,36 @@ const TEXT_SAMPLES: &[TextSampleRow] = &[
 type EditorSwatchEntry = (ColorProp, &'static str, ColorProp);
 fn editor_swatches() -> [EditorSwatchEntry; 6] {
     [
-        (SurfaceRole::EditorBg.into(), "editor_bg", TextRole::EditorFg.into()),
-        (TextRole::EditorFg.into(), "editor_fg", SurfaceRole::EditorBg.into()),
-        (SurfaceRole::EditorCaret.into(), "editor_caret", SurfaceRole::EditorBg.into()),
-        (SurfaceRole::EditorCurrentLineBg.into(), "editor_current_line_bg", TextRole::EditorFg.into()),
-        (TextRole::EditorGutterFg.into(), "editor_gutter_fg", SurfaceRole::EditorBg.into()),
-        (SurfaceRole::EditorSelectionBg.into(), "editor_selection_bg", TextRole::EditorFg.into()),
+        (
+            SurfaceRole::EditorBg.into(),
+            "editor_bg",
+            TextRole::EditorFg.into(),
+        ),
+        (
+            TextRole::EditorFg.into(),
+            "editor_fg",
+            SurfaceRole::EditorBg.into(),
+        ),
+        (
+            SurfaceRole::EditorCaret.into(),
+            "editor_caret",
+            SurfaceRole::EditorBg.into(),
+        ),
+        (
+            SurfaceRole::EditorCurrentLineBg.into(),
+            "editor_current_line_bg",
+            TextRole::EditorFg.into(),
+        ),
+        (
+            TextRole::EditorGutterFg.into(),
+            "editor_gutter_fg",
+            SurfaceRole::EditorBg.into(),
+        ),
+        (
+            SurfaceRole::EditorSelectionBg.into(),
+            "editor_selection_bg",
+            TextRole::EditorFg.into(),
+        ),
     ]
 }
 

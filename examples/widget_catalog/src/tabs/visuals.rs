@@ -24,13 +24,16 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let rect = section(
         ctx,
         "RectWidget",
-        FixedSize::new().bind_width(220.0_f32).bind_height(36.0_f32).child(
-            RectWidget::new()
-                .background(SurfaceRole::AccentSubtle)
-                .border_color(BorderRole::Strong)
-                .border_width(1.0)
-                .corner_radius(CornerRadius::uniform(6.0)),
-        ),
+        FixedSize::new()
+            .bind_width(220.0_f32)
+            .bind_height(36.0_f32)
+            .child(
+                RectWidget::new()
+                    .background(SurfaceRole::AccentSubtle)
+                    .border_color(BorderRole::Strong)
+                    .border_width(1.0)
+                    .corner_radius(CornerRadius::uniform(6.0)),
+            ),
     );
     let text = section(
         ctx,

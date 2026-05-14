@@ -78,8 +78,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                         .background(SurfaceRole::Raised)
                         .padding(12.0)
                         .child(
-                            TextWidget::new(tr!(anim_collapse_body()))
-                                .style(TextStyleRole::Body),
+                            TextWidget::new(tr!(anim_collapse_body())).style(TextStyleRole::Body),
                         ),
                 ),
             ),
@@ -102,11 +101,14 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .spacing(6.0)
             .child(drive_box(tr!(anim_visible()), slide_visible.clone()))
             .child(
-                FixedSize::new().bind_width(280.0_f32).bind_height(40.0_f32).child(
-                    Slide::new(slide_visible)
-                        .from(SlideEdge::Trailing)
-                        .child(color_cell(SurfaceRole::AltRow, "snackbar")),
-                ),
+                FixedSize::new()
+                    .bind_width(280.0_f32)
+                    .bind_height(40.0_f32)
+                    .child(
+                        Slide::new(slide_visible)
+                            .from(SlideEdge::Trailing)
+                            .child(color_cell(SurfaceRole::AltRow, "snackbar")),
+                    ),
             ),
     );
     let shake_trigger = ctx.signal(0_u32);
@@ -139,14 +141,12 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let rotate = section(
         ctx,
         "Rotate",
-        HStack::new()
-            .spacing(8.0)
-            .child(rotate_btn)
-            .child(
-                FixedSize::new().bind_width(60.0_f32).bind_height(60.0_f32).child(
-                    Rotate::new(rotate_angle).child(color_cell(SurfaceRole::Sunken, "↻")),
-                ),
-            ),
+        HStack::new().spacing(8.0).child(rotate_btn).child(
+            FixedSize::new()
+                .bind_width(60.0_f32)
+                .bind_height(60.0_f32)
+                .child(Rotate::new(rotate_angle).child(color_cell(SurfaceRole::Sunken, "↻"))),
+        ),
     );
     let blur_radius: Signal<f32> = ctx.signal(0.0_f32);
     let blur_btn = Button::new(tr!(anim_blur_toggle())).on_activate_fn({
@@ -156,19 +156,14 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let blur = section(
         ctx,
         "Blur",
-        VStack::new()
-            .spacing(6.0)
-            .child(blur_btn)
-            .child(
-                Blur::new(blur_radius).child(
-                    Panel::new()
-                        .background(SurfaceRole::AccentSubtle)
-                        .padding(16.0)
-                        .child(
-                            TextWidget::new(tr!(anim_blur_body())).style(TextStyleRole::Body),
-                        ),
-                ),
+        VStack::new().spacing(6.0).child(blur_btn).child(
+            Blur::new(blur_radius).child(
+                Panel::new()
+                    .background(SurfaceRole::AccentSubtle)
+                    .padding(16.0)
+                    .child(TextWidget::new(tr!(anim_blur_body())).style(TextStyleRole::Body)),
             ),
+        ),
     );
 
     ctx.add(
