@@ -1089,15 +1089,25 @@ impl<T: 'static> Widget for TreeView<T> {
         &self,
         bounds: Rect,
         canvas: &mut fern_canvas::Canvas,
-        _ctx: &fern_core::widget::PaintContext,
+        ctx: &fern_core::widget::PaintContext,
     ) {
-        // Draw insertion line during drag hover
+        // Draw insertion line during drag hover — recipe-driven role +
+        // thickness via `ListContainerStyle::insertion()`.
         if let Some((y, width)) = self.drop_feedback.get() {
+            let recipe = ctx
+                .theme
+                .style_slots
+                .list_container
+                .as_ref()
+                .map(|s| s.insertion())
+                .unwrap_or_default();
+            let color = recipe.role.resolve(&ctx.theme.colors);
             let line_y = bounds.y + y;
             let line_x = bounds.x;
+            let half = recipe.thickness * 0.5;
             canvas.fill_rect(
-                Rect::new(line_x, line_y - 1.0, width, 2.0),
-                fern_tokens::Color::from_rgba(0.2, 0.4, 0.9, 0.8),
+                Rect::new(line_x, line_y - half, width, recipe.thickness),
+                color,
             );
         }
     }
