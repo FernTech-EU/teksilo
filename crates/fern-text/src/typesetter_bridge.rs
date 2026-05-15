@@ -229,7 +229,11 @@ impl TypesetterBridge {
     /// Requires the `system-emoji` feature.
     #[cfg(feature = "system-emoji")]
     pub fn register_system_emoji_font(&mut self) -> Option<FontFaceId> {
-        crate::system_emoji::load_system_emoji_data().map(|data| self.service.register_font(&data))
+        // `register_font_shared` keeps the mmap handle alive inside
+        // the font registry without copying the bytes to the heap —
+        // the kernel pages glyph tables in on demand.
+        crate::system_emoji::load_system_emoji_data()
+            .map(|data| self.service.register_font_shared(data))
     }
 
     /// Set the default font and size. Forwards to the shared

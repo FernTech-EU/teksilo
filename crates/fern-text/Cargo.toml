@@ -53,7 +53,7 @@ fonts-all = [
 # hard-coded list of well-known paths at startup. No-op on misses;
 # no warning. Apps that need a specific or bundled emoji font still
 # use `register_font(bytes)` directly.
-system-emoji = []
+system-emoji = ["dep:memmap2"]
 
 # Enables `RichTextEngine` and the `FontRegistrar` trait. Pulls in
 # `text-document` directly so the engine can consume `FlowSnapshot`,
@@ -66,3 +66,7 @@ fern-canvas = { workspace = true }
 fern-tokens = { workspace = true }
 text-typeset = { workspace = true }
 text-document = { workspace = true, optional = true }
+# Activated by the `system-emoji` feature. The bundled color-emoji
+# fonts can be ~180 MB on macOS — mmap lets the kernel page glyphs in
+# on demand instead of `fs::read`-ing the whole file into a heap Vec.
+memmap2 = { version = "0.9", optional = true }

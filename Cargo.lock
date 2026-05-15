@@ -1503,6 +1503,7 @@ version = "0.2.0"
 dependencies = [
  "fern-canvas",
  "fern-tokens",
+ "memmap2",
  "text-document",
  "text-typeset",
 ]
