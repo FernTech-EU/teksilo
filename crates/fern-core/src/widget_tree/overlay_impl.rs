@@ -767,6 +767,14 @@ impl WidgetTree {
         &self.overlay_manager
     }
 
+    /// Mutable access to the overlay manager. Used by the
+    /// modal-presentation pipeline to wire up cascade-dismissal
+    /// between paired overlays (e.g. the dialog scrim and the modal
+    /// panel) via [`OverlayManager::set_parent_overlay`].
+    pub fn overlay_manager_mut(&mut self) -> &mut crate::overlay::OverlayManager {
+        &mut self.overlay_manager
+    }
+
     pub fn active_overlays(&self) -> Vec<crate::overlay::OverlayId> {
         self.overlay_manager.active_ids()
     }

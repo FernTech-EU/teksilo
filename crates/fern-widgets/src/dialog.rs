@@ -1,17 +1,18 @@
+use std::cell::Cell;
 use std::rc::Rc;
 
-use fern_canvas::{Rect, SizeProposal};
+use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::modal::{ModalCloseBehavior, ModalPresentation, ModalRequest};
-use fern_core::overlay::OverlayDismissCallback;
+use fern_core::overlay::{OverlayDismissCallback, OverlayId};
 use fern_core::signal::Signal;
 use fern_core::styles::{DialogStyleConfig, SharedDialogStyle};
 use fern_core::widget::{
     EventContext, LayoutContext, PendingChild, Widget, WidgetPlacement,
 };
-use fern_core::widget_builder::WidgetBuilder;
+use fern_core::widget_builder::{HandlerSet, WidgetBuilder};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{TextRole, TextStyleRole};
 
@@ -178,6 +179,148 @@ impl Widget for ModalContainer {
         // through `ModalRequest` / `ModalPresentation`. A dialog that
         // doesn't block outside interaction would use `Popover` instead.
         builder.set_modal();
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.root_child_id.into_iter().collect()
+    }
+}
+
+/// Full-viewport dimming scrim painted behind a [`ModalContainer`].
+///
+/// Mounted by the modal-presentation pipeline (fern-app) as a separate
+/// `OverlayPlacement::FullViewport` overlay pushed BEFORE the centered
+/// modal overlay so it z-orders below the panel. The chrome itself is
+/// delegated to the active [`DialogStyle::make_scrim`]; clicking the
+/// scrim dismisses the linked modal when the modal's
+/// [`ModalCloseBehavior`] permits click-outside dismissal.
+///
+/// The dismissal cascade is wired via
+/// [`OverlayManager::set_parent_overlay`] AFTER both overlays are
+/// pushed — the scrim's `parent_overlay` is set to the modal's id, so
+/// any dismiss of the modal cascades through `dismiss_immediate` and
+/// also dismisses the scrim. The scrim's own `dismiss` behavior is
+/// `Manual` — it never dismisses itself directly.
+pub struct ModalScrim {
+    style_override: Option<SharedDialogStyle>,
+    /// Filled in by the framework AFTER the modal overlay is pushed
+    /// — the scrim is mounted FIRST (so it z-orders below the modal),
+    /// so the modal's `OverlayId` isn't yet known at build time. The
+    /// scrim's on-tap closure reads through this `Cell` at click time
+    /// rather than capturing a value that doesn't exist yet.
+    dismiss_target: Rc<Cell<Option<OverlayId>>>,
+    /// Whether clicking the scrim should dismiss `dismiss_target`.
+    /// Reflects the modal's [`ModalCloseBehavior`]: `true` for
+    /// `ClickOutside` and `EscapeOrClickOutside`; `false` for
+    /// `EscapeKey` and `Manual` (clicks on the dim are absorbed but
+    /// do not dismiss).
+    click_to_dismiss: bool,
+    root_child_id: Option<WidgetId>,
+}
+
+impl ModalScrim {
+    pub fn new() -> Self {
+        Self {
+            style_override: None,
+            dismiss_target: Rc::new(Cell::new(None)),
+            click_to_dismiss: false,
+            root_child_id: None,
+        }
+    }
+
+    /// Per-call style override for the scrim chrome. Replaces the
+    /// theme-wide default `DialogStyle` for just this scrim.
+    pub fn style(mut self, style: impl fern_core::styles::DialogStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
+    }
+
+    /// Handle to the modal-overlay id the scrim dismisses on click.
+    /// The framework fills this AFTER the modal is pushed (see the
+    /// in-tree modal pipeline in `fern-app`).
+    pub fn dismiss_target(mut self, target: Rc<Cell<Option<OverlayId>>>) -> Self {
+        self.dismiss_target = target;
+        self
+    }
+
+    /// Enable click-to-dismiss on the scrim. Should mirror whether the
+    /// modal's [`ModalCloseBehavior`] permits click-outside dismissal.
+    pub fn click_to_dismiss(mut self, enabled: bool) -> Self {
+        self.click_to_dismiss = enabled;
+        self
+    }
+}
+
+impl Default for ModalScrim {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for ModalScrim {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModalScrim")
+            .field("click_to_dismiss", &self.click_to_dismiss)
+            .finish()
+    }
+}
+
+impl Widget for ModalScrim {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let style: SharedDialogStyle = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.dialog.clone())
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeDialogStyle::default()));
+        let chrome_id = style.make_scrim(ctx);
+
+        if self.click_to_dismiss {
+            let target = self.dismiss_target.clone();
+            let handlers = HandlerSet::new().on_tap(move |_event, ctx| {
+                if let Some(modal_id) = target.get() {
+                    ctx.dismiss_overlay(modal_id);
+                }
+            });
+            ctx.apply_self_handlers(handlers);
+        }
+
+        self.root_child_id = Some(chrome_id);
+        vec![chrome_id]
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
+        // The scrim's actual size is determined by
+        // `OverlayPlacement::FullViewport` in `position_overlays`,
+        // which overrides the intrinsic size to the full viewport. We
+        // still report the child's wanted size so the proposal flows
+        // correctly when the framework probes the intrinsic size.
+        self.root_child_id
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = fern_canvas::Point::new(bounds.x, bounds.y);
+            child.size = Size::new(bounds.width, bounds.height);
+        }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // Hidden from the AT: the modal panel above carries the
+        // `Role::Dialog` node with the accessible name.
+        builder.set_hidden();
     }
 
     fn children(&self) -> Vec<WidgetId> {

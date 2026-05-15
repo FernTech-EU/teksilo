@@ -119,6 +119,7 @@ fn present_in_tree_modal_request(
     let dismiss = modal_close_behavior_to_overlay_dismiss(request.close_behavior);
     let requested_focus = request.focus_target;
     let on_dismiss = request.on_dismiss;
+    let close_behavior = request.close_behavior;
     let content_id = match request.content {
         ModalContent::ExistingWidget(id) => id,
         ModalContent::Deferred(builder) => {
@@ -128,8 +129,37 @@ fn present_in_tree_modal_request(
         }
     };
 
+    // Mount the dialog scrim FIRST so it z-orders below the modal
+    // panel in the overlay stack. The scrim chrome (a full-viewport
+    // dim) comes from the active `DialogStyle::make_scrim`; clicks on
+    // it dismiss the modal when its `ModalCloseBehavior` permits
+    // click-outside dismissal. The framework patches the scrim's
+    // `parent_overlay` after the modal is pushed so that dismissing
+    // the modal cascades through and also dismisses the scrim.
+    let click_to_dismiss = matches!(
+        close_behavior,
+        ModalCloseBehavior::ClickOutside | ModalCloseBehavior::EscapeOrClickOutside,
+    );
+    let dismiss_target: std::rc::Rc<std::cell::Cell<Option<fern_core::overlay::OverlayId>>> =
+        std::rc::Rc::new(std::cell::Cell::new(None));
+    let scrim_id = tree.add(
+        fern_widgets::ModalScrim::new()
+            .dismiss_target(dismiss_target.clone())
+            .click_to_dismiss(click_to_dismiss),
+    );
+    let scrim_overlay = tree.show_overlay(OverlayRequest {
+        content_id: scrim_id,
+        anchor: source_widget,
+        placement: OverlayPlacement::FullViewport,
+        dismiss: DismissBehavior::Manual,
+        layer: OverlayLayer::InTree,
+        parent_overlay: None,
+        on_dismiss: None,
+        fade_duration: None,
+    });
+
     tree.activate(content_id);
-    tree.show_overlay_from_source(
+    let modal_overlay = tree.show_overlay_from_source(
         source_widget,
         OverlayRequest {
             content_id,
@@ -142,6 +172,16 @@ fn present_in_tree_modal_request(
             fade_duration: None,
         },
     );
+    // Cascade-dismiss the scrim when the modal is dismissed (by any
+    // path: Escape, click-outside, manual). The scrim is below the
+    // modal in the stack but counts as its "child" in the parent-
+    // overlay graph, so `dismiss_immediate` walks the descendants and
+    // dismisses it too.
+    tree.overlay_manager_mut()
+        .set_parent_overlay(scrim_overlay, Some(modal_overlay));
+    // Fill in the dismiss target NOW that the modal id is known. The
+    // scrim's on-tap reads through this `Cell` at click time.
+    dismiss_target.set(Some(modal_overlay));
 
     let focus_target = requested_focus
         .filter(|id| tree.is_active(*id) && tree.is_descendant_of(*id, content_id))
@@ -2216,7 +2256,9 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
-        assert_eq!(tree.active_overlays().len(), 1);
+        // Two overlays: the modal-panel overlay AND the dialog scrim
+        // pushed below it by the modal-presentation pipeline.
+        assert_eq!(tree.active_overlays().len(), 2);
         assert!(tree.find_by_label("Modal content").is_some());
     }
 
@@ -2234,8 +2276,99 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
-        assert_eq!(tree.active_overlays().len(), 1);
+        // Two overlays: the modal-panel overlay AND the dialog scrim
+        // pushed below it by the modal-presentation pipeline.
+        assert_eq!(tree.active_overlays().len(), 2);
         assert!(tree.find_by_label("Deferred modal").is_some());
+    }
+
+    #[test]
+    fn present_in_tree_modal_request_mounts_scrim_below_modal() {
+        // The scrim must be pushed BEFORE the modal so it z-orders
+        // below the panel. `active_content_ids()` returns ids in
+        // stack order (oldest → newest), so the first id is the
+        // scrim and the second is the modal content.
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
+        let source = tree.add(Button::new_literal("Trigger"));
+        let content = tree.add(Button::new_literal("Modal content"));
+        tree.set_dormant(content);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        present_in_tree_modal_request(
+            &mut tree,
+            source,
+            ModalRequest::in_tree(content).presentation(ModalPresentation::InTree),
+        );
+
+        let stack = tree.overlay_manager().active_content_ids();
+        assert_eq!(stack.len(), 2, "scrim + modal");
+        // Scrim is the first one; modal content the second.
+        assert_eq!(stack[1], content, "modal content sits above scrim");
+    }
+
+    #[test]
+    fn dismissing_modal_cascades_to_scrim() {
+        // The scrim's `parent_overlay` is patched to the modal id
+        // after both are pushed. Dismissing the modal must therefore
+        // also dismiss the scrim through the cascade walk in
+        // `dismiss_immediate`.
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
+        let source = tree.add(Button::new_literal("Trigger"));
+        let content = tree.add(Button::new_literal("Modal content"));
+        tree.set_dormant(content);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        present_in_tree_modal_request(
+            &mut tree,
+            source,
+            ModalRequest::in_tree(content).presentation(ModalPresentation::InTree),
+        );
+        assert_eq!(tree.active_overlays().len(), 2);
+
+        // Find the modal's overlay id (the one whose content is the
+        // modal content widget) and dismiss it.
+        let modal_overlay = tree
+            .overlay_manager()
+            .find_by_content(content)
+            .expect("modal overlay registered");
+        tree.overlay_manager_mut().dismiss(modal_overlay);
+
+        assert!(
+            tree.active_overlays().is_empty(),
+            "scrim must cascade away with the modal",
+        );
+    }
+
+    #[test]
+    fn scrim_uses_full_viewport_placement() {
+        // The scrim's overlay placement determines its bounds during
+        // `position_overlays`. It must be `FullViewport` so the dim
+        // covers the entire window regardless of the modal's size or
+        // position.
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
+        let source = tree.add(Button::new_literal("Trigger"));
+        let content = tree.add(Button::new_literal("Modal content"));
+        tree.set_dormant(content);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        present_in_tree_modal_request(
+            &mut tree,
+            source,
+            ModalRequest::in_tree(content).presentation(ModalPresentation::InTree),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        // The scrim is at the bottom of the stack — first content id.
+        let scrim_content_id = tree.overlay_manager().active_content_ids()[0];
+        let scrim_bounds = tree.bounds(scrim_content_id);
+        assert!(
+            (scrim_bounds.width - 800.0).abs() < 0.01,
+            "scrim spans the viewport width",
+        );
+        assert!(
+            (scrim_bounds.height - 600.0).abs() < 0.01,
+            "scrim spans the viewport height",
+        );
     }
 
     #[test]

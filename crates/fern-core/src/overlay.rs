@@ -56,6 +56,11 @@ pub enum OverlayPlacement {
     /// Below the anchor if space allows, otherwise above (combo box dropdown).
     /// The viewport height is supplied by `position_overlays()` at layout time.
     BelowPreferred,
+    /// Fills the entire viewport, anchor-independent. Used by the
+    /// modal-presentation pipeline to mount a dialog scrim behind a
+    /// centered modal panel — the scrim covers the full window so the
+    /// content behind dims uniformly. Anchor bounds are ignored.
+    FullViewport,
 }
 
 /// When an overlay is dismissed.
@@ -473,6 +478,17 @@ impl OverlayManager {
     pub fn update_placement(&mut self, id: OverlayId, placement: OverlayPlacement) {
         if let Some(overlay) = self.stack.iter_mut().find(|o| o.id == id) {
             overlay.placement = placement;
+        }
+    }
+
+    /// Update the parent-overlay link of an existing overlay. Used by the
+    /// modal-presentation pipeline to retroactively attach the dialog
+    /// scrim (pushed first, below the modal in the stack) to the modal
+    /// (pushed second) so that dismissing the modal cascades through
+    /// `dismiss_immediate` and also dismisses the scrim.
+    pub fn set_parent_overlay(&mut self, id: OverlayId, parent: Option<OverlayId>) {
+        if let Some(overlay) = self.stack.iter_mut().find(|o| o.id == id) {
+            overlay.parent_overlay = parent;
         }
     }
 
@@ -928,6 +944,7 @@ impl OverlayManager {
                         content_size.height,
                     )
                 }
+                OverlayPlacement::FullViewport => Rect::new(0.0, 0.0, vw, vh),
             };
         }
     }

@@ -132,7 +132,7 @@ pub use date_edit::DateEdit;
 pub use date_range_edit::DateRangeEdit;
 #[cfg(feature = "rich-text")]
 pub use date_time_edit::DateTimeEdit;
-pub use dialog::{Dialog, DialogContent, ModalContainer};
+pub use dialog::{Dialog, DialogContent, ModalContainer, ModalScrim};
 #[cfg(feature = "rich-text")]
 pub use file_picker_field::{FilePickerField, FilePickerKind};
 pub use group_box::GroupBox;
