@@ -227,7 +227,13 @@ impl Widget for Toggle {
 
         ctx.apply_self_handlers(handlers);
 
-        vec![body_id]
+        // Return `root` (the HStack wrapper when a label is set,
+        // else the bare body). Returning `body_id` here would leave
+        // the HStack as a parent-less arena root: its child list
+        // would still list `body_id`, and the AccessKit walker would
+        // see `body_id` claimed by both Toggle and the orphan HStack
+        // — a "duplicate accessibility child" log on every refresh.
+        vec![root]
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
@@ -335,6 +341,32 @@ mod tests {
         let info = tree.accessibility_node(t);
         assert_eq!(info.role(), fern_core::accesskit::Role::Switch);
         assert!(info.is_toggled());
+    }
+
+    /// Regression: a labeled Toggle wraps its body + label in an
+    /// HStack inside `build`. The earlier code returned the inner
+    /// body id instead of the HStack id, which left the HStack
+    /// parent-less in the arena. The AccessKit walker then saw the
+    /// body id claimed by both Toggle and the orphan HStack —
+    /// "FernUI bug: duplicate accessibility child …" on every AT
+    /// refresh.
+    #[test]
+    fn labeled_toggle_does_not_orphan_hstack_wrapper() {
+        let on = Signal::new(false);
+        let mut tree = WidgetTree::new();
+        let _t = tree.add(Toggle::new(on).label_literal("Dark mode"));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        let update = tree.sync_accessibility();
+        let mut seen = std::collections::HashMap::new();
+        for (parent_id, node) in &update.nodes {
+            for &child_id in node.children() {
+                let prev = seen.insert(child_id, *parent_id);
+                assert!(
+                    prev.is_none(),
+                    "duplicate AT child {child_id:?}: claimed by both {prev:?} and {parent_id:?}"
+                );
+            }
+        }
     }
 
     #[test]
