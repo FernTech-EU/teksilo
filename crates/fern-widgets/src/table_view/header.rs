@@ -22,6 +22,9 @@ use fern_core::color_prop::ColorProp;
 use fern_core::drag_payload::DragPayload;
 use fern_core::event::{EventResponse, PointerButton, WidgetEvent};
 use fern_core::signal::Signal;
+use fern_core::styles::{
+    SortDirection as StyleSortDirection, SharedTableStyle, TableHeaderCellConfig,
+};
 use fern_core::widget::{
     CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
 };
@@ -29,6 +32,17 @@ use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_data::SortDirection;
 use fern_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
+
+/// Convert the data-layer `SortDirection` (fern-data) to the
+/// styles-layer one (fern-core::styles). They share the same shape
+/// but are distinct types because fern-core cannot depend on
+/// fern-data.
+fn style_sort(d: SortDirection) -> StyleSortDirection {
+    match d {
+        SortDirection::Ascending => StyleSortDirection::Ascending,
+        SortDirection::Descending => StyleSortDirection::Descending,
+    }
+}
 
 use crate::primitives::{HStack, Padding, Spacer, TextWidget};
 
@@ -116,6 +130,15 @@ pub(crate) struct HeaderCell {
     /// place via `set_filter` semantics — empty string removes the
     /// entry, non-empty string inserts/replaces it.
     filters_signal: Signal<HashMap<String, String>>,
+    /// `true` while the pointer is inside the cell — drives the
+    /// `Hover` overlay supplied by [`TableStyle::make_header_cell`].
+    /// Toggled by the cell's `on_hover` handler.
+    is_hovered: Signal<bool>,
+    /// `true` while an active column-resize drag is anchored on
+    /// this cell — drives the `Pressed` overlay supplied by
+    /// [`TableStyle::make_header_cell`]. Toggled in lockstep with
+    /// the `resize_state` writes in `on_pointer_event`.
+    is_resizing: Signal<bool>,
 
     // Build state
     root_child_id: Option<WidgetId>,
@@ -163,6 +186,8 @@ impl HeaderCell {
             filterable,
             filter_zone_width: if filterable { filter_zone_width } else { 0.0 },
             filters_signal,
+            is_hovered: Signal::new(false),
+            is_resizing: Signal::new(false),
             root_child_id: None,
         }
     }
@@ -256,7 +281,26 @@ impl Widget for HeaderCell {
             Padding::symmetric(cp::CELL_PADDING_VERTICAL, cp::CELL_PADDING_HORIZONTAL)
                 .child_id(row_id),
         );
-        self.root_child_id = Some(padded);
+
+        // Route the header cell's chrome through `TableStyle::make_header_cell`.
+        // The default `RecipeTableStyle` returns a `ZStack` that overlays
+        // a hover/resize background behind the label — apps install a
+        // theme-wide `style_slots.table` or pass their own when wrapping
+        // the table to swap the chrome wholesale.
+        let style: SharedTableStyle = ctx
+            .theme()
+            .style_slots
+            .table
+            .clone()
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTableStyle::default()));
+        let cell_cfg = TableHeaderCellConfig {
+            label: padded,
+            sort: self.current_sort.map(style_sort),
+            is_hovered: self.is_hovered.clone(),
+            is_resizing: self.is_resizing.clone(),
+        };
+        let cell_root = style.make_header_cell(&cell_cfg, ctx);
+        self.root_child_id = Some(cell_root);
 
         // Build a single pointer-event handler covering: cursor hint,
         // resize start (PointerDown in trailing zone), resize advance
@@ -279,8 +323,16 @@ impl Widget for HeaderCell {
         let self_id = ctx.self_id();
         let cell_window_x = self.cell_window_x.clone();
         let filter_zone_w = self.filter_zone_width;
+        let is_hovered = self.is_hovered.clone();
+        let is_resizing = self.is_resizing.clone();
 
         let handlers = HandlerSet::new()
+            .on_hover({
+                let is_hovered = is_hovered.clone();
+                move |entered, _ctx| {
+                    is_hovered.set(entered);
+                }
+            })
             .on_pointer_event(move |event, ctx: &mut EventContext| {
                 // Pointer events deliver `position` in window coords;
                 // the resize-zone test and the press-state distance
@@ -360,6 +412,7 @@ impl Widget for HeaderCell {
                                 start_pointer_x: local_x,
                                 start_width: cell_w,
                             });
+                            is_resizing.set(true);
                             ctx.capture_pointer();
                             return EventResponse::Handled;
                         }
@@ -392,6 +445,7 @@ impl Widget for HeaderCell {
                                 let new_w = (state.start_width + delta).max(MIN_COLUMN_WIDTH);
                                 write_width(&widths_signal, &state.col_id, new_w);
                             }
+                            is_resizing.set(false);
                             ctx.release_pointer();
                             return EventResponse::Handled;
                         }
@@ -423,7 +477,7 @@ impl Widget for HeaderCell {
             .focusable(false);
         ctx.apply_self_handlers(handlers);
 
-        vec![padded]
+        vec![cell_root]
     }
 
     fn layout_response(
@@ -456,10 +510,12 @@ impl Widget for HeaderCell {
         }
     }
 
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let bg = SurfaceRole::Raised.resolve(&ctx.theme.colors);
-        canvas.fill_rect(bounds, bg);
-    }
+    // No `paint()` — the cell's visual chrome is composed via
+    // `TableStyle::make_header_cell`, layered behind the label inside
+    // a `ZStack`. The outer `HeaderRow` paints the shared `Raised`
+    // background for the whole strip, so a transparent cell default
+    // (`SurfaceRole::Transparent`) lets the row chrome show through
+    // while hover / resize overlays come from the composed body.
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::ColumnHeader);

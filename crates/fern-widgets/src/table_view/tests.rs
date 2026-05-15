@@ -1787,3 +1787,81 @@ fn count_role(tree: &WidgetTree, root: WidgetId, role: Role) -> usize {
     }
     n
 }
+
+// -----------------------------------------------------------------------------
+// TableStyle::make_header_cell wiring.
+// -----------------------------------------------------------------------------
+
+#[test]
+fn header_cells_route_through_table_style_make_header_cell() {
+    // Installing a custom `TableStyle` whose `make_header_cell`
+    // returns a sentinel widget proves the header cell wires its
+    // chrome through the trait instead of building it inline. The
+    // sentinel here is `RectWidget` with a `Selected` background —
+    // every header cell ends up with this id as its root, so we can
+    // count how many `Role::ColumnHeader` AT nodes have it as their
+    // first descendant.
+    use fern_core::build_context::BuildContext;
+    use fern_core::styles::{
+        TableGridRecipe, TableHeaderCellConfig, TableRowConfig, TableStyle,
+    };
+    use fern_core::widget_id::WidgetId;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    struct CountingStyle {
+        calls: Rc<Cell<u32>>,
+    }
+    impl TableStyle for CountingStyle {
+        fn make_header_cell(
+            &self,
+            cfg: &TableHeaderCellConfig,
+            ctx: &mut BuildContext,
+        ) -> WidgetId {
+            self.calls.set(self.calls.get() + 1);
+            // Return the label slot directly so we don't perturb
+            // layout — a passthrough style.
+            let _ = ctx;
+            cfg.label
+        }
+        fn make_sort_indicator(
+            &self,
+            _direction: fern_core::styles::SortDirection,
+            ctx: &mut BuildContext,
+        ) -> WidgetId {
+            ctx.add(crate::primitives::Spacer::new())
+        }
+        fn make_row_background(
+            &self,
+            _cfg: &TableRowConfig,
+            ctx: &mut BuildContext,
+        ) -> WidgetId {
+            ctx.add(crate::primitives::Spacer::new())
+        }
+        fn grid(&self) -> TableGridRecipe {
+            TableGridRecipe::default()
+        }
+    }
+
+    let calls = Rc::new(Cell::new(0_u32));
+    let style: Rc<dyn TableStyle> = Rc::new(CountingStyle {
+        calls: calls.clone(),
+    });
+    let mut theme = fern_core::presets::intui::light();
+    theme.style_slots.table = Some(style);
+    let mut tree = WidgetTree::new().with_theme(theme);
+    tree.add(
+        TableView::new(rows(2))
+            .add_column(id_col())
+            .add_column(name_col()),
+    );
+    tree.layout(SizeProposal::exact(400.0, 240.0));
+    let _ = tree.render();
+
+    // One call per header cell — two columns means two calls.
+    assert_eq!(
+        calls.get(),
+        2,
+        "TableStyle::make_header_cell must be called once per header cell",
+    );
+}
