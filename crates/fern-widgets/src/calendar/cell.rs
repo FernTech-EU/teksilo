@@ -1,25 +1,28 @@
 //! `DayCell` — single day cell in a calendar's day grid.
 //!
-//! Renders the day number, paints the per-state background (selected /
-//! range / hover / today ring), advertises Role::GridCell, and routes
-//! tap to the parent's commit pipeline.
+//! Owns the date-bound state computation (today / out-of-month /
+//! disabled / fill role derived from the calendar's `SelectionBinding`)
+//! and the tap pipeline. Visual chrome (background fill, today ring,
+//! roving-focus ring, day-number label) is delegated to the active
+//! `CalendarStyle::make_day_cell` via `cfg`.
+
+use std::rc::Rc;
 
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::accesskit::{Action, Role};
 use fern_core::build_context::BuildContext;
-use fern_core::color_prop::ColorProp;
 use fern_core::signal::Signal;
+use fern_core::styles::{CalendarDayConfig, CalendarDayFill, SharedCalendarStyle};
 use fern_core::widget::{CursorIcon, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_i18n::resolve_message_widget;
-use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::common::datetime::Date;
 use crate::common::datetime::types::{YearMonth, today_local};
 use crate::common::datetime::{month_long_key, weekday_long_key};
-use crate::primitives::{RectWidget, TextWidget, ZStack};
+use crate::styles::recipe_calendar_style::RecipeCalendarStyle;
 
 use super::{
     DisabledDateFilter, OnActivate, OnRangeChanged, OnSelectionChanged, SelectionBinding,
@@ -37,8 +40,6 @@ pub(crate) struct DayCell {
     calendar_focused: Signal<bool>,
     selection: SelectionBinding,
     cell_size: f32,
-    cell_radius: f32,
-    today_ring_width: f32,
     min_date: Option<Date>,
     max_date: Option<Date>,
     disabled_filter: Option<DisabledDateFilter>,
@@ -66,8 +67,6 @@ impl DayCell {
         calendar_focused: Signal<bool>,
         selection: SelectionBinding,
         cell_size: f32,
-        cell_radius: f32,
-        today_ring_width: f32,
         min_date: Option<Date>,
         max_date: Option<Date>,
         disabled_filter: Option<DisabledDateFilter>,
@@ -85,8 +84,6 @@ impl DayCell {
             calendar_focused,
             selection,
             cell_size,
-            cell_radius,
-            today_ring_width,
             min_date,
             max_date,
             disabled_filter,
@@ -104,8 +101,6 @@ impl DayCell {
 impl Widget for DayCell {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let date = self.date;
-        let cell_size = self.cell_size;
-        let radius = self.cell_radius;
         let in_visible_month = YearMonth::from_date(date) == self.visible_month.get();
 
         let disabled_static = is_date_disabled(
@@ -116,147 +111,65 @@ impl Widget for DayCell {
         );
         let interactable = self.enabled && !disabled_static;
 
-        // ── Background fill ────────────────────────────────────
-        // Reactive role per (selected, range, hover, focus) state. We
-        // compose into a single Signal<SurfaceRole> resolved per paint.
-        let bg_role: Signal<SurfaceRole> = match &self.selection {
+        // ── Selection-derived fill (reactive) ──────────────────
+        // Drives the recipe's background colour without rebuilding
+        // the cell on selection changes.
+        let fill: Signal<CalendarDayFill> = match &self.selection {
             SelectionBinding::Single(sig) => {
                 let date_owned = date;
                 sig.map(move |sel| match sel {
-                    Some(d) if *d == date_owned => SurfaceRole::Selected,
-                    _ => SurfaceRole::Transparent,
+                    Some(d) if *d == date_owned => CalendarDayFill::Selected,
+                    _ => CalendarDayFill::None,
                 })
             }
             SelectionBinding::Range { value, anchor } => {
                 let date_owned = date;
                 let v = value.clone();
                 let a = anchor.clone();
-                let range_signal = v.zip(&a);
-                range_signal.map(move |(rng, anc)| {
+                v.zip(&a).map(move |(rng, anc)| {
                     if let Some(start) = anc {
                         // Mid-selection — show anchor as Selected.
                         if date_owned == *start {
-                            return SurfaceRole::Selected;
+                            return CalendarDayFill::Selected;
                         }
                     }
                     if let Some(rng) = rng {
                         if date_owned == rng.start || date_owned == rng.end {
-                            SurfaceRole::Selected
+                            CalendarDayFill::Selected
                         } else if rng.contains(date_owned) {
-                            SurfaceRole::SelectedInactive
+                            CalendarDayFill::InRange
                         } else {
-                            SurfaceRole::Transparent
+                            CalendarDayFill::None
                         }
                     } else {
-                        SurfaceRole::Transparent
+                        CalendarDayFill::None
                     }
                 })
             }
         };
 
-        // ── Text color: in-month → Primary, off-month → Disabled,
-        // disabled → Disabled, today → Accent, on-selected → OnAccent.
-        let text_color: ColorProp = if disabled_static {
-            TextRole::Disabled.into()
-        } else if !in_visible_month {
-            TextRole::Disabled.into()
-        } else {
-            // Reactive: Accent when selected, Primary otherwise.
-            let date_owned = date;
-            let role_signal: Signal<TextRole> = match &self.selection {
-                SelectionBinding::Single(sig) => sig.map(move |sel| match sel {
-                    Some(d) if *d == date_owned => TextRole::OnAccent,
-                    _ => TextRole::Primary,
-                }),
-                SelectionBinding::Range { value, anchor } => {
-                    let v = value.clone();
-                    let a = anchor.clone();
-                    v.zip(&a).map(move |(rng, anc)| {
-                        if let Some(start) = anc
-                            && date_owned == *start
-                        {
-                            return TextRole::OnAccent;
-                        }
-                        if let Some(rng) = rng {
-                            if date_owned == rng.start || date_owned == rng.end {
-                                TextRole::OnAccent
-                            } else {
-                                TextRole::Primary
-                            }
-                        } else {
-                            TextRole::Primary
-                        }
-                    })
-                }
-            };
-            ColorProp::DynamicTextRole(role_signal)
-        };
-
-        // ── Build cell visuals ────────────────────────────────
-        let bg_widget = RectWidget::new()
-            .bind_background(bg_role)
-            .corner_radius(CornerRadius::uniform(radius));
-        let bg_id = ctx.add(bg_widget);
-
-        // Today ring — outline border on the same rect when today.
-        let ring_id = if self.is_today && in_visible_month {
-            let ring = RectWidget::new()
-                .background(SurfaceRole::Transparent)
-                .border_color(BorderRole::Focused)
-                .border_width(self.today_ring_width)
-                .corner_radius(CornerRadius::uniform(radius));
-            Some(ctx.add(ring))
-        } else {
-            None
-        };
-
-        // Roving focus ring — drawn only when the parent Calendar
-        // holds keyboard focus AND this cell's date is the currently
-        // focused one. Int UI convention: 2 dp accent border directly
-        // on the cell edge (no offset, since cells are tightly packed
-        // and an outset ring would overlap neighbours). Distinguishes
-        // from the today ring by being thicker (focus_ring_width vs
-        // today_ring_width).
-        let focus_ring_width = ctx.theme_signal().get().shape.focus_ring_width;
-        let focus_ring = RectWidget::new()
-            .background(SurfaceRole::Transparent)
-            .border_color(BorderRole::Focused)
-            .border_width(focus_ring_width)
-            .corner_radius(CornerRadius::uniform(radius));
-        let focus_ring_id = ctx.add(focus_ring);
+        // ── Roving focus indicator — only visible while the parent
+        // calendar holds keyboard focus AND this cell is the focused
+        // date. The recipe binds visibility on the focus-ring node.
         let date_owned = date;
         let calendar_focused = self.calendar_focused.clone();
-        let focus_visible = self
+        let is_focused_cell = self
             .focused_date
             .zip(&calendar_focused)
             .map(move |(focused_d, has_focus)| *has_focus && *focused_d == date_owned);
-        ctx.visible_when(focus_ring_id, focus_visible);
 
-        // Day number text.
-        let label_text = format!("{}", date.day());
-        let label = TextWidget::new_literal(label_text)
-            .style(TextStyleRole::Body)
-            .bind_color(text_color)
-            .single_line()
-            .a11y_hidden();
-        let label_id = ctx.add(label);
-
-        // Center the label inside the cell rect.
-        let centered = ctx.add(crate::primitives::Center::new().child_id(label_id));
-        let mut z = ZStack::new().add_child(bg_id);
-        if let Some(ring) = ring_id {
-            z = z.add_child(ring);
-        }
-        z = z.add_child(focus_ring_id);
-        z = z.add_child(centered);
-        let z_id = ctx.add(z);
-
-        let sized = ctx.add(
-            crate::primitives::FixedSize::new()
-                .bind_width(cell_size)
-                .bind_height(cell_size)
-                .child_id(z_id),
-        );
+        // ── Delegate visual chrome to the active CalendarStyle ─
+        let style = resolve_calendar_style(ctx);
+        let cfg = CalendarDayConfig {
+            label: format!("{}", date.day()),
+            fill,
+            is_today: self.is_today,
+            is_out_of_month: !in_visible_month,
+            is_disabled: disabled_static,
+            is_focused_cell,
+            cell_size: self.cell_size,
+        };
+        let chrome_id = style.make_day_cell(&cfg, ctx);
 
         // ── Tap handler ────────────────────────────────────────
         let date_owned = date;
@@ -299,8 +212,8 @@ impl Widget for DayCell {
             });
         ctx.apply_self_handlers(handlers);
 
-        self.root_id = Some(sized);
-        vec![sized]
+        self.root_id = Some(chrome_id);
+        vec![chrome_id]
     }
 
     fn layout_response(
@@ -381,6 +294,15 @@ impl Widget for DayCell {
         builder.add_action(Action::Click);
         builder.add_action(Action::Focus);
     }
+}
+
+fn resolve_calendar_style(ctx: &BuildContext) -> SharedCalendarStyle {
+    ctx.theme_signal()
+        .get()
+        .style_slots
+        .calendar
+        .clone()
+        .unwrap_or_else(|| Rc::new(RecipeCalendarStyle) as SharedCalendarStyle)
 }
 
 fn update_range_status(selection: &SelectionBinding, status: &Signal<String>) {

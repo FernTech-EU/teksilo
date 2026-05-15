@@ -25,11 +25,11 @@
 //! ```
 
 use crate::styles::{
-    SharedAvatarStyle, SharedBadgeStyle, SharedBannerStyle, SharedButtonStyle, SharedCardStyle,
-    SharedCheckboxStyle, SharedComboBoxStyle, SharedDialogStyle, SharedIconButtonStyle,
-    SharedLinkStyle, SharedMenuItemStyle, SharedPanelStyle, SharedPopoverStyle,
-    SharedProgressBarStyle, SharedRadioStyle, SharedScrollBarStyle,
-    SharedSegmentedControlStyle, SharedSliderStyle, SharedSnackbarStyle,
+    SharedAvatarStyle, SharedBadgeStyle, SharedBannerStyle, SharedButtonStyle,
+    SharedCalendarStyle, SharedCardStyle, SharedCheckboxStyle, SharedComboBoxStyle,
+    SharedDialogStyle, SharedIconButtonStyle, SharedLinkStyle, SharedMenuItemStyle,
+    SharedPanelStyle, SharedPopoverStyle, SharedProgressBarStyle, SharedRadioStyle,
+    SharedScrollBarStyle, SharedSegmentedControlStyle, SharedSliderStyle, SharedSnackbarStyle,
     SharedStandardItemStyle, SharedTabStyle, SharedTextInputStyle, SharedToggleStyle,
     SharedTooltipStyle,
 };
@@ -63,6 +63,7 @@ pub struct ComponentStyleSlots {
     pub link: Option<SharedLinkStyle>,
     pub segmented_control: Option<SharedSegmentedControlStyle>,
     pub avatar: Option<SharedAvatarStyle>,
+    pub calendar: Option<SharedCalendarStyle>,
 }
 
 impl std::fmt::Debug for ComponentStyleSlots {
@@ -95,6 +96,7 @@ impl std::fmt::Debug for ComponentStyleSlots {
             .field("link", &self.link.is_some())
             .field("segmented_control", &self.segmented_control.is_some())
             .field("avatar", &self.avatar.is_some())
+            .field("calendar", &self.calendar.is_some())
             .finish()
     }
 }
@@ -135,5 +137,6 @@ impl PartialEq for ComponentStyleSlots {
             && rc_eq(&self.link, &other.link)
             && rc_eq(&self.segmented_control, &other.segmented_control)
             && rc_eq(&self.avatar, &other.avatar)
+            && rc_eq(&self.calendar, &other.calendar)
     }
 }

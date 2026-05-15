@@ -91,6 +91,7 @@ use crate::common::datetime::Date;
 use crate::common::datetime::month_long_key;
 use crate::common::datetime::types::{YearMonth, today_local, weekday_from_monday_zero};
 use crate::common::datetime::weekday_short_key;
+use crate::styles::recipe_calendar_style as cal_recipe;
 use crate::primitives::{Center, Divider, FixedSize, HStack, Padding, Spacer, TextWidget, VStack};
 
 use self::cell::DayCell;
@@ -386,12 +387,11 @@ impl Calendar {
 impl Widget for Calendar {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme_signal().get();
-        let style = theme.components.calendar;
         let enabled = self.enabled;
         let week_numbers = self.week_numbers;
         let week_number_col_width = match week_numbers {
             WeekNumberDisplay::None => 0.0,
-            _ => style.week_number_column_width,
+            _ => cal_recipe::CALENDAR_WEEK_NUMBER_COLUMN_WIDTH,
         };
 
         // Resolve first day of week: explicit override → locale default → Monday.
@@ -420,7 +420,7 @@ impl Widget for Calendar {
 
         // ── Weekday header row ──────────────────────────────────
         // Only meaningful in Days mode; hidden in Months/Years zoom.
-        let weekday_row_id = build_weekday_row(ctx, first_dow, week_number_col_width, &style);
+        let weekday_row_id = build_weekday_row(ctx, first_dow, week_number_col_width);
         ctx.visible_when(
             weekday_row_id,
             self.mode.map(|m| matches!(m, CalendarMode::Days)),
@@ -438,7 +438,6 @@ impl Widget for Calendar {
             focused: self.focused.clone(),
             selection: self.selection.clone(),
             first_dow,
-            style,
             week_numbers,
             min_date: self.min_date,
             max_date: self.max_date,
@@ -453,8 +452,8 @@ impl Widget for Calendar {
         // size so the body's overall width matches the day grid (7
         // day cells worth, divided across 3 zoom columns) and the
         // calendar's outer width stays constant across mode flips.
-        let zoom_cell_height = (style.cell_size * 1.4).max(36.0);
-        let zoom_cell_width = (style.cell_size * 7.0 / 3.0).max(64.0);
+        let zoom_cell_height = (cal_recipe::CALENDAR_CELL_SIZE * 1.4).max(36.0);
+        let zoom_cell_width = (cal_recipe::CALENDAR_CELL_SIZE * 7.0 / 3.0).max(64.0);
         let months_body = zoom_grid::MonthsGrid::new(
             self.visible_month.clone(),
             self.mode.clone(),
@@ -501,7 +500,7 @@ impl Widget for Calendar {
 
         // ── Assemble VStack ─────────────────────────────────────
         let mut col = VStack::new()
-            .spacing(style.section_gap)
+            .spacing(cal_recipe::CALENDAR_SECTION_GAP)
             .add_child(header_id)
             .add_child(weekday_row_id)
             .add_child(grid_id);
@@ -510,7 +509,7 @@ impl Widget for Calendar {
             col = col.add_child(divider_id).add_child(footer_id);
         }
         let col_id = ctx.add(col);
-        let padded_id = ctx.add(Padding::uniform(style.outer_padding).child_id(col_id));
+        let padded_id = ctx.add(Padding::uniform(cal_recipe::CALENDAR_OUTER_PADDING).child_id(col_id));
 
         // Opaque background — Calendar can be used standalone (sits
         // on whatever surface the parent provides) or as a popover
@@ -711,15 +710,14 @@ fn build_weekday_row(
     ctx: &mut BuildContext,
     first_dow: Weekday,
     week_number_col_width: f32,
-    style: &fern_tokens::CalendarStyle,
 ) -> WidgetId {
-    let mut row = HStack::new().spacing(style.cell_gap);
+    let mut row = HStack::new().spacing(cal_recipe::CALENDAR_CELL_GAP);
     if week_number_col_width > 0.0 {
         // Empty corner cell above the week-number column.
         let spacer = ctx.add(
             FixedSize::new()
                 .bind_width(week_number_col_width)
-                .bind_height(style.weekday_row_height)
+                .bind_height(cal_recipe::CALENDAR_WEEKDAY_ROW_HEIGHT)
                 .child(Spacer::new()),
         );
         row = row.add_child(spacer);
@@ -740,8 +738,8 @@ fn build_weekday_row(
         let cell = WeekdayHeaderCell::new(
             text_id,
             long_label,
-            style.cell_size,
-            style.weekday_row_height,
+            cal_recipe::CALENDAR_CELL_SIZE,
+            cal_recipe::CALENDAR_WEEKDAY_ROW_HEIGHT,
         );
         row = row.add_child(ctx.add(cell));
     }
@@ -757,7 +755,6 @@ struct BuildGridParams {
     focused: Signal<bool>,
     selection: SelectionBinding,
     first_dow: Weekday,
-    style: fern_tokens::CalendarStyle,
     week_numbers: WeekNumberDisplay,
     min_date: Option<Date>,
     max_date: Option<Date>,
@@ -917,12 +914,12 @@ impl Widget for CalendarBody {
             .unwrap_or(first_of_month);
 
         let mut row_ids = Vec::with_capacity(6);
-        let cell_size = self.params.style.cell_size;
-        let cell_height = self.params.style.cell_size;
-        let gap = self.params.style.cell_gap;
+        let cell_size = cal_recipe::CALENDAR_CELL_SIZE;
+        let cell_height = cal_recipe::CALENDAR_CELL_SIZE;
+        let gap = cal_recipe::CALENDAR_CELL_GAP;
         let week_number_col_width = match self.params.week_numbers {
             WeekNumberDisplay::None => 0.0,
-            _ => self.params.style.week_number_column_width,
+            _ => cal_recipe::CALENDAR_WEEK_NUMBER_COLUMN_WIDTH,
         };
 
         for week in 0..6 {
@@ -964,8 +961,6 @@ impl Widget for CalendarBody {
                     self.params.focused.clone(),
                     self.params.selection.clone(),
                     cell_size,
-                    self.params.style.cell_radius,
-                    self.params.style.today_ring_width,
                     self.params.min_date,
                     self.params.max_date,
                     self.params.disabled_filter.clone(),

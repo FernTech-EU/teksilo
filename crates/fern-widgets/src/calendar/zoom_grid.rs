@@ -10,9 +10,8 @@
 //!   visible_month's year to that year + zooms back to
 //!   [`CalendarMode::Months`].
 //!
-//! Cells are minimal: hover + pressed + selected backgrounds, no per-
-//! cell focus ring (header-zoom is primarily a click-driven shortcut;
-//! deep keyboard nav inside zoom modes is deferred).
+//! Visual chrome (selected / pressed / hover background, label
+//! colour) is delegated to the active `CalendarStyle::make_zoom_cell`.
 
 use std::rc::Rc;
 
@@ -20,24 +19,23 @@ use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::accesskit::{Action, Role};
 use fern_core::build_context::BuildContext;
-use fern_core::color_prop::ColorProp;
 use fern_core::signal::Signal;
+use fern_core::styles::{CalendarZoomCellConfig, SharedCalendarStyle};
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_i18n::resolve_message_widget;
-use fern_tokens::{CornerRadius, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::common::datetime::month_long_key;
 use crate::common::datetime::types::YearMonth;
-use crate::primitives::{HStack, RectWidget, TextWidget, VStack, ZStack};
+use crate::primitives::{HStack, VStack};
+use crate::styles::recipe_calendar_style::RecipeCalendarStyle;
 
 use super::CalendarMode;
 
 const COLUMNS: usize = 3;
 const ROWS: usize = 4;
 const CELL_SPACING: f32 = 4.0;
-const CELL_RADIUS: f32 = 6.0;
 
 // ── MonthsGrid ───────────────────────────────────────────────────────
 
@@ -90,6 +88,7 @@ impl Widget for MonthsGrid {
                     label,
                     selected_signal,
                     self.enabled,
+                    self.cell_width,
                     self.cell_height,
                     Rc::new(move |ctx_evt: &mut EventContext| {
                         let cur = visible_month_for_cell.get();
@@ -98,20 +97,7 @@ impl Widget for MonthsGrid {
                         ctx_evt.request_frame();
                     }),
                 );
-                let cell_id = ctx.add(cell);
-                // Fix the cell's footprint so the row reports a real
-                // natural width (3 × cell_width + 2 × spacing). Without
-                // this, the row would advertise zero wanted width to
-                // the parent VStack — which uses children's *wanted*
-                // widths for cross-axis sizing, regardless of flex —
-                // and the body would collapse to the leading edge.
-                let sized_cell_id = ctx.add(
-                    crate::primitives::FixedSize::new()
-                        .bind_width(self.cell_width)
-                        .bind_height(self.cell_height)
-                        .child_id(cell_id),
-                );
-                row = row.add_child(sized_cell_id);
+                row = row.add_child(ctx.add(cell));
             }
             rows.push(ctx.add(row));
         }
@@ -225,6 +211,7 @@ impl Widget for YearsGrid {
                     label,
                     selected_signal,
                     self.enabled,
+                    self.cell_width,
                     self.cell_height,
                     Rc::new(move |ctx_evt: &mut EventContext| {
                         let cur = visible_for_cell.get();
@@ -233,18 +220,7 @@ impl Widget for YearsGrid {
                         ctx_evt.request_frame();
                     }),
                 );
-                let cell_id = ctx.add(cell);
-                // Fix the cell's footprint — see the matching note in
-                // `MonthsGrid` for why this is required (the row's
-                // wanted width must be non-zero to survive the parent
-                // VStack's cross-axis sizing).
-                let sized_cell_id = ctx.add(
-                    crate::primitives::FixedSize::new()
-                        .bind_width(self.cell_width)
-                        .bind_height(self.cell_height)
-                        .child_id(cell_id),
-                );
-                row = row.add_child(sized_cell_id);
+                row = row.add_child(ctx.add(cell));
             }
             rows.push(ctx.add(row));
         }
@@ -300,7 +276,8 @@ struct ZoomCell {
     label: String,
     selected: Signal<bool>,
     enabled: bool,
-    height: f32,
+    cell_width: f32,
+    cell_height: f32,
     on_pick: Rc<dyn Fn(&mut EventContext)>,
     root_id: Option<WidgetId>,
 }
@@ -318,14 +295,16 @@ impl ZoomCell {
         label: String,
         selected: Signal<bool>,
         enabled: bool,
-        height: f32,
+        cell_width: f32,
+        cell_height: f32,
         on_pick: Rc<dyn Fn(&mut EventContext)>,
     ) -> Self {
         Self {
             label,
             selected,
             enabled,
-            height,
+            cell_width,
+            cell_height,
             on_pick,
             root_id: None,
         }
@@ -338,51 +317,18 @@ impl Widget for ZoomCell {
         let pressed = ctx.signal(false);
         let selected = self.selected.clone();
 
-        // Background role priorities: selected wins (accent fill) →
-        // pressed → hover → transparent. Same role precedence the
-        // day grid uses.
-        let bg_role = selected
-            .clone()
-            .zip3(&hover, &pressed)
-            .map(|(sel, hov, prs)| {
-                if *sel {
-                    SurfaceRole::Accent
-                } else if *prs {
-                    SurfaceRole::Pressed
-                } else if *hov {
-                    SurfaceRole::Hover
-                } else {
-                    SurfaceRole::Transparent
-                }
-            });
-        let text_role = selected.map(|sel| {
-            if *sel {
-                TextRole::OnAccent
-            } else {
-                TextRole::Primary
-            }
-        });
+        // Visual chrome via the active CalendarStyle.
+        let style = resolve_calendar_style(ctx);
+        let cfg = CalendarZoomCellConfig {
+            label: self.label.clone(),
+            is_selected: selected,
+            is_hovered: hover.clone(),
+            is_pressed: pressed.clone(),
+            cell_width: self.cell_width,
+            cell_height: self.cell_height,
+        };
+        let chrome_id = style.make_zoom_cell(&cfg, ctx);
 
-        let bg = RectWidget::new()
-            .background(ColorProp::DynamicSurfaceRole(bg_role))
-            .corner_radius(CornerRadius::uniform(CELL_RADIUS));
-        let bg_id = ctx.add(bg);
-
-        let text = TextWidget::new_literal(self.label.clone())
-            .style(TextStyleRole::Body)
-            .color(ColorProp::DynamicTextRole(text_role))
-            .single_line();
-        let text_id = ctx.add(crate::primitives::Center::new().child(text));
-
-        let z = ZStack::new().add_child(bg_id).add_child(text_id);
-        let z_id = ctx.add(z);
-        let sized = ctx.add(
-            crate::primitives::FixedSize::new()
-                .bind_height(self.height)
-                .child_id(z_id),
-        );
-
-        let label_for_a11y = self.label.clone();
         let on_pick = self.on_pick.clone();
         let on_pick_for_access = on_pick.clone();
         let hover_for_handler = hover.clone();
@@ -415,11 +361,8 @@ impl Widget for ZoomCell {
                 }
             });
         ctx.apply_self_handlers(handlers);
-        // We attach to self; use the inner `sized` as the visible body.
-        self.root_id = Some(sized);
-        // Stash the label for accessibility().
-        let _ = label_for_a11y;
-        vec![sized]
+        self.root_id = Some(chrome_id);
+        vec![chrome_id]
     }
 
     fn layout_response(
@@ -460,4 +403,13 @@ impl Widget for ZoomCell {
             builder.set_selected(true);
         }
     }
+}
+
+fn resolve_calendar_style(ctx: &BuildContext) -> SharedCalendarStyle {
+    ctx.theme_signal()
+        .get()
+        .style_slots
+        .calendar
+        .clone()
+        .unwrap_or_else(|| Rc::new(RecipeCalendarStyle) as SharedCalendarStyle)
 }

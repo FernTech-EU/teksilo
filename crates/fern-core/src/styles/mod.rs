@@ -8,6 +8,7 @@ pub mod avatar_style;
 pub mod badge_style;
 pub mod banner_style;
 pub mod button_style;
+pub mod calendar_style;
 pub mod card_style;
 pub mod checkbox_style;
 pub mod combo_box_style;
@@ -44,6 +45,10 @@ pub use banner_style::{
 };
 pub use button_style::{
     ButtonRecipe, ButtonStyle, ButtonStyleConfig, ButtonVariant, SharedButtonStyle,
+};
+pub use calendar_style::{
+    CalendarDayConfig, CalendarDayFill, CalendarHeaderConfig, CalendarStyle,
+    CalendarZoomCellConfig, SharedCalendarStyle,
 };
 pub use card_style::{CardStyle, CardStyleConfig, CardVariant, SharedCardStyle};
 pub use checkbox_style::{

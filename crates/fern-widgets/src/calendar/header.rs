@@ -1,11 +1,14 @@
 //! `CalendarHeader` — month navigation strip: prev / "Month Year" / next.
 
+use std::rc::Rc;
+
 use fern_canvas::{Path, Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::accesskit::{Action, Role};
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::signal::Signal;
+use fern_core::styles::{CalendarHeaderConfig, SharedCalendarStyle};
 use fern_core::widget::{CursorIcon, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
@@ -15,7 +18,10 @@ use fern_tokens::{BorderRole, CornerRadius, SurfaceRole};
 use crate::common::datetime::Date;
 use crate::common::datetime::month_long_key;
 use crate::common::datetime::types::YearMonth;
-use crate::primitives::{Center, Expand, FixedSize, HStack, IconWidget, RectWidget, ZStack};
+use crate::primitives::{Center, FixedSize, IconWidget, RectWidget, ZStack};
+use crate::styles::recipe_calendar_style::{
+    CALENDAR_NAV_ARROW_RADIUS, CALENDAR_NAV_ARROW_SIZE, RecipeCalendarStyle,
+};
 
 use super::{CalendarMode, OnMonthChanged};
 
@@ -174,16 +180,17 @@ impl Widget for CalendarHeader {
                 }
             });
         let title_id = ctx.add(title_btn);
-        let label_centered = ctx.add(Expand::horizontal().child_id(title_id));
 
-        let row = HStack::new()
-            .spacing(4.0)
-            .add_child(prev_year_id)
-            .add_child(prev_id)
-            .add_child(label_centered)
-            .add_child(next_id)
-            .add_child(next_year_id);
-        let row_id = ctx.add(row);
+        // Delegate row layout to the active CalendarStyle.
+        let style = resolve_calendar_style(ctx);
+        let cfg = CalendarHeaderConfig {
+            prev_double: Some(prev_year_id),
+            prev: Some(prev_id),
+            title: title_id,
+            next: Some(next_id),
+            next_double: Some(next_year_id),
+        };
+        let row_id = style.make_header(&cfg, ctx);
         self.root_id = Some(row_id);
         vec![row_id]
     }
@@ -293,13 +300,13 @@ impl Widget for NavArrow {
             .background(SurfaceRole::Transparent)
             .border_color(border_role)
             .border_width(border_width)
-            .corner_radius(CornerRadius::uniform(4.0));
+            .corner_radius(CornerRadius::uniform(CALENDAR_NAV_ARROW_RADIUS));
         let bg_id = ctx.add(bg);
         let z = ctx.add(ZStack::new().add_child(bg_id).add_child(centered));
         let sized = ctx.add(
             FixedSize::new()
-                .bind_width(24.0)
-                .bind_height(24.0)
+                .bind_width(CALENDAR_NAV_ARROW_SIZE)
+                .bind_height(CALENDAR_NAV_ARROW_SIZE)
                 .child_id(z),
         );
 
@@ -350,8 +357,8 @@ impl Widget for NavArrow {
         match self.root_id {
             Some(id) => ctx
                 .child_size(id, proposal)
-                .unwrap_or_else(|| Size::new(24.0, 24.0)),
-            None => Size::new(24.0, 24.0),
+                .unwrap_or_else(|| Size::new(CALENDAR_NAV_ARROW_SIZE, CALENDAR_NAV_ARROW_SIZE)),
+            None => Size::new(CALENDAR_NAV_ARROW_SIZE, CALENDAR_NAV_ARROW_SIZE),
         }
         .into()
     }
@@ -433,4 +440,13 @@ fn double_chevron_right_icon(size: f32) -> IconWidget {
     path.line_to(Point::new(s * 0.80, s * 0.50));
     path.line_to(Point::new(s * 0.50, s * 0.75));
     IconWidget::from_path(path, size)
+}
+
+fn resolve_calendar_style(ctx: &BuildContext) -> SharedCalendarStyle {
+    ctx.theme_signal()
+        .get()
+        .style_slots
+        .calendar
+        .clone()
+        .unwrap_or_else(|| Rc::new(RecipeCalendarStyle) as SharedCalendarStyle)
 }
