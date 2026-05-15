@@ -27,11 +27,12 @@
 use crate::styles::{
     SharedAvatarStyle, SharedBadgeStyle, SharedBannerStyle, SharedButtonStyle,
     SharedCalendarStyle, SharedCardStyle, SharedCheckboxStyle, SharedColorPickerStyle,
-    SharedComboBoxStyle, SharedDialogStyle, SharedIconButtonStyle, SharedLinkStyle,
-    SharedMenuItemStyle, SharedPanelStyle, SharedPopoverStyle, SharedProgressBarStyle,
-    SharedRadioStyle, SharedScrollBarStyle, SharedSegmentedControlStyle, SharedSliderStyle,
-    SharedSnackbarStyle, SharedSpinBoxStyle, SharedStandardItemStyle, SharedTabStyle,
-    SharedTextInputStyle, SharedToggleStyle, SharedTooltipStyle,
+    SharedComboBoxStyle, SharedDateEditStyle, SharedDialogStyle, SharedIconButtonStyle,
+    SharedLinkStyle, SharedMenuItemStyle, SharedPanelStyle, SharedPopoverStyle,
+    SharedProgressBarStyle, SharedRadioStyle, SharedScrollBarStyle,
+    SharedSegmentedControlStyle, SharedSliderStyle, SharedSnackbarStyle, SharedSpinBoxStyle,
+    SharedStandardItemStyle, SharedTabStyle, SharedTextInputStyle, SharedToggleStyle,
+    SharedTooltipStyle,
 };
 
 /// Typed slot bag living on [`crate::styles::Theme`]. One slot per
@@ -66,6 +67,7 @@ pub struct ComponentStyleSlots {
     pub calendar: Option<SharedCalendarStyle>,
     pub color_picker: Option<SharedColorPickerStyle>,
     pub spin_box: Option<SharedSpinBoxStyle>,
+    pub date_edit: Option<SharedDateEditStyle>,
 }
 
 impl std::fmt::Debug for ComponentStyleSlots {
@@ -101,6 +103,7 @@ impl std::fmt::Debug for ComponentStyleSlots {
             .field("calendar", &self.calendar.is_some())
             .field("color_picker", &self.color_picker.is_some())
             .field("spin_box", &self.spin_box.is_some())
+            .field("date_edit", &self.date_edit.is_some())
             .finish()
     }
 }
@@ -144,5 +147,6 @@ impl PartialEq for ComponentStyleSlots {
             && rc_eq(&self.calendar, &other.calendar)
             && rc_eq(&self.color_picker, &other.color_picker)
             && rc_eq(&self.spin_box, &other.spin_box)
+            && rc_eq(&self.date_edit, &other.date_edit)
     }
 }

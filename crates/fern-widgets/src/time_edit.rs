@@ -96,6 +96,7 @@ pub struct TimeEdit {
     text_signal: Signal<String>,
     focused: Signal<bool>,
     feedback: Signal<ValidationFeedback>,
+    style_override: Option<fern_core::styles::SharedDateEditStyle>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -129,8 +130,15 @@ impl TimeEdit {
             text_signal: Signal::new(String::new()),
             focused: Signal::new(false),
             feedback: Signal::new(ValidationFeedback::Pristine),
+            style_override: None,
             root_child_id: None,
         }
+    }
+
+    /// Per-call DateEditStyle override (shared with DateEdit family).
+    pub fn style(mut self, style: impl fern_core::styles::DateEditStyle) -> Self {
+        self.style_override = Some(std::rc::Rc::new(style));
+        self
     }
 
     pub fn required(value: Signal<Time>) -> Self {
@@ -467,7 +475,7 @@ impl Widget for TimeEdit {
         // Fill → wrap in intrinsic-respecting Expand so the field
         // stretches to its parent's offered width while still
         // reporting natural width when unconstrained.
-        let root_id = match self.width_policy {
+        let body_id = match self.width_policy {
             crate::date_edit::WidthPolicy::Default => ctx.add(text_input),
             crate::date_edit::WidthPolicy::Fill => {
                 let inner_id = ctx.add(text_input);
@@ -478,6 +486,12 @@ impl Widget for TimeEdit {
                 )
             }
         };
+        let style = crate::styles::recipe_date_edit_style::resolve_date_edit_style(
+            &self.style_override,
+            ctx,
+        );
+        let cfg = fern_core::styles::DateEditStyleConfig { body: body_id };
+        let root_id = style.make_body(&cfg, ctx);
         self.root_child_id = Some(root_id);
 
         // ── Segment-stepping helper ───────────────────────────

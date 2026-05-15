@@ -161,6 +161,9 @@ pub struct DateEdit {
     /// `set_expanded` on the trigger.
     popover_open: Signal<bool>,
     // Build state
+    /// Per-call DateEditStyle override. Higher precedence than the
+    /// theme-wide `style_slots.date_edit` slot.
+    style_override: Option<fern_core::styles::SharedDateEditStyle>,
     root_child_id: Option<WidgetId>,
     calendar_id: Option<WidgetId>,
 }
@@ -198,9 +201,16 @@ impl DateEdit {
             text_signal: Signal::new(String::new()),
             focused: Signal::new(false),
             popover_open: Signal::new(false),
+            style_override: None,
             root_child_id: None,
             calendar_id: None,
         }
+    }
+
+    /// Per-call style override for the date-edit chrome.
+    pub fn style(mut self, style: impl fern_core::styles::DateEditStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
     }
 
     /// Construct from a non-nullable date signal. Internally backed by
@@ -340,7 +350,8 @@ impl Widget for DateEdit {
         }
 
         let theme = ctx.theme_signal().get();
-        let date_style = theme.components.date_edit;
+        use crate::styles::recipe_date_edit_style as de;
+        let _ = &theme;
         let enabled = self.enabled;
         let read_only = self.read_only;
 
@@ -566,7 +577,7 @@ impl Widget for DateEdit {
                 })
             };
             Some(
-                IconButton::new(calendar_glyph_icon(date_style.calendar_icon_size))
+                IconButton::new(calendar_glyph_icon(de::CALENDAR_ICON_SIZE))
                     .embedded()
                     .size(IconButtonSize::Default)
                     .enabled(enabled && !read_only)
@@ -673,7 +684,7 @@ impl Widget for DateEdit {
         // composite stretches to its parent's offered width while
         // still reporting the natural width when unconstrained
         // (matches SpinBox's `.fill_width()` semantics).
-        let root_id = match self.width_policy {
+        let body_id = match self.width_policy {
             WidthPolicy::Default => ctx.add(text_input),
             WidthPolicy::Fill => {
                 let inner_id = ctx.add(text_input);
@@ -684,6 +695,13 @@ impl Widget for DateEdit {
                 )
             }
         };
+        // Delegate any final wrapping to the active DateEditStyle.
+        let style = crate::styles::recipe_date_edit_style::resolve_date_edit_style(
+            &self.style_override,
+            ctx,
+        );
+        let cfg = fern_core::styles::DateEditStyleConfig { body: body_id };
+        let root_id = style.make_body(&cfg, ctx);
         self.root_child_id = Some(root_id);
 
         // ── Segment-stepping helper — captured by the on_key_preview

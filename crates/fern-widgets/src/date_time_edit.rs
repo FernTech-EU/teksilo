@@ -133,6 +133,7 @@ pub struct DateTimeEdit {
     /// trigger's AT `set_expanded` and the open/close toggle.
     calendar_popover_open: Signal<bool>,
     on_value_changed: Option<OnValueChanged>,
+    style_override: Option<fern_core::styles::SharedDateEditStyle>,
     root_child_id: Option<WidgetId>,
     calendar_id: Option<WidgetId>,
 }
@@ -174,9 +175,16 @@ impl DateTimeEdit {
             focused: Signal::new(false),
             calendar_popover_open: Signal::new(false),
             on_value_changed: None,
+            style_override: None,
             root_child_id: None,
             calendar_id: None,
         }
+    }
+
+    /// Per-call DateEditStyle override (shared with DateEdit family).
+    pub fn style(mut self, style: impl fern_core::styles::DateEditStyle) -> Self {
+        self.style_override = Some(std::rc::Rc::new(style));
+        self
     }
 
     pub fn required(value: Signal<DateTime>) -> Self {
@@ -299,8 +307,8 @@ impl DateTimeEdit {
 impl Widget for DateTimeEdit {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme_signal().get();
+        use crate::styles::recipe_date_edit_style as de;
         use crate::styles::recipe_text_input_style as field_dims;
-        let date_style = theme.components.date_edit;
         let focus_ring_width = theme.shape.focus_ring_width;
         let enabled = self.enabled;
         let read_only = self.read_only;
@@ -518,7 +526,7 @@ impl Widget for DateTimeEdit {
                     popover_open.set(false);
                 })
             };
-            let trigger_btn = IconButton::new(calendar_glyph_icon(date_style.calendar_icon_size))
+            let trigger_btn = IconButton::new(calendar_glyph_icon(de::CALENDAR_ICON_SIZE))
                 .embedded()
                 .size(IconButtonSize::Default)
                 .enabled(enabled && !read_only)
@@ -619,7 +627,15 @@ impl Widget for DateTimeEdit {
                 .add_child(sized_id)
                 .add_child(strip_id),
         );
-        self.root_child_id = Some(root_with_strip);
+        let style = crate::styles::recipe_date_edit_style::resolve_date_edit_style(
+            &self.style_override,
+            ctx,
+        );
+        let cfg = fern_core::styles::DateEditStyleConfig {
+            body: root_with_strip,
+        };
+        let root_id = style.make_body(&cfg, ctx);
+        self.root_child_id = Some(root_id);
 
         // ── Self handlers: focus_within drives the frame border ─
         let handlers = HandlerSet::new().focus_within(self.focused.clone());
