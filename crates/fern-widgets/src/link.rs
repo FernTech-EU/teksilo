@@ -3,20 +3,19 @@
 //! Follows the Button pattern for interaction but renders as underlined text.
 //! V2 attached handlers — no event() override.
 
+use std::rc::Rc;
+
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::signal::Signal;
+use fern_core::styles::{LinkStyleConfig, SharedLinkStyle};
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{BorderRole, TextRole, TextStyleRole};
 
 use crate::button::InteractionState;
-use fern_tokens::CornerRadius;
-
-use crate::primitives::{RectWidget, TextWidget, VStack, ZStack};
 
 type CommandFactory = Box<dyn Fn(&mut EventContext)>;
 
@@ -29,7 +28,15 @@ pub struct Link {
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn fern_core::widget::Widget>>,
     interaction: Option<Signal<InteractionState>>,
+    /// Visited state — orthogonal to `InteractionState`. The app owns
+    /// the URL-visit tracking; this signal toggles `TextRole::LinkVisited`
+    /// when no transient interaction (hover / press) is active.
+    /// Default is a permanently-`false` signal so links that don't
+    /// represent URLs render as unvisited.
+    visited: Option<Signal<bool>>,
     enabled: bool,
+    /// Per-call override for the link chrome.
+    style_override: Option<SharedLinkStyle>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -44,9 +51,26 @@ impl Link {
             rich_tooltip_source: None,
             composite_tooltip_content: None,
             interaction: None,
+            visited: None,
             enabled: true,
+            style_override: None,
             root_child_id: None,
         }
+    }
+
+    /// Mark the link's target as visited. Drives `TextRole::LinkVisited`
+    /// when no transient interaction (hover / press) is active. Visited
+    /// is overridden by hover/press, following the web convention. The
+    /// app owns the signal (typically backed by URL-history state).
+    pub fn visited(mut self, visited: Signal<bool>) -> Self {
+        self.visited = Some(visited);
+        self
+    }
+
+    /// Per-call style override for the link chrome.
+    pub fn style(mut self, style: impl fern_core::styles::LinkStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
     }
 
     /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw string in `LocalizedString::literal`.
@@ -127,73 +151,34 @@ impl std::fmt::Debug for Link {
     }
 }
 
-fn resolve_link_role(state: InteractionState) -> TextRole {
-    match state {
-        InteractionState::Disabled => TextRole::Disabled,
-        InteractionState::Hovered | InteractionState::Pressed => TextRole::LinkHover,
-        InteractionState::Focused | InteractionState::Idle => TextRole::Link,
-    }
-}
-
-fn resolve_focus_border_role(state: InteractionState) -> BorderRole {
-    match state {
-        InteractionState::Focused => BorderRole::Focused,
-        _ => BorderRole::Transparent,
-    }
-}
-
 impl Widget for Link {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme();
-        let link_corner_radius = theme.components.link.corner_radius;
-        let focus_ring_width = theme.shape.focus_ring_width;
-
         let interaction = ctx.signal(InteractionState::Idle);
         self.interaction = Some(interaction.clone());
 
-        let text_role = interaction.map(|s| resolve_link_role(*s));
-        let underline_role = interaction.map(|s| resolve_link_role(*s));
+        // Derive the four state bools `LinkStyle` expects from the
+        // single `InteractionState` signal. Disabled is static.
+        let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));
+        let is_pressed = interaction.map(|s| matches!(s, InteractionState::Pressed));
+        let is_focused = interaction.map(|s| matches!(s, InteractionState::Focused));
+        let is_visited = self.visited.clone().unwrap_or_else(|| Signal::new(false));
 
-        let text = TextWidget::new_literal(&self.text)
-            .style(TextStyleRole::Body)
-            .bind_color(text_role)
-            .single_line()
-            .a11y_hidden();
-        let text_id = ctx.add(text);
-
-        // 1px underline below the text
-        let underline = RectWidget::new().bind_background(underline_role);
-        let underline_id = ctx.add(underline);
-        let underline_sized = ctx.add(
-            crate::primitives::FixedSize::new()
-                .bind_height(1.0_f32)
-                .child_id(underline_id),
+        let style: SharedLinkStyle = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.link.clone())
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeLinkStyle::default()));
+        let root_id = style.make_body(
+            &LinkStyleConfig {
+                text: self.text.clone(),
+                is_hovered,
+                is_pressed,
+                is_focused,
+                is_visited,
+                is_disabled: !self.enabled,
+            },
+            ctx,
         );
-
-        let content_id = ctx.add(
-            VStack::new()
-                .spacing(0.0)
-                .add_child(text_id)
-                .add_child(underline_sized),
-        );
-
-        // Int UI focus convention: the link paints its own
-        // accent-colored border on focus instead of a separate
-        // ring. Link has no visible rest-state border; the focus
-        // state swaps in a `focus_ring_width` outline around the
-        // text.
-        let focus_border_role = interaction.map(|s| resolve_focus_border_role(*s));
-        let focus_border_width = interaction.map(move |s| match *s {
-            InteractionState::Focused => focus_ring_width,
-            _ => 0.0,
-        });
-        let focus_rect_id = ctx.add(
-            RectWidget::new()
-                .bind_border_color(focus_border_role)
-                .bind_border_width(focus_border_width)
-                .corner_radius(CornerRadius::uniform(link_corner_radius)),
-        );
-        let root_id = ctx.add(ZStack::new().add_child(focus_rect_id).add_child(content_id));
 
         if let Some(content) = self.composite_tooltip_content.take() {
             crate::tooltip::attach_composite_tooltip_boxed(

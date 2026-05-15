@@ -46,6 +46,11 @@ pub enum TextRole {
     Link,
     /// Inline hyperlink on hover.
     LinkHover,
+    /// Inline hyperlink whose target the user has previously visited.
+    /// Distinct from `Link` (idle un-visited) but overridden by
+    /// `LinkHover` while the pointer is over the link, following the
+    /// standard web convention.
+    LinkVisited,
     /// Tooltip body text (dark surface in both themes).
     TooltipText,
     /// Tooltip shortcut chip text.
@@ -69,6 +74,7 @@ impl TextRole {
             TextRole::Success => colors.text_success,
             TextRole::Link => colors.text_link,
             TextRole::LinkHover => colors.text_link_hover,
+            TextRole::LinkVisited => colors.text_link_visited,
             TextRole::TooltipText => colors.tooltip_text,
             TextRole::TooltipShortcut => colors.tooltip_shortcut,
             TextRole::EditorFg => colors.editor_fg,

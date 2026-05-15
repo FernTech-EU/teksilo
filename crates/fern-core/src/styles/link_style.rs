@@ -1,0 +1,39 @@
+//! Tier-3 style protocol for `Link`. See `docs/styling-system.md`.
+//!
+//! The style owns the full visual: the per-state text colour (idle /
+//! hover / pressed / visited / disabled), the underline policy, the
+//! corner radius, and the focus-ring border. The `Link` widget owns
+//! only the interaction state signals and dispatches events — it
+//! passes the resolved text *string* (not a pre-built `TextWidget`)
+//! through the config so the style can build the label with its own
+//! colour binding.
+
+use std::rc::Rc;
+
+use crate::build_context::BuildContext;
+use crate::signal::Signal;
+use crate::widget_id::WidgetId;
+
+#[derive(Clone, Debug)]
+pub struct LinkStyleConfig {
+    /// Resolved label text (already localised at the widget level).
+    pub text: String,
+    /// `true` while the pointer is over the link.
+    pub is_hovered: Signal<bool>,
+    /// `true` while the link is being pressed (mouse-down or Space/Enter).
+    pub is_pressed: Signal<bool>,
+    /// `true` while the link holds keyboard focus.
+    pub is_focused: Signal<bool>,
+    /// `true` if the link's target has previously been visited. The
+    /// app owns visited-tracking; default `Signal::new(false)` is
+    /// fine for links that don't represent URLs.
+    pub is_visited: Signal<bool>,
+    /// Disabled state (static).
+    pub is_disabled: bool,
+}
+
+pub trait LinkStyle: 'static {
+    fn make_body(&self, cfg: &LinkStyleConfig, ctx: &mut BuildContext) -> WidgetId;
+}
+
+pub type SharedLinkStyle = Rc<dyn LinkStyle>;

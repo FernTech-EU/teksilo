@@ -27,10 +27,10 @@
 use crate::styles::{
     SharedBadgeStyle, SharedBannerStyle, SharedButtonStyle, SharedCardStyle,
     SharedCheckboxStyle, SharedComboBoxStyle, SharedDialogStyle, SharedIconButtonStyle,
-    SharedMenuItemStyle, SharedPanelStyle, SharedPopoverStyle, SharedProgressBarStyle,
-    SharedRadioStyle, SharedScrollBarStyle, SharedSliderStyle, SharedSnackbarStyle,
-    SharedStandardItemStyle, SharedTabStyle, SharedTextInputStyle, SharedToggleStyle,
-    SharedTooltipStyle,
+    SharedLinkStyle, SharedMenuItemStyle, SharedPanelStyle, SharedPopoverStyle,
+    SharedProgressBarStyle, SharedRadioStyle, SharedScrollBarStyle, SharedSliderStyle,
+    SharedSnackbarStyle, SharedStandardItemStyle, SharedTabStyle, SharedTextInputStyle,
+    SharedToggleStyle, SharedTooltipStyle,
 };
 
 /// Typed slot bag living on [`crate::styles::Theme`]. One slot per
@@ -59,6 +59,7 @@ pub struct ComponentStyleSlots {
     pub banner: Option<SharedBannerStyle>,
     pub badge: Option<SharedBadgeStyle>,
     pub progress_bar: Option<SharedProgressBarStyle>,
+    pub link: Option<SharedLinkStyle>,
 }
 
 impl std::fmt::Debug for ComponentStyleSlots {
@@ -88,6 +89,7 @@ impl std::fmt::Debug for ComponentStyleSlots {
             .field("banner", &self.banner.is_some())
             .field("badge", &self.badge.is_some())
             .field("progress_bar", &self.progress_bar.is_some())
+            .field("link", &self.link.is_some())
             .finish()
     }
 }
@@ -125,5 +127,6 @@ impl PartialEq for ComponentStyleSlots {
             && rc_eq(&self.banner, &other.banner)
             && rc_eq(&self.badge, &other.badge)
             && rc_eq(&self.progress_bar, &other.progress_bar)
+            && rc_eq(&self.link, &other.link)
     }
 }
