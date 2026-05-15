@@ -31,87 +31,28 @@
 use std::rc::Rc;
 
 use fern_canvas::raster::RasterIcon;
-use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal};
+use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::color_prop::ColorProp;
 use fern_core::signal::{Prop, Signal};
+use fern_core::styles::{AvatarStyleConfig, SharedAvatarStyle};
 use fern_core::widget::{
     CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
 };
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, CornerRadius, FontWeight, TextStyle};
+use fern_tokens::{Color, FontWeight, TextStyle};
+
+pub use fern_core::styles::{AvatarCorner, AvatarPresence, AvatarShape, AvatarSize};
 
 use crate::primitives::ImageWidget;
 use crate::primitives::image_mask::ImageMaskShape;
 use crate::primitives::image_widget::ImageFit;
-
-// ─── Public types ──────────────────────────────────────────────────────────
-
-/// Discrete avatar size variants. `Custom(px)` accepts an arbitrary
-/// logical-pixel side length when the four standard sizes are not a
-/// good fit.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum AvatarSize {
-    /// 24 dp — list rows, mention chips.
-    Small,
-    /// 32 dp — comment threads, sidebars (default).
-    #[default]
-    Medium,
-    /// 48 dp — profile cards.
-    Large,
-    /// 64 dp — settings, "your account" headers.
-    XLarge,
-    /// Arbitrary side length.
-    Custom(f32),
-}
-
-impl AvatarSize {
-    fn resolve(self, style: &fern_tokens::AvatarStyle) -> f32 {
-        match self {
-            AvatarSize::Small => style.size_small,
-            AvatarSize::Medium => style.size_medium,
-            AvatarSize::Large => style.size_large,
-            AvatarSize::XLarge => style.size_x_large,
-            AvatarSize::Custom(px) => px.max(1.0),
-        }
-    }
-}
-
-/// Outer outline. `Circle` is the most common; `RoundedSquare` matches
-/// Material's "rounded" variant and is useful for non-person avatars
-/// (project icons, channels). `Square` is a hard rectangle with no
-/// corner rounding.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum AvatarShape {
-    #[default]
-    Circle,
-    RoundedSquare,
-    Square,
-}
-
-/// Presence indicator dot drawn at one corner of the avatar. The
-/// `Custom` variant carries its own colour and an a11y label so apps
-/// can model domain-specific statuses (e.g. "in a meeting").
-#[derive(Debug, Clone)]
-pub enum AvatarPresence {
-    Online,
-    Offline,
-    Away,
-    Busy,
-    Custom { color: ColorProp, label: String },
-}
-
-/// Where the presence dot is rendered relative to the avatar bounds.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum AvatarCorner {
-    #[default]
-    BottomTrailing,
-    BottomLeading,
-    TopTrailing,
-    TopLeading,
-}
+use crate::styles::recipe_avatar_style::{
+    AVATAR_FONT_RATIO_1CHAR, AVATAR_FONT_RATIO_2CHAR, AVATAR_ROUNDED_RADIUS_RATIO,
+    auto_contrast_text, avatar_pixel_size, hash_pick_palette_color,
+};
 
 // ─── The widget ────────────────────────────────────────────────────────────
 
@@ -189,10 +130,15 @@ pub struct Avatar {
     /// otherwise drop a `Box<dyn Fn>` after the first take).
     action: Option<ActionFn>,
 
-    /// Focus state — set in `build()` for clickable avatars only.
-    /// Drives the focus ring stroke in `paint()`. `None` when the
-    /// avatar isn't focusable (no `on_activate_fn`).
+    /// Focus state — set in `build()` and threaded into the
+    /// `AvatarStyle` config so the chrome can paint the keyboard
+    /// focus ring. `None` until `build()` runs.
     focused: Option<Signal<bool>>,
+    /// Per-call override for the chrome (shape fill, border, focus ring,
+    /// presence dot).
+    style_override: Option<SharedAvatarStyle>,
+    /// Build-time `AvatarStyle::make_body` root.
+    root_child_id: Option<WidgetId>,
 }
 
 #[derive(Clone)]
@@ -273,7 +219,15 @@ impl Avatar {
             expanded_signal: None,
             action: None,
             focused: None,
+            style_override: None,
+            root_child_id: None,
         }
+    }
+
+    /// Per-call style override for the avatar chrome.
+    pub fn style(mut self, style: impl fern_core::styles::AvatarStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
     }
 
     /// Permanent `#[doc(hidden)]` shim for tests — wraps in
@@ -520,15 +474,6 @@ impl std::fmt::Debug for Avatar {
 
 /// Inline FNV-1a 64-bit. Stable across Rust versions and process runs
 /// (unlike `DefaultHasher`). Same idiom as `fern_core::accessibility`.
-fn fnv1a_64(bytes: &[u8]) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;
-    for &b in bytes {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    h
-}
-
 /// Truncate to ≤ 2 chars and uppercase. Returns `"?"` when the input
 /// trims to empty. Operates on `char`s (Unicode scalars), not extended
 /// graphemes — this is sufficient for real-world names where accented
@@ -572,62 +517,10 @@ fn derive_initials(name: &str) -> String {
     if out.is_empty() { "?".to_string() } else { out }
 }
 
-/// Pick a colour from the theme's chart palette deterministically from
-/// `seed`. Empty palette falls back to a neutral grey so the widget
-/// still renders.
-fn hash_pick_palette_color(seed: &str, theme: &fern_core::Theme) -> Color {
-    let palette = &theme.colors.chart_palette;
-    if palette.is_empty() {
-        return Color::from_rgb(0.5, 0.5, 0.5);
-    }
-    let h = fnv1a_64(seed.as_bytes());
-    let idx = (h as usize) % palette.len();
-    palette[idx]
-}
-
-/// Auto-contrast foreground for a given background.
-fn auto_contrast_text(bg: Color) -> Color {
-    if bg.relative_luminance() < 0.5 {
-        Color::WHITE
-    } else {
-        Color::from_rgb(0.121, 0.121, 0.121) // ≈ #1F1F1F
-    }
-}
-
-fn presence_color(p: &AvatarPresence, theme: &fern_core::Theme) -> Color {
-    match p {
-        AvatarPresence::Online => theme.colors.status_success_fg,
-        AvatarPresence::Offline => theme.colors.text_disabled,
-        AvatarPresence::Away => theme.colors.status_warning_fg,
-        AvatarPresence::Busy => theme.colors.status_error_fg,
-        AvatarPresence::Custom { color, .. } => color.resolve(theme),
-    }
-}
-
-fn presence_label(p: &AvatarPresence) -> String {
-    match p {
-        AvatarPresence::Online => "Online".to_string(),
-        AvatarPresence::Offline => "Offline".to_string(),
-        AvatarPresence::Away => "Away".to_string(),
-        AvatarPresence::Busy => "Busy".to_string(),
-        AvatarPresence::Custom { label, .. } => label.clone(),
-    }
-}
-
-fn corner_offset(corner: AvatarCorner) -> (f32, f32) {
-    // x_factor, y_factor each in {-1, 1}: -1 = leading/top, 1 = trailing/bottom.
-    match corner {
-        AvatarCorner::BottomTrailing => (1.0, 1.0),
-        AvatarCorner::BottomLeading => (-1.0, 1.0),
-        AvatarCorner::TopTrailing => (1.0, -1.0),
-        AvatarCorner::TopLeading => (-1.0, -1.0),
-    }
-}
-
-fn shape_to_image_mask(shape: AvatarShape, radius_ratio: f32) -> ImageMaskShape {
+fn shape_to_image_mask(shape: AvatarShape) -> ImageMaskShape {
     match shape {
         AvatarShape::Circle => ImageMaskShape::Circle,
-        AvatarShape::RoundedSquare => ImageMaskShape::RoundedSquare(radius_ratio),
+        AvatarShape::RoundedSquare => ImageMaskShape::RoundedSquare(AVATAR_ROUNDED_RADIUS_RATIO),
         AvatarShape::Square => ImageMaskShape::None,
     }
 }
@@ -705,9 +598,7 @@ impl Avatar {
 impl Widget for Avatar {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
-        let theme = ctx.theme();
-        let mask_shape =
-            shape_to_image_mask(self.shape, theme.components.avatar.rounded_radius_ratio);
+        let mask_shape = shape_to_image_mask(self.shape);
 
         // 1. Resolve current content state. Each `current_*` reads
         //    the signal if bound, falling back to the static field.
@@ -716,8 +607,9 @@ impl Widget for Avatar {
         let alt = self.current_alt();
         let image_bytes = self.current_image();
 
-        // 2. Build child(ren). The masking lives on `ImageWidget` so
-        //    Avatar doesn't manage pixel buffers itself any more.
+        // 2. Build inner content (`InitialsLeaf` / `ImageWidget`).
+        //    The masking lives on `ImageWidget` so Avatar doesn't
+        //    manage pixel buffers itself.
         let make_initials_leaf = || InitialsLeaf {
             initials: initials.clone(),
             seed: seed.clone(),
@@ -731,43 +623,38 @@ impl Widget for Avatar {
             if let Some(a) = alt {
                 img = img.alt(a);
             } else {
-                // Inner ImageWidget is silenced — parent Avatar owns
-                // the canonical Role::Image / Role::Button + name.
+                // Inner ImageWidget is silenced — the parent Avatar
+                // owns the Role::Image / Role::Button + name.
                 img = img.a11y_hidden();
             }
             img
         };
 
-        let mut children = Vec::new();
-        match (image_bytes, &self.image_visible) {
+        // Assemble inner content as a single `WidgetId`. For the
+        // bound-visibility case the image and initials sit as siblings
+        // inside a `ZStack` with `visible_when` bindings; either is
+        // mounted alone otherwise.
+        let content_id = match (image_bytes, &self.image_visible) {
             (Some((bytes, w, h)), Prop::Static(true)) => {
-                let id = ctx.add(make_image_widget(bytes, w, h, alt.clone()));
-                children.push(id);
+                ctx.add(make_image_widget(bytes, w, h, alt.clone()))
             }
-            (Some(_), Prop::Static(false)) => {
-                // Image present but explicitly hidden — initials only.
-                let id = ctx.add(make_initials_leaf());
-                children.push(id);
-            }
+            (Some(_), Prop::Static(false)) => ctx.add(make_initials_leaf()),
             (Some((bytes, w, h)), Prop::Bound(visible_signal)) => {
                 let img_id = ctx.add(make_image_widget(bytes, w, h, alt.clone()));
                 let init_id = ctx.add(make_initials_leaf());
                 let v_clone = visible_signal.clone();
                 ctx.visible_when(img_id, v_clone.clone());
                 ctx.visible_when(init_id, v_clone.map(|v| !*v));
-                children.push(img_id);
-                children.push(init_id);
+                ctx.add(
+                    crate::primitives::ZStack::new()
+                        .add_child(img_id)
+                        .add_child(init_id),
+                )
             }
-            (None, _) => {
-                // Pure initials — single leaf child holds the centred
-                // text; the avatar paints the background itself.
-                let id = ctx.add(make_initials_leaf());
-                children.push(id);
-            }
-        }
+            (None, _) => ctx.add(make_initials_leaf()),
+        };
 
         // 3. Wire reactive content signals so flips re-run build().
-        //    Levels picked per the doc on each field.
         let registry = ctx.binding_registry();
         if let Some(sig) = &self.name_signal {
             sig.bind_to(self_id, registry, fern_core::binding::BindingLevel::Rebuild);
@@ -793,20 +680,12 @@ impl Widget for Avatar {
             );
         }
 
-        // 3. If clickable, install attached handlers — including the
-        //    `on_focus` that drives the focus-ring repaint.
+        // 4. If clickable, install attached handlers — including the
+        //    `on_focus` that drives the focus-ring repaint via the
+        //    chrome's `is_focused` signal.
+        let focused = ctx.signal(false);
+        self.focused = Some(focused.clone());
         if let Some(action) = self.action.clone() {
-            let focused = ctx.signal(false);
-            // Bind so the a11y / paint pipeline re-runs when focus
-            // state flips.
-            let self_id = ctx.self_id();
-            let registry = ctx.binding_registry();
-            focused.bind_to(
-                self_id,
-                registry,
-                fern_core::binding::BindingLevel::RepaintOnly,
-            );
-            self.focused = Some(focused.clone());
             let focus_for_handler = focused.clone();
 
             let action_for_tap = action.clone();
@@ -842,8 +721,7 @@ impl Widget for Avatar {
             ctx.apply_self_handlers(handlers);
         }
 
-        // 4. Wire `expanded_signal` for a11y refresh on flip — same
-        //    pattern as Button's disclosure trigger.
+        // 5. Wire `expanded_signal` for a11y refresh on flip.
         if let Some(ref expanded_signal) = self.expanded_signal {
             let self_id = ctx.self_id();
             let registry = ctx.binding_registry();
@@ -854,16 +732,40 @@ impl Widget for Avatar {
             );
         }
 
-        children
+        // 6. The shape-aware chrome (background fill, border, focus
+        //    ring, presence dot) is owned by the active `AvatarStyle`;
+        //    this widget keeps its Role::Image / Role::Button / Role::Label
+        //    semantics and the initials-derivation logic.
+        let style: SharedAvatarStyle = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.avatar.clone())
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeAvatarStyle::default()));
+        let root = style.make_body(
+            &AvatarStyleConfig {
+                shape: self.shape,
+                size: self.size,
+                content: content_id,
+                presence: self.current_presence(),
+                presence_corner: self.presence_corner,
+                is_focused: focused,
+                background_override: self.background.clone(),
+                border_color_override: self.border_color.clone(),
+                border_width_override: self.border_width,
+                seed,
+            },
+            ctx,
+        );
+        self.root_child_id = Some(root);
+        vec![root]
     }
 
     fn layout_response(
         &self,
         _proposal: SizeProposal,
-        ctx: &LayoutContext,
+        _ctx: &LayoutContext,
     ) -> fern_core::widget::LayoutResponse {
-        let style = ctx.theme.components.avatar;
-        let side = self.size.resolve(&style);
+        let side = avatar_pixel_size(self.size);
         Size::new(side, side).into()
     }
 
@@ -874,112 +776,9 @@ impl Widget for Avatar {
         children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
-        // All children fill the avatar's bounds — image / initials
-        // both span the full circle.
         for child in children.iter_mut() {
             child.origin = bounds.origin();
             child.size = bounds.size();
-        }
-    }
-
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let theme = ctx.theme;
-        let style = theme.components.avatar;
-
-        // Resolve the background colour. Hash-derived from the seed
-        // (or initials) when no override is supplied. Static `false`
-        // image_visible still uses the bg; static `true` image
-        // typically covers it but the bg shows through if the image
-        // failed to register — so we always paint it.
-        let bg = match &self.background {
-            Some(prop) => prop.resolve(theme),
-            None => hash_pick_palette_color(&self.current_seed(), theme),
-        };
-
-        // Background fill (always) — circle, rounded-square or square.
-        match self.shape {
-            AvatarShape::Circle => {
-                let radius = bounds.width.min(bounds.height) / 2.0;
-                let center = Point::new(
-                    bounds.x + bounds.width / 2.0,
-                    bounds.y + bounds.height / 2.0,
-                );
-                canvas.fill_circle(center, radius, bg);
-            }
-            AvatarShape::RoundedSquare => {
-                let r = bounds.width.min(bounds.height) * style.rounded_radius_ratio;
-                canvas.fill_rounded_rect(bounds, CornerRadius::uniform(r), bg);
-            }
-            AvatarShape::Square => {
-                canvas.fill_rounded_rect(bounds, CornerRadius::uniform(0.0), bg);
-            }
-        }
-
-        // Border (outer ring) — drawn over children to mask any image
-        // bleed at the rim. Offset half-stroke inward so the visible
-        // ring stays inside the layout rect.
-        if let Some(width) = self.border_width
-            && width > 0.0
-        {
-            let color = match &self.border_color {
-                Some(prop) => prop.resolve(theme),
-                None => theme.colors.surface_main,
-            };
-            paint_border(
-                canvas,
-                bounds,
-                self.shape,
-                style.rounded_radius_ratio,
-                width,
-                color,
-            );
-        }
-
-        // Focus ring — drawn outside the avatar bounds with the
-        // theme's gap + width tokens, in `colors.focus_ring`. Only
-        // rendered when the avatar is keyboard-focused (signal set
-        // by `on_focus`). Hugs the configured shape so a square
-        // avatar gets a square ring, etc.
-        if let Some(focused) = &self.focused
-            && focused.get()
-        {
-            paint_focus_ring(
-                canvas,
-                bounds,
-                self.shape,
-                style.rounded_radius_ratio,
-                theme.shape.focus_ring_offset,
-                theme.shape.focus_ring_width,
-                theme.colors.focus_ring,
-            );
-        }
-
-        // Presence dot — drawn on top of everything, even the border,
-        // so it remains visible regardless of avatar contents. Reads
-        // the current presence (signal-bound or static).
-        if let Some(presence) = self.current_presence() {
-            let color = presence_color(&presence, theme);
-            let dot_diameter = (bounds.width.min(bounds.height) * style.presence_diameter_ratio)
-                .clamp(style.presence_diameter_min, style.presence_diameter_max);
-            let dot_radius = dot_diameter / 2.0;
-            let (xf, yf) = corner_offset(self.presence_corner);
-            let inset = style.presence_inset;
-            let cx = if xf < 0.0 {
-                bounds.x + dot_radius + inset
-            } else {
-                bounds.x + bounds.width - dot_radius - inset
-            };
-            let cy = if yf < 0.0 {
-                bounds.y + dot_radius + inset
-            } else {
-                bounds.y + bounds.height - dot_radius - inset
-            };
-            let center = Point::new(cx, cy);
-            // Outline first (in surface_main) for the punched-out
-            // appearance, then the dot itself on top.
-            let outline_radius = dot_radius + style.presence_outline_width;
-            canvas.fill_circle(center, outline_radius, theme.colors.surface_main);
-            canvas.fill_circle(center, dot_radius, color);
         }
     }
 
@@ -1030,7 +829,7 @@ impl Widget for Avatar {
         }
 
         if let Some(presence) = self.current_presence() {
-            builder.set_description(presence_label(&presence));
+            builder.set_description(presence.label());
         }
 
         // Disclosure-pattern hints. Only meaningful for clickable
@@ -1045,110 +844,9 @@ impl Widget for Avatar {
             builder.set_expanded(signal.get());
         }
     }
-}
 
-/// Stroke a focus ring outside the avatar's content bounds.
-///
-/// `offset` is the gap between the avatar edge and the inner edge of
-/// the ring; `width` is the stroke thickness. The visible ring lives
-/// in the rect `bounds.outset(offset + width / 2.0)` — i.e. the
-/// stroke straddles the line `offset + width / 2` outside the bounds.
-fn paint_focus_ring(
-    canvas: &mut Canvas,
-    bounds: Rect,
-    shape: AvatarShape,
-    rounded_radius_ratio: f32,
-    offset: f32,
-    width: f32,
-    color: Color,
-) {
-    use fern_canvas::{Paint, StrokeStyle};
-    let outset = offset + width / 2.0;
-    let outer = Rect::new(
-        bounds.x - outset,
-        bounds.y - outset,
-        bounds.width + outset * 2.0,
-        bounds.height + outset * 2.0,
-    );
-    match shape {
-        AvatarShape::Circle => {
-            let radius = outer.width.min(outer.height) / 2.0;
-            let center = Point::new(outer.x + outer.width / 2.0, outer.y + outer.height / 2.0);
-            canvas.stroke_circle(
-                center,
-                radius,
-                Paint::from(color),
-                StrokeStyle::solid(width),
-            );
-        }
-        AvatarShape::RoundedSquare => {
-            // Grow the corner radius by the outset so the ring
-            // remains visually concentric with the avatar's curve.
-            let r = bounds.width.min(bounds.height) * rounded_radius_ratio + outset;
-            canvas.stroke_rounded_rect(
-                outer,
-                CornerRadius::uniform(r),
-                color,
-                StrokeStyle::solid(width),
-            );
-        }
-        AvatarShape::Square => {
-            canvas.stroke_rounded_rect(
-                outer,
-                CornerRadius::uniform(0.0),
-                color,
-                StrokeStyle::solid(width),
-            );
-        }
-    }
-}
-
-fn paint_border(
-    canvas: &mut Canvas,
-    bounds: Rect,
-    shape: AvatarShape,
-    rounded_radius_ratio: f32,
-    width: f32,
-    color: Color,
-) {
-    use fern_canvas::{Paint, StrokeStyle};
-    let half = width / 2.0;
-    // Inset by half-stroke so the visible ring sits inside `bounds`
-    // (and doesn't get clipped by an ancestor with `clips_children`).
-    let inner = Rect::new(
-        bounds.x + half,
-        bounds.y + half,
-        (bounds.width - width).max(0.0),
-        (bounds.height - width).max(0.0),
-    );
-    match shape {
-        AvatarShape::Circle => {
-            let radius = inner.width.min(inner.height) / 2.0;
-            let center = Point::new(inner.x + inner.width / 2.0, inner.y + inner.height / 2.0);
-            canvas.stroke_circle(
-                center,
-                radius,
-                Paint::from(color),
-                StrokeStyle::solid(width),
-            );
-        }
-        AvatarShape::RoundedSquare => {
-            let r = inner.width.min(inner.height) * rounded_radius_ratio;
-            canvas.stroke_rounded_rect(
-                inner,
-                CornerRadius::uniform(r),
-                color,
-                StrokeStyle::solid(width),
-            );
-        }
-        AvatarShape::Square => {
-            canvas.stroke_rounded_rect(
-                inner,
-                CornerRadius::uniform(0.0),
-                color,
-                StrokeStyle::solid(width),
-            );
-        }
+    fn children(&self) -> Vec<WidgetId> {
+        self.root_child_id.into_iter().collect()
     }
 }
 
@@ -1198,13 +896,12 @@ impl Widget for InitialsLeaf {
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let theme = ctx.theme;
-        let style = theme.components.avatar;
 
         let font_size = bounds.width.min(bounds.height)
             * if self.initials.chars().count() <= 1 {
-                style.font_ratio_1char
+                AVATAR_FONT_RATIO_1CHAR
             } else {
-                style.font_ratio_2char
+                AVATAR_FONT_RATIO_2CHAR
             };
 
         let text_style = TextStyle {
@@ -1253,6 +950,7 @@ impl Widget for InitialsLeaf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::styles::recipe_avatar_style::fnv1a_64;
     use fern_core::widget::LayoutContext;
     use fern_core::widget_tree::WidgetTree;
     use fern_core::Theme;

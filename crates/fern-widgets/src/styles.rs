@@ -9,6 +9,7 @@
 //! composition over the `FooStyle` trait — no `paint()` method on
 //! any themable widget.
 
+pub mod recipe_avatar_style;
 pub mod recipe_badge_style;
 pub mod recipe_banner_style;
 pub mod recipe_button_style;
@@ -33,6 +34,7 @@ pub mod recipe_text_input_style;
 pub mod recipe_toggle_style;
 pub mod recipe_tooltip_style;
 
+pub use recipe_avatar_style::RecipeAvatarStyle;
 pub use recipe_badge_style::RecipeBadgeStyle;
 pub use recipe_banner_style::RecipeBannerStyle;
 pub use recipe_button_style::RecipeButtonStyle;

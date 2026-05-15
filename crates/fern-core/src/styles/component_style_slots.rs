@@ -25,7 +25,7 @@
 //! ```
 
 use crate::styles::{
-    SharedBadgeStyle, SharedBannerStyle, SharedButtonStyle, SharedCardStyle,
+    SharedAvatarStyle, SharedBadgeStyle, SharedBannerStyle, SharedButtonStyle, SharedCardStyle,
     SharedCheckboxStyle, SharedComboBoxStyle, SharedDialogStyle, SharedIconButtonStyle,
     SharedLinkStyle, SharedMenuItemStyle, SharedPanelStyle, SharedPopoverStyle,
     SharedProgressBarStyle, SharedRadioStyle, SharedScrollBarStyle,
@@ -62,6 +62,7 @@ pub struct ComponentStyleSlots {
     pub progress_bar: Option<SharedProgressBarStyle>,
     pub link: Option<SharedLinkStyle>,
     pub segmented_control: Option<SharedSegmentedControlStyle>,
+    pub avatar: Option<SharedAvatarStyle>,
 }
 
 impl std::fmt::Debug for ComponentStyleSlots {
@@ -93,6 +94,7 @@ impl std::fmt::Debug for ComponentStyleSlots {
             .field("progress_bar", &self.progress_bar.is_some())
             .field("link", &self.link.is_some())
             .field("segmented_control", &self.segmented_control.is_some())
+            .field("avatar", &self.avatar.is_some())
             .finish()
     }
 }
@@ -132,5 +134,6 @@ impl PartialEq for ComponentStyleSlots {
             && rc_eq(&self.progress_bar, &other.progress_bar)
             && rc_eq(&self.link, &other.link)
             && rc_eq(&self.segmented_control, &other.segmented_control)
+            && rc_eq(&self.avatar, &other.avatar)
     }
 }

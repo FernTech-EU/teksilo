@@ -4,6 +4,7 @@
 //!
 //! See `docs/styling-system.md` for the full four-tier ladder.
 
+pub mod avatar_style;
 pub mod badge_style;
 pub mod banner_style;
 pub mod button_style;
@@ -33,6 +34,10 @@ pub mod theme_extension;
 pub mod toggle_style;
 pub mod tooltip_style;
 
+pub use avatar_style::{
+    AvatarCorner, AvatarPresence, AvatarShape, AvatarSize, AvatarStyle, AvatarStyleConfig,
+    SharedAvatarStyle,
+};
 pub use badge_style::{BadgeStyle, BadgeStyleConfig, SharedBadgeStyle};
 pub use banner_style::{
     BannerSeverity, BannerStyle, BannerStyleConfig, SharedBannerStyle,
