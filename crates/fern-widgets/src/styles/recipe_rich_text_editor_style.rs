@@ -1,12 +1,11 @@
 //! Default `RichTextEditorStyle` impl.
 //!
 //! Frames the editor viewport in a TextInput-like border + padding +
-//! corner-radius surface. The recipe is *available* but the widget
-//! itself is not yet routed through `make_body` — that requires the
-//! leaf-vs-composing split documented on `RichTextEditorStyle` and
-//! is deferred. The default impl exists so apps installing a custom
-//! `RichTextEditorStyle` via the theme slot have a reference shape
-//! to compare against.
+//! corner-radius surface. The `RichTextEditor` widget routes its
+//! body through this trait — apps installing a custom
+//! `RichTextEditorStyle` (per-call `.style(...)` or theme-wide via
+//! `style_slots.rich_text_editor`) swap the chrome wholesale
+//! without touching the editor's handlers, focus, or paint.
 
 use fern_core::build_context::BuildContext;
 use fern_core::color_prop::ColorProp;

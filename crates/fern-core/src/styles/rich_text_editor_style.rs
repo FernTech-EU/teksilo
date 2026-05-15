@@ -1,21 +1,16 @@
 //! Tier-3 style protocol for `RichTextEditor`. See `docs/styling-system.md`.
 //!
 //! Themes only the *frame* — border, padding, focus ring, background —
-//! the same surface a `TextInput` has. `RichTextEditor::paint` renders
+//! the same surface a `TextInput` has. The body's `paint` renders
 //! glyph runs, caret, and selection itself; that is the editor's
 //! domain output and stays widget-owned (principle 6).
 //!
-//! ## Wiring status
-//!
-//! The trait surface and the `style_slots.rich_text_editor` slot are
-//! in place. Wiring the `RichTextEditor` widget itself through
-//! `make_body` requires splitting the editor between a composing
-//! outer widget (state + handlers) and an inner leaf (paint only),
-//! since today `RichTextEditor` is a single leaf widget owning both.
-//! That refactor is intentionally deferred — see the follow-up entry
-//! in `docs/plans/group-5-styling-migration.md`. Apps that want a
-//! bordered surface around a `RichTextEditor` should continue
-//! wrapping it in a `Panel` until the wiring lands.
+//! The `RichTextEditor` widget is wired through `make_body` — the
+//! composing outer widget owns state, handlers, focus, while the
+//! inner leaf body owns layout, paint, and accessibility. Apps
+//! install a chrome override via
+//! `RichTextEditor::style(impl RichTextEditorStyle)` or the
+//! theme-wide `style_slots.rich_text_editor` slot.
 
 use std::rc::Rc;
 

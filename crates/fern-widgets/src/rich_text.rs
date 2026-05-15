@@ -52,10 +52,15 @@ pub use policy::{
     PolicyBundle, READ_ONLY_PRESET,
 };
 
+use std::rc::Rc;
+
 use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::signal::Signal;
+use fern_core::styles::{
+    RichTextEditorStyle, RichTextEditorStyleConfig, SharedRichTextEditorStyle,
+};
 use fern_core::widget::{CursorIcon, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
@@ -67,6 +72,7 @@ use fern_tokens::Color;
 
 use self::paint::{PaintParams, paint_frame};
 use self::state::{EditorState, SharedState};
+use crate::styles::RecipeRichTextEditorStyle;
 
 /// Scrollbar visibility policy, applied independently per axis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -115,6 +121,15 @@ pub struct RichTextEditor {
     /// Maximum visible-text height expressed in lines. Hard-caps
     /// the intrinsic height — see [`max_lines`](Self::max_lines).
     max_lines: Option<u32>,
+    /// Per-call style override for the chrome (border, padding, focus
+    /// ring). Replaces the theme-wide `style_slots.rich_text_editor`
+    /// and the default [`RecipeRichTextEditorStyle`] for just this
+    /// editor.
+    style_override: Option<SharedRichTextEditorStyle>,
+    /// Root of the composed subtree returned by
+    /// [`RichTextEditorStyle::make_body`]. Cached so layout queries
+    /// route through the chrome without re-running the style call.
+    root_child_id: Option<WidgetId>,
 }
 
 impl std::fmt::Debug for RichTextEditor {
@@ -162,7 +177,18 @@ impl RichTextEditor {
             custom_context_menu: None,
             min_lines: None,
             max_lines: None,
+            style_override: None,
+            root_child_id: None,
         }
+    }
+
+    /// Per-call style override for the editor chrome (border, padding,
+    /// focus ring). Replaces the theme-wide
+    /// `style_slots.rich_text_editor` and the IntUI default
+    /// `RecipeRichTextEditorStyle` for just this editor.
+    pub fn style(mut self, style: impl RichTextEditorStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
     }
 
     // --- Builder methods ------------------------------------------------
@@ -974,29 +1000,40 @@ impl RichTextEditor {
     }
 }
 
-impl Widget for RichTextEditor {
-    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        // Swap the private fallback engine for one that shares the
-        // application's `SharedTypesetter` so rendered glyphs end up
-        // in the atlas fern-render uploads to the GPU. Headless tests
-        // without a `SharedTypesetter` in app_state keep the private
-        // engine untouched.
-        if let Some(shared) = ctx.app_state::<SharedTypesetter>() {
-            let mut st = self.state.borrow_mut();
-            let wrap = st.wrap_mode;
-            let mut engine = RichTextEngine::from_shared(shared.clone());
-            engine.set_wrap_mode(wrap);
-            st.engine = engine;
-            st.needs_full_layout = true;
-        }
+/// Private leaf body for [`RichTextEditor`].
+///
+/// Pure rendering surface: layout (intrinsic / greedy via
+/// `min_lines` / `max_lines`), `place_children` (records the
+/// viewport on `state`), `paint` (glyph runs, caret, selection),
+/// `accessibility` (Role::MultilineTextInput / Role::Document plus
+/// the flow-snapshot walk that emits paragraph + text-run children).
+///
+/// Handlers, focus, the context-menu factory, and per-frame ticking
+/// all live on the composing outer [`RichTextEditor`]; the body
+/// itself is non-focusable and has no event handlers. The shared
+/// `state` is what links them — both widgets hold an `Rc` to the
+/// same [`EditorState`], so a key event on the wrapper mutates the
+/// state and the body re-paints on the next frame.
+pub(crate) struct RichTextEditorBody {
+    state: SharedState,
+    min_lines: Option<u32>,
+    max_lines: Option<u32>,
+}
 
+impl std::fmt::Debug for RichTextEditorBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RichTextEditorBody")
+            .field("policy", &self.state.borrow().policy)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Widget for RichTextEditorBody {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // Bind `caret_visible` to the framework's repaint tracker so
-        // that every toggle in the frame-tick effect marks this
-        // widget `needs_paint`. Without this the cached paint frame
-        // is reused on subsequent redraws and the caret never
-        // visibly changes state even though the Signal flips.
-        // Skipped for `CaretPolicy::Hidden` — no caret means no
-        // repaint reason and we save per-frame work on pure viewers.
+        // that every toggle in the frame-tick effect marks **this
+        // body** widget `needs_paint` — the caret is painted in
+        // `RichTextEditorBody::paint`. Skipped for `CaretPolicy::Hidden`.
         {
             let st = self.state.borrow();
             let caret_policy = st.policy.caret_policy;
@@ -1012,14 +1049,11 @@ impl Widget for RichTextEditor {
             }
         }
 
-        // Bind document_version at `BindingLevel::AccessibilityOnly`
-        // so any text or format edit (which bumps document_version
-        // inside `drain_events`) automatically flips the tree's
-        // `a11y_dirty` flag during `process_state_changes`. Without
-        // this binding, screen readers only see updated text when
-        // an unrelated event (focus change, window resize) happens
-        // to mark the a11y tree dirty. See the RichTextEditor
-        // accessibility plan for details.
+        // Bind document_version at `BindingLevel::AccessibilityOnly` so
+        // text / format edits flip the tree's `a11y_dirty` flag through
+        // **this body** — its `accessibility()` is the one that emits
+        // the editor's Role::MultilineTextInput / Role::Document and
+        // walks the flow snapshot.
         {
             let st = self.state.borrow();
             let document_version = st.document_version.clone();
@@ -1032,135 +1066,6 @@ impl Widget for RichTextEditor {
             );
         }
 
-        // Stash the tree's frame-request handle on the state so the
-        // frame-tick effect can self-chain (caret blink, drag
-        // auto-scroll) without mutable access to the tree.
-        {
-            let mut st = self.state.borrow_mut();
-            st.frame_request = Some(ctx.frame_request_handle());
-            st.frame_wake_at = Some(ctx.wake_at_handle());
-        }
-
-        // Ask for one frame so the initial layout / paint runs through
-        // the tick path and populates max_scroll / content metrics.
-        ctx.request_frame();
-
-        // Frame-tick effect: runs only on frames the tree was asked
-        // to pump. `frame_loop::tick` returns `true` while there's
-        // more work pending (document events draining, caret blink
-        // active) — we re-arm the tree's frame-request flag so the
-        // next layout pass runs the effect again.
-        {
-            let state = self.state.clone();
-            let tick_signal = ctx.frame_tick();
-            ctx.effect(&tick_signal, move |delta| {
-                let mut st = state.borrow_mut();
-                let more = frame_loop::tick(&mut st, *delta);
-                st.has_selection.set(st.cursor.has_selection());
-                if more && let Some(handle) = &st.frame_request {
-                    handle.set(true);
-                }
-                drop(st);
-            });
-        }
-
-        // Attach handlers:
-        // * `on_pointer_event`: PointerDown for caret placement and
-        //   drag-select start, PointerMove for drag extension and
-        //   auto-scroll velocity, PointerUp for drag teardown. Returns
-        //   `Ignored` on Down/Up so the gesture arena also processes
-        //   the event and the double/triple tap recognizers see every
-        //   press. Handled on Move during an active drag.
-        // * `on_scroll`: mouse wheel / trackpad.
-        // * `on_key`: arrow navigation, Home/End (line + document),
-        //   PageUp/PageDown, Enter, Backspace, Delete, Ctrl+Backspace
-        //   / Ctrl+Delete word deletion, Ctrl+B/I/U formatting,
-        //   Ctrl+Z/Y/Shift+Z undo/redo, Ctrl+C/X/V clipboard,
-        //   Ctrl+A with table-aware escalation ladder, printable
-        //   characters into `pending_chars` for frame-start batch
-        //   insertion, IME commit.
-        // * `on_double_tap` / `on_triple_tap`: word / paragraph
-        //   selection via cooperative gesture recognizers in
-        //   `fern-core::gesture`. The single-click caret placement
-        //   is handled by `on_pointer_event::PointerDown` above
-        //   because mouse-down semantics demand immediate response,
-        //   which `on_tap` (fires on release) would violate.
-        // * `on_focus`: mirror `has_focus` onto the editor state so
-        //   `paint()` and `frame_loop::tick` can gate the caret.
-        let mut handlers = HandlerSet::new();
-        handlers = handlers
-            .focusable(true)
-            .cursor(CursorIcon::Text)
-            .on_focus({
-                let state = self.state.clone();
-                move |gained, ctx| {
-                    let mut st = state.borrow_mut();
-                    st.has_focus = gained;
-                    if gained && matches!(st.policy.caret_policy, CaretPolicy::Blinking) {
-                        // Reset the blink phase to "now" so the caret
-                        // pops on immediately and the first off-toggle
-                        // happens exactly one interval later. Skipped
-                        // for `Hidden` — no caret means no blink, and
-                        // we avoid a spurious `caret_visible` signal
-                        // update on focus gain.
-                        st.blink_last_toggle = Some(std::time::Instant::now());
-                        st.caret_visible.set(true);
-                    }
-                    drop(st);
-                    ctx.request_frame();
-                }
-            })
-            .on_pointer_event({
-                let state = self.state.clone();
-                move |event, ctx| self::mouse::handle_pointer_event(&state, event, ctx)
-            })
-            .on_scroll({
-                let state = self.state.clone();
-                move |event, ctx| self::mouse::handle_scroll(&state, event, ctx)
-            })
-            .on_key({
-                let state = self.state.clone();
-                move |event, ctx| self::keyboard::handle_key(&state, event, ctx)
-            })
-            .on_double_tap({
-                let state = self.state.clone();
-                move |event, ctx| self::mouse::handle_double_tap(&state, event.position, ctx)
-            })
-            .on_triple_tap({
-                let state = self.state.clone();
-                move |event, ctx| self::mouse::handle_triple_tap(&state, event.position, ctx)
-            })
-            .on_access_action_request({
-                let state = self.state.clone();
-                move |action, target_node, data, ctx| {
-                    handle_access_action_request(&state, action, target_node, data, ctx)
-                }
-            });
-
-        // Context-menu factory. Installed via the framework's
-        // `HandlerSet::context_menu` plumbing so the right-click
-        // interception, overlay placement (AtPointer), and dismiss
-        // behaviour all come for free from
-        // `show_context_menu_for` — no manual overlay wiring, no
-        // arena-parenting of the menu under the editor.
-        //
-        // Precedence: user-supplied factory wins over the default;
-        // `default_context_menu(false)` with no user factory means
-        // no factory at all, and right-click bubbles.
-        let policy_snapshot = self.state.borrow().policy;
-        if let Some(factory) = context_menu::resolve_factory(
-            self.custom_context_menu.take(),
-            self.default_context_menu_enabled,
-            self.state.clone(),
-            policy_snapshot,
-        ) {
-            // The resolved factory is already in the framework's
-            // `Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>>`
-            // shape — install it directly.
-            handlers = handlers.context_menu(move |pos, ctx| factory(pos, ctx));
-        }
-
-        ctx.apply_self_handlers(handlers);
         Vec::new()
     }
 
@@ -1462,6 +1367,193 @@ impl Widget for RichTextEditor {
     fn clips_children(&self) -> bool {
         true
     }
+}
+
+impl Widget for RichTextEditor {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Engine swap: replace the private fallback with one sharing
+        // the application's `SharedTypesetter` so rendered glyphs end
+        // up in the atlas fern-render uploads to the GPU. Headless
+        // tests without a `SharedTypesetter` keep the private engine
+        // untouched. Lives on the wrapper because state mutation
+        // doesn't depend on `ctx.self_id()`.
+        if let Some(shared) = ctx.app_state::<SharedTypesetter>() {
+            let mut st = self.state.borrow_mut();
+            let wrap = st.wrap_mode;
+            let mut engine = RichTextEngine::from_shared(shared.clone());
+            engine.set_wrap_mode(wrap);
+            st.engine = engine;
+            st.needs_full_layout = true;
+        }
+
+        // Stash the tree's frame-request handle on the state so the
+        // frame-tick effect can self-chain (caret blink, drag
+        // auto-scroll) without mutable access to the tree.
+        {
+            let mut st = self.state.borrow_mut();
+            st.frame_request = Some(ctx.frame_request_handle());
+            st.frame_wake_at = Some(ctx.wake_at_handle());
+        }
+
+        // Kick off the first frame so the initial layout/paint runs
+        // through the tick path and populates max_scroll / content
+        // metrics.
+        ctx.request_frame();
+
+        // Frame-tick effect — drains document events, blinks the
+        // caret, runs drag auto-scroll. Re-arms the tree's
+        // frame-request flag while there's still pending work.
+        {
+            let state = self.state.clone();
+            let tick_signal = ctx.frame_tick();
+            ctx.effect(&tick_signal, move |delta| {
+                let mut st = state.borrow_mut();
+                let more = frame_loop::tick(&mut st, *delta);
+                st.has_selection.set(st.cursor.has_selection());
+                if more && let Some(handle) = &st.frame_request {
+                    handle.set(true);
+                }
+                drop(st);
+            });
+        }
+
+        // Attach handlers on the WRAPPER — making the composing
+        // widget itself the focus + event target. The body is a
+        // pure leaf so users can wrap it in arbitrary chrome via
+        // `RichTextEditorStyle::make_body` without losing focus
+        // semantics.
+        let mut handlers = HandlerSet::new();
+        handlers = handlers
+            .focusable(true)
+            .cursor(CursorIcon::Text)
+            .on_focus({
+                let state = self.state.clone();
+                move |gained, ctx| {
+                    let mut st = state.borrow_mut();
+                    st.has_focus = gained;
+                    // Mirror onto the reactive signal so chrome
+                    // installed by `RichTextEditorStyle::make_body`
+                    // (focus-aware border / ring) re-renders.
+                    st.focus_signal.set(gained);
+                    if gained && matches!(st.policy.caret_policy, CaretPolicy::Blinking) {
+                        st.blink_last_toggle = Some(std::time::Instant::now());
+                        st.caret_visible.set(true);
+                    }
+                    drop(st);
+                    ctx.request_frame();
+                }
+            })
+            .on_pointer_event({
+                let state = self.state.clone();
+                move |event, ctx| self::mouse::handle_pointer_event(&state, event, ctx)
+            })
+            .on_scroll({
+                let state = self.state.clone();
+                move |event, ctx| self::mouse::handle_scroll(&state, event, ctx)
+            })
+            .on_key({
+                let state = self.state.clone();
+                move |event, ctx| self::keyboard::handle_key(&state, event, ctx)
+            })
+            .on_double_tap({
+                let state = self.state.clone();
+                move |event, ctx| self::mouse::handle_double_tap(&state, event.position, ctx)
+            })
+            .on_triple_tap({
+                let state = self.state.clone();
+                move |event, ctx| self::mouse::handle_triple_tap(&state, event.position, ctx)
+            })
+            .on_access_action_request({
+                let state = self.state.clone();
+                move |action, target_node, data, ctx| {
+                    handle_access_action_request(&state, action, target_node, data, ctx)
+                }
+            });
+
+        // Context-menu factory — same shape as before, just hosted on
+        // the wrapper.
+        let policy_snapshot = self.state.borrow().policy;
+        if let Some(factory) = context_menu::resolve_factory(
+            self.custom_context_menu.take(),
+            self.default_context_menu_enabled,
+            self.state.clone(),
+            policy_snapshot,
+        ) {
+            handlers = handlers.context_menu(move |pos, ctx| factory(pos, ctx));
+        }
+
+        ctx.apply_self_handlers(handlers);
+
+        // Build the pure-paint leaf body. The body carries
+        // layout/paint/accessibility (using its own `self_id()` for
+        // `caret_visible` + `document_version` bindings); the shared
+        // `state` propagates handler-driven mutations into it.
+        let body = RichTextEditorBody {
+            state: self.state.clone(),
+            min_lines: self.min_lines,
+            max_lines: self.max_lines,
+        };
+        let viewport_id = ctx.add(body);
+
+        // Snapshot focus + read-only state for the chrome. `is_focused`
+        // is the reactive mirror updated by `on_focus`; `is_read_only`
+        // is sampled from the policy bundle.
+        let (is_focused, is_read_only) = {
+            let st = self.state.borrow();
+            (st.focus_signal.clone(), st.policy.is_read_only())
+        };
+
+        let style: SharedRichTextEditorStyle = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.rich_text_editor.clone())
+            .unwrap_or_else(|| Rc::new(RecipeRichTextEditorStyle::default()));
+        let cfg = RichTextEditorStyleConfig {
+            viewport: viewport_id,
+            is_focused,
+            is_read_only,
+        };
+        let root = style.make_body(&cfg, ctx);
+        self.root_child_id = Some(root);
+        vec![root]
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
+        self.root_child_id
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = fern_canvas::Point::new(bounds.x, bounds.y);
+            child.size = Size::new(bounds.width, bounds.height);
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.root_child_id.into_iter().collect()
+    }
+
+    fn clips_children(&self) -> bool {
+        // Mirror the body's clipping so chrome around the editor
+        // doesn't leak the body's overflow.
+        true
+    }
+
+    // No accessibility() override — the body carries `Role::MultilineTextInput`
+    // / `Role::Document`. The chrome wrapper between them is purely visual.
 }
 
 // ---------------------------------------------------------------------------

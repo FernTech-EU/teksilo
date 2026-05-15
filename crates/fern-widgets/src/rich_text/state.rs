@@ -81,6 +81,13 @@ pub(crate) struct EditorState {
     // Focus — mirrored from `on_focus` so paint can gate the caret.
     pub has_focus: bool,
 
+    /// Reactive mirror of `has_focus`, kept in lockstep by the
+    /// `on_focus` handler. Exposed so the composing
+    /// `RichTextEditor` shell can pass it into
+    /// `RichTextEditorStyle::make_body` and drive a focus-aware
+    /// border without polling.
+    pub focus_signal: Signal<bool>,
+
     /// Sticky preferred X for vertical navigation (§27.10.12). Set
     /// the first time Up/Down/PageUp/PageDown is pressed, preserved
     /// across further vertical presses so the cursor keeps trying to
@@ -339,6 +346,7 @@ impl EditorState {
             content_dirty: true,
             wrap_mode,
             has_focus: false,
+            focus_signal: Signal::new(false),
             event_queue,
             _event_subscription: subscription,
             image_cache: ImageCache::new(),
