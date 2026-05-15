@@ -16,6 +16,7 @@ pub mod icon_button_style;
 pub mod menu_item_style;
 pub mod panel_style;
 pub mod popover_style;
+pub mod progress_bar_style;
 pub mod radio_style;
 pub mod recipe;
 pub mod scroll_bar_style;
@@ -52,6 +53,9 @@ pub use icon_button_style::{
 pub use menu_item_style::{MenuItemStyle, MenuItemStyleConfig, SharedMenuItemStyle};
 pub use panel_style::{PanelStyle, PanelStyleConfig, PanelVariant, SharedPanelStyle};
 pub use popover_style::{PopoverStyle, PopoverStyleConfig, PopoverVariant, SharedPopoverStyle};
+pub use progress_bar_style::{
+    ProgressBarStyle, ProgressBarStyleConfig, ProgressKind, SharedProgressBarStyle,
+};
 pub use radio_style::{RadioStyle, RadioStyleConfig, RadioVariant, SharedRadioStyle};
 pub use recipe::{
     BorderPosition, BorderRecipe, BorderStyle, FillRecipe, GradientStop, PerStateRecipe,

@@ -62,6 +62,8 @@ It is in production use by FernTech's own applications, including the fern-colle
 
 **Text.** A full rich-text stack: a document model with tables, lists, and undo/redo, and a typesetting engine with proper shaping, bidirectional text, color emoji, and zoom without reflow. Even the plain text widget routes through it, so any label gets correct shaping and font fallback for free.
 
+**Tooltips.** Three tiers from one system: a plain line of text; a rich tooltip with inline markup, a keyboard-shortcut hint, and an expandable detail section; and a composite tier that hosts arbitrary widgets such as tabs, charts, and conditional rows. Rich and composite tooltips can be pinned: dwell on one and it becomes a focusable surface the user can interact with.
+
 **Animations.** Ready-made wrappers for the common cases (collapse, fade, slide, crossfade, blur, and more). Each respects the system "reduce motion" setting.
 
 **Rendering.** GPU-accelerated, with text and graphics sharing one pipeline. When nothing is moving, the app is genuinely idle: no wasted frames, near-zero CPU and GPU use.
