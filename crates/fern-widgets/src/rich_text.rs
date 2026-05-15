@@ -1552,8 +1552,17 @@ impl Widget for RichTextEditor {
         true
     }
 
-    // No accessibility() override — the body carries `Role::MultilineTextInput`
-    // / `Role::Document`. The chrome wrapper between them is purely visual.
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // Transparent container in the AT tree — the inner
+        // `RichTextEditorBody` carries the real role
+        // (`MultilineTextInput` / `Document`) plus the paragraph and
+        // text-run children. Without this method the wrapper would
+        // emit a `Role::Unknown` node (the `AccessNodeBuilder`
+        // default), which screen readers can't classify. Same
+        // pattern as [`TextInput`](crate::TextInput), which also
+        // wraps a focusable inner field.
+        builder.set_role(fern_core::accesskit::Role::GenericContainer);
+    }
 }
 
 // ---------------------------------------------------------------------------

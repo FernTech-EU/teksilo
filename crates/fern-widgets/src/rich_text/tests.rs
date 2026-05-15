@@ -3326,3 +3326,40 @@ fn editor_style_override_installs_custom_chrome() {
     assert!((b.width - 400.0).abs() < 0.5);
     assert!((b.height - 60.0).abs() < 0.5);
 }
+
+#[test]
+fn editor_wrapper_is_generic_container_in_a11y_tree() {
+    // Regression guard: the composing outer `RichTextEditor` must
+    // emit `Role::GenericContainer` in the AT tree so screen readers
+    // don't get the `AccessNodeBuilder` default of `Role::Unknown`.
+    // The inner `RichTextEditorBody` carries the real role
+    // (`MultilineTextInput` / `Document`) and the synthetic paragraph
+    // / text-run children — same pattern as `TextInput` wrapping
+    // `TextInputField`.
+    use fern_core::accesskit::Role;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("hello").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 60.0));
+
+    let info = tree.accessibility_node(id);
+    assert_eq!(
+        info.role(),
+        Role::GenericContainer,
+        "wrapper RichTextEditor must emit GenericContainer in the AT tree (got {:?})",
+        info.role(),
+    );
+    // The body still emits MultilineTextInput somewhere under the wrapper.
+    let update = tree.sync_accessibility();
+    let has_input = update
+        .nodes
+        .iter()
+        .any(|(_, n)| n.role() == Role::MultilineTextInput);
+    assert!(
+        has_input,
+        "the inner body must still emit Role::MultilineTextInput",
+    );
+}
