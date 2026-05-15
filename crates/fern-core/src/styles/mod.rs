@@ -24,6 +24,7 @@ pub mod popover_style;
 pub mod progress_bar_style;
 pub mod radio_style;
 pub mod recipe;
+pub mod rich_text_editor_style;
 pub mod scroll_bar_style;
 pub mod search_field_style;
 pub mod segmented_control_style;
@@ -81,6 +82,9 @@ pub use radio_style::{RadioStyle, RadioStyleConfig, RadioVariant, SharedRadioSty
 pub use recipe::{
     BorderPosition, BorderRecipe, BorderStyle, FillRecipe, GradientStop, PerStateRecipe,
     RecipeColor, ShadowRecipe, ShapeRecipe, WidgetState,
+};
+pub use rich_text_editor_style::{
+    RichTextEditorStyle, RichTextEditorStyleConfig, SharedRichTextEditorStyle,
 };
 pub use scroll_bar_style::{
     ScrollBarOrientation, ScrollBarStyle, ScrollBarStyleConfig, ScrollBarVariant,

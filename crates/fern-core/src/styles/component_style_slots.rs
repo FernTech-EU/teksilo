@@ -29,10 +29,10 @@ use crate::styles::{
     SharedCalendarStyle, SharedCardStyle, SharedCheckboxStyle, SharedColorPickerStyle,
     SharedComboBoxStyle, SharedDateEditStyle, SharedDialogStyle, SharedIconButtonStyle,
     SharedLinkStyle, SharedMenuItemStyle, SharedPanelStyle, SharedPopoverStyle,
-    SharedProgressBarStyle, SharedRadioStyle, SharedScrollBarStyle, SharedSearchFieldStyle,
-    SharedSegmentedControlStyle, SharedSliderStyle, SharedSnackbarStyle, SharedSpinBoxStyle,
-    SharedStandardItemStyle, SharedTabStyle, SharedTextInputStyle, SharedToggleStyle,
-    SharedTooltipStyle,
+    SharedProgressBarStyle, SharedRadioStyle, SharedRichTextEditorStyle,
+    SharedScrollBarStyle, SharedSearchFieldStyle, SharedSegmentedControlStyle,
+    SharedSliderStyle, SharedSnackbarStyle, SharedSpinBoxStyle, SharedStandardItemStyle,
+    SharedTabStyle, SharedTextInputStyle, SharedToggleStyle, SharedTooltipStyle,
 };
 
 /// Typed slot bag living on [`crate::styles::Theme`]. One slot per
@@ -69,6 +69,7 @@ pub struct ComponentStyleSlots {
     pub spin_box: Option<SharedSpinBoxStyle>,
     pub date_edit: Option<SharedDateEditStyle>,
     pub search_field: Option<SharedSearchFieldStyle>,
+    pub rich_text_editor: Option<SharedRichTextEditorStyle>,
 }
 
 impl std::fmt::Debug for ComponentStyleSlots {
@@ -106,6 +107,7 @@ impl std::fmt::Debug for ComponentStyleSlots {
             .field("spin_box", &self.spin_box.is_some())
             .field("date_edit", &self.date_edit.is_some())
             .field("search_field", &self.search_field.is_some())
+            .field("rich_text_editor", &self.rich_text_editor.is_some())
             .finish()
     }
 }
@@ -151,5 +153,6 @@ impl PartialEq for ComponentStyleSlots {
             && rc_eq(&self.spin_box, &other.spin_box)
             && rc_eq(&self.date_edit, &other.date_edit)
             && rc_eq(&self.search_field, &other.search_field)
+            && rc_eq(&self.rich_text_editor, &other.rich_text_editor)
     }
 }
