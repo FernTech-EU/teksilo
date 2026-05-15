@@ -29,7 +29,7 @@ use crate::styles::{
     SharedCalendarStyle, SharedCardStyle, SharedCheckboxStyle, SharedColorPickerStyle,
     SharedComboBoxStyle, SharedDateEditStyle, SharedDialogStyle, SharedIconButtonStyle,
     SharedLinkStyle, SharedMenuItemStyle, SharedPanelStyle, SharedPopoverStyle,
-    SharedProgressBarStyle, SharedRadioStyle, SharedScrollBarStyle,
+    SharedProgressBarStyle, SharedRadioStyle, SharedScrollBarStyle, SharedSearchFieldStyle,
     SharedSegmentedControlStyle, SharedSliderStyle, SharedSnackbarStyle, SharedSpinBoxStyle,
     SharedStandardItemStyle, SharedTabStyle, SharedTextInputStyle, SharedToggleStyle,
     SharedTooltipStyle,
@@ -68,6 +68,7 @@ pub struct ComponentStyleSlots {
     pub color_picker: Option<SharedColorPickerStyle>,
     pub spin_box: Option<SharedSpinBoxStyle>,
     pub date_edit: Option<SharedDateEditStyle>,
+    pub search_field: Option<SharedSearchFieldStyle>,
 }
 
 impl std::fmt::Debug for ComponentStyleSlots {
@@ -104,6 +105,7 @@ impl std::fmt::Debug for ComponentStyleSlots {
             .field("color_picker", &self.color_picker.is_some())
             .field("spin_box", &self.spin_box.is_some())
             .field("date_edit", &self.date_edit.is_some())
+            .field("search_field", &self.search_field.is_some())
             .finish()
     }
 }
@@ -148,5 +150,6 @@ impl PartialEq for ComponentStyleSlots {
             && rc_eq(&self.color_picker, &other.color_picker)
             && rc_eq(&self.spin_box, &other.spin_box)
             && rc_eq(&self.date_edit, &other.date_edit)
+            && rc_eq(&self.search_field, &other.search_field)
     }
 }

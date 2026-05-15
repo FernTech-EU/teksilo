@@ -25,6 +25,7 @@ pub mod progress_bar_style;
 pub mod radio_style;
 pub mod recipe;
 pub mod scroll_bar_style;
+pub mod search_field_style;
 pub mod segmented_control_style;
 pub mod snackbar_style;
 pub mod slider_style;
@@ -84,6 +85,9 @@ pub use recipe::{
 pub use scroll_bar_style::{
     ScrollBarOrientation, ScrollBarStyle, ScrollBarStyleConfig, ScrollBarVariant,
     SharedScrollBarStyle,
+};
+pub use search_field_style::{
+    SearchFieldStyle, SearchFieldStyleConfig, SharedSearchFieldStyle,
 };
 pub use segmented_control_style::{
     SegmentedControlStyle, SegmentedControlStyleConfig, SharedSegmentedControlStyle,

@@ -119,6 +119,8 @@ pub struct SearchField {
     /// `accessibility()` to drive `set_expanded`. Built in `build()`,
     /// reused across rebuilds.
     overlay_open: RefCell<Option<Signal<bool>>>,
+    /// Per-call style override.
+    style_override: Option<fern_core::styles::SharedSearchFieldStyle>,
 }
 
 impl SearchField {
@@ -137,7 +139,14 @@ impl SearchField {
             listbox_id_slot: Rc::new(Cell::new(None)),
             panel_content_id: None,
             overlay_open: RefCell::new(None),
+            style_override: None,
         }
+    }
+
+    /// Per-call SearchFieldStyle override.
+    pub fn style(mut self, style: impl fern_core::styles::SearchFieldStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
     }
 
     pub fn placeholder(mut self, text: impl Into<String>) -> Self {
@@ -213,7 +222,7 @@ impl Widget for SearchField {
         // Built inline (matching DateEdit / TimeEdit / SpinBox) — no
         // helper method or stored Option<TextInput>, just direct
         // construction from the SearchField's own config fields.
-        let style = ctx.theme().components.search_field;
+        use crate::styles::recipe_search_field_style as sf;
         let placeholder = self
             .placeholder
             .clone()
@@ -228,7 +237,7 @@ impl Widget for SearchField {
         let mut input = TextInput::new(self.text.clone())
             .placeholder(placeholder)
             .show_clear_button(true)
-            .leading_slot(search_glyph(style.glyph_size, style.glyph_slot_width))
+            .leading_slot(search_glyph(sf::GLYPH_SIZE, sf::GLYPH_SLOT_WIDTH))
             .enabled(self.enabled)
             .on_submit_fn(move |ctx| {
                 let idx = highlighted_for_submit.get();
@@ -357,7 +366,13 @@ impl Widget for SearchField {
         // The visible subtree is just the TextInput now; the
         // suggestions panel lives as an overlay anchored to this
         // widget's own bounds via `OverlayRequest`.
-        let visible_root = ctx.add(MinSize::new(0.0, 0.0).child_id(input_id));
+        let body_id = ctx.add(MinSize::new(0.0, 0.0).child_id(input_id));
+        let style = crate::styles::recipe_search_field_style::resolve_search_field_style(
+            &self.style_override,
+            ctx,
+        );
+        let cfg = fern_core::styles::SearchFieldStyleConfig { body: body_id };
+        let visible_root = style.make_body(&cfg, ctx);
         self.root_child_id = Some(visible_root);
 
         // ── Handlers ───────────────────────────────────────────────
@@ -504,7 +519,7 @@ impl Widget for SuggestionPanel {
         self.suggestions
             .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
-        let style = ctx.theme().components.search_field;
+        use crate::styles::recipe_search_field_style as sf;
         let suggestions = self.suggestions.clone();
         let highlighted = self.highlighted.clone();
         let on_select = self.on_select.clone();
@@ -522,7 +537,7 @@ impl Widget for SuggestionPanel {
             let bg = ctx.add(
                 RectWidget::new()
                     .bind_background(bg_role)
-                    .corner_radius(CornerRadius::uniform(style.row_corner_radius)),
+                    .corner_radius(CornerRadius::uniform(sf::ROW_CORNER_RADIUS)),
             );
             let label_id = ctx.add(
                 TextWidget::new_literal(&value)
@@ -530,7 +545,7 @@ impl Widget for SuggestionPanel {
                     .single_line(),
             );
             let inner_padded = ctx.add(
-                Padding::symmetric(style.row_padding_vertical, style.row_padding_horizontal)
+                Padding::symmetric(sf::ROW_PADDING_VERTICAL, sf::ROW_PADDING_HORIZONTAL)
                     .child_id(label_id),
             );
             let row_z = ctx.add(ZStack::new().add_child(bg).add_child(inner_padded));
@@ -545,7 +560,7 @@ impl Widget for SuggestionPanel {
                     label: value.clone(),
                     index: idx,
                     total,
-                    row_height: style.row_height,
+                    row_height: sf::ROW_HEIGHT,
                     selected_signal: highlighted.clone(),
                     inner_id: row_z,
                 }
@@ -573,7 +588,7 @@ impl Widget for SuggestionPanel {
         // opens below the field (`BelowPreferred` in `SearchField`),
         // so the placement suppresses the top-side shadow.
         let listbox_inner = ctx.add(column);
-        let padded = ctx.add(Padding::uniform(style.panel_padding).child_id(listbox_inner));
+        let padded = ctx.add(Padding::uniform(sf::PANEL_PADDING).child_id(listbox_inner));
         let popover_style: fern_core::styles::SharedPopoverStyle = ctx
             .theme()
             .style_slots
