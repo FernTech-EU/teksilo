@@ -1095,11 +1095,12 @@ mod tests {
     #[test]
     fn small_medium_large_xlarge_sizes() {
         let theme = fern_core::presets::intui::light();
+        use crate::styles::recipe_avatar_style as av;
         let cases = [
-            (AvatarSize::Small, theme.components.avatar.size_small),
-            (AvatarSize::Medium, theme.components.avatar.size_medium),
-            (AvatarSize::Large, theme.components.avatar.size_large),
-            (AvatarSize::XLarge, theme.components.avatar.size_x_large),
+            (AvatarSize::Small, av::AVATAR_SIZE_SMALL),
+            (AvatarSize::Medium, av::AVATAR_SIZE_MEDIUM),
+            (AvatarSize::Large, av::AVATAR_SIZE_LARGE),
+            (AvatarSize::XLarge, av::AVATAR_SIZE_X_LARGE),
         ];
         for (variant, expected) in cases {
             let mut tree = WidgetTree::new().with_theme(theme.clone());

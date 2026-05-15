@@ -6,14 +6,15 @@
 //! (intentional Int UI house style).
 //!
 //! These constructors aggregate raw token data from `fern-tokens` with
-//! the new [`Theme`](crate::styles::Theme) struct (which adds the
-//! required `appearance` field). The trait-driven `ComponentStyles`
-//! slot bag is added to the same constructors in a later migration
-//! step; for now they reuse the legacy dimension-only `ComponentStyles`
-//! defaults from `fern-tokens`.
+//! the [`Theme`](crate::styles::Theme) struct. The `Theme::components`
+//! slot was removed in Stage G of the group-5 styling migration: every
+//! widget that used to read `theme.components.<widget>` now reads
+//! `pub const`s on its `recipe_<widget>_style` (themable) or owning
+//! widget module (group-4 composites). Theme-wide style installs go
+//! through `style_slots: ComponentStyleSlots` instead.
 
 use fern_tokens::{
-    ColorTokens, ComponentStyles, LayoutTokens, MotionTokens, ShapeTokens, TypographyTokens,
+    ColorTokens, LayoutTokens, MotionTokens, ShapeTokens, TypographyTokens,
 };
 
 use crate::styles::{ComponentStyleSlots, Theme, ThemeAppearance, ThemeExtensions};
@@ -27,7 +28,6 @@ pub fn light() -> Theme {
         typography: TypographyTokens::default(),
         shape: ShapeTokens::light_default(),
         motion: MotionTokens::default(),
-        components: ComponentStyles::default(),
         style_slots: ComponentStyleSlots::default(),
         extensions: ThemeExtensions::new(),
     }
@@ -43,7 +43,6 @@ pub fn dark() -> Theme {
         typography: TypographyTokens::default(),
         shape: ShapeTokens::dark_default(),
         motion: MotionTokens::default(),
-        components: ComponentStyles::default(),
         style_slots: ComponentStyleSlots::default(),
         extensions: ThemeExtensions::new(),
     }

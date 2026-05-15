@@ -22,7 +22,7 @@
 use serde::{Deserialize, Serialize};
 
 use fern_tokens::{
-    ColorTokens, ComponentStyles, LayoutTokens, MotionTokens, ShapeTokens, TypographyTokens,
+    ColorTokens, LayoutTokens, MotionTokens, ShapeTokens, TypographyTokens,
 };
 
 use crate::styles::component_style_slots::ComponentStyleSlots;
@@ -37,7 +37,6 @@ pub struct Theme {
     pub typography: TypographyTokens,
     pub shape: ShapeTokens,
     pub motion: MotionTokens,
-    pub components: ComponentStyles,
     /// Typed `Rc<dyn FooStyle>` slot bag for theme-wide style
     /// installations. `None` per slot means "use the widget's local
     /// `Recipe*Style` default"; apps install per-theme overrides via
@@ -61,7 +60,6 @@ impl Theme {
         typography: TypographyTokens,
         shape: ShapeTokens,
         motion: MotionTokens,
-        components: ComponentStyles,
     ) -> Self {
         Self {
             appearance,
@@ -70,7 +68,6 @@ impl Theme {
             typography,
             shape,
             motion,
-            components,
             style_slots: ComponentStyleSlots::default(),
             extensions: ThemeExtensions::new(),
         }

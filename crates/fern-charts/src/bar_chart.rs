@@ -173,7 +173,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let theme = ctx.theme;
-        let style = &theme.components.chart;
+        use crate::style as cs;
 
         let series_vec = self.series.get();
         if series_vec.is_empty() {
@@ -213,7 +213,6 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
             legend_main_axis_size(
                 canvas.text_backend(),
                 &series_vec,
-                style,
                 &label_style,
                 legend_orientation,
             )
@@ -223,7 +222,6 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
 
         let area = carve_plot_area(&CarveParams {
             bounds,
-            style,
             axis_x: &self.axis_x,
             axis_y: &self.axis_y,
             y_label_max_width,
@@ -260,7 +258,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
                     Point::new(plot.x, y),
                     Point::new(plot.right(), y),
                     grid_color,
-                    style.gridline_width,
+                    cs::GRIDLINE_WIDTH,
                 );
             }
         }
@@ -301,7 +299,6 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
                 y_lo,
                 y_hi,
                 &palette,
-                style,
             ),
             BarGrouping::Grouped => self.paint_grouped(
                 canvas,
@@ -312,7 +309,6 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
                 y_lo,
                 y_hi,
                 &palette,
-                style,
             ),
         }
 
@@ -413,8 +409,8 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
         y_lo: f32,
         y_hi: f32,
         palette: &ChartPalette,
-        style: &fern_tokens::ChartStyle,
     ) {
+        use crate::style as cs;
         let n = categories.len();
         if n == 0 {
             return;
@@ -424,7 +420,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
         match self.orientation {
             BarOrientation::Vertical => {
                 let total_gap = self.min_bar_gap * (n as f32 + 1.0);
-                let bar_w = ((plot.width - total_gap) / n as f32).max(style.bar_min_width);
+                let bar_w = ((plot.width - total_gap) / n as f32).max(cs::BAR_MIN_WIDTH);
                 let baseline_y = y_to_pixel(0.0_f32.max(y_lo).min(y_hi), y_lo, y_hi, plot);
                 for (i, datum) in series.data.iter().enumerate() {
                     let color = series
@@ -453,7 +449,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
             }
             BarOrientation::Horizontal => {
                 let total_gap = self.min_bar_gap * (n as f32 + 1.0);
-                let bar_h = ((plot.height - total_gap) / n as f32).max(style.bar_min_width);
+                let bar_h = ((plot.height - total_gap) / n as f32).max(cs::BAR_MIN_WIDTH);
                 // For horizontal we flip the value mapping onto the x-axis
                 // and use vertical positions for categories.
                 let baseline_x = value_to_pixel_h(0.0_f32.max(y_lo).min(y_hi), y_lo, y_hi, plot);
@@ -496,8 +492,8 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
         y_lo: f32,
         y_hi: f32,
         palette: &ChartPalette,
-        style: &fern_tokens::ChartStyle,
     ) {
+        use crate::style as cs;
         let n = categories.len();
         let s = visible.len();
         if n == 0 || s == 0 {
@@ -506,9 +502,9 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
         match self.orientation {
             BarOrientation::Vertical => {
                 let total_group_gap = self.group_gap * (n as f32 + 1.0);
-                let group_w = ((plot.width - total_group_gap) / n as f32).max(style.bar_min_width);
+                let group_w = ((plot.width - total_group_gap) / n as f32).max(cs::BAR_MIN_WIDTH);
                 let bar_w = ((group_w - self.min_bar_gap * (s as f32 - 1.0)) / s as f32)
-                    .max(style.bar_min_width);
+                    .max(cs::BAR_MIN_WIDTH);
                 let baseline_y = y_to_pixel(0.0_f32.max(y_lo).min(y_hi), y_lo, y_hi, plot);
                 for (gi, _) in categories.iter().enumerate() {
                     let group_x = plot.x + self.group_gap + gi as f32 * (group_w + self.group_gap);
@@ -543,9 +539,9 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
             }
             BarOrientation::Horizontal => {
                 let total_group_gap = self.group_gap * (n as f32 + 1.0);
-                let group_h = ((plot.height - total_group_gap) / n as f32).max(style.bar_min_width);
+                let group_h = ((plot.height - total_group_gap) / n as f32).max(cs::BAR_MIN_WIDTH);
                 let bar_h = ((group_h - self.min_bar_gap * (s as f32 - 1.0)) / s as f32)
-                    .max(style.bar_min_width);
+                    .max(cs::BAR_MIN_WIDTH);
                 let baseline_x = value_to_pixel_h(0.0_f32.max(y_lo).min(y_hi), y_lo, y_hi, plot);
                 for (gi, _) in categories.iter().enumerate() {
                     let group_y = plot.y + self.group_gap + gi as f32 * (group_h + self.group_gap);
@@ -593,7 +589,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
         y_hi: f32,
         label_style: &fern_tokens::TextStyle,
     ) {
-        let style = &theme.components.chart;
+        use crate::style as cs;
         let label_color = TextRole::Primary.resolve(&theme.colors);
         let s = visible.len();
         let n = categories.len();
@@ -603,7 +599,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
         match (self.orientation, self.grouping) {
             (BarOrientation::Vertical, BarGrouping::Single) => {
                 let total_gap = self.min_bar_gap * (n as f32 + 1.0);
-                let bar_w = ((plot.width - total_gap) / n as f32).max(style.bar_min_width);
+                let bar_w = ((plot.width - total_gap) / n as f32).max(cs::BAR_MIN_WIDTH);
                 let series = visible[0];
                 for (i, datum) in series.data.iter().enumerate() {
                     let x = plot.x + self.min_bar_gap + i as f32 * (bar_w + self.min_bar_gap);
@@ -621,9 +617,9 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
             }
             (BarOrientation::Vertical, BarGrouping::Grouped) => {
                 let total_group_gap = self.group_gap * (n as f32 + 1.0);
-                let group_w = ((plot.width - total_group_gap) / n as f32).max(style.bar_min_width);
+                let group_w = ((plot.width - total_group_gap) / n as f32).max(cs::BAR_MIN_WIDTH);
                 let bar_w = ((group_w - self.min_bar_gap * (s as f32 - 1.0)) / s as f32)
-                    .max(style.bar_min_width);
+                    .max(cs::BAR_MIN_WIDTH);
                 for (gi, _) in categories.iter().enumerate() {
                     let group_x = plot.x + self.group_gap + gi as f32 * (group_w + self.group_gap);
                     for (si, series) in visible.iter().enumerate() {
@@ -646,7 +642,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
             }
             (BarOrientation::Horizontal, BarGrouping::Single) => {
                 let total_gap = self.min_bar_gap * (n as f32 + 1.0);
-                let bar_h = ((plot.height - total_gap) / n as f32).max(style.bar_min_width);
+                let bar_h = ((plot.height - total_gap) / n as f32).max(cs::BAR_MIN_WIDTH);
                 let series = visible[0];
                 for (i, datum) in series.data.iter().enumerate() {
                     let y = plot.y + self.min_bar_gap + i as f32 * (bar_h + self.min_bar_gap);
@@ -664,9 +660,9 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
             }
             (BarOrientation::Horizontal, BarGrouping::Grouped) => {
                 let total_group_gap = self.group_gap * (n as f32 + 1.0);
-                let group_h = ((plot.height - total_group_gap) / n as f32).max(style.bar_min_width);
+                let group_h = ((plot.height - total_group_gap) / n as f32).max(cs::BAR_MIN_WIDTH);
                 let bar_h = ((group_h - self.min_bar_gap * (s as f32 - 1.0)) / s as f32)
-                    .max(style.bar_min_width);
+                    .max(cs::BAR_MIN_WIDTH);
                 for (gi, _) in categories.iter().enumerate() {
                     let group_y = plot.y + self.group_gap + gi as f32 * (group_h + self.group_gap);
                     for (si, series) in visible.iter().enumerate() {
@@ -702,7 +698,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
         y_hi: f32,
         label_style: &fern_tokens::TextStyle,
     ) {
-        let style = &theme.components.chart;
+        use crate::style as cs;
         let axis_color = BorderRole::Default.resolve(&theme.colors);
         let label_color = TextRole::Secondary.resolve(&theme.colors);
 
@@ -718,7 +714,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
             for &t in y_ticks {
                 let y = y_to_pixel(t, y_lo, y_hi, plot);
                 canvas.draw_line(
-                    Point::new(plot.x - style.axis_tick_length, y),
+                    Point::new(plot.x - cs::AXIS_TICK_LENGTH, y),
                     Point::new(plot.x, y),
                     axis_color,
                     1.0,
@@ -743,7 +739,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
                 let label = self.axis_y.format(t);
                 let w = measure_text_width(canvas, &label, label_style);
                 let rect = Rect::new(
-                    plot.x - style.axis_tick_length - style.axis_label_gap - w,
+                    plot.x - cs::AXIS_TICK_LENGTH - cs::AXIS_LABEL_GAP - w,
                     y - label_style.size * 0.6,
                     w,
                     label_style.size * 1.2,
@@ -761,7 +757,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
                 let center_x = plot.x + slot_w * (i as f32 + 0.5);
                 let rect = Rect::new(
                     center_x - w * 0.5,
-                    plot.bottom() + style.axis_tick_length + style.axis_label_gap,
+                    plot.bottom() + cs::AXIS_TICK_LENGTH + cs::AXIS_LABEL_GAP,
                     w,
                     label_style.size * 1.2,
                 );
@@ -773,7 +769,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
         if let Some(title) = self.axis_y.label.as_ref() {
             let w = measure_text_width(canvas, title, label_style);
             let rect = Rect::new(
-                plot.x - style.axis_tick_length - style.axis_label_gap - w - 4.0,
+                plot.x - cs::AXIS_TICK_LENGTH - cs::AXIS_LABEL_GAP - w - 4.0,
                 plot.y + plot.height * 0.5 - label_style.size * 0.6,
                 w,
                 label_style.size * 1.2,
@@ -785,8 +781,8 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
             let rect = Rect::new(
                 plot.x + plot.width * 0.5 - w * 0.5,
                 plot.bottom()
-                    + style.axis_tick_length
-                    + style.axis_label_gap
+                    + cs::AXIS_TICK_LENGTH
+                    + cs::AXIS_LABEL_GAP
                     + label_style.size * 1.4,
                 w,
                 label_style.size * 1.2,

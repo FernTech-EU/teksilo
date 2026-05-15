@@ -92,7 +92,7 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
         if series_vec.is_empty() {
             return (Size::ZERO).into();
         }
-        let style = &ctx.theme.components.chart;
+        use crate::style as cs;
         let label_style = TextStyleRole::Tiny.resolve(&ctx.theme.typography);
 
         // Item = swatch + small gap + label text.
@@ -102,14 +102,14 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
             .collect();
         let item_widths: Vec<f32> = label_widths
             .iter()
-            .map(|w| style.legend_swatch_size + 4.0 + w)
+            .map(|w| cs::LEGEND_SWATCH_SIZE + 4.0 + w)
             .collect();
-        let line_height = (style.legend_swatch_size).max(label_style.size * 1.2);
+        let line_height = (cs::LEGEND_SWATCH_SIZE).max(label_style.size * 1.2);
 
         match self.orientation {
             LegendOrientation::Horizontal => {
                 let total_w: f32 = item_widths.iter().sum::<f32>()
-                    + style.legend_item_gap * (item_widths.len() as f32 - 1.0).max(0.0);
+                    + cs::LEGEND_ITEM_GAP * (item_widths.len() as f32 - 1.0).max(0.0);
                 let height = line_height;
                 Size::new(
                     proposal.width.unwrap_or(total_w).min(total_w.max(0.0)),
@@ -130,7 +130,7 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let theme = ctx.theme;
-        let style = &theme.components.chart;
+        use crate::style as cs;
         let series_vec = self.series.get();
         if series_vec.is_empty() {
             return;
@@ -138,7 +138,7 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
         let palette = self.palette.get();
         let label_style = TextStyleRole::Tiny.resolve(&theme.typography);
         let label_color = TextRole::Primary.resolve(&theme.colors);
-        let line_height = style.legend_swatch_size.max(label_style.size * 1.2);
+        let line_height = cs::LEGEND_SWATCH_SIZE.max(label_style.size * 1.2);
 
         match self.orientation {
             LegendOrientation::Horizontal => {
@@ -158,16 +158,16 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
                     };
                     let swatch = Rect::new(
                         x,
-                        center_y - style.legend_swatch_size * 0.5,
-                        style.legend_swatch_size,
-                        style.legend_swatch_size,
+                        center_y - cs::LEGEND_SWATCH_SIZE * 0.5,
+                        cs::LEGEND_SWATCH_SIZE,
+                        cs::LEGEND_SWATCH_SIZE,
                     );
                     canvas.fill_rounded_rect(
                         swatch,
                         fern_tokens::CornerRadius::uniform(2.0),
                         final_color,
                     );
-                    x += style.legend_swatch_size + 4.0;
+                    x += cs::LEGEND_SWATCH_SIZE + 4.0;
                     let label_w = measure_text_width(canvas, &series.name, &label_style);
                     let text_color = if visible {
                         label_color
@@ -185,7 +185,7 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
                         &label_style,
                         text_color,
                     );
-                    x += label_w + style.legend_item_gap;
+                    x += label_w + cs::LEGEND_ITEM_GAP;
                 }
             }
             LegendOrientation::Vertical => {
@@ -205,9 +205,9 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
                     let center_y = row_y + line_height * 0.5;
                     let swatch = Rect::new(
                         bounds.x,
-                        center_y - style.legend_swatch_size * 0.5,
-                        style.legend_swatch_size,
-                        style.legend_swatch_size,
+                        center_y - cs::LEGEND_SWATCH_SIZE * 0.5,
+                        cs::LEGEND_SWATCH_SIZE,
+                        cs::LEGEND_SWATCH_SIZE,
                     );
                     canvas.fill_rounded_rect(
                         swatch,
@@ -223,7 +223,7 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
                     canvas.draw_text(
                         &series.name,
                         Rect::new(
-                            bounds.x + style.legend_swatch_size + 4.0,
+                            bounds.x + cs::LEGEND_SWATCH_SIZE + 4.0,
                             center_y - label_style.size * 0.6,
                             label_w,
                             label_style.size * 1.2,
@@ -262,11 +262,11 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
 pub(crate) fn legend_main_axis_size<T: Clone + 'static>(
     backend: Option<&Rc<RefCell<dyn TextBackend>>>,
     series_vec: &[ChartSeries<T>],
-    style: &fern_tokens::ChartStyle,
     label_style: &fern_tokens::TextStyle,
     orientation: LegendOrientation,
 ) -> f32 {
-    let line_height = style.legend_swatch_size.max(label_style.size * 1.2);
+    use crate::style as cs;
+    let line_height = cs::LEGEND_SWATCH_SIZE.max(label_style.size * 1.2);
     match orientation {
         LegendOrientation::Horizontal => line_height,
         LegendOrientation::Vertical => {
@@ -274,7 +274,7 @@ pub(crate) fn legend_main_axis_size<T: Clone + 'static>(
                 .iter()
                 .map(|s| measure_text_width_via(backend, &s.name, label_style))
                 .fold(0.0_f32, f32::max);
-            style.legend_swatch_size + 4.0 + max_w
+            cs::LEGEND_SWATCH_SIZE + 4.0 + max_w
         }
     }
 }
@@ -303,10 +303,10 @@ pub(crate) fn paint_embedded_legend<T: Clone + 'static>(
     if series_vec.is_empty() || band.width <= 0.0 || band.height <= 0.0 {
         return;
     }
-    let style = &theme.components.chart;
+    use crate::style as cs;
     let label_style = TextStyleRole::Tiny.resolve(&theme.typography);
     let label_color = TextRole::Primary.resolve(&theme.colors);
-    let line_height = style.legend_swatch_size.max(label_style.size * 1.2);
+    let line_height = cs::LEGEND_SWATCH_SIZE.max(label_style.size * 1.2);
 
     match orientation {
         LegendOrientation::Horizontal => {
@@ -319,10 +319,10 @@ pub(crate) fn paint_embedded_legend<T: Clone + 'static>(
                 .collect();
             let item_widths: Vec<f32> = label_widths
                 .iter()
-                .map(|w| style.legend_swatch_size + 4.0 + w)
+                .map(|w| cs::LEGEND_SWATCH_SIZE + 4.0 + w)
                 .collect();
             let total_w: f32 = item_widths.iter().sum::<f32>()
-                + style.legend_item_gap * (item_widths.len() as f32 - 1.0).max(0.0);
+                + cs::LEGEND_ITEM_GAP * (item_widths.len() as f32 - 1.0).max(0.0);
             let mut x = band.x + (band.width - total_w) * 0.5;
             let center_y = band.y + line_height * 0.5;
             for (i, series) in series_vec.iter().enumerate() {
@@ -339,16 +339,16 @@ pub(crate) fn paint_embedded_legend<T: Clone + 'static>(
                 };
                 let swatch = Rect::new(
                     x,
-                    center_y - style.legend_swatch_size * 0.5,
-                    style.legend_swatch_size,
-                    style.legend_swatch_size,
+                    center_y - cs::LEGEND_SWATCH_SIZE * 0.5,
+                    cs::LEGEND_SWATCH_SIZE,
+                    cs::LEGEND_SWATCH_SIZE,
                 );
                 canvas.fill_rounded_rect(
                     swatch,
                     fern_tokens::CornerRadius::uniform(2.0),
                     final_color,
                 );
-                x += style.legend_swatch_size + 4.0;
+                x += cs::LEGEND_SWATCH_SIZE + 4.0;
                 let label_w = label_widths[i];
                 let text_color = if visible {
                     label_color
@@ -366,7 +366,7 @@ pub(crate) fn paint_embedded_legend<T: Clone + 'static>(
                     &label_style,
                     text_color,
                 );
-                x += label_w + style.legend_item_gap;
+                x += label_w + cs::LEGEND_ITEM_GAP;
             }
         }
         LegendOrientation::Vertical => {
@@ -386,9 +386,9 @@ pub(crate) fn paint_embedded_legend<T: Clone + 'static>(
                 let center_y = row_y + line_height * 0.5;
                 let swatch = Rect::new(
                     band.x,
-                    center_y - style.legend_swatch_size * 0.5,
-                    style.legend_swatch_size,
-                    style.legend_swatch_size,
+                    center_y - cs::LEGEND_SWATCH_SIZE * 0.5,
+                    cs::LEGEND_SWATCH_SIZE,
+                    cs::LEGEND_SWATCH_SIZE,
                 );
                 canvas.fill_rounded_rect(
                     swatch,
@@ -404,7 +404,7 @@ pub(crate) fn paint_embedded_legend<T: Clone + 'static>(
                 canvas.draw_text(
                     &series.name,
                     Rect::new(
-                        band.x + style.legend_swatch_size + 4.0,
+                        band.x + cs::LEGEND_SWATCH_SIZE + 4.0,
                         center_y - label_style.size * 0.6,
                         label_w,
                         label_style.size * 1.2,

@@ -318,14 +318,13 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
         if children.is_empty() {
             return;
         }
-        let style = &ctx.theme.components.chart;
         let label_style = TextStyleRole::Tiny.resolve(&ctx.theme.typography);
-        let legend_size = self.compute_legend_size(ctx.text_backend, style, &label_style);
+        let legend_size = self.compute_legend_size(ctx.text_backend, &label_style);
         // Carve off the legend band first so the disc placed here matches
         // the disc rendered in paint (otherwise the center widget drifts
         // off-center when a legend is shown).
-        let plot_rect = self.compute_plot_rect(bounds, style, legend_size);
-        let (center, _outer, inner) = self.compute_disc_geometry(plot_rect, style);
+        let plot_rect = self.compute_plot_rect(bounds, legend_size);
+        let (center, _outer, inner) = self.compute_disc_geometry(plot_rect);
         let side = (inner * std::f32::consts::FRAC_1_SQRT_2 * 2.0).max(0.0);
         for child in children.iter_mut() {
             child.origin = Point::new(center.x - side * 0.5, center.y - side * 0.5);
@@ -335,7 +334,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let theme = ctx.theme;
-        let style = &theme.components.chart;
+        use crate::style as cs;
 
         let data = self.data.get();
         if data.is_empty() {
@@ -349,15 +348,15 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
         let label_style = TextStyleRole::Tiny.resolve(&theme.typography);
         let legend_orientation = orientation_for_position(self.legend_position);
 
-        let legend_size = self.compute_legend_size(canvas.text_backend(), style, &label_style);
-        let plot = self.compute_plot_rect(bounds, style, legend_size);
+        let legend_size = self.compute_legend_size(canvas.text_backend(), &label_style);
+        let plot = self.compute_plot_rect(bounds, legend_size);
         if plot.width <= 0.0 || plot.height <= 0.0 {
             return;
         }
         let legend_band = legend_band_rect(bounds, self.legend_position, legend_size);
 
         // Disc geometry.
-        let (center, outer_radius, inner_radius) = self.compute_disc_geometry(plot, style);
+        let (center, outer_radius, inner_radius) = self.compute_disc_geometry(plot);
         if outer_radius <= 0.0 {
             return;
         }
@@ -472,15 +471,15 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
     fn compute_legend_size(
         &self,
         backend: Option<&Rc<RefCell<dyn TextBackend>>>,
-        style: &fern_tokens::ChartStyle,
         label_style: &fern_tokens::TextStyle,
     ) -> f32 {
+        use crate::style as cs;
         if !self.show_legend {
             return 0.0;
         }
         let orientation = orientation_for_position(self.legend_position);
         match orientation {
-            LegendOrientation::Horizontal => style.legend_swatch_size.max(label_style.size * 1.2),
+            LegendOrientation::Horizontal => cs::LEGEND_SWATCH_SIZE.max(label_style.size * 1.2),
             LegendOrientation::Vertical => {
                 let data = self.data.get();
                 let max_w = data
@@ -490,7 +489,7 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
                         crate::text::measure_text_width_via(backend, &name, label_style)
                     })
                     .fold(0.0_f32, f32::max);
-                style.legend_swatch_size + 4.0 + max_w
+                cs::LEGEND_SWATCH_SIZE + 4.0 + max_w
             }
         }
     }
@@ -502,7 +501,6 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
     fn compute_plot_rect(
         &self,
         bounds: Rect,
-        style: &fern_tokens::ChartStyle,
         legend_size: f32,
     ) -> Rect {
         let no_axis = crate::axis::AxisConfig::new()
@@ -510,7 +508,6 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
             .show_axis_line(false);
         let area = carve_plot_area(&CarveParams {
             bounds,
-            style,
             axis_x: &no_axis,
             axis_y: &no_axis,
             y_label_max_width: 0.0,
@@ -530,9 +527,9 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
     fn compute_disc_geometry(
         &self,
         bounds: Rect,
-        style: &fern_tokens::ChartStyle,
     ) -> (Point, f32, f32) {
-        let pad = style.pie_padding;
+        use crate::style as cs;
+        let pad = cs::PIE_PADDING;
         let usable_w = (bounds.width - pad * 2.0).max(0.0);
         let usable_h = (bounds.height - pad * 2.0).max(0.0);
         let diameter = usable_w.min(usable_h);
@@ -573,9 +570,9 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
         category: &str,
         label_style: &fern_tokens::TextStyle,
     ) {
-        let style = &theme.components.chart;
+        use crate::style as cs;
         let label_color = TextRole::Primary.resolve(&theme.colors);
-        let min_deg = style.pie_min_slice_label_degrees;
+        let min_deg = cs::PIE_MIN_SLICE_LABEL_DEGREES;
         // Compute the slice's actual sweep degrees by looking it up in
         // the live hits. (Hits include the gap-adjusted sweep.)
         let label_text = if self.show_percentages {
@@ -608,17 +605,17 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
             }
             PieLabelMode::Outside => {
                 let r_inner = outer * 0.95;
-                let r_outer = outer + style.pie_leader_length;
+                let r_outer = outer + cs::PIE_LEADER_LENGTH;
                 let p1 = Point::new(center.x + r_inner * cos, center.y + r_inner * sin);
                 let p2 = Point::new(center.x + r_outer * cos, center.y + r_outer * sin);
                 canvas.draw_line(p1, p2, label_color, 1.0);
-                let lx_anchor = center.x + (r_outer + style.pie_label_gap) * cos;
+                let lx_anchor = center.x + (r_outer + cs::PIE_LABEL_GAP) * cos;
                 let lx = if cos >= 0.0 {
                     lx_anchor
                 } else {
                     lx_anchor - approx_w
                 };
-                let ly = center.y + (r_outer + style.pie_label_gap) * sin - height * 0.5;
+                let ly = center.y + (r_outer + cs::PIE_LABEL_GAP) * sin - height * 0.5;
                 canvas.draw_text(
                     &label_text,
                     Rect::new(lx, ly, approx_w, height),
@@ -639,17 +636,17 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
                     );
                 } else {
                     let r_inner = outer * 0.95;
-                    let r_outer = outer + style.pie_leader_length;
+                    let r_outer = outer + cs::PIE_LEADER_LENGTH;
                     let p1 = Point::new(center.x + r_inner * cos, center.y + r_inner * sin);
                     let p2 = Point::new(center.x + r_outer * cos, center.y + r_outer * sin);
                     canvas.draw_line(p1, p2, label_color, 1.0);
-                    let lx_anchor = center.x + (r_outer + style.pie_label_gap) * cos;
+                    let lx_anchor = center.x + (r_outer + cs::PIE_LABEL_GAP) * cos;
                     let lx = if cos >= 0.0 {
                         lx_anchor
                     } else {
                         lx_anchor - approx_w
                     };
-                    let ly = center.y + (r_outer + style.pie_label_gap) * sin - height * 0.5;
+                    let ly = center.y + (r_outer + cs::PIE_LABEL_GAP) * sin - height * 0.5;
                     canvas.draw_text(
                         &label_text,
                         Rect::new(lx, ly, approx_w, height),
@@ -672,7 +669,7 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
         hit: &SliceHit,
         label_style: &fern_tokens::TextStyle,
     ) {
-        let style = &theme.components.chart;
+        use crate::style as cs;
         let label = format!(
             "{}: {} ({:.1}%)",
             hit.label,
@@ -680,8 +677,8 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
             hit.percent
         );
         let text_w = measure_text_width(canvas, &label, label_style);
-        let approx_w = text_w + style.tooltip_padding * 2.0;
-        let height = label_style.size * 1.4 + style.tooltip_padding;
+        let approx_w = text_w + cs::TOOLTIP_PADDING * 2.0;
+        let height = label_style.size * 1.4 + cs::TOOLTIP_PADDING;
 
         // Anchor at the bisector midpoint between inner and outer radius.
         let bisector_rad =
@@ -713,9 +710,9 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
         );
 
         let label_rect = Rect::new(
-            tip.x + style.tooltip_padding,
+            tip.x + cs::TOOLTIP_PADDING,
             tip.y + (tip.height - label_style.size * 1.2) * 0.5,
-            tip.width - style.tooltip_padding * 2.0,
+            tip.width - cs::TOOLTIP_PADDING * 2.0,
             label_style.size * 1.2,
         );
         canvas.draw_text(&label, label_rect, label_style, theme.colors.tooltip_text);

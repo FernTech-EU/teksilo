@@ -52,10 +52,16 @@ impl Divider {
         self
     }
 
-    fn resolved_thickness(&self, theme: &fern_core::Theme) -> f32 {
-        self.thickness.unwrap_or(theme.components.divider.thickness)
+    fn resolved_thickness(&self, _theme: &fern_core::Theme) -> f32 {
+        self.thickness.unwrap_or(DIVIDER_THICKNESS)
     }
 }
+
+/// Default visual thickness of a `Divider` stroke. Relocated here
+/// from `theme.components.divider.thickness` as part of the Stage G
+/// teardown — divider has no per-widget `Recipe*Style` module to host
+/// it, so the constant lives alongside the widget that reads it.
+pub const DIVIDER_THICKNESS: f32 = 1.0;
 
 impl Default for Divider {
     fn default() -> Self {

@@ -77,6 +77,16 @@ impl Widget for AccordionRegion {
 // Accordion widget
 // ---------------------------------------------------------------------------
 
+/// Accordion design tokens — relocated from `theme.components.accordion`
+/// as part of the Stage G teardown. Accordion is a group-4 composite
+/// with no dedicated `Recipe*Style`, so its layout numbers live
+/// alongside the widget that reads them.
+pub const ACCORDION_HEADER_HEIGHT: f32 = 28.0;
+pub const ACCORDION_HEADER_PADDING_HORIZONTAL: f32 = 8.0;
+pub const ACCORDION_INDICATOR_SIZE: f32 = 12.0;
+pub const ACCORDION_INDICATOR_GAP: f32 = 6.0;
+pub const ACCORDION_CORNER_RADIUS: f32 = 4.0;
+
 /// A collapsible section with a clickable header that toggles content visibility.
 ///
 /// Content must be pre-registered via `content_id(id)`.
@@ -164,7 +174,7 @@ impl Widget for Accordion {
         }
 
         let theme = ctx.theme();
-        let accordion_corner_radius = theme.components.accordion.corner_radius;
+        let accordion_corner_radius = ACCORDION_CORNER_RADIUS;
         let focus_ring_width = theme.shape.focus_ring_width;
         let expanded = self.expanded.clone();
 

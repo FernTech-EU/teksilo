@@ -18,7 +18,7 @@ use fern_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_platform::ClipboardHandle;
 use fern_core::Theme;
-use fern_tokens::{Color, ColorTokens, ComponentStyles, ShapeTokens, TextRole, TextStyleRole};
+use fern_tokens::{Color, ColorTokens, ShapeTokens, TextRole, TextStyleRole};
 use fern_widgets::primitives::{HStack, Padding, Spacer, VStack};
 use fern_widgets::{Button, ColorEdit, ScrollArea, Slider, TextWidget};
 
@@ -87,15 +87,13 @@ const SHOWN_SHADOW_ALPHAS: &[F32Access<ShapeTokens>] = &[
     ),
 ];
 
-// Step 7 of the styling refactor deleted the per-themable-widget
-// dimension structs in `fern-tokens::components.rs` — including the
-// `shadow_density` fields the Theme tab used to expose. The data now
-// lives as `pub const` declarations in
-// `fern-widgets/src/styles/recipe_<widget>_style.rs`, not editable
-// at runtime through the inspector. Re-introducing the slider UI
-// requires a different mechanism (per-recipe-instance overrides on
-// the active style trait object).
-const SHOWN_DENSITIES: &[F32Access<ComponentStyles>] = &[];
+// Stage G of the styling refactor deleted `ComponentStyles` entirely;
+// every dimension is now either a `pub const` on a `recipe_*_style.rs`
+// module (themable widgets) or on the owning widget module (group-4
+// composites). Density sliders that mutated `theme.components.X` at
+// runtime no longer have a mutable target — re-exposing them needs a
+// different mechanism (per-recipe-instance overrides on the active
+// style trait object).
 
 const SHOWN_COLORS: &[ColorAccess] = &[
     ("accent", |t| t.accent, |t, c| t.accent = c),
@@ -239,10 +237,6 @@ impl Widget for ThemeTab {
             .iter()
             .map(|(_, get, _)| Signal::new(get(&initial_theme.shape)))
             .collect();
-        let density_drafts: Vec<Signal<f32>> = SHOWN_DENSITIES
-            .iter()
-            .map(|(_, get, _)| Signal::new(get(&initial_theme.components)))
-            .collect();
 
         // Theme → drafts bridge. Fires after every successful
         // `ctx.set_theme(...)`. Without this the row swatches would
@@ -251,7 +245,6 @@ impl Widget for ThemeTab {
         {
             let drafts = drafts.clone();
             let alpha_drafts = alpha_drafts.clone();
-            let density_drafts = density_drafts.clone();
             let h = theme_sig.observe(move |theme| {
                 for ((_, get, _), sig) in SHOWN_COLORS.iter().zip(&drafts) {
                     let v = get(&theme.colors);
@@ -261,12 +254,6 @@ impl Widget for ThemeTab {
                 }
                 for ((_, get, _), sig) in SHOWN_SHADOW_ALPHAS.iter().zip(&alpha_drafts) {
                     let v = get(&theme.shape);
-                    if (sig.get() - v).abs() > f32::EPSILON {
-                        sig.set(v);
-                    }
-                }
-                for ((_, get, _), sig) in SHOWN_DENSITIES.iter().zip(&density_drafts) {
-                    let v = get(&theme.components);
                     if (sig.get() - v).abs() > f32::EPSILON {
                         sig.set(v);
                     }
@@ -284,7 +271,6 @@ impl Widget for ThemeTab {
         // Apply: fold every draft back into a fresh theme and commit.
         let drafts_for_apply = drafts.clone();
         let alpha_drafts_for_apply = alpha_drafts.clone();
-        let density_drafts_for_apply = density_drafts.clone();
         let theme_for_apply = theme_sig.clone();
         let apply_btn = Button::new_literal("Apply").on_activate_fn(move |c| {
             let mut next = theme_for_apply.get();
@@ -294,16 +280,12 @@ impl Widget for ThemeTab {
             for ((_, _, set), sig) in SHOWN_SHADOW_ALPHAS.iter().zip(&alpha_drafts_for_apply) {
                 set(&mut next.shape, sig.get());
             }
-            for ((_, _, set), sig) in SHOWN_DENSITIES.iter().zip(&density_drafts_for_apply) {
-                set(&mut next.components, sig.get());
-            }
             c.set_theme(next);
         });
 
         // Reset: discard pending drafts by re-reading the active theme.
         let drafts_for_reset = drafts.clone();
         let alpha_drafts_for_reset = alpha_drafts.clone();
-        let density_drafts_for_reset = density_drafts.clone();
         let theme_for_reset = theme_sig.clone();
         let reset_btn = Button::new_literal("Reset").on_activate_fn(move |_c| {
             let theme = theme_for_reset.get();
@@ -315,12 +297,6 @@ impl Widget for ThemeTab {
             }
             for ((_, get, _), sig) in SHOWN_SHADOW_ALPHAS.iter().zip(&alpha_drafts_for_reset) {
                 let v = get(&theme.shape);
-                if (sig.get() - v).abs() > f32::EPSILON {
-                    sig.set(v);
-                }
-            }
-            for ((_, get, _), sig) in SHOWN_DENSITIES.iter().zip(&density_drafts_for_reset) {
-                let v = get(&theme.components);
                 if (sig.get() - v).abs() > f32::EPSILON {
                     sig.set(v);
                 }
@@ -391,11 +367,8 @@ impl Widget for ThemeTab {
             rows = rows.child(slider_row(name, sig.clone()));
         }
 
-        // Components — per-surface inner-rim density multiplier.
-        rows = rows.child(section_header("Components — shadow density"));
-        for ((name, _, _), sig) in SHOWN_DENSITIES.iter().zip(&density_drafts) {
-            rows = rows.child(slider_row(name, sig.clone()));
-        }
+        // Per-component density rows removed in Stage G — see the
+        // teardown note on `SHOWN_DENSITIES` earlier in this file.
 
         let root = ctx.add(
             VStack::new()

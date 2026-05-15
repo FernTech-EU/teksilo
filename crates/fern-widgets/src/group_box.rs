@@ -20,6 +20,12 @@ use crate::Checkbox;
 use crate::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
 use fern_tokens::{TextRole, TextStyleRole};
 
+/// GroupBox design tokens — relocated from `theme.components.group_box`
+/// in Stage G of the styling migration.
+pub const GROUP_BOX_CONTENT_INDENT: f32 = 24.0;
+pub const GROUP_BOX_TITLE_CONTENT_SPACING: f32 = 8.0;
+pub const GROUP_BOX_CHECKBOX_GAP: f32 = 6.0;
+
 pub struct GroupBox {
     title: String,
     checked: Option<Signal<bool>>,
@@ -94,8 +100,7 @@ impl Widget for GroupBox {
         }
 
         let theme_signal = ctx.theme_signal();
-        let snapshot = theme_signal.get();
-        let style = snapshot.components.group_box;
+        let _ = theme_signal.get();
 
         let title_label = TextWidget::new_literal(&self.title)
             .style(TextStyleRole::BodyBold)
@@ -109,7 +114,7 @@ impl Widget for GroupBox {
             let checkbox = Checkbox::new(checked.clone()).label_literal(&self.title);
             ctx.add(
                 HStack::new()
-                    .spacing(style.checkbox_gap)
+                    .spacing(GROUP_BOX_CHECKBOX_GAP)
                     .child(checkbox)
                     .child(title_label),
             )
@@ -118,9 +123,9 @@ impl Widget for GroupBox {
         };
 
         let padded_content_id = if let Some(content_id) = self.content_id {
-            ctx.add(Padding::new(0.0, 0.0, 0.0, style.content_indent).child_id(content_id))
+            ctx.add(Padding::new(0.0, 0.0, 0.0, GROUP_BOX_CONTENT_INDENT).child_id(content_id))
         } else {
-            ctx.add(Padding::new(0.0, 0.0, 0.0, style.content_indent))
+            ctx.add(Padding::new(0.0, 0.0, 0.0, GROUP_BOX_CONTENT_INDENT))
         };
 
         // When checkable and unchecked, lay a translucent surface tint over
@@ -143,7 +148,7 @@ impl Widget for GroupBox {
 
         let root = ctx.add(
             VStack::new()
-                .spacing(style.title_content_spacing)
+                .spacing(GROUP_BOX_TITLE_CONTENT_SPACING)
                 .add_child(title_row_id)
                 .add_child(content_wrapper_id),
         );

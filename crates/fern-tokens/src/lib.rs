@@ -1,6 +1,5 @@
 pub mod alignment;
 pub mod color;
-pub mod components;
 pub mod layout;
 pub mod motion;
 pub mod orientation;
@@ -13,13 +12,6 @@ pub mod typography;
 
 pub use alignment::{Alignment, HAlignment, VAlignment};
 pub use color::Color;
-pub use components::{
-    AccordionStyle, AvatarStyle, BadgeStyle, BreadcrumbStyle, CalendarStyle, ChartStyle,
-    ComponentStyles, DateEditStyle, DialogStyle, DividerStyle, GroupBoxStyle, LinkStyle,
-    NotificationStyle, ProgressBarStyle, SegmentedControlStyle, SnackbarStyle, SplitButtonStyle,
-    SplitViewStyle, StatusBarStyle, TextAreaStyle, TimeEditStyle, ToolbarStyle, TreeListStyle,
-    WizardStyle,
-};
 pub use layout::LayoutTokens;
 pub use motion::{Easing, MotionTokens, lerp};
 pub use orientation::Orientation;

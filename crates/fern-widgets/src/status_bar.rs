@@ -10,6 +10,12 @@ use crate::Panel;
 use crate::primitives::HStack;
 use fern_tokens::SurfaceRole;
 
+/// StatusBar design tokens — relocated from
+/// `theme.components.status_bar` in Stage G of the styling migration.
+pub const STATUS_BAR_HEIGHT: f32 = 22.0;
+pub const STATUS_BAR_PADDING_HORIZONTAL: f32 = 8.0;
+pub const STATUS_BAR_ITEM_GAP: f32 = 2.0;
+
 /// A status bar for displaying information at the bottom of a window.
 pub struct StatusBar {
     pending: Vec<PendingChild>,
@@ -53,8 +59,8 @@ impl std::fmt::Debug for StatusBar {
 
 impl Widget for StatusBar {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme_signal = ctx.theme_signal();
-        let spacing = theme_signal.get().components.status_bar.item_gap;
+        let _ = ctx.theme_signal();
+        let spacing = STATUS_BAR_ITEM_GAP;
 
         // Resolve pending children
         let pending = std::mem::take(&mut self.pending);

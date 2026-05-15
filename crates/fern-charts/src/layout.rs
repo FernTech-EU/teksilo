@@ -6,9 +6,9 @@
 //! placement.
 
 use fern_canvas::Rect;
-use fern_tokens::ChartStyle;
 
 use crate::axis::AxisConfig;
+use crate::style as cs;
 
 /// Where the legend sits relative to the plot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +32,6 @@ pub struct PlotArea {
 /// to [`carve_plot_area`].
 pub struct CarveParams<'a> {
     pub bounds: Rect,
-    pub style: &'a ChartStyle,
     pub axis_x: &'a AxisConfig,
     pub axis_y: &'a AxisConfig,
     /// Maximum width of any y-axis tick label, in logical pixels. Pass 0 if
@@ -61,12 +60,12 @@ pub fn carve_plot_area(p: &CarveParams) -> PlotArea {
     {
         match pos {
             LegendPosition::Top => {
-                let h = p.legend_size + p.style.legend_to_plot_gap;
+                let h = p.legend_size + cs::LEGEND_TO_PLOT_GAP;
                 legend = Rect::new(rect.x, rect.y, rect.width, p.legend_size);
                 rect = Rect::new(rect.x, rect.y + h, rect.width, (rect.height - h).max(0.0));
             }
             LegendPosition::Bottom => {
-                let h = p.legend_size + p.style.legend_to_plot_gap;
+                let h = p.legend_size + cs::LEGEND_TO_PLOT_GAP;
                 legend = Rect::new(
                     rect.x,
                     rect.bottom() - p.legend_size,
@@ -76,12 +75,12 @@ pub fn carve_plot_area(p: &CarveParams) -> PlotArea {
                 rect = Rect::new(rect.x, rect.y, rect.width, (rect.height - h).max(0.0));
             }
             LegendPosition::Leading => {
-                let w = p.legend_size + p.style.legend_to_plot_gap;
+                let w = p.legend_size + cs::LEGEND_TO_PLOT_GAP;
                 legend = Rect::new(rect.x, rect.y, p.legend_size, rect.height);
                 rect = Rect::new(rect.x + w, rect.y, (rect.width - w).max(0.0), rect.height);
             }
             LegendPosition::Trailing => {
-                let w = p.legend_size + p.style.legend_to_plot_gap;
+                let w = p.legend_size + cs::LEGEND_TO_PLOT_GAP;
                 legend = Rect::new(
                     rect.right() - p.legend_size,
                     rect.y,
@@ -98,14 +97,14 @@ pub fn carve_plot_area(p: &CarveParams) -> PlotArea {
     if p.axis_y.show_labels && p.y_label_max_width > 0.0 {
         y_band_w += p.y_label_max_width;
         if p.axis_y.show_axis_line {
-            y_band_w += p.style.axis_tick_length;
+            y_band_w += cs::AXIS_TICK_LENGTH;
         }
-        y_band_w += p.style.axis_label_gap;
+        y_band_w += cs::AXIS_LABEL_GAP;
     } else if p.axis_y.show_axis_line {
-        y_band_w += p.style.axis_tick_length;
+        y_band_w += cs::AXIS_TICK_LENGTH;
     }
     if p.axis_y.label.is_some() && p.axis_title_line_height > 0.0 {
-        y_band_w += p.axis_title_line_height + p.style.axis_title_gap;
+        y_band_w += p.axis_title_line_height + cs::AXIS_TITLE_GAP;
     }
 
     // 3. X-axis band (bottom edge).
@@ -113,23 +112,23 @@ pub fn carve_plot_area(p: &CarveParams) -> PlotArea {
     if p.axis_x.show_labels && p.x_label_height > 0.0 {
         x_band_h += p.x_label_height;
         if p.axis_x.show_axis_line {
-            x_band_h += p.style.axis_tick_length;
+            x_band_h += cs::AXIS_TICK_LENGTH;
         }
-        x_band_h += p.style.axis_label_gap;
+        x_band_h += cs::AXIS_LABEL_GAP;
     } else if p.axis_x.show_axis_line {
-        x_band_h += p.style.axis_tick_length;
+        x_band_h += cs::AXIS_TICK_LENGTH;
     }
     if p.axis_x.label.is_some() && p.axis_title_line_height > 0.0 {
-        x_band_h += p.axis_title_line_height + p.style.axis_title_gap;
+        x_band_h += p.axis_title_line_height + cs::AXIS_TITLE_GAP;
     }
 
     // 4. Inner plot padding.
     let plot = Rect::new(
-        rect.x + y_band_w + p.style.plot_padding_leading,
-        rect.y + p.style.plot_padding_top,
-        (rect.width - y_band_w - p.style.plot_padding_leading - p.style.plot_padding_right)
+        rect.x + y_band_w + cs::PLOT_PADDING_LEADING,
+        rect.y + cs::PLOT_PADDING_TOP,
+        (rect.width - y_band_w - cs::PLOT_PADDING_LEADING - cs::PLOT_PADDING_RIGHT)
             .max(0.0),
-        (rect.height - x_band_h - p.style.plot_padding_top - p.style.plot_padding_bottom).max(0.0),
+        (rect.height - x_band_h - cs::PLOT_PADDING_TOP - cs::PLOT_PADDING_BOTTOM).max(0.0),
     );
 
     PlotArea { plot, legend }
@@ -138,16 +137,13 @@ pub fn carve_plot_area(p: &CarveParams) -> PlotArea {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fern_tokens::ChartStyle;
 
     fn default_params(bounds: Rect) -> CarveParams<'static> {
         // We deliberately leak owned configs — tests are short-lived.
-        let style: &'static ChartStyle = Box::leak(Box::new(ChartStyle::default()));
         let ax: &'static AxisConfig = Box::leak(Box::new(AxisConfig::new()));
         let ay: &'static AxisConfig = Box::leak(Box::new(AxisConfig::new()));
         CarveParams {
             bounds,
-            style,
             axis_x: ax,
             axis_y: ay,
             y_label_max_width: 0.0,
@@ -168,8 +164,6 @@ mod tests {
         p.axis_x = Box::leak(Box::new(ax));
         p.axis_y = Box::leak(Box::new(ay));
         let area = carve_plot_area(&p);
-        // Plot rect should be the bounds minus only plot_padding (default
-        // 4-12 px on each side).
         assert!(area.plot.width > 0.0);
         assert!(area.plot.height > 0.0);
         assert!(area.plot.width < bounds.width);

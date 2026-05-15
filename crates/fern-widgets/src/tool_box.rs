@@ -180,6 +180,15 @@ impl ToolBoxItem {
 /// The active section is driven by a caller-owned `Signal<usize>`; mirrors
 /// [`TabWidget::new`](crate::TabWidget::new) so persistence, synchronised
 /// windows, and programmatic activation work identically.
+
+/// ToolBox design tokens — relocated from `theme.components.tool_box`
+/// in Stage G of the styling migration.
+pub const TOOL_BOX_HEADER_MIN_HEIGHT: f32 = 28.0;
+pub const TOOL_BOX_HEADER_PADDING_HORIZONTAL: f32 = 12.0;
+pub const TOOL_BOX_ICON_TEXT_SPACING: f32 = 8.0;
+pub const TOOL_BOX_CHEVRON_SIZE: f32 = 12.0;
+pub const TOOL_BOX_INDICATOR_THICKNESS: f32 = 1.0;
+
 pub struct ToolBox {
     selected: Signal<usize>,
     items: Vec<ToolBoxItem>,
@@ -340,7 +349,6 @@ impl Widget for ToolBoxHeader {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
         let theme = ctx.theme();
-        let style = theme.components.tool_box;
         let focus_ring_width = theme.shape.focus_ring_width;
 
         let idx = self.index;
@@ -421,7 +429,7 @@ impl Widget for ToolBoxHeader {
         let indicator_rect_id = ctx.add(RectWidget::new().background(indicator_bg));
         let indicator_id = ctx.add(
             FixedSize::new()
-                .bind_width(style.indicator_thickness)
+                .bind_width(TOOL_BOX_INDICATOR_THICKNESS)
                 .child_id(indicator_rect_id),
         );
 
@@ -448,15 +456,15 @@ impl Widget for ToolBoxHeader {
         // Two chevron glyphs toggled via `visible_when` — cheaper than
         // re-rendering a single glyph at runtime.
         let chevron_down_id =
-            ctx.add(IconWidget::chevron_down(style.chevron_size).bind_color(text_role.clone()));
+            ctx.add(IconWidget::chevron_down(TOOL_BOX_CHEVRON_SIZE).bind_color(text_role.clone()));
         let chevron_right_id =
-            ctx.add(IconWidget::chevron_right(style.chevron_size).bind_color(text_role));
+            ctx.add(IconWidget::chevron_right(TOOL_BOX_CHEVRON_SIZE).bind_color(text_role));
         ctx.visible_when(chevron_down_id, is_selected.clone());
         ctx.visible_when(chevron_right_id, is_selected.map(|v| !*v));
 
         // Compose the header row:
         //   [indicator] [leading?] [label] [spacer] [trailing?] [chevron]
-        let mut row = HStack::new().spacing(style.icon_text_spacing);
+        let mut row = HStack::new().spacing(TOOL_BOX_ICON_TEXT_SPACING);
         row = row.add_child(indicator_id);
         if let Some(id) = leading_id {
             row = row.add_child(id);
@@ -474,7 +482,7 @@ impl Widget for ToolBoxHeader {
         // Settings panels render their selection bar (inset from the
         // row edge by the container's padding).
         let padded_row_id = ctx.add(
-            crate::primitives::Padding::symmetric(0.0, style.header_padding_horizontal)
+            crate::primitives::Padding::symmetric(0.0, TOOL_BOX_HEADER_PADDING_HORIZONTAL)
                 .child_id(row_id),
         );
 
@@ -505,7 +513,7 @@ impl Widget for ToolBoxHeader {
         );
 
         // Enforce the Int UI 28 dp row height.
-        let root_id = ctx.add(MinSize::new(0.0, style.header_min_height).child_id(zstack_id));
+        let root_id = ctx.add(MinSize::new(0.0, TOOL_BOX_HEADER_MIN_HEIGHT).child_id(zstack_id));
         self.root_child_id = Some(root_id);
 
         // Attach rich tooltip if configured.

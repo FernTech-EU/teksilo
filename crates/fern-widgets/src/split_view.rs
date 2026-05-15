@@ -457,8 +457,7 @@ impl Widget for SplitHandle {
         // visible handle, no filled background. The hit area is wider
         // than the line for comfortable pointer targeting; the cursor
         // change on hover is what tells the user it's grabbable.
-        let style = ctx.theme.components.split_view;
-        let line_thickness = style.divider_line_thickness.max(1.0);
+        let line_thickness = SPLIT_VIEW_DIVIDER_LINE_THICKNESS.max(1.0);
         // Focus indicator is the same divider line drawn thicker with
         // the focus color — not a bounding stroke. Cross-fades over the
         // resting line via alpha during the hover-dwell phase, fully
@@ -534,6 +533,13 @@ impl Widget for SplitHandle {
         }
     }
 }
+
+/// SplitView design tokens — relocated from
+/// `theme.components.split_view` in Stage G of the styling migration.
+pub const SPLIT_VIEW_GUTTER_THICKNESS: f32 = 6.0;
+pub const SPLIT_VIEW_DIVIDER_LINE_THICKNESS: f32 = 1.0;
+pub const SPLIT_VIEW_MIN_PANE_SIZE: f32 = 96.0;
+pub const SPLIT_VIEW_KEYBOARD_STEP: f32 = 24.0;
 
 pub struct SplitView {
     split: Signal<f32>,
@@ -624,13 +630,12 @@ impl SplitView {
     /// `keyboard_step_px` is theme-only (not user-overridable). Panes
     /// and handle all share this resolution path so they stay in sync
     /// when the theme changes.
-    fn resolved_style(&self, theme: &fern_core::Theme) -> ResolvedStyle {
-        let s = theme.components.split_view;
+    fn resolved_style(&self, _theme: &fern_core::Theme) -> ResolvedStyle {
         ResolvedStyle {
-            min_first_size: self.min_first_size.unwrap_or(s.min_pane_size),
-            min_second_size: self.min_second_size.unwrap_or(s.min_pane_size),
-            divider_thickness: self.divider_thickness.unwrap_or(s.gutter_thickness),
-            keyboard_step_px: s.keyboard_step,
+            min_first_size: self.min_first_size.unwrap_or(SPLIT_VIEW_MIN_PANE_SIZE),
+            min_second_size: self.min_second_size.unwrap_or(SPLIT_VIEW_MIN_PANE_SIZE),
+            divider_thickness: self.divider_thickness.unwrap_or(SPLIT_VIEW_GUTTER_THICKNESS),
+            keyboard_step_px: SPLIT_VIEW_KEYBOARD_STEP,
         }
     }
 
@@ -916,7 +921,7 @@ mod tests {
         let handle = tree.child_widget(root, 1);
         let second = tree.child_widget(root, 2);
 
-        let default_thickness = fern_tokens::SplitViewStyle::default().gutter_thickness;
+        let default_thickness = SPLIT_VIEW_GUTTER_THICKNESS;
         let available = 400.0 - default_thickness;
         assert!((tree.bounds(first).width - available * 0.25).abs() < 0.01);
         assert!((tree.bounds(handle).width - default_thickness).abs() < 0.01);
@@ -1004,7 +1009,7 @@ mod tests {
         let handle = tree.child_widget(root, 1);
         let second = tree.child_widget(root, 2);
 
-        let default_thickness = fern_tokens::SplitViewStyle::default().gutter_thickness;
+        let default_thickness = SPLIT_VIEW_GUTTER_THICKNESS;
         let available = 400.0 - default_thickness;
         assert!((tree.bounds(first).height - available * 0.25).abs() < 0.01);
         assert!((tree.bounds(handle).height - default_thickness).abs() < 0.01);

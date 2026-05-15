@@ -53,6 +53,18 @@ enum Row {
     Separator,
 }
 
+/// SplitButton design tokens — relocated from
+/// `theme.components.split_button` in Stage G of the styling migration.
+pub const SPLIT_BUTTON_HEIGHT: f32 = 24.0;
+pub const SPLIT_BUTTON_MIN_WIDTH: f32 = 72.0;
+pub const SPLIT_BUTTON_PADDING_HORIZONTAL: f32 = 14.0;
+pub const SPLIT_BUTTON_PADDING_VERTICAL: f32 = 0.0;
+pub const SPLIT_BUTTON_CORNER_RADIUS: f32 = 4.0;
+pub const SPLIT_BUTTON_BORDER_WIDTH: f32 = 1.0;
+pub const SPLIT_BUTTON_CHEVRON_WIDTH: f32 = 22.0;
+pub const SPLIT_BUTTON_DIVIDER_WIDTH: f32 = 1.0;
+pub const SPLIT_BUTTON_CHEVRON_ICON_SIZE: f32 = 12.0;
+
 pub struct SplitButton {
     rows: Vec<Row>,
     variant: ButtonVariant,
@@ -362,8 +374,7 @@ fn resolve_border_width(
 
 impl Widget for SplitButton {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let sb_style = ctx.theme().components.split_button;
-        let normal_bw = sb_style.border_width;
+        let normal_bw = SPLIT_BUTTON_BORDER_WIDTH;
         let focus_bw = ctx.theme().shape.focus_ring_width;
         let style = self.variant;
         let enabled = self.enabled;
@@ -519,7 +530,7 @@ impl Widget for SplitButton {
         let label_id = ctx.add(label_widget);
 
         let main_padding_id = ctx.add(
-            Padding::symmetric(sb_style.padding_vertical, sb_style.padding_horizontal)
+            Padding::symmetric(SPLIT_BUTTON_PADDING_VERTICAL, SPLIT_BUTTON_PADDING_HORIZONTAL)
                 .child_id(label_id),
         );
         // ZStack (default CENTER alignment) centers the padded label within
@@ -531,7 +542,7 @@ impl Widget for SplitButton {
         let main_region = {
             let actions_for_tap = actions_rc.clone();
             let selected_for_tap = selected.clone();
-            MinSize::new(sb_style.min_width, sb_style.height)
+            MinSize::new(SPLIT_BUTTON_MIN_WIDTH, SPLIT_BUTTON_HEIGHT)
                 .child_id(main_content_id)
                 .on_tap(move |_pos, ctx: &mut EventContext| {
                     if !enabled {
@@ -577,22 +588,22 @@ impl Widget for SplitButton {
             ctx.add(RectWidget::new().background(fern_tokens::BorderRole::Default));
         let divider_id = ctx.add(
             FixedSize::new()
-                .bind_width(sb_style.divider_width)
-                .bind_height(sb_style.height)
+                .bind_width(SPLIT_BUTTON_DIVIDER_WIDTH)
+                .bind_height(SPLIT_BUTTON_HEIGHT)
                 .child_id(divider_fill_id),
         );
 
         // ---- Chevron region ----
         let chevron_icon_id = ctx.add(
-            IconWidget::chevron_down(sb_style.chevron_icon_size).bind_color(text_role.clone()),
+            IconWidget::chevron_down(SPLIT_BUTTON_CHEVRON_ICON_SIZE).bind_color(text_role.clone()),
         );
         let chevron_centered_id = ctx.add(Center::new().child_id(chevron_icon_id));
 
         let chevron_region = {
             let int_for_tap = interaction.clone();
             FixedSize::new()
-                .bind_width(sb_style.chevron_width)
-                .bind_height(sb_style.height)
+                .bind_width(SPLIT_BUTTON_CHEVRON_WIDTH)
+                .bind_height(SPLIT_BUTTON_HEIGHT)
                 .child_id(chevron_centered_id)
                 .on_tap({
                     let menu_open = self.menu_open.clone();
@@ -682,14 +693,14 @@ impl Widget for SplitButton {
             .bind_background(bg_role)
             .bind_border_color(border_role)
             .bind_border_width(border_width)
-            .corner_radius(CornerRadius::uniform(sb_style.corner_radius));
+            .corner_radius(CornerRadius::uniform(SPLIT_BUTTON_CORNER_RADIUS));
         let bg_id = ctx.add(bg_rect);
 
         let frame_id = ctx.add(ZStack::new().add_child(bg_id).add_child(row_id));
 
         // Enforce an overall minimum size: main min_width + divider + chevron.
-        let total_min_width = sb_style.min_width + sb_style.divider_width + sb_style.chevron_width;
-        let root_id = ctx.add(MinSize::new(total_min_width, sb_style.height).child_id(frame_id));
+        let total_min_width = SPLIT_BUTTON_MIN_WIDTH + SPLIT_BUTTON_DIVIDER_WIDTH + SPLIT_BUTTON_CHEVRON_WIDTH;
+        let root_id = ctx.add(MinSize::new(total_min_width, SPLIT_BUTTON_HEIGHT).child_id(frame_id));
         self.root_child_id = Some(root_id);
 
         // ---- Self handlers: the SplitButton is the single focus stop.

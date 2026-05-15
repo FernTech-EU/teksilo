@@ -245,7 +245,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let theme = ctx.theme;
-        let style = &theme.components.chart;
+        use crate::style as cs;
 
         let series_vec = self.series.get();
         if series_vec.is_empty() {
@@ -284,7 +284,6 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
             legend_main_axis_size(
                 canvas.text_backend(),
                 &series_vec,
-                style,
                 &label_style,
                 legend_orientation,
             )
@@ -294,7 +293,6 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
 
         let area = carve_plot_area(&CarveParams {
             bounds,
-            style,
             axis_x: &self.axis_x,
             axis_y: &self.axis_y,
             y_label_max_width,
@@ -333,15 +331,15 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
                     Point::new(plot.x, y),
                     Point::new(plot.right(), y),
                     grid_color,
-                    style.gridline_width,
+                    cs::GRIDLINE_WIDTH,
                 );
             }
         }
 
         // ─── Series (area fill first so lines paint on top) ─────────────
         let palette = self.palette.get();
-        let line_w = self.line_width.unwrap_or(style.line_default_width);
-        let point_r = self.point_radius.unwrap_or(style.point_default_radius);
+        let line_w = self.line_width.unwrap_or(cs::LINE_DEFAULT_WIDTH);
+        let point_r = self.point_radius.unwrap_or(cs::POINT_DEFAULT_RADIUS);
 
         // Use the first visible series to determine x categories. PR 3
         // assumes all visible series share the same x categories — multi-x
@@ -505,7 +503,7 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
         y_hi: f32,
         label_style: &fern_tokens::TextStyle,
     ) {
-        let style = &theme.components.chart;
+        use crate::style as cs;
         let axis_color = BorderRole::Default.resolve(&theme.colors);
         let label_color = TextRole::Secondary.resolve(&theme.colors);
 
@@ -519,7 +517,7 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
             for &t in y_ticks {
                 let y = y_to_pixel(t, y_lo, y_hi, plot);
                 canvas.draw_line(
-                    Point::new(plot.x - style.axis_tick_length, y),
+                    Point::new(plot.x - cs::AXIS_TICK_LENGTH, y),
                     Point::new(plot.x, y),
                     axis_color,
                     1.0,
@@ -542,7 +540,7 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
                 let label = self.axis_y.format(t);
                 let w = measure_text_width(canvas, &label, label_style);
                 let rect = Rect::new(
-                    plot.x - style.axis_tick_length - style.axis_label_gap - w,
+                    plot.x - cs::AXIS_TICK_LENGTH - cs::AXIS_LABEL_GAP - w,
                     y - label_style.size * 0.6,
                     w,
                     label_style.size * 1.2,
@@ -558,7 +556,7 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
                 let center_x = x_for_index(i, n, plot);
                 let rect = Rect::new(
                     center_x - w * 0.5,
-                    plot.bottom() + style.axis_tick_length + style.axis_label_gap,
+                    plot.bottom() + cs::AXIS_TICK_LENGTH + cs::AXIS_LABEL_GAP,
                     w,
                     label_style.size * 1.2,
                 );
@@ -569,7 +567,7 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
         if let Some(title) = self.axis_y.label.as_ref() {
             let w = measure_text_width(canvas, title, label_style);
             let rect = Rect::new(
-                plot.x - style.axis_tick_length - style.axis_label_gap - w - 4.0,
+                plot.x - cs::AXIS_TICK_LENGTH - cs::AXIS_LABEL_GAP - w - 4.0,
                 plot.y + plot.height * 0.5 - label_style.size * 0.6,
                 w,
                 label_style.size * 1.2,
@@ -581,8 +579,8 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
             let rect = Rect::new(
                 plot.x + plot.width * 0.5 - w * 0.5,
                 plot.bottom()
-                    + style.axis_tick_length
-                    + style.axis_label_gap
+                    + cs::AXIS_TICK_LENGTH
+                    + cs::AXIS_LABEL_GAP
                     + label_style.size * 1.4,
                 w,
                 label_style.size * 1.2,
@@ -599,7 +597,7 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
         hit: &PointHit,
         label_style: &fern_tokens::TextStyle,
     ) {
-        let style = &theme.components.chart;
+        use crate::style as cs;
         let palette = self.palette.get();
         // Marker color follows the series color.
         let marker_color = self
@@ -621,8 +619,8 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
             self.axis_y.format(hit.value)
         );
         let text_w = measure_text_width(canvas, &label, label_style);
-        let approx_w = text_w + style.tooltip_padding * 2.0;
-        let height = label_style.size * 1.4 + style.tooltip_padding;
+        let approx_w = text_w + cs::TOOLTIP_PADDING * 2.0;
+        let height = label_style.size * 1.4 + cs::TOOLTIP_PADDING;
 
         // Place the tooltip above the marker by default; flip below if it
         // would clip; flip horizontally if it would clip left/right.
@@ -646,9 +644,9 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
 
         let text_color = theme.colors.tooltip_text;
         let label_rect = Rect::new(
-            tip.x + style.tooltip_padding,
+            tip.x + cs::TOOLTIP_PADDING,
             tip.y + (tip.height - label_style.size * 1.2) * 0.5,
-            tip.width - style.tooltip_padding * 2.0,
+            tip.width - cs::TOOLTIP_PADDING * 2.0,
             label_style.size * 1.2,
         );
         canvas.draw_text(&label, label_rect, label_style, text_color);

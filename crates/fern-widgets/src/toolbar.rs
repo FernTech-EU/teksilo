@@ -9,6 +9,16 @@ use fern_core::widget_id::WidgetId;
 use crate::Panel;
 use crate::primitives::HStack;
 
+/// Toolbar design tokens — relocated from `theme.components.toolbar`
+/// in Stage G of the styling migration.
+pub const TOOLBAR_HEIGHT_COMPACT: f32 = 30.0;
+pub const TOOLBAR_HEIGHT_DEFAULT: f32 = 40.0;
+pub const TOOLBAR_BUTTON_SIZE_COMPACT: f32 = 22.0;
+pub const TOOLBAR_BUTTON_SIZE_DEFAULT: f32 = 30.0;
+pub const TOOLBAR_ICON_SIZE: f32 = 16.0;
+pub const TOOLBAR_SEPARATOR_WIDTH: f32 = 1.0;
+pub const TOOLBAR_SEPARATOR_INSET: f32 = 4.0;
+
 /// A compact horizontal container for toolbar actions.
 pub struct Toolbar {
     pending: Vec<PendingChild>,
@@ -70,9 +80,9 @@ impl std::fmt::Debug for Toolbar {
 
 impl Widget for Toolbar {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme_signal = ctx.theme_signal();
-        let spacing = theme_signal.get().components.toolbar.separator_inset;
-        let padding_signal = theme_signal.map(|t| t.components.toolbar.separator_inset);
+        let _ = ctx.theme_signal();
+        let spacing = TOOLBAR_SEPARATOR_INSET;
+        let padding_signal = fern_core::signal::Signal::new(TOOLBAR_SEPARATOR_INSET);
 
         // Resolve pending children
         let pending = std::mem::take(&mut self.pending);

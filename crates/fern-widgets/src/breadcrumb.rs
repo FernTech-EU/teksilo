@@ -33,6 +33,13 @@ impl std::fmt::Debug for BreadcrumbEntry {
     }
 }
 
+/// Breadcrumb design tokens — relocated from
+/// `theme.components.breadcrumb` in Stage G of the styling migration.
+pub const BREADCRUMB_ITEM_HEIGHT: f32 = 20.0;
+pub const BREADCRUMB_ITEM_PADDING_HORIZONTAL: f32 = 6.0;
+pub const BREADCRUMB_SEPARATOR_GAP: f32 = 4.0;
+pub const BREADCRUMB_CORNER_RADIUS: f32 = 4.0;
+
 /// A single breadcrumb segment definition.
 pub struct BreadcrumbItem {
     label: String,
@@ -126,7 +133,7 @@ impl BreadcrumbSegment {
     }
 
     fn estimate_width(&self, ctx: &LayoutContext) -> f32 {
-        let pad_h = ctx.theme.components.breadcrumb.item_padding_horizontal;
+        let pad_h = BREADCRUMB_ITEM_PADDING_HORIZONTAL;
         let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
         let text_width = if let Some(backend) = ctx.text_backend {
             backend
@@ -246,7 +253,6 @@ impl Widget for BreadcrumbSegment {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> fern_core::widget::LayoutResponse {
-        let style = ctx.theme.components.breadcrumb;
         let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
         let width = proposal.width.unwrap_or_else(|| self.estimate_width(ctx));
         let text_height = if let Some(backend) = ctx.text_backend {
@@ -257,13 +263,12 @@ impl Widget for BreadcrumbSegment {
         } else {
             FALLBACK_LINE_HEIGHT
         };
-        let visual_h = text_height.max(style.item_height);
+        let visual_h = text_height.max(BREADCRUMB_ITEM_HEIGHT);
         Size::new(width, visual_h + envelope * 2.0).into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let colors = &ctx.theme.colors;
-        let style = ctx.theme.components.breadcrumb;
         let shape = &ctx.theme.shape;
         let envelope = shape.focus_ring_offset + shape.focus_ring_width;
         let interaction = self.interaction.get();
@@ -288,7 +293,7 @@ impl Widget for BreadcrumbSegment {
             if background.a() > 0.0 {
                 canvas.fill_rounded_rect(
                     visual,
-                    CornerRadius::uniform(style.corner_radius),
+                    CornerRadius::uniform(BREADCRUMB_CORNER_RADIUS),
                     background,
                 );
             }
@@ -301,7 +306,7 @@ impl Widget for BreadcrumbSegment {
                     (bounds.width - half_stroke * 2.0).max(0.0),
                     (bounds.height - half_stroke * 2.0).max(0.0),
                 );
-                let ring_radius = style.corner_radius + shape.focus_ring_offset + half_stroke;
+                let ring_radius = BREADCRUMB_CORNER_RADIUS + shape.focus_ring_offset + half_stroke;
                 canvas.stroke_rounded_rect(
                     ring_rect,
                     CornerRadius::uniform(ring_radius),
@@ -321,7 +326,7 @@ impl Widget for BreadcrumbSegment {
             colors.text_secondary
         };
 
-        let pad_h = style.item_padding_horizontal;
+        let pad_h = BREADCRUMB_ITEM_PADDING_HORIZONTAL;
         let text_bounds = Rect::new(
             visual.x + pad_h,
             visual.y,
@@ -363,8 +368,8 @@ impl Widget for BreadcrumbSeparator {
         _proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> fern_core::widget::LayoutResponse {
-        let style = ctx.theme.components.breadcrumb;
-        Size::new(style.separator_gap * 3.0, style.item_height).into()
+        let _ = ctx;
+        Size::new(BREADCRUMB_SEPARATOR_GAP * 3.0, BREADCRUMB_ITEM_HEIGHT).into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {

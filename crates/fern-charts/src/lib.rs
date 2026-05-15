@@ -24,6 +24,7 @@ pub mod line_chart;
 pub mod palette;
 pub mod pie_chart;
 pub mod series;
+pub mod style;
 pub(crate) mod text;
 
 pub use axis::{AxisConfig, auto_tick_count, nice_ticks};
