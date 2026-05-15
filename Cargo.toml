@@ -113,7 +113,18 @@ fern-telemetry-codegen = { path = "crates/fern-telemetry-codegen", version = "0.
 [profile.release]
 lto = "fat"
 panic = "abort"
-strip = true
+# `strip = true` (equivalent to `strip = "symbols"`) triggers a heisenbug
+# under the combo `lto = "fat" + codegen-units = 1` on macOS-aarch64
+# where the binary makes a 192 MB MALLOC_LARGE allocation at startup
+# that is never used and only freed back to the malloc cache (visible
+# as `MALLOC_LARGE (empty)` in vmmap). Measured on simple-button:
+# strip = true   → 396 MB resident, 366 MB in two MALLOC_LARGE regions
+# strip = "debuginfo" → 29 MB resident, 0 MALLOC_LARGE
+# The bug is heisen — any debug-info change suppresses it, so the
+# offending allocation site can't be symbolicated. `"debuginfo"` keeps
+# the Rust function symbol table (sub-MB cost) while still removing
+# DWARF, and side-steps the codegen pathology entirely.
+strip = "debuginfo"
 codegen-units = 1
 
 [profile.profiling]
