@@ -182,7 +182,7 @@ impl std::fmt::Debug for HeaderCell {
 
 impl Widget for HeaderCell {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let style = ctx.theme().components.table;
+        use crate::styles::recipe_table_style as cp;
 
         let label_id = ctx.add(
             TextWidget::new_literal(self.label.clone())
@@ -200,7 +200,7 @@ impl Widget for HeaderCell {
         if self.current_sort.is_some() {
             let chevron = ctx.add(SortIndicator::new(
                 self.current_sort,
-                style.sort_indicator_size,
+                cp::SORT_INDICATOR_SIZE,
             ));
             row = row.add_child(chevron);
         }
@@ -223,7 +223,7 @@ impl Widget for HeaderCell {
                 .cloned()
                 .unwrap_or_default();
             let active = !initial.is_empty();
-            let glyph = FilterIndicator::new(style.filter_indicator_size, active);
+            let glyph = FilterIndicator::new(cp::FILTER_INDICATOR_SIZE, active);
             let on_change = {
                 let filters_signal = filters_signal.clone();
                 let col_id = col_id.clone();
@@ -253,7 +253,7 @@ impl Widget for HeaderCell {
         }
         let row_id = ctx.add(row);
         let padded = ctx.add(
-            Padding::symmetric(style.cell_padding_vertical, style.cell_padding_horizontal)
+            Padding::symmetric(cp::CELL_PADDING_VERTICAL, cp::CELL_PADDING_HORIZONTAL)
                 .child_id(row_id),
         );
         self.root_child_id = Some(padded);

@@ -39,7 +39,9 @@ use fern_data::{
     TreeModel,
 };
 use fern_i18n::LocalizedString;
-use fern_tokens::{BorderRole, SurfaceRole, components::TableStyle};
+use fern_tokens::{BorderRole, SurfaceRole};
+
+use crate::styles::recipe_table_style as cp;
 
 use crate::primitives::{HStack, Padding, TwistArrow};
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
@@ -410,20 +412,20 @@ impl<T: 'static> TreeTable<T> {
 
     // ── Internals ──────────────────────────────────────────────────────
 
-    fn effective_row_height(&self, style: &TableStyle) -> f32 {
-        self.row_height.unwrap_or(style.row_height)
+    fn effective_row_height(&self) -> f32 {
+        self.row_height.unwrap_or(cp::ROW_HEIGHT)
     }
 
-    fn effective_header_height(&self, style: &TableStyle) -> f32 {
+    fn effective_header_height(&self) -> f32 {
         if self.show_header {
-            self.header_height.unwrap_or(style.header_height)
+            self.header_height.unwrap_or(cp::HEADER_HEIGHT)
         } else {
             0.0
         }
     }
 
-    fn effective_indent(&self, style: &TableStyle) -> f32 {
-        self.indent_per_level.unwrap_or(style.tree_indent_per_level)
+    fn effective_indent(&self) -> f32 {
+        self.indent_per_level.unwrap_or(cp::TREE_INDENT_PER_LEVEL)
     }
 
     /// Resolve the tree column id to a declaration index. Falls back
@@ -515,10 +517,9 @@ impl<T: 'static> std::fmt::Debug for TreeTable<T> {
 
 impl<T: 'static> Widget for TreeTable<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let style = ctx.theme().components.table;
-        let row_h = self.effective_row_height(&style);
-        let header_h = self.effective_header_height(&style);
-        let indent_per_level = self.effective_indent(&style);
+        let row_h = self.effective_row_height();
+        let header_h = self.effective_header_height();
+        let indent_per_level = self.effective_indent();
 
         let version = ctx.signal(0_u64);
         version.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
@@ -708,7 +709,7 @@ impl<T: 'static> Widget for TreeTable<T> {
                 let current_sort = active_sort
                     .as_ref()
                     .and_then(|(id, dir)| if id == &col.id { Some(*dir) } else { None });
-                let filter_zone_width = style.filter_indicator_size + style.cell_padding_horizontal;
+                let filter_zone_width = cp::FILTER_INDICATOR_SIZE + cp::CELL_PADDING_HORIZONTAL;
                 let cell = HeaderCell::new(
                     col.id.clone(),
                     col.header_label.resolve_now(),
@@ -716,7 +717,7 @@ impl<T: 'static> Widget for TreeTable<T> {
                     col.sortable,
                     col.resizable,
                     col.reorderable,
-                    style.resize_handle_width,
+                    cp::RESIZE_HANDLE_WIDTH,
                     current_sort,
                     self.sort_signal.clone(),
                     self.column_widths_signal.clone(),
@@ -734,7 +735,7 @@ impl<T: 'static> Widget for TreeTable<T> {
             let header_row = HeaderRow::new(
                 cell_ids,
                 self.column_widths.clone(),
-                style.grid_line_thickness,
+                cp::GRID_LINE_THICKNESS,
             );
             self.header_row_id = Some(ctx.add(header_row));
         }
@@ -748,7 +749,7 @@ impl<T: 'static> Widget for TreeTable<T> {
             let selection = self.selection.clone();
             let cell_selection = self.cell_selection.clone();
             let selection_mode = self.selection_mode;
-            let tree_color = style.tree_twist_size;
+            let tree_color = cp::TREE_TWIST_SIZE;
             let _ = tree_color;
             let editing_state = self.editing_cell.get();
 
@@ -812,7 +813,7 @@ impl<T: 'static> Widget for TreeTable<T> {
                         let proxy_for_twist = proxy.clone();
                         let twist = ctx.add(
                             TwistArrow::new(
-                                style.tree_twist_size,
+                                cp::TREE_TWIST_SIZE,
                                 entry.has_children,
                                 entry.is_expanded,
                             )
@@ -823,7 +824,7 @@ impl<T: 'static> Widget for TreeTable<T> {
                         // Build inside-out so each `ctx.add` happens
                         // outside the mutable borrow chain.
                         let twist_and_label = HStack::new()
-                            .spacing(style.tree_twist_label_gap)
+                            .spacing(cp::TREE_TWIST_LABEL_GAP)
                             .add_child(twist)
                             .add_child(inner_id);
                         let twist_label_id = ctx.add(twist_and_label);
@@ -941,14 +942,13 @@ impl<T: 'static> Widget for TreeTable<T> {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        ctx: &LayoutContext,
+        _ctx: &LayoutContext,
     ) {
         if children.is_empty() {
             return;
         }
-        let style = ctx.theme.components.table;
-        let row_h = self.effective_row_height(&style);
-        let header_h = self.effective_header_height(&style);
+        let row_h = self.effective_row_height();
+        let header_h = self.effective_header_height();
         let body_height = (bounds.height - header_h).max(0.0);
 
         let row_count = self.proxy.visible_count();
@@ -976,7 +976,7 @@ impl<T: 'static> Widget for TreeTable<T> {
             &self.columns,
             &display,
             body_width,
-            style.min_column_width_default,
+            cp::MIN_COLUMN_WIDTH_DEFAULT,
             &overrides,
         );
         *self.column_widths.borrow_mut() = widths;
@@ -1017,9 +1017,8 @@ impl<T: 'static> Widget for TreeTable<T> {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let style = ctx.theme.components.table;
-        let row_h = self.effective_row_height(&style);
-        let header_h = self.effective_header_height(&style);
+        let row_h = self.effective_row_height();
+        let header_h = self.effective_header_height();
         let colors = &ctx.theme.colors;
         let scroll_y = self.scroll_y.get();
         let body_origin_y = bounds.y + header_h;
@@ -1064,7 +1063,7 @@ impl<T: 'static> Widget for TreeTable<T> {
         }
 
         let line_color = BorderRole::Divider.resolve(colors);
-        let line_w = style.grid_line_thickness.max(1.0);
+        let line_w = cp::GRID_LINE_THICKNESS.max(1.0);
         if matches!(self.grid_lines, GridLines::Horizontal | GridLines::Both) {
             let first_visible = (scroll_y / row_h).floor().max(0.0) as usize;
             let last_visible = ((scroll_y + body_height) / row_h).ceil() as usize;
@@ -1098,8 +1097,8 @@ impl<T: 'static> Widget for TreeTable<T> {
             let cell_w = widths[focus_col];
             let y = body_origin_y + (focus_row as f32) * row_h - scroll_y;
             if y + row_h >= body_origin_y && y <= body_origin_y + body_height {
-                let inset = style.focus_ring_inset;
-                let stroke = style.grid_line_thickness.max(1.5);
+                let inset = cp::FOCUS_RING_INSET;
+                let stroke = cp::GRID_LINE_THICKNESS.max(1.5);
                 let ring_color = BorderRole::Focused.resolve(colors);
                 let rx = bounds.x + x_off + inset;
                 let ry = y + inset;
@@ -1209,7 +1208,7 @@ mod tests {
         assert_eq!(selection.selected_indices().len(), 0);
         // Click on the first body row — visible at flat_idx 0
         // ("docs"), which sits below the header at y ≈ header + 0.
-        let header_h = tree.theme().components.table.header_height;
+        let header_h = cp::HEADER_HEIGHT;
         let click_y = header_h + 10.0;
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: Point::new(40.0, click_y),

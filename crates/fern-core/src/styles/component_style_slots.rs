@@ -32,7 +32,8 @@ use crate::styles::{
     SharedProgressBarStyle, SharedRadioStyle, SharedRichTextEditorStyle,
     SharedScrollBarStyle, SharedSearchFieldStyle, SharedSegmentedControlStyle,
     SharedSliderStyle, SharedSnackbarStyle, SharedSpinBoxStyle, SharedStandardItemStyle,
-    SharedTabStyle, SharedTextInputStyle, SharedToggleStyle, SharedTooltipStyle,
+    SharedTabStyle, SharedTableStyle, SharedTextInputStyle, SharedToggleStyle,
+    SharedTooltipStyle,
 };
 
 /// Typed slot bag living on [`crate::styles::Theme`]. One slot per
@@ -70,6 +71,7 @@ pub struct ComponentStyleSlots {
     pub date_edit: Option<SharedDateEditStyle>,
     pub search_field: Option<SharedSearchFieldStyle>,
     pub rich_text_editor: Option<SharedRichTextEditorStyle>,
+    pub table: Option<SharedTableStyle>,
 }
 
 impl std::fmt::Debug for ComponentStyleSlots {
@@ -108,6 +110,7 @@ impl std::fmt::Debug for ComponentStyleSlots {
             .field("date_edit", &self.date_edit.is_some())
             .field("search_field", &self.search_field.is_some())
             .field("rich_text_editor", &self.rich_text_editor.is_some())
+            .field("table", &self.table.is_some())
             .finish()
     }
 }
@@ -154,5 +157,6 @@ impl PartialEq for ComponentStyleSlots {
             && rc_eq(&self.date_edit, &other.date_edit)
             && rc_eq(&self.search_field, &other.search_field)
             && rc_eq(&self.rich_text_editor, &other.rich_text_editor)
+            && rc_eq(&self.table, &other.table)
     }
 }

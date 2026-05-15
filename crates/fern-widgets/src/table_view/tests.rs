@@ -1360,11 +1360,11 @@ fn resize_drag_right_grows_column_for_non_first_column() {
 
     // id width = 60. name takes the rest = 340. Grab name's trailing
     // edge at window x ≈ 399.
-    let style = tree.theme().components.table;
-    let resize_handle = style.resize_handle_width;
+    use crate::styles::recipe_table_style as cp;
+    let resize_handle = cp::RESIZE_HANDLE_WIDTH;
     let down_x = 400.0 - resize_handle * 0.5;
     let drag_to_x = down_x + 30.0;
-    let down_y = style.header_height * 0.5;
+    let down_y = cp::HEADER_HEIGHT * 0.5;
 
     tree.dispatch_event(WidgetEvent::PointerDown {
         position: Point::new(down_x, down_y),
@@ -1414,13 +1414,13 @@ fn resize_pointer_down_in_filter_zone_does_not_start_resize() {
         width: Some(400.0),
         height: Some(200.0),
     });
-    let style = tree.theme().components.table;
+    use crate::styles::recipe_table_style as cp;
     // Click well inside the filter-zone band — past the resize zone
     // but before the sort/label region.
     let click_x = 400.0
-        - style.resize_handle_width
-        - (style.filter_indicator_size + style.cell_padding_horizontal) * 0.5;
-    let click_y = style.header_height * 0.5;
+        - cp::RESIZE_HANDLE_WIDTH
+        - (cp::FILTER_INDICATOR_SIZE + cp::CELL_PADDING_HORIZONTAL) * 0.5;
+    let click_y = cp::HEADER_HEIGHT * 0.5;
     let mods = Modifiers::NONE;
     tree.dispatch_event(WidgetEvent::PointerDown {
         position: Point::new(click_x, click_y),
@@ -1525,15 +1525,15 @@ fn header_resize_works_when_table_is_nested_in_panel() {
     });
 
     let table_bounds = tree.bounds(table_id);
-    let style = tree.theme().components.table;
+    use crate::styles::recipe_table_style as cp;
 
     // Trailing edge of "name" in window coords (table is offset by the
     // VStack/Panel padding, so we have to ask the arena where the
     // table actually sits).
-    let resize_handle = style.resize_handle_width;
+    let resize_handle = cp::RESIZE_HANDLE_WIDTH;
     let down_x = table_bounds.right() - resize_handle * 0.5;
     let drag_to_x = down_x + 30.0;
-    let down_y = table_bounds.y + style.header_height * 0.5;
+    let down_y = table_bounds.y + cp::HEADER_HEIGHT * 0.5;
 
     tree.dispatch_event(WidgetEvent::PointerDown {
         position: Point::new(down_x, down_y),
@@ -1585,8 +1585,8 @@ fn cursor_resets_to_default_when_pointer_leaves_resize_zone() {
         height: Some(200.0),
     });
 
-    let style = tree.theme().components.table;
-    let header_y = style.header_height * 0.5;
+    use crate::styles::recipe_table_style as cp;
+    let header_y = cp::HEADER_HEIGHT * 0.5;
     // Hover near the right edge of "name" → cursor becomes ColResize.
     tree.dispatch_event(WidgetEvent::PointerMove {
         position: Point::new(398.0, header_y),
@@ -1654,12 +1654,12 @@ fn header_resizing_works_in_full_data_grid_layout() {
     // Hit the right edge of the cell. We can't compute the absolute
     // trailing edge of "name" from layout alone (Panel adds padding,
     // VStack adds spacing) — read it from the table's own widths.
-    let (style, name_w_at_layout, table_bounds) = {
-        let style = tree.theme().components.table;
+    use crate::styles::recipe_table_style as cp;
+    let (name_w_at_layout, table_bounds) = {
         let any = tree.widget_as_any(table_id).unwrap();
         let tv = any.downcast_ref::<TableView<Row>>().unwrap();
         let w = tv.column_widths_signal().get();
-        (style, w.get("name").copied(), tree.bounds(table_id))
+        (w.get("name").copied(), tree.bounds(table_id))
     };
     // No override yet — flex resolved to (table_w - 60 - scrollbar).
     assert!(name_w_at_layout.is_none());
@@ -1669,8 +1669,8 @@ fn header_resizing_works_in_full_data_grid_layout() {
     // last `resize_handle_width` of that.
     let scrollbar_thickness = 12.0_f32;
     let trailing_x = table_bounds.right() - scrollbar_thickness;
-    let down_x = trailing_x - style.resize_handle_width * 0.5;
-    let down_y = table_bounds.y + style.header_height * 0.5;
+    let down_x = trailing_x - cp::RESIZE_HANDLE_WIDTH * 0.5;
+    let down_y = table_bounds.y + cp::HEADER_HEIGHT * 0.5;
     let drop_x = down_x + 60.0;
 
     tree.dispatch_event(WidgetEvent::PointerDown {

@@ -41,7 +41,9 @@ use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_data::{DataChange, ListDataSource, ListModel, SelectionModel};
 use fern_i18n::LocalizedString;
-use fern_tokens::{BorderRole, SurfaceRole, components::TableStyle};
+use fern_tokens::{BorderRole, SurfaceRole};
+
+use crate::styles::recipe_table_style as cp;
 
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
 
@@ -705,18 +707,18 @@ impl<T: 'static> TableView<T> {
     /// of 28 px. Once a `BuildContext` is available we read the table
     /// style; this static helper is for paths outside `build()`.
     fn effective_row_height_static(&self) -> f32 {
-        self.row_height.unwrap_or(28.0)
+        self.row_height.unwrap_or(cp::ROW_HEIGHT)
     }
 
-    fn effective_row_height(&self, style: &TableStyle) -> f32 {
-        self.row_height.unwrap_or(style.row_height)
+    fn effective_row_height(&self) -> f32 {
+        self.row_height.unwrap_or(cp::ROW_HEIGHT)
     }
 
-    fn effective_header_height(&self, style: &TableStyle) -> f32 {
+    fn effective_header_height(&self) -> f32 {
         if !self.show_header {
             0.0
         } else {
-            self.header_height.unwrap_or(style.header_height)
+            self.header_height.unwrap_or(cp::HEADER_HEIGHT)
         }
     }
 
@@ -766,9 +768,8 @@ impl<T: 'static> std::fmt::Debug for TableView<T> {
 
 impl<T: 'static> Widget for TableView<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let style = ctx.theme().components.table;
-        let row_h = self.effective_row_height(&style);
-        let header_h = self.effective_header_height(&style);
+        let row_h = self.effective_row_height();
+        let header_h = self.effective_header_height();
 
         // Version signal — bumps drive a rebuild.
         let version = ctx.signal(0_u64);
@@ -1102,7 +1103,7 @@ impl<T: 'static> Widget for TableView<T> {
                 // Filter zone width: indicator glyph + a small horizontal
                 // padding for tap tolerance. Mirrors the layout of the
                 // HStack inside HeaderCell::build.
-                let filter_zone_width = style.filter_indicator_size + style.cell_padding_horizontal;
+                let filter_zone_width = cp::FILTER_INDICATOR_SIZE + cp::CELL_PADDING_HORIZONTAL;
                 let cell = header::HeaderCell::new(
                     col.id.clone(),
                     col.header_label.resolve_now(),
@@ -1110,7 +1111,7 @@ impl<T: 'static> Widget for TableView<T> {
                     col.sortable,
                     col.resizable,
                     col.reorderable,
-                    style.resize_handle_width,
+                    cp::RESIZE_HANDLE_WIDTH,
                     current_sort,
                     self.sort_signal.clone(),
                     self.column_widths_signal.clone(),
@@ -1128,7 +1129,7 @@ impl<T: 'static> Widget for TableView<T> {
             let header_row = header::HeaderRow::new(
                 cell_ids,
                 self.column_widths.clone(),
-                style.grid_line_thickness,
+                cp::GRID_LINE_THICKNESS,
             );
             // Wire reorder drag-target handlers on the header strip.
             let header_row_id = ctx.add(header_row);
@@ -1238,14 +1239,13 @@ impl<T: 'static> Widget for TableView<T> {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        ctx: &LayoutContext,
+        _ctx: &LayoutContext,
     ) {
         if children.is_empty() {
             return;
         }
-        let style = ctx.theme.components.table;
-        let row_h = self.effective_row_height(&style);
-        let header_h = self.effective_header_height(&style);
+        let row_h = self.effective_row_height();
+        let header_h = self.effective_header_height();
         let body_height = (bounds.height - header_h).max(0.0);
 
         let total_height = self.total_content_height(row_h);
@@ -1274,7 +1274,7 @@ impl<T: 'static> Widget for TableView<T> {
             &self.columns,
             &display,
             body_width,
-            style.min_column_width_default,
+            cp::MIN_COLUMN_WIDTH_DEFAULT,
             &overrides,
         );
         *self.column_widths.borrow_mut() = widths;
@@ -1334,9 +1334,8 @@ impl<T: 'static> Widget for TableView<T> {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let style = ctx.theme.components.table;
-        let row_h = self.effective_row_height(&style);
-        let header_h = self.effective_header_height(&style);
+        let row_h = self.effective_row_height();
+        let header_h = self.effective_header_height();
         let colors = &ctx.theme.colors;
 
         let scroll_y = self.scroll_y.get();
@@ -1385,7 +1384,7 @@ impl<T: 'static> Widget for TableView<T> {
 
         // Grid lines.
         let line_color = BorderRole::Divider.resolve(colors);
-        let line_w = style.grid_line_thickness.max(1.0);
+        let line_w = cp::GRID_LINE_THICKNESS.max(1.0);
 
         if matches!(self.grid_lines, GridLines::Horizontal | GridLines::Both) {
             let first_visible = (scroll_y / row_h).floor().max(0.0) as usize;
@@ -1421,8 +1420,8 @@ impl<T: 'static> Widget for TableView<T> {
             let cell_w = widths[focus_col];
             let y = body_origin_y + (focus_row as f32) * row_h - scroll_y;
             if y + row_h >= body_origin_y && y <= body_origin_y + body_height {
-                let inset = style.focus_ring_inset;
-                let stroke = style.grid_line_thickness.max(1.5);
+                let inset = cp::FOCUS_RING_INSET;
+                let stroke = cp::GRID_LINE_THICKNESS.max(1.5);
                 let ring_color = BorderRole::Focused.resolve(colors);
                 let rx = bounds.x + x_off + inset;
                 let ry = y + inset;

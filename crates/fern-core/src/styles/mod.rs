@@ -33,6 +33,7 @@ pub mod slider_style;
 pub mod spin_box_style;
 pub mod standard_item_style;
 pub mod tab_style;
+pub mod table_style;
 pub mod text_input_style;
 pub mod theme;
 pub mod theme_appearance;
@@ -108,6 +109,10 @@ pub use standard_item_style::{
 };
 pub use tab_style::{
     SharedTabStyle, TabBarChromeConfig, TabBarOrientation, TabStyle, TabStyleConfig,
+};
+pub use table_style::{
+    SharedTableStyle, SortDirection, TableGridRecipe, TableHeaderCellConfig, TableRowConfig,
+    TableStyle,
 };
 pub use text_input_style::{
     SharedTextInputStyle, TextInputStyle, TextInputStyleConfig, TextInputValidationLevel,
