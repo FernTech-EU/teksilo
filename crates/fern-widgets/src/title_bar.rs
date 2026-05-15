@@ -493,10 +493,13 @@ mod tests {
     /// changes shape this test will tell us by panicking with a helpful
     /// debug print of the children at each level.
     ///
-    /// The maximize slot is a `Switcher` wrapping a `ControlButton` for the
-    /// `□` (normal) and `❐` (zoomed) glyphs; this helper drills in and
-    /// returns the currently-visible ControlButton so accessibility /
-    /// geometry assertions work unchanged.
+    /// The maximize slot is a `Switcher` whose two pages (`□` normal and
+    /// `❐` zoomed) are pre-mounted ControlButtons handed in via
+    /// `child_id`. With Switcher's lazy-mount semantics, `PreMounted`
+    /// entries become `Mounted` eagerly on first build, so the Switcher
+    /// reports both pages as direct children — this helper picks the
+    /// first (normal-state) since `TestHost::default()` reports
+    /// `is_maximized = false`.
     fn locate_control_buttons(tree: &WidgetTree, bar: WidgetId) -> [WidgetId; 3] {
         // bar -> [HStack root]
         let bar_kids = tree.children(bar);
@@ -528,17 +531,14 @@ mod tests {
             3,
             "inner controls row should contain 3 items, got {inner_kids:?}"
         );
-        // Descend into the Switcher → ZStack → [normal, zoomed]; return the
-        // first (normal-state) ControlButton since `TestHost::default()`
-        // reports `is_maximized = false` at build time.
-        let switcher_kids = tree.children(inner_kids[1]);
-        assert_eq!(switcher_kids.len(), 1, "Switcher wraps one ZStack");
-        let zstack = switcher_kids[0];
-        let max_buttons = tree.children(zstack);
+        // Switcher's direct children are its mounted pages — both
+        // pre-mounted ControlButtons (□ normal + ❐ zoomed) in
+        // declaration order.
+        let max_buttons = tree.children(inner_kids[1]);
         assert_eq!(
             max_buttons.len(),
             2,
-            "maximize Switcher should wrap 2 ControlButtons (□ + ❐), got {max_buttons:?}"
+            "maximize Switcher should expose 2 ControlButtons (□ + ❐), got {max_buttons:?}"
         );
         [inner_kids[0], max_buttons[0], inner_kids[2]]
     }
