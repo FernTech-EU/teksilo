@@ -30,8 +30,8 @@ use crate::styles::{
     SharedComboBoxStyle, SharedDialogStyle, SharedIconButtonStyle, SharedLinkStyle,
     SharedMenuItemStyle, SharedPanelStyle, SharedPopoverStyle, SharedProgressBarStyle,
     SharedRadioStyle, SharedScrollBarStyle, SharedSegmentedControlStyle, SharedSliderStyle,
-    SharedSnackbarStyle, SharedStandardItemStyle, SharedTabStyle, SharedTextInputStyle,
-    SharedToggleStyle, SharedTooltipStyle,
+    SharedSnackbarStyle, SharedSpinBoxStyle, SharedStandardItemStyle, SharedTabStyle,
+    SharedTextInputStyle, SharedToggleStyle, SharedTooltipStyle,
 };
 
 /// Typed slot bag living on [`crate::styles::Theme`]. One slot per
@@ -65,6 +65,7 @@ pub struct ComponentStyleSlots {
     pub avatar: Option<SharedAvatarStyle>,
     pub calendar: Option<SharedCalendarStyle>,
     pub color_picker: Option<SharedColorPickerStyle>,
+    pub spin_box: Option<SharedSpinBoxStyle>,
 }
 
 impl std::fmt::Debug for ComponentStyleSlots {
@@ -99,6 +100,7 @@ impl std::fmt::Debug for ComponentStyleSlots {
             .field("avatar", &self.avatar.is_some())
             .field("calendar", &self.calendar.is_some())
             .field("color_picker", &self.color_picker.is_some())
+            .field("spin_box", &self.spin_box.is_some())
             .finish()
     }
 }
@@ -141,5 +143,6 @@ impl PartialEq for ComponentStyleSlots {
             && rc_eq(&self.avatar, &other.avatar)
             && rc_eq(&self.calendar, &other.calendar)
             && rc_eq(&self.color_picker, &other.color_picker)
+            && rc_eq(&self.spin_box, &other.spin_box)
     }
 }

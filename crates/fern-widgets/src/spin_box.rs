@@ -100,11 +100,11 @@ use fern_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_text::SharedTypesetter;
-use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextStyle};
+use fern_tokens::{CornerRadius, TextStyle};
 
 use crate::primitives::icon_widget::IconWidget;
 use crate::primitives::text_input_field::TextInputField;
-use crate::primitives::{Divider, Expand, HStack, MinSize, Padding, RectWidget, VStack, ZStack};
+use crate::primitives::{MinSize, Padding};
 
 use self::step_button::StepButton;
 
@@ -135,17 +135,7 @@ pub enum StepType {
     Adaptive,
 }
 
-/// Button visibility / placement.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ButtonLayout {
-    /// Up arrow on top, down arrow below, stacked vertically to the
-    /// right of the field. Default, matches Qt and WinUI.
-    #[default]
-    Stacked,
-    /// No visible step buttons. Useful for read-only displays and
-    /// for SpinBoxes driven entirely by keyboard / wheel.
-    Hidden,
-}
+pub use fern_core::styles::ButtonLayout;
 
 /// When the mouse wheel adjusts the value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -259,6 +249,9 @@ pub struct SpinBox<T: SpinValue> {
     /// Floor width so the field and step buttons always fit. Also
     /// resolved at build from `button_layout`.
     min_width: f32,
+    /// Per-call style override for the SpinBox chrome. Higher
+    /// precedence than the theme-wide `style_slots.spin_box` slot.
+    style_override: Option<fern_core::styles::SharedSpinBoxStyle>,
     root_child_id: Option<WidgetId>,
     field_id: Option<WidgetId>,
 }
@@ -311,9 +304,17 @@ impl<T: SpinValue> SpinBox<T> {
             can_step_down: Signal::new(true),
             pixel_cap: None,
             min_width: MIN_WIDTH_WITH_BUTTONS,
+            style_override: None,
             root_child_id: None,
             field_id: None,
         }
+    }
+
+    /// Per-call style override. Higher precedence than the theme-wide
+    /// `style_slots.spin_box` slot.
+    pub fn style(mut self, style: impl fern_core::styles::SpinBoxStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
     }
 
     // ── Builder methods ─────────────────────────────────────────────
@@ -870,6 +871,8 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         self.field_id = Some(field_id);
 
         // Wrap field in vertical padding so it aligns inside the frame.
+        // (Horizontal Expand is owned by the active SpinBoxStyle so a
+        // custom recipe can re-arrange the row.)
         let padded_field_id = ctx.add(
             Padding::new(
                 field_dims::TEXT_FIELD_PADDING_VERTICAL,
@@ -879,17 +882,10 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             )
             .child_id(field_id),
         );
-        // `Expand::horizontal()` defaults to flex=1 with zero-basis: the
-        // wrapped field's natural 200 dp default does NOT enter the rigid
-        // pool, so the field gets exactly the leftover width inside the
-        // SpinBox's MaxSize-capped bounds. Without flex, the natural width
-        // would add up with the divider + buttons, blow past the cap, and
-        // paint off-screen.
-        let expanded_field_id = ctx.add(Expand::horizontal().child_id(padded_field_id));
 
-        // ── Step button column ─────────────────────────────────────
-        let buttons_id_opt = if self.button_layout != ButtonLayout::Hidden {
-            Some(build_buttons(
+        // ── Step buttons ───────────────────────────────────────────
+        let (step_up_id, step_down_id) = if self.button_layout != ButtonLayout::Hidden {
+            let (u, d) = build_step_buttons(
                 ctx,
                 &step,
                 &step_silent,
@@ -898,81 +894,28 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                 enabled && !read_only,
                 field_dims::TEXT_FIELD_HEIGHT,
                 field_dims::TEXT_FIELD_CORNER_RADIUS,
-            ))
+            );
+            (Some(u), Some(d))
         } else {
-            None
+            (None, None)
         };
 
-        // ── Row: field | divider | buttons ────────────────────────
-        let row_id = {
-            let mut row = HStack::new().spacing(0.0);
-            row = row.add_child(expanded_field_id);
-            if let Some(buttons_id) = buttons_id_opt {
-                // Thin vertical divider between text and buttons so
-                // the click targets read as distinct affordances.
-                let divider = Divider::vertical()
-                    .thickness(1.0)
-                    .color(fern_tokens::BorderRole::Default);
-                let divider_id = ctx.add(Padding::new(2.0, 0.0, 2.0, 0.0).child(divider));
-                row = row.add_child(divider_id).add_child(buttons_id);
-            }
-            ctx.add(row)
-        };
-
-        // Symmetric horizontal padding sourced from
-        // `theme.components.text_field.padding_horizontal` — same
-        // token `TextInput` uses, so the two controls line up on
-        // forms. Previously the left side was set to 0, which made
-        // the text sit flush against the border; the chrome math
-        // for `.width_chars()` already assumes padding on both
-        // sides (`padding_horizontal * 2.0`), so this also brings
-        // the measured and rendered widths back into agreement.
-        let padded_row_id = ctx.add(
-            Padding::new(
-                0.0,
-                field_dims::TEXT_FIELD_PADDING_HORIZONTAL,
-                0.0,
-                field_dims::TEXT_FIELD_PADDING_HORIZONTAL,
-            )
-            .child_id(row_id),
+        // ── Delegate visual chrome (row layout + divider + bordered
+        // surface) to the active SpinBoxStyle.
+        let style = crate::styles::recipe_spin_box_style::resolve_spin_box_style(
+            &self.style_override,
+            ctx,
         );
-
-        // ── Frame: border + background ─────────────────────────────
-        //
-        // Int UI text-field convention (Section 7 of the v2
-        // reference): the focus indicator IS the border — accent-
-        // colored and `focus_ring_width` dp thick when focused,
-        // normal border color and `border_width` dp otherwise. No
-        // separate ring wrapping the control (which would reserve
-        // extra envelope space and clash with row layouts that
-        // expect the widget to report its visual footprint as its
-        // full size).
-        // Border role tracks the SpinBox's focus_within signal; the
-        // paint-time resolver swaps in the right color against the
-        // current theme on every pass, so theme switches refresh for
-        // free.
-        let border_role = self.focused.map(|f| {
-            if *f {
-                BorderRole::Focused
-            } else {
-                BorderRole::Default
-            }
-        });
-        let border_width_signal = self.focused.map(move |f| {
-            if *f {
-                focus_ring_width
-            } else {
-                field_border_width
-            }
-        });
-        let bg = RectWidget::new()
-            .background(SurfaceRole::Content)
-            .border_color(border_role)
-            .border_width(border_width_signal)
-            .corner_radius(CornerRadius::uniform(field_dims::TEXT_FIELD_CORNER_RADIUS));
-        let bg_id = ctx.add(bg);
-
-        let zstack_id = ctx.add(ZStack::new().add_child(bg_id).add_child(padded_row_id));
+        let cfg = fern_core::styles::SpinBoxStyleConfig {
+            field: padded_field_id,
+            step_up: step_up_id,
+            step_down: step_down_id,
+            layout: self.button_layout,
+            is_focused: self.focused.clone(),
+        };
+        let zstack_id = style.make_body(&cfg, ctx);
+        let _ = focus_ring_width;
+        let _ = field_border_width;
 
         // Resolve the width policy into a concrete pixel cap (or
         // `None` for `Fill`). Char-mode measurement uses the app-
@@ -1257,7 +1200,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
 /// `step` (with `EventContext`) is called on the initial tap;
 /// `step_silent` is called from the hold-to-repeat timer, which
 /// runs inside a frame-tick effect with no `EventContext` to hand.
-fn build_buttons<T: SpinValue>(
+fn build_step_buttons<T: SpinValue>(
     ctx: &mut BuildContext,
     step: &Rc<dyn Fn(i32, bool, &mut EventContext)>,
     step_silent: &Rc<dyn Fn(i32, bool) -> Option<T>>,
@@ -1266,7 +1209,7 @@ fn build_buttons<T: SpinValue>(
     enabled: bool,
     frame_height: f32,
     corner_radius: f32,
-) -> WidgetId {
+) -> (WidgetId, WidgetId) {
     // Each button is half of the field's inner height (minus the
     // borders and a 1 px gutter between the two).
     let button_height = ((frame_height - 2.0) * 0.5).max(8.0);
@@ -1315,14 +1258,7 @@ fn build_buttons<T: SpinValue>(
         bottom_right: corner_radius,
     });
 
-    let up_id = ctx.add(up_button);
-    let down_id = ctx.add(down_button);
-
-    let column = VStack::new()
-        .spacing(0.0)
-        .add_child(up_id)
-        .add_child(down_id);
-    ctx.add(column)
+    (ctx.add(up_button), ctx.add(down_button))
 }
 
 /// Small chevron-up icon at `size` px. Mirrors the shape of the

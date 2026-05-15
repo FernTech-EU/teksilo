@@ -27,6 +27,7 @@ pub mod scroll_bar_style;
 pub mod segmented_control_style;
 pub mod snackbar_style;
 pub mod slider_style;
+pub mod spin_box_style;
 pub mod standard_item_style;
 pub mod tab_style;
 pub mod text_input_style;
@@ -89,6 +90,9 @@ pub use slider_style::{
     SharedSliderStyle, SliderOrientation, SliderStyle, SliderStyleConfig, SliderVariant,
 };
 pub use snackbar_style::{SharedSnackbarStyle, SnackbarStyle, SnackbarStyleConfig};
+pub use spin_box_style::{
+    ButtonLayout, SharedSpinBoxStyle, SpinBoxStyle, SpinBoxStyleConfig,
+};
 pub use standard_item_style::{
     SharedStandardItemStyle, StandardItemStyle, StandardItemStyleConfig,
 };
