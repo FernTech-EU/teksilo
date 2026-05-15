@@ -11,6 +11,7 @@ pub mod button_style;
 pub mod calendar_style;
 pub mod card_style;
 pub mod checkbox_style;
+pub mod color_picker_style;
 pub mod combo_box_style;
 pub mod component_style_slots;
 pub mod dialog_style;
@@ -53,6 +54,9 @@ pub use calendar_style::{
 pub use card_style::{CardStyle, CardStyleConfig, CardVariant, SharedCardStyle};
 pub use checkbox_style::{
     CheckboxState, CheckboxStyle, CheckboxStyleConfig, CheckboxVariant, SharedCheckboxStyle,
+};
+pub use color_picker_style::{
+    ColorPickerLayout, ColorPickerStyle, ColorPickerStyleConfig, SharedColorPickerStyle,
 };
 pub use combo_box_style::{
     ComboBoxStyle, ComboBoxStyleConfig, ComboBoxVariant, SharedComboBoxStyle,

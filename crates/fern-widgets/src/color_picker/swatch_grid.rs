@@ -89,15 +89,15 @@ impl Widget for SwatchGrid {
 
         let swatches = self.swatches.get();
         let columns = self.columns;
-        let style = ctx.theme_signal().get().components.color_picker;
+        use crate::styles::recipe_color_picker_style as cp;
 
         // Build one ColorSwatch per color.
         let on_select = self.on_select.clone();
         let selected = self.selected.clone();
         let mut grid = Grid::new()
             .columns(vec![TrackSize::Auto; columns])
-            .row_gap(style.swatch_spacing)
-            .column_gap(style.swatch_spacing);
+            .row_gap(cp::SWATCH_SPACING)
+            .column_gap(cp::SWATCH_SPACING);
         for color in &swatches {
             let color = *color;
             let on_select = on_select.clone();

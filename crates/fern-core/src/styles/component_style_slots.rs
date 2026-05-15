@@ -26,12 +26,12 @@
 
 use crate::styles::{
     SharedAvatarStyle, SharedBadgeStyle, SharedBannerStyle, SharedButtonStyle,
-    SharedCalendarStyle, SharedCardStyle, SharedCheckboxStyle, SharedComboBoxStyle,
-    SharedDialogStyle, SharedIconButtonStyle, SharedLinkStyle, SharedMenuItemStyle,
-    SharedPanelStyle, SharedPopoverStyle, SharedProgressBarStyle, SharedRadioStyle,
-    SharedScrollBarStyle, SharedSegmentedControlStyle, SharedSliderStyle, SharedSnackbarStyle,
-    SharedStandardItemStyle, SharedTabStyle, SharedTextInputStyle, SharedToggleStyle,
-    SharedTooltipStyle,
+    SharedCalendarStyle, SharedCardStyle, SharedCheckboxStyle, SharedColorPickerStyle,
+    SharedComboBoxStyle, SharedDialogStyle, SharedIconButtonStyle, SharedLinkStyle,
+    SharedMenuItemStyle, SharedPanelStyle, SharedPopoverStyle, SharedProgressBarStyle,
+    SharedRadioStyle, SharedScrollBarStyle, SharedSegmentedControlStyle, SharedSliderStyle,
+    SharedSnackbarStyle, SharedStandardItemStyle, SharedTabStyle, SharedTextInputStyle,
+    SharedToggleStyle, SharedTooltipStyle,
 };
 
 /// Typed slot bag living on [`crate::styles::Theme`]. One slot per
@@ -64,6 +64,7 @@ pub struct ComponentStyleSlots {
     pub segmented_control: Option<SharedSegmentedControlStyle>,
     pub avatar: Option<SharedAvatarStyle>,
     pub calendar: Option<SharedCalendarStyle>,
+    pub color_picker: Option<SharedColorPickerStyle>,
 }
 
 impl std::fmt::Debug for ComponentStyleSlots {
@@ -97,6 +98,7 @@ impl std::fmt::Debug for ComponentStyleSlots {
             .field("segmented_control", &self.segmented_control.is_some())
             .field("avatar", &self.avatar.is_some())
             .field("calendar", &self.calendar.is_some())
+            .field("color_picker", &self.color_picker.is_some())
             .finish()
     }
 }
@@ -138,5 +140,6 @@ impl PartialEq for ComponentStyleSlots {
             && rc_eq(&self.segmented_control, &other.segmented_control)
             && rc_eq(&self.avatar, &other.avatar)
             && rc_eq(&self.calendar, &other.calendar)
+            && rc_eq(&self.color_picker, &other.color_picker)
     }
 }

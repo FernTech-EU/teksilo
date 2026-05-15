@@ -257,7 +257,7 @@ impl Widget for ColorEdit {
 
         let value = self.binding.proxy();
         let alpha_enabled = self.alpha_enabled;
-        let style_snapshot = ctx.theme_signal().get().components.color_picker;
+        use crate::styles::recipe_color_picker_style as cp;
 
         // Snapshot of the bound color at popover-open time. Cancel
         // restores this; Done leaves the picker's writes intact. The
@@ -299,7 +299,7 @@ impl Widget for ColorEdit {
         // ── Build the trigger ──
         let swatch_size = self
             .trigger_swatch_size
-            .unwrap_or(style_snapshot.preview_height);
+            .unwrap_or(cp::PREVIEW_HEIGHT);
 
         // ColorSwatch accepts `impl Into<Prop<Color>>` — pass the
         // bound signal so it re-paints whenever the picker mutates
@@ -308,7 +308,7 @@ impl Widget for ColorEdit {
         // trigger Button's Role::Button.
         let swatch = ColorSwatch::new(value.clone())
             .size(swatch_size)
-            .corner_radius(style_snapshot.preview_corner_radius)
+            .corner_radius(cp::PREVIEW_CORNER_RADIUS)
             .enabled(false)
             .access_hidden(true);
 

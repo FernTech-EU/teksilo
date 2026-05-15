@@ -58,8 +58,7 @@ use self::state::ColorComponents;
 use self::swatch_grid::SwatchGrid;
 use crate::button::{Button, ButtonVariant};
 use crate::hex_color_input::HexColorInput;
-use crate::panel::Panel;
-use crate::primitives::{HStack, Spacer, TextWidget, VStack};
+use crate::primitives::{HStack, Spacer, TextWidget};
 use crate::spin_box::SpinBox;
 
 pub use self::swatch::ColorSwatch;
@@ -81,19 +80,7 @@ pub const DEFAULT_SWATCHES: [Color; 12] = [
     Color::new(0.96, 0.96, 0.96, 1.0), // near-white
 ];
 
-/// Layout variants for [`ColorPicker`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ColorPickerLayout {
-    /// HSV canvas + hue strip + hex input. No alpha, no spinners, no swatches.
-    Compact,
-    /// Default. HSV canvas + hue strip (+ alpha strip if enabled),
-    /// RGB spinners + hex input + preview, plus an optional swatch grid.
-    #[default]
-    Standard,
-    /// Like Standard but with the spinners and swatches in a side
-    /// column rather than stacked below.
-    Wide,
-}
+pub use fern_core::styles::ColorPickerLayout;
 
 /// Internal binding to either a non-nullable `Signal<Color>` or a
 /// nullable `Signal<Option<Color>>`. The picker always operates on a
@@ -146,6 +133,10 @@ pub struct ColorPicker {
     /// dirty-marking is what triggers re-resolution, instead of every
     /// AT walk allocating a fresh string.
     last_announced_hex: Rc<RefCell<Option<String>>>,
+    /// Per-call style override. Higher precedence than the theme-wide
+    /// `style_slots.color_picker` slot, which in turn beats the default
+    /// `RecipeColorPickerStyle`.
+    style_override: Option<fern_core::styles::SharedColorPickerStyle>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -190,8 +181,16 @@ impl ColorPicker {
             label: None,
             enabled: true,
             last_announced_hex: Rc::new(RefCell::new(None)),
+            style_override: None,
             root_child_id: None,
         }
+    }
+
+    /// Per-call style override. Higher precedence than the theme-wide
+    /// `style_slots.color_picker` slot.
+    pub fn style(mut self, style: impl fern_core::styles::ColorPickerStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
+        self
     }
 
     pub fn alpha_enabled(mut self, e: bool) -> Self {
@@ -375,14 +374,14 @@ impl Widget for ColorPicker {
         // ── Resolve flags ──
         let alpha_enabled = self.alpha_enabled;
         let show_alpha_strip = self.show_alpha_strip.unwrap_or(alpha_enabled);
-        let style_snapshot = ctx.theme_signal().get().components.color_picker;
         let layout = self.layout;
         let enabled = self.enabled;
+        use crate::styles::recipe_color_picker_style as cp;
 
         // ── Build subcomponents ──
 
         // Top row: HSV canvas + hue strip + alpha strip
-        let mut top_row = HStack::new().spacing(style_snapshot.gap);
+        let mut top_row = HStack::new().spacing(cp::GAP);
         if self.show_hsv_canvas {
             let canvas = HsvCanvas::new(
                 components.hue.clone(),
@@ -420,40 +419,49 @@ impl Widget for ColorPicker {
             .label(resolve_message_widget("color-picker-alpha-label", &[]));
             top_row = top_row.child(alpha);
         }
+        let top_row_id = ctx.add(top_row);
 
-        // Preview + hex row
-        let mut preview_row = HStack::new().spacing(style_snapshot.gap);
-        if self.show_preview {
-            preview_row = preview_row.child(
-                ColorSwatch::new(value.clone())
-                    .size(style_snapshot.preview_height)
-                    .corner_radius(style_snapshot.preview_corner_radius)
-                    .label(resolve_message_widget(
-                        "color-picker-current-color-label",
-                        &[],
-                    )),
-            );
-        }
-        if self.show_hex_input && layout != ColorPickerLayout::Compact {
-            let hex = HexColorInput::new(value.clone())
-                .alpha_enabled(alpha_enabled)
-                .label(resolve_message_widget("color-picker-hex-label", &[]))
-                .width(style_snapshot.hex_field_width);
-            preview_row = preview_row.child(hex);
-        }
+        // Preview + hex row — Standard / Wide only. Empty row in
+        // Compact (Compact uses the compact-hex slot instead).
+        let preview_row_id: Option<WidgetId> = if layout != ColorPickerLayout::Compact
+            && (self.show_preview || self.show_hex_input)
+        {
+            let mut row = HStack::new().spacing(cp::GAP);
+            if self.show_preview {
+                row = row.child(
+                    ColorSwatch::new(value.clone())
+                        .size(cp::PREVIEW_HEIGHT)
+                        .corner_radius(cp::PREVIEW_CORNER_RADIUS)
+                        .label(resolve_message_widget(
+                            "color-picker-current-color-label",
+                            &[],
+                        )),
+                );
+            }
+            if self.show_hex_input {
+                let hex = HexColorInput::new(value.clone())
+                    .alpha_enabled(alpha_enabled)
+                    .label(resolve_message_widget("color-picker-hex-label", &[]))
+                    .width(cp::HEX_FIELD_WIDTH);
+                row = row.child(hex);
+            }
+            Some(ctx.add(row))
+        } else {
+            None
+        };
 
         // RGB spinners row — built eagerly so closures don't fight over &mut ctx.
         // Bridges observe the mutable `value` signal (not the derived
         // `components.red` etc., which are ReadOnly and don't support
         // `ctx.effect`).
-        let rgb_row: Option<HStack> = if self.show_rgb_spinners {
+        let rgb_row_id: Option<WidgetId> = if self.show_rgb_spinners {
             let r_spin = make_byte_spinner_from_value(
                 ctx,
                 value.clone(),
                 |c| c.r(),
                 components.set_red.clone(),
                 enabled,
-                style_snapshot.spinner_field_width,
+                cp::SPINNER_FIELD_WIDTH,
             );
             let g_spin = make_byte_spinner_from_value(
                 ctx,
@@ -461,7 +469,7 @@ impl Widget for ColorPicker {
                 |c| c.g(),
                 components.set_green.clone(),
                 enabled,
-                style_snapshot.spinner_field_width,
+                cp::SPINNER_FIELD_WIDTH,
             );
             let b_spin = make_byte_spinner_from_value(
                 ctx,
@@ -469,10 +477,10 @@ impl Widget for ColorPicker {
                 |c| c.b(),
                 components.set_blue.clone(),
                 enabled,
-                style_snapshot.spinner_field_width,
+                cp::SPINNER_FIELD_WIDTH,
             );
             let mut row = HStack::new()
-                .spacing(style_snapshot.gap)
+                .spacing(cp::GAP)
                 .child(spinner_cell("color-picker-red-short", r_spin))
                 .child(spinner_cell("color-picker-green-short", g_spin))
                 .child(spinner_cell("color-picker-blue-short", b_spin));
@@ -483,23 +491,23 @@ impl Widget for ColorPicker {
                     |c| c.a(),
                     components.set_alpha.clone(),
                     enabled,
-                    style_snapshot.spinner_field_width,
+                    cp::SPINNER_FIELD_WIDTH,
                 );
                 row = row.child(spinner_cell("color-picker-alpha-short", a_spin));
             }
-            Some(row)
+            Some(ctx.add(row))
         } else {
             None
         };
 
         // HSV spinners row — same pattern.
-        let hsv_row: Option<HStack> = if self.show_hsv_spinners {
+        let hsv_row_id: Option<WidgetId> = if self.show_hsv_spinners {
             let h_spin = make_hue_spinner_from_value(
                 ctx,
                 value.clone(),
                 components.set_hue.clone(),
                 enabled,
-                style_snapshot.spinner_field_width,
+                cp::SPINNER_FIELD_WIDTH,
             );
             let s_spin = make_percent_spinner_from_value(
                 ctx,
@@ -507,7 +515,7 @@ impl Widget for ColorPicker {
                 |c| c.to_hsv().1,
                 components.set_saturation.clone(),
                 enabled,
-                style_snapshot.spinner_field_width,
+                cp::SPINNER_FIELD_WIDTH,
             );
             let v_spin = make_percent_spinner_from_value(
                 ctx,
@@ -515,34 +523,34 @@ impl Widget for ColorPicker {
                 |c| c.to_hsv().2,
                 components.set_value_hsv.clone(),
                 enabled,
-                style_snapshot.spinner_field_width,
+                cp::SPINNER_FIELD_WIDTH,
             );
-            Some(
+            Some(ctx.add(
                 HStack::new()
-                    .spacing(style_snapshot.gap)
+                    .spacing(cp::GAP)
                     .child(spinner_cell("color-picker-hue-short", h_spin))
                     .child(spinner_cell("color-picker-saturation-short", s_spin))
                     .child(spinner_cell("color-picker-value-short", v_spin)),
-            )
+            ))
         } else {
             None
         };
 
         // Compact-layout hex row.
-        let compact_hex_widget: Option<HexColorInput> =
+        let compact_hex_id: Option<WidgetId> =
             if layout == ColorPickerLayout::Compact && self.show_hex_input {
-                Some(
+                Some(ctx.add(
                     HexColorInput::new(value.clone())
                         .alpha_enabled(alpha_enabled)
                         .label(resolve_message_widget("color-picker-hex-label", &[]))
-                        .width(style_snapshot.hex_field_width),
-                )
+                        .width(cp::HEX_FIELD_WIDTH),
+                ))
             } else {
                 None
             };
 
         // Swatch grid
-        let swatch_grid_widget =
+        let swatches_id: Option<WidgetId> =
             if self.show_swatches && !self.swatches.is_empty() || self.swatches_signal.is_some() {
                 let swatches_signal = self
                     .swatches_signal
@@ -554,12 +562,12 @@ impl Widget for ColorPicker {
                         value.set(c);
                     })
                 };
-                Some(SwatchGrid::new(
+                Some(ctx.add(SwatchGrid::new(
                     swatches_signal,
                     value.clone(),
                     self.swatch_columns,
                     on_select,
-                ))
+                )))
             } else {
                 None
             };
@@ -568,9 +576,9 @@ impl Widget for ColorPicker {
         // is set. Built once per layout. The buttons fire user-supplied
         // callbacks; the picker doesn't dismiss anything itself (it
         // doesn't own the surrounding surface).
-        let footer_row: Option<HStack> = if self.show_footer {
+        let footer_id: Option<WidgetId> = if self.show_footer {
             let mut row = HStack::new()
-                .spacing(style_snapshot.gap)
+                .spacing(cp::GAP)
                 .child(Spacer::new());
             if let Some(cb) = self.on_cancel.clone() {
                 let cancel_btn =
@@ -587,74 +595,24 @@ impl Widget for ColorPicker {
                     .on_activate_fn(move |ctx_evt| cb(ctx_evt));
                 row = row.child(done_btn);
             }
-            Some(row)
+            Some(ctx.add(row))
         } else {
             None
         };
 
-        // ── Compose by layout ──
-        // Each layout produces a `VStack` of rows; we then wrap the
-        // VStack in a `Panel` so the picker reads as a self-contained
-        // surface (border + background + corner radius). Without the
-        // Panel, embedding the picker as the content of an
-        // `OverlayRequest` produces a transparent popup — the
-        // overlay system doesn't paint a default surface.
-        let body = match layout {
-            ColorPickerLayout::Compact => {
-                let mut col = VStack::new().spacing(style_snapshot.gap).child(top_row);
-                if let Some(hex) = compact_hex_widget {
-                    col = col.child(hex);
-                }
-                if let Some(footer) = footer_row {
-                    col = col.child(footer);
-                }
-                col
-            }
-            ColorPickerLayout::Standard => {
-                let mut col = VStack::new().spacing(style_snapshot.gap).child(top_row);
-                col = col.child(preview_row);
-                if let Some(rgb) = rgb_row {
-                    col = col.child(rgb);
-                }
-                if let Some(hsv) = hsv_row {
-                    col = col.child(hsv);
-                }
-                if let Some(grid) = swatch_grid_widget {
-                    col = col.child(grid);
-                }
-                if let Some(footer) = footer_row {
-                    col = col.child(footer);
-                }
-                col
-            }
-            ColorPickerLayout::Wide => {
-                let mut side_col = VStack::new().spacing(style_snapshot.gap).child(preview_row);
-                if let Some(rgb) = rgb_row {
-                    side_col = side_col.child(rgb);
-                }
-                if let Some(hsv) = hsv_row {
-                    side_col = side_col.child(hsv);
-                }
-                let main_row = HStack::new()
-                    .spacing(style_snapshot.gap)
-                    .child(top_row)
-                    .child(side_col);
-                let mut col = VStack::new().spacing(style_snapshot.gap).child(main_row);
-                if let Some(grid) = swatch_grid_widget {
-                    col = col.child(grid);
-                }
-                if let Some(footer) = footer_row {
-                    col = col.child(footer);
-                }
-                col
-            }
+        // ── Delegate body assembly + surface wrap to the active style.
+        let style = resolve_color_picker_style(&self.style_override, ctx);
+        let cfg = fern_core::styles::ColorPickerStyleConfig {
+            layout,
+            top_row: top_row_id,
+            preview_row: preview_row_id,
+            rgb_row: rgb_row_id,
+            hsv_row: hsv_row_id,
+            swatches: swatches_id,
+            footer: footer_id,
+            compact_hex: compact_hex_id,
         };
-        let root_id = ctx.add(
-            Panel::new()
-                .padding(style_snapshot.padding)
-                .border_width(1.0)
-                .child(body),
-        );
+        let root_id = style.make_body(&cfg, ctx);
         self.root_child_id = Some(root_id);
 
         // Bind the value signal so the wrapper's accessibility() re-runs
@@ -719,6 +677,24 @@ impl Widget for ColorPicker {
         }
         builder.add_action(Action::Focus);
     }
+}
+
+fn resolve_color_picker_style(
+    override_: &Option<fern_core::styles::SharedColorPickerStyle>,
+    ctx: &BuildContext,
+) -> fern_core::styles::SharedColorPickerStyle {
+    if let Some(s) = override_.clone() {
+        return s;
+    }
+    ctx.theme_signal()
+        .get()
+        .style_slots
+        .color_picker
+        .clone()
+        .unwrap_or_else(|| {
+            Rc::new(crate::styles::recipe_color_picker_style::RecipeColorPickerStyle)
+                as fern_core::styles::SharedColorPickerStyle
+        })
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────

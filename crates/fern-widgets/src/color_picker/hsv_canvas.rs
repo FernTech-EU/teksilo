@@ -166,9 +166,9 @@ impl Widget for HsvCanvas {
         Vec::new()
     }
 
-    fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
-        let style = ctx.theme.components.color_picker;
-        Size::new(style.canvas_width, style.canvas_height).into()
+    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        use crate::styles::recipe_color_picker_style as cp;
+        Size::new(cp::CANVAS_WIDTH, cp::CANVAS_HEIGHT).into()
     }
 
     fn place_children(
@@ -181,10 +181,10 @@ impl Widget for HsvCanvas {
         self.cached_bounds.set(bounds);
     }
 
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+    fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
+        use crate::styles::recipe_color_picker_style as cp;
         self.cached_bounds.set(bounds);
-        let style = ctx.theme.components.color_picker;
-        let radius = CornerRadius::uniform(style.canvas_corner_radius);
+        let radius = CornerRadius::uniform(cp::CANVAS_CORNER_RADIUS);
 
         // Layer 1: solid base — the pure hue at full saturation + value.
         let hue = self.hue.get();
@@ -243,15 +243,15 @@ impl Widget for HsvCanvas {
 
         canvas.stroke_circle(
             center,
-            style.indicator_radius + style.indicator_inner_stroke_width,
-            style.indicator_outer_color,
-            style.indicator_outer_stroke_width,
+            cp::INDICATOR_RADIUS + cp::INDICATOR_INNER_STROKE_WIDTH,
+            cp::INDICATOR_OUTER_COLOR,
+            cp::INDICATOR_OUTER_STROKE_WIDTH,
         );
         canvas.stroke_circle(
             center,
-            style.indicator_radius,
-            style.indicator_inner_color,
-            style.indicator_inner_stroke_width,
+            cp::INDICATOR_RADIUS,
+            cp::INDICATOR_INNER_COLOR,
+            cp::INDICATOR_INNER_STROKE_WIDTH,
         );
     }
 

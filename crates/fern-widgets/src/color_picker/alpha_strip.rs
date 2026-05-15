@@ -242,11 +242,11 @@ impl Widget for AlphaStrip {
         Vec::new()
     }
 
-    fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
-        let style = ctx.theme.components.color_picker;
+    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        use crate::styles::recipe_color_picker_style as cp;
         let size = match self.orientation {
-            Orientation::Vertical => Size::new(style.strip_thickness, style.strip_length),
-            Orientation::Horizontal => Size::new(style.strip_length, style.strip_thickness),
+            Orientation::Vertical => Size::new(cp::STRIP_THICKNESS, cp::STRIP_LENGTH),
+            Orientation::Horizontal => Size::new(cp::STRIP_LENGTH, cp::STRIP_THICKNESS),
         };
         size.into()
     }
@@ -262,9 +262,9 @@ impl Widget for AlphaStrip {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        use crate::styles::recipe_color_picker_style as cp;
         self.cached_bounds.set(bounds);
-        let style = ctx.theme.components.color_picker;
-        let radius = CornerRadius::uniform(style.strip_corner_radius);
+        let radius = CornerRadius::uniform(cp::STRIP_CORNER_RADIUS);
 
         // Checkerboard background — many small fill_rect calls. For a
         // 14×192 strip with 6 px cells that's ~64 calls per paint, well
@@ -273,9 +273,9 @@ impl Widget for AlphaStrip {
         paint_checkerboard(
             canvas,
             bounds,
-            style.checker_cell,
-            style.checker_color_a,
-            style.checker_color_b,
+            cp::CHECKER_CELL,
+            cp::CHECKER_COLOR_A,
+            cp::CHECKER_COLOR_B,
         );
 
         // Gradient overlay — current color from transparent to opaque
@@ -312,9 +312,9 @@ impl Widget for AlphaStrip {
 
         // Thumb.
         let t = self.alpha.get().clamp(0.0, 1.0);
-        let thumb_w = style.strip_thumb_width;
-        let thumb_h = style.strip_thumb_height;
-        let thumb_radius = CornerRadius::uniform(style.strip_thumb_corner_radius);
+        let thumb_w = cp::STRIP_THUMB_WIDTH;
+        let thumb_h = cp::STRIP_THUMB_HEIGHT;
+        let thumb_radius = CornerRadius::uniform(cp::STRIP_THUMB_CORNER_RADIUS);
         let thumb_rect = match self.orientation {
             Orientation::Vertical => Rect::new(
                 bounds.x - 2.0,

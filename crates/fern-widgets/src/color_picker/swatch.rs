@@ -174,16 +174,16 @@ impl Widget for ColorSwatch {
         Vec::new()
     }
 
-    fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
-        let style = ctx.theme.components.color_picker;
-        let size = self.size.unwrap_or(style.swatch_size);
+    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        use crate::styles::recipe_color_picker_style as cp;
+        let size = self.size.unwrap_or(cp::SWATCH_SIZE);
         Size::new(size, size).into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let style = ctx.theme.components.color_picker;
+        use crate::styles::recipe_color_picker_style as cp;
         let radius =
-            CornerRadius::uniform(self.corner_radius.unwrap_or(style.swatch_corner_radius));
+            CornerRadius::uniform(self.corner_radius.unwrap_or(cp::SWATCH_CORNER_RADIUS));
         let color = self.color.get();
 
         // Checkerboard underlay if the swatch is partly transparent.
@@ -191,9 +191,9 @@ impl Widget for ColorSwatch {
             paint_checkerboard(
                 canvas,
                 bounds,
-                style.checker_cell,
-                style.checker_color_a,
-                style.checker_color_b,
+                cp::CHECKER_CELL,
+                cp::CHECKER_COLOR_A,
+                cp::CHECKER_COLOR_B,
             );
         }
 
@@ -205,7 +205,7 @@ impl Widget for ColorSwatch {
                 bounds,
                 radius,
                 ctx.theme.colors.accent,
-                style.swatch_selected_stroke_width,
+                cp::SWATCH_SELECTED_STROKE_WIDTH,
             );
         } else {
             // Always draw a hairline border so light swatches don't
@@ -227,7 +227,7 @@ impl Widget for ColorSwatch {
             canvas.stroke_rounded_rect(
                 ring,
                 CornerRadius::uniform(
-                    self.corner_radius.unwrap_or(style.swatch_corner_radius) + inset,
+                    self.corner_radius.unwrap_or(cp::SWATCH_CORNER_RADIUS) + inset,
                 ),
                 ctx.theme.colors.focus_ring,
                 ctx.theme.shape.focus_ring_width,
