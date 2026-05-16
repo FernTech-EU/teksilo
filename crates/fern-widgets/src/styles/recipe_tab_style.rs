@@ -189,10 +189,13 @@ impl Widget for TabBarChromePainter {
         vec![]
     }
 
-    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
-        // Leaf painter — no intrinsic size; the parent hands it the
-        // bar bounds the content reports.
-        Size::ZERO.into()
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        // Leaf painter — no intrinsic size, so accept whatever the
+        // parent proposes. ZStack/TabBarChrome propose the full bar
+        // bounds, then use the returned size as the placement. If we
+        // returned ZERO here, the painter would be placed at zero
+        // bounds and the separator + drop indicator would never show.
+        proposal.resolve(0.0, 0.0).into()
     }
 
     fn place_children(
@@ -298,10 +301,14 @@ impl Widget for TabBodyPainter {
         vec![]
     }
 
-    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
-        // Leaf painter has no intrinsic size; the ZStack hands it the
-        // bounds the surrounding row reports.
-        Size::ZERO.into()
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        // Leaf painter — no intrinsic size, so accept whatever the
+        // parent ZStack proposes. ZStack proposes the full tab
+        // bounds, then uses the returned size as the placement. If we
+        // returned ZERO here, the painter would be placed at zero
+        // bounds and both the accent indicator and the focus ring
+        // would never show.
+        proposal.resolve(0.0, 0.0).into()
     }
 
     fn place_children(
