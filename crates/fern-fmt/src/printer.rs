@@ -152,7 +152,14 @@ impl<'a> Printer<'a> {
                 if i > 0 {
                     self.write(", ");
                 }
-                self.write(&verbatim_slice(self.source, &arg.to_token_stream()));
+                // Use the dedent+reindent path so multi-line arg
+                // expressions (e.g. a string literal split across
+                // lines or a nested call broken at parens) anchor
+                // their continuations to the current printer indent
+                // rather than carrying source-absolute spacing. The
+                // latter would compound with `reindent_block` on
+                // every successive run.
+                self.write_verbatim_multiline(&arg.to_token_stream());
             }
             self.write(")");
             // Advance cursor exactly past the closing `)`.

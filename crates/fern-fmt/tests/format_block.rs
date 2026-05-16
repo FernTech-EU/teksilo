@@ -223,3 +223,25 @@ fn closure_canonical_indent_is_stable() {
     let canonical = "Button {\n    on_activate: |ctx| {\n        ctx.send(X);\n    }\n}";
     assert_eq!(fmt(canonical), canonical);
 }
+
+// Regression: element-header args with multi-line content (a string
+// literal split with `\` continuations, or a nested call broken at
+// parens) used to be emitted via `verbatim_slice`, preserving source-
+// absolute column positions. When the result was then re-indented by
+// `format_file::reindent_block`, every continuation line gained
+// `base_indent` spaces — and the next run repeated the addition,
+// growing the file indefinitely. They now route through
+// `write_verbatim_multiline`, which dedents to the slice's min-indent
+// and reanchors at the current printer depth (round-trip stable).
+
+#[test]
+fn multiline_string_literal_arg_is_stable() {
+    let canonical = "VStack {\n    TextWidget::new_literal(\"hello \\\n    world, line 2 \\\n    line 3\") {\n        style: BodyBold\n    }\n}";
+    assert_eq!(fmt(canonical), canonical);
+}
+
+#[test]
+fn multiline_call_expr_arg_is_stable() {
+    let canonical = "HStack {\n    MinSizeForLabel::new(TextWidget::new_literal(\n        \"Fill\",\n    )) {\n        width: 220.0\n    }\n}";
+    assert_eq!(fmt(canonical), canonical);
+}
