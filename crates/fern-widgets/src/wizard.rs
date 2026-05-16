@@ -973,6 +973,34 @@ mod tests {
         ));
     }
 
+    /// Regression: the catalog used `.trigger(Button::new(...))` — the
+    /// inner Button installs its own gesture arena (Button always wires
+    /// `on_tap` for InteractionState tracking), and the tap was
+    /// consumed there before the OverlayTrigger ancestor's on_tap
+    /// could fire, so the modal was never queued. The fix routes
+    /// OverlayTrigger's handlers into the child's external bucket via
+    /// `apply_handlers`, so both fire on the recognized Tap.
+    #[test]
+    fn wizard_with_button_trigger_queues_modal_on_tap() {
+        let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
+        tree.add(
+            Wizard::new_literal("Open wizard")
+                .trigger(Button::new_literal("Launch"))
+                .step(WizardStep::new_literal("Details").content(|| FixedLeaf(220.0, 120.0))),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let trigger = tree.find_by_label("Launch").unwrap();
+        tree.click(trigger);
+
+        let requests = tree.drain_pending_modal_requests();
+        assert_eq!(
+            requests.len(),
+            1,
+            "wizard with custom Button trigger must queue a modal on tap"
+        );
+    }
+
     #[test]
     fn wizard_navigation_updates_step_and_finish_dismisses_modal() {
         let finished = Rc::new(RefCell::new(false));

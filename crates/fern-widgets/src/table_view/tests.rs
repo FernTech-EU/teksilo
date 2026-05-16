@@ -1271,8 +1271,6 @@ fn non_filterable_column_does_not_expose_filter_trigger() {
 #[cfg(feature = "rich-text")]
 #[test]
 fn filter_popover_opens_via_trigger_click() {
-    use fern_core::accesskit::Action;
-    use fern_core::event::WidgetEvent;
     let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TableView::new(rows(5))
@@ -1284,13 +1282,12 @@ fn filter_popover_opens_via_trigger_click() {
         width: Some(400.0),
         height: Some(200.0),
     });
+    // OverlayTrigger routes its opener onto the trigger child, so a
+    // pointer click on the wrapper hit-tests into the child where the
+    // handler lives. AccessAction dispatched at the wrapper id alone
+    // no longer fires (handlers aren't on the wrapper node).
     let trigger = tree.find_by_label("Filter").expect("trigger present");
-    tree.dispatch_event(WidgetEvent::AccessAction {
-        action: Action::Click,
-        target: Some(trigger),
-        target_node: fern_core::accessibility::root_node_id(),
-        data: None,
-    });
+    tree.click(trigger);
     assert_eq!(
         tree.active_overlays().len(),
         1,
@@ -1451,8 +1448,6 @@ fn resize_pointer_down_in_filter_zone_does_not_start_resize() {
 #[cfg(feature = "rich-text")]
 #[test]
 fn filter_popover_editor_gains_focus_on_mouse_click() {
-    use fern_core::accesskit::Action;
-    use fern_core::event::WidgetEvent;
     let mut tree = WidgetTree::new().with_theme(fern_core::presets::intui::light());
     tree.add(
         TableView::new(rows(5))
@@ -1465,12 +1460,7 @@ fn filter_popover_editor_gains_focus_on_mouse_click() {
         height: Some(300.0),
     });
     let trigger = tree.find_by_label("Filter").expect("trigger present");
-    tree.dispatch_event(WidgetEvent::AccessAction {
-        action: Action::Click,
-        target: Some(trigger),
-        target_node: fern_core::accessibility::root_node_id(),
-        data: None,
-    });
+    tree.click(trigger);
     tree.layout(SizeProposal {
         width: Some(400.0),
         height: Some(300.0),

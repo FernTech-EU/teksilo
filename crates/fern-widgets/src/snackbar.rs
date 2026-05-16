@@ -514,13 +514,11 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(640.0, 480.0));
 
+        // OverlayTrigger now routes handlers onto the trigger child;
+        // a pointer click on the wrapper hit-tests into the child where
+        // the handler lives.
         let trigger = tree.find_by_label("Show snackbar").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction {
-            action: fern_core::accesskit::Action::Click,
-            target: Some(trigger),
-            target_node: fern_core::accessibility::root_node_id(),
-            data: None,
-        });
+        tree.click(trigger);
 
         assert_eq!(tree.active_overlays().len(), 1);
     }

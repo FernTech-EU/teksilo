@@ -72,8 +72,25 @@ impl Widget for OverlayTrigger {
                 PendingChild::Deferred(w) => ctx.add_boxed(w),
             });
         }
+        // Attach handlers to the CHILD, not to ourselves. The child is
+        // the hit-test target and the first node in the bubble pass —
+        // if it has its own gesture arena (e.g. a real `Button`, which
+        // unconditionally wires `on_tap` for InteractionState
+        // tracking), it consumes the tap before any ancestor can see
+        // it. Routing the overlay-opening handlers onto the child's
+        // *external* bucket means they fire alongside the child's own
+        // handlers when the gesture arena emits `Tap`.
+        //
+        // For non-interactive triggers (test `FixedLeaf`, `Panel`,
+        // etc.) `ensure_gesture_arena` lazily installs a recognizer
+        // for the external `on_tap`, so the same path works.
         if let Some(handlers) = self.pending_handlers.take() {
-            ctx.apply_self_handlers(handlers);
+            if let Some(child_id) = self.child_id {
+                ctx.apply_handlers(child_id, handlers);
+            } else {
+                // No child — keep handlers on self so they aren't lost.
+                ctx.apply_self_handlers(handlers);
+            }
         }
         // Register the expanded_signal so flips trigger an a11y
         // refresh on this trigger node.

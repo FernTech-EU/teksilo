@@ -978,13 +978,13 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
+        // The OverlayTrigger now routes its handlers onto the trigger
+        // child (so real `Button` triggers, which install their own
+        // gesture arena, can't consume the tap before the opener
+        // fires). Clicking the wrapper hit-tests into the child, which
+        // is where the handler lives.
         let trigger = tree.find_by_label("Open dialog").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction {
-            action: fern_core::accesskit::Action::Click,
-            target: Some(trigger),
-            target_node: fern_core::accessibility::root_node_id(),
-            data: None,
-        });
+        tree.click(trigger);
 
         assert_eq!(tree.drain_pending_modal_requests().len(), 1);
     }
