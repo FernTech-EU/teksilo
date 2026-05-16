@@ -37,7 +37,7 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
 use fern_core::signal::Signal;
-use fern_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::widget::{LayoutContext, PaintContext, Widget};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_i18n::LocalizedString;
@@ -69,16 +69,6 @@ pub struct RichTooltipWidget {
     /// that the registry install order doesn't matter.
     pending_key: Option<String>,
     root_child_id: Option<WidgetId>,
-    /// Dormant nested `RichTooltipWidget`s pre-created for every
-    /// `:key` URL referenced by the body or "more" text. Returned
-    /// from `children()` so the framework links them as real children
-    /// of this widget — without this they would be orphan arena roots
-    /// (added via `ctx.add` then never linked), which leaks them past
-    /// rebuilds and lets their fallback bounds bleed into hit-tests.
-    /// The `nested_map` Rc shared into link-click closures still
-    /// owns the `HashMap<String, WidgetId>`; this Vec is the parallel
-    /// arena-membership tracker for tree-side cleanup.
-    nested_content_ids: Vec<WidgetId>,
     // ── Dwell state machine ──
     /// Dwell step in 0..=4. 0 = empty circle, 4 = pin icon.
     /// Updated from `paint()` based on elapsed visible time.
@@ -111,7 +101,6 @@ impl RichTooltipWidget {
             content: Some(content),
             pending_key: None,
             root_child_id: None,
-            nested_content_ids: Vec::new(),
             dwell_step: Signal::new(0),
             sticky: Signal::new(false),
             shown_at_sink: Rc::new(Cell::new(None)),
@@ -128,7 +117,6 @@ impl RichTooltipWidget {
             content: None,
             pending_key: Some(key.into()),
             root_child_id: None,
-            nested_content_ids: Vec::new(),
             dwell_step: Signal::new(0),
             sticky: Signal::new(false),
             shown_at_sink: Rc::new(Cell::new(None)),
@@ -173,11 +161,6 @@ impl RichTooltipWidget {
 
 impl Widget for RichTooltipWidget {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        // Reset arena membership tracking — the framework destroys
-        // the previous build's children before re-entering build(),
-        // so any ids we held are stale.
-        self.nested_content_ids.clear();
-
         // Resolve the content: either the inline entry or a registry
         // lookup via the pending key.
         if self.content.is_none()
@@ -235,9 +218,22 @@ impl Widget for RichTooltipWidget {
             // never wait for a hover event. Activation happens in
             // `make_link_click_handler` when the user clicks a `:key`
             // link.
+            // Keep nested tooltips as orphan arena roots (not linked
+            // as children of this widget). The cascading-overlay nature
+            // of tooltips means that adding them under `children()`
+            // would propagate `ctx.activate(nested)` down to their own
+            // sub-nested tooltips when the user clicks a link to open
+            // one. The sub-nested tooltips have no overlay registration
+            // (yet) so they wouldn't land in `overlay_skip` — the paint
+            // walk would render them as regular children at zero size,
+            // and TextWidgets inside would leak glyphs at the parent
+            // origin (the "ghost text" cascade bug). The trade-off is
+            // that nested tooltip widgets leak memory across rebuilds
+            // of the host; this is acceptable because RichTooltipWidget
+            // is built once per overlay show and lives only as long as
+            // the surrounding tooltip stack.
             ctx.set_dormant(nested_id);
             nested_ids.insert(key.clone(), nested_id);
-            self.nested_content_ids.push(nested_id);
         }
         let nested_map = Rc::new(nested_ids);
 
@@ -387,15 +383,7 @@ impl Widget for RichTooltipWidget {
             fern_core::binding::BindingLevel::AccessibilityOnly,
         );
 
-        // Return the padded root AND every dormant nested tooltip so
-        // the framework links them as real children. Without this they
-        // would be orphan arena roots — leaks across rebuilds plus
-        // hit-test pollution at fallback bounds. See popover_button.rs
-        // for the same pattern.
-        let mut out = Vec::with_capacity(1 + self.nested_content_ids.len());
-        out.push(padded);
-        out.extend(self.nested_content_ids.iter().copied());
-        out
+        vec![padded]
     }
 
     fn layout_response(
@@ -414,26 +402,6 @@ impl Widget for RichTooltipWidget {
             .and_then(|id| ctx.child_size(id, clamped))
             .unwrap_or_else(|| Size::new(0.0, 0.0))
             .into()
-    }
-
-    fn place_children(
-        &self,
-        bounds: Rect,
-        _proposal: SizeProposal,
-        children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
-    ) {
-        // The padded root fills our bounds; every nested tooltip
-        // content lives in an overlay positioned by the overlay
-        // manager (`position_overlays`), so we zero-size them here.
-        for child in children.iter_mut() {
-            if self.nested_content_ids.contains(&child.id) {
-                child.size = Size::ZERO;
-                continue;
-            }
-            child.origin = bounds.origin();
-            child.size = bounds.size();
-        }
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -466,12 +434,7 @@ impl Widget for RichTooltipWidget {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        let mut out = Vec::with_capacity(1 + self.nested_content_ids.len());
-        if let Some(id) = self.root_child_id {
-            out.push(id);
-        }
-        out.extend(self.nested_content_ids.iter().copied());
-        out
+        self.root_child_id.map(|id| vec![id]).unwrap_or_default()
     }
 }
 
