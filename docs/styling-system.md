@@ -96,28 +96,40 @@ ButtonVariant    { Filled, Tinted, Outlined, Plain, Ghost, Link, Destructive }
 ToggleVariant    { Switch, Pill, Square, Inset }
 CheckboxVariant  { Square, Rounded, Circle }
 RadioVariant     { Circle, Square, Rounded }
-IconButtonSize   { Compact, Default, Toolbar, Large, Hero }
-CardVariant      { Plain, Elevated, Outlined, Filled }
+IconButtonSize   { Compact, Default, Toolbar, Large, Hero }  // size = variant for IconButton
+CardVariant      { Plain, Elevated*, Outlined, Filled }       // * = #[default]
 PanelVariant     { Plain, Sunken, Raised, Highlighted }
 PopoverVariant   { Default, Menu, Tooltip }
 SliderVariant    { Continuous, Discrete, Range }
 TextInputVariant { Outlined, Filled, Underline, Bare }
 ComboBoxVariant  { Outlined, Filled, Underline, Plain }
 ScrollBarVariant { Permanent, Overlay, Thin }
+AvatarShape      { Circle, Square, Rounded }                  // and AvatarSize, AvatarCorner, AvatarPresence
 ```
 
-`MenuItem`, `StandardListItem` / `StandardTreeItem`, `TabBar`, and
-`TooltipWidget` are themable but variant-free — their style trait takes
-a `*StyleConfig` with no `variant` field. `Slider` and `ScrollBar`
-additionally carry an *orientation* enum (`SliderOrientation`,
-`ScrollBarOrientation`) alongside the variant, since orientation
-changes layout, not just paint.
+`Card` defaults to `Elevated` (shadow + surface_main) — the "just
+works" Card that matches pre-refactor behaviour. Use
+`.variant(CardVariant::Plain)` for a flat surface.
 
-`TabStyle` is the one trait with two methods: `make_body` themes a
-single tab header, `make_bar` themes the whole strip (backdrop fill,
-content-pane separator, drag-reorder drop indicator). A custom
-`impl TabStyle` provides both. Every other style trait has a single
-`make_body`.
+The remaining themable widgets are variant-free: `MenuItem`,
+`StandardListItem` / `StandardTreeItem`, `TabBar`, `TooltipWidget`,
+`Dialog`, `Snackbar`, `Banner`, `SegmentedControl`, `ProgressBar`,
+`Link`, `Badge`, `SearchField`, `SpinBox`, `DateEdit`, `ColorPicker`,
+`Calendar`, `RichTextEditor`, `ListView` / `TreeView` (via
+`ListContainerStyle`), `TableView` / `TreeTable` (via `TableStyle`).
+Their style traits take a `*StyleConfig` with no `variant` field —
+the design language has a single canonical shape, or the variant
+distinction lives elsewhere (e.g. `ProgressBarKind` for determinate
+vs indeterminate).
+
+`Slider` and `ScrollBar` additionally carry an *orientation* enum
+(`SliderOrientation`, `ScrollBarOrientation`) alongside the variant,
+since orientation changes layout, not just paint.
+
+Several widgets have multi-method style traits where chrome
+decomposes into named slots (e.g. `TabStyle::make_body` +
+`make_bar`). See [Multi-method styles](#multi-method-styles) below
+for the full list.
 
 Set per-call: `Button::new("Save").variant(ButtonVariant::Outlined)`.
 Set per-app via a custom Tier-3 style that *defaults* a variant for
@@ -230,15 +242,12 @@ The trait is `'static` only (not `Send + Sync`) because all FernUI
 trees are single-threaded by construction; `Rc<dyn FooStyle>` is the
 public alias (`SharedButtonStyle` and friends).
 
-**Same shape across widgets.** `ToggleStyle`, `CheckboxStyle`,
-`RadioStyle`, `IconButtonStyle`, `PanelStyle`, `CardStyle`,
-`TooltipStyle`, `PopoverStyle`, `MenuItemStyle`, `SliderStyle`,
-`TextInputStyle`, `ComboBoxStyle`, `ScrollBarStyle`,
-`StandardItemStyle`, `TabStyle` — all defined in
+**Same shape across widgets.** All 32 style traits live in
 [`fern-core/src/styles/`](../crates/fern-core/src/styles/), all
-returning `WidgetId`, all taking a `*StyleConfig` describing the
-inputs that vary by widget. The trait is the public API; everything
-below it is implementation.
+return `WidgetId` from their `make_*` methods, all take a
+`*StyleConfig` describing the inputs that vary by widget. The trait
+is the public API; everything below it is implementation. The full
+list lives in the [migration status table](#migration-status-as-of-this-branch).
 
 ### Worked example — a Material-3-flavoured Button
 
@@ -330,8 +339,11 @@ pub fn brutalist_light() -> Theme {
 
 ## Migration status (as of this branch)
 
-Every themable widget is now on the Tier-3 trait + recipe-default +
-slot lookup. No themable widget self-paints anymore.
+Every themable widget is on the Tier-3 trait + recipe-default +
+slot lookup. No themable widget self-paints anymore. **32 widgets**
+across six families:
+
+**Controls**
 
 | Widget | Trait | Default impl | Slot |
 | --- | --- | --- | --- |
@@ -340,31 +352,107 @@ slot lookup. No themable widget self-paints anymore.
 | `Checkbox` | `CheckboxStyle` | `RecipeCheckboxStyle` | `style_slots.checkbox` |
 | `RadioButton` | `RadioStyle` | `RecipeRadioStyle` | `style_slots.radio` |
 | `IconButton` | `IconButtonStyle` | `RecipeIconButtonStyle` | `style_slots.icon_button` |
+| `Slider` | `SliderStyle` | `RecipeSliderStyle` | `style_slots.slider` |
+| `SegmentedControl` | `SegmentedControlStyle` | `RecipeSegmentedControlStyle` | `style_slots.segmented_control` |
+| `ProgressBar` | `ProgressBarStyle` | `RecipeProgressBarStyle` | `style_slots.progress_bar` |
+| `Link` | `LinkStyle` | `RecipeLinkStyle` | `style_slots.link` |
+| `Avatar` | `AvatarStyle` | `RecipeAvatarStyle` | `style_slots.avatar` |
+| `Badge` | `BadgeStyle` | `RecipeBadgeStyle` | `style_slots.badge` |
+
+**Inputs**
+
+| Widget | Trait | Default impl | Slot |
+| --- | --- | --- | --- |
+| `TextInput` | `TextInputStyle` | `RecipeTextInputStyle` | `style_slots.text_input` |
+| `SearchField` | `SearchFieldStyle` | `RecipeSearchFieldStyle` | `style_slots.search_field` |
+| `ComboBox` | `ComboBoxStyle` | `RecipeComboBoxStyle` | `style_slots.combo_box` |
+| `SpinBox` | `SpinBoxStyle` | `RecipeSpinBoxStyle` | `style_slots.spin_box` |
+| `DateEdit` | `DateEditStyle` | `RecipeDateEditStyle` | `style_slots.date_edit` |
+| `ColorPicker` | `ColorPickerStyle` | `RecipeColorPickerStyle` | `style_slots.color_picker` |
+| `Calendar` | `CalendarStyle` ¹ | `RecipeCalendarStyle` | `style_slots.calendar` |
+| `RichTextEditor` | `RichTextEditorStyle` | `RecipeRichTextEditorStyle` | `style_slots.rich_text_editor` |
+
+**Containers**
+
+| Widget | Trait | Default impl | Slot |
+| --- | --- | --- | --- |
 | `Panel` | `PanelStyle` | `RecipePanelStyle` | `style_slots.panel` |
 | `Card` | `CardStyle` | `RecipeCardStyle` | `style_slots.card` |
+| `TabBar` | `TabStyle` ¹ | `RecipeTabStyle` | `style_slots.tab` |
+| `ListView` / `TreeView` (container chrome) | `ListContainerStyle` | `RecipeListContainerStyle` | `style_slots.list_container` |
+| `TableView` / `TreeTable` (header + sort + row chrome) | `TableStyle` ¹ | `RecipeTableStyle` | `style_slots.table` |
+
+**Overlays**
+
+| Widget | Trait | Default impl | Slot |
+| --- | --- | --- | --- |
 | `TooltipWidget` | `TooltipStyle` | `RecipeTooltipStyle` | `style_slots.tooltip` |
-| `MenuItem` | `MenuItemStyle` | `RecipeMenuItemStyle` | `style_slots.menu_item` |
 | `Popover` | `PopoverStyle` | `RecipePopoverStyle` | `style_slots.popover` |
-| `ScrollBar` | `ScrollBarStyle` | `RecipeScrollBarStyle` | `style_slots.scroll_bar` |
+| `Dialog` (in-tree modal) | `DialogStyle` ¹ | `RecipeDialogStyle` | `style_slots.dialog` |
+| `Snackbar` | `SnackbarStyle` | `RecipeSnackbarStyle` | `style_slots.snackbar` |
+| `Banner` | `BannerStyle` | `RecipeBannerStyle` | `style_slots.banner` |
+
+**Rows / Items**
+
+| Widget | Trait | Default impl | Slot |
+| --- | --- | --- | --- |
+| `MenuItem` | `MenuItemStyle` | `RecipeMenuItemStyle` | `style_slots.menu_item` |
 | `StandardListItem` / `StandardTreeItem` | `StandardItemStyle` | `RecipeStandardItemStyle` | `style_slots.standard_item` |
-| `TabBar` | `TabStyle` | `RecipeTabStyle` | `style_slots.tab` |
-| `ComboBox` | `ComboBoxStyle` | `RecipeComboBoxStyle` | `style_slots.combo_box` |
-| `Slider` | `SliderStyle` | `RecipeSliderStyle` | `style_slots.slider` |
-| `TextInput` | `TextInputStyle` | `RecipeTextInputStyle` | `style_slots.text_input` |
 
-Step 7 is done: the legacy per-widget dimension structs in
-`fern-tokens::components` (`ButtonStyle`, `ToggleStyle`, … 17 structs)
-were deleted and their IntUI constants folded into the matching
-`fern-widgets/src/styles/recipe_*_style.rs` modules. `theme.components`
-(`ComponentStyles`) still exists but now carries dimension data only
-for the *non-themable* widgets (toolbar, status bar, dialog, accordion,
-badge, progress bar, table, calendar, …) — anything that isn't yet on
-a style trait. Migrated widgets read entirely from
-`theme.style_slots.*` plus their `Recipe*Style` defaults.
+**Chrome**
 
-Still ahead on the styling roadmap: image-backed styles (Step 9),
-the `ImageTheme` TOML manifest loader (Step 10), and the sibling
-preset crates `fern-theme-material3` / `-macos` / `-fluent` (Step 11).
+| Widget | Trait | Default impl | Slot |
+| --- | --- | --- | --- |
+| `ScrollBar` | `ScrollBarStyle` | `RecipeScrollBarStyle` | `style_slots.scroll_bar` |
+
+¹ Multi-method trait — see [Multi-method styles](#multi-method-styles)
+below.
+
+Step 7 (delete legacy per-widget dimension structs) is done: the 17
+old `fern-tokens::components::*Style` structs were deleted and their
+IntUI constants folded into the matching
+`fern-widgets/src/styles/recipe_*_style.rs` modules.
+`theme.components` (`ComponentStyles`) still exists but now carries
+dimension data only for the *non-themable* widgets (toolbar, status
+bar, accordion, …) — anything that isn't yet on a style trait.
+Migrated widgets read entirely from `theme.style_slots.*` plus their
+`Recipe*Style` defaults.
+
+Still ahead on the styling roadmap: image-backed styles (Step 9), the
+`ImageTheme` TOML manifest loader (Step 10), and the sibling preset
+crates `fern-theme-material3` / `-macos` / `-fluent` (Step 11).
+
+### Multi-method styles
+
+Most style traits have a single `make_body(cfg, ctx) -> WidgetId`
+method. Four widgets need finer granularity — the trait splits chrome
+into multiple slots so a custom impl can replace one piece without
+re-implementing the others:
+
+- **`TabStyle`** — `make_body` themes a single tab header (accent
+  indicator + focus ring + label slot composition); `make_bar` themes
+  the whole strip (optional backdrop fill, content-pane separator,
+  drag-reorder drop indicator).
+- **`DialogStyle`** — `make_panel` themes the modal surface (shadow +
+  corner radius + padding + container chrome); `make_scrim` themes
+  the full-viewport overlay backdrop (the click-outside-to-dismiss
+  layer). Wired into the in-tree modal pipeline so the scrim is a
+  proper child of the dialog overlay, not a hand-rolled rect.
+- **`TableStyle`** — `make_header_cell` (column header chrome: hover
+  tint, resize-handle band, raised background), `make_sort_indicator`
+  (the up/down arrow), `make_row_background` (per-row surface, with
+  selection + hover + zebra states). The body cell stays
+  app-controlled — same delegate that produces the cell's content
+  also owns its paint.
+- **`CalendarStyle`** — `make_day_cell`, `make_zoom_cell` (month /
+  year picker grid), `make_header` (month-year label + nav buttons).
+  Calendar is unusually paint-heavy and the three slots match the
+  three distinct visual modes (day grid, zoom grid, header).
+
+For these traits, a custom `impl` must implement every method (no
+default impls beyond the trait's own — the recipe defaults compose
+the four slots into the IntUI look). Apps that only want to tweak
+one slot typically forward the others to `Recipe*Style::default()`.
 
 ## Custom widgets and the styling system
 
