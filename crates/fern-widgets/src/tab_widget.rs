@@ -24,6 +24,28 @@
 //! tabs follow. Selection is by stable [`TabId`] — drag-reorder and
 //! model mutations never silently send the active selection to a
 //! different tab.
+//!
+//! ## Accessibility
+//!
+//! Both [`TabWidget`] and [`TabBar`] emit `Role::TabList` on the bar
+//! and `Role::Tab` on each header. ARIA APG ([tabs
+//! pattern](https://www.w3.org/WAI/ARIA/apg/patterns/tabs/))
+//! recommends providing an accessible name for the tab list
+//! whenever a page hosts more than one — call
+//! [`.access_label(tr!("editor_tabs"))`](fern_core::widget_builder::WidgetBuilder::access_label)
+//! on the widget so screen readers can distinguish "editor tabs"
+//! from "tool tabs":
+//!
+//! ```ignore
+//! TabWidget::new(selected)
+//!     .static_tab(TabInfo::new().title(tr!("welcome")), welcome_panel)
+//!     // ...
+//!     .access_label(tr!("editor_tabs"))
+//! ```
+//!
+//! Panels with no focusable descendants (a static text-only "About"
+//! tab, a chart-only metrics tab) are unreachable by Tab key unless
+//! opted in via [`TabInfo::focusable_panel(true)`](TabInfo::focusable_panel).
 
 use std::any::Any;
 use std::cell::RefCell;
@@ -35,7 +57,9 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::signal::Signal;
-use fern_core::widget::{LayoutContext, LayoutResponse, PendingChild, Widget, WidgetPlacement};
+use fern_core::widget::{
+    EventContext, LayoutContext, LayoutResponse, PendingChild, Widget, WidgetPlacement,
+};
 use fern_core::widget_id::WidgetId;
 use fern_data::ListModel;
 
@@ -223,9 +247,9 @@ pub struct TabWidget {
     show_scroll_arrows: Option<bool>,
     show_overflow_dropdown: Option<bool>,
     reorderable: bool,
-    on_close: Option<Rc<dyn Fn(TabId)>>,
-    on_reorder: Option<Rc<dyn Fn(TabId, usize)>>,
-    on_pin_toggle: Option<Rc<dyn Fn(TabId, bool)>>,
+    on_close: Option<Rc<dyn Fn(TabId, &mut EventContext)>>,
+    on_reorder: Option<Rc<dyn Fn(TabId, usize, &mut EventContext)>>,
+    on_pin_toggle: Option<Rc<dyn Fn(TabId, bool, &mut EventContext)>>,
     bar_leading_slot: Option<BarSlot>,
     bar_trailing_slot: Option<BarSlot>,
 
@@ -512,31 +536,49 @@ impl TabWidget {
     }
 
     /// Install a close-tab handler. Receives the [`TabId`] of the
-    /// closed tab (not its index — indices are presentation-only).
+    /// closed tab (not its index — indices are presentation-only)
+    /// and the firing [`EventContext`]. The latter lets the handler
+    /// open a confirmation dialog
+    /// (`ctx.present_modal(MessageBox::confirm(...))`), dispatch an
+    /// intent, or otherwise route the close request before mutating
+    /// the underlying model. To veto, do nothing in the handler; to
+    /// confirm-then-close, only call the model mutator on accept.
+    ///
     /// If unset, the default behavior is to remove the tab from
-    /// [`dynamic_model`](Self::dynamic_model) (static tabs cannot
-    /// be closed by default).
-    pub fn on_close(mut self, f: impl Fn(TabId) + 'static) -> Self {
+    /// [`dynamic_model`](Self::dynamic_model) without a prompt
+    /// (static tabs cannot be closed by default).
+    pub fn on_close(mut self, f: impl Fn(TabId, &mut EventContext) + 'static) -> Self {
         self.on_close = Some(Rc::new(f));
         self
     }
 
     /// Install a reorder handler. Receives `(moved_tab_id,
-    /// destination_index)` in the unified static-then-dynamic
-    /// ordering. If unset, the default behavior is to reorder
-    /// within the dynamic region of [`dynamic_model`](Self::dynamic_model).
-    /// Implies [`reorderable(true)`](Self::reorderable).
-    pub fn on_reorder(mut self, f: impl Fn(TabId, usize) + 'static) -> Self {
+    /// destination_index, ctx)` in the unified static-then-dynamic
+    /// ordering. The firing [`EventContext`] lets the handler
+    /// confirm or dispatch the reorder via a dialog / intent
+    /// before mutating the model. If unset, the default behavior
+    /// is to reorder within the dynamic region of
+    /// [`dynamic_model`](Self::dynamic_model). Implies
+    /// [`reorderable(true)`](Self::reorderable).
+    pub fn on_reorder(
+        mut self,
+        f: impl Fn(TabId, usize, &mut EventContext) + 'static,
+    ) -> Self {
         self.on_reorder = Some(Rc::new(f));
         self.reorderable = true;
         self
     }
 
     /// Install a pin-toggle handler — receives `(tab_id,
-    /// new_pinned_flag)` when the user drags a tab across the
-    /// pinned ↔ unpinned boundary. Apps decide whether to actually
-    /// mutate the tab's `info.pinned`.
-    pub fn on_pin_toggle(mut self, f: impl Fn(TabId, bool) + 'static) -> Self {
+    /// new_pinned_flag, ctx)` when the user drags a tab across the
+    /// pinned ↔ unpinned boundary. The firing [`EventContext`]
+    /// lets the handler confirm or dispatch the transition via a
+    /// dialog / intent. Apps decide whether to actually mutate the
+    /// tab's `info.pinned`.
+    pub fn on_pin_toggle(
+        mut self,
+        f: impl Fn(TabId, bool, &mut EventContext) + 'static,
+    ) -> Self {
         self.on_pin_toggle = Some(Rc::new(f));
         self
     }
@@ -704,6 +746,12 @@ impl Widget for TabWidget {
         // accessibility relation.
         let panel_ids = Rc::new(RefCell::new(Vec::with_capacity(total)));
 
+        // Shared header-id buffer: the bar populates this with each
+        // tab header's WidgetId in tab order; each TabPane reads it
+        // to publish the TabPanel → Tab `aria-labelledby` relation.
+        let header_ids: Rc<RefCell<Vec<WidgetId>>> =
+            Rc::new(RefCell::new(Vec::with_capacity(total)));
+
         // Build + configure the inner TabBar. Selection is plumbed
         // through as id-based — the bar maintains its own private
         // index-side signal and bridges the two internally.
@@ -721,7 +769,8 @@ impl Widget for TabWidget {
                 |_, h: &TabHandle| h.id,
             ),
         }
-        .with_panel_ids(panel_ids.clone());
+        .with_panel_ids(panel_ids.clone())
+        .with_header_ids(header_ids.clone());
 
         if let Some(ref sizing) = self.sizing {
             // Bind at Rebuild level so flipping the signal triggers
@@ -765,10 +814,10 @@ impl Widget for TabWidget {
         let close_cb = self.on_close.clone();
         let dyn_model_for_close = self.dynamic_model.clone();
         let idx_to_id_for_close = index_to_id.clone();
-        bar = bar.on_close(move |i: usize| {
+        bar = bar.on_close(move |i: usize, ctx: &mut EventContext| {
             if let Some(&id) = idx_to_id_for_close.get(i) {
                 if let Some(ref f) = close_cb {
-                    f(id);
+                    f(id, ctx);
                 } else if i >= static_count {
                     // Default: remove from dynamic_model. Static
                     // tabs are not auto-closable.
@@ -788,10 +837,10 @@ impl Widget for TabWidget {
         let dyn_model_for_reorder = self.dynamic_model.clone();
         let idx_to_id_for_reorder = index_to_id.clone();
         if self.reorderable {
-            bar = bar.on_reorder(move |from: usize, to: usize| {
+            bar = bar.on_reorder(move |from: usize, to: usize, ctx: &mut EventContext| {
                 if let Some(&id) = idx_to_id_for_reorder.get(from) {
                     if let Some(ref f) = reorder_cb {
-                        f(id, to);
+                        f(id, to, ctx);
                     } else if from >= static_count && to >= static_count {
                         // Default: reorder within the dynamic region
                         // only. Static tabs are pinned in place.
@@ -816,9 +865,9 @@ impl Widget for TabWidget {
 
         if let Some(f) = self.on_pin_toggle.clone() {
             let idx_to_id = index_to_id.clone();
-            bar = bar.on_pin_toggle(move |i: usize, pinned: bool| {
+            bar = bar.on_pin_toggle(move |i: usize, pinned: bool, ctx: &mut EventContext| {
                 if let Some(&id) = idx_to_id.get(i) {
-                    f(id, pinned);
+                    f(id, pinned, ctx);
                 }
             });
         }
@@ -850,7 +899,12 @@ impl Widget for TabWidget {
                 Some(id) => id,
                 None => {
                     let content = slot.source.into_widget(&slot.handle);
-                    let id = ctx.add(TabPane::new(slot.handle.clone(), content));
+                    let id = ctx.add(TabPane::new(
+                        slot.handle.clone(),
+                        content,
+                        panel_ids.clone(),
+                        header_ids.clone(),
+                    ));
                     slot.pane_id = Some(id);
                     id
                 }
@@ -873,7 +927,12 @@ impl Widget for TabWidget {
                         )
                     });
                     let content = factory(handle, handle.payload.as_ref());
-                    let id = ctx.add(TabPane::new(handle.clone(), content));
+                    let id = ctx.add(TabPane::new(
+                        handle.clone(),
+                        content,
+                        panel_ids.clone(),
+                        header_ids.clone(),
+                    ));
                     self.dyn_pane_ids.insert(handle.id, id);
                     id
                 }
@@ -986,22 +1045,63 @@ struct TabPane {
     handle: TabHandle,
     child_id: Option<WidgetId>,
     pending_child: Option<Box<dyn Widget>>,
+    /// Captured during `build()` so `accessibility()` can find this
+    /// pane's position in `panel_ids` (and thereby look up the
+    /// corresponding tab header in `header_ids`) — surviving
+    /// reorders without needing the parent to update memoized
+    /// state.
+    self_id: Option<WidgetId>,
+    /// Shared buffer the parent `TabWidget` populates (via the
+    /// inner `Switcher::capture_child_ids_into`) with each pane's
+    /// `WidgetId` in tab order. The pane reads it to discover its
+    /// own current index.
+    panel_ids: Rc<RefCell<Vec<WidgetId>>>,
+    /// Shared buffer the bar populates with each header's
+    /// `WidgetId` in tab order. Read at `accessibility()` time to
+    /// resolve the labelling tab.
+    header_ids: Rc<RefCell<Vec<WidgetId>>>,
+    /// When true, the pane attaches a `focusable(true)` handler to
+    /// itself at build time AND advertises `Action::Focus` from
+    /// `accessibility()`. Apps opt in via
+    /// [`TabInfo::focusable_panel`] for panels containing no
+    /// focusable descendants (an empty "About" tab, a chart-only
+    /// metrics tab) so keyboard users can reach them.
+    self_focusable: bool,
 }
 
 impl TabPane {
-    fn new(handle: TabHandle, content: Box<dyn Widget>) -> Self {
+    fn new(
+        handle: TabHandle,
+        content: Box<dyn Widget>,
+        panel_ids: Rc<RefCell<Vec<WidgetId>>>,
+        header_ids: Rc<RefCell<Vec<WidgetId>>>,
+    ) -> Self {
+        let self_focusable = handle.info.focusable_panel;
         Self {
             handle,
             child_id: None,
             pending_child: Some(content),
+            self_id: None,
+            panel_ids,
+            header_ids,
+            self_focusable,
         }
     }
 }
 
 impl Widget for TabPane {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        self.self_id = Some(ctx.self_id());
         if let Some(child) = self.pending_child.take() {
             self.child_id = Some(ctx.add_boxed(child));
+        }
+        if self.self_focusable {
+            // Apply self-handlers so the framework treats this pane
+            // as a Tab-key stop, allowing Tab from the selected tab
+            // header to land inside an otherwise-empty panel.
+            ctx.apply_self_handlers(
+                fern_core::widget_builder::HandlerSet::new().focusable(true),
+            );
         }
         self.child_id.into_iter().collect()
     }
@@ -1031,6 +1131,31 @@ impl Widget for TabPane {
         if let Some(ref title) = self.handle.info.title {
             let resolved: String = title.clone().into();
             builder.set_name(&resolved);
+        }
+        // ARIA aria-labelledby — point to the tab header that
+        // controls this panel. Look up *current* index by finding
+        // self_id in panel_ids (which the Switcher repopulates each
+        // build, so this auto-corrects on reorder), then map that
+        // to the header at the same position. Skip the relation —
+        // no dangling — when self_id or the header for that index
+        // isn't yet available (e.g. mid-rebuild after a model
+        // mutation).
+        if let Some(self_id) = self.self_id {
+            let panel_ids = self.panel_ids.borrow();
+            if let Some(pos) = panel_ids.iter().position(|&id| id == self_id) {
+                if let Some(&header_id) = self.header_ids.borrow().get(pos) {
+                    builder.push_labelled_by(
+                        fern_core::accessibility::widget_id_to_node_id(header_id),
+                    );
+                }
+            }
+        }
+        // Opt-in panel focusability (TabInfo::focusable_panel).
+        // AccessKit has no `tabindex` field; `Action::Focus` is the
+        // canonical way to signal focusability to AT, matching how
+        // TabHeader::accessibility advertises focusability.
+        if self.self_focusable {
+            builder.add_action(fern_core::accesskit::Action::Focus);
         }
     }
 

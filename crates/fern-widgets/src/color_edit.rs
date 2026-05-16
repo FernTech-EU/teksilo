@@ -217,11 +217,22 @@ impl ColorEdit {
         self
     }
 
+    /// Install a callback fired when the color-picker popover opens.
+    ///
+    /// The signature is `Fn()` (no [`EventContext`](fern_core::widget::EventContext))
+    /// because `on_close` is invoked from the overlay-dismiss path,
+    /// which has no ctx in scope. To keep the open/close pair
+    /// symmetric, `on_open` matches. If you need ctx in a
+    /// color-editing-mode callback, attach an `on_tap` on a sibling
+    /// trigger that wakes the editor explicitly.
     pub fn on_open(mut self, f: impl Fn() + 'static) -> Self {
         self.on_open = Some(Rc::new(f));
         self
     }
 
+    /// Install a callback fired when the color-picker popover closes.
+    /// See [`on_open`](Self::on_open) for why this is `Fn()` and not
+    /// `Fn(&mut EventContext)`.
     pub fn on_close(mut self, f: impl Fn() + 'static) -> Self {
         self.on_close = Some(Rc::new(f));
         self

@@ -100,11 +100,11 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         "TwistArrow",
         HStack::new()
             .spacing(8.0)
-            .child(TwistArrow::new(16.0, true, true).on_click(move || {
+            .child(TwistArrow::new(16.0, true, true).on_click(move |_ctx| {
                 twist_classic.set(!twist_classic.get());
             }))
-            .child(TwistArrow::new(16.0, true, false).on_click(|| {}))
-            .child(TwistArrow::new(16.0, false, false).on_click(|| {})),
+            .child(TwistArrow::new(16.0, true, false).on_click(|_ctx| {}))
+            .child(TwistArrow::new(16.0, false, false).on_click(|_ctx| {})),
     );
     let panel_demo = section(
         ctx,
@@ -249,10 +249,10 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 HStack {
                     spacing: 8.0
                     TwistArrow::new(16.0, true, true) {
-                        on_click: move || { twist_for_click.set(!twist_for_click.get()); }
+                        on_click: move |_ctx| { twist_for_click.set(!twist_for_click.get()); }
                     }
-                    TwistArrow::new(16.0, true, false) { on_click: || {} }
-                    TwistArrow::new(16.0, false, false) { on_click: || {} }
+                    TwistArrow::new(16.0, true, false) { on_click: |_ctx| {} }
+                    TwistArrow::new(16.0, false, false) { on_click: |_ctx| {} }
                 }
             }
 

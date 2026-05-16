@@ -2089,6 +2089,41 @@ impl WidgetTree {
         self.arena.is_enabled(id)
     }
 
+    /// Bind a widget's Tab-key participation to a boolean prop or
+    /// compatibility state binding. When false, the widget is removed
+    /// from Tab / Shift+Tab traversal (`cycle_focus`) but remains
+    /// reachable via `request_focus` and arrow-key navigation that
+    /// calls `request_focus`. Implements the ARIA roving-tabindex
+    /// pattern (HTML `tabindex="-1"` semantics). Accepts
+    /// `Signal<bool>`, `Prop<bool>`, or plain `bool`.
+    pub fn set_tab_stop(&mut self, id: WidgetId, state: impl Into<crate::signal::Prop<bool>>) {
+        let prop = state.into();
+        // Bind at the lightest level — tab-stop changes never affect
+        // layout or paint; cycle_focus reads the current value on
+        // each Tab keypress.
+        prop.register_if_bound(
+            id,
+            &self.binding_registry,
+            crate::binding::BindingLevel::RepaintOnly,
+        );
+        if let Some(node) = self.arena.get_mut(id) {
+            node.tab_stop = Some(prop);
+        }
+    }
+
+    /// Current Tab-key participation for a widget. Returns the value
+    /// of the `tab_stop` prop if bound, or `true` (the default) when
+    /// no binding is present. Mirrors the filter used by
+    /// `cycle_focus` — primarily for tests asserting the
+    /// roving-tabindex contract.
+    pub fn tab_stop(&self, id: WidgetId) -> bool {
+        self.arena
+            .get(id)
+            .and_then(|node| node.tab_stop.as_ref())
+            .map(|prop| prop.get())
+            .unwrap_or(true)
+    }
+
     // --- Theme override ---
 
     /// Set a theme override on a widget. All descendants of this widget

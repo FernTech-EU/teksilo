@@ -694,7 +694,7 @@ fn on_pin_toggle_handler_fires_with_tab_id() {
                 Box::new(FixedLeaf(120.0, 48.0)) as Box<dyn Widget>
             })
             .dynamic_model(model)
-            .on_pin_toggle(move |id, pinned| cap.set(Some((id, pinned))))
+            .on_pin_toggle(move |id, pinned, _ctx| cap.set(Some((id, pinned))))
             .show_scroll_arrows(false)
             .show_overflow_dropdown(false),
     );
@@ -1045,7 +1045,7 @@ fn explicit_on_close_receives_tab_id() {
                 Box::new(FixedLeaf(120.0, 48.0)) as Box<dyn Widget>
             })
             .dynamic_model(model)
-            .on_close(move |id| cap.set(Some(id)))
+            .on_close(move |id, _ctx| cap.set(Some(id)))
             .show_scroll_arrows(false)
             .show_overflow_dropdown(false),
     );

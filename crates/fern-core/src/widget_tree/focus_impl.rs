@@ -185,6 +185,18 @@ impl WidgetTree {
             }
         }
 
+        // Filter out widgets with a `tab_stop` binding that
+        // evaluates to `false` — they're focusable via
+        // `request_focus` but excluded from Tab traversal. Implements
+        // the ARIA roving-tabindex pattern (HTML `tabindex="-1"`).
+        focusable.retain(|&id| {
+            self.arena
+                .get(id)
+                .and_then(|node| node.tab_stop.as_ref())
+                .map(|prop| prop.get())
+                .unwrap_or(true)
+        });
+
         if focusable.is_empty() {
             return;
         }

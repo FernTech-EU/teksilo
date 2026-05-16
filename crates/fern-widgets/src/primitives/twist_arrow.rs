@@ -11,7 +11,9 @@ use fern_canvas::{Canvas, Path, Point, Rect, Size, SizeProposal};
 
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
-use fern_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
+use fern_core::widget::{
+    EventContext, LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement,
+};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{SurfaceRole, TextRole};
@@ -22,7 +24,7 @@ pub struct TwistArrow {
     size: f32,
     has_children: bool,
     expanded: bool,
-    on_click: Option<Rc<dyn Fn()>>,
+    on_click: Option<Rc<dyn Fn(&mut EventContext)>>,
 }
 
 impl TwistArrow {
@@ -35,7 +37,10 @@ impl TwistArrow {
         }
     }
 
-    pub fn on_click(mut self, f: impl Fn() + 'static) -> Self {
+    /// Install a tap handler. Receives the firing [`EventContext`]
+    /// so consumers can dispatch intents (e.g. lazy-load children on
+    /// expand) or open dialogs from the chevron toggle.
+    pub fn on_click(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.on_click = Some(Rc::new(f));
         self
     }
@@ -55,8 +60,8 @@ impl Widget for TwistArrow {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         if let Some(cb) = self.on_click.clone() {
             let handlers = HandlerSet::new()
-                .on_tap(move |_pos, _ctx| {
-                    cb();
+                .on_tap(move |_pos, ctx| {
+                    cb(ctx);
                 })
                 .focusable(false);
             ctx.apply_self_handlers(handlers);

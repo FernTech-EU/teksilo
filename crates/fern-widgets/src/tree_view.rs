@@ -63,10 +63,12 @@ pub struct TreeRowContext<'a, T: 'static> {
 impl<'a, T: 'static> TreeRowContext<'a, T> {
     /// Toggle callback for this row's chevron. Wires in one line:
     /// `.on_toggle_rc(ctx.toggle_callback())`.
-    pub fn toggle_callback(&self) -> std::rc::Rc<dyn Fn()> {
+    pub fn toggle_callback(
+        &self,
+    ) -> std::rc::Rc<dyn Fn(&mut fern_core::widget::EventContext)> {
         let slice = self.slice.clone();
         let node = self.node_id;
-        std::rc::Rc::new(move || slice.toggle_expand(node))
+        std::rc::Rc::new(move |_ctx| slice.toggle_expand(node))
     }
 
     /// Cloned handle to the slice — call `.toggle_expand(node)`,

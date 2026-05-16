@@ -93,14 +93,16 @@ pub(crate) struct TabHeader {
     /// Per-tab close callback. Set when the tab is closable AND the
     /// bar carries an `on_close` handler (or its source is a
     /// `ListModel<T>` providing a default-remove). The header wires
-    /// it to a trailing close button and a middle-click handler.
-    on_close: Option<Rc<dyn Fn()>>,
+    /// it to a trailing close button, a middle-click handler, and
+    /// the `Delete` key. Receives the firing `EventContext` so apps
+    /// can open a confirmation dialog before actually closing.
+    on_close: Option<Rc<dyn Fn(&mut EventContext)>>,
     /// Per-tab reorder callback. Set when the bar is reorderable;
-    /// receives the destination index. Wired to AT custom actions
-    /// "Move Left" / "Move Right" so screen-reader users can
-    /// reorder tabs without dragging. Argument is the destination
-    /// index in the unified bar ordering.
-    on_reorder_to: Option<Rc<dyn Fn(usize)>>,
+    /// receives the destination index and the firing
+    /// [`EventContext`]. Wired to AT custom actions "Move Left" /
+    /// "Move Right" / "Move Up" / "Move Down" so screen-reader
+    /// users can reorder tabs without dragging.
+    on_reorder_to: Option<Rc<dyn Fn(usize, &mut EventContext)>>,
     /// `Some(bar_id)` when the bar enables drag-to-reorder and this
     /// tab is therefore a drag source. The header attaches `on_drag`
     /// that emits a `TabBarDragData` payload with this `bar_id`.
@@ -172,8 +174,8 @@ pub(crate) struct TabHeaderConfig {
     pub rich_tooltip: Option<crate::tooltip::RichTooltipSource>,
     pub composite_tooltip: Option<Box<dyn Widget>>,
     pub context_menu_factory: Option<super::delegate::ContextMenuFactory>,
-    pub on_close: Option<Rc<dyn Fn()>>,
-    pub on_reorder_to: Option<Rc<dyn Fn(usize)>>,
+    pub on_close: Option<Rc<dyn Fn(&mut EventContext)>>,
+    pub on_reorder_to: Option<Rc<dyn Fn(usize, &mut EventContext)>>,
     pub drag_source_bar_id: Option<WidgetId>,
     pub index: usize,
     pub enabled: bool,
@@ -296,6 +298,28 @@ impl Widget for TabHeader {
         label_signal.bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
         self.label_signal = Some(label_signal);
 
+        // Locale signal binding for the reorder CustomAction
+        // descriptions ("Move Left" / "Move Right" / "Move Up" /
+        // "Move Down"). They're resolved inside `accessibility()`
+        // via `LocalizedString::literal(...).resolve_now()`; binding
+        // the locale signal at `AccessibilityOnly` dirties the AT
+        // cache when the locale flips so the descriptions refresh.
+        ctx.locale_signal()
+            .bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
+
+        // Roving tabindex (ARIA tabs pattern). Only the selected tab
+        // is a Tab-key stop; arrow keys still move focus across
+        // headers via `request_focus(headers[next])`. Disabled tabs
+        // are already filtered by `is_node_focusable` upstream, so
+        // we don't need to special-case `enabled` here. Bound at
+        // `RepaintOnly` — the only consumer is `cycle_focus`, which
+        // re-evaluates on each Tab keypress.
+        let index_for_tab_stop = self.index;
+        let tab_stop = self
+            .selected
+            .map(move |sel| *sel == index_for_tab_stop);
+        ctx.set_tab_stop(self_id, tab_stop);
+
         // Build the inner content row.
         //
         // - Standard tab: [icon? leading? label trailing? close?]
@@ -384,7 +408,7 @@ impl Widget for TabHeader {
                     .size(IconButtonSize::Compact)
                     .focusable(false)
                     .tooltip(LocalizedString::literal("Close tab"))
-                    .on_activate_fn(move |_ctx| (close_fn)());
+                    .on_activate_fn(move |ctx| (close_fn)(ctx));
                 let close_id = ctx.add(close_button);
                 // Hover-only: the button is hidden when the
                 // surrounding tab header is in the Idle interaction
@@ -524,6 +548,7 @@ impl Widget for TabHeader {
                 let selected = self.selected.clone();
                 let header_ids = header_ids.clone();
                 let enabled_tabs = enabled_tabs.clone();
+                let on_close = self.on_close.clone();
                 move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
                     if !enabled {
                         return EventResponse::Ignored;
@@ -559,6 +584,39 @@ impl Widget for TabHeader {
                             EventResponse::Handled
                         }
                         WidgetEvent::KeyDown {
+                            key: Key::Home, ..
+                        } => {
+                            let Some(target) = first_enabled_index(&enabled_tabs) else {
+                                return EventResponse::Ignored;
+                            };
+                            selected.set(target);
+                            ctx.request_focus(headers[target]);
+                            EventResponse::Handled
+                        }
+                        WidgetEvent::KeyDown {
+                            key: Key::End, ..
+                        } => {
+                            let Some(target) = last_enabled_index(&enabled_tabs) else {
+                                return EventResponse::Ignored;
+                            };
+                            selected.set(target);
+                            ctx.request_focus(headers[target]);
+                            EventResponse::Handled
+                        }
+                        WidgetEvent::KeyDown {
+                            key: Key::Delete, ..
+                        } => {
+                            // Close the tab if closable (APG-recommended
+                            // optional binding; mirrors browser
+                            // convention). Selection adjustment is the
+                            // close callback's responsibility.
+                            let Some(close) = on_close.as_ref() else {
+                                return EventResponse::Ignored;
+                            };
+                            (close)(ctx);
+                            EventResponse::Handled
+                        }
+                        WidgetEvent::KeyDown {
                             key: Key::Enter | Key::Space,
                             ..
                         } => {
@@ -573,7 +631,7 @@ impl Widget for TabHeader {
                 let selected = self.selected.clone();
                 let on_reorder_to = self.on_reorder_to.clone();
                 let header_count_signal = self.shared.header_ids.clone();
-                move |action, _node, data, _ctx: &mut EventContext| -> EventResponse {
+                move |action, _node, data, ctx: &mut EventContext| -> EventResponse {
                     if !enabled {
                         return EventResponse::Ignored;
                     }
@@ -596,11 +654,11 @@ impl Widget for TabHeader {
                             let total = header_count_signal.borrow().len();
                             match idx {
                                 0 if index > 0 => {
-                                    reorder(index - 1);
+                                    reorder(index - 1, ctx);
                                     EventResponse::Handled
                                 }
                                 1 if index + 1 < total => {
-                                    reorder(index + 1);
+                                    reorder(index + 1, ctx);
                                     EventResponse::Handled
                                 }
                                 _ => EventResponse::Ignored,
@@ -654,12 +712,12 @@ impl Widget for TabHeader {
         // press never fires the inner `on_tap`. The `on_pointer_event`
         // handler here only adds the close-on-middle-up behaviour.
         if let Some(close_fn) = self.on_close.clone() {
-            handler_set = handler_set.on_pointer_event(move |event, _ctx| match event {
+            handler_set = handler_set.on_pointer_event(move |event, ctx| match event {
                 WidgetEvent::PointerUp {
                     button: PointerButton::Middle,
                     ..
                 } if enabled => {
-                    (close_fn)();
+                    (close_fn)(ctx);
                     EventResponse::Handled
                 }
                 _ => EventResponse::Ignored,
@@ -752,29 +810,55 @@ impl Widget for TabHeader {
         }
         builder.add_action(fern_core::accesskit::Action::Focus);
         builder.set_selected(self.selected.get() == self.index);
+
+        // ARIA aria-posinset / aria-setsize — let screen readers
+        // announce "tab 3 of 5". Pinned and regular tabs share one
+        // TabList (the bar emits one Role::TabList parent), so we
+        // include both in the same set. `self.index` is the unified
+        // index across pinned + regular.
+        let set_size = self.shared.header_ids.borrow().len();
+        if set_size > 0 {
+            builder.set_size_of_set(set_size);
+            builder.set_position_in_set(self.index + 1);
+        }
+
         if let Some(&panel_id) = self.shared.panel_ids.borrow().get(self.index) {
             builder.push_controlled(fern_core::accessibility::widget_id_to_node_id(panel_id));
         }
 
         // Advertise reorder custom actions for AT users who can't drag.
-        // Order matters: index 0 = "Move Left", index 1 = "Move Right"
-        // — `on_access_action_request` reads the index from
-        // `ActionData::CustomAction(idx)` and routes accordingly.
+        // Order matters: index 0 = "Move Left/Up", index 1 = "Move
+        // Right/Down" — `on_access_action_request` reads the index
+        // from `ActionData::CustomAction(idx)` and routes accordingly.
         // Suppressed for pinned tabs (whose order is conceptually fixed
         // by the pinned-strip layout — Firefox convention).
         if self.on_reorder_to.is_some() && self.enabled && !self.pinned {
             let total = self.shared.header_ids.borrow().len();
+            // Orientation-aware labels: a vertical bar's "Move Left"
+            // would mislead a screen reader user. `LocalizedString`
+            // resolves now; the locale signal binding in build()
+            // dirties the AT cache on locale change so these refresh.
+            let (prev_label, next_label) = match self.orientation {
+                super::delegate::TabBarOrientation::Horizontal => (
+                    LocalizedString::literal("Move Left").resolve_now(),
+                    LocalizedString::literal("Move Right").resolve_now(),
+                ),
+                super::delegate::TabBarOrientation::Vertical => (
+                    LocalizedString::literal("Move Up").resolve_now(),
+                    LocalizedString::literal("Move Down").resolve_now(),
+                ),
+            };
             let mut actions = Vec::with_capacity(2);
             if self.index > 0 {
                 actions.push(fern_core::accesskit::CustomAction {
                     id: 0,
-                    description: "Move Left".into(),
+                    description: prev_label.into(),
                 });
             }
             if self.index + 1 < total {
                 actions.push(fern_core::accesskit::CustomAction {
                     id: 1,
-                    description: "Move Right".into(),
+                    description: next_label.into(),
                 });
             }
             if !actions.is_empty() {
@@ -803,4 +887,16 @@ pub(crate) fn next_enabled_index(enabled_tabs: &[bool], current: usize, directio
         offset += 1;
     }
     current
+}
+
+/// First enabled tab in `enabled_tabs`, scanning from index 0.
+/// Returns `None` if every tab is disabled.
+pub(crate) fn first_enabled_index(enabled_tabs: &[bool]) -> Option<usize> {
+    enabled_tabs.iter().position(|&e| e)
+}
+
+/// Last enabled tab in `enabled_tabs`, scanning from the end.
+/// Returns `None` if every tab is disabled.
+pub(crate) fn last_enabled_index(enabled_tabs: &[bool]) -> Option<usize> {
+    enabled_tabs.iter().rposition(|&e| e)
 }

@@ -54,6 +54,12 @@ pub struct TabInfo {
     pub(crate) closable: bool,
     pub(crate) pinned: bool,
     pub(crate) enabled: bool,
+    /// Mark the tab's content pane as focusable so keyboard users can
+    /// reach it. ARIA: a `tabpanel` with no focusable content must
+    /// itself be focusable (`tabindex="0"`). Opt-in because the
+    /// framework can't reliably auto-detect at build time (children
+    /// are built lazily). Default: `false`.
+    pub(crate) focusable_panel: bool,
 }
 
 impl std::fmt::Debug for TabInfo {
@@ -67,6 +73,7 @@ impl std::fmt::Debug for TabInfo {
             .field("closable", &self.closable)
             .field("pinned", &self.pinned)
             .field("enabled", &self.enabled)
+            .field("focusable_panel", &self.focusable_panel)
             .finish()
     }
 }
@@ -84,6 +91,7 @@ impl TabInfo {
             closable: false,
             pinned: false,
             enabled: true,
+            focusable_panel: false,
         }
     }
 
@@ -172,6 +180,26 @@ impl TabInfo {
     /// don't get the close button. Default: `true`.
     pub fn enabled(mut self, b: bool) -> Self {
         self.enabled = b;
+        self
+    }
+
+    /// Make the tab's content pane itself focusable, so keyboard users
+    /// can press `Tab` from the selected tab header and land inside
+    /// the panel.
+    ///
+    /// Opt in for panels you know contain no focusable descendants —
+    /// a static text-only "About" tab, a chart-only metrics tab.
+    /// Panels that already host a `Button`, `TextInput`, `ListView`,
+    /// or any other interactive widget don't need this: focus will
+    /// flow naturally into the descendant.
+    ///
+    /// ARIA: this implements the `tabindex="0"` requirement that an
+    /// empty `tabpanel` must be focusable so its content can be read
+    /// by screen readers in browse mode. AccessKit has no `tabindex`
+    /// field; the framework advertises `Action::Focus` on the panel
+    /// node to signal focusability to AT. Default: `false`.
+    pub fn focusable_panel(mut self, b: bool) -> Self {
+        self.focusable_panel = b;
         self
     }
 }

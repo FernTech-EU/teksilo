@@ -295,6 +295,24 @@ impl AccessNodeBuilder {
         self.inner.set_orientation(orientation);
     }
 
+    /// 1-based index of this item in its parent set — maps to ARIA
+    /// `aria-posinset`. Pair with [`set_size_of_set`] on every item in
+    /// the set so AT can announce "tab 3 of 5", "row 12 of 200", etc.
+    /// Use on `Role::Tab`, `Role::ListBoxOption`, `Role::Row`,
+    /// `Role::MenuItem`, and similar collection items.
+    pub fn set_position_in_set(&mut self, position: usize) {
+        self.inner.set_position_in_set(position);
+    }
+
+    /// Total number of items in this item's parent set — maps to ARIA
+    /// `aria-setsize`. Set on every collection item alongside
+    /// [`set_position_in_set`]; the value should reflect the *logical*
+    /// set size, not the visible window (e.g. report 200 for a
+    /// virtualized 200-row list even when only 20 rows are realized).
+    pub fn set_size_of_set(&mut self, size: usize) {
+        self.inner.set_size_of_set(size);
+    }
+
     /// Flag the node as a modal dialog. Use on `Role::Dialog` /
     /// `Role::AlertDialog` when input is blocked outside the dialog.
     pub fn set_modal(&mut self) {

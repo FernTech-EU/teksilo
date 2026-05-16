@@ -12,6 +12,15 @@
 //! mutable) or any external `ListDataSource<Item = T>` (a database
 //! cursor, a virtual list, …) without TabBar having to carry a generic
 //! source parameter.
+//!
+//! ## Accessibility
+//!
+//! The bar emits `Role::TabList` with an `aria-orientation`
+//! reflecting whether it was built with [`TabBar::horizontal`] or
+//! [`TabBar::vertical`]. When a page hosts more than one tab list,
+//! give each one an accessible name via
+//! [`.access_label(tr!("..."))`](fern_core::widget_builder::WidgetBuilder::access_label)
+//! so screen readers can distinguish them (ARIA APG recommendation).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -143,10 +152,10 @@ pub struct TabBar<T: 'static> {
     vertical_wheel_scrolls_horizontally: bool,
     shift_wheel_scrolls_horizontally: bool,
 
-    on_close: Option<Rc<dyn Fn(usize)>>,
+    on_close: Option<Rc<dyn Fn(usize, &mut EventContext)>>,
     reorderable: bool,
-    on_reorder: Option<Rc<dyn Fn(usize, usize)>>,
-    on_pin_toggle: Option<Rc<dyn Fn(usize, bool)>>,
+    on_reorder: Option<Rc<dyn Fn(usize, usize, &mut EventContext)>>,
+    on_pin_toggle: Option<Rc<dyn Fn(usize, bool, &mut EventContext)>>,
 
     /// Optional shared buffer the parent `TabWidget<T>` populates with
     /// its content panel ids so the headers can publish the
@@ -155,6 +164,13 @@ pub struct TabBar<T: 'static> {
     /// case (which is the right semantics: there is no panel to
     /// control).
     panel_ids_buffer: Option<Rc<RefCell<Vec<WidgetId>>>>,
+
+    /// Optional shared buffer the parent `TabWidget<T>` reads after
+    /// the bar builds to obtain each header's `WidgetId` (in tab
+    /// order). Used to wire the `TabPanel → aria-labelledby → Tab`
+    /// accessibility relation on the TabPane side. `None` for
+    /// stand-alone `TabBar` use.
+    header_ids_buffer: Option<Rc<RefCell<Vec<WidgetId>>>>,
 
     /// Drop indicator x position in bar-local coords, painted by
     /// `paint()`. `None` means no drag in progress / not dropping
@@ -332,6 +348,7 @@ impl<T: 'static> TabBar<T> {
             on_reorder: None,
             on_pin_toggle: None,
             panel_ids_buffer: None,
+            header_ids_buffer: None,
             paint_state: PaintState::default(),
             root_child_id: None,
             header_row_id: None,
@@ -430,10 +447,15 @@ impl<T: 'static> TabBar<T> {
 
     /// Install a pin-toggle handler called whenever the user crosses
     /// a pinned tab over the unpinned region or vice-versa during a
-    /// drag. Receives `(model_index, new_pinned_flag)`. Apps decide
-    /// whether to actually mutate the item — the bar simply reports
-    /// the desired transition.
-    pub fn on_pin_toggle(mut self, f: impl Fn(usize, bool) + 'static) -> Self {
+    /// drag. Receives `(model_index, new_pinned_flag, ctx)`. The
+    /// firing [`EventContext`] lets the handler confirm the
+    /// transition via a dialog or route it through an intent before
+    /// mutating the item; apps decide whether to actually flip the
+    /// pinned state.
+    pub fn on_pin_toggle(
+        mut self,
+        f: impl Fn(usize, bool, &mut EventContext) + 'static,
+    ) -> Self {
         self.on_pin_toggle = Some(Rc::new(f));
         self
     }
@@ -504,11 +526,19 @@ impl<T: 'static> TabBar<T> {
     }
 
     /// Install a close-tab handler called whenever the user clicks a
-    /// closable tab's close button or middle-clicks the tab header.
+    /// closable tab's close button, middle-clicks the tab header, or
+    /// presses `Delete` on a focused tab. The handler receives the
+    /// firing [`EventContext`] so it can open a confirmation dialog
+    /// (`ctx.present_modal(MessageBox::confirm(...))`), dispatch an
+    /// intent, or otherwise route the close request through the
+    /// framework. To veto the close, do nothing in the handler; to
+    /// confirm-then-close, run the confirmation flow and only mutate
+    /// the underlying model on accept.
+    ///
     /// If unset and the bar is backed by a [`ListModel<T>`], the
     /// default behavior is to remove the item at the given index
-    /// from the model.
-    pub fn on_close(mut self, f: impl Fn(usize) + 'static) -> Self {
+    /// from the model (no confirmation, no ctx needed for that path).
+    pub fn on_close(mut self, f: impl Fn(usize, &mut EventContext) + 'static) -> Self {
         self.on_close = Some(Rc::new(f));
         self
     }
@@ -526,9 +556,15 @@ impl<T: 'static> TabBar<T> {
     }
 
     /// Install a reorder handler called whenever the user drag-drops
-    /// a tab to a new position. Receives `(from, to)` model
-    /// indices. Implies [`reorderable(true)`](Self::reorderable).
-    pub fn on_reorder(mut self, f: impl Fn(usize, usize) + 'static) -> Self {
+    /// a tab to a new position. Receives `(from, to, ctx)` —
+    /// `from`/`to` are model indices and `ctx` is the firing
+    /// [`EventContext`] so the handler can open a confirmation
+    /// dialog or dispatch an intent before persisting the move.
+    /// Implies [`reorderable(true)`](Self::reorderable).
+    pub fn on_reorder(
+        mut self,
+        f: impl Fn(usize, usize, &mut EventContext) + 'static,
+    ) -> Self {
         self.on_reorder = Some(Rc::new(f));
         self.reorderable = true;
         self
@@ -541,6 +577,16 @@ impl<T: 'static> TabBar<T> {
     /// relation.
     pub(crate) fn with_panel_ids(mut self, buffer: Rc<RefCell<Vec<WidgetId>>>) -> Self {
         self.panel_ids_buffer = Some(buffer);
+        self
+    }
+
+    /// Share the bar's header-ids buffer with the parent so each
+    /// `TabPane` can wire its `aria-labelledby` relation to the
+    /// header at the matching index. Populated by `build()` once
+    /// every header has been added to the arena; readers must
+    /// `borrow()` after the bar's build pass.
+    pub(crate) fn with_header_ids(mut self, buffer: Rc<RefCell<Vec<WidgetId>>>) -> Self {
+        self.header_ids_buffer = Some(buffer);
         self
     }
 }
@@ -666,7 +712,15 @@ impl<T: 'static> Widget for TabBar<T> {
             }
         });
 
-        let header_ids_buf = Rc::new(RefCell::new(Vec::with_capacity(n)));
+        let header_ids_buf = self
+            .header_ids_buffer
+            .clone()
+            .unwrap_or_else(|| Rc::new(RefCell::new(Vec::with_capacity(n))));
+        // If a parent provided a pre-allocated buffer (e.g.
+        // `TabWidget` rebuilding after a dynamic-model mutation),
+        // clear stale entries so the new tab order replaces — never
+        // appends to — the prior pass.
+        header_ids_buf.borrow_mut().clear();
         let panel_ids_buf = self
             .panel_ids_buffer
             .clone()
@@ -714,36 +768,42 @@ impl<T: 'static> Widget for TabBar<T> {
         // sync would then promote — causing the active tab to
         // change visually (and the content pane to fall out of
         // sync) on every drag.
-        let reorder_handler: Option<Rc<dyn Fn(usize, usize)>> = if self.reorderable {
-            self.on_reorder
-                .clone()
-                .or_else(|| self.source.move_item_fn.clone())
-                .map(|inner| {
-                    Rc::new(move |from: usize, to: usize| {
-                        (inner)(from, to);
-                    }) as Rc<dyn Fn(usize, usize)>
+        let reorder_handler: Option<Rc<dyn Fn(usize, usize, &mut EventContext)>> = if self
+            .reorderable
+        {
+            if let Some(explicit) = self.on_reorder.clone() {
+                Some(explicit)
+            } else {
+                self.source.move_item_fn.clone().map(|move_fn| {
+                    Rc::new(move |from: usize, to: usize, _ctx: &mut EventContext| {
+                        (move_fn)(from, to);
+                    }) as Rc<dyn Fn(usize, usize, &mut EventContext)>
                 })
+            }
         } else {
             None
         };
 
-        // Close handler. Use the explicit `on_close` if set,
-        // otherwise fall back to the source's `remove_item_fn`
-        // (populated when backed by a `ListModel`). Same id-based
+        // Close handler. The explicit `on_close` overrides everything;
+        // otherwise we fall back to the source's `remove_item_fn`
+        // (populated when backed by a `ListModel`) and lift it into
+        // the ctx-accepting shape by ignoring ctx. Same id-based
         // discipline as reorder: don't pre-empt the index signal.
         // After model.remove the rebuild's pre-build sync handles
         // both the "selected id still valid" case (re-indexes to
         // the survivor) and the "selected id stale" case (stale-id
         // fallback picks the next neighbor, browser convention).
-        let close_handler: Option<Rc<dyn Fn(usize)>> = self
-            .on_close
-            .clone()
-            .or_else(|| self.source.remove_item_fn.clone())
-            .map(|inner| {
-                Rc::new(move |i: usize| {
-                    (inner)(i);
-                }) as Rc<dyn Fn(usize)>
-            });
+        let close_handler: Option<Rc<dyn Fn(usize, &mut EventContext)>> = if let Some(explicit) =
+            self.on_close.clone()
+        {
+            Some(explicit)
+        } else {
+            self.source.remove_item_fn.clone().map(|remove| {
+                Rc::new(move |i: usize, _ctx: &mut EventContext| {
+                    (remove)(i);
+                }) as Rc<dyn Fn(usize, &mut EventContext)>
+            })
+        };
         for i in 0..n {
             // Build the TabHeader for index i. The data-source
             // `with_item_fn` requires a `Fn(&T) -> Box<dyn Widget>`
@@ -774,17 +834,19 @@ impl<T: 'static> Widget for TabBar<T> {
                 let context_menu_factory = self.delegate.resolve_context_menu(i, item);
                 let enabled = self.delegate.resolve_enabled(i, item);
                 let closable = self.delegate.resolve_closable(i, item);
-                let on_close: Option<Rc<dyn Fn()>> = if closable {
-                    close_handler_for_tab
-                        .clone()
-                        .map(|f| Rc::new(move || (f)(i)) as Rc<dyn Fn()>)
+                let on_close: Option<Rc<dyn Fn(&mut EventContext)>> = if closable {
+                    close_handler_for_tab.clone().map(|f| {
+                        Rc::new(move |ctx: &mut EventContext| (f)(i, ctx))
+                            as Rc<dyn Fn(&mut EventContext)>
+                    })
                 } else {
                     None
                 };
 
-                let on_reorder_to: Option<Rc<dyn Fn(usize)>> = if !is_pinned {
+                let on_reorder_to: Option<Rc<dyn Fn(usize, &mut EventContext)>> = if !is_pinned {
                     reorder_handler.clone().map(|reorder| {
-                        Rc::new(move |to: usize| (reorder)(i, to)) as Rc<dyn Fn(usize)>
+                        Rc::new(move |to: usize, ctx: &mut EventContext| (reorder)(i, to, ctx))
+                            as Rc<dyn Fn(usize, &mut EventContext)>
                     })
                 } else {
                     None
@@ -1200,7 +1262,7 @@ impl<T: 'static> Widget for TabBar<T> {
                     let bar_id = bar_id_for_drop;
                     move |mut payload: DragPayload,
                           position: Point,
-                          _ctx: &mut EventContext|
+                          ctx: &mut EventContext|
                           -> bool {
                         drop_indicator.set(None);
                         let Some(data) = payload.take_typed::<TabBarDragData>() else {
@@ -1253,7 +1315,7 @@ impl<T: 'static> Widget for TabBar<T> {
                             to_model
                         };
                         if from != adjusted_to {
-                            (reorder)(from, adjusted_to);
+                            (reorder)(from, adjusted_to, ctx);
                         }
                         true
                     }
@@ -1361,6 +1423,10 @@ impl<T: 'static> Widget for TabBar<T> {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::TabList);
+        builder.set_orientation(match self.orientation {
+            TabBarOrientation::Horizontal => fern_core::accesskit::Orientation::Horizontal,
+            TabBarOrientation::Vertical => fern_core::accesskit::Orientation::Vertical,
+        });
     }
 
     fn children(&self) -> Vec<WidgetId> {

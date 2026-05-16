@@ -817,7 +817,7 @@ impl<T: 'static> Widget for TreeTable<T> {
                                 entry.has_children,
                                 entry.is_expanded,
                             )
-                            .on_click(move || {
+                            .on_click(move |_ctx| {
                                 proxy_for_twist.toggle(twist_node_id);
                             }),
                         );

@@ -512,7 +512,7 @@ pub struct StandardTreeItem {
     depth: usize,
     has_children: bool,
     is_expanded: Signal<bool>,
-    on_toggle: Option<Rc<dyn Fn()>>,
+    on_toggle: Option<Rc<dyn Fn(&mut fern_core::widget::EventContext)>>,
 }
 
 impl StandardTreeItem {
@@ -677,13 +677,14 @@ impl StandardTreeItem {
     /// is true. Typical use: `.on_toggle(ctx.toggle_callback())` from
     /// a `TreeRowContext` (see `TreeView::new_with_context`).
     ///
-    /// The callback signature is `Fn()` (no `EventContext`) because
-    /// the chevron is wired through `TwistArrow::on_click` and the
-    /// tree-toggle workflow doesn't need to dispatch intents — it
-    /// just calls `slice.toggle_expand(node)`. If you need access to
-    /// `EventContext` in a chevron-tap handler, attach a sibling
-    /// `on_tap` via the `WidgetBuilder` chain on a wrapping widget.
-    pub fn on_toggle(mut self, f: impl Fn() + 'static) -> Self {
+    /// The callback receives the firing [`EventContext`] so apps can
+    /// dispatch an intent (e.g. lazy-load children on expand), open
+    /// a dialog, or otherwise route the toggle through the framework
+    /// before mutating model state.
+    pub fn on_toggle(
+        mut self,
+        f: impl Fn(&mut fern_core::widget::EventContext) + 'static,
+    ) -> Self {
         self.on_toggle = Some(Rc::new(f));
         self
     }
@@ -692,7 +693,7 @@ impl StandardTreeItem {
     /// same callback is shared across multiple call sites without an
     /// extra clone — e.g. `TreeRowContext::toggle_callback()` returns
     /// this shape directly.
-    pub fn on_toggle_rc(mut self, f: Rc<dyn Fn()>) -> Self {
+    pub fn on_toggle_rc(mut self, f: Rc<dyn Fn(&mut fern_core::widget::EventContext)>) -> Self {
         self.on_toggle = Some(f);
         self
     }
@@ -735,7 +736,7 @@ impl Widget for StandardTreeItem {
         if self.has_children
             && let Some(cb) = self.on_toggle.clone()
         {
-            chevron = chevron.on_click(move || cb());
+            chevron = chevron.on_click(move |ctx| cb(ctx));
         }
         let chevron_column_id = ctx.add(
             FixedSize::new()
@@ -963,7 +964,7 @@ mod tests {
         let f = fired.clone();
         let mut tree = WidgetTree::new().with_theme(theme());
         let id = tree.add(
-            TwistArrow::new(20.0, true, false).on_click(move || f.set(f.get() + 1)),
+            TwistArrow::new(20.0, true, false).on_click(move |_ctx| f.set(f.get() + 1)),
         );
         tree.layout(SizeProposal::exact(40.0, 40.0));
         let b = tree.bounds(id);
@@ -1094,7 +1095,7 @@ mod tests {
                 .depth(0)
                 .has_children(true)
                 .is_expanded(false)
-                .on_toggle(move || fired_clone.set(fired_clone.get() + 1)),
+                .on_toggle(move |_ctx| fired_clone.set(fired_clone.get() + 1)),
         );
         tree.layout(SizeProposal::exact(400.0, 60.0));
         let bounds = tree.bounds(id);
@@ -1173,7 +1174,7 @@ mod tests {
             StandardTreeItem::new_literal("Leaf")
                 .depth(0)
                 .has_children(false)
-                .on_toggle(move || fired_clone.set(fired_clone.get() + 1)),
+                .on_toggle(move |_ctx| fired_clone.set(fired_clone.get() + 1)),
         );
         tree.layout(SizeProposal::exact(400.0, 60.0));
         let bounds = tree.bounds(id);

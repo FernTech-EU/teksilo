@@ -65,6 +65,15 @@ pub struct WidgetNode {
     pub(crate) theme_override: Option<ThemeOverride>,
     pub(crate) visible_state: Option<Prop<bool>>,
     pub(crate) enabled_state: Option<Prop<bool>>,
+    /// Reactive Tab-key participation. When bound and evaluates to
+    /// `false`, the widget is excluded from Tab / Shift+Tab traversal
+    /// (`cycle_focus`) — but remains reachable via `request_focus`
+    /// and arrow-key navigation that calls `request_focus`. This
+    /// implements the ARIA roving-tabindex pattern (HTML
+    /// `tabindex="-1"` semantics). `None` means "always a Tab stop
+    /// when focusable" — the default. The selected `TabHeader` is the
+    /// canonical user.
+    pub(crate) tab_stop: Option<Prop<bool>>,
     /// User-bound signal that the framework sets to `true` whenever
     /// the focused widget is a strict descendant of this node, and
     /// `false` otherwise. Used by `Panel` / `Card` / composite
@@ -256,6 +265,7 @@ impl WidgetArena {
             theme_override: None,
             visible_state: None,
             enabled_state: None,
+            tab_stop: None,
             focus_within_signal: None,
             hover_within_signal: None,
             alignment_override: None,
@@ -313,6 +323,7 @@ impl WidgetArena {
             theme_override: None,
             visible_state: None,
             enabled_state: None,
+            tab_stop: None,
             focus_within_signal: None,
             hover_within_signal: None,
             alignment_override: None,

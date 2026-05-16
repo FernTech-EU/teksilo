@@ -17,7 +17,7 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::binding::BindingLevel;
 use fern_core::drag_payload::DragPayload;
 use fern_core::signal::Signal;
-use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
+use fern_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 
@@ -76,7 +76,7 @@ pub struct ListView<T: 'static> {
 
     /// Callback for inter-widget drops from external drag sources.
     #[allow(clippy::type_complexity)]
-    on_item_drop: Option<Rc<dyn Fn(DragPayload, usize) -> bool>>,
+    on_item_drop: Option<Rc<dyn Fn(DragPayload, usize, &mut EventContext) -> bool>>,
 
     // Persistent state (survives rebuild)
     scroll_y: Signal<f32>,
@@ -209,9 +209,15 @@ impl<T: 'static> ListView<T> {
 
     /// Set a callback for inter-widget drops from external drag sources.
     ///
-    /// The callback receives `(payload, insertion_index)` and returns `true`
-    /// if the drop was accepted.
-    pub fn on_item_drop(mut self, f: impl Fn(DragPayload, usize) -> bool + 'static) -> Self {
+    /// The callback receives `(payload, insertion_index, ctx)` and
+    /// returns `true` if the drop was accepted. The firing
+    /// [`EventContext`] lets the handler open a confirmation /
+    /// validation dialog before mutating the underlying model,
+    /// dispatch an intent, or present a snackbar on failure.
+    pub fn on_item_drop(
+        mut self,
+        f: impl Fn(DragPayload, usize, &mut EventContext) -> bool + 'static,
+    ) -> Self {
         self.on_item_drop = Some(Rc::new(f));
         self
     }
@@ -582,7 +588,7 @@ impl<T: 'static> Widget for ListView<T> {
             let ih_for_drop = self.item_height;
             let row_step_for_drop = self.item_height + self.spacing;
 
-            handlers = handlers.on_drop(move |mut payload, position, _ctx| {
+            handlers = handlers.on_drop(move |mut payload, position, ctx| {
                 let scroll = scroll_for_drop.get().max(0.0);
                 let content_y = position.y + scroll;
                 let to_index = if row_step_for_drop > 0.0 {
@@ -615,7 +621,7 @@ impl<T: 'static> Widget for ListView<T> {
 
                 // Inter-widget drop
                 if let Some(ref handler) = on_item_drop {
-                    return handler(payload, to_index);
+                    return handler(payload, to_index, ctx);
                 }
 
                 false
@@ -1691,7 +1697,7 @@ mod tests {
                         Box::new(FixedLeaf(100.0, 30.0))
                     })
                     .item_height(30.0)
-                    .on_item_drop(move |mut payload, idx| {
+                    .on_item_drop(move |mut payload, idx, _ctx| {
                         if let Some(s) = payload.take_typed::<String>() {
                             *r.borrow_mut() = Some((s, idx));
                             true

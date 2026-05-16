@@ -302,6 +302,15 @@ impl<'a> BuildContext<'a> {
         self.tree.enabled_when(id, state);
     }
 
+    /// Bind a widget's Tab-key participation to a boolean prop or
+    /// compatibility state binding. When false, the widget is removed
+    /// from Tab / Shift+Tab traversal but remains reachable via
+    /// `request_focus` and arrow-key navigation. Implements the ARIA
+    /// roving-tabindex pattern (HTML `tabindex="-1"` semantics).
+    pub fn set_tab_stop(&mut self, id: WidgetId, state: impl Into<crate::signal::Prop<bool>>) {
+        self.tree.set_tab_stop(id, state);
+    }
+
     /// Attach a tooltip to a widget.
     pub fn attach_tooltip(
         &mut self,
