@@ -445,7 +445,15 @@ impl Widget for SearchField {
 
         ctx.apply_self_handlers(handlers);
 
-        vec![visible_root]
+        // Return BOTH the visible root AND the dormant suggestions
+        // panel as children so the framework links `panel_id` under
+        // this widget in the arena instead of leaving it an orphan
+        // root. See popover_button.rs for the same pattern.
+        let mut out = vec![visible_root];
+        if let Some(panel_id) = self.panel_content_id {
+            out.push(panel_id);
+        }
+        out
     }
 
     fn layout_response(
@@ -466,7 +474,14 @@ impl Widget for SearchField {
         children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
+        // The visible root fills our bounds; the suggestions panel's
+        // bounds are owned by the overlay manager when shown
+        // (`position_overlays`), so we zero-size it here.
         for child in children.iter_mut() {
+            if Some(child.id) == self.panel_content_id {
+                child.size = fern_canvas::Size::ZERO;
+                continue;
+            }
             child.origin = bounds.origin();
             child.size = bounds.size();
         }
@@ -488,7 +503,14 @@ impl Widget for SearchField {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        self.root_child_id.into_iter().collect()
+        let mut out = Vec::new();
+        if let Some(id) = self.root_child_id {
+            out.push(id);
+        }
+        if let Some(id) = self.panel_content_id {
+            out.push(id);
+        }
+        out
     }
 }
 

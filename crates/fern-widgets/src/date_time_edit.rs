@@ -661,7 +661,16 @@ impl Widget for DateTimeEdit {
             fern_core::binding::BindingLevel::AccessibilityOnly,
         );
 
-        vec![root_with_strip]
+        // Return BOTH the visible root AND the dormant calendar
+        // popover content as children so the framework links
+        // `calendar_id` under this widget in the arena instead of
+        // leaving it an orphan root. See popover_button.rs for the
+        // same pattern.
+        let mut out = vec![root_with_strip];
+        if let Some(cal_id) = self.calendar_id {
+            out.push(cal_id);
+        }
+        out
     }
 
     fn layout_response(
@@ -693,14 +702,28 @@ impl Widget for DateTimeEdit {
         children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
+        // The visible root fills our bounds; the calendar popover's
+        // bounds are owned by the overlay manager when shown
+        // (`position_overlays`), so we zero-size it here.
         for child in children.iter_mut() {
+            if Some(child.id) == self.calendar_id {
+                child.size = fern_canvas::Size::ZERO;
+                continue;
+            }
             child.origin = bounds.origin();
             child.size = bounds.size();
         }
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        self.root_child_id.into_iter().collect()
+        let mut out = Vec::new();
+        if let Some(id) = self.root_child_id {
+            out.push(id);
+        }
+        if let Some(id) = self.calendar_id {
+            out.push(id);
+        }
+        out
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

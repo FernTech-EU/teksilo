@@ -806,7 +806,14 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
 
         ctx.apply_self_handlers(handler_set);
 
-        vec![root_id]
+        // Return BOTH the trigger root AND the dormant dropdown as
+        // children so the framework links `dropdown_id` under this
+        // widget in the arena instead of leaving it an orphan root.
+        // Hit-test walks all arena roots; an orphan dormant subtree
+        // can leak into hit-tests at fallback bounds and intercept
+        // clicks meant for siblings. See popover_button.rs for the
+        // same pattern.
+        vec![root_id, dropdown_id]
     }
 
     fn layout_response(
@@ -837,7 +844,14 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
+        // The trigger fills our bounds; the dropdown's bounds are
+        // owned by the overlay manager when shown (`position_overlays`),
+        // so we zero-size it here.
         for child in children.iter_mut() {
+            if Some(child.id) == self.dropdown_content_id {
+                child.size = fern_canvas::Size::ZERO;
+                continue;
+            }
             child.origin = bounds.origin();
             child.size = bounds.size();
         }
@@ -901,6 +915,13 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        self.root_child_id.into_iter().collect()
+        let mut out = Vec::new();
+        if let Some(id) = self.root_child_id {
+            out.push(id);
+        }
+        if let Some(id) = self.dropdown_content_id {
+            out.push(id);
+        }
+        out
     }
 }
