@@ -4,16 +4,20 @@ members = [
     "crates/*",
     "examples/*",
 ]
-# `fern-analytics-fern` + `fern-collector-proto` build protobuf-src from
-# source, which needs a system `cmake` + C++ toolchain. They're opt-in
-# and only consumed by the `telemetry-fern` example, so excluding all
-# three keeps a default `cargo build`/`cargo test` working without that
-# toolchain. Build them explicitly with `-p fern-analytics-fern` (and
+# `fern-analytics-fern` builds protobuf-src from source (transitively
+# via `fern-collector-proto`), which needs a system `cmake` + C++
+# toolchain. It's opt-in and only consumed by the `telemetry-fern`
+# example, so excluding both keeps a default `cargo build`/`cargo test`
+# working without that toolchain. Build them explicitly with
+# `-p fern-analytics-fern` (and
 # `--manifest-path examples/telemetry_fern/Cargo.toml`) when cmake is
 # available.
+#
+# `fern-collector-proto` itself lives in a sibling repo at
+# `../fern-collector-proto` — its wire-format version stream is
+# decoupled from this workspace's release version.
 exclude = [
     "crates/fern-analytics-fern",
-    "crates/fern-collector-proto",
     "examples/telemetry_fern",
 ]
 
@@ -98,14 +102,14 @@ fern-theme-material3 = { path = "crates/fern-theme-material3", version = "0.2.0"
 fern-theme-macos = { path = "crates/fern-theme-macos", version = "0.2.0" }
 fern-theme-fluent = { path = "crates/fern-theme-fluent", version = "0.2.0" }
 
-# gRPC proto crate — lives in-tree as a workspace member so cross
-# builds and CI environments don't need the sibling `fern-collector`
-# repo checked out. The adapter that consumes it (fern-analytics-fern)
-# owns its own tonic/prost/tokio versions in its own Cargo.toml since
-# no other framework crate uses them. The `fern-collector` server repo
-# path-deps back into this crate to keep the wire-format spec
-# single-sourced.
-fern-collector-proto = { path = "crates/fern-collector-proto", version = "0.2.0" }
+# gRPC proto crate — lives in a sibling repo at `../fern-collector-proto`
+# so the wire-format spec has its own version stream (and the
+# `fern-collector` server can consume it without needing the entire
+# fern-ui checkout). Path-dep into the sibling for now; promote to a
+# git-rev / crates.io dep once the schema stabilises. The only fern-ui
+# consumer (`fern-analytics-fern`) owns its own tonic / prost / tokio
+# versions since no other framework crate uses them.
+fern-collector-proto = { path = "../fern-collector-proto", version = "0.1.0" }
 fern-analytics-fern = { path = "crates/fern-analytics-fern", version = "0.2.0" }
 fern-telemetry-codegen = { path = "crates/fern-telemetry-codegen", version = "0.2.0" }
 
