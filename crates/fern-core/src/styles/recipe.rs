@@ -28,9 +28,7 @@
 use serde::{Deserialize, Serialize};
 
 use fern_canvas::Vec2;
-use fern_tokens::{
-    BorderRole, Color, ColorTokens, CornerRadius, SurfaceRole, TextRole,
-};
+use fern_tokens::{BorderRole, Color, ColorTokens, CornerRadius, SurfaceRole, TextRole};
 
 use crate::styles::Theme;
 
@@ -40,19 +38,14 @@ use crate::styles::Theme;
 /// chrome composer derives the active state from the widget's
 /// boolean signals (priority chain: Disabled > Pressed > Focused >
 /// Hovered > Idle).
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default, Serialize, Deserialize)]
 pub enum WidgetState {
+    #[default]
     Idle,
     Hovered,
     Pressed,
     Focused,
     Disabled,
-}
-
-impl Default for WidgetState {
-    fn default() -> Self {
-        Self::Idle
-    }
 }
 
 // ─── RecipeColor ────────────────────────────────────────────────────────────
@@ -192,35 +185,30 @@ impl FillRecipe {
 
 // ─── BorderRecipe ───────────────────────────────────────────────────────────
 
-#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum BorderStyle {
+    #[default]
     Solid,
-    Dashed { dash: f32, gap: f32 },
-    Dotted { gap: f32 },
+    Dashed {
+        dash: f32,
+        gap: f32,
+    },
+    Dotted {
+        gap: f32,
+    },
 }
 
-impl Default for BorderStyle {
-    fn default() -> Self {
-        Self::Solid
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BorderPosition {
     /// Border drawn entirely inside the shape (default — matches the
     /// existing IntUI-style `RectWidget` border).
+    #[default]
     Inside,
     /// Centerline of the border lies on the shape edge.
     Center,
     /// Border drawn entirely outside the shape (used for focus rings
     /// that sit in the gap outside the control).
     Outside,
-}
-
-impl Default for BorderPosition {
-    fn default() -> Self {
-        Self::Inside
-    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]

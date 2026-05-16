@@ -282,7 +282,6 @@ mod tests {
     use super::*;
     use crate::primitives::{FixedSize, TextWidget};
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[test]
     fn first_measurement_snaps_to_natural_no_grow_in_animation() {

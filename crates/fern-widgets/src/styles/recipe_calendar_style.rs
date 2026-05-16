@@ -23,8 +23,7 @@ use fern_core::build_context::BuildContext;
 use fern_core::color_prop::ColorProp;
 use fern_core::signal::Signal;
 use fern_core::styles::{
-    CalendarDayConfig, CalendarDayFill, CalendarHeaderConfig, CalendarStyle,
-    CalendarZoomCellConfig,
+    CalendarDayConfig, CalendarDayFill, CalendarHeaderConfig, CalendarStyle, CalendarZoomCellConfig,
 };
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole, TextStyleRole};
@@ -216,4 +215,3 @@ impl CalendarStyle for RecipeCalendarStyle {
         ctx.add(row)
     }
 }
-

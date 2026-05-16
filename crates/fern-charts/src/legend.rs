@@ -421,7 +421,6 @@ pub(crate) fn paint_embedded_legend<T: Clone + 'static>(
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     fn three_series() -> Vec<ChartSeries<String>> {
         vec![

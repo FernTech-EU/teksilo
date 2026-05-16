@@ -141,7 +141,6 @@ impl Panel {
         self.padding = Some(padding.into());
         self
     }
-
 }
 
 impl Default for Panel {
@@ -162,14 +161,18 @@ impl Widget for Panel {
             Some(id) => id,
             // Headless / empty panel — emit a zero-size placeholder so
             // the style still has a `content: WidgetId` to wrap.
-            None => ctx.add(crate::primitives::FixedSize::new().bind_width(0.0).bind_height(0.0)),
+            None => ctx.add(
+                crate::primitives::FixedSize::new()
+                    .bind_width(0.0)
+                    .bind_height(0.0),
+            ),
         };
 
         let style: SharedPanelStyle = self
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.panel.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipePanelStyle::default()));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipePanelStyle));
         let cfg = PanelStyleConfig {
             content,
             variant: self.variant,
@@ -227,7 +230,6 @@ impl Widget for Panel {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);

@@ -427,9 +427,9 @@ impl Widget for TextInputField {
         // otherwise pull from the recipe constant. The theme snapshot
         // is still captured for downstream typography reads below.
         let theme_snapshot = ctx.theme_signal().get();
-        let mask_placeholder_char = self.mask_placeholder_override.unwrap_or(
-            crate::styles::recipe_text_input_style::TEXT_FIELD_MASK_PLACEHOLDER_CHAR,
-        );
+        let mask_placeholder_char = self
+            .mask_placeholder_override
+            .unwrap_or(crate::styles::recipe_text_input_style::TEXT_FIELD_MASK_PLACEHOLDER_CHAR);
 
         // Auto-derive placeholder from mask when none was explicitly
         // set: an empty masked field paints `__/__/____` rather than

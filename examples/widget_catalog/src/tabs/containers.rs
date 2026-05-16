@@ -252,8 +252,7 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let acc_open = sigs.accordion_expanded.clone();
     let acc2_open = sigs.accordion2_expanded.clone();
 
-    fern!(ctx =>
-        VStack {
+    fern!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0
@@ -266,7 +265,7 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Secondary
                 }
             }
-            Divider {}
+            Divider
 
             VStack {
                 spacing: 6.0
@@ -279,7 +278,9 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     border_color: BorderRole::Default
                     border_width: 1.0
                     padding: 12.0
-                    TextWidget::new(tr!(cnt_panel_body())) { style: TextStyleRole::Small }
+                    TextWidget::new(tr!(cnt_panel_body())) {
+                        style: TextStyleRole::Small
+                    }
                 }
             }
 
@@ -302,8 +303,12 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     checkable: group_checked
                     VStack {
                         spacing: 4.0
-                        Checkbox::new(cb_sounds) { label: tr!(cnt_cb_sounds()) }
-                        Checkbox::new(cb_banner) { label: tr!(cnt_cb_banner()) }
+                        Checkbox::new(cb_sounds) {
+                            label: tr!(cnt_cb_sounds())
+                        }
+                        Checkbox::new(cb_banner) {
+                            label: tr!(cnt_cb_banner())
+                        }
                     }
                 }
             }
@@ -317,7 +322,9 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                 VStack {
                     spacing: 6.0
                     GroupHeader::new(tr!(cnt_groupheader_title()))
-                    TextWidget::new(tr!(cnt_groupheader_body())) { style: TextStyleRole::Body }
+                    TextWidget::new(tr!(cnt_groupheader_body())) {
+                        style: TextStyleRole::Body
+                    }
                 }
             }
 

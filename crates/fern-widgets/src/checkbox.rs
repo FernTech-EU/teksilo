@@ -320,13 +320,11 @@ impl Widget for Checkbox {
         // protocol-side `CheckboxState` (fern-core). The mapping is 1-to-1;
         // `.map()` registers the upstream root so the body repaints when
         // the check state flips.
-        let style_state = kind
-            .check_state_signal()
-            .map(|cs| match *cs {
-                CheckState::Unchecked => CheckboxState::Unchecked,
-                CheckState::Checked => CheckboxState::Checked,
-                CheckState::Indeterminate => CheckboxState::Indeterminate,
-            });
+        let style_state = kind.check_state_signal().map(|cs| match *cs {
+            CheckState::Unchecked => CheckboxState::Unchecked,
+            CheckState::Checked => CheckboxState::Checked,
+            CheckState::Indeterminate => CheckboxState::Indeterminate,
+        });
 
         let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));
         let is_pressed = interaction.map(|s| matches!(s, InteractionState::Pressed));
@@ -337,7 +335,7 @@ impl Widget for Checkbox {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.checkbox.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeCheckboxStyle::default()));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeCheckboxStyle));
         let cfg = CheckboxStyleConfig {
             state: style_state,
             is_hovered,
@@ -348,8 +346,12 @@ impl Widget for Checkbox {
         };
         let body_id = style.make_body(&cfg, ctx);
 
-        let mut row = HStack::new().spacing(cb_dims::CHECKBOX_LABEL_GAP).add_child(body_id);
-        if !self.labels_hidden && let Some(ref label) = self.label {
+        let mut row = HStack::new()
+            .spacing(cb_dims::CHECKBOX_LABEL_GAP)
+            .add_child(body_id);
+        if !self.labels_hidden
+            && let Some(ref label) = self.label
+        {
             let label_widget = TextWidget::new_literal(label)
                 .style(TextStyleRole::Body)
                 .color(TextRole::Primary)
@@ -381,8 +383,13 @@ impl Widget for Checkbox {
         }
 
         let row_id = ctx.add(row);
-        let root_id =
-            ctx.add(MinSize::new(cb_dims::CHECKBOX_BOX_HIT_AREA, cb_dims::CHECKBOX_BOX_HIT_AREA).child_id(row_id));
+        let root_id = ctx.add(
+            MinSize::new(
+                cb_dims::CHECKBOX_BOX_HIT_AREA,
+                cb_dims::CHECKBOX_BOX_HIT_AREA,
+            )
+            .child_id(row_id),
+        );
 
         if let Some(content) = self.composite_tooltip_content.take() {
             crate::tooltip::attach_composite_tooltip_boxed(
@@ -564,7 +571,6 @@ mod tests {
     use super::*;
     use fern_core::event::Modifiers;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     // --- Two-state tests ---
 
@@ -698,7 +704,10 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let frame = tree.render();
-        let disabled_fill = fern_core::presets::intui::light().colors.accent_disabled.to_array();
+        let disabled_fill = fern_core::presets::intui::light()
+            .colors
+            .accent_disabled
+            .to_array();
         assert!(
             frame.shapes.iter().any(|s| s.color == disabled_fill),
             "disabled checkbox should render with disabled_fill color"

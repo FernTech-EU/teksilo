@@ -298,6 +298,7 @@ impl std::fmt::Debug for SplitButton {
 // `Filled` family (Filled / Destructive), `Plain` family (Plain /
 // Tinted / Outlined), `Ghost` family (Ghost / Link).
 #[derive(Copy, Clone, Eq, PartialEq)]
+#[allow(clippy::enum_variant_names)]
 enum SplitButtonFamily {
     FilledLike,
     PlainLike,
@@ -530,8 +531,11 @@ impl Widget for SplitButton {
         let label_id = ctx.add(label_widget);
 
         let main_padding_id = ctx.add(
-            Padding::symmetric(SPLIT_BUTTON_PADDING_VERTICAL, SPLIT_BUTTON_PADDING_HORIZONTAL)
-                .child_id(label_id),
+            Padding::symmetric(
+                SPLIT_BUTTON_PADDING_VERTICAL,
+                SPLIT_BUTTON_PADDING_HORIZONTAL,
+            )
+            .child_id(label_id),
         );
         // ZStack (default CENTER alignment) centers the padded label within
         // the MinSize bounds when the region is wider than the text — same
@@ -699,8 +703,10 @@ impl Widget for SplitButton {
         let frame_id = ctx.add(ZStack::new().add_child(bg_id).add_child(row_id));
 
         // Enforce an overall minimum size: main min_width + divider + chevron.
-        let total_min_width = SPLIT_BUTTON_MIN_WIDTH + SPLIT_BUTTON_DIVIDER_WIDTH + SPLIT_BUTTON_CHEVRON_WIDTH;
-        let root_id = ctx.add(MinSize::new(total_min_width, SPLIT_BUTTON_HEIGHT).child_id(frame_id));
+        let total_min_width =
+            SPLIT_BUTTON_MIN_WIDTH + SPLIT_BUTTON_DIVIDER_WIDTH + SPLIT_BUTTON_CHEVRON_WIDTH;
+        let root_id =
+            ctx.add(MinSize::new(total_min_width, SPLIT_BUTTON_HEIGHT).child_id(frame_id));
         self.root_child_id = Some(root_id);
 
         // ---- Self handlers: the SplitButton is the single focus stop.

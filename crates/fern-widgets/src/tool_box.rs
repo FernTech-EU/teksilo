@@ -174,13 +174,6 @@ impl ToolBoxItem {
     }
 }
 
-/// A vertical container of collapsible sections with exactly one expanded
-/// at a time — the Int UI / `QToolBox` pattern.
-///
-/// The active section is driven by a caller-owned `Signal<usize>`; mirrors
-/// [`TabWidget::new`](crate::TabWidget::new) so persistence, synchronised
-/// windows, and programmatic activation work identically.
-
 /// ToolBox design tokens — relocated from `theme.components.tool_box`
 /// in Stage G of the styling migration.
 pub const TOOL_BOX_HEADER_MIN_HEIGHT: f32 = 28.0;
@@ -189,6 +182,12 @@ pub const TOOL_BOX_ICON_TEXT_SPACING: f32 = 8.0;
 pub const TOOL_BOX_CHEVRON_SIZE: f32 = 12.0;
 pub const TOOL_BOX_INDICATOR_THICKNESS: f32 = 1.0;
 
+/// A vertical container of collapsible sections with exactly one expanded
+/// at a time — the Int UI / `QToolBox` pattern.
+///
+/// The active section is driven by a caller-owned `Signal<usize>`; mirrors
+/// [`TabWidget::new`](crate::TabWidget::new) so persistence, synchronised
+/// windows, and programmatic activation work identically.
 pub struct ToolBox {
     selected: Signal<usize>,
     items: Vec<ToolBoxItem>,
@@ -924,7 +923,6 @@ mod tests {
     use fern_core::accesskit;
     use fern_core::event::Modifiers;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     fn tree() -> WidgetTree {
         WidgetTree::new().with_theme(fern_core::presets::intui::light())

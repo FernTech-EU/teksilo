@@ -334,7 +334,6 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let theme = ctx.theme;
-        use crate::style as cs;
 
         let data = self.data.get();
         if data.is_empty() {
@@ -498,11 +497,7 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
     /// where the disc lives. Both `place_children` and `paint` go through
     /// this so the donut's center-slot placement matches the rendered
     /// disc when a legend is shown.
-    fn compute_plot_rect(
-        &self,
-        bounds: Rect,
-        legend_size: f32,
-    ) -> Rect {
+    fn compute_plot_rect(&self, bounds: Rect, legend_size: f32) -> Rect {
         let no_axis = crate::axis::AxisConfig::new()
             .show_labels(false)
             .show_axis_line(false);
@@ -524,10 +519,7 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
     }
 
     /// Compute (center, outer_radius, inner_radius) given a bounds rect.
-    fn compute_disc_geometry(
-        &self,
-        bounds: Rect,
-    ) -> (Point, f32, f32) {
+    fn compute_disc_geometry(&self, bounds: Rect) -> (Point, f32, f32) {
         use crate::style as cs;
         let pad = cs::PIE_PADDING;
         let usable_w = (bounds.width - pad * 2.0).max(0.0);
@@ -834,7 +826,6 @@ mod tests {
     use super::*;
     use fern_canvas::SizeProposal;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     fn three_slices() -> Vec<ChartDatum<String>> {
         vec![

@@ -65,11 +65,7 @@ pub struct ColorPickerStyleConfig {
 }
 
 pub trait ColorPickerStyle: 'static {
-    fn make_body(
-        &self,
-        cfg: &ColorPickerStyleConfig,
-        ctx: &mut BuildContext,
-    ) -> WidgetId;
+    fn make_body(&self, cfg: &ColorPickerStyleConfig, ctx: &mut BuildContext) -> WidgetId;
 }
 
 pub type SharedColorPickerStyle = Rc<dyn ColorPickerStyle>;

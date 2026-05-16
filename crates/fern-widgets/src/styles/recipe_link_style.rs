@@ -99,13 +99,9 @@ impl LinkStyle for RecipeLinkStyle {
                 BorderRole::Transparent
             }
         });
-        let focus_border_width = cfg.is_focused.map(move |f| {
-            if *f {
-                focus_ring_width
-            } else {
-                0.0
-            }
-        });
+        let focus_border_width = cfg
+            .is_focused
+            .map(move |f| if *f { focus_ring_width } else { 0.0 });
         let focus_rect_id = ctx.add(
             RectWidget::new()
                 .bind_border_color(focus_border_role)

@@ -723,9 +723,7 @@ impl WidgetArena {
     /// Stream widgets with `visible_state` bindings without
     /// allocating. Each entry is `(id, is_currently_active,
     /// should_be_visible)`.
-    pub fn visibility_checks_iter(
-        &self,
-    ) -> impl Iterator<Item = (WidgetId, bool, bool)> + '_ {
+    pub fn visibility_checks_iter(&self) -> impl Iterator<Item = (WidgetId, bool, bool)> + '_ {
         self.nodes.iter().filter_map(|(id, node)| {
             node.visible_state.as_ref().map(|state| {
                 let is_active = node.activation == ActivationState::Active;

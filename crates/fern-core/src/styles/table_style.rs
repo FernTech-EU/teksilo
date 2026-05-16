@@ -76,23 +76,11 @@ impl Default for TableGridRecipe {
 }
 
 pub trait TableStyle: 'static {
-    fn make_header_cell(
-        &self,
-        cfg: &TableHeaderCellConfig,
-        ctx: &mut BuildContext,
-    ) -> WidgetId;
-    fn make_sort_indicator(
-        &self,
-        direction: SortDirection,
-        ctx: &mut BuildContext,
-    ) -> WidgetId;
+    fn make_header_cell(&self, cfg: &TableHeaderCellConfig, ctx: &mut BuildContext) -> WidgetId;
+    fn make_sort_indicator(&self, direction: SortDirection, ctx: &mut BuildContext) -> WidgetId;
     /// Row-band chrome (selection / hover / alt) — composed *behind*
     /// the cells.
-    fn make_row_background(
-        &self,
-        cfg: &TableRowConfig,
-        ctx: &mut BuildContext,
-    ) -> WidgetId;
+    fn make_row_background(&self, cfg: &TableRowConfig, ctx: &mut BuildContext) -> WidgetId;
     /// Grid-line + frozen-column-shadow recipe — the table's own paint
     /// pass batches over the virtualized viewport using this data.
     fn grid(&self) -> TableGridRecipe;

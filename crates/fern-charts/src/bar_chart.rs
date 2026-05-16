@@ -780,10 +780,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
             let w = measure_text_width(canvas, title, label_style);
             let rect = Rect::new(
                 plot.x + plot.width * 0.5 - w * 0.5,
-                plot.bottom()
-                    + cs::AXIS_TICK_LENGTH
-                    + cs::AXIS_LABEL_GAP
-                    + label_style.size * 1.4,
+                plot.bottom() + cs::AXIS_TICK_LENGTH + cs::AXIS_LABEL_GAP + label_style.size * 1.4,
                 w,
                 label_style.size * 1.2,
             );
@@ -820,7 +817,6 @@ fn measure_max_label_width(
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     fn sample_series() -> Vec<ChartSeries<String>> {
         let mut s = ChartSeries::new("Revenue");

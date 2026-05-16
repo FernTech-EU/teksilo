@@ -25,16 +25,14 @@
 //! ```
 
 use crate::styles::{
-    SharedAvatarStyle, SharedBadgeStyle, SharedBannerStyle, SharedButtonStyle,
-    SharedCalendarStyle, SharedCardStyle, SharedCheckboxStyle, SharedColorPickerStyle,
-    SharedComboBoxStyle, SharedDateEditStyle, SharedDialogStyle, SharedIconButtonStyle,
-    SharedLinkStyle, SharedListContainerStyle, SharedMenuItemStyle, SharedPanelStyle,
-    SharedPopoverStyle,
-    SharedProgressBarStyle, SharedRadioStyle, SharedRichTextEditorStyle,
-    SharedScrollBarStyle, SharedSearchFieldStyle, SharedSegmentedControlStyle,
-    SharedSliderStyle, SharedSnackbarStyle, SharedSpinBoxStyle, SharedStandardItemStyle,
-    SharedTabStyle, SharedTableStyle, SharedTextInputStyle, SharedToggleStyle,
-    SharedTooltipStyle,
+    SharedAvatarStyle, SharedBadgeStyle, SharedBannerStyle, SharedButtonStyle, SharedCalendarStyle,
+    SharedCardStyle, SharedCheckboxStyle, SharedColorPickerStyle, SharedComboBoxStyle,
+    SharedDateEditStyle, SharedDialogStyle, SharedIconButtonStyle, SharedLinkStyle,
+    SharedListContainerStyle, SharedMenuItemStyle, SharedPanelStyle, SharedPopoverStyle,
+    SharedProgressBarStyle, SharedRadioStyle, SharedRichTextEditorStyle, SharedScrollBarStyle,
+    SharedSearchFieldStyle, SharedSegmentedControlStyle, SharedSliderStyle, SharedSnackbarStyle,
+    SharedSpinBoxStyle, SharedStandardItemStyle, SharedTabStyle, SharedTableStyle,
+    SharedTextInputStyle, SharedToggleStyle, SharedTooltipStyle,
 };
 
 /// Typed slot bag living on [`crate::styles::Theme`]. One slot per

@@ -132,7 +132,6 @@ impl Widget for StatusBar {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[test]
     fn status_bar_builds() {

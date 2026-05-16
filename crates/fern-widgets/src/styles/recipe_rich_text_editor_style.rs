@@ -24,11 +24,7 @@ use crate::styles::recipe_text_input_style as field_dims;
 pub struct RecipeRichTextEditorStyle;
 
 impl RichTextEditorStyle for RecipeRichTextEditorStyle {
-    fn make_body(
-        &self,
-        cfg: &RichTextEditorStyleConfig,
-        ctx: &mut BuildContext,
-    ) -> WidgetId {
+    fn make_body(&self, cfg: &RichTextEditorStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         // Read-only viewers stay frameless — they're typically rendered
         // inside an outer surface (Card, Panel) that owns the chrome.
         if cfg.is_read_only {

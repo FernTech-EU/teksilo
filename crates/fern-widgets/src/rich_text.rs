@@ -1507,7 +1507,7 @@ impl Widget for RichTextEditor {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.rich_text_editor.clone())
-            .unwrap_or_else(|| Rc::new(RecipeRichTextEditorStyle::default()));
+            .unwrap_or_else(|| Rc::new(RecipeRichTextEditorStyle));
         let cfg = RichTextEditorStyleConfig {
             viewport: viewport_id,
             is_focused,

@@ -23,7 +23,7 @@ use fern_core::drag_payload::DragPayload;
 use fern_core::event::{EventResponse, PointerButton, WidgetEvent};
 use fern_core::signal::Signal;
 use fern_core::styles::{
-    SortDirection as StyleSortDirection, SharedTableStyle, TableHeaderCellConfig,
+    SharedTableStyle, SortDirection as StyleSortDirection, TableHeaderCellConfig,
 };
 use fern_core::widget::{
     CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
@@ -292,7 +292,7 @@ impl Widget for HeaderCell {
             .style_slots
             .table
             .clone()
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTableStyle::default()));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTableStyle));
         let cell_cfg = TableHeaderCellConfig {
             label: padded,
             sort: self.current_sort.map(style_sort),

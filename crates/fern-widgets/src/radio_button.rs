@@ -210,7 +210,7 @@ impl Widget for RadioButton {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.radio.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeRadioStyle::default()));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeRadioStyle));
         let cfg = RadioStyleConfig {
             is_selected,
             is_hovered,
@@ -256,8 +256,9 @@ impl Widget for RadioButton {
         }
 
         let row_id = ctx.add(row);
-        let root_id =
-            ctx.add(MinSize::new(radio_dims::RADIO_HIT_AREA, radio_dims::RADIO_HIT_AREA).child_id(row_id));
+        let root_id = ctx.add(
+            MinSize::new(radio_dims::RADIO_HIT_AREA, radio_dims::RADIO_HIT_AREA).child_id(row_id),
+        );
 
         if let Some(content) = self.composite_tooltip_content.take() {
             crate::tooltip::attach_composite_tooltip_boxed(
@@ -428,7 +429,6 @@ mod tests {
     use super::*;
     use fern_core::event::Modifiers;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[test]
     fn selecting_one_deselects_others() {

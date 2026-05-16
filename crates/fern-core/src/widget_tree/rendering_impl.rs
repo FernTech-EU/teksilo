@@ -72,14 +72,15 @@ impl WidgetTree {
             // cached frame so we don't tangle borrows.
             self.arm_frame_tick_for_visible_subscribers();
 
-            let cached = self.cached_frame.as_mut().expect("just checked Some");
-            let frame = std::rc::Rc::make_mut(cached);
-            if has_animations {
-                let src = self.animated_quads.scratch_slice();
-                frame.anim_params.clear();
-                frame.anim_params.extend_from_slice(src);
+            if let Some(cached) = self.cached_frame.as_mut() {
+                let frame = std::rc::Rc::make_mut(cached);
+                if has_animations {
+                    let src = self.animated_quads.scratch_slice();
+                    frame.anim_params.clear();
+                    frame.anim_params.extend_from_slice(src);
+                }
+                return std::rc::Rc::clone(cached);
             }
-            return std::rc::Rc::clone(cached);
         }
 
         self.paint_epoch = self.paint_epoch.saturating_add(1);
@@ -436,7 +437,6 @@ fn paint_widget_cached(
 mod tests {
     use super::*;
     use crate::test_widgets::{FillWidget, StackWidget};
-    use crate::styles::Theme;
     use fern_tokens::{Color, CornerRadius};
 
     #[derive(Debug)]

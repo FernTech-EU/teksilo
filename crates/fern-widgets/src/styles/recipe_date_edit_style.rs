@@ -12,9 +12,7 @@
 //! wrap the body or surround it with siblings.
 
 use fern_core::build_context::BuildContext;
-use fern_core::styles::{
-    DateEditStyle, DateEditStyleConfig, SharedDateEditStyle,
-};
+use fern_core::styles::{DateEditStyle, DateEditStyleConfig, SharedDateEditStyle};
 use fern_core::widget_id::WidgetId;
 
 // ─── IntUI design tokens for the date-edit family ──────────────────

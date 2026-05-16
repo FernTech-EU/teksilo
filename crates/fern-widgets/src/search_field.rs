@@ -616,7 +616,7 @@ impl Widget for SuggestionPanel {
             .style_slots
             .popover
             .clone()
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle::default()));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle));
         let surface = popover_style.make_body(
             &PopoverStyleConfig {
                 content: padded,
@@ -785,7 +785,6 @@ impl Widget for SuggestionRow {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[test]
     fn search_field_builds() {

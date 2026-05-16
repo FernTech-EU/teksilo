@@ -1,7 +1,6 @@
 use super::*;
 use fern_core::widget_tree::WidgetTree;
 use fern_data::ListModel;
-use fern_core::Theme;
 
 // ─── Helpers ──────────────────────────────────────────────────────
 

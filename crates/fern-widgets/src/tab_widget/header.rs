@@ -315,9 +315,7 @@ impl Widget for TabHeader {
         // `RepaintOnly` — the only consumer is `cycle_focus`, which
         // re-evaluates on each Tab keypress.
         let index_for_tab_stop = self.index;
-        let tab_stop = self
-            .selected
-            .map(move |sel| *sel == index_for_tab_stop);
+        let tab_stop = self.selected.map(move |sel| *sel == index_for_tab_stop);
         ctx.set_tab_stop(self_id, tab_stop);
 
         // Build the inner content row.
@@ -583,9 +581,7 @@ impl Widget for TabHeader {
                             ctx.request_focus(headers[prev]);
                             EventResponse::Handled
                         }
-                        WidgetEvent::KeyDown {
-                            key: Key::Home, ..
-                        } => {
+                        WidgetEvent::KeyDown { key: Key::Home, .. } => {
                             let Some(target) = first_enabled_index(&enabled_tabs) else {
                                 return EventResponse::Ignored;
                             };
@@ -593,9 +589,7 @@ impl Widget for TabHeader {
                             ctx.request_focus(headers[target]);
                             EventResponse::Handled
                         }
-                        WidgetEvent::KeyDown {
-                            key: Key::End, ..
-                        } => {
+                        WidgetEvent::KeyDown { key: Key::End, .. } => {
                             let Some(target) = last_enabled_index(&enabled_tabs) else {
                                 return EventResponse::Ignored;
                             };

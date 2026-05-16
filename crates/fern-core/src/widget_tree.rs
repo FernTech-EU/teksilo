@@ -1,8 +1,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use fern_canvas::{Canvas, Point, Rect, RenderFrame, SizeProposal};
 use crate::styles::Theme;
+use fern_canvas::{Canvas, Point, Rect, RenderFrame, SizeProposal};
 
 use crate::arena::WidgetArena;
 use crate::event::{EventResponse, Key, Modifiers, PointerButton, WidgetEvent};

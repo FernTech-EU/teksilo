@@ -224,7 +224,6 @@ mod tests {
     use super::*;
     use fern_core::signal::Signal;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[test]
     fn group_publishes_radio_group_role_and_name() {

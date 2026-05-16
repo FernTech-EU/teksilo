@@ -17,9 +17,7 @@ use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::focus::FocusOrigin;
 use fern_core::signal::Signal;
-use fern_core::styles::{
-    SliderOrientation, SliderStyle, SliderStyleConfig, SliderVariant,
-};
+use fern_core::styles::{SliderOrientation, SliderStyle, SliderStyleConfig, SliderVariant};
 use fern_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::CornerRadius;
@@ -198,13 +196,21 @@ impl Widget for SliderBody {
                         let tx = track_rect.x + track_rect.width * tt;
                         let ty = track_rect.y - tick_size - 2.0;
                         let r = Rect::new(tx - tick_size * 0.5, ty, tick_size, tick_size);
-                        canvas.fill_rounded_rect(r, CornerRadius::uniform(tick_size * 0.5), tick_color);
+                        canvas.fill_rounded_rect(
+                            r,
+                            CornerRadius::uniform(tick_size * 0.5),
+                            tick_color,
+                        );
                     }
                     SliderOrientation::Vertical => {
                         let ty = track_rect.y + track_rect.height * tt;
                         let tx = track_rect.x - tick_size - 2.0;
                         let r = Rect::new(tx, ty - tick_size * 0.5, tick_size, tick_size);
-                        canvas.fill_rounded_rect(r, CornerRadius::uniform(tick_size * 0.5), tick_color);
+                        canvas.fill_rounded_rect(
+                            r,
+                            CornerRadius::uniform(tick_size * 0.5),
+                            tick_color,
+                        );
                     }
                 }
             }

@@ -385,7 +385,6 @@ mod tests {
     use fern_core::accesskit::{HasPopup, Role};
     use fern_core::event::{Key, Modifiers, WidgetEvent};
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     fn dummy_content() -> impl Widget {
         MinSize::new(40.0, 40.0).child(RectWidget::new())

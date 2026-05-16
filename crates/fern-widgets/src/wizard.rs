@@ -928,7 +928,6 @@ mod tests {
     use fern_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
     use fern_core::widget_tree::WidgetTree;
     use fern_core::{ModalContent, ModalPresentation};
-    use fern_core::Theme;
 
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);

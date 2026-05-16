@@ -84,9 +84,7 @@ pub mod prelude {
     pub use fern_canvas::{Canvas, EllipsisMode, Paint, Path, RenderFrame, TextOverflow};
 
     // Tokens
-    pub use fern_tokens::{
-        BorderRole, Color, CornerRadius, SurfaceRole, TextRole, TextStyleRole,
-    };
+    pub use fern_tokens::{BorderRole, Color, CornerRadius, SurfaceRole, TextRole, TextStyleRole};
 
     // Theme + appearance + extensions live in fern-core (so they can
     // co-locate with the per-widget style trait protocols and the typed

@@ -172,7 +172,6 @@ fn max_extent(a: &Shadow, b: &Shadow, dir: Direction) -> f32 {
 mod tests {
     use super::*;
     use fern_canvas::{DrawCommand, RenderFrame};
-    use fern_core::Theme;
 
     fn capture_frame<F: FnOnce(&mut Canvas)>(f: F) -> RenderFrame {
         let mut canvas = Canvas::new();

@@ -453,7 +453,7 @@ impl Widget for Popover {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.popover.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle::default()));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle));
         let surface_cfg = fern_core::styles::PopoverStyleConfig {
             content: inner_content_id,
             variant: self.surface_variant,
@@ -747,7 +747,6 @@ impl Widget for Popover {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);

@@ -286,7 +286,6 @@ fn apply_result(result: &FileDialogResult, text: &Signal<String>, kind: FilePick
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[test]
     fn file_picker_builds() {

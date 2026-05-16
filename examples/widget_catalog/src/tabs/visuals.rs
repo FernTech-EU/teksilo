@@ -137,8 +137,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let twist_expanded = ctx.signal(true);
     let twist_for_click = twist_expanded.clone();
 
-    fern!(ctx =>
-        VStack {
+    fern!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0
@@ -151,7 +150,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     color: TextRole::Secondary
                 }
             }
-            Divider {}
+            Divider
 
             VStack {
                 spacing: 6.0
@@ -179,7 +178,9 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 }
                 VStack {
                     spacing: 4.0
-                    TextWidget::new(tr!(vis_text_body())) { style: TextStyleRole::Body }
+                    TextWidget::new(tr!(vis_text_body())) {
+                        style: TextStyleRole::Body
+                    }
                     TextWidget::new(tr!(vis_text_bold())) {
                         style: TextStyleRole::BodyBold
                         color: TextRole::Primary
@@ -251,8 +252,12 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     TwistArrow::new(16.0, true, true) {
                         on_click: move |_ctx| { twist_for_click.set(!twist_for_click.get()); }
                     }
-                    TwistArrow::new(16.0, true, false) { on_click: |_ctx| {} }
-                    TwistArrow::new(16.0, false, false) { on_click: |_ctx| {} }
+                    TwistArrow::new(16.0, true, false) {
+                        on_click: |_ctx| {}
+                    }
+                    TwistArrow::new(16.0, false, false) {
+                        on_click: |_ctx| {}
+                    }
                 }
             }
 
@@ -268,7 +273,9 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     border_width: 1.0
                     corner_radius: 8.0
                     padding: 12.0
-                    TextWidget::new(tr!(vis_panel_body())) { style: TextStyleRole::Small }
+                    TextWidget::new(tr!(vis_panel_body())) {
+                        style: TextStyleRole::Small
+                    }
                 }
             }
         }

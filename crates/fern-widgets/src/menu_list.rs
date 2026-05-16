@@ -340,7 +340,7 @@ impl Widget for MenuList {
             .style_slots
             .popover
             .clone()
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle::default()));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle));
         let surface_cfg = PopoverStyleConfig {
             content: visible_cap_id,
             variant: PopoverVariant::Menu,
@@ -491,7 +491,6 @@ mod tests {
     use super::*;
     use crate::menu_item::MenuItem;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     fn light_tree() -> WidgetTree {
         WidgetTree::new().with_theme(fern_core::presets::intui::light())

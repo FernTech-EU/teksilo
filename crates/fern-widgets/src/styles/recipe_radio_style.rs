@@ -38,17 +38,20 @@ pub struct RecipeRadioStyle;
 
 impl RadioStyle for RecipeRadioStyle {
     fn make_body(&self, cfg: &RadioStyleConfig, ctx: &mut BuildContext) -> WidgetId {
-        let focus_origin = cfg.is_focused.zip(&cfg.is_hovered).map(|(focused, hovered)| {
-            if *focused {
-                Some(if *hovered {
-                    FocusOrigin::Pointer
+        let focus_origin = cfg
+            .is_focused
+            .zip(&cfg.is_hovered)
+            .map(|(focused, hovered)| {
+                if *focused {
+                    Some(if *hovered {
+                        FocusOrigin::Pointer
+                    } else {
+                        FocusOrigin::Keyboard
+                    })
                 } else {
-                    FocusOrigin::Keyboard
-                })
-            } else {
-                None
-            }
-        });
+                    None
+                }
+            });
 
         ctx.add(RadioBody {
             is_selected: cfg.is_selected.clone(),

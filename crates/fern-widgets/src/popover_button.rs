@@ -384,7 +384,6 @@ mod tests {
     use fern_core::accesskit::Role;
     use fern_core::event::{Key, Modifiers, WidgetEvent};
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[test]
     fn build_does_not_panic_with_minimum_config() {

@@ -165,8 +165,7 @@ mod tests {
     use crate::primitives::{FixedSize, RectWidget};
     use fern_core::signal::Signal;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
-use fern_tokens::Color;
+    use fern_tokens::Color;
 
     fn collect_blur_radii(frame: &fern_canvas::RenderFrame) -> Vec<f32> {
         frame

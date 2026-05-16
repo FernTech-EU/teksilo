@@ -53,8 +53,7 @@ pub(super) fn build_default_item(
     let body = &theme.typography.body;
     let body_line = body.size * body.line_height;
     let pad_v = ((menu::MENU_ITEM_HEIGHT - body_line) * 0.5).max(0.0);
-    let padding =
-        Padding::symmetric(pad_v, menu::MENU_ITEM_PADDING_HORIZONTAL).child_id(row_id);
+    let padding = Padding::symmetric(pad_v, menu::MENU_ITEM_PADDING_HORIZONTAL).child_id(row_id);
     ctx.add(padding)
 }
 

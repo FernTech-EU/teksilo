@@ -12,9 +12,7 @@
 //! `PADDING` interior).
 
 use fern_core::build_context::BuildContext;
-use fern_core::styles::{
-    ColorPickerLayout, ColorPickerStyle, ColorPickerStyleConfig,
-};
+use fern_core::styles::{ColorPickerLayout, ColorPickerStyle, ColorPickerStyleConfig};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::Color;
 
@@ -77,16 +75,10 @@ pub const HEX_FIELD_WIDTH: f32 = 96.0;
 pub struct RecipeColorPickerStyle;
 
 impl ColorPickerStyle for RecipeColorPickerStyle {
-    fn make_body(
-        &self,
-        cfg: &ColorPickerStyleConfig,
-        ctx: &mut BuildContext,
-    ) -> WidgetId {
+    fn make_body(&self, cfg: &ColorPickerStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         let body = match cfg.layout {
             ColorPickerLayout::Compact => {
-                let mut col = VStack::new()
-                    .spacing(GAP)
-                    .add_child(cfg.top_row);
+                let mut col = VStack::new().spacing(GAP).add_child(cfg.top_row);
                 if let Some(hex) = cfg.compact_hex {
                     col = col.add_child(hex);
                 }
@@ -96,9 +88,7 @@ impl ColorPickerStyle for RecipeColorPickerStyle {
                 ctx.add(col)
             }
             ColorPickerLayout::Standard => {
-                let mut col = VStack::new()
-                    .spacing(GAP)
-                    .add_child(cfg.top_row);
+                let mut col = VStack::new().spacing(GAP).add_child(cfg.top_row);
                 if let Some(preview) = cfg.preview_row {
                     col = col.add_child(preview);
                 }

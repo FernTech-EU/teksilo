@@ -172,7 +172,6 @@ impl Widget for GroupHeader {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[test]
     fn builds_and_lays_out_with_proposed_width() {

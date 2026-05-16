@@ -40,8 +40,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 }
 
 pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
-    fern!(ctx =>
-        VStack {
+    fern!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0
@@ -54,7 +53,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     color: TextRole::Secondary
                 }
             }
-            Divider {}
+            Divider
 
             VStack {
                 spacing: 6.0
@@ -64,7 +63,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 }
                 FixedSize {
                     bind_height: 280.0_f32
-                    ShortcutSettings {}
+                    ShortcutSettings
                 }
             }
 

@@ -17,9 +17,7 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, PointerButton, WidgetEvent};
 use fern_core::gesture::DragPhase;
 use fern_core::signal::Signal;
-use fern_core::styles::{
-    SharedScrollBarStyle, ScrollBarStyle, ScrollBarStyleConfig,
-};
+use fern_core::styles::{ScrollBarStyle, ScrollBarStyleConfig, SharedScrollBarStyle};
 use fern_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;

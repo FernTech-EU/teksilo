@@ -417,20 +417,10 @@ impl Widget for DateTimeEdit {
         }
 
         // ── Build each half as a bare TextInputField ───────────
-        let date_field_id = self.build_date_half(
-            ctx,
-            date_pattern_rc.clone(),
-            &date_mask,
-            date_min,
-            date_max,
-        );
-        let time_field_id = self.build_time_half(
-            ctx,
-            time_pattern_rc.clone(),
-            &time_mask,
-            time_min,
-            time_max,
-        );
+        let date_field_id =
+            self.build_date_half(ctx, date_pattern_rc.clone(), &date_mask, date_min, date_max);
+        let time_field_id =
+            self.build_time_half(ctx, time_pattern_rc.clone(), &time_mask, time_min, time_max);
 
         // ── Painted (or text) separator ────────────────────────
         // Default: thin painted middle-dot glyph. Apps that want a
@@ -615,7 +605,8 @@ impl Widget for DateTimeEdit {
             .corner_radius(CornerRadius::uniform(field_dims::TEXT_FIELD_CORNER_RADIUS));
         let bg_id = ctx.add(bg);
         let framed_id = ctx.add(ZStack::new().add_child(bg_id).add_child(row_id));
-        let sized_id = ctx.add(MinSize::new(0.0, field_dims::TEXT_FIELD_HEIGHT).child_id(framed_id));
+        let sized_id =
+            ctx.add(MinSize::new(0.0, field_dims::TEXT_FIELD_HEIGHT).child_id(framed_id));
 
         // ── Inline validation strip below the frame ───────────
         let strip_id = ctx.add(crate::primitives::ValidationStrip::new(
@@ -944,8 +935,10 @@ impl DateTimeEdit {
         kind: DateTimeHalfKind,
     ) -> WidgetId {
         use crate::styles::recipe_text_input_style as field_dims;
-        let inner_height = (field_dims::TEXT_FIELD_HEIGHT - 2.0 * field_dims::TEXT_FIELD_BORDER_WIDTH).max(0.0);
-        let text_area_height = (inner_height - 2.0 * field_dims::TEXT_FIELD_PADDING_VERTICAL).max(0.0);
+        let inner_height =
+            (field_dims::TEXT_FIELD_HEIGHT - 2.0 * field_dims::TEXT_FIELD_BORDER_WIDTH).max(0.0);
+        let text_area_height =
+            (inner_height - 2.0 * field_dims::TEXT_FIELD_PADDING_VERTICAL).max(0.0);
 
         let pattern_for_filter = match &kind {
             DateTimeHalfKind::Date { pattern, .. } => pattern.clone(),

@@ -346,8 +346,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .label_literal("Square"),
     );
 
-    fern!(ctx =>
-        VStack {
+    fern!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0
@@ -360,7 +359,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     color: TextRole::Secondary
                 }
             }
-            Divider {}
+            Divider
 
             VStack {
                 spacing: 6.0
@@ -370,16 +369,30 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 }
                 HStack {
                     spacing: 8.0
-                    Button::new_literal("Filled") { variant: ButtonVariant::Filled }
-                    Button::new_literal("Tinted") { variant: ButtonVariant::Tinted }
-                    Button::new_literal("Outlined") { variant: ButtonVariant::Outlined }
-                    Button::new_literal("Plain") { variant: ButtonVariant::Plain }
+                    Button::new_literal("Filled") {
+                        variant: ButtonVariant::Filled
+                    }
+                    Button::new_literal("Tinted") {
+                        variant: ButtonVariant::Tinted
+                    }
+                    Button::new_literal("Outlined") {
+                        variant: ButtonVariant::Outlined
+                    }
+                    Button::new_literal("Plain") {
+                        variant: ButtonVariant::Plain
+                    }
                 }
                 HStack {
                     spacing: 8.0
-                    Button::new_literal("Ghost") { variant: ButtonVariant::Ghost }
-                    Button::new_literal("Link") { variant: ButtonVariant::Link }
-                    Button::new_literal("Delete") { variant: ButtonVariant::Destructive }
+                    Button::new_literal("Ghost") {
+                        variant: ButtonVariant::Ghost
+                    }
+                    Button::new_literal("Link") {
+                        variant: ButtonVariant::Link
+                    }
+                    Button::new_literal("Delete") {
+                        variant: ButtonVariant::Destructive
+                    }
                 }
             }
 
@@ -441,7 +454,9 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 }
                 HStack {
                     spacing: 12.0
-                    Button::new_literal("Default") { variant: ButtonVariant::Filled }
+                    Button::new_literal("Default") {
+                        variant: ButtonVariant::Filled
+                    }
                     #{ glow_button }
                 }
             }
@@ -454,7 +469,9 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 }
                 HStack {
                     spacing: 16.0
-                    Toggle::new(tog_default) { label_literal: "Default" }
+                    Toggle::new(tog_default) {
+                        label_literal: "Default"
+                    }
                     #{ square_toggle }
                 }
             }

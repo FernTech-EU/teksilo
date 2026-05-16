@@ -326,8 +326,13 @@ impl ShortcutSettings {
 
         let primary_slot =
             self.slot_widget(id, SlotKind::Primary, row.primary, capturing, label_role);
-        let secondary_slot =
-            self.slot_widget(id, SlotKind::Secondary, row.secondary, capturing, label_role);
+        let secondary_slot = self.slot_widget(
+            id,
+            SlotKind::Secondary,
+            row.secondary,
+            capturing,
+            label_role,
+        );
 
         let reset_button = Button::new_literal("Reset")
             .enabled(row.has_override)
@@ -452,7 +457,6 @@ mod tests {
     use super::*;
     use fern_core::shortcut::Shortcut;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[test]
     fn shortcut_settings_builds_a_row_per_registered_shortcut() {

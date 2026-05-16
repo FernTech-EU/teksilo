@@ -77,15 +77,14 @@ impl StandardItemStyle for RecipeStandardItemStyle {
         // and leave (e.g.) tree chevrons shifted off the leading edge.
         let content_expanded = ctx.add(Expand::horizontal().child_id(cfg.content));
         let content_padded = ctx.add(
-            Padding::symmetric(STANDARD_ITEM_PADDING_VERTICAL, STANDARD_ITEM_PADDING_HORIZONTAL)
-                .child_id(content_expanded),
+            Padding::symmetric(
+                STANDARD_ITEM_PADDING_VERTICAL,
+                STANDARD_ITEM_PADDING_HORIZONTAL,
+            )
+            .child_id(content_expanded),
         );
 
-        ctx.add(
-            ZStack::new()
-                .add_child(bg_padded)
-                .add_child(content_padded),
-        )
+        ctx.add(ZStack::new().add_child(bg_padded).add_child(content_padded))
     }
 }
 

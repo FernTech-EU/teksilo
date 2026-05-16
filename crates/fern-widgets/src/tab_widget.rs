@@ -483,10 +483,7 @@ impl TabWidget {
     /// selection is conveyed only by the accent indicator and the
     /// label-color shift (Int UI editor-strip convention). Default
     /// is transparent.
-    pub fn tab_surface_role(
-        mut self,
-        color: impl Into<fern_core::color_prop::ColorProp>,
-    ) -> Self {
+    pub fn tab_surface_role(mut self, color: impl Into<fern_core::color_prop::ColorProp>) -> Self {
         self.tab_surface_role = Some(color.into());
         self
     }
@@ -560,10 +557,7 @@ impl TabWidget {
     /// is to reorder within the dynamic region of
     /// [`dynamic_model`](Self::dynamic_model). Implies
     /// [`reorderable(true)`](Self::reorderable).
-    pub fn on_reorder(
-        mut self,
-        f: impl Fn(TabId, usize, &mut EventContext) + 'static,
-    ) -> Self {
+    pub fn on_reorder(mut self, f: impl Fn(TabId, usize, &mut EventContext) + 'static) -> Self {
         self.on_reorder = Some(Rc::new(f));
         self.reorderable = true;
         self
@@ -575,10 +569,7 @@ impl TabWidget {
     /// lets the handler confirm or dispatch the transition via a
     /// dialog / intent. Apps decide whether to actually mutate the
     /// tab's `info.pinned`.
-    pub fn on_pin_toggle(
-        mut self,
-        f: impl Fn(TabId, bool, &mut EventContext) + 'static,
-    ) -> Self {
+    pub fn on_pin_toggle(mut self, f: impl Fn(TabId, bool, &mut EventContext) + 'static) -> Self {
         self.on_pin_toggle = Some(Rc::new(f));
         self
     }
@@ -1099,9 +1090,7 @@ impl Widget for TabPane {
             // Apply self-handlers so the framework treats this pane
             // as a Tab-key stop, allowing Tab from the selected tab
             // header to land inside an otherwise-empty panel.
-            ctx.apply_self_handlers(
-                fern_core::widget_builder::HandlerSet::new().focusable(true),
-            );
+            ctx.apply_self_handlers(fern_core::widget_builder::HandlerSet::new().focusable(true));
         }
         self.child_id.into_iter().collect()
     }
@@ -1144,9 +1133,9 @@ impl Widget for TabPane {
             let panel_ids = self.panel_ids.borrow();
             if let Some(pos) = panel_ids.iter().position(|&id| id == self_id) {
                 if let Some(&header_id) = self.header_ids.borrow().get(pos) {
-                    builder.push_labelled_by(
-                        fern_core::accessibility::widget_id_to_node_id(header_id),
-                    );
+                    builder.push_labelled_by(fern_core::accessibility::widget_id_to_node_id(
+                        header_id,
+                    ));
                 }
             }
         }

@@ -15,7 +15,6 @@ use std::rc::Rc;
 use fern_canvas::{Point, SizeProposal};
 use fern_core::widget_id::WidgetId;
 use fern_core::widget_tree::WidgetTree;
-use fern_core::Theme;
 use fern_widgets::Button;
 
 use crate::shell::InspectorShell;

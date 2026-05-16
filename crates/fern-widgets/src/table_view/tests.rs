@@ -18,7 +18,6 @@ use fern_core::signal::Signal;
 use fern_core::widget_id::WidgetId;
 use fern_core::widget_tree::WidgetTree;
 use fern_data::{ListModel, SelectionMode, SelectionModel};
-use fern_core::Theme;
 
 use super::{CellContext, Column, ColumnWidth, SortDirection, TableSelectionMode, TableView};
 use crate::primitives::TextWidget;
@@ -1792,9 +1791,7 @@ fn header_cells_route_through_table_style_make_header_cell() {
     // count how many `Role::ColumnHeader` AT nodes have it as their
     // first descendant.
     use fern_core::build_context::BuildContext;
-    use fern_core::styles::{
-        TableGridRecipe, TableHeaderCellConfig, TableRowConfig, TableStyle,
-    };
+    use fern_core::styles::{TableGridRecipe, TableHeaderCellConfig, TableRowConfig, TableStyle};
     use fern_core::widget_id::WidgetId;
     use std::cell::Cell;
     use std::rc::Rc;
@@ -1821,11 +1818,7 @@ fn header_cells_route_through_table_style_make_header_cell() {
         ) -> WidgetId {
             ctx.add(crate::primitives::Spacer::new())
         }
-        fn make_row_background(
-            &self,
-            _cfg: &TableRowConfig,
-            ctx: &mut BuildContext,
-        ) -> WidgetId {
+        fn make_row_background(&self, _cfg: &TableRowConfig, ctx: &mut BuildContext) -> WidgetId {
             ctx.add(crate::primitives::Spacer::new())
         }
         fn grid(&self) -> TableGridRecipe {

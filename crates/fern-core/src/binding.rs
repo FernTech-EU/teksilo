@@ -100,21 +100,23 @@ impl BindingRegistry {
 
     pub(crate) fn register(&self, binding: Binding) {
         let mut by_source = self.by_source.borrow_mut();
-        let group = by_source.entry(binding.source_id).or_insert_with(|| {
-            BindingGroup {
+        let group = by_source
+            .entry(binding.source_id)
+            .or_insert_with(|| BindingGroup {
                 is_dirty: binding.is_dirty.clone(),
                 clear_dirty: binding.clear_dirty.clone(),
                 bindings: Vec::new(),
-            }
-        });
+            });
         // Dedup within the group by (widget_id, a11y bucket). Visual
         // levels collapse with each other (and promote); a11y stays
         // in its own bucket so a widget can hold both flavours on
         // one source without one clobbering the other.
         let incoming_a11y = is_a11y_only(binding.level);
-        if let Some(existing) = group.bindings.iter_mut().find(|(wid, lvl)| {
-            *wid == binding.widget_id && is_a11y_only(*lvl) == incoming_a11y
-        }) {
+        if let Some(existing) = group
+            .bindings
+            .iter_mut()
+            .find(|(wid, lvl)| *wid == binding.widget_id && is_a11y_only(*lvl) == incoming_a11y)
+        {
             existing.1 = promote_level(existing.1, binding.level);
             return;
         }
@@ -185,9 +187,7 @@ impl BindingRegistry {
                     BindingLevel::AccessibilityOnly => {
                         a11y_dirty = true;
                     }
-                    BindingLevel::RepaintOnly
-                    | BindingLevel::Relayout
-                    | BindingLevel::Rebuild => {
+                    BindingLevel::RepaintOnly | BindingLevel::Relayout | BindingLevel::Rebuild => {
                         let entry = dirty_map.entry(wid).or_insert(level);
                         *entry = promote_level(*entry, level);
                     }

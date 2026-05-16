@@ -119,7 +119,6 @@ pub use button::{Button, ButtonVariant, IconLocation};
 pub use calendar::{Calendar, DateRange, WeekNumberDisplay};
 pub use card::Card;
 pub use checkbox::Checkbox;
-pub use fern_data::CheckState;
 #[cfg(feature = "rich-text")]
 pub use color_edit::ColorEdit;
 #[cfg(feature = "rich-text")]
@@ -133,6 +132,7 @@ pub use date_range_edit::DateRangeEdit;
 #[cfg(feature = "rich-text")]
 pub use date_time_edit::DateTimeEdit;
 pub use dialog::{Dialog, DialogContent, ModalContainer, ModalScrim};
+pub use fern_data::CheckState;
 #[cfg(feature = "rich-text")]
 pub use file_picker_field::{FilePickerField, FilePickerKind};
 pub use group_box::GroupBox;

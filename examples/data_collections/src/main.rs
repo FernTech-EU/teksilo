@@ -232,8 +232,7 @@ impl Root {
                                 TextWidget::new_literal("•").color(TextRole::Accent),
                             )
                             .subtitle_trailing_slot(
-                                TextWidget::new_literal("just now")
-                                    .color(TextRole::Secondary),
+                                TextWidget::new_literal("just now").color(TextRole::Secondary),
                             );
                     } else {
                         row = row.checkbox(checks.signal_for(index));

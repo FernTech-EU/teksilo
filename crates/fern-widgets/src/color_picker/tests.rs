@@ -8,7 +8,6 @@ use fern_core::accesskit::Role;
 use fern_core::event::{Key, Modifiers};
 use fern_core::signal::Signal;
 use fern_core::widget_tree::WidgetTree;
-use fern_core::Theme;
 use fern_tokens::Color;
 
 use super::*;

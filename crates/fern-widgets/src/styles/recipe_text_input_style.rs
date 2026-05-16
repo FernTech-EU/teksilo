@@ -106,9 +106,7 @@ impl TextInputStyle for RecipeTextInputStyle {
 
         // Horizontal-only padding so leading / trailing slots inside
         // the editor row sit flush against top and bottom of the frame.
-        let padded_id = ctx.add(
-            Padding::new(0.0, padding_h, 0.0, padding_h).child_id(cfg.editor),
-        );
+        let padded_id = ctx.add(Padding::new(0.0, padding_h, 0.0, padding_h).child_id(cfg.editor));
 
         let zstack_id = ctx.add(ZStack::new().add_child(bg_id).add_child(padded_id));
         ctx.add(MinSize::new(0.0, height).child_id(zstack_id))

@@ -602,8 +602,7 @@ fn editor_swatches() -> [EditorSwatchEntry; 6] {
 }
 
 pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
-    fern!(ctx =>
-        VStack {
+    fern!(ctx => VStack {
             spacing: 20.0
 
             // ── tab header ──────────────────────────────────────────
@@ -618,7 +617,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     color: TextRole::Secondary
                 }
             }
-            Divider {}
+            Divider
 
             // ── Surfaces section ────────────────────────────────────
             VStack {
@@ -719,7 +718,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                                 style: TextStyleRole::Body
                                 color: TextRole::OnAccent
                             }
-                            Spacer {}
+                            Spacer
                             TextWidget::new_literal("text_on_accent on accent") {
                                 style: TextStyleRole::Tiny
                                 color: TextRole::OnAccent
@@ -805,7 +804,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                                             corner_radius: 0.0
                                             border_width: 0.0
                                             padding: 0.0
-                                            Spacer {}
+                                            Spacer
                                         }
                                     }
                                 }

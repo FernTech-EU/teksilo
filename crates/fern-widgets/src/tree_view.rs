@@ -63,9 +63,7 @@ pub struct TreeRowContext<'a, T: 'static> {
 impl<'a, T: 'static> TreeRowContext<'a, T> {
     /// Toggle callback for this row's chevron. Wires in one line:
     /// `.on_toggle_rc(ctx.toggle_callback())`.
-    pub fn toggle_callback(
-        &self,
-    ) -> std::rc::Rc<dyn Fn(&mut fern_core::widget::EventContext)> {
+    pub fn toggle_callback(&self) -> std::rc::Rc<dyn Fn(&mut fern_core::widget::EventContext)> {
         let slice = self.slice.clone();
         let node = self.node_id;
         std::rc::Rc::new(move |_ctx| slice.toggle_expand(node))
@@ -85,8 +83,7 @@ impl<'a, T: 'static> TreeRowContext<'a, T> {
 /// Internal delegate type: takes the inputs the 3-arg form gets plus
 /// the optional `TreeRowContext`. Both the 3-arg `new` and the 4-arg
 /// `new_with_context` produce a closure of this shape.
-type TreeDelegate<T> =
-    dyn Fn(&T, &FlatEntry, bool, &TreeRowContext<'_, T>) -> Box<dyn Widget>;
+type TreeDelegate<T> = dyn Fn(&T, &FlatEntry, bool, &TreeRowContext<'_, T>) -> Box<dyn Widget>;
 
 pub struct TreeView<T: 'static> {
     tree_slice: TreeSlice<T>,
@@ -137,9 +134,10 @@ impl<T: 'static> TreeView<T> {
     ) -> Self {
         // Adapt the 3-arg delegate to the internal 4-arg shape by
         // discarding the context.
-        let adapted = move |item: &T, entry: &FlatEntry, sel: bool, _ctx: &TreeRowContext<'_, T>| {
-            delegate(item, entry, sel)
-        };
+        let adapted =
+            move |item: &T, entry: &FlatEntry, sel: bool, _ctx: &TreeRowContext<'_, T>| {
+                delegate(item, entry, sel)
+            };
         Self::new_internal(model, Rc::new(adapted))
     }
 

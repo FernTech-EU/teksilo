@@ -27,9 +27,7 @@ use fern_core::animated_quad::{AnimatedQuadHandle, AnimatedQuadKind};
 use fern_core::binding::BindingLevel;
 use fern_core::color_prop::ColorProp;
 use fern_core::signal::{Prop, Signal};
-use fern_core::styles::{
-    ProgressBarStyleConfig, ProgressKind, SharedProgressBarStyle,
-};
+use fern_core::styles::{ProgressBarStyleConfig, ProgressKind, SharedProgressBarStyle};
 use fern_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 #[cfg(test)]
@@ -168,7 +166,7 @@ impl Widget for ProgressBar {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.progress_bar.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeProgressBarStyle::default()));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeProgressBarStyle));
         let cfg = ProgressBarStyleConfig {
             orientation: self.orientation,
             progress: if self.indeterminate {
@@ -390,7 +388,6 @@ impl Widget for IndeterminateSweepLeaf {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[test]
     fn progress_bar_size() {

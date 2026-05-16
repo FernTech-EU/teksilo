@@ -76,8 +76,8 @@ use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::TextRole;
 
-use crate::primitives::icon_widget::IconWidget;
 use crate::primitives::Switcher;
+use crate::primitives::icon_widget::IconWidget;
 
 /// Size variant for [`IconButton`]. See [`fern_core::styles::IconButtonSize`]
 /// for the canonical definition. Variants are calibrated to the
@@ -612,7 +612,7 @@ impl fern_core::widget::Widget for IconButton {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.icon_button.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeIconButtonStyle::default()));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeIconButtonStyle));
         let is_pressed = interaction.map(|s| matches!(s, InteractionState::Pressed));
         let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));
         let is_focused = interaction.map(|s| matches!(s, InteractionState::Focused));

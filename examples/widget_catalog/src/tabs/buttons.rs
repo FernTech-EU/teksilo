@@ -181,8 +181,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         popover_surface(TextWidget::new(tr!(btn_popover_icon_body())).style(TextStyleRole::Small)),
     ));
 
-    fern!(ctx =>
-        VStack {
+    fern!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0
@@ -195,7 +194,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     color: TextRole::Secondary
                 }
             }
-            Divider {}
+            Divider
 
             VStack {
                 spacing: 6.0
@@ -228,9 +227,18 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 }
                 HStack {
                     spacing: 8.0
-                    Button::new(tr!(btn_default())) { variant: ButtonVariant::Filled enabled: false }
-                    Button::new(tr!(btn_regular())) { variant: ButtonVariant::Plain enabled: false }
-                    Button::new(tr!(btn_flat())) { variant: ButtonVariant::Ghost enabled: false }
+                    Button::new(tr!(btn_default())) {
+                        variant: ButtonVariant::Filled
+                        enabled: false
+                    }
+                    Button::new(tr!(btn_regular())) {
+                        variant: ButtonVariant::Plain
+                        enabled: false
+                    }
+                    Button::new(tr!(btn_flat())) {
+                        variant: ButtonVariant::Ghost
+                        enabled: false
+                    }
                 }
             }
 
@@ -255,11 +263,21 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 }
                 HStack {
                     spacing: 8.0
-                    IconButton::add() { tooltip: tr!(demo_new()) }
-                    IconButton::copy() { tooltip: tr!(demo_copy()) }
-                    IconButton::clear() { tooltip: tr!(demo_find()) }
-                    IconButton::search() { tooltip: tr!(demo_find()) }
-                    IconButton::expand() { tooltip: tr!(demo_open()) }
+                    IconButton::add() {
+                        tooltip: tr!(demo_new())
+                    }
+                    IconButton::copy() {
+                        tooltip: tr!(demo_copy())
+                    }
+                    IconButton::clear() {
+                        tooltip: tr!(demo_find())
+                    }
+                    IconButton::search() {
+                        tooltip: tr!(demo_find())
+                    }
+                    IconButton::expand() {
+                        tooltip: tr!(demo_open())
+                    }
                 }
             }
 

@@ -357,7 +357,6 @@ mod tests {
     use super::*;
     use crate::primitives::TextWidget;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[test]
     fn starts_visible_when_signal_true_emits_identity_skip() {

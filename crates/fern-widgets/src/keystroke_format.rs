@@ -19,7 +19,6 @@
 
 use fern_core::event::{Key, Modifiers};
 use fern_core::shortcut::KeyStroke;
-use fern_i18n::tr_widget;
 
 /// Render `keystroke` as the conventional label for the current
 /// platform and active locale.

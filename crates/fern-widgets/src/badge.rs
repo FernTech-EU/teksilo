@@ -79,9 +79,10 @@ impl Widget for Badge {
         // `.text_color(...)`. The pill background default
         // (`AccentSubtle`) lives in the recipe; `.color(...)` reaches
         // the style as `background_override`.
-        let text: ColorProp = self.text_color.take().unwrap_or_else(|| {
-            ColorProp::Bound(theme_signal.map(|t| t.colors.status_info_fg))
-        });
+        let text: ColorProp = self
+            .text_color
+            .take()
+            .unwrap_or_else(|| ColorProp::Bound(theme_signal.map(|t| t.colors.status_info_fg)));
 
         let text_widget = TextWidget::new_literal(&self.label)
             .style(TextStyleRole::Tiny)
@@ -96,7 +97,7 @@ impl Widget for Badge {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.badge.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeBadgeStyle::default()));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeBadgeStyle));
         let root = style.make_body(
             &BadgeStyleConfig {
                 content,
@@ -148,7 +149,6 @@ impl Widget for Badge {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[test]
     fn badge_builds_and_renders() {

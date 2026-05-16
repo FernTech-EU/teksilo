@@ -780,4 +780,3 @@ fn feedback_to_state(fb: &ValidationFeedback) -> ValidationState {
         ValidationFeedback::Invalid { message } => ValidationState::Error(message.clone()),
     }
 }
-

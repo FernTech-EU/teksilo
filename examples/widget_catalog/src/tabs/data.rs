@@ -135,8 +135,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         |_idx, item: &String, _sel| Box::new(StandardListItem::new_literal(item.clone())),
     ));
 
-    fern!(ctx =>
-        VStack {
+    fern!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0
@@ -149,7 +148,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     color: TextRole::Secondary
                 }
             }
-            Divider {}
+            Divider
 
             VStack {
                 spacing: 6.0
@@ -195,10 +194,18 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 }
                 VStack {
                     spacing: 2.0
-                    StandardTreeItem::new(tr!(dat_tree_root())) { depth: 0 }
-                    StandardTreeItem::new(tr!(data_child_a())) { depth: 1 }
-                    StandardTreeItem::new(tr!(data_child_b())) { depth: 1 }
-                    StandardTreeItem::new(tr!(dat_tree_grandchild())) { depth: 2 }
+                    StandardTreeItem::new(tr!(dat_tree_root())) {
+                        depth: 0
+                    }
+                    StandardTreeItem::new(tr!(data_child_a())) {
+                        depth: 1
+                    }
+                    StandardTreeItem::new(tr!(data_child_b())) {
+                        depth: 1
+                    }
+                    StandardTreeItem::new(tr!(dat_tree_grandchild())) {
+                        depth: 2
+                    }
                 }
             }
 

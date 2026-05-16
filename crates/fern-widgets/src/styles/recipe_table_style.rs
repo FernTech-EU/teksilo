@@ -70,11 +70,7 @@ pub const TREE_TWIST_LABEL_GAP: f32 = 4.0;
 pub struct RecipeTableStyle;
 
 impl TableStyle for RecipeTableStyle {
-    fn make_header_cell(
-        &self,
-        cfg: &TableHeaderCellConfig,
-        ctx: &mut BuildContext,
-    ) -> WidgetId {
+    fn make_header_cell(&self, cfg: &TableHeaderCellConfig, ctx: &mut BuildContext) -> WidgetId {
         // Reference shape: rounded surface that flips Hover when the
         // pointer is over the cell, Pressed while a resize drag is
         // active. The widget side handles label placement + sort
@@ -98,40 +94,30 @@ impl TableStyle for RecipeTableStyle {
         ctx.add(ZStack::new().add_child(bg).add_child(cfg.label))
     }
 
-    fn make_sort_indicator(
-        &self,
-        _direction: SortDirection,
-        ctx: &mut BuildContext,
-    ) -> WidgetId {
+    fn make_sort_indicator(&self, _direction: SortDirection, ctx: &mut BuildContext) -> WidgetId {
         // Placeholder — TableView paints the indicator chevron directly
         // for performance. Custom styles override.
         ctx.add(crate::primitives::Spacer::new())
     }
 
-    fn make_row_background(
-        &self,
-        cfg: &TableRowConfig,
-        ctx: &mut BuildContext,
-    ) -> WidgetId {
+    fn make_row_background(&self, cfg: &TableRowConfig, ctx: &mut BuildContext) -> WidgetId {
         let alt = cfg.is_alt;
-        let role: Signal<SurfaceRole> = cfg
-            .is_selected
-            .clone()
-            .zip(&cfg.is_hovered)
-            .map(move |(sel, hov)| {
-                if *sel {
-                    SurfaceRole::Selected
-                } else if *hov {
-                    SurfaceRole::Hover
-                } else if alt {
-                    SurfaceRole::AltRow
-                } else {
-                    SurfaceRole::Transparent
-                }
-            });
-        ctx.add(
-            RectWidget::new().background(ColorProp::DynamicSurfaceRole(role)),
-        )
+        let role: Signal<SurfaceRole> =
+            cfg.is_selected
+                .clone()
+                .zip(&cfg.is_hovered)
+                .map(move |(sel, hov)| {
+                    if *sel {
+                        SurfaceRole::Selected
+                    } else if *hov {
+                        SurfaceRole::Hover
+                    } else if alt {
+                        SurfaceRole::AltRow
+                    } else {
+                        SurfaceRole::Transparent
+                    }
+                });
+        ctx.add(RectWidget::new().background(ColorProp::DynamicSurfaceRole(role)))
     }
 
     fn grid(&self) -> TableGridRecipe {

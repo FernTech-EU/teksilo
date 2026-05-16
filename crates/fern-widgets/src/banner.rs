@@ -252,7 +252,7 @@ impl Widget for Banner {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.banner.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeBannerStyle::default()));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeBannerStyle));
         let root = style.make_body(
             &BannerStyleConfig {
                 severity,
@@ -325,7 +325,6 @@ impl Widget for Banner {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[test]
     fn banner_builds_and_lays_out() {

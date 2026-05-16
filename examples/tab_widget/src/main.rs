@@ -26,9 +26,9 @@ use fern_ui::core::widget::WidgetPlacement;
 use fern_ui::data::ListModel;
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Badge, Breadcrumb, BreadcrumbItem, Button, ButtonVariant, Card, HStack, IconWidget,
-    MessageBox, MessageBoxButtons, Panel, StandardButton, TabBarOrientation, TabHandle, TabId,
-    TabInfo, TabSizing, TabWidget, TextWidget, VStack,
+    Badge, Breadcrumb, BreadcrumbItem, Button, ButtonVariant, Card, HStack, IconWidget, MessageBox,
+    MessageBoxButtons, Panel, StandardButton, TabBarOrientation, TabHandle, TabId, TabInfo,
+    TabSizing, TabWidget, TextWidget, VStack,
 };
 
 /// Per-document mutable state — kept on the `TabHandle::payload`
@@ -255,26 +255,25 @@ impl Widget for Root {
                 move |id, ctx| {
                     let title = (0..model.len())
                         .find_map(|i| {
-                            model.with_item(i, |h| (h.id == id).then(|| h.info_title_cloned()))
+                            model
+                                .with_item(i, |h| (h.id == id).then(|| h.info_title_cloned()))
                                 .flatten()
                         })
                         .unwrap_or_else(|| "this tab".to_string());
                     let model_for_cb = model.clone();
                     MessageBox::question_literal("Close tab?")
                         .text_literal(format!("Are you sure you want to close \"{title}\"?"))
-                        .informative_text_literal(
-                            "Unsaved changes in the tab will be lost.",
-                        )
+                        .informative_text_literal("Unsaved changes in the tab will be lost.")
                         .buttons(MessageBoxButtons::YesNo)
                         .default_button(StandardButton::No)
                         .escape_button(StandardButton::No)
                         .on_result(move |r, _ctx| {
-                            if r.button == StandardButton::Yes {
-                                if let Some(idx) = (0..model_for_cb.len())
-                                    .find(|&i| model_for_cb.with_item(i, |h| h.id == id).unwrap_or(false))
-                                {
-                                    let _ = model_for_cb.remove(idx);
-                                }
+                            if r.button == StandardButton::Yes
+                                && let Some(idx) = (0..model_for_cb.len()).find(|&i| {
+                                    model_for_cb.with_item(i, |h| h.id == id).unwrap_or(false)
+                                })
+                            {
+                                let _ = model_for_cb.remove(idx);
                             }
                         })
                         .present(ctx);

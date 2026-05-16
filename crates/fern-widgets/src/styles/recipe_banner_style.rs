@@ -66,8 +66,7 @@ impl BannerStyle for RecipeBannerStyle {
                 .add_child(content),
         );
         let padded = ctx.add(
-            Padding::symmetric(BANNER_PADDING_VERTICAL, BANNER_PADDING_HORIZONTAL)
-                .child_id(row),
+            Padding::symmetric(BANNER_PADDING_VERTICAL, BANNER_PADDING_HORIZONTAL).child_id(row),
         );
 
         ctx.add(ZStack::new().add_child(bg).add_child(padded))

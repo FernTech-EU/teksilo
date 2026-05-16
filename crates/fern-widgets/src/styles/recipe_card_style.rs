@@ -139,12 +139,10 @@ impl Widget for CardFrame {
         // outer shadow only. Plain / Outlined have no shadow; Elevated
         // and Filled use the theme's shadow_md pair; the variant-default
         // gets multiplied by `card.shadow_density` before painting.
-        let outer = self
-            .shadow_override
-            .or(match self.variant {
-                CardVariant::Plain | CardVariant::Outlined => None,
-                CardVariant::Elevated | CardVariant::Filled => Some(ctx.theme.shape.shadow_md),
-            });
+        let outer = self.shadow_override.or(match self.variant {
+            CardVariant::Plain | CardVariant::Outlined => None,
+            CardVariant::Elevated | CardVariant::Filled => Some(ctx.theme.shape.shadow_md),
+        });
         if let Some(outer) = outer {
             crate::shadow::paint_layered_shadow(
                 canvas,

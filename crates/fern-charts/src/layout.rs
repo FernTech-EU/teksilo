@@ -126,8 +126,7 @@ pub fn carve_plot_area(p: &CarveParams) -> PlotArea {
     let plot = Rect::new(
         rect.x + y_band_w + cs::PLOT_PADDING_LEADING,
         rect.y + cs::PLOT_PADDING_TOP,
-        (rect.width - y_band_w - cs::PLOT_PADDING_LEADING - cs::PLOT_PADDING_RIGHT)
-            .max(0.0),
+        (rect.width - y_band_w - cs::PLOT_PADDING_LEADING - cs::PLOT_PADDING_RIGHT).max(0.0),
         (rect.height - x_band_h - cs::PLOT_PADDING_TOP - cs::PLOT_PADDING_BOTTOM).max(0.0),
     );
 

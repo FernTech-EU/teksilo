@@ -39,17 +39,20 @@ pub struct RecipeCheckboxStyle;
 
 impl CheckboxStyle for RecipeCheckboxStyle {
     fn make_body(&self, cfg: &CheckboxStyleConfig, ctx: &mut BuildContext) -> WidgetId {
-        let focus_origin = cfg.is_focused.zip(&cfg.is_hovered).map(|(focused, hovered)| {
-            if *focused {
-                Some(if *hovered {
-                    FocusOrigin::Pointer
+        let focus_origin = cfg
+            .is_focused
+            .zip(&cfg.is_hovered)
+            .map(|(focused, hovered)| {
+                if *focused {
+                    Some(if *hovered {
+                        FocusOrigin::Pointer
+                    } else {
+                        FocusOrigin::Keyboard
+                    })
                 } else {
-                    FocusOrigin::Keyboard
-                })
-            } else {
-                None
-            }
-        });
+                    None
+                }
+            });
 
         ctx.add(CheckboxBody {
             state: cfg.state.clone(),
@@ -83,8 +86,7 @@ impl Widget for CheckboxBody {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let id = ctx.self_id();
         let registry = ctx.binding_registry();
-        self.state
-            .bind_to(id, registry, BindingLevel::RepaintOnly);
+        self.state.bind_to(id, registry, BindingLevel::RepaintOnly);
         self.is_hovered
             .bind_to(id, registry, BindingLevel::RepaintOnly);
         self.is_pressed

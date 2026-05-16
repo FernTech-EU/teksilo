@@ -740,7 +740,7 @@ impl Widget for Avatar {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.avatar.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeAvatarStyle::default()));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeAvatarStyle));
         let root = style.make_body(
             &AvatarStyleConfig {
                 shape: self.shape,
@@ -953,7 +953,6 @@ mod tests {
     use crate::styles::recipe_avatar_style::fnv1a_64;
     use fern_core::widget::LayoutContext;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     // ── helpers ────────────────────────────────────────────────────────
 

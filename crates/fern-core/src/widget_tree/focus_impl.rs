@@ -551,7 +551,6 @@ mod tests {
 
     #[test]
     fn focus_survives_theme_switch() {
-        use crate::styles::Theme;
         let mut tree = WidgetTree::new();
         let a = tree.add(FillWidget::new().focusable());
         let _b = tree.add(FillWidget::new().focusable());

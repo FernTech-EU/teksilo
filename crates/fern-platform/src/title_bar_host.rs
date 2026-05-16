@@ -66,14 +66,12 @@ pub fn create_title_bar_host(
 ) -> Result<Rc<dyn PlatformTitleBarHost>, PlatformError> {
     #[cfg(target_os = "windows")]
     {
-        return WindowsHost::new(window, callbacks)
-            .map(|h| Rc::new(h) as Rc<dyn PlatformTitleBarHost>);
+        WindowsHost::new(window, callbacks).map(|h| Rc::new(h) as Rc<dyn PlatformTitleBarHost>)
     }
 
     #[cfg(target_os = "macos")]
     {
-        return MacOsHost::new(window, callbacks)
-            .map(|h| Rc::new(h) as Rc<dyn PlatformTitleBarHost>);
+        MacOsHost::new(window, callbacks).map(|h| Rc::new(h) as Rc<dyn PlatformTitleBarHost>)
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]

@@ -182,7 +182,6 @@ mod tests {
     use crate::primitives::TextWidget;
     use fern_canvas::Size;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     fn count_set_opacity(frame: &fern_canvas::RenderFrame) -> Vec<f32> {
         frame

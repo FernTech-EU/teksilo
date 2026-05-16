@@ -125,8 +125,7 @@ pub fn paint_focus_ring(
     match shape {
         AvatarShape::Circle => {
             let radius = outer.width.min(outer.height) / 2.0;
-            let center =
-                Point::new(outer.x + outer.width / 2.0, outer.y + outer.height / 2.0);
+            let center = Point::new(outer.x + outer.width / 2.0, outer.y + outer.height / 2.0);
             canvas.stroke_circle(
                 center,
                 radius,
@@ -173,8 +172,7 @@ pub fn paint_border(
     match shape {
         AvatarShape::Circle => {
             let radius = inner.width.min(inner.height) / 2.0;
-            let center =
-                Point::new(inner.x + inner.width / 2.0, inner.y + inner.height / 2.0);
+            let center = Point::new(inner.x + inner.width / 2.0, inner.y + inner.height / 2.0);
             canvas.stroke_circle(
                 center,
                 radius,

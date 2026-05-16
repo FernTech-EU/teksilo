@@ -1415,10 +1415,7 @@ impl WidgetCatalog for ListView<String> {
                     .bind_width(280.0_f32)
                     .bind_height(220.0_f32)
                     .child(ListView::new(model, |_idx, item, selected| {
-                        Box::new(
-                            StandardListItem::new_literal(item.clone())
-                                .selected(selected),
-                        )
+                        Box::new(StandardListItem::new_literal(item.clone()).selected(selected))
                     })),
             )
         }
@@ -1510,9 +1507,7 @@ impl WidgetCatalog for StandardListItem {
                 StandardListItem::new_literal("Title line")
                     .subtitle_literal("Subtitle line")
                     .leading_slot(TextWidget::new_literal("●").color(TextRole::Accent))
-                    .subtitle_leading_slot(
-                        TextWidget::new_literal("•").color(TextRole::Secondary),
-                    )
+                    .subtitle_leading_slot(TextWidget::new_literal("•").color(TextRole::Secondary))
                     .subtitle_trailing_slot(
                         TextWidget::new_literal("just now").color(TextRole::Secondary),
                     )
@@ -1526,9 +1521,7 @@ impl WidgetCatalog for StandardListItem {
         fn build_with_tristate_checkbox() -> Box<dyn Widget> {
             use fern_data::CheckState;
             let s = Signal::new(CheckState::Indeterminate);
-            Box::new(
-                StandardListItem::new_literal("With tristate checkbox").tristate_checkbox(s),
-            )
+            Box::new(StandardListItem::new_literal("With tristate checkbox").tristate_checkbox(s))
         }
         fn build_selected() -> Box<dyn Widget> {
             Box::new(StandardListItem::new_literal("Selected").selected(true))
@@ -1550,10 +1543,7 @@ impl WidgetCatalog for StandardListItem {
         scenario_for::<Self>(variant)
     }
 }
-register_widget_catalog_at!(
-    "crates/fern-widgets/src/standard_item.rs",
-    StandardListItem
-);
+register_widget_catalog_at!("crates/fern-widgets/src/standard_item.rs", StandardListItem);
 
 // ---------------------------------------------------------------------------
 // StandardTreeItem
@@ -1628,10 +1618,7 @@ impl WidgetCatalog for StandardTreeItem {
         scenario_for::<Self>(variant)
     }
 }
-register_widget_catalog_at!(
-    "crates/fern-widgets/src/standard_item.rs",
-    StandardTreeItem
-);
+register_widget_catalog_at!("crates/fern-widgets/src/standard_item.rs", StandardTreeItem);
 
 // ---------------------------------------------------------------------------
 // MenuList

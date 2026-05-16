@@ -416,7 +416,9 @@ impl AnimationScheduler {
     }
 }
 
-use crate::motion_visibility::{alive as anim_widget_alive, painted_recently as anim_widget_visible};
+use crate::motion_visibility::{
+    alive as anim_widget_alive, painted_recently as anim_widget_visible,
+};
 
 impl Default for AnimationScheduler {
     fn default() -> Self {

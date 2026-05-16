@@ -76,8 +76,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let menu_bar = ctx.add(make_menu_bar());
     let menu_list = ctx.add(make_menu_list());
 
-    fern!(ctx =>
-        VStack {
+    fern!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0
@@ -90,7 +89,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     color: TextRole::Secondary
                 }
             }
-            Divider {}
+            Divider
 
             VStack {
                 spacing: 6.0
@@ -119,8 +118,12 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 VStack {
                     spacing: 2.0
                     MenuItem::new(tr!(mnu_standalone_a()))
-                    MenuItem::new(tr!(mnu_with_shortcut())) { shortcut_label: "Ctrl+S" }
-                    MenuItem::new(tr!(mnu_disabled())) { enabled: false }
+                    MenuItem::new(tr!(mnu_with_shortcut())) {
+                        shortcut_label: "Ctrl+S"
+                    }
+                    MenuItem::new(tr!(mnu_disabled())) {
+                        enabled: false
+                    }
                 }
             }
         }

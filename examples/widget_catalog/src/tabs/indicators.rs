@@ -118,8 +118,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 // (UpperCamel calls) or via the `child:` property for free functions
 // returning Widget.
 pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
-    fern!(ctx =>
-        VStack {
+    fern!(ctx => VStack {
             spacing: 20.0
 
             // header (title + refs)
@@ -134,7 +133,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     color: TextRole::Secondary
                 }
             }
-            Divider {}
+            Divider
 
             // ProgressBar — determinate
             VStack {
@@ -155,7 +154,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                ProgressBar::indeterminate() {}
+                ProgressBar::indeterminate()
             }
 
             // ProgressBar — vertical
@@ -183,8 +182,8 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 }
                 HStack {
                     spacing: 16.0
-                    Spinner::new(20.0) {}
-                    Spinner::new(28.0) {}
+                    Spinner::new(20.0)
+                    Spinner::new(28.0)
                     Spinner::new(36.0) {
                         label: tr!(demo_loading())
                     }
@@ -220,7 +219,9 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     spacing: 8.0
                     Badge::new_literal("New")
                     Badge::new_literal("Beta")
-                    Badge::new_literal("Stable") { color: SurfaceRole::Raised }
+                    Badge::new_literal("Stable") {
+                        color: SurfaceRole::Raised
+                    }
                     Badge::new_literal("3")
                     Badge::new_literal("99+")
                 }
@@ -235,7 +236,9 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 }
                 HStack {
                     spacing: 12.0
-                    Avatar::with_initials_literal("CJ") { size: AvatarSize::Medium }
+                    Avatar::with_initials_literal("CJ") {
+                        size: AvatarSize::Medium
+                    }
                     Avatar::with_initials_literal("AB") {
                         shape: AvatarShape::RoundedSquare
                         seed: "alice"

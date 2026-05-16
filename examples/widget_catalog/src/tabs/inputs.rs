@@ -161,8 +161,7 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let slider_step = sigs.slider_stepped.clone();
     let slider_v_val = sigs.slider_v_value.clone();
 
-    fern!(ctx =>
-        VStack {
+    fern!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0
@@ -175,7 +174,7 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Secondary
                 }
             }
-            Divider {}
+            Divider
 
             VStack {
                 spacing: 6.0
@@ -185,8 +184,12 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                 }
                 VStack {
                     spacing: 6.0
-                    Checkbox::new(cb_checked) { label: tr!(inp_checkbox_two_state()) }
-                    Checkbox::tristate(cb_tri) { label: tr!(inp_checkbox_tristate()) }
+                    Checkbox::new(cb_checked) {
+                        label: tr!(inp_checkbox_two_state())
+                    }
+                    Checkbox::tristate(cb_tri) {
+                        label: tr!(inp_checkbox_tristate())
+                    }
                     Checkbox::new(cb_disabled) {
                         label: tr!(inp_checkbox_disabled())
                         enabled: false
@@ -202,9 +205,15 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                 }
                 VStack {
                     spacing: 4.0
-                    RadioButton::new(0, radio_sel.clone()) { label: tr!(inp_radio_a()) }
-                    RadioButton::new(1, radio_sel.clone()) { label: tr!(inp_radio_b()) }
-                    RadioButton::new(2, radio_sel) { label: tr!(inp_radio_c()) }
+                    RadioButton::new(0, radio_sel.clone()) {
+                        label: tr!(inp_radio_a())
+                    }
+                    RadioButton::new(1, radio_sel.clone()) {
+                        label: tr!(inp_radio_b())
+                    }
+                    RadioButton::new(2, radio_sel) {
+                        label: tr!(inp_radio_c())
+                    }
                 }
             }
 
@@ -216,8 +225,12 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                 }
                 VStack {
                     spacing: 6.0
-                    Toggle::new(toggle_on) { label: tr!(inp_toggle_feature()) }
-                    Toggle::new(toggle_label) { label: tr!(inp_toggle_with_label()) }
+                    Toggle::new(toggle_on) {
+                        label: tr!(inp_toggle_feature())
+                    }
+                    Toggle::new(toggle_label) {
+                        label: tr!(inp_toggle_with_label())
+                    }
                     Toggle::new(toggle_disabled) {
                         label: tr!(inp_toggle_disabled())
                         enabled: false

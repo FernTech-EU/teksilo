@@ -10,7 +10,7 @@
 
 use std::time::Duration;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CliOptions {
     /// Index of the tab to open on startup.
     pub initial_tab: usize,
@@ -18,16 +18,6 @@ pub struct CliOptions {
     pub cycle: Option<Duration>,
     /// `false` → start in classic builder view; `true` → start in `fern!` view.
     pub fern_mode: bool,
-}
-
-impl Default for CliOptions {
-    fn default() -> Self {
-        Self {
-            initial_tab: 0,
-            cycle: None,
-            fern_mode: false,
-        }
-    }
 }
 
 /// Parse command-line args. On `--help`, prints usage and exits 0.
@@ -65,9 +55,8 @@ pub fn parse(tab_names: &[&str]) -> CliOptions {
                 let ms = iter
                     .peek()
                     .and_then(|s| s.parse::<u64>().ok())
-                    .map(|n| {
+                    .inspect(|_| {
                         iter.next();
-                        n
                     })
                     .unwrap_or(100);
                 opts.cycle = Some(Duration::from_millis(ms));

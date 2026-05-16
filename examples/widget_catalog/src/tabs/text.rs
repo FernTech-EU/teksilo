@@ -150,8 +150,7 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     // single-line closures fine but the suggestion closure is multi-line.
     let search_id = ctx.add(search_field(sigs.search_text.clone()));
 
-    fern!(ctx =>
-        VStack {
+    fern!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0
@@ -164,7 +163,7 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Secondary
                 }
             }
-            Divider {}
+            Divider
 
             VStack {
                 spacing: 6.0

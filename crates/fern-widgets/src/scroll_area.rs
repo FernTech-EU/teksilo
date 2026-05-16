@@ -1467,7 +1467,6 @@ mod tests {
 
     #[test]
     fn scroll_survives_theme_switch_at_root() {
-        use fern_core::Theme;
         let mut tree = WidgetTree::new();
         let scroll = tree.add(
             ScrollArea::new()
@@ -1554,7 +1553,6 @@ mod tests {
 
     #[test]
     fn scroll_survives_theme_switch_inside_composite() {
-        use fern_core::Theme;
         let mut tree = WidgetTree::new();
         let parent = tree.add(ScrollParent::new());
         tree.layout(SizeProposal::exact(200.0, 100.0));

@@ -203,7 +203,10 @@ fn intui_filled_recipe() -> ButtonRecipe {
             idle: BorderRecipe::solid(0.0, RecipeColor::Border(BorderRole::Transparent)),
             hover: None,
             pressed: None,
-            focused: Some(BorderRecipe::solid(2.0, RecipeColor::Border(BorderRole::Focused))),
+            focused: Some(BorderRecipe::solid(
+                2.0,
+                RecipeColor::Border(BorderRole::Focused),
+            )),
             disabled: None,
         },
         shadow: PerStateRecipe::uniform(None),
@@ -224,9 +227,18 @@ fn intui_plain_recipe() -> ButtonRecipe {
         },
         border: PerStateRecipe {
             idle: BorderRecipe::solid(1.0, RecipeColor::Border(BorderRole::Default)),
-            hover: Some(BorderRecipe::solid(1.0, RecipeColor::Border(BorderRole::Strong))),
-            pressed: Some(BorderRecipe::solid(1.0, RecipeColor::Border(BorderRole::Strong))),
-            focused: Some(BorderRecipe::solid(2.0, RecipeColor::Border(BorderRole::Focused))),
+            hover: Some(BorderRecipe::solid(
+                1.0,
+                RecipeColor::Border(BorderRole::Strong),
+            )),
+            pressed: Some(BorderRecipe::solid(
+                1.0,
+                RecipeColor::Border(BorderRole::Strong),
+            )),
+            focused: Some(BorderRecipe::solid(
+                2.0,
+                RecipeColor::Border(BorderRole::Focused),
+            )),
             disabled: None,
         },
         shadow: PerStateRecipe::uniform(None),
@@ -249,7 +261,10 @@ fn intui_ghost_recipe() -> ButtonRecipe {
             idle: BorderRecipe::solid(0.0, RecipeColor::Border(BorderRole::Transparent)),
             hover: None,
             pressed: None,
-            focused: Some(BorderRecipe::solid(2.0, RecipeColor::Border(BorderRole::Focused))),
+            focused: Some(BorderRecipe::solid(
+                2.0,
+                RecipeColor::Border(BorderRole::Focused),
+            )),
             disabled: None,
         },
         shadow: PerStateRecipe::uniform(None),

@@ -13,9 +13,7 @@
 //! widget module (group-4 composites). Theme-wide style installs go
 //! through `style_slots: ComponentStyleSlots` instead.
 
-use fern_tokens::{
-    ColorTokens, LayoutTokens, MotionTokens, ShapeTokens, TypographyTokens,
-};
+use fern_tokens::{ColorTokens, LayoutTokens, MotionTokens, ShapeTokens, TypographyTokens};
 
 use crate::styles::{ComponentStyleSlots, Theme, ThemeAppearance, ThemeExtensions};
 

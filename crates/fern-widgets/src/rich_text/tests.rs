@@ -526,7 +526,8 @@ fn focus_editor(tree: &mut WidgetTree, id: fern_core::widget_id::WidgetId) {
     assert!(
         focused.is_some_and(|f| f == id || tree.is_descendant_of(f, id)),
         "focus_editor helper: click did not focus editor (focus={:?}, expected {:?} or a descendant)",
-        focused, id,
+        focused,
+        id,
     );
 }
 
@@ -3271,15 +3272,11 @@ fn editor_chrome_padding_is_included_in_wrapper_bounds() {
     // Editor mode fills the proposal too (chrome consumes the parent
     // proposal exactly). What we can verify: the inner viewport is
     // inset by the chrome padding on both axes.
-    let body_id = tree_ed
-        .first_focusable_descendant(id_ed)
-        .or_else(|| {
-            // Body is not focusable now; pierce via descendants until
-            // we find a widget whose bounds shrink by the chrome
-            // padding. Skip — easier path is to just compare bounds
-            // shape: viewport bounds.x must be at TEXT_FIELD_PADDING_HORIZONTAL.
-            None
-        });
+    // Body is not focusable now; pierce via descendants until we find
+    // a widget whose bounds shrink by the chrome padding. Skip — easier
+    // path is to just compare bounds shape: viewport bounds.x must be
+    // at TEXT_FIELD_PADDING_HORIZONTAL.
+    let body_id = tree_ed.first_focusable_descendant(id_ed);
     let _ = body_id;
     // Confirm the wrapper width is the full proposal.
     assert!(
@@ -3306,11 +3303,7 @@ fn editor_style_override_installs_custom_chrome() {
     #[derive(Default)]
     struct PassthroughStyle;
     impl RichTextEditorStyle for PassthroughStyle {
-        fn make_body(
-            &self,
-            cfg: &RichTextEditorStyleConfig,
-            _ctx: &mut BuildContext,
-        ) -> WidgetId {
+        fn make_body(&self, cfg: &RichTextEditorStyleConfig, _ctx: &mut BuildContext) -> WidgetId {
             cfg.viewport
         }
     }

@@ -35,10 +35,8 @@ impl ButtonStyle for GlowButton {
         // Bg switches to the accent family on hover/press; idle is a
         // muted accent-subtle that hints at the call-to-action without
         // shouting.
-        let bg = cfg
-            .is_pressed
-            .zip3(&cfg.is_hovered, &cfg.is_disabled)
-            .map(|(pressed, hovered, disabled)| {
+        let bg = cfg.is_pressed.zip3(&cfg.is_hovered, &cfg.is_disabled).map(
+            |(pressed, hovered, disabled)| {
                 if *disabled {
                     SurfaceRole::AccentDisabled
                 } else if *pressed {
@@ -48,7 +46,8 @@ impl ButtonStyle for GlowButton {
                 } else {
                     SurfaceRole::AccentSubtle
                 }
-            });
+            },
+        );
 
         let body = ctx.add(
             RectWidget::new()
@@ -120,9 +119,7 @@ impl Widget for Demo {
              button slot.",
             VStack::new()
                 .spacing(12.0)
-                .child(
-                    TextWidget::new_literal("Title").style(TextStyleRole::BodyBold),
-                )
+                .child(TextWidget::new_literal("Title").style(TextStyleRole::BodyBold))
                 .child(Toggle::new(Signal::new(false)).label_literal("Notifications"))
                 .child(Toggle::new(Signal::new(true)).label_literal("Dark mode")),
         );
@@ -134,10 +131,7 @@ impl Widget for Demo {
              `.style()` needed.",
             VStack::new()
                 .spacing(12.0)
-                .child(
-                    TextWidget::new_literal("Both glowing")
-                        .style(TextStyleRole::BodyBold),
-                )
+                .child(TextWidget::new_literal("Both glowing").style(TextStyleRole::BodyBold))
                 .child(
                     Button::new_literal("Save")
                         .variant(ButtonVariant::Filled)
@@ -203,10 +197,6 @@ fn column_card(
                     .style(TextStyleRole::Small)
                     .color(TextRole::Secondary),
             )
-            .child(
-                Card::new()
-                    .variant(CardVariant::Plain)
-                    .content(body),
-            ),
+            .child(Card::new().variant(CardVariant::Plain).content(body)),
     )
 }

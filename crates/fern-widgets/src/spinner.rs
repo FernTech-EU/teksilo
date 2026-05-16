@@ -204,7 +204,6 @@ mod tests {
     use super::*;
     use fern_canvas::DrawCommand;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[test]
     fn spinner_size() {

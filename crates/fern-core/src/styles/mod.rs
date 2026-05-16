@@ -29,8 +29,8 @@ pub mod rich_text_editor_style;
 pub mod scroll_bar_style;
 pub mod search_field_style;
 pub mod segmented_control_style;
-pub mod snackbar_style;
 pub mod slider_style;
+pub mod snackbar_style;
 pub mod spin_box_style;
 pub mod standard_item_style;
 pub mod tab_style;
@@ -47,9 +47,7 @@ pub use avatar_style::{
     SharedAvatarStyle,
 };
 pub use badge_style::{BadgeStyle, BadgeStyleConfig, SharedBadgeStyle};
-pub use banner_style::{
-    BannerSeverity, BannerStyle, BannerStyleConfig, SharedBannerStyle,
-};
+pub use banner_style::{BannerSeverity, BannerStyle, BannerStyleConfig, SharedBannerStyle};
 pub use button_style::{
     ButtonRecipe, ButtonStyle, ButtonStyleConfig, ButtonVariant, SharedButtonStyle,
 };
@@ -95,9 +93,7 @@ pub use scroll_bar_style::{
     ScrollBarOrientation, ScrollBarStyle, ScrollBarStyleConfig, ScrollBarVariant,
     SharedScrollBarStyle,
 };
-pub use search_field_style::{
-    SearchFieldStyle, SearchFieldStyleConfig, SharedSearchFieldStyle,
-};
+pub use search_field_style::{SearchFieldStyle, SearchFieldStyleConfig, SharedSearchFieldStyle};
 pub use segmented_control_style::{
     SegmentedControlStyle, SegmentedControlStyleConfig, SharedSegmentedControlStyle,
 };
@@ -105,9 +101,7 @@ pub use slider_style::{
     SharedSliderStyle, SliderOrientation, SliderStyle, SliderStyleConfig, SliderVariant,
 };
 pub use snackbar_style::{SharedSnackbarStyle, SnackbarStyle, SnackbarStyleConfig};
-pub use spin_box_style::{
-    ButtonLayout, SharedSpinBoxStyle, SpinBoxStyle, SpinBoxStyleConfig,
-};
+pub use spin_box_style::{ButtonLayout, SharedSpinBoxStyle, SpinBoxStyle, SpinBoxStyleConfig};
 pub use standard_item_style::{
     SharedStandardItemStyle, StandardItemStyle, StandardItemStyleConfig,
 };

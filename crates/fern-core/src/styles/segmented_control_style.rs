@@ -34,11 +34,7 @@ pub struct SegmentedControlStyleConfig {
 }
 
 pub trait SegmentedControlStyle: 'static {
-    fn make_body(
-        &self,
-        cfg: &SegmentedControlStyleConfig,
-        ctx: &mut BuildContext,
-    ) -> WidgetId;
+    fn make_body(&self, cfg: &SegmentedControlStyleConfig, ctx: &mut BuildContext) -> WidgetId;
 }
 
 pub type SharedSegmentedControlStyle = Rc<dyn SegmentedControlStyle>;

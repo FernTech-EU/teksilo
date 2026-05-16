@@ -11,14 +11,12 @@
 //! (`IconButton::style(...)`) or theme-wide (step 8's
 //! `ComponentStyles.icon_button = Rc::new(MyIconButton)`).
 
-use fern_tokens::CornerRadius;
 use fern_core::build_context::BuildContext;
 use fern_core::color_prop::ColorProp;
 use fern_core::signal::Signal;
-use fern_core::styles::{
-    IconButtonSize, IconButtonStyle, IconButtonStyleConfig,
-};
+use fern_core::styles::{IconButtonSize, IconButtonStyle, IconButtonStyleConfig};
 use fern_core::widget_id::WidgetId;
+use fern_tokens::CornerRadius;
 use fern_tokens::{BorderRole, SurfaceRole};
 
 use crate::primitives::{Center, FixedSize, RectWidget, ZStack};
@@ -54,8 +52,9 @@ impl IconButtonStyle for RecipeIconButtonStyle {
         // flat treatment otherwise. Pressed always wins (the press
         // flash overrides Selected).
         let bg_role: ColorProp = match cfg.is_on.clone() {
-            Some(on) => bistate_bg_role(&cfg.is_pressed, &cfg.is_hovered, &cfg.is_disabled, &on)
-                .into(),
+            Some(on) => {
+                bistate_bg_role(&cfg.is_pressed, &cfg.is_hovered, &cfg.is_disabled, &on).into()
+            }
             None => plain_bg_role(&cfg.is_pressed, &cfg.is_hovered, &cfg.is_disabled).into(),
         };
 

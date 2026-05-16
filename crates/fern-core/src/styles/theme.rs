@@ -21,9 +21,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use fern_tokens::{
-    ColorTokens, LayoutTokens, MotionTokens, ShapeTokens, TypographyTokens,
-};
+use fern_tokens::{ColorTokens, LayoutTokens, MotionTokens, ShapeTokens, TypographyTokens};
 
 use crate::styles::component_style_slots::ComponentStyleSlots;
 use crate::styles::theme_appearance::ThemeAppearance;

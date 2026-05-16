@@ -28,11 +28,7 @@ pub struct RichTextEditorStyleConfig {
 }
 
 pub trait RichTextEditorStyle: 'static {
-    fn make_body(
-        &self,
-        cfg: &RichTextEditorStyleConfig,
-        ctx: &mut BuildContext,
-    ) -> WidgetId;
+    fn make_body(&self, cfg: &RichTextEditorStyleConfig, ctx: &mut BuildContext) -> WidgetId;
 }
 
 pub type SharedRichTextEditorStyle = Rc<dyn RichTextEditorStyle>;

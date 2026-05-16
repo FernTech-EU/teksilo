@@ -9,9 +9,7 @@ use fern_core::modal::{ModalCloseBehavior, ModalPresentation, ModalRequest};
 use fern_core::overlay::{OverlayDismissCallback, OverlayId};
 use fern_core::signal::Signal;
 use fern_core::styles::{DialogStyleConfig, SharedDialogStyle};
-use fern_core::widget::{
-    EventContext, LayoutContext, PendingChild, Widget, WidgetPlacement,
-};
+use fern_core::widget::{EventContext, LayoutContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_builder::{HandlerSet, WidgetBuilder};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{TextRole, TextStyleRole};
@@ -93,7 +91,6 @@ impl ModalContainer {
         self.title = Some(title.into());
         self
     }
-
 }
 
 impl std::fmt::Debug for ModalContainer {
@@ -132,7 +129,7 @@ impl Widget for ModalContainer {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.dialog.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeDialogStyle::default()));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeDialogStyle));
         let cfg = DialogStyleConfig {
             content: content_id,
             has_scrim: true,
@@ -271,7 +268,7 @@ impl Widget for ModalScrim {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.dialog.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeDialogStyle::default()));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeDialogStyle));
         let chrome_id = style.make_scrim(ctx);
 
         if self.click_to_dismiss {
@@ -825,7 +822,6 @@ mod tests {
     use fern_canvas::Size;
     use fern_core::widget_tree::WidgetTree;
     use fern_core::{ModalContent, ModalPresentation};
-    use fern_core::Theme;
 
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);

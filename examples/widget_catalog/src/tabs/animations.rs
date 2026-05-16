@@ -212,8 +212,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let blur_radius: Signal<f32> = ctx.signal(0.0_f32);
     let blur_for_btn = blur_radius.clone();
 
-    fern!(ctx =>
-        VStack {
+    fern!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0
@@ -226,11 +225,14 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     color: TextRole::Secondary
                 }
             }
-            Divider {}
+            Divider
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Fade") { style: TextStyleRole::SmallBold color: TextRole::Accent }
+                TextWidget::new_literal("Fade") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
                 VStack {
                     spacing: 6.0
                     child: drive_box(tr!(anim_visible()), fade_for_drive)
@@ -242,7 +244,10 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Pulse") { style: TextStyleRole::SmallBold color: TextRole::Accent }
+                TextWidget::new_literal("Pulse") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
                 Pulse::opacity(0.3, 1.0) {
                     period: Duration::from_millis(900)
                     child: color_cell(SurfaceRole::Raised, "REC")
@@ -251,18 +256,30 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Cycle") { style: TextStyleRole::SmallBold color: TextRole::Accent }
+                TextWidget::new_literal("Cycle") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
                 Cycle {
                     period: Duration::from_millis(1500)
-                    TextWidget::new(tr!(anim_tip_1())) { style: TextStyleRole::Body }
-                    TextWidget::new(tr!(anim_tip_2())) { style: TextStyleRole::Body }
-                    TextWidget::new(tr!(anim_tip_3())) { style: TextStyleRole::Body }
+                    TextWidget::new(tr!(anim_tip_1())) {
+                        style: TextStyleRole::Body
+                    }
+                    TextWidget::new(tr!(anim_tip_2())) {
+                        style: TextStyleRole::Body
+                    }
+                    TextWidget::new(tr!(anim_tip_3())) {
+                        style: TextStyleRole::Body
+                    }
                 }
             }
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Crossfade") { style: TextStyleRole::SmallBold color: TextRole::Accent }
+                TextWidget::new_literal("Crossfade") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
                 VStack {
                     spacing: 6.0
                     Button::new(tr!(anim_crossfade_next())) {
@@ -274,7 +291,10 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Collapse") { style: TextStyleRole::SmallBold color: TextRole::Accent }
+                TextWidget::new_literal("Collapse") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
                 VStack {
                     spacing: 6.0
                     child: drive_box(tr!(anim_expanded()), collapse_for_drive)
@@ -282,7 +302,9 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                         Panel {
                             background: SurfaceRole::Raised
                             padding: 12.0
-                            TextWidget::new(tr!(anim_collapse_body())) { style: TextStyleRole::Body }
+                            TextWidget::new(tr!(anim_collapse_body())) {
+                                style: TextStyleRole::Body
+                            }
                         }
                     }
                 }
@@ -290,19 +312,27 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("SmoothSize") { style: TextStyleRole::SmallBold color: TextRole::Accent }
+                TextWidget::new_literal("SmoothSize") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
                 SmoothSize {
                     Panel {
                         background: SurfaceRole::AccentSubtle
                         padding: 12.0
-                        TextWidget::new(tr!(anim_smooth_body())) { style: TextStyleRole::Body }
+                        TextWidget::new(tr!(anim_smooth_body())) {
+                            style: TextStyleRole::Body
+                        }
                     }
                 }
             }
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Slide") { style: TextStyleRole::SmallBold color: TextRole::Accent }
+                TextWidget::new_literal("Slide") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
                 VStack {
                     spacing: 6.0
                     child: drive_box(tr!(anim_visible()), slide_for_drive)
@@ -319,7 +349,10 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Shake") { style: TextStyleRole::SmallBold color: TextRole::Accent }
+                TextWidget::new_literal("Shake") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
                 HStack {
                     spacing: 8.0
                     Button::new(tr!(anim_shake())) {
@@ -333,7 +366,10 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Scale") { style: TextStyleRole::SmallBold color: TextRole::Accent }
+                TextWidget::new_literal("Scale") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
                 VStack {
                     spacing: 6.0
                     child: drive_box(tr!(anim_visible()), scale_for_drive)
@@ -345,7 +381,10 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Rotate") { style: TextStyleRole::SmallBold color: TextRole::Accent }
+                TextWidget::new_literal("Rotate") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
                 HStack {
                     spacing: 8.0
                     Button::new(tr!(anim_rotate())) {
@@ -363,7 +402,10 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Blur") { style: TextStyleRole::SmallBold color: TextRole::Accent }
+                TextWidget::new_literal("Blur") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
                 VStack {
                     spacing: 6.0
                     Button::new(tr!(anim_blur_toggle())) {
@@ -373,7 +415,9 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                         Panel {
                             background: SurfaceRole::AccentSubtle
                             padding: 16.0
-                            TextWidget::new(tr!(anim_blur_body())) { style: TextStyleRole::Body }
+                            TextWidget::new(tr!(anim_blur_body())) {
+                                style: TextStyleRole::Body
+                            }
                         }
                     }
                 }

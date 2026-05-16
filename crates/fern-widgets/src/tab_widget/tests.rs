@@ -2,7 +2,6 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use fern_canvas::{Size, SizeProposal};
-use fern_core::Theme;
 use fern_core::accesskit;
 use fern_core::event::{Key, Modifiers};
 use fern_core::signal::Signal;

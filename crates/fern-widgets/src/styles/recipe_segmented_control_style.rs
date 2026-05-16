@@ -34,11 +34,7 @@ pub const SEGMENTED_CONTROL_BORDER_WIDTH: f32 = 1.0;
 pub struct RecipeSegmentedControlStyle;
 
 impl SegmentedControlStyle for RecipeSegmentedControlStyle {
-    fn make_body(
-        &self,
-        cfg: &SegmentedControlStyleConfig,
-        ctx: &mut BuildContext,
-    ) -> WidgetId {
+    fn make_body(&self, cfg: &SegmentedControlStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         ctx.add(SegmentedControlChrome {
             labels: cfg.labels.clone(),
             selected: cfg.selected.clone(),
@@ -102,7 +98,8 @@ impl Widget for SegmentedControlChrome {
         // Repaint on any state-signal change. Label changes are
         // structural and live on the parent `SegmentedControl`'s
         // rebuild path, so we don't bind to a labels signal here.
-        self.selected.bind_to(id, registry, BindingLevel::RepaintOnly);
+        self.selected
+            .bind_to(id, registry, BindingLevel::RepaintOnly);
         self.hovered_segment
             .bind_to(id, registry, BindingLevel::RepaintOnly);
         self.focus_origin

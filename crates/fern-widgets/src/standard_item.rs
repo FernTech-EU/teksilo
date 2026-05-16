@@ -286,7 +286,6 @@ fn resolve_label_role(enabled: bool) -> TextRole {
     }
 }
 
-
 impl StandardListItem {
     /// Build the row content (HStack of slots + label column) and
     /// register it. Returns the WidgetId of the content node (not the
@@ -320,7 +319,9 @@ impl StandardListItem {
                 let id = ctx.add_boxed(w);
                 sub_row = sub_row.add_child(id);
             }
-            sub_row = sub_row.add_child(subtitle_text_id).add_child(ctx.add(Spacer::new()));
+            sub_row = sub_row
+                .add_child(subtitle_text_id)
+                .add_child(ctx.add(Spacer::new()));
             if let Some(w) = self.subtitle_trailing_slot.take() {
                 let id = ctx.add_boxed(w);
                 sub_row = sub_row.add_child(id);
@@ -371,7 +372,9 @@ impl StandardListItem {
             let id = ctx.add_boxed(w);
             row = row.add_child(id);
         }
-        row = row.add_child(label_column_id).add_child(ctx.add(Spacer::new()));
+        row = row
+            .add_child(label_column_id)
+            .add_child(ctx.add(Spacer::new()));
         if let Some(w) = self.trailing_slot.take() {
             let id = ctx.add_boxed(w);
             row = row.add_child(id);
@@ -392,8 +395,12 @@ impl StandardListItem {
         // re-evaluates the bg role on any source change.
         let is_selected = self.selected.clone();
         let is_disabled = self.enabled.map(|e| !*e);
-        let is_hovered = self.interaction.map(|s| matches!(s, InteractionState::Hovered));
-        let is_pressed = self.interaction.map(|s| matches!(s, InteractionState::Pressed));
+        let is_hovered = self
+            .interaction
+            .map(|s| matches!(s, InteractionState::Hovered));
+        let is_pressed = self
+            .interaction
+            .map(|s| matches!(s, InteractionState::Pressed));
         // StandardItem doesn't track focus separately today — the
         // parent ListView / TreeView owns row focus via its own a11y
         // wiring. Wire a constant-false signal so the recipe sees a
@@ -404,7 +411,7 @@ impl StandardListItem {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.standard_item.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeStandardItemStyle::default()));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeStandardItemStyle));
         let cfg = StandardItemStyleConfig {
             content: content_id,
             is_selected,
@@ -637,7 +644,7 @@ impl StandardTreeItem {
     /// Per-call style override for the row chrome. Forwarded to the
     /// inner [`StandardListItem`] — see its `style(...)` for the
     /// precedence rules (per-call > theme.style_slots.standard_item >
-    /// `RecipeStandardItemStyle::default()`).
+    /// `RecipeStandardItemStyle`).
     pub fn style(mut self, style: impl fern_core::styles::StandardItemStyle) -> Self {
         self.inner = self.inner.style(style);
         self
@@ -681,10 +688,7 @@ impl StandardTreeItem {
     /// dispatch an intent (e.g. lazy-load children on expand), open
     /// a dialog, or otherwise route the toggle through the framework
     /// before mutating model state.
-    pub fn on_toggle(
-        mut self,
-        f: impl Fn(&mut fern_core::widget::EventContext) + 'static,
-    ) -> Self {
+    pub fn on_toggle(mut self, f: impl Fn(&mut fern_core::widget::EventContext) + 'static) -> Self {
         self.on_toggle = Some(Rc::new(f));
         self
     }
@@ -728,21 +732,13 @@ impl Widget for StandardTreeItem {
         //    `FixedSize.on_tap`, which routes taps through the column
         //    wrapper and the composed parent chain.
         let chevron_size = si::STANDARD_ITEM_CHEVRON_COLUMN_WIDTH;
-        let mut chevron = TwistArrow::new(
-            chevron_size,
-            self.has_children,
-            self.is_expanded.get(),
-        );
+        let mut chevron = TwistArrow::new(chevron_size, self.has_children, self.is_expanded.get());
         if self.has_children
             && let Some(cb) = self.on_toggle.clone()
         {
             chevron = chevron.on_click(move |ctx| cb(ctx));
         }
-        let chevron_column_id = ctx.add(
-            FixedSize::new()
-                .bind_width(chevron_size)
-                .child(chevron),
-        );
+        let chevron_column_id = ctx.add(FixedSize::new().bind_width(chevron_size).child(chevron));
 
         // 4. Outer HStack: indent | chevron column | inner row.
         let outer_row_id = ctx.add(
@@ -793,8 +789,8 @@ impl Widget for StandardTreeItem {
 mod tests {
     use super::*;
     use fern_canvas::SizeProposal;
-    use fern_core::widget_tree::WidgetTree;
     use fern_core::Theme;
+    use fern_core::widget_tree::WidgetTree;
 
     fn theme() -> Theme {
         fern_core::presets::intui::light()
@@ -816,10 +812,7 @@ mod tests {
     #[test]
     fn list_item_layout_two_line() {
         let mut tree = WidgetTree::new().with_theme(theme());
-        let id = tree.add(
-            StandardListItem::new_literal("Title")
-                .subtitle_literal("Subtitle text"),
-        );
+        let id = tree.add(StandardListItem::new_literal("Title").subtitle_literal("Subtitle text"));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -840,9 +833,7 @@ mod tests {
         // name. Lets screen readers present primary vs supplementary
         // info distinctly.
         let mut tree = WidgetTree::new().with_theme(theme());
-        let id = tree.add(
-            StandardListItem::new_literal("Title").subtitle_literal("Subtitle"),
-        );
+        let id = tree.add(StandardListItem::new_literal("Title").subtitle_literal("Subtitle"));
         tree.layout(SizeProposal::exact(300.0, 100.0));
         let info = tree.accessibility_node(id);
         assert_eq!(info.name(), Some("Title"));
@@ -857,15 +848,13 @@ mod tests {
         assert_eq!(info.name(), Some("Just a title"));
     }
 
-
     #[test]
     fn list_item_with_checkbox_two_state() {
         use fern_core::signal::Signal;
         let checked = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(theme());
-        let _id = tree.add(
-            StandardListItem::new_literal("Item with checkbox").checkbox(checked.clone()),
-        );
+        let _id =
+            tree.add(StandardListItem::new_literal("Item with checkbox").checkbox(checked.clone()));
         tree.layout(SizeProposal::exact(300.0, 100.0));
         // Just verify the build succeeds with the checkbox attached.
         // Toggle behavior is exercised by Checkbox's own tests.
@@ -877,10 +866,7 @@ mod tests {
         use fern_core::signal::Signal;
         let state = Signal::new(CheckState::Indeterminate);
         let mut tree = WidgetTree::new().with_theme(theme());
-        let id = tree.add(
-            StandardListItem::new_literal("Folder")
-                .tristate_checkbox(state.clone()),
-        );
+        let id = tree.add(StandardListItem::new_literal("Folder").tristate_checkbox(state.clone()));
         tree.layout(SizeProposal::exact(300.0, 100.0));
         let b = tree.bounds(id);
         assert!(b.width > 0.0);
@@ -963,12 +949,14 @@ mod tests {
         let fired = Rc::new(Cell::new(0u32));
         let f = fired.clone();
         let mut tree = WidgetTree::new().with_theme(theme());
-        let id = tree.add(
-            TwistArrow::new(20.0, true, false).on_click(move |_ctx| f.set(f.get() + 1)),
-        );
+        let id =
+            tree.add(TwistArrow::new(20.0, true, false).on_click(move |_ctx| f.set(f.get() + 1)));
         tree.layout(SizeProposal::exact(40.0, 40.0));
         let b = tree.bounds(id);
-        dispatch_tap(&mut tree, Point::new(b.x + b.width * 0.5, b.y + b.height * 0.5));
+        dispatch_tap(
+            &mut tree,
+            Point::new(b.x + b.width * 0.5, b.y + b.height * 0.5),
+        );
         assert_eq!(fired.get(), 1, "TwistArrow.on_click() must fire on tap");
     }
 
@@ -993,7 +981,10 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(40.0, 40.0));
         let b = tree.bounds(id);
-        dispatch_tap(&mut tree, Point::new(b.x + b.width * 0.5, b.y + b.height * 0.5));
+        dispatch_tap(
+            &mut tree,
+            Point::new(b.x + b.width * 0.5, b.y + b.height * 0.5),
+        );
         assert_eq!(fired.get(), 1);
     }
 
@@ -1041,21 +1032,23 @@ mod tests {
         use fern_canvas::Point;
         let checked = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(theme());
-        let id = tree.add(
-            StandardListItem::new_literal("Row")
-                .checkbox(checked.clone()),
-        );
+        let id = tree.add(StandardListItem::new_literal("Row").checkbox(checked.clone()));
         tree.layout(SizeProposal::exact(400.0, 60.0));
         let bounds = tree.bounds(id);
         use crate::styles::recipe_standard_item_style as si;
         // Checkbox sits at the row's leading edge, just inside the
         // bg_horizontal_inset + padding_horizontal. Tap a few pixels
         // in from there so we land on the box visual.
-        let cb_x =
-            bounds.x + si::STANDARD_ITEM_BG_HORIZONTAL_INSET + si::STANDARD_ITEM_PADDING_HORIZONTAL + 4.0;
+        let cb_x = bounds.x
+            + si::STANDARD_ITEM_BG_HORIZONTAL_INSET
+            + si::STANDARD_ITEM_PADDING_HORIZONTAL
+            + 4.0;
         let cb_y = bounds.y + bounds.height * 0.5;
         dispatch_tap(&mut tree, Point::new(cb_x, cb_y));
-        assert!(checked.get(), "tap on checkbox should flip the bound signal");
+        assert!(
+            checked.get(),
+            "tap on checkbox should flip the bound signal"
+        );
         dispatch_tap(&mut tree, Point::new(cb_x, cb_y));
         assert!(!checked.get(), "second tap should flip back");
     }
@@ -1103,7 +1096,9 @@ mod tests {
         // Inside the row's content padding the chevron column sits at
         // `padding_horizontal` (depth=0 → indent=0). Sample its
         // center.
-        let cx = bounds.x + si::STANDARD_ITEM_PADDING_HORIZONTAL + si::STANDARD_ITEM_CHEVRON_COLUMN_WIDTH * 0.5;
+        let cx = bounds.x
+            + si::STANDARD_ITEM_PADDING_HORIZONTAL
+            + si::STANDARD_ITEM_CHEVRON_COLUMN_WIDTH * 0.5;
         let cy = bounds.y + bounds.height * 0.5;
         dispatch_tap(&mut tree, Point::new(cx, cy));
         assert_eq!(
@@ -1121,10 +1116,7 @@ mod tests {
         use fern_canvas::Point;
         let state = Signal::new(CheckState::Unchecked);
         let mut tree = WidgetTree::new().with_theme(theme());
-        let id = tree.add(
-            StandardListItem::new_literal("Folder")
-                .tristate_checkbox(state.clone()),
-        );
+        let id = tree.add(StandardListItem::new_literal("Folder").tristate_checkbox(state.clone()));
         tree.layout(SizeProposal::exact(400.0, 60.0));
         let bounds = tree.bounds(id);
         use crate::styles::recipe_standard_item_style as si;
@@ -1149,10 +1141,7 @@ mod tests {
         use fern_canvas::Point;
         let state = Signal::new(CheckState::Indeterminate);
         let mut tree = WidgetTree::new().with_theme(theme());
-        let id = tree.add(
-            StandardListItem::new_literal("Folder")
-                .tristate_checkbox(state.clone()),
-        );
+        let id = tree.add(StandardListItem::new_literal("Folder").tristate_checkbox(state.clone()));
         tree.layout(SizeProposal::exact(400.0, 60.0));
         let bounds = tree.bounds(id);
         use crate::styles::recipe_standard_item_style as si;
@@ -1179,8 +1168,9 @@ mod tests {
         tree.layout(SizeProposal::exact(400.0, 60.0));
         let bounds = tree.bounds(id);
         use crate::styles::recipe_standard_item_style as si;
-        let cx =
-            bounds.x + si::STANDARD_ITEM_PADDING_HORIZONTAL + si::STANDARD_ITEM_CHEVRON_COLUMN_WIDTH * 0.5;
+        let cx = bounds.x
+            + si::STANDARD_ITEM_PADDING_HORIZONTAL
+            + si::STANDARD_ITEM_CHEVRON_COLUMN_WIDTH * 0.5;
         let cy = bounds.y + bounds.height * 0.5;
         dispatch_tap(&mut tree, Point::new(cx, cy));
         assert_eq!(

@@ -77,10 +77,8 @@ impl ComboBoxStyle for RecipeComboBoxStyle {
         // open or hovered. AccentDisabled overrides everything when
         // disabled.
         let variant = cfg.variant;
-        let bg_role = cfg
-            .is_open
-            .zip3(&cfg.is_hovered, &cfg.is_disabled)
-            .map(move |(open, hovered, disabled)| {
+        let bg_role = cfg.is_open.zip3(&cfg.is_hovered, &cfg.is_disabled).map(
+            move |(open, hovered, disabled)| {
                 if *disabled {
                     SurfaceRole::AccentDisabled
                 } else if matches!(variant, ComboBoxVariant::Filled) {
@@ -90,7 +88,8 @@ impl ComboBoxStyle for RecipeComboBoxStyle {
                 } else {
                     SurfaceRole::Main
                 }
-            });
+            },
+        );
 
         // border: thicker accent ring on focus, dimmed on disabled,
         // default border in any other state. IntUI doesn't paint a
@@ -175,4 +174,3 @@ fn build_inner_row(
             .add_child(chevron_id),
     )
 }
-

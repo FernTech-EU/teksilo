@@ -1153,7 +1153,6 @@ mod tests {
     use fern_core::accesskit::Role;
     use fern_core::widget_tree::WidgetTree;
     use fern_data::{SortFilterTreeModel, TreeFilterMode, TreeModel};
-    use fern_core::Theme;
 
     fn sample_tree() -> TreeModel<&'static str> {
         let t = TreeModel::new();

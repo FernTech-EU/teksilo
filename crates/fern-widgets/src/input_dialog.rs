@@ -305,7 +305,6 @@ impl Widget for InputDialogBody {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[test]
     fn input_dialog_body_builds() {

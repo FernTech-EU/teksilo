@@ -189,7 +189,10 @@ impl Widget for CommandLinkButton {
             .spacing(COMMAND_LINK_BUTTON_ICON_TEXT_GAP)
             .alignment(VAlignment::Center);
         if let Some(icon) = self.icon.take() {
-            let icon_id = ctx.add(icon.icon_size(COMMAND_LINK_BUTTON_ICON_SIZE).bind_color(icon_role));
+            let icon_id = ctx.add(
+                icon.icon_size(COMMAND_LINK_BUTTON_ICON_SIZE)
+                    .bind_color(icon_role),
+            );
             row = row.add_child(icon_id);
         }
         row = row.add_child(text_column_id);
@@ -197,7 +200,11 @@ impl Widget for CommandLinkButton {
 
         // Padding inside the surface.
         let padded = ctx.add(
-            Padding::symmetric(COMMAND_LINK_BUTTON_PADDING_VERTICAL, COMMAND_LINK_BUTTON_PADDING_HORIZONTAL).child_id(row_id),
+            Padding::symmetric(
+                COMMAND_LINK_BUTTON_PADDING_VERTICAL,
+                COMMAND_LINK_BUTTON_PADDING_HORIZONTAL,
+            )
+            .child_id(row_id),
         );
 
         // Surface (background + border, drives hover / press / focus).
@@ -210,7 +217,9 @@ impl Widget for CommandLinkButton {
         );
 
         let zstack = ctx.add(ZStack::new().add_child(rect).add_child(padded));
-        let root = ctx.add(crate::primitives::MinSize::new(0.0, COMMAND_LINK_BUTTON_MIN_HEIGHT).child_id(zstack));
+        let root = ctx.add(
+            crate::primitives::MinSize::new(0.0, COMMAND_LINK_BUTTON_MIN_HEIGHT).child_id(zstack),
+        );
 
         // Attached handlers — same shape as Button but without
         // shortcut / tooltip / has_popup machinery.
@@ -357,7 +366,6 @@ impl Widget for CommandLinkButton {
 mod tests {
     use super::*;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[test]
     fn builds_with_title_and_description() {

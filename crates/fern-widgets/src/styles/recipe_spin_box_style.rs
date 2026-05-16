@@ -14,9 +14,7 @@
 
 use fern_core::build_context::BuildContext;
 use fern_core::color_prop::ColorProp;
-use fern_core::styles::{
-    ButtonLayout, SharedSpinBoxStyle, SpinBoxStyle, SpinBoxStyleConfig,
-};
+use fern_core::styles::{ButtonLayout, SharedSpinBoxStyle, SpinBoxStyle, SpinBoxStyleConfig};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{BorderRole, CornerRadius, SurfaceRole};
 
@@ -33,14 +31,9 @@ impl SpinBoxStyle for RecipeSpinBoxStyle {
         let buttons_id_opt: Option<WidgetId> = match cfg.layout {
             ButtonLayout::Hidden => None,
             ButtonLayout::Stacked => match (cfg.step_up, cfg.step_down) {
-                (Some(up), Some(down)) => Some(
-                    ctx.add(
-                        VStack::new()
-                            .spacing(0.0)
-                            .add_child(up)
-                            .add_child(down),
-                    ),
-                ),
+                (Some(up), Some(down)) => {
+                    Some(ctx.add(VStack::new().spacing(0.0).add_child(up).add_child(down)))
+                }
                 _ => None,
             },
         };

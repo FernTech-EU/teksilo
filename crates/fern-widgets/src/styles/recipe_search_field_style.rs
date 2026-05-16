@@ -9,9 +9,7 @@
 //! chrome + panel padding remain SearchField-specific.
 
 use fern_core::build_context::BuildContext;
-use fern_core::styles::{
-    SearchFieldStyle, SearchFieldStyleConfig, SharedSearchFieldStyle,
-};
+use fern_core::styles::{SearchFieldStyle, SearchFieldStyleConfig, SharedSearchFieldStyle};
 use fern_core::widget_id::WidgetId;
 
 // ─── IntUI design tokens for SearchField ───────────────────────────

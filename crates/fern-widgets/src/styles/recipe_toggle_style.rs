@@ -65,17 +65,20 @@ impl ToggleStyle for RecipeToggleStyle {
         // Focus-origin signal, derived from is_focused × is_hovered.
         // Pointer-induced focus skips the focus ring; keyboard focus
         // shows it.
-        let focus_origin = cfg.is_focused.zip(&cfg.is_hovered).map(|(focused, hovered)| {
-            if *focused {
-                Some(if *hovered {
-                    FocusOrigin::Pointer
+        let focus_origin = cfg
+            .is_focused
+            .zip(&cfg.is_hovered)
+            .map(|(focused, hovered)| {
+                if *focused {
+                    Some(if *hovered {
+                        FocusOrigin::Pointer
+                    } else {
+                        FocusOrigin::Keyboard
+                    })
                 } else {
-                    FocusOrigin::Keyboard
-                })
-            } else {
-                None
-            }
-        });
+                    None
+                }
+            });
 
         ctx.add(ToggleBody {
             knob_position,

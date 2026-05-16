@@ -120,6 +120,7 @@ pub fn attach_child_window(parent: &winit::window::Window, child: &winit::window
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
     use super::*;
 
     #[cfg(target_os = "linux")]

@@ -452,10 +452,7 @@ impl<T: 'static> TabBar<T> {
     /// transition via a dialog or route it through an intent before
     /// mutating the item; apps decide whether to actually flip the
     /// pinned state.
-    pub fn on_pin_toggle(
-        mut self,
-        f: impl Fn(usize, bool, &mut EventContext) + 'static,
-    ) -> Self {
+    pub fn on_pin_toggle(mut self, f: impl Fn(usize, bool, &mut EventContext) + 'static) -> Self {
         self.on_pin_toggle = Some(Rc::new(f));
         self
     }
@@ -561,10 +558,7 @@ impl<T: 'static> TabBar<T> {
     /// [`EventContext`] so the handler can open a confirmation
     /// dialog or dispatch an intent before persisting the move.
     /// Implies [`reorderable(true)`](Self::reorderable).
-    pub fn on_reorder(
-        mut self,
-        f: impl Fn(usize, usize, &mut EventContext) + 'static,
-    ) -> Self {
+    pub fn on_reorder(mut self, f: impl Fn(usize, usize, &mut EventContext) + 'static) -> Self {
         self.on_reorder = Some(Rc::new(f));
         self.reorderable = true;
         self
@@ -768,21 +762,20 @@ impl<T: 'static> Widget for TabBar<T> {
         // sync would then promote — causing the active tab to
         // change visually (and the content pane to fall out of
         // sync) on every drag.
-        let reorder_handler: Option<Rc<dyn Fn(usize, usize, &mut EventContext)>> = if self
-            .reorderable
-        {
-            if let Some(explicit) = self.on_reorder.clone() {
-                Some(explicit)
+        let reorder_handler: Option<Rc<dyn Fn(usize, usize, &mut EventContext)>> =
+            if self.reorderable {
+                if let Some(explicit) = self.on_reorder.clone() {
+                    Some(explicit)
+                } else {
+                    self.source.move_item_fn.clone().map(|move_fn| {
+                        Rc::new(move |from: usize, to: usize, _ctx: &mut EventContext| {
+                            (move_fn)(from, to);
+                        }) as Rc<dyn Fn(usize, usize, &mut EventContext)>
+                    })
+                }
             } else {
-                self.source.move_item_fn.clone().map(|move_fn| {
-                    Rc::new(move |from: usize, to: usize, _ctx: &mut EventContext| {
-                        (move_fn)(from, to);
-                    }) as Rc<dyn Fn(usize, usize, &mut EventContext)>
-                })
-            }
-        } else {
-            None
-        };
+                None
+            };
 
         // Close handler. The explicit `on_close` overrides everything;
         // otherwise we fall back to the source's `remove_item_fn`
@@ -793,17 +786,16 @@ impl<T: 'static> Widget for TabBar<T> {
         // both the "selected id still valid" case (re-indexes to
         // the survivor) and the "selected id stale" case (stale-id
         // fallback picks the next neighbor, browser convention).
-        let close_handler: Option<Rc<dyn Fn(usize, &mut EventContext)>> = if let Some(explicit) =
-            self.on_close.clone()
-        {
-            Some(explicit)
-        } else {
-            self.source.remove_item_fn.clone().map(|remove| {
-                Rc::new(move |i: usize, _ctx: &mut EventContext| {
-                    (remove)(i);
-                }) as Rc<dyn Fn(usize, &mut EventContext)>
-            })
-        };
+        let close_handler: Option<Rc<dyn Fn(usize, &mut EventContext)>> =
+            if let Some(explicit) = self.on_close.clone() {
+                Some(explicit)
+            } else {
+                self.source.remove_item_fn.clone().map(|remove| {
+                    Rc::new(move |i: usize, _ctx: &mut EventContext| {
+                        (remove)(i);
+                    }) as Rc<dyn Fn(usize, &mut EventContext)>
+                })
+            };
         for i in 0..n {
             // Build the TabHeader for index i. The data-source
             // `with_item_fn` requires a `Fn(&T) -> Box<dyn Widget>`

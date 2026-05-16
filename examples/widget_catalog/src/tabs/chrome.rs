@@ -110,8 +110,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // steps with closures — pre-register.
     let wizard_widget = ctx.add(make_wizard());
 
-    fern!(ctx =>
-        VStack {
+    fern!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0
@@ -124,7 +123,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     color: TextRole::Secondary
                 }
             }
-            Divider {}
+            Divider
 
             VStack {
                 spacing: 6.0
@@ -135,9 +134,15 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 Toolbar {
                     HStack {
                         spacing: 6.0
-                        Button::new(tr!(demo_new())) { variant: ButtonVariant::Ghost }
-                        Button::new(tr!(demo_open())) { variant: ButtonVariant::Ghost }
-                        Button::new(tr!(demo_save())) { variant: ButtonVariant::Ghost }
+                        Button::new(tr!(demo_new())) {
+                            variant: ButtonVariant::Ghost
+                        }
+                        Button::new(tr!(demo_open())) {
+                            variant: ButtonVariant::Ghost
+                        }
+                        Button::new(tr!(demo_save())) {
+                            variant: ButtonVariant::Ghost
+                        }
                     }
                 }
             }

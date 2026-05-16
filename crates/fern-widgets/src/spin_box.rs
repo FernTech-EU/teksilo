@@ -752,8 +752,10 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // overlay is reproduced here around both the field and the
         // buttons in one shared frame, instead of framing the text
         // by itself.
-        let inner_height = (field_dims::TEXT_FIELD_HEIGHT - 2.0 * field_dims::TEXT_FIELD_BORDER_WIDTH).max(0.0);
-        let text_area_height = (inner_height - 2.0 * field_dims::TEXT_FIELD_PADDING_VERTICAL).max(0.0);
+        let inner_height =
+            (field_dims::TEXT_FIELD_HEIGHT - 2.0 * field_dims::TEXT_FIELD_BORDER_WIDTH).max(0.0);
+        let text_area_height =
+            (inner_height - 2.0 * field_dims::TEXT_FIELD_PADDING_VERTICAL).max(0.0);
 
         let mut field = TextInputField::new(self.text_signal.clone())
             .enabled(enabled)
@@ -902,10 +904,8 @@ impl<T: SpinValue> Widget for SpinBox<T> {
 
         // ── Delegate visual chrome (row layout + divider + bordered
         // surface) to the active SpinBoxStyle.
-        let style = crate::styles::recipe_spin_box_style::resolve_spin_box_style(
-            &self.style_override,
-            ctx,
-        );
+        let style =
+            crate::styles::recipe_spin_box_style::resolve_spin_box_style(&self.style_override, ctx);
         let cfg = fern_core::styles::SpinBoxStyleConfig {
             field: padded_field_id,
             step_up: step_up_id,
@@ -964,7 +964,8 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         //   half of the focus-state border stroke against the
         //   widget's own shape quad (visible as a ring clipped on
         //   all four sides).
-        let sized_id = ctx.add(MinSize::new(min_width, field_dims::TEXT_FIELD_HEIGHT).child_id(zstack_id));
+        let sized_id =
+            ctx.add(MinSize::new(min_width, field_dims::TEXT_FIELD_HEIGHT).child_id(zstack_id));
         // Stash the resolved cap + floor on `self` for
         // `size_that_fits` to read at layout time.
         self.pixel_cap = pixel_cap;

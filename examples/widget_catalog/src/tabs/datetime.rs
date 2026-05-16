@@ -67,8 +67,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let dt_signal: Signal<Option<DateTime>> = ctx.signal(None);
     let range_signal: Signal<Option<DateRange>> = ctx.signal(None);
 
-    fern!(ctx =>
-        VStack {
+    fern!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0
@@ -81,7 +80,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     color: TextRole::Secondary
                 }
             }
-            Divider {}
+            Divider
 
             VStack {
                 spacing: 6.0
@@ -91,7 +90,9 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 }
                 FixedSize {
                     bind_width: 280.0_f32
-                    Calendar::single(cal_single_signal) { show_today_button: true }
+                    Calendar::single(cal_single_signal) {
+                        show_today_button: true
+                    }
                 }
             }
 
@@ -103,7 +104,9 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 }
                 FixedSize {
                     bind_width: 280.0_f32
-                    Calendar::range(cal_range_signal) { show_today_button: true }
+                    Calendar::range(cal_range_signal) {
+                        show_today_button: true
+                    }
                 }
             }
 
@@ -113,7 +116,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                DateEdit::new(date_signal) {}
+                DateEdit::new(date_signal)
             }
 
             VStack {
@@ -122,7 +125,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                TimeEdit::new(time_signal) {}
+                TimeEdit::new(time_signal)
             }
 
             VStack {
@@ -131,7 +134,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                DateTimeEdit::new(dt_signal) {}
+                DateTimeEdit::new(dt_signal)
             }
 
             VStack {
@@ -140,7 +143,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                DateRangeEdit::new(range_signal) {}
+                DateRangeEdit::new(range_signal)
             }
         }
     )

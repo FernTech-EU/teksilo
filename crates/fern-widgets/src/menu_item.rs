@@ -427,7 +427,7 @@ impl Widget for MenuItem {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.menu_item.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeMenuItemStyle::default()));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeMenuItemStyle));
         let cfg = MenuItemStyleConfig {
             label,
             leading: Some(leading),

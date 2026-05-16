@@ -171,9 +171,7 @@ impl<'a> BuildContext<'a> {
     /// pattern for visual-only continuous animations. The widget's
     /// `frame_tick` effect closure no longer needs to call
     /// `frame_request.set(true)` itself — the scheduler handles it.
-    pub fn subscribe_frame_tick(
-        &self,
-    ) -> crate::frame_tick_scheduler::FrameTickSubscription {
+    pub fn subscribe_frame_tick(&self) -> crate::frame_tick_scheduler::FrameTickSubscription {
         let sub = self.tree.subscribe_frame_tick(self.self_id());
         // Bootstrap: ensure at least one frame runs after registration
         // so the first paint happens. The post-render re-arm takes over

@@ -182,8 +182,7 @@ impl Widget for ColorSwatch {
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         use crate::styles::recipe_color_picker_style as cp;
-        let radius =
-            CornerRadius::uniform(self.corner_radius.unwrap_or(cp::SWATCH_CORNER_RADIUS));
+        let radius = CornerRadius::uniform(self.corner_radius.unwrap_or(cp::SWATCH_CORNER_RADIUS));
         let color = self.color.get();
 
         // Checkerboard underlay if the swatch is partly transparent.

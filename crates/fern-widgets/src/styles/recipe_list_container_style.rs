@@ -29,10 +29,7 @@ impl ListContainerStyle for RecipeListContainerStyle {
         // Custom container styles may install a different leaf.
         let _ = cfg.axis_offset; // positioned by the container's place_children
         let _ = cfg.width;
-        ctx.add(
-            RectWidget::new()
-                .background(BorderRole::Accent),
-        )
+        ctx.add(RectWidget::new().background(BorderRole::Accent))
     }
 
     fn insertion(&self) -> ListInsertionRecipe {

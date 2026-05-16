@@ -504,8 +504,7 @@ mod tests {
     #[test]
     fn thumb_drag_updates_value() {
         let theme = fern_core::presets::intui::light();
-        let thumb_radius =
-            crate::styles::recipe_slider_style::SLIDER_THUMB_DIAMETER * 0.5;
+        let thumb_radius = crate::styles::recipe_slider_style::SLIDER_THUMB_DIAMETER * 0.5;
         let value = Signal::new(50.0_f32);
         let mut tree = WidgetTree::new().with_theme(theme);
         let s = tree.add(Slider::new(value.clone(), 0.0, 100.0));

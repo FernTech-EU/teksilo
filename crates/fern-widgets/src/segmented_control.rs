@@ -215,9 +215,7 @@ impl Widget for SegmentedControl {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.segmented_control.clone())
-            .unwrap_or_else(|| {
-                Rc::new(crate::styles::RecipeSegmentedControlStyle::default())
-            });
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeSegmentedControlStyle));
         let chrome_id = style.make_body(
             &SegmentedControlStyleConfig {
                 labels: self.labels.clone(),
@@ -382,8 +380,7 @@ impl Widget for SegmentedControl {
         );
         let seg_w = inner.width / n as f32;
         for (i, placement) in children.iter_mut().skip(1).take(n).enumerate() {
-            placement.origin =
-                fern_canvas::Point::new(inner.x + i as f32 * seg_w, inner.y);
+            placement.origin = fern_canvas::Point::new(inner.x + i as f32 * seg_w, inner.y);
             placement.size = Size::new(seg_w, inner.height);
         }
     }
@@ -412,7 +409,6 @@ mod tests {
     use super::*;
     use fern_core::event::Modifiers;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[test]
     fn click_selects_segment_by_position() {

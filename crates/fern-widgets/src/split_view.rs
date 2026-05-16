@@ -634,7 +634,9 @@ impl SplitView {
         ResolvedStyle {
             min_first_size: self.min_first_size.unwrap_or(SPLIT_VIEW_MIN_PANE_SIZE),
             min_second_size: self.min_second_size.unwrap_or(SPLIT_VIEW_MIN_PANE_SIZE),
-            divider_thickness: self.divider_thickness.unwrap_or(SPLIT_VIEW_GUTTER_THICKNESS),
+            divider_thickness: self
+                .divider_thickness
+                .unwrap_or(SPLIT_VIEW_GUTTER_THICKNESS),
             keyboard_step_px: SPLIT_VIEW_KEYBOARD_STEP,
         }
     }
@@ -890,7 +892,6 @@ mod tests {
     use super::*;
     use fern_core::event::Modifiers;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);

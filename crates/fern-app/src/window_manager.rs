@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use fern_core::Theme;
 use fern_core::event_source::TreeAppContext;
 use fern_core::{
     DecorationsMode, PlatformTitleBarHost, TitleBarHostCallbacks, UserAttentionKind, WidgetTree,
@@ -17,7 +18,6 @@ use fern_platform::AccessibilityPreferences;
 use fern_platform::PlatformWindow;
 use fern_platform::create_title_bar_host;
 use fern_platform::event_translation::TranslationState;
-use fern_core::Theme;
 use fern_tokens::ColorTokens;
 #[allow(unused_imports)]
 use winit::raw_window_handle::HasWindowHandle;

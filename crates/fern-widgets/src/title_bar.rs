@@ -215,10 +215,16 @@ impl Widget for TitleBar {
         // already mark-all-dirties the tree.
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
-        self.background
-            .register_if_bound(self_id, registry, fern_core::binding::BindingLevel::RepaintOnly);
-        self.border_color
-            .register_if_bound(self_id, registry, fern_core::binding::BindingLevel::RepaintOnly);
+        self.background.register_if_bound(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::RepaintOnly,
+        );
+        self.border_color.register_if_bound(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::RepaintOnly,
+        );
 
         let leading_inset = self.host.reserved_leading_inset();
         let trailing_inset = self.host.reserved_trailing_inset();

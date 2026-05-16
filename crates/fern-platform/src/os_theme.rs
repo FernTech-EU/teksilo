@@ -4,7 +4,9 @@
 //! Supports GNOME, KDE, and Cinnamon on Linux. macOS and Windows return
 //! only the light/dark preference (via winit), with no color reading.
 
-use fern_tokens::{Color, ColorSchemePreference, OsThemeColors};
+#[cfg(target_os = "linux")]
+use fern_tokens::Color;
+use fern_tokens::{ColorSchemePreference, OsThemeColors};
 
 /// Query only the OS light/dark preference (lightweight).
 /// Used by `ThemeMode::FollowSystem`.

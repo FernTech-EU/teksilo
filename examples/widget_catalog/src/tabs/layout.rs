@@ -301,8 +301,7 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let switcher_idx = sigs.tool_box_selected.clone();
     let switcher_idx_for_btn = switcher_idx.clone();
 
-    fern!(ctx =>
-        VStack {
+    fern!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0
@@ -315,11 +314,14 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Secondary
                 }
             }
-            Divider {}
+            Divider
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("HStack") { style: TextStyleRole::SmallBold color: TextRole::Accent }
+                TextWidget::new_literal("HStack") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
                 HStack {
                     spacing: 8.0
                     child: color_cell(SurfaceRole::AltRow, "A")
@@ -330,7 +332,10 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("VStack") { style: TextStyleRole::SmallBold color: TextRole::Accent }
+                TextWidget::new_literal("VStack") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
                 VStack {
                     spacing: 6.0
                     child: color_cell(SurfaceRole::Sunken, "Top")
@@ -341,12 +346,17 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("ZStack") { style: TextStyleRole::SmallBold color: TextRole::Accent }
+                TextWidget::new_literal("ZStack") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
                 FixedSize {
                     bind_width: 120.0_f32
                     bind_height: 60.0_f32
                     ZStack {
-                        RectWidget { background: SurfaceRole::Raised }
+                        RectWidget {
+                            background: SurfaceRole::Raised
+                        }
                         TextWidget::new(tr!(lay_overlay())) {
                             style: TextStyleRole::SmallBold
                             color: TextRole::OnAccent
@@ -357,7 +367,10 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Grid") { style: TextStyleRole::SmallBold color: TextRole::Accent }
+                TextWidget::new_literal("Grid") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
                 Grid {
                     columns: vec![
                         TrackSize::Fixed(80.0),
@@ -378,7 +391,10 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Wrap") { style: TextStyleRole::SmallBold color: TextRole::Accent }
+                TextWidget::new_literal("Wrap") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
                 Wrap {
                     spacing: 8.0
                     line_spacing: 8.0
@@ -394,7 +410,10 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("MasonryLayout") { style: TextStyleRole::SmallBold color: TextRole::Accent }
+                TextWidget::new_literal("MasonryLayout") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
                 MasonryLayout(3) {
                     column_spacing: 8.0
                     item_spacing: 8.0
@@ -409,121 +428,29 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("FormLayout") { style: TextStyleRole::SmallBold color: TextRole::Accent }
+                TextWidget::new_literal("FormLayout") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
                 #{ form_widget }
             }
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Center") { style: TextStyleRole::SmallBold color: TextRole::Accent }
+                TextWidget::new_literal("Center") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
                 FixedSize {
                     bind_width: 180.0_f32
                     bind_height: 60.0_f32
                     ZStack {
-                        RectWidget { background: SurfaceRole::AccentSubtle }
-                        Center {
-                            TextWidget::new(tr!(lay_centered())) { style: TextStyleRole::SmallBold }
+                        RectWidget {
+                            background: SurfaceRole::AccentSubtle
                         }
-                    }
-                }
-            }
-
-            VStack {
-                spacing: 6.0
-                TextWidget::new_literal("Expand") { style: TextStyleRole::SmallBold color: TextRole::Accent }
-                FixedSize {
-                    bind_width: 200.0_f32
-                    bind_height: 28.0_f32
-                    HStack {
-                        spacing: 0.0
-                        child: color_cell(SurfaceRole::Raised, "fixed")
-                        Expand { flex: 1.0  child: color_cell(SurfaceRole::Sunken, "1fr") }
-                        Expand { flex: 2.0  child: color_cell(SurfaceRole::AltRow, "2fr") }
-                    }
-                }
-            }
-
-            VStack {
-                spacing: 6.0
-                TextWidget::new_literal("Padding") { style: TextStyleRole::SmallBold color: TextRole::Accent }
-                Panel {
-                    background: SurfaceRole::AccentSubtle
-                    Padding::uniform(16.0) {
-                        TextWidget::new(tr!(lay_padding_body())) { style: TextStyleRole::Small }
-                    }
-                }
-            }
-
-            VStack {
-                spacing: 6.0
-                TextWidget::new_literal("Spacer") { style: TextStyleRole::SmallBold color: TextRole::Accent }
-                FixedSize {
-                    bind_width: 220.0_f32
-                    bind_height: 28.0_f32
-                    HStack {
-                        child: color_cell(SurfaceRole::Raised, "L")
-                        Spacer {}
-                        child: color_cell(SurfaceRole::Sunken, "R")
-                    }
-                }
-            }
-
-            VStack {
-                spacing: 6.0
-                TextWidget::new_literal("Divider") { style: TextStyleRole::SmallBold color: TextRole::Accent }
-                VStack {
-                    spacing: 4.0
-                    TextWidget::new_literal("above") { style: TextStyleRole::Small }
-                    Divider {}
-                    TextWidget::new_literal("below") { style: TextStyleRole::Small }
-                }
-            }
-
-            VStack {
-                spacing: 6.0
-                TextWidget::new_literal("FixedSize") { style: TextStyleRole::SmallBold color: TextRole::Accent }
-                FixedSize {
-                    bind_width: 140.0_f32
-                    bind_height: 40.0_f32
-                    Panel {
-                        background: SurfaceRole::AltRow
-                        TextWidget::new(tr!(lay_fixed_size())) { style: TextStyleRole::SmallBold }
-                    }
-                }
-            }
-
-            VStack {
-                spacing: 6.0
-                TextWidget::new_literal("MinSize") { style: TextStyleRole::SmallBold color: TextRole::Accent }
-                MinSize(160.0, 32.0) {
-                    Panel {
-                        background: SurfaceRole::AccentSubtle
-                        TextWidget::new(tr!(lay_min_size())) { style: TextStyleRole::Small }
-                    }
-                }
-            }
-
-            VStack {
-                spacing: 6.0
-                TextWidget::new_literal("MaxSize") { style: TextStyleRole::SmallBold color: TextRole::Accent }
-                MaxSize(240.0, 32.0) {
-                    Panel {
-                        background: SurfaceRole::Raised
-                        TextWidget::new(tr!(lay_max_size())) { style: TextStyleRole::Small }
-                    }
-                }
-            }
-
-            VStack {
-                spacing: 6.0
-                TextWidget::new_literal("AspectRatio") { style: TextStyleRole::SmallBold color: TextRole::Accent }
-                FixedSize {
-                    bind_width: 180.0_f32
-                    AspectRatio::widescreen() {
-                        Panel {
-                            background: SurfaceRole::Sunken
-                            Center {
-                                TextWidget::new(tr!(lay_aspect_label())) { style: TextStyleRole::SmallBold }
+                        Center {
+                            TextWidget::new(tr!(lay_centered())) {
+                                style: TextStyleRole::SmallBold
                             }
                         }
                     }
@@ -532,7 +459,156 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Switcher") { style: TextStyleRole::SmallBold color: TextRole::Accent }
+                TextWidget::new_literal("Expand") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
+                FixedSize {
+                    bind_width: 200.0_f32
+                    bind_height: 28.0_f32
+                    HStack {
+                        spacing: 0.0
+                        child: color_cell(SurfaceRole::Raised, "fixed")
+                        Expand {
+                            flex: 1.0
+                            child: color_cell(SurfaceRole::Sunken, "1fr")
+                        }
+                        Expand {
+                            flex: 2.0
+                            child: color_cell(SurfaceRole::AltRow, "2fr")
+                        }
+                    }
+                }
+            }
+
+            VStack {
+                spacing: 6.0
+                TextWidget::new_literal("Padding") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
+                Panel {
+                    background: SurfaceRole::AccentSubtle
+                    Padding::uniform(16.0) {
+                        TextWidget::new(tr!(lay_padding_body())) {
+                            style: TextStyleRole::Small
+                        }
+                    }
+                }
+            }
+
+            VStack {
+                spacing: 6.0
+                TextWidget::new_literal("Spacer") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
+                FixedSize {
+                    bind_width: 220.0_f32
+                    bind_height: 28.0_f32
+                    HStack {
+                        child: color_cell(SurfaceRole::Raised, "L")
+                        Spacer
+                        child: color_cell(SurfaceRole::Sunken, "R")
+                    }
+                }
+            }
+
+            VStack {
+                spacing: 6.0
+                TextWidget::new_literal("Divider") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
+                VStack {
+                    spacing: 4.0
+                    TextWidget::new_literal("above") {
+                        style: TextStyleRole::Small
+                    }
+                    Divider
+                    TextWidget::new_literal("below") {
+                        style: TextStyleRole::Small
+                    }
+                }
+            }
+
+            VStack {
+                spacing: 6.0
+                TextWidget::new_literal("FixedSize") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
+                FixedSize {
+                    bind_width: 140.0_f32
+                    bind_height: 40.0_f32
+                    Panel {
+                        background: SurfaceRole::AltRow
+                        TextWidget::new(tr!(lay_fixed_size())) {
+                            style: TextStyleRole::SmallBold
+                        }
+                    }
+                }
+            }
+
+            VStack {
+                spacing: 6.0
+                TextWidget::new_literal("MinSize") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
+                MinSize(160.0, 32.0) {
+                    Panel {
+                        background: SurfaceRole::AccentSubtle
+                        TextWidget::new(tr!(lay_min_size())) {
+                            style: TextStyleRole::Small
+                        }
+                    }
+                }
+            }
+
+            VStack {
+                spacing: 6.0
+                TextWidget::new_literal("MaxSize") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
+                MaxSize(240.0, 32.0) {
+                    Panel {
+                        background: SurfaceRole::Raised
+                        TextWidget::new(tr!(lay_max_size())) {
+                            style: TextStyleRole::Small
+                        }
+                    }
+                }
+            }
+
+            VStack {
+                spacing: 6.0
+                TextWidget::new_literal("AspectRatio") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
+                FixedSize {
+                    bind_width: 180.0_f32
+                    AspectRatio::widescreen() {
+                        Panel {
+                            background: SurfaceRole::Sunken
+                            Center {
+                                TextWidget::new(tr!(lay_aspect_label())) {
+                                    style: TextStyleRole::SmallBold
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            VStack {
+                spacing: 6.0
+                TextWidget::new_literal("Switcher") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
                 VStack {
                     spacing: 6.0
                     Button::new(tr!(lay_switcher_next())) {
@@ -549,7 +625,6 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     }
                 }
             }
-
         }
     )
 }

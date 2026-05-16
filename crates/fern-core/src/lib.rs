@@ -46,7 +46,6 @@ pub use action::{Action, ActionBuilder, ActionHandler};
 pub use animated_quad::{AnimatedQuadHandle, AnimatedQuadKind, AnimatedQuadRegistry};
 pub use animation::AnimationRequest;
 pub use animation::AnimationScheduler;
-pub use frame_tick_scheduler::{FrameTickScheduler, FrameTickSubscription};
 pub use animation_builder::AnimationSpec;
 pub use app_event::AppEvent;
 pub use arena::WidgetArena;
@@ -63,6 +62,7 @@ pub use event_source::{
     AppEventPoster, EventSource, EventSourceAdapter, SubscriptionHandle, SubscriptionId,
 };
 pub use focus::{FocusOrigin, FocusPolicy};
+pub use frame_tick_scheduler::{FrameTickScheduler, FrameTickSubscription};
 pub use gesture::{
     DoubleTapRecognizer, DragRecognizer, GestureArena, GestureEvent, GestureRecognizer,
     GestureResult, LongPressRecognizer, RawPointerEvent, SwipeDirection, SwipeRecognizer, TapEvent,

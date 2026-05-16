@@ -155,7 +155,6 @@ mod tests {
     fn every_catalog_variant_lays_out_without_panic() {
         use fern_canvas::SizeProposal;
         use fern_core::widget_tree::WidgetTree;
-        use fern_core::Theme;
 
         let mut failures: Vec<String> = Vec::new();
         for entry in iter_entries() {

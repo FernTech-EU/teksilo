@@ -146,7 +146,7 @@ impl Root {
                                 .selected(selected)
                                 .leading_slot(
                                     TextWidget::new_literal(
-                                        format!("{:>2}.", index + 1).leak() as &str,
+                                        format!("{:>2}.", index + 1).leak() as &str
                                     )
                                     .color(TextRole::Secondary),
                                 ),

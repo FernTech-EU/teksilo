@@ -170,8 +170,7 @@ impl Widget for Switcher {
                     *slot = Slot::Mounted(*id);
                 }
                 Slot::Pending(_) if i == current => {
-                    let widget = match std::mem::replace(slot, Slot::Mounted(WidgetId::default()))
-                    {
+                    let widget = match std::mem::replace(slot, Slot::Mounted(WidgetId::default())) {
                         Slot::Pending(w) => w,
                         _ => unreachable!(),
                     };
@@ -339,10 +338,7 @@ mod tests {
         }
     }
     impl Widget for CountingLeaf {
-        fn build(
-            &mut self,
-            _ctx: &mut fern_core::build_context::BuildContext,
-        ) -> Vec<WidgetId> {
+        fn build(&mut self, _ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
             self.build_calls.set(self.build_calls.get() + 1);
             Vec::new()
         }
@@ -473,10 +469,12 @@ mod tests {
         struct LazyWithShortcuts(Rc<std::cell::Cell<u32>>);
         impl Widget for LazyWithShortcuts {
             fn declare_shortcuts(&self) -> Vec<Shortcut> {
-                vec![Shortcut::new("__test.lazy.action")
-                    .name("Lazy Action")
-                    .primary(KeyStroke::ctrl(Key::L))
-                    .build()]
+                vec![
+                    Shortcut::new("__test.lazy.action")
+                        .name("Lazy Action")
+                        .primary(KeyStroke::ctrl(Key::L))
+                        .build(),
+                ]
             }
             fn build(
                 &mut self,

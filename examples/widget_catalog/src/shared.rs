@@ -81,6 +81,7 @@ pub fn build_tooltip_registry() -> Vec<TooltipContent> {
 /// Bundle of reactive signals shared across every tab. Tabs that
 /// don't need a particular signal simply ignore it.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct Signals {
     // ── Inputs tab ────────────────────────────────────────────────
     pub checkbox_checked: Signal<bool>,

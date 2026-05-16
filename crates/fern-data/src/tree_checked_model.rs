@@ -48,20 +48,15 @@ use crate::tree_change::NodeId;
 use crate::tree_model::TreeModel;
 
 /// How a parent's `CheckState` relates to its descendants.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AggregateMode {
     /// Each node owns its state; parents do not reflect their descendants.
     None,
     /// All-checked → `Checked`; all-unchecked → `Unchecked`; mixed →
     /// `Indeterminate`. Toggling a parent cascades to all descendants.
     /// Default.
+    #[default]
     DescendantsDriveAncestors,
-}
-
-impl Default for AggregateMode {
-    fn default() -> Self {
-        AggregateMode::DescendantsDriveAncestors
-    }
 }
 
 struct Inner {
@@ -387,7 +382,14 @@ impl<T: 'static> std::fmt::Debug for TreeCheckedModel<T> {
 mod tests {
     use super::*;
 
-    fn sample_tree() -> (TreeModel<&'static str>, NodeId, NodeId, NodeId, NodeId, NodeId) {
+    fn sample_tree() -> (
+        TreeModel<&'static str>,
+        NodeId,
+        NodeId,
+        NodeId,
+        NodeId,
+        NodeId,
+    ) {
         // root1 (parent)
         //   ├─ a (leaf)
         //   └─ b (leaf)

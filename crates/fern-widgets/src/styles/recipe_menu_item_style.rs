@@ -83,15 +83,8 @@ impl MenuItemStyle for RecipeMenuItemStyle {
         let body = &ctx.theme().typography.body;
         let body_line = body.size * body.line_height;
         let pad_v = ((MENU_ITEM_HEIGHT - body_line) * 0.5).max(0.0);
-        let padding = ctx.add(
-            Padding::new(
-                pad_v,
-                0.0,
-                pad_v,
-                MENU_ITEM_PADDING_HORIZONTAL,
-            )
-            .child_id(row_id),
-        );
+        let padding =
+            ctx.add(Padding::new(pad_v, 0.0, pad_v, MENU_ITEM_PADDING_HORIZONTAL).child_id(row_id));
 
         // Background — Hover / Highlighted both use AccentSubtle (the
         // same row tint), Pressed uses Pressed, Disabled stays

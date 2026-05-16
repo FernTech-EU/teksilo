@@ -154,7 +154,7 @@ impl Widget for TooltipWidget {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.tooltip.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTooltipStyle::default()));
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTooltipStyle));
         let cfg = TooltipStyleConfig { content: text_id };
         let root_id = style.make_body(&cfg, ctx);
         self.root_child_id = Some(root_id);
@@ -231,7 +231,6 @@ mod tests {
     use fern_canvas::SizeProposal;
     use fern_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[test]
     fn tooltip_widget_emits_shadow() {

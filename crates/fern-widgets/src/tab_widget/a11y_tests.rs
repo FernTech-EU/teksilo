@@ -1,14 +1,13 @@
 use fern_canvas::SizeProposal;
-use fern_core::accesskit;
 use fern_core::accessibility::node_id_to_widget_id;
+use fern_core::accesskit;
 use fern_core::signal::Signal;
 use fern_core::widget::Widget;
 use fern_core::widget_tree::WidgetTree;
 use fern_data::ListModel;
-use fern_core::Theme;
 
-use crate::tab_widget::{TabBarOrientation, TabHandle, TabId, TabInfo, TabWidget};
 use crate::tab_widget::header::{first_enabled_index, last_enabled_index};
+use crate::tab_widget::{TabBarOrientation, TabHandle, TabId, TabInfo, TabWidget};
 
 #[derive(Debug)]
 struct FixedLeaf;
@@ -149,10 +148,7 @@ fn make_tree_with_orientation(
     (tree, selected)
 }
 
-fn find_node<'a>(
-    update: &'a accesskit::TreeUpdate,
-    id: accesskit::NodeId,
-) -> Option<&'a accesskit::Node> {
+fn find_node(update: &accesskit::TreeUpdate, id: accesskit::NodeId) -> Option<&accesskit::Node> {
     update
         .nodes
         .iter()
@@ -216,7 +212,11 @@ fn tab_panel_is_labelled_by_active_tab() {
     assert_eq!(panel_ids.len(), 1, "exactly one panel mounted at a time");
     let panel = find_node(&update, panel_ids[0]).unwrap();
     let labelled_by: Vec<accesskit::NodeId> = panel.labelled_by().to_vec();
-    assert_eq!(labelled_by.len(), 1, "panel should be labelled by exactly one tab");
+    assert_eq!(
+        labelled_by.len(),
+        1,
+        "panel should be labelled by exactly one tab"
+    );
     assert_eq!(
         labelled_by[0], tab_ids[0],
         "panel should be labelled by the active (first) tab"

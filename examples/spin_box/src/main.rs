@@ -121,8 +121,8 @@ impl Widget for Root {
                                 color: TextRole::Primary
                             }
                             TextWidget::new_literal("Every SpinBox feature on one page. \
-                                            Use arrow keys, Page↑/Page↓, mouse wheel, \
-                                            or the ± buttons; press Enter or Tab to commit typed input.") {
+                            Use arrow keys, Page↑/Page↓, mouse wheel, \
+                            or the ± buttons; press Enter or Tab to commit typed input.") {
                                 style: TextStyleRole::Body
                                 color: TextRole::Secondary
                             }
@@ -255,8 +255,8 @@ impl Widget for Root {
                             HStack {
                                 spacing: 12.0
                                 MinSizeForLabel::new(TextWidget::new_literal(
-                                                "Fill — .fill_width()",
-                                            )) {
+                                    "Fill — .fill_width()",
+                                )) {
                                     width: 220.0
                                 }
                                 Expand::horizontal() {

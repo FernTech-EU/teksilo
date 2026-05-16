@@ -24,7 +24,6 @@
 use fern_ui::core::WidgetPlacement;
 use fern_ui::i18n::I18nConfig;
 use fern_ui::prelude::*;
-use fern_ui::prelude::Theme;
 use fern_ui::tokens::Color;
 use fern_ui::widgets::{
     Button, ColorEdit, ColorPicker, ColorPickerLayout, Expand, HStack, HexColorInput, Padding,

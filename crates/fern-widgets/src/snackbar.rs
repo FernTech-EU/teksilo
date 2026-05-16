@@ -104,8 +104,13 @@ impl Widget for SnackbarSurface {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.snackbar.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeSnackbarStyle::default()));
-        let root_id = style.make_body(&SnackbarStyleConfig { content: content_id }, ctx);
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeSnackbarStyle));
+        let root_id = style.make_body(
+            &SnackbarStyleConfig {
+                content: content_id,
+            },
+            ctx,
+        );
         self.root_child_id = Some(root_id);
         vec![root_id]
     }
@@ -466,7 +471,6 @@ mod tests {
     use super::*;
     use fern_canvas::Size;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);

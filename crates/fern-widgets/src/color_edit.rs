@@ -308,9 +308,7 @@ impl Widget for ColorEdit {
         }
 
         // ── Build the trigger ──
-        let swatch_size = self
-            .trigger_swatch_size
-            .unwrap_or(cp::PREVIEW_HEIGHT);
+        let swatch_size = self.trigger_swatch_size.unwrap_or(cp::PREVIEW_HEIGHT);
 
         // ColorSwatch accepts `impl Into<Prop<Color>>` — pass the
         // bound signal so it re-paints whenever the picker mutates

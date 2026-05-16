@@ -504,7 +504,9 @@ impl fern_core::widget::Widget for Button {
             if let Some(ref over) = self.text_role_override {
                 over.clone()
             } else {
-                interaction.map(move |s| resolve_text_role(variant, *s)).into()
+                interaction
+                    .map(move |s| resolve_text_role(variant, *s))
+                    .into()
             };
 
         // Build the content (icon + label) based on icon_location
@@ -830,7 +832,6 @@ mod tests {
     use super::*;
     use fern_core::event::{Modifiers, WidgetEvent};
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
     use std::cell::Cell;
     use std::rc::Rc;
 

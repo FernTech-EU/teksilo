@@ -983,7 +983,6 @@ mod tests {
     use fern_core::ModalContent;
     use fern_core::event::WidgetEvent;
     use fern_core::widget_tree::WidgetTree;
-    use fern_core::Theme;
 
     /// Mirrors the focus resolution `fern_app::present_in_tree_modal_request`
     /// applies after the modal content subtree is built. Reproduced here

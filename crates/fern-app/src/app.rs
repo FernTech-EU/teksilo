@@ -1,4 +1,5 @@
 use fern_canvas::SizeProposal;
+use fern_core::Theme;
 use fern_core::app_event::AppEvent;
 use fern_core::event::WidgetEvent;
 use fern_core::event_source::{
@@ -9,7 +10,6 @@ use fern_core::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest}
 use fern_core::{WidgetId, WidgetTree};
 use fern_i18n::{I18nConfig, I18nManager, LanguageIdentifier};
 use fern_platform::event_translation;
-use fern_core::Theme;
 use fern_tokens::ColorTokens;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;

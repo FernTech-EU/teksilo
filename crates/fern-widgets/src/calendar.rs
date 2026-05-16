@@ -91,8 +91,8 @@ use crate::common::datetime::Date;
 use crate::common::datetime::month_long_key;
 use crate::common::datetime::types::{YearMonth, today_local, weekday_from_monday_zero};
 use crate::common::datetime::weekday_short_key;
-use crate::styles::recipe_calendar_style as cal_recipe;
 use crate::primitives::{Center, Divider, FixedSize, HStack, Padding, Spacer, TextWidget, VStack};
+use crate::styles::recipe_calendar_style as cal_recipe;
 
 use self::cell::DayCell;
 use self::header::CalendarHeader;
@@ -509,7 +509,8 @@ impl Widget for Calendar {
             col = col.add_child(divider_id).add_child(footer_id);
         }
         let col_id = ctx.add(col);
-        let padded_id = ctx.add(Padding::uniform(cal_recipe::CALENDAR_OUTER_PADDING).child_id(col_id));
+        let padded_id =
+            ctx.add(Padding::uniform(cal_recipe::CALENDAR_OUTER_PADDING).child_id(col_id));
 
         // Opaque background — Calendar can be used standalone (sits
         // on whatever surface the parent provides) or as a popover
