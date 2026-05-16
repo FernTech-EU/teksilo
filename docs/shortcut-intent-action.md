@@ -143,11 +143,14 @@ arbitrary projections. The same combinators work for `Action::enabled_when`.
 
 ## `ShortcutRegistry`
 
-Two-layer store:
+Two-layer store, both keyed by shortcut **id** (`&'static str`):
 
-1. **Defaults** — records registered by widgets during `build()`.
+1. **Defaults** — records registered by widgets during `build()` or
+   declared statically via [`Widget::declare_shortcuts`](#static-declaration--widgetdeclare_shortcuts).
    Re-registering the same id **upserts**: code-owned fields are
-   refreshed, the user override is preserved.
+   refreshed, the user override is preserved. Id is the unique key,
+   so two widgets declaring the same id share the entry — see
+   [Same-id collisions](#same-id-collisions).
 2. **Overrides** — user-supplied keystroke rebindings keyed by
    shortcut id, persisted across widget rebuilds (*graveyard*
    semantics — a widget that disappears and reappears keeps its
@@ -187,6 +190,125 @@ ctx.register_shortcut_global(
 Both register **with ownership**: when the widget is destroyed or
 rebuilt, the framework calls `unregister_all_for_owner(widget_id)` so
 stale entries don't leak.
+
+### Static declaration — `Widget::declare_shortcuts`
+
+`ctx.register_shortcut` runs from `build()`, so a chord only enters
+the registry once its owning widget has actually been built. That's
+fine for always-mounted widgets — `build()` runs immediately on
+insert. It's **not** fine when the widget lives behind a lazy
+boundary:
+
+- A [`Switcher`](../crates/fern-widgets/src/primitives/switcher.rs)
+  arm that hasn't been selected yet (lazy mount: the page widget
+  stays Boxed until first selection).
+- A subtree gated by a feature flag or a closed disclosure.
+- Anything else that defers `build()`.
+
+For those cases, the chord won't appear in `ShortcutSettings` (or any
+other registry consumer) until the user happens to visit that
+subtree at least once. A rebind UI whose contents depend on where
+you've clicked is the wrong shape.
+
+`Widget::declare_shortcuts(&self) -> Vec<Shortcut>` opts in to
+**eager registration of metadata** — same id and keystrokes, no
+handler:
+
+```rust
+impl Widget for SaveTools {
+    fn declare_shortcuts(&self) -> Vec<Shortcut> {
+        // Metadata only — no on_activate, no captured state.
+        vec![
+            Shortcut::new("app.save")
+                .name("Save")
+                .primary(KeyStroke::ctrl(Key::S))
+                .build(),
+        ]
+    }
+
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Install the handler. Same id — the registry upserts.
+        let do_save = self.do_save.clone();
+        ctx.register_shortcut(
+            Shortcut::new("app.save")
+                .name("Save")
+                .primary(KeyStroke::ctrl(Key::S))
+                .on_activate(move |_, _| {
+                    (do_save)();
+                    Intent::new("app.save")
+                })
+                .build(),
+        );
+        // ...
+    }
+}
+```
+
+The framework walks `declare_shortcuts` at three sites:
+
+- **Insertion** — `tree.add(w)` / `ctx.add_child(parent, w)`, right
+  after handler-set extraction, *before* `build()`.
+- **Rebuild** — right after `unregister_all_for_owner` wipes the
+  previous build's registrations, so declared metadata survives the
+  rebuild cycle even if `build()` only conditionally re-registers.
+- **`Switcher::build`** — for every still-`Pending` slot. The
+  Switcher pre-registers each lazy page's declared shortcuts owned
+  by itself, so the chord is visible from the moment the Switcher
+  builds, *without* mounting the page. When the page is eventually
+  mounted, the insertion walk re-registers the same id owned by the
+  page widget; the registry's idempotent upsert transfers ownership
+  cleanly and preserves any user override.
+
+**When you need it.** Any widget that might live behind a lazy
+boundary, or any widget whose chord *must* appear in a rebind UI on
+the first frame regardless of which views the user has visited.
+
+**When you don't.** Always-mounted widgets (app root, top-level
+toolbar, modeless docked panels). Build-time `register_shortcut`
+already runs immediately on insert — same visibility, no
+duplication.
+
+**Pairing convention.** When you opt in, mirror the metadata in
+both methods (same id, name, default keystrokes). `declare_shortcuts`
+omits `on_activate`; `register_shortcut` adds it. The registry's
+upsert refreshes the entry with the handler-bearing version when
+`build()` runs.
+
+The default impl is empty (`fn declare_shortcuts(&self) -> Vec<Shortcut> { Vec::new() }`),
+so existing widgets keep working unchanged. This is strictly
+opt-in.
+
+### Same-id collisions
+
+The registry is keyed by **id**, not by `(id, owner)`. Two widgets
+registering the same id is not an error — it's intentional aliasing.
+Concrete behaviour:
+
+- `defaults: HashMap<&'static str, Shortcut>` — the second
+  registration **replaces** the first (last-write-wins). Metadata,
+  default keystrokes, and handler from the loser are discarded.
+- `overrides: HashMap<String, KeyStrokeOverride>` — one override per
+  id. A user rebind of `"app.save"` applies to whichever shortcut
+  is currently in `defaults`. Two widgets sharing an id share the
+  user rebind.
+- `by_owner` tracks one owner per id at a time. The newer
+  registration's `register_owned` calls `detach_owner_index` to pull
+  the id off the previous owner's cleanup list, then the new owner
+  inherits it. Destroying the *previous* owner doesn't touch the
+  entry; destroying the *current* owner removes it (and any
+  remaining declaration would have to re-register to refill).
+
+**Use this intentionally.** If two widgets implement the same
+logical action (`"app.save"` from a toolbar button, a menu item,
+and a keyboard chord all targeting the same code), declaring the
+same id is correct — the user rebinds once, all three follow.
+
+**The footgun.** Two *unrelated* widgets accidentally picking the
+same id. Rebinding one silently rebinds the other. Hierarchical
+dotted ids prevent this in practice (`editor.format.bold`, not just
+`bold`); there's no namespacing enforcement at the type level.
+Framework-internal chords use a `__` prefix by convention
+(`__fern_inspector.pick`) so app ids can't collide with them.
 
 ### Per-slot overrides
 
@@ -564,6 +686,7 @@ impl Widget for Root {
 | Declare a keyboard shortcut                | `Shortcut::new("id").primary(KeyStroke::…).build()`                  |
 | Register widget-scoped                     | `ctx.register_shortcut(shortcut)`                                    |
 | Register app-level                         | `ctx.register_shortcut_global(shortcut)`                             |
+| Declare metadata eagerly (lazy-safe)       | `fn declare_shortcuts(&self) -> Vec<Shortcut>` on the Widget impl    |
 | Parametric payload                         | `.on_activate(\|ks, ctx\| AppIntent::X(…))`                          |
 | Disable reactively                         | `.enabled_when(signal)`                                              |
 | Composite predicate (AND/OR/NOT)           | `a.and(&b.not())`, `a.or(&b)`, `s.not()` on `Signal<bool>`           |
