@@ -42,6 +42,38 @@ impl std::fmt::Debug for PanelShortcutHost {
 }
 
 impl Widget for PanelShortcutHost {
+    fn declare_shortcuts(&self) -> Vec<Shortcut> {
+        // Mirror the build()-time registrations *without* handlers so
+        // settings UIs (and any other registry consumer) see the
+        // inspector chords from the moment the host mounts — and,
+        // because Switcher walks declare_shortcuts on its Pending
+        // slots too, even before the panel branch is selected.
+        // build() then upserts the same ids with real `on_activate`
+        // closures.
+        vec![
+            Shortcut::new("__fern_inspector.pick")
+                .name("Toggle Picker")
+                .primary(KeyStroke::ctrl(Key::P))
+                .build(),
+            Shortcut::new("__fern_inspector.bounds_cycle")
+                .name("Cycle Bounds Overlay")
+                .primary(KeyStroke::ctrl(Key::B))
+                .build(),
+            Shortcut::new("__fern_inspector.tab_next")
+                .name("Next Tab")
+                .primary(KeyStroke::ctrl(Key::Tab))
+                .build(),
+            Shortcut::new("__fern_inspector.tab_prev")
+                .name("Previous Tab")
+                .primary(KeyStroke::ctrl_shift(Key::Tab))
+                .build(),
+            Shortcut::new("__fern_inspector.escape")
+                .name("Inspector: Escape")
+                .primary(KeyStroke::new(Key::Escape, Modifiers::empty()))
+                .build(),
+        ]
+    }
+
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // ── Pick (Ctrl+P) ─────────────────────────────────────────
         let st = self.state.clone();

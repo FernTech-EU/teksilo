@@ -1242,6 +1242,12 @@ impl WidgetTree {
         // rebindings survive this round-trip (see ShortcutRegistry
         // graveyard semantics).
         self.shortcut_registry.unregister_all_for_owner(widget_id);
+        // Re-apply `Widget::declare_shortcuts` so the static metadata
+        // survives the rebuild (the unregister above wiped both
+        // declared and build-registered entries; build() will refill
+        // the handler-bearing ones, but it can't be relied on to
+        // refill the metadata-only declarations).
+        self.apply_declared_shortcuts(widget_id);
         // Drop any signal→widget bindings from the previous build
         // cycle so `build()` can re-register a fresh set without
         // accumulating duplicates across rebuilds.
@@ -1735,6 +1741,23 @@ impl WidgetTree {
 
     // --- Widget insertion ---
 
+    /// Walk `Widget::declare_shortcuts` for an already-inserted widget
+    /// and register every returned shortcut with the registry, owned
+    /// by `id`. Called at insertion AND at rebuild so the declared
+    /// metadata survives across rebuilds (which `unregister_all_for_owner`
+    /// would otherwise wipe). Build-time `ctx.register_shortcut` calls
+    /// upsert handlers on top; the registry is idempotent on id.
+    pub(crate) fn apply_declared_shortcuts(&mut self, id: WidgetId) {
+        let declared = self
+            .arena
+            .get(id)
+            .map(|n| n.widget.declare_shortcuts())
+            .unwrap_or_default();
+        for shortcut in declared {
+            self.shortcut_registry.register_owned(shortcut, id);
+        }
+    }
+
     /// Internal: insert a widget, call build(), wire children, register clips.
     fn insert_widget(&mut self, widget: Box<dyn Widget>) -> WidgetId {
         let id = self.arena.insert(widget);
@@ -1789,6 +1812,12 @@ impl WidgetTree {
                 }
             }
         }
+
+        // Walk Widget::declare_shortcuts before build() so the
+        // declared metadata lands in the registry first; if build()
+        // also registers the same id with a real on_activate, the
+        // registry upserts (preserving any user override).
+        self.apply_declared_shortcuts(id);
 
         {
             let mut widget_box = match self.arena.take_widget(id) {
@@ -1898,6 +1927,11 @@ impl WidgetTree {
                 }
             }
         }
+
+        // Same shortcut-declaration walk as `insert_widget` — keeps
+        // metadata visible from the moment the child mounts, before
+        // build() runs.
+        self.apply_declared_shortcuts(id);
 
         {
             if let Some(mut widget_box) = self.arena.take_widget(id) {

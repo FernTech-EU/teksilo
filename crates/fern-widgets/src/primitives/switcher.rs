@@ -142,6 +142,24 @@ impl Widget for Switcher {
 
         let current = self.selected.get();
 
+        // Walk every still-Pending slot's static
+        // `Widget::declare_shortcuts` and pre-register the metadata
+        // owned by this Switcher. This makes shortcuts buried inside
+        // a not-yet-selected page visible to `ShortcutSettings` (and
+        // any other registry consumer) from the moment the Switcher
+        // builds — without paying the cost of mounting the page. When
+        // the page is eventually mounted, the framework's insert-time
+        // declaration walk re-registers the same ids owned by the
+        // page widget; the registry upserts cleanly.
+        for slot in self.slots.iter() {
+            if let Slot::Pending(widget) = slot {
+                let declared = widget.declare_shortcuts();
+                if !declared.is_empty() {
+                    ctx.register_pending_shortcuts(declared);
+                }
+            }
+        }
+
         // Materialize: promote PreMounted → Mounted on first build,
         // and promote Pending → Mounted when its index becomes
         // selected. Pending slots untouched here stay Pending; they
@@ -439,6 +457,63 @@ mod tests {
             (c0.get(), c1.get(), c2.get()),
             (1, 1, 1),
             "page 2 mounts on first visit"
+        );
+    }
+
+    /// `Widget::declare_shortcuts` returned by a Pending Switcher page
+    /// must be registered in the shortcut registry before the page is
+    /// mounted — settings UIs depend on seeing the full keystroke
+    /// catalog without forcing every lazy branch to build.
+    #[test]
+    fn switcher_pending_pages_declare_shortcuts_eagerly() {
+        use fern_core::event::Key;
+        use fern_core::shortcut::{KeyStroke, Shortcut};
+
+        #[derive(Debug)]
+        struct LazyWithShortcuts(Rc<std::cell::Cell<u32>>);
+        impl Widget for LazyWithShortcuts {
+            fn declare_shortcuts(&self) -> Vec<Shortcut> {
+                vec![Shortcut::new("__test.lazy.action")
+                    .name("Lazy Action")
+                    .primary(KeyStroke::ctrl(Key::L))
+                    .build()]
+            }
+            fn build(
+                &mut self,
+                _ctx: &mut fern_core::build_context::BuildContext,
+            ) -> Vec<WidgetId> {
+                self.0.set(self.0.get() + 1);
+                Vec::new()
+            }
+            fn layout_response(
+                &self,
+                _proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> fern_core::widget::LayoutResponse {
+                Size::new(10.0, 10.0).into()
+            }
+        }
+
+        let selected = Signal::new(0_usize);
+        let build_count = Rc::new(std::cell::Cell::new(0));
+        let mut tree = WidgetTree::new();
+        let _id = tree.add(
+            Switcher::new(selected.clone())
+                .child(FixedLeaf(50.0, 50.0))
+                .child(LazyWithShortcuts(build_count.clone())),
+        );
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+
+        assert_eq!(
+            build_count.get(),
+            0,
+            "lazy page must not have built — index 1 was never selected"
+        );
+        assert!(
+            tree.shortcut_registry()
+                .get_default("__test.lazy.action")
+                .is_some(),
+            "Switcher must pre-register Pending pages' declared shortcuts"
         );
     }
 }

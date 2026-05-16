@@ -518,6 +518,31 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         false
     }
 
+    /// Declare the rebindable keyboard shortcuts this widget exposes,
+    /// *without* installing handlers. The framework calls this at
+    /// arena insertion time (before `build()`) and at certain lazy
+    /// boundaries (e.g. `Switcher` walks declarations on its
+    /// not-yet-mounted `Pending` slots), so settings UIs and the
+    /// `ShortcutRegistry` see the keystrokes the moment the owning
+    /// container mounts — even if `build()` hasn't run.
+    ///
+    /// Pair this with `BuildContext::register_shortcut` in `build()`
+    /// to install the matching `on_activate` handler: the build-time
+    /// registration *upserts* the declared entry, preserving any user
+    /// override and the declared keystrokes while attaching the
+    /// closure that actually fires.
+    ///
+    /// The returned shortcuts may omit `on_activate` (a metadata-only
+    /// declaration). When matched at dispatch time without a
+    /// registered handler, the framework synthesizes a no-parameter
+    /// intent from the shortcut's id — same path as a build-time
+    /// registration with `on_activate: None`.
+    ///
+    /// Default: empty (no declared shortcuts).
+    fn declare_shortcuts(&self) -> Vec<crate::shortcut::Shortcut> {
+        Vec::new()
+    }
+
     /// Extract attached handler set from a `WidgetWithHandlers` wrapper.
     /// Called during arena insertion to transfer handlers to the `WidgetNode`.
     /// Default: returns `None` (no attached handlers).

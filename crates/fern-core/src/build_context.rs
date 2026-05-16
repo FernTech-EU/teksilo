@@ -464,6 +464,32 @@ impl<'a> BuildContext<'a> {
             .register_owned(shortcut, id);
     }
 
+    /// Pre-declare shortcuts on behalf of a not-yet-mounted child
+    /// (e.g. a `Switcher` walking its `Pending` slots' static
+    /// declarations before they're inserted). Each shortcut is owned
+    /// by the *calling* widget and its declared scope is preserved
+    /// as-is — unlike [`register_shortcut`](Self::register_shortcut),
+    /// no rewrite from `Global` to `Scoped(self)` happens, because
+    /// the child intended its own scope.
+    ///
+    /// When the child is eventually mounted, the framework's
+    /// insert-time walk of `Widget::declare_shortcuts` re-registers
+    /// the same ids owned by the *child*; the registry's idempotent
+    /// upsert moves ownership cleanly. If the child never mounts, the
+    /// pre-declared entries stay alive (owned by the parent) so
+    /// settings UIs still see them, and they get torn down when the
+    /// parent goes away.
+    pub fn register_pending_shortcuts(
+        &mut self,
+        shortcuts: impl IntoIterator<Item = crate::shortcut::Shortcut>,
+    ) {
+        let id = self.self_id();
+        let registry = self.tree.shortcut_registry_mut();
+        for shortcut in shortcuts {
+            registry.register_owned(shortcut, id);
+        }
+    }
+
     /// Read-through access to the tree's shortcut registry. Consumers
     /// (menus, tooltips) look up the effective keystroke for a given
     /// id here, and observe

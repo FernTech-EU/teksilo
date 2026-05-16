@@ -23,7 +23,7 @@
 //! bar. Neither painter has an intrinsic size; each fills the bounds
 //! its parent hands it.
 
-use fern_canvas::{Canvas, Rect, Size, SizeProposal};
+use fern_canvas::{Canvas, Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
