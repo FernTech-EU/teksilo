@@ -11,8 +11,8 @@ use crate::widget_id::WidgetId;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
 pub enum CardVariant {
-    #[default]
     Plain,
+    #[default]
     Elevated,
     Outlined,
     Filled,
