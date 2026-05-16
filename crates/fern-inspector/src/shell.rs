@@ -123,10 +123,18 @@ impl Widget for InspectorShell {
         // collapses both handle and panel to zero so the user-root
         // takes the full window. Open shows the handle on top of the
         // panel (handle drags drive `state.panel_height`).
-        // The panel content is wrapped in `PanelShortcutHost` so the
-        // P / B / T / Shift+T / Esc shortcuts are scoped to the panel
-        // subtree — single-letter chords don't hijack typing in the
-        // user app's text inputs.
+        //
+        // `PanelShortcutHost` wraps the *outer* Switcher (not the
+        // panel content inside) so the P / B / T / Shift+T / Esc
+        // shortcuts register with the registry the moment the host
+        // mounts — without this, the lazy `Switcher` skipped building
+        // its panel branch until the first F12, and a separate
+        // `ShortcutSettings` UI mounted before that wouldn't see the
+        // inspector chords. Scoping still holds: shortcuts only fire
+        // when focus is in PanelShortcutHost's subtree, and focus
+        // can't reach the inert `empty_filler` when the panel is
+        // closed (it has no focusable descendants).
+        //
         // Inner panel content (ResizeHandle + panel body). Each piece
         // is wrapped in `Expand::horizontal().flex(0)` + `FixedSize`
         // so the wrapper claims the parent's full-width proposal
@@ -134,7 +142,6 @@ impl Widget for InspectorShell {
         // natural width when no `bind_width` is set). `flex(0)` opts
         // out of the parent VStack's height-slack distribution so we
         // don't compete with the user-root's `Expand(flex=1)`.
-        let panel_inner = PanelShortcutHost::new(state.clone(), build_panel(state.clone()));
         let panel_block = VStack::new()
             .child(
                 Expand::horizontal().flex(0.0).child(
@@ -147,13 +154,16 @@ impl Widget for InspectorShell {
                 Expand::horizontal().flex(0.0).child(
                     FixedSize::new()
                         .bind_height(state.panel_height.clone())
-                        .child(panel_inner),
+                        .child(build_panel(state.clone())),
                 ),
             );
         let panel_index = state.open.map(|open| if *open { 1usize } else { 0 });
-        let panel_switcher = fern_widgets::primitives::Switcher::new(panel_index)
-            .child(empty_filler())
-            .child(panel_block);
+        let panel_switcher = PanelShortcutHost::new(
+            state.clone(),
+            fern_widgets::primitives::Switcher::new(panel_index)
+                .child(empty_filler())
+                .child(panel_block),
+        );
 
         // Derived height signal — depends on BOTH `open` and
         // `panel_height` so dragging the handle OR toggling the panel
