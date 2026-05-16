@@ -291,6 +291,15 @@ pub struct Popover {
     /// focusable editor in the content (e.g. filter popover).
     initial_focus_slot: Option<Rc<Cell<Option<WidgetId>>>>,
     root_child_id: Option<WidgetId>,
+    /// Popover surface root produced by `make_body`. Stored so the
+    /// widget can re-export it in [`Widget::children`] — linking the
+    /// dormant content as a child of `Popover` is what lets
+    /// `arena.hit_test_at` skip the entire popover subtree when the
+    /// popover is closed (the framework prunes dormant children
+    /// automatically). Without this, the content survives as an
+    /// orphan root in the arena and absorbs every click that lands
+    /// inside the trigger's bounds.
+    content_id: Option<WidgetId>,
 }
 
 impl Popover {
@@ -310,6 +319,7 @@ impl Popover {
             style_override: None,
             initial_focus_slot: None,
             root_child_id: None,
+            content_id: None,
         }
     }
 
@@ -454,6 +464,7 @@ impl Widget for Popover {
         };
         let content_id = surface_style.make_body(&surface_cfg, ctx);
         ctx.set_dormant(content_id);
+        self.content_id = Some(content_id);
 
         // Popover-is-open signal drives the trigger's `set_expanded`
         // disclosure state. Each open handler sets it to `true`
@@ -668,7 +679,14 @@ impl Widget for Popover {
         };
 
         self.root_child_id = Some(root_id);
-        vec![root_id]
+        // Return BOTH the trigger root AND the dormant popover content
+        // as children so the framework links `content_id` under
+        // `Popover` in the arena. Without this, the content survives as
+        // an orphan root and `arena.hit_test_at` walks its subtree on
+        // every click (descendants of an orphan root keep their
+        // pre-dormant bounds and absorb hits inside the trigger). The
+        // framework's layout pass skips dormant children automatically.
+        vec![root_id, content_id]
     }
 
     fn layout_response(
@@ -689,7 +707,18 @@ impl Widget for Popover {
         children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
+        // Trigger fills our bounds; the popover content (active or
+        // dormant) is positioned by the overlay manager via
+        // `position_overlays`, not by us. Dormant children are
+        // already filtered out before placements reach this fn; when
+        // active, zero out the content's placement so our trigger
+        // bounds don't drive a layout pass that would clobber the
+        // overlay positioning.
         for child in children.iter_mut() {
+            if Some(child.id) == self.content_id {
+                child.size = Size::ZERO;
+                continue;
+            }
             child.origin = bounds.origin();
             child.size = bounds.size();
         }
@@ -700,7 +729,17 @@ impl Widget for Popover {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        self.root_child_id.into_iter().collect()
+        // Include both the trigger root AND the popover content so
+        // `set_dormant` cascades correctly and `arena.hit_test_at`
+        // prunes the content subtree when dormant.
+        let mut out = Vec::new();
+        if let Some(id) = self.root_child_id {
+            out.push(id);
+        }
+        if let Some(id) = self.content_id {
+            out.push(id);
+        }
+        out
     }
 }
 

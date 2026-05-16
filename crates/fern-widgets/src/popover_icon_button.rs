@@ -313,7 +313,11 @@ impl Widget for PopoverIconButton {
             let caret_id = ctx.add(DisclosureCaret { role: role_signal });
             let root_id = ctx.add(ZStack::new().add_child(trigger_id).add_child(caret_id));
             self.root_child_id = Some(root_id);
-            return vec![root_id];
+            // Return BOTH the trigger root AND the dormant content as
+            // children so the framework links content_id under this
+            // widget in the arena — see `PopoverButton::build` for
+            // the rationale (prevents orphan-root hit-test leaks).
+            return vec![root_id, content_id];
         }
 
         let trigger = trigger
@@ -322,7 +326,7 @@ impl Widget for PopoverIconButton {
             .on_activate_fn(activate);
         let trigger_id = ctx.add(trigger);
         self.root_child_id = Some(trigger_id);
-        vec![trigger_id]
+        vec![trigger_id, content_id]
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
@@ -341,14 +345,28 @@ impl Widget for PopoverIconButton {
         children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
+        // Mirror `PopoverButton::place_children` — the trigger fills
+        // our bounds, the content's bounds are owned by the overlay
+        // manager when shown.
         for child in children.iter_mut() {
+            if Some(child.id) == self.content_id {
+                child.size = fern_canvas::Size::ZERO;
+                continue;
+            }
             child.origin = bounds.origin();
             child.size = bounds.size();
         }
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        self.root_child_id.into_iter().collect()
+        let mut out = Vec::new();
+        if let Some(id) = self.root_child_id {
+            out.push(id);
+        }
+        if let Some(id) = self.content_id {
+            out.push(id);
+        }
+        out
     }
 
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {

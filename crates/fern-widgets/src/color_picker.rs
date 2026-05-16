@@ -450,11 +450,16 @@ impl Widget for ColorPicker {
             None
         };
 
-        // RGB spinners row — built eagerly so closures don't fight over &mut ctx.
-        // Bridges observe the mutable `value` signal (not the derived
-        // `components.red` etc., which are ReadOnly and don't support
-        // `ctx.effect`).
-        let rgb_row_id: Option<WidgetId> = if self.show_rgb_spinners {
+        // RGB spinners row — Standard / Wide only (the Compact layout
+        // doesn't include them, so creating one in Compact would leak
+        // an orphan root in the arena and absorb hit-tests at the
+        // pre-layout fallback bounds). Built eagerly so closures don't
+        // fight over &mut ctx. Bridges observe the mutable `value`
+        // signal (not the derived `components.red` etc., which are
+        // ReadOnly and don't support `ctx.effect`).
+        let rgb_row_id: Option<WidgetId> = if layout != ColorPickerLayout::Compact
+            && self.show_rgb_spinners
+        {
             let r_spin = make_byte_spinner_from_value(
                 ctx,
                 value.clone(),
@@ -500,8 +505,10 @@ impl Widget for ColorPicker {
             None
         };
 
-        // HSV spinners row — same pattern.
-        let hsv_row_id: Option<WidgetId> = if self.show_hsv_spinners {
+        // HSV spinners row — same pattern. Standard / Wide only.
+        let hsv_row_id: Option<WidgetId> = if layout != ColorPickerLayout::Compact
+            && self.show_hsv_spinners
+        {
             let h_spin = make_hue_spinner_from_value(
                 ctx,
                 value.clone(),
@@ -549,9 +556,12 @@ impl Widget for ColorPicker {
                 None
             };
 
-        // Swatch grid
-        let swatches_id: Option<WidgetId> =
-            if self.show_swatches && !self.swatches.is_empty() || self.swatches_signal.is_some() {
+        // Swatch grid — Standard / Wide only (Compact doesn't surface
+        // a swatch grid; building one anyway would orphan it in the
+        // arena and absorb hit-tests inside the trigger).
+        let swatches_id: Option<WidgetId> = if layout != ColorPickerLayout::Compact
+            && (self.show_swatches && !self.swatches.is_empty() || self.swatches_signal.is_some())
+        {
                 let swatches_signal = self
                     .swatches_signal
                     .clone()

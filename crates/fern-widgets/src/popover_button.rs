@@ -293,7 +293,16 @@ impl Widget for PopoverButton {
             let caret_id = ctx.add(DisclosureCaret { role: role_signal });
             let root_id = ctx.add(ZStack::new().add_child(trigger_id).add_child(caret_id));
             self.root_child_id = Some(root_id);
-            return vec![root_id];
+            // Return BOTH the trigger root AND the dormant content as
+            // children so the framework links content_id under
+            // `PopoverButton` in the arena. Without this, content_id
+            // stays as an orphan root and `arena.hit_test_at` walks
+            // its subtree on every click (even though `set_dormant`
+            // ran on `content_id` itself, descendants added during the
+            // content's own build can re-surface as hit targets at
+            // their pre-dormant positions). The framework's layout
+            // pass skips dormant children automatically.
+            return vec![root_id, content_id];
         }
 
         let trigger = trigger
@@ -303,7 +312,9 @@ impl Widget for PopoverButton {
 
         let trigger_id = ctx.add(trigger);
         self.root_child_id = Some(trigger_id);
-        vec![trigger_id]
+        // See comment above on the disclosure-caret branch — same
+        // rationale for linking `content_id` as a child here.
+        vec![trigger_id, content_id]
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
@@ -322,14 +333,37 @@ impl Widget for PopoverButton {
         children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
+        // The trigger fills our bounds; the dormant/active content
+        // never participates in trigger layout — its bounds are owned
+        // by the overlay manager (via `position_overlays`) when shown
+        // and stay at zero while dormant. Dormant children are already
+        // filtered out by `layout_widget_recursive` before placements
+        // reach this function; if the content is *active* (popover
+        // open), zero its placement so the parent's bounds don't
+        // accidentally drive a layout pass that would clobber the
+        // overlay positioning.
         for child in children.iter_mut() {
+            if Some(child.id) == self.content_id {
+                child.size = fern_canvas::Size::ZERO;
+                continue;
+            }
             child.origin = bounds.origin();
             child.size = bounds.size();
         }
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        self.root_child_id.into_iter().collect()
+        // Include both the trigger root AND the dormant content so
+        // `set_dormant` cascades correctly and `arena.hit_test_at`
+        // can prune the content subtree when it's not visible.
+        let mut out = Vec::new();
+        if let Some(id) = self.root_child_id {
+            out.push(id);
+        }
+        if let Some(id) = self.content_id {
+            out.push(id);
+        }
+        out
     }
 
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {
