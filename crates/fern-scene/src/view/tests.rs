@@ -5076,6 +5076,173 @@ fn item_thumbnails_returns_visible_lightweight_items_with_colors() {
     let _ = (red, blue);
 }
 
+// -----------------------------------------------------------------
+// Unit 6 — reactive DragMode
+// -----------------------------------------------------------------
+
+#[test]
+fn drag_mode_signal_flips_behavior_at_runtime() {
+    // Start in RubberBand mode (default). A drag that misses
+    // every item should produce a marquee. After flipping the
+    // drag mode to ScrollHandDrag via the signal — without
+    // rebuilding the view — the SAME gesture must pan the view
+    // instead of marquee-selecting.
+    let scene = Scene::new();
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(
+        SceneView::new(scene).selection_mode(crate::SceneSelectionMode::Multi),
+        // Note: NO .drag_mode(...) — defaults to RubberBand.
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let drag = |tree: &mut WidgetTree, fx: f32, fy: f32, tx: f32, ty: f32| {
+        tree.pointer_move(fern_canvas::Point::new(fx, fy));
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: fern_canvas::Point::new(fx, fy),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        // Two moves so the second produces DragMoved (recognizer
+        // emits Started on the threshold-crossing Move and Moved
+        // on subsequent ones).
+        let mid = fern_canvas::Point::new((fx + tx) * 0.5, (fy + ty) * 0.5);
+        tree.dispatch_event(WidgetEvent::PointerMove { position: mid });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: fern_canvas::Point::new(tx, ty),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: fern_canvas::Point::new(tx, ty),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+    };
+
+    // Round 1: RubberBand mode. Drag from (50,50) to (200,200) —
+    // marquee fires, drag does NOT pan.
+    {
+        let view = view_handle(&tree, view_id);
+        assert_eq!(
+            view.drag_mode_signal().get(),
+            crate::DragMode::RubberBand
+        );
+    }
+    drag(&mut tree, 50.0, 50.0, 200.0, 200.0);
+    {
+        let view = view_handle(&tree, view_id);
+        assert_eq!(
+            view.pan(),
+            Vec2::ZERO,
+            "RubberBand mode: drag must NOT pan the view"
+        );
+    }
+
+    // Round 2: flip to ScrollHandDrag via the signal. Same
+    // gesture — should pan now, marquee should NOT trigger.
+    {
+        let view = view_handle(&tree, view_id);
+        view.drag_mode_signal()
+            .set(crate::DragMode::ScrollHandDrag);
+    }
+    drag(&mut tree, 100.0, 100.0, 175.0, 150.0);
+    {
+        let view = view_handle(&tree, view_id);
+        // Hand-drag pans by the delta of the second move only
+        // (37.5, 25) — same recognizer convention as the
+        // existing Unit 1 test.
+        let p = view.pan();
+        assert!(
+            p.x.abs() > 1e-3 || p.y.abs() > 1e-3,
+            "ScrollHandDrag mode (via runtime signal flip): drag must pan; got {:?}",
+            p
+        );
+    }
+}
+
+#[test]
+fn drag_mode_signal_to_no_drag_disables_dispatch_at_runtime() {
+    // Start in ScrollHandDrag, drag once (pan moves), flip to
+    // NoDrag via signal, drag again (pan must NOT move further).
+    let scene = Scene::new();
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(
+        SceneView::new(scene)
+            .selection_mode(crate::SceneSelectionMode::Multi)
+            .drag_mode(crate::DragMode::ScrollHandDrag),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let drag = |tree: &mut WidgetTree, fx: f32, fy: f32, tx: f32, ty: f32| {
+        tree.pointer_move(fern_canvas::Point::new(fx, fy));
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: fern_canvas::Point::new(fx, fy),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        let mid = fern_canvas::Point::new((fx + tx) * 0.5, (fy + ty) * 0.5);
+        tree.dispatch_event(WidgetEvent::PointerMove { position: mid });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: fern_canvas::Point::new(tx, ty),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: fern_canvas::Point::new(tx, ty),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+    };
+
+    drag(&mut tree, 100.0, 100.0, 150.0, 150.0);
+    let pan_after_first = view_handle(&tree, view_id).pan();
+    assert!(
+        pan_after_first.x.abs() > 1e-3 || pan_after_first.y.abs() > 1e-3,
+        "hand drag in round 1 should pan; got {:?}",
+        pan_after_first
+    );
+
+    // Flip to NoDrag mid-life.
+    view_handle(&tree, view_id)
+        .drag_mode_signal()
+        .set(crate::DragMode::NoDrag);
+
+    // Second drag: pan must NOT change.
+    drag(&mut tree, 200.0, 200.0, 250.0, 250.0);
+    let pan_after_second = view_handle(&tree, view_id).pan();
+    assert_eq!(
+        pan_after_second, pan_after_first,
+        "after flipping to NoDrag, subsequent drag must NOT change pan"
+    );
+}
+
+#[test]
+fn bind_drag_mode_shares_app_owned_signal() {
+    // Caller owns a Signal<DragMode>, binds the view to it,
+    // toggles it from outside — view picks up the change.
+    let app_owned: Signal<crate::DragMode> =
+        Signal::new(crate::DragMode::RubberBand);
+    let scene = Scene::new();
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(
+        SceneView::new(scene)
+            .selection_mode(crate::SceneSelectionMode::Multi)
+            .bind_drag_mode(app_owned.clone()),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // Mutate the app-owned signal — view reads through it.
+    app_owned.set(crate::DragMode::ScrollHandDrag);
+    let view = view_handle(&tree, view_id);
+    assert_eq!(
+        view.drag_mode_signal().get(),
+        crate::DragMode::ScrollHandDrag,
+        "view's drag_mode_signal must reflect the shared app-owned signal"
+    );
+
+    // Conversely, mutating through the view also updates the
+    // shared signal (both are clones of the same Rc-backed
+    // Signal).
+    view.drag_mode_signal().set(crate::DragMode::NoDrag);
+    assert_eq!(app_owned.get(), crate::DragMode::NoDrag);
+}
+
 #[test]
 fn item_thumbnails_skips_invisible_and_logical_items() {
     use crate::flags::ItemFlags;

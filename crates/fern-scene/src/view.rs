@@ -332,7 +332,14 @@ pub struct SceneView {
     /// move; empty area → marquee). `ScrollHandDrag` makes the
     /// canvas pan unconditionally on left-mouse drag; `NoDrag`
     /// disables the on-drag handler entirely.
-    drag_mode: crate::item_handlers::DragMode,
+    /// Drag mode (rubber-band marquee, scroll-hand pan, or no-drag).
+    /// Reactive: gesture handlers read this per event, so mutating
+    /// the signal at runtime (typically from a toolbar) flips
+    /// behaviour on the next pointer event without rebuilding
+    /// the view. `.drag_mode(mode)` writes to it directly;
+    /// `.bind_drag_mode(sig)` replaces the inner signal with an
+    /// app-owned one so toolbars can share state with the view.
+    drag_mode: Signal<crate::item_handlers::DragMode>,
     /// Per-layout snapshot of (id, scene_rect, handlers) for items
     /// that have a handler set installed. Used by the
     /// `on_pointer_event` closure to dispatch hover / tap / context
@@ -595,7 +602,7 @@ impl SceneView {
             widget_to_item: HashMap::new(),
             default_size: Size::new(800.0, 600.0),
             adopt_scene_size: false,
-            drag_mode: crate::item_handlers::DragMode::RubberBand,
+            drag_mode: Signal::new(crate::item_handlers::DragMode::RubberBand),
             handler_snapshot: Rc::new(RefCell::new(Vec::new())),
             hovered_item: Rc::new(Cell::new(None)),
             pending_tap: Rc::new(Cell::new(None)),
@@ -963,9 +970,29 @@ impl SceneView {
     /// a marquee. [`DragMode::ScrollHandDrag`] makes left-drag
     /// pan the view unconditionally; [`DragMode::NoDrag`] disables
     /// the on-drag handler entirely.
-    pub fn drag_mode(mut self, mode: crate::item_handlers::DragMode) -> Self {
-        self.drag_mode = mode;
+    pub fn drag_mode(self, mode: crate::item_handlers::DragMode) -> Self {
+        self.drag_mode.set(mode);
         self
+    }
+
+    /// Replace the view's internal drag-mode signal with an
+    /// app-owned one — so a toolbar widget can hold the same
+    /// `Signal<DragMode>` and toggle Hand vs Select vs NoDrag
+    /// at runtime without touching the SceneView directly.
+    ///
+    /// After binding, the view's own `drag_mode(...)` setter
+    /// writes to the shared signal too. To stop sharing, call
+    /// `bind_drag_mode(Signal::new(mode))` with a fresh signal.
+    pub fn bind_drag_mode(mut self, sig: Signal<crate::item_handlers::DragMode>) -> Self {
+        self.drag_mode = sig;
+        self
+    }
+
+    /// Reactive accessor for the drag mode. Useful for toolbars
+    /// that need to read the current mode (e.g. to highlight the
+    /// active tool button) and write to it.
+    pub fn drag_mode_signal(&self) -> Signal<crate::item_handlers::DragMode> {
+        self.drag_mode.clone()
     }
 
     /// Install a closure painted **before** the items walk. The
@@ -2264,7 +2291,7 @@ impl Widget for SceneView {
 
         // --- Marquee box-select via on_drag --------------------
         //
-        // Active only when selection mode is not None. The on_drag
+        // Active when selection mode is not None. The on_drag
         // closure tracks the marquee rectangle in *screen* coords
         // (the position the recognizer hands us is screen-space at
         // the time of the gesture) and, on `Ended`, posts a
@@ -2273,13 +2300,18 @@ impl Widget for SceneView {
         // and can call `SceneSelection::commit_marquee` without
         // forcing `Scene` into an `Rc<RefCell>`. Tests can also
         // trigger the commit via `flush_marquee_commit()`.
-        let drag_mode = self.drag_mode;
-        if drag_mode != crate::item_handlers::DragMode::NoDrag
-            && !matches!(
-                self.selection.mode(),
-                crate::selection::SceneSelectionMode::None
-            )
-        {
+        //
+        // Drag mode (RubberBand / ScrollHandDrag / NoDrag) is
+        // reactive — the handler is always installed when
+        // selection is on, and the closure reads `drag_mode_sig`
+        // live each event so a toolbar can flip between Select /
+        // Hand tools without rebuilding the view. NoDrag is
+        // treated as "all branches early-return", same observable
+        // effect as not registering the handler.
+        if !matches!(
+            self.selection.mode(),
+            crate::selection::SceneSelectionMode::None
+        ) {
             let marquee = self.marquee.clone();
             let pending_marquee_commit = self.pending_marquee_commit.clone();
             let drag_target = self.drag_target.clone();
@@ -2289,7 +2321,7 @@ impl Widget for SceneView {
             let bounds_snapshot = self.lightweight_bounds_snapshot.clone();
             let pan_x_for_drag = self.pan_x.clone();
             let pan_y_for_drag = self.pan_y.clone();
-            let drag_mode_inner = drag_mode;
+            let drag_mode_sig = self.drag_mode.clone();
             // Live signal captures — runtime mutations to pan_axes /
             // pan_bounds take effect on the next drag event.
             let pan_axes_sig_drag = self.scene.pan_axes_signal();
@@ -2298,6 +2330,12 @@ impl Widget for SceneView {
             let zoom_for_drag = self.zoom.clone();
             let last_viewport_for_drag = self.last_viewport.clone();
             handlers = handlers.on_drag(move |phase, _ctx| {
+                // Read drag mode live so a toolbar can flip
+                // between Select / Hand / NoDrag at runtime.
+                let drag_mode_inner = drag_mode_sig.get();
+                if drag_mode_inner == crate::item_handlers::DragMode::NoDrag {
+                    return;
+                }
                 // ScrollHandDrag mode bypasses item / marquee logic
                 // entirely — drag pans the view by the cursor
                 // delta in scene coords. Marquee and drag-to-move
