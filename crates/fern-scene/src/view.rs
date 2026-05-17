@@ -2826,11 +2826,43 @@ impl SceneView {
         let viewport_color = fern_tokens::Color::new(0.95, 0.30, 0.30, 0.85);
         let selection_color = fern_tokens::Color::new(1.00, 0.60, 0.20, 0.95);
 
+        // The canvas rides the view-transform scope, so paint commands
+        // are in scene coords. For IGNORES_TRANSFORMATIONS items, the
+        // visible area on screen is `local_bounds` rooted at the
+        // screen-projected `scene_anchor` (NOT at the zoom-scaled
+        // scene_rect). To stroke that visible area correctly through
+        // a view-transform-scoped canvas we inverse-project the
+        // screen-space rect back to scene coords — same trick the
+        // marquee overlay uses. Falls through to scene_rect when the
+        // view transform is degenerate.
+        let view_transform = self.view_transform();
+        let visible_bounds = |id: crate::item::ItemId| -> Option<Rect> {
+            let scene_rect = self.scene.scene_rect(id)?;
+            let flags = self.scene.flags(id).unwrap_or_default();
+            if !flags.contains(crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS) {
+                return Some(scene_rect);
+            }
+            let local_bounds = self.scene.local_bounds(id)?;
+            let scene_xform = self.scene.scene_transform(id);
+            let scene_anchor = scene_xform.apply_point(Point::ZERO);
+            let screen_anchor = view_transform.apply_point(scene_anchor);
+            let screen_rect = Rect::new(
+                screen_anchor.x + local_bounds.x,
+                screen_anchor.y + local_bounds.y,
+                local_bounds.width,
+                local_bounds.height,
+            );
+            view_transform
+                .inverse()
+                .map(|inv| inv.apply_rect(screen_rect))
+                .or(Some(scene_rect))
+        };
+
         if cfg.item_bounds {
             for id in self.scene.ids() {
-                if let Some(scene_rect) = self.scene.scene_rect(id) {
+                if let Some(rect) = visible_bounds(id) {
                     canvas.stroke_rect(
-                        scene_rect,
+                        rect,
                         item_color,
                         fern_canvas::StrokeStyle::solid(stroke_w),
                     );
@@ -2855,7 +2887,7 @@ impl SceneView {
         }
         if cfg.selection_bounds {
             for id in self.selection.selected() {
-                if let Some(rect) = self.scene.scene_rect(id) {
+                if let Some(rect) = visible_bounds(id) {
                     canvas.stroke_rect(
                         rect,
                         selection_color,

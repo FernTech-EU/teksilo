@@ -4337,3 +4337,115 @@ fn ignores_xform_hit_test_anchor_follows_pan() {
     );
     let _ = id;
 }
+
+#[test]
+fn ignores_xform_debug_overlay_paints_screen_anchored_bounds() {
+    // The debug item-bounds overlay paints commands through a
+    // view-transform-scoped canvas. For IGNORES items, the
+    // overlay must outline the actual visible area (fixed-pixel
+    // size rooted at the screen-projected anchor), NOT the
+    // scaled scene_rect that a naive scene-coord stroke would
+    // produce.
+    //
+    // We verify by inverse: take the decoration rect the
+    // overlay emitted, project it through the live view
+    // transform, and assert the result equals the expected
+    // screen rect — i.e. the round-trip lands on (screen_anchor
+    // + local_bounds) with width/height untouched by zoom.
+    use crate::items::RectItem;
+
+    let mut scene = Scene::new();
+    let id = scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 40.0, 40.0)).fill(fern_tokens::Color::RED),
+        Point::new(100.0, 100.0),
+    );
+    scene.set_flag(id, crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS, true);
+
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene).debug_overlay(DebugOverlay {
+        item_bounds: true,
+        ..DebugOverlay::default()
+    }));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    {
+        let view = view_handle(&tree, view_id);
+        view.set_zoom(2.0);
+    }
+    let view_xform = view_handle(&tree, view_id).view_transform();
+    let scene_anchor = Point::new(100.0, 100.0);
+    let screen_anchor = view_xform.apply_point(scene_anchor);
+    let expected_screen_rect = Rect::new(screen_anchor.x, screen_anchor.y, 40.0, 40.0);
+
+    let frame = tree.render();
+    // stroke_rect emits 4 thin decoration rects (top, bottom,
+    // left, right edges), each centered on the boundary of the
+    // passed rect. We compute the union of all four and the
+    // union's center should equal the center of the passed
+    // rect — robust to stroke-centering offsets.
+    let item_color_arr = fern_tokens::Color::new(0.20, 0.75, 0.35, 0.85).to_array();
+    let edges: Vec<[f32; 4]> = frame
+        .decorations
+        .iter()
+        .filter(|d| {
+            d.color
+                .iter()
+                .zip(item_color_arr.iter())
+                .all(|(a, b)| (a - b).abs() < 1e-3)
+        })
+        .map(|d| d.rect)
+        .collect();
+    assert_eq!(
+        edges.len(),
+        4,
+        "stroke_rect should emit 4 edge decorations, got {}",
+        edges.len()
+    );
+    let min_x = edges
+        .iter()
+        .map(|r| r[0])
+        .fold(f32::INFINITY, f32::min);
+    let min_y = edges
+        .iter()
+        .map(|r| r[1])
+        .fold(f32::INFINITY, f32::min);
+    let max_x = edges
+        .iter()
+        .map(|r| r[0] + r[2])
+        .fold(f32::NEG_INFINITY, f32::max);
+    let max_y = edges
+        .iter()
+        .map(|r| r[1] + r[3])
+        .fold(f32::NEG_INFINITY, f32::max);
+    let union_scene = Rect::new(min_x, min_y, max_x - min_x, max_y - min_y);
+    let union_screen = view_xform.apply_rect(union_scene);
+    let union_center_x = union_screen.x + union_screen.width / 2.0;
+    let union_center_y = union_screen.y + union_screen.height / 2.0;
+    let expected_center_x = expected_screen_rect.x + expected_screen_rect.width / 2.0;
+    let expected_center_y = expected_screen_rect.y + expected_screen_rect.height / 2.0;
+    assert!(
+        (union_center_x - expected_center_x).abs() < 0.5,
+        "overlay union center x: expected {}, got {}",
+        expected_center_x,
+        union_center_x
+    );
+    assert!(
+        (union_center_y - expected_center_y).abs() < 0.5,
+        "overlay union center y: expected {}, got {}",
+        expected_center_y,
+        union_center_y
+    );
+    // Size: outer extent of the stroke = local_bounds + stroke
+    // width (1.0 in scene coords; 2.0 in screen coords at 2× zoom).
+    // So union screen size = 40 + 2 = 42.
+    assert!(
+        (union_screen.width - 42.0).abs() < 0.5,
+        "union screen width should be ~42 (40 fixed + 2px stroke at 2× zoom), \
+         not ~82 (80 scaled + 2), got {}",
+        union_screen.width
+    );
+    assert!(
+        (union_screen.height - 42.0).abs() < 0.5,
+        "union screen height should be ~42, got {}",
+        union_screen.height
+    );
+}
