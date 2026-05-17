@@ -52,8 +52,12 @@ impl ItemCoordinateCache {
         Self::default()
     }
 
-    /// Whether `id`'s entry is still valid.
-    pub fn contains(&self, id: ItemId) -> bool {
+    /// Whether `id`'s entry is still valid. Test-only diagnostic;
+    /// apps observe cache effectiveness via the parent
+    /// [`SceneView::item_cache_len`](crate::SceneView::item_cache_len)
+    /// or by counting paint calls in their own SceneItem impl.
+    #[cfg(test)]
+    pub(crate) fn contains(&self, id: ItemId) -> bool {
         self.entries.contains_key(&id)
     }
 
@@ -78,8 +82,9 @@ impl ItemCoordinateCache {
         self.entries.len()
     }
 
-    /// Whether the cache is empty.
-    pub fn is_empty(&self) -> bool {
+    /// Whether the cache is empty. Test-only diagnostic.
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 }

@@ -93,19 +93,6 @@ pub fn local_to_parent(local_pos: Point, transform: &Transform2D) -> Transform2D
     transform.then(&Transform2D::translate(local_pos.x, local_pos.y))
 }
 
-/// Compose a chain of per-item local→parent transforms into one
-/// local→scene transform. `chain` is ordered from the **leaf** item up
-/// to (but not including) the scene root — i.e. the leaf's transform
-/// is at index 0 and its parent's is at index 1, etc. An empty chain
-/// is the identity.
-pub fn compose_chain(chain: &[Transform2D]) -> Transform2D {
-    let mut acc = Transform2D::identity();
-    for t in chain {
-        acc = acc.then(t);
-    }
-    acc
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

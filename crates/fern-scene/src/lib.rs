@@ -45,36 +45,43 @@
 
 #![allow(clippy::type_complexity)]
 
-pub mod a11y;
-pub mod animation;
-pub mod cache;
-pub mod flags;
-pub mod index;
-pub mod item;
-pub mod item_handlers;
-pub mod items;
-pub mod minimap;
-pub mod scene;
-pub mod selection;
-pub mod state;
-pub mod transform;
-pub mod view;
+// Implementation modules are intentionally `pub(crate)`. The crate's
+// public surface is the re-export block below — every type or trait
+// an external consumer is meant to use is reachable as
+// `fern_scene::Foo` (never `fern_scene::flags::Foo` etc). Narrowing
+// here lets internal refactors land without ripple effects in
+// downstream apps. Adding a new external-facing type? Re-export it
+// rather than widening a module to `pub`.
+pub(crate) mod a11y;
+pub(crate) mod animation;
+pub(crate) mod cache;
+pub(crate) mod flags;
+pub(crate) mod index;
+pub(crate) mod item;
+pub(crate) mod item_handlers;
+pub(crate) mod items;
+pub(crate) mod minimap;
+pub(crate) mod scene;
+pub(crate) mod selection;
+pub(crate) mod state;
+pub(crate) mod transform;
+pub(crate) mod view;
 
 pub use a11y::{
-    A11yBoundsSpace, A11yCategory, A11yGroup, A11yGroupBuilder, A11yGroupId, A11yNode,
+    A11yBoundsSpace, A11yCategory, A11yGroup, A11yGroupBuilder, A11yGroupId, A11yMode, A11yNode,
     A11yOffScreenMode, A11yRelation,
 };
 pub use animation::{pulse_once, register_animated_item_signal};
-pub use cache::{CacheMode, ItemCoordinateCache};
+pub use cache::CacheMode;
 pub use flags::ItemFlags;
 pub use index::{GridHashIndex, SpatialIndex};
 pub use item::{ItemId, SceneItem, SceneItemA11yContext, SceneItemPaintContext};
-pub use item_handlers::{DragMode, SceneItemHandlerSet};
+pub use item_handlers::{DragMode, SceneItemHandlerSet, SceneTapEvent};
 pub use items::AccessSubtreeMode;
 pub use items::{GroupItem, ImageItem, PathItem, RectItem, TextItem};
 pub use minimap::SceneMinimap;
 pub use scene::Scene;
-pub use scene::{ItemChange, PanAxes};
+pub use scene::{ItemChange, PanAxes, SceneConstraints};
 pub use selection::{SceneSelection, SceneSelectionMode};
 pub use state::SceneViewState;
 pub use view::{DebugOverlay, FocusDirection, SceneView};
