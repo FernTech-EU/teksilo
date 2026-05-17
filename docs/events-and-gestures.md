@@ -1,7 +1,7 @@
 # Events and Gestures
 
-**Companion to:** [fern-ui-architecture.md](fern-ui-architecture.md)
-**Scope:** How input becomes widget behavior in FernUI — attached handlers, preview/bubble dispatch, gesture recognizers, and the `EventContext` deferred-operations pattern.
+**Companion to:** [bastyde-architecture.md](bastyde-architecture.md)
+**Scope:** How input becomes widget behavior in Bastyde — attached handlers, preview/bubble dispatch, gesture recognizers, and the `EventContext` deferred-operations pattern.
 
 ---
 
@@ -51,7 +51,7 @@ Every event that targets a specific widget (via hit testing for pointer events, 
      root
 ```
 
-Implementation is a single walk per pass in [widget_tree/event_dispatch_impl.rs](../crates/fern-core/src/widget_tree/event_dispatch_impl.rs): `dispatch_to_widget_returning_handled(target, &event)` collects ancestors, runs preview top-down, then runs bubble target-up, returning on the first `Handled`.
+Implementation is a single walk per pass in [widget_tree/event_dispatch_impl.rs](../crates/bastyde-core/src/widget_tree/event_dispatch_impl.rs): `dispatch_to_widget_returning_handled(target, &event)` collects ancestors, runs preview top-down, then runs bubble target-up, returning on the first `Handled`.
 
 The framework decides what "target" means per event type:
 
@@ -64,7 +64,7 @@ There is no "capture phase" distinct from preview, no event replay, no explicit 
 
 ## 3. Attached handlers
 
-Widget builders register event handlers via blanket-implemented methods on the [`WidgetBuilder`](../crates/fern-core/src/widget_builder.rs) trait. Every widget gets them for free:
+Widget builders register event handlers via blanket-implemented methods on the [`WidgetBuilder`](../crates/bastyde-core/src/widget_builder.rs) trait. Every widget gets them for free:
 
 ```rust
 ctx.add(
@@ -89,7 +89,7 @@ Under the hood, the builder wraps the widget in a `WidgetWithHandlers<W>` that c
 
 ### 3.1 Handler catalogue
 
-[`event_handlers.rs`](../crates/fern-core/src/event_handlers.rs) defines the full set. Summarized:
+[`event_handlers.rs`](../crates/bastyde-core/src/event_handlers.rs) defines the full set. Summarized:
 
 | Handler | Fires when | Signature (simplified) |
 |---|---|---|
@@ -114,7 +114,7 @@ Under the hood, the builder wraps the widget in a `WidgetWithHandlers<W>` that c
 
 ### 3.1.1 `TapEvent` — button + modifiers in the callback
 
-The four click-style handlers (`on_tap` / `on_double_tap` / `on_triple_tap` / `on_long_press`) all receive a borrowed [`TapEvent`](../crates/fern-core/src/gesture.rs):
+The four click-style handlers (`on_tap` / `on_double_tap` / `on_triple_tap` / `on_long_press`) all receive a borrowed [`TapEvent`](../crates/bastyde-core/src/gesture.rs):
 
 ```rust
 #[non_exhaustive]
@@ -236,7 +236,7 @@ The `event()`-method vs attached-handlers tradeoff flipped once three things bec
 
 ## 4. Gesture recognizers — composition with backpressure
 
-[`gesture.rs`](../crates/fern-core/src/gesture.rs) defines the recognizer state machines. Each is a pure, platform-free value type that consumes `RawPointerEvent::{Down, Move, Up}` and emits `GestureResult::{Pending, Recognized(GestureEvent), Failed}`.
+[`gesture.rs`](../crates/bastyde-core/src/gesture.rs) defines the recognizer state machines. Each is a pure, platform-free value type that consumes `RawPointerEvent::{Down, Move, Up}` and emits `GestureResult::{Pending, Recognized(GestureEvent), Failed}`.
 
 Built-in recognizers (the four click-style ones default to `ButtonMask::PRIMARY` — call `.accept_buttons(...)` / `.accept_any_button()` to widen):
 
@@ -313,7 +313,7 @@ Via `EventContext`, any handler can:
 - `ctx.dismiss_all_overlays()` — useful after menu item activation.
 - `ctx.send_intent(AppIntent::X)` — fire a typed intent; framework walks source → root invoking any matching `Action`. See [shortcut-intent-action.md](shortcut-intent-action.md).
 - `ctx.request_frame()` — ask the event loop to pump one more frame (caret blink restart, drag auto-scroll, pending document events).
-- `ctx.app_state::<T>()` — look up an app-scoped value registered on `FernAppBuilder` by `TypeId`.
+- `ctx.app_state::<T>()` — look up an app-scoped value registered on `BastydeAppBuilder` by `TypeId`.
 
 These are the methods that make it possible to build app-level behavior (menu routing, theme switching, shortcut rebind UIs) without any global statics or hardcoded backchannels.
 
@@ -395,10 +395,10 @@ No Xvfb, no GPU, no display server required.
 
 - [animation.md](animation.md) — `Signal<f32>::animate_to` and the scheduler. Handlers that kick off motion (toggle thumb, accordion height, snackbar slide-in) call `animate_to` on animation-capable signals; the docs here and there are two halves of the "handler runs → something moves" path.
 - [shortcut-intent-action.md](shortcut-intent-action.md) — how intents travel source → root and fire `Action`s; rebindable keystrokes via `ShortcutRegistry`.
-- [fern-ui-architecture.md §22 Window Management](fern-ui-architecture.md) — modal-vs-modeless, window focus routing.
-- [fern-ui-architecture.md §13 Overlay System](fern-ui-architecture.md) — overlay stack, click-outside, Escape cascade, focus-restore on dismiss.
-- [crates/fern-core/src/event_handlers.rs](../crates/fern-core/src/event_handlers.rs) — `EventHandlers` struct.
-- [crates/fern-core/src/widget_builder.rs](../crates/fern-core/src/widget_builder.rs) — blanket-impl builder methods.
-- [crates/fern-core/src/gesture.rs](../crates/fern-core/src/gesture.rs) — recognizer state machines.
-- [crates/fern-core/src/widget_tree/event_dispatch_impl.rs](../crates/fern-core/src/widget_tree/event_dispatch_impl.rs) — dispatch walk.
-- [crates/fern-core/src/widget.rs](../crates/fern-core/src/widget.rs) — `EventContext`.
+- [bastyde-architecture.md §22 Window Management](bastyde-architecture.md) — modal-vs-modeless, window focus routing.
+- [bastyde-architecture.md §13 Overlay System](bastyde-architecture.md) — overlay stack, click-outside, Escape cascade, focus-restore on dismiss.
+- [crates/bastyde-core/src/event_handlers.rs](../crates/bastyde-core/src/event_handlers.rs) — `EventHandlers` struct.
+- [crates/bastyde-core/src/widget_builder.rs](../crates/bastyde-core/src/widget_builder.rs) — blanket-impl builder methods.
+- [crates/bastyde-core/src/gesture.rs](../crates/bastyde-core/src/gesture.rs) — recognizer state machines.
+- [crates/bastyde-core/src/widget_tree/event_dispatch_impl.rs](../crates/bastyde-core/src/widget_tree/event_dispatch_impl.rs) — dispatch walk.
+- [crates/bastyde-core/src/widget.rs](../crates/bastyde-core/src/widget.rs) — `EventContext`.

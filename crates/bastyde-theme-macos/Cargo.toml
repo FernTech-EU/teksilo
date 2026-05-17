@@ -1,0 +1,12 @@
+[package]
+name = "bastyde-theme-macos"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+bastyde-core = { workspace = true }
+bastyde-tokens = { workspace = true }

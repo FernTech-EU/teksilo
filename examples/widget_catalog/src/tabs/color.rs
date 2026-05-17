@@ -1,7 +1,7 @@
 //! Color tab — HexColorInput, ColorEdit, ColorPicker.
 
-use fern_ui::prelude::*;
-use fern_ui::widgets::{ColorEdit, ColorPicker, Divider, HexColorInput, TextWidget, VStack};
+use bastyde::prelude::*;
+use bastyde::widgets::{ColorEdit, ColorPicker, Divider, HexColorInput, TextWidget, VStack};
 
 use crate::shared::{Signals, section, tab_header};
 
@@ -51,12 +51,12 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let hex_color = ctx.signal(Color::from_hex("#CC6633"));
     let edit_color = ctx.signal(Color::from_hex("#55AADD"));
     let pick_color = ctx.signal(Color::from_hex("#8844BB"));
 
-    fern!(ctx => VStack {
+    bati!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

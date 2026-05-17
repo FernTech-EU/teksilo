@@ -7,8 +7,8 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-fern-ui = { workspace = true, features = ["telemetry"] }
-fern-analytics-plausible = { workspace = true }
-fern-settings = { workspace = true }
-fern-telemetry = { workspace = true }
-fern-core = { workspace = true }
+bastyde = { workspace = true, features = ["telemetry"] }
+bastyde-analytics-plausible = { workspace = true }
+bastyde-settings = { workspace = true }
+bastyde-telemetry = { workspace = true }
+bastyde-core = { workspace = true }

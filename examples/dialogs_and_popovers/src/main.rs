@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use fern_ui::core::WidgetPlacement;
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::core::WidgetPlacement;
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Badge, Button, ButtonVariant, Dialog, DialogContent, EventContextMessageBoxExt, Expand, HStack,
     MessageBox, MessageBoxButton, MessageBoxButtons, Panel, Popover, ScrollArea, Snackbar, Spacer,
     StandardButton, TextWidget, Toolbar, VStack,
@@ -15,9 +15,9 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                fern_ui::presets::intui::dark()
+                bastyde::presets::intui::dark()
             } else {
-                fern_ui::presets::intui::light()
+                bastyde::presets::intui::light()
             });
         }),
     ))
@@ -133,7 +133,7 @@ impl OverlayDemo {
             .on_activate_fn(move |ctx| {
                 let record = record_welcome.clone();
                 ctx.present_message_box(
-                    MessageBox::information_literal("Welcome to FernUI")
+                    MessageBox::information_literal("Welcome to Bastyde")
                         .text_literal(
                             "This demo showcases the MessageBox pipeline across severities.",
                         )
@@ -281,7 +281,7 @@ impl Widget for OverlayDemo {
                         )
                         .body(
                             TextWidget::new_literal(
-                                "The app code does not branch on Wayland or window-system support here; it issues one modal request and lets FernUI resolve it.",
+                                "The app code does not branch on Wayland or window-system support here; it issues one modal request and lets Bastyde resolve it.",
                             )
                             .style(TextStyleRole::Body)
                             .color(TextRole::Secondary),
@@ -306,7 +306,7 @@ impl Widget for OverlayDemo {
                     )
                     .child(
                         TextWidget::new_literal(
-                            "FernUI now resolves dialogs through a shared modal presentation pipeline, alongside anchored popovers and timed snackbars.",
+                            "Bastyde now resolves dialogs through a shared modal presentation pipeline, alongside anchored popovers and timed snackbars.",
                         )
                         .style(TextStyleRole::Body)
                         .color(TextRole::Secondary),
@@ -373,7 +373,7 @@ impl Widget for OverlayDemo {
                                 )
                                 .child(
                                     TextWidget::new_literal(
-                                        "Dialogs now share one modal request API. Footer actions can dismiss the current modal without knowing whether FernUI resolved it to an in-tree overlay or a native modal child window.",
+                                        "Dialogs now share one modal request API. Footer actions can dismiss the current modal without knowing whether Bastyde resolved it to an in-tree overlay or a native modal child window.",
                                     )
                                     .style(TextStyleRole::Body)
                                     .color(TextRole::Secondary),
@@ -421,9 +421,9 @@ impl Widget for OverlayDemo {
 }
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("Dialogs and Popovers")

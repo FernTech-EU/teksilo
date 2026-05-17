@@ -1,0 +1,5 @@
+error: bastyde-i18n: path segment `foo__bar` contains `__`, which is reserved as the nested-module separator. Use `::` for nesting, or single `_` within a segment.
+  --> tests/ui/fail/double_underscore_in_segment.rs:10:17
+   |
+10 |     let _ = tr!(foo__bar());
+   |                 ^^^^^^^^

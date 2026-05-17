@@ -1,10 +1,10 @@
 # TabWidget and TabBar
 
-Two cooperating widgets for tabbed content in FernUI: a header-only
-[`TabBar<T>`](../crates/fern-widgets/src/tab_widget/bar.rs) driven by any
-[`ListDataSource<Item = T>`](../crates/fern-data/src/list_data_source.rs)
-and a [`TabDelegate<T>`](../crates/fern-widgets/src/tab_widget/delegate.rs),
-and an all-in-one [`TabWidget`](../crates/fern-widgets/src/tab_widget.rs)
+Two cooperating widgets for tabbed content in Bastyde: a header-only
+[`TabBar<T>`](../crates/bastyde-widgets/src/tab_widget/bar.rs) driven by any
+[`ListDataSource<Item = T>`](../crates/bastyde-data/src/list_data_source.rs)
+and a [`TabDelegate<T>`](../crates/bastyde-widgets/src/tab_widget/delegate.rs),
+and an all-in-one [`TabWidget`](../crates/bastyde-widgets/src/tab_widget.rs)
 that pairs a `TabBar` with a `Switcher` of content panes — sharing one
 `Signal<Option<TabId>>` selection.
 
@@ -22,9 +22,9 @@ can rely on.
 ## At a glance
 
 ```rust
-use fern_ui::data::ListModel;
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::data::ListModel;
+use bastyde::prelude::*;
+use bastyde::widgets::{
     TabBarOrientation, TabHandle, TabId, TabInfo, TabSizing, TabWidget,
     TextWidget, VStack,
 };
@@ -67,7 +67,7 @@ let tw = TabWidget::new(selected.clone())
 Stand-alone `TabBar<T>` looks the same minus the content-side machinery:
 
 ```rust
-use fern_ui::widgets::{TabBar, TabDelegate};
+use bastyde::widgets::{TabBar, TabDelegate};
 
 let bar = TabBar::horizontal(
     model,
@@ -88,18 +88,18 @@ let bar = TabBar::horizontal(
 
 A tab's runtime identity is split across three types, each with one job:
 
-- [`TabId`](../crates/fern-widgets/src/tab_widget/id.rs) — stable identity.
+- [`TabId`](../crates/bastyde-widgets/src/tab_widget/id.rs) — stable identity.
   A `NonZeroU64` wrapper. Allocate fresh ids with `TabId::fresh()` (a
   monotonic counter), or wrap an external key with
   `TabId::from_raw(NonZeroU64)` when the identity comes from app-side
   storage (document UUID, file-path hash, …) — fresh ids would re-allocate
   every restart and break session-restore round-trips.
-- [`TabInfo`](../crates/fern-widgets/src/tab_widget/info.rs) — presentation
+- [`TabInfo`](../crates/bastyde-widgets/src/tab_widget/info.rs) — presentation
   metadata: `title`, `icon`, `tooltip`, `closable`, `pinned`, `enabled`.
   Title and tooltip are `LocalizedString` (accept `tr!(...)`); the icon is
   a factory closure (no `IconWidget: Clone` requirement) called each
   build, so it picks up theme/state changes naturally.
-- [`TabHandle`](../crates/fern-widgets/src/tab_widget/handle.rs) — the
+- [`TabHandle`](../crates/bastyde-widgets/src/tab_widget/handle.rs) — the
   thing that lives in the data source. Carries `id`, `info`, a `kind`
   discriminator, and an `Rc<dyn Any>` payload. Heavy state (the document,
   the image, the page) lives on `payload` — **not** on the content
@@ -128,7 +128,7 @@ preserved.
 |---------------------------------------------------|--------------------------------------------|-----------------------------------------------------------------------------|
 | `static_tab(info, content)`                       | `impl Widget + 'static`                    | One-shot ownership; consumed on first build.                                |
 | `static_tab_factory(info, fn(&TabHandle) -> Box)` | factory closure                            | Called once on first build.                                                 |
-| `static_tab_id(info, WidgetId)`                   | pre-registered `WidgetId`                  | For the `fern!` DSL — wraps the id in an alias on first build.              |
+| `static_tab_id(info, WidgetId)`                   | pre-registered `WidgetId`                  | For the `bati!` DSL — wraps the id in an alias on first build.              |
 | `static_tab_with_id(id, info, content)`           | `impl Widget + 'static` + caller-chosen id | Use when external code (deep links, session restore) flips selection by id. |
 | `static_tab_factory_with_id(id, info, factory)`   | factory closure + caller-chosen id         | Factory variant of the above.                                               |
 
@@ -225,7 +225,7 @@ The split is data flow, not features. `TabBar` owns:
 - the unified ordering (static-then-dynamic) over the bar's index space
 - callback translation: bar speaks indices, app callbacks speak `TabId`
 
-Either widget works in the `fern!` DSL; both publish their selection
+Either widget works in the `bati!` DSL; both publish their selection
 through `Signal<Option<TabId>>`.
 
 ---
@@ -261,7 +261,7 @@ closed tab was at the end.
 
 ## Orientation — reactive
 
-[`TabBarOrientation`](../crates/fern-widgets/src/tab_widget/delegate.rs)
+[`TabBarOrientation`](../crates/bastyde-widgets/src/tab_widget/delegate.rs)
 is `Horizontal` (default) or `Vertical`. On `TabWidget`:
 
 ```rust
@@ -289,7 +289,7 @@ wrapper does for you.
 
 Vertical bars use **upright** text (single-line, ellipsis-truncated),
 not rotated glyphs. Rotated text breaks hit-testing and focus-ring
-math, and FernUI's `text-typeset` integration doesn't yet support
+math, and Bastyde's `text-typeset` integration doesn't yet support
 per-glyph layout rotation. This matches VS Code's activity-bar style.
 
 ---
@@ -517,7 +517,7 @@ bar:
 ```
 
 Both accept `impl Widget + 'static`. `_id` variants take a
-pre-registered `WidgetId` for the `fern!` DSL. The slot widget is
+pre-registered `WidgetId` for the `bati!` DSL. The slot widget is
 registered once on first build and **memoized** — subsequent rebuilds
 reuse the same id, so a slot's internal state (button hover, tooltip
 visibility, focus) survives bar rebuilds.
@@ -608,7 +608,7 @@ the default cascade reads with insufficient contrast. Disabled tabs
 always render at `TextRole::Disabled`.
 
 Static numbers come from `theme.components.tab`
-([`TabStyle`](../crates/fern-tokens/src/components.rs)):
+([`TabStyle`](../crates/bastyde-tokens/src/components.rs)):
 
 - `editor_tab_height` (default 50 dp) — height of horizontal bar tabs.
 - `tool_window_tab_height` (default 28 dp) — reserved for future

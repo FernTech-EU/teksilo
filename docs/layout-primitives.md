@@ -1,7 +1,7 @@
 # Layout Primitives
 
-**Companion to:** [fern-ui-architecture.md](fern-ui-architecture.md) §2 (Layout Model)
-**Scope:** Reference for the layout primitives in [crates/fern-widgets/src/primitives/](../crates/fern-widgets/src/primitives/) — the containers and size wrappers every other widget composes against.
+**Companion to:** [bastyde-architecture.md](bastyde-architecture.md) §2 (Layout Model)
+**Scope:** Reference for the layout primitives in [crates/bastyde-widgets/src/primitives/](../crates/bastyde-widgets/src/primitives/) — the containers and size wrappers every other widget composes against.
 
 This document is a working reference: each primitive comes with a one-line summary, the public surface as you'd actually call it, the rule the layout engine applies, and at least one runnable example. Where two primitives can express the same intent, the trade-off is called out explicitly.
 
@@ -9,7 +9,7 @@ This document is a working reference: each primitive comes with a one-line summa
 
 ## 1. Mental model
 
-FernUI layout is a SwiftUI-style two-phase negotiation, recursive over the widget tree:
+Bastyde layout is a SwiftUI-style two-phase negotiation, recursive over the widget tree:
 
 1. The parent calls `child.layout_response(proposal, ctx)`. The child returns a `LayoutResponse { size: Size, flex: f32 }` — the size it wants (a floor) plus a flex weight for slack distribution.
 2. The parent calls `child.place_children(bounds, …)` once it has decided how much space each child gets and where to put it.
@@ -42,12 +42,12 @@ Three containers cover almost everything: `VStack`, `HStack`, `ZStack`. They sha
 
 ### 2.1 `VStack` — vertical stack
 
-[crates/fern-widgets/src/primitives/vstack.rs](../crates/fern-widgets/src/primitives/vstack.rs)
+[crates/bastyde-widgets/src/primitives/vstack.rs](../crates/bastyde-widgets/src/primitives/vstack.rs)
 
 Lays children top-to-bottom. Cross-axis (horizontal) alignment is `HAlignment` — default `Leading`. Spacing accepts a static `f32` or a `Signal<f32>`.
 
 ```rust
-use fern_ui::prelude::*;
+use bastyde::prelude::*;
 
 VStack::new()
     .spacing(8.0)
@@ -63,7 +63,7 @@ VStack::new()
 
 ### 2.2 `HStack` — horizontal stack
 
-[crates/fern-widgets/src/primitives/hstack.rs](../crates/fern-widgets/src/primitives/hstack.rs)
+[crates/bastyde-widgets/src/primitives/hstack.rs](../crates/bastyde-widgets/src/primitives/hstack.rs)
 
 Mirror of `VStack`. Cross-axis (vertical) alignment is `VAlignment` — default `Center`. **RTL-aware:** in `LayoutDirection::RightToLeft`, children are placed right-to-left automatically. There is no manual mirroring.
 
@@ -82,7 +82,7 @@ HStack::new()
 
 ### 2.3 `ZStack` — overlay stack
 
-[crates/fern-widgets/src/primitives/zstack.rs](../crates/fern-widgets/src/primitives/zstack.rs)
+[crates/bastyde-widgets/src/primitives/zstack.rs](../crates/bastyde-widgets/src/primitives/zstack.rs)
 
 Children overlap; later children paint on top. Size is the max of children's intrinsic sizes; the proposal is *only* used as a fallback when no child has a queryable size. Container-level alignment is a full `Alignment` (both axes); per-child override via `tree.set_alignment(id, …)`.
 
@@ -110,7 +110,7 @@ Slack is the leftover space inside a stack after every child's wanted size and t
 
 ### 3.1 `Spacer` — fills available space
 
-[crates/fern-widgets/src/primitives/spacer.rs](../crates/fern-widgets/src/primitives/spacer.rs)
+[crates/bastyde-widgets/src/primitives/spacer.rs](../crates/bastyde-widgets/src/primitives/spacer.rs)
 
 Returns `LayoutResponse::flexible(Size::new(min, min), 1.0)`. The min-length is a floor on the main axis (default 0); the parent stack adds slack share on top.
 
@@ -133,7 +133,7 @@ HStack::new()
 
 ### 3.2 `Expand` — claim space and fill a child
 
-[crates/fern-widgets/src/primitives/expand.rs](../crates/fern-widgets/src/primitives/expand.rs)
+[crates/bastyde-widgets/src/primitives/expand.rs](../crates/bastyde-widgets/src/primitives/expand.rs)
 
 `Expand` is the workhorse. It returns flex (default `1.0`) and stretches its single child to its allocated bounds. Unlike `Spacer`, it has a child.
 
@@ -166,7 +166,7 @@ By default `Expand` reports `wanted = 0` on its flex axes. That's CSS `flex-basi
 
 Switch with `.respect_intrinsic()` (CSS `flex-basis: auto`) when the parent is unconstrained on the flex axis. The child's natural size acts as a floor and slack is added on top. Use this inside an outer `VStack` with `height = None`, where zero-basis would let the child overflow because the parent has no bound to share.
 
-**Trade-off (called out at [expand.rs:130](../crates/fern-widgets/src/primitives/expand.rs#L130)):** with `respect_intrinsic`, exact ratios bend by content. The same `[1, 2]` split inside a 300 px parent now gives `60 + 66 = 126` and `40 + 133 = 173` rather than `100 / 200`. Keep zero-basis for ratio layouts and reach for `respect_intrinsic` only when you actually need the floor.
+**Trade-off (called out at [expand.rs:130](../crates/bastyde-widgets/src/primitives/expand.rs#L130)):** with `respect_intrinsic`, exact ratios bend by content. The same `[1, 2]` split inside a 300 px parent now gives `60 + 66 = 126` and `40 + 133 = 173` rather than `100 / 200`. Keep zero-basis for ratio layouts and reach for `respect_intrinsic` only when you actually need the floor.
 
 #### `horizontal()` / `vertical()` semantics
 
@@ -175,11 +175,11 @@ The named axis is the one the wrapper *competes for slack on*. Cross-axis behavi
 - `Expand::vertical()` inside a `VStack` (parent binds width, distributes height) — fills the VStack's full width AND distributes vertical slack.
 - `Expand::horizontal()` inside a `VStack` — claims the VStack's full width, but reports `flex = 0` on the open vertical axis. It does **not** steal vertical slack from siblings — height stays at child intrinsic.
 
-Symmetric for HStack. The behavior is documented and tested at [expand.rs:25-41](../crates/fern-widgets/src/primitives/expand.rs#L25-L41).
+Symmetric for HStack. The behavior is documented and tested at [expand.rs:25-41](../crates/bastyde-widgets/src/primitives/expand.rs#L25-L41).
 
 ### 3.3 `Center` — sugar for centered fill
 
-[crates/fern-widgets/src/primitives/center.rs](../crates/fern-widgets/src/primitives/center.rs)
+[crates/bastyde-widgets/src/primitives/center.rs](../crates/bastyde-widgets/src/primitives/center.rs)
 
 `Center::new().child(w)` is exactly `Expand::new().align_child(Alignment::CENTER).child(w)`. Reach for it when that's all you mean — the name is clearer.
 
@@ -205,7 +205,7 @@ Five primitives constrain what their child can be:
 
 ### 4.1 `FixedSize`
 
-[crates/fern-widgets/src/primitives/fixed_size.rs](../crates/fern-widgets/src/primitives/fixed_size.rs)
+[crates/bastyde-widgets/src/primitives/fixed_size.rs](../crates/bastyde-widgets/src/primitives/fixed_size.rs)
 
 ```rust
 // Static width, child decides height:
@@ -227,7 +227,7 @@ Both `bind_width` and `bind_height` accept `impl Into<Prop<f32>>` — pass an `f
 
 ### 4.2 `MinSize`
 
-[crates/fern-widgets/src/primitives/min_size.rs](../crates/fern-widgets/src/primitives/min_size.rs)
+[crates/bastyde-widgets/src/primitives/min_size.rs](../crates/bastyde-widgets/src/primitives/min_size.rs)
 
 ```rust
 // 48×48 minimum touch target — the Button composite uses this internally:
@@ -241,11 +241,11 @@ MinSize::height(36.0).child(row)
 MinSize::width(0.0).bind_min_width(min_w_signal).child(text)
 ```
 
-The proposal forwarded to the child is **clamped upward** to the minimum. A wrapping `TextWidget` inside `MinSize::width(100)` measures against `width >= 100`, so its wrapped height reflects the minimum width — not the unconstrained natural width. Tested at [min_size.rs:230-258](../crates/fern-widgets/src/primitives/min_size.rs#L230-L258).
+The proposal forwarded to the child is **clamped upward** to the minimum. A wrapping `TextWidget` inside `MinSize::width(100)` measures against `width >= 100`, so its wrapped height reflects the minimum width — not the unconstrained natural width. Tested at [min_size.rs:230-258](../crates/bastyde-widgets/src/primitives/min_size.rs#L230-L258).
 
 ### 4.3 `MaxSize`
 
-[crates/fern-widgets/src/primitives/max_size.rs](../crates/fern-widgets/src/primitives/max_size.rs)
+[crates/bastyde-widgets/src/primitives/max_size.rs](../crates/bastyde-widgets/src/primitives/max_size.rs)
 
 ```rust
 // Reading-width cap on a long article:
@@ -262,7 +262,7 @@ Symmetric to `MinSize`: proposal clamped *downward*, wanted size clamped downwar
 
 ### 4.4 `AspectRatio`
 
-[crates/fern-widgets/src/primitives/aspect_ratio.rs](../crates/fern-widgets/src/primitives/aspect_ratio.rs)
+[crates/bastyde-widgets/src/primitives/aspect_ratio.rs](../crates/bastyde-widgets/src/primitives/aspect_ratio.rs)
 
 ```rust
 AspectRatio::widescreen().child(video_thumbnail)     // 16:9
@@ -276,7 +276,7 @@ The child fills the resolved bounds.
 
 ### 4.5 `Padding`
 
-[crates/fern-widgets/src/primitives/padding.rs](../crates/fern-widgets/src/primitives/padding.rs)
+[crates/bastyde-widgets/src/primitives/padding.rs](../crates/bastyde-widgets/src/primitives/padding.rs)
 
 ```rust
 // All four insets:
@@ -303,12 +303,12 @@ For tables of mixed-size content, multi-column flow, and form-style label/field 
 
 ### 5.1 `Grid` — explicit row and column tracks
 
-[crates/fern-widgets/src/primitives/grid.rs](../crates/fern-widgets/src/primitives/grid.rs)
+[crates/bastyde-widgets/src/primitives/grid.rs](../crates/bastyde-widgets/src/primitives/grid.rs)
 
 Children are placed in **row-major order** — child *i* goes to row `i / cols`, column `i % cols`. Tracks come in three sizing modes:
 
 ```rust
-use fern_ui::widgets::{Grid, TrackSize};
+use bastyde::widgets::{Grid, TrackSize};
 
 // 3 columns: [auto | 1fr | 80px], 2 rows of intrinsic height
 Grid::new()
@@ -332,13 +332,13 @@ Grid::new()
 - **`Auto`** — sized to the largest child intrinsic size in that track.
 - **`Fractional(weight)`** — splits remaining space (after Fixed and Auto are claimed) by weight.
 
-**Two-pass layout.** Auto tracks are resolved against children's unspecified-proposal width. Fractional tracks then take the remainder. Children that landed in Fractional columns *narrower* than their intrinsic single-line width are re-measured at the resolved column width — wrapping content reports its actual wrapped height instead of bleeding outside its cell. See [grid.rs:159-223](../crates/fern-widgets/src/primitives/grid.rs#L159-L223) for the reasoning.
+**Two-pass layout.** Auto tracks are resolved against children's unspecified-proposal width. Fractional tracks then take the remainder. Children that landed in Fractional columns *narrower* than their intrinsic single-line width are re-measured at the resolved column width — wrapping content reports its actual wrapped height instead of bleeding outside its cell. See [grid.rs:159-223](../crates/bastyde-widgets/src/primitives/grid.rs#L159-L223) for the reasoning.
 
 Both `column_gap` and `row_gap` accept `impl Into<Prop<f32>>`.
 
 ### 5.2 `Wrap` — line-breaking flow
 
-[crates/fern-widgets/src/primitives/wrap.rs](../crates/fern-widgets/src/primitives/wrap.rs)
+[crates/bastyde-widgets/src/primitives/wrap.rs](../crates/bastyde-widgets/src/primitives/wrap.rs)
 
 A horizontal flow that wraps to the next line when a child won't fit. Each child keeps its intrinsic size; lines are packed greedily.
 
@@ -355,7 +355,7 @@ Use cases: tag clouds, toolbar overflow, chip lists, breadcrumb segments that fo
 
 ### 5.3 `MasonryLayout` — Pinterest-style packing
 
-[crates/fern-widgets/src/primitives/masonry.rs](../crates/fern-widgets/src/primitives/masonry.rs)
+[crates/bastyde-widgets/src/primitives/masonry.rs](../crates/bastyde-widgets/src/primitives/masonry.rs)
 
 Variable-height grid where each child slots into the **shortest column** at the time. Column count is fixed; column width is `(available_width − gaps) / columns`. RTL-aware (column 0 is the rightmost in RTL).
 
@@ -372,7 +372,7 @@ Each child is queried at column-width to get its real height, then placed under 
 
 ### 5.4 `FormLayout` — two-column label / field
 
-[crates/fern-widgets/src/primitives/form_layout.rs](../crates/fern-widgets/src/primitives/form_layout.rs)
+[crates/bastyde-widgets/src/primitives/form_layout.rs](../crates/bastyde-widgets/src/primitives/form_layout.rs)
 
 A specialized two-column layout: label column auto-sizes to the widest label, field column takes the rest. Supports full-width rows for separators or wide inputs.
 
@@ -397,7 +397,7 @@ Row height is `max(label.height, field.height)`. The label column width is the w
 
 ### 5.5 `Switcher` — show one child at a time
 
-[crates/fern-widgets/src/primitives/switcher.rs](../crates/fern-widgets/src/primitives/switcher.rs)
+[crates/bastyde-widgets/src/primitives/switcher.rs](../crates/bastyde-widgets/src/primitives/switcher.rs)
 
 Internally a `ZStack` where each child has a `visible_when` binding derived from `selected.map(|i| i == index)`. Layout is the size of the active child.
 
@@ -420,7 +420,7 @@ Use for tab content, wizard pages, or any "one of N visible" pattern. Hidden fro
 
 ### 6.1 `Divider` — themed separator line
 
-[crates/fern-widgets/src/primitives/divider.rs](../crates/fern-widgets/src/primitives/divider.rs)
+[crates/bastyde-widgets/src/primitives/divider.rs](../crates/bastyde-widgets/src/primitives/divider.rs)
 
 A 1 px (theme-tokenable) line. Horizontal by default, fills the proposal's main axis, claims `thickness` on the cross axis.
 
@@ -438,7 +438,7 @@ HStack::new()
 
 `color()` accepts the full `ColorProp` range — `Color`, a role (typically `BorderRole`), or `Signal<Color>`. Defaults to `BorderRole::Divider`. Emits `Role::Splitter` to AT.
 
-Note: `Divider` is a *visual* separator, not a draggable splitter — for drag-to-resize panes, use `SplitView` from fern-widgets.
+Note: `Divider` is a *visual* separator, not a draggable splitter — for drag-to-resize panes, use `SplitView` from bastyde-widgets.
 
 ### 6.2 Spacing summary
 
@@ -508,12 +508,12 @@ Behavior under `prefers-reduced-motion`: `to_or_snap` snaps the value instead of
 
 ## 9. Composing your own
 
-A custom layout container is an ordinary `Widget` that returns children from `build()`, picks a wanted size in `layout_response`, and places its children in `place_children`. The layout engine doesn't care whether a widget is shipped in fern-widgets or written in your app crate.
+A custom layout container is an ordinary `Widget` that returns children from `build()`, picks a wanted size in `layout_response`, and places its children in `place_children`. The layout engine doesn't care whether a widget is shipped in bastyde-widgets or written in your app crate.
 
 ```rust
-use fern_canvas::{Point, Rect, Size, SizeProposal};
-use fern_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
-use fern_core::widget_id::WidgetId;
+use bastyde_canvas::{Point, Rect, Size, SizeProposal};
+use bastyde_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
+use bastyde_core::widget_id::WidgetId;
 
 #[derive(Debug)]
 struct StaggeredColumn {
@@ -563,14 +563,14 @@ Three things to remember:
 - **Match `place_children`'s child query to your sizing policy.** If `layout_response` queried with `SizeProposal::with_width(w)`, query the same way in `place_children` — otherwise wrapping children measure twice with different results.
 - **Honor flex.** If your layout wants stacks-style slack distribution, sum `child_layout_response(...).flex` and apply the standard rule. If your layout doesn't distribute slack, ignore flex; that's fine.
 
-For testing, [crates/fern-core/src/test_widgets.rs](../crates/fern-core/src/test_widgets.rs) ships `FillWidget` and `StackWidget` (pub(crate)); for end-to-end layout tests use `WidgetTree` directly with `tree.layout(SizeProposal::exact(w, h))` and assert `tree.bounds(id)`.
+For testing, [crates/bastyde-core/src/test_widgets.rs](../crates/bastyde-core/src/test_widgets.rs) ships `FillWidget` and `StackWidget` (pub(crate)); for end-to-end layout tests use `WidgetTree` directly with `tree.layout(SizeProposal::exact(w, h))` and assert `tree.bounds(id)`.
 
 ---
 
 ## 10. References
 
-- Architecture: [fern-ui-architecture.md §2 Layout Model](fern-ui-architecture.md)
-- Reactive layer: [reactive-theme.md](reactive-theme.md), `Signal<T>` / `Prop<T>` in [crates/fern-core/src/signal.rs](../crates/fern-core/src/signal.rs)
+- Architecture: [bastyde-architecture.md §2 Layout Model](bastyde-architecture.md)
+- Reactive layer: [reactive-theme.md](reactive-theme.md), `Signal<T>` / `Prop<T>` in [crates/bastyde-core/src/signal.rs](../crates/bastyde-core/src/signal.rs)
 - Animation tied to layout: [animation.md](animation.md)
-- Custom widget patterns: [`Widget` trait](../crates/fern-core/src/widget.rs), [BuildContext](../crates/fern-core/src/build_context.rs)
+- Custom widget patterns: [`Widget` trait](../crates/bastyde-core/src/widget.rs), [BuildContext](../crates/bastyde-core/src/build_context.rs)
 - Visual tour: `cargo run -p widget-catalog`, `cargo run -p text-and-layout`, `cargo run -p data-grid`

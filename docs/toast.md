@@ -1,22 +1,22 @@
 # Toast Notification Reference
 
-`fern_widgets::toast` ships the FernUI notification system: stackable,
+`bastyde_widgets::toast` ships the Bastyde notification system: stackable,
 action-rich, severity-aware floating notifications backed by a
 persistent archive with a log + bell-button + dialog UI.
 
 Mental model in one line:
 
 ```
-FernAppBuilder.install_toast_default() → ctx.show_toast(Toast::…) from any handler
+BastydeAppBuilder.install_toast_default() → ctx.show_toast(Toast::…) from any handler
 ```
 
 Distinct from siblings:
 
 | Widget | Shape | Lifetime | Stackable | Archive |
 |---|---|---|---|---|
-| [`Snackbar`](../crates/fern-widgets/src/snackbar.rs) | Bottom-center, single-instance | Auto-dismiss (4s default) | No (calls `dismiss_all_except_hosts`) | No |
-| [`Banner`](../crates/fern-widgets/src/banner.rs) | Inline persistent strip | Until user dismisses | No (inline) | No |
-| [`MessageBox`](../crates/fern-widgets/src/message_box.rs) | Modal dialog | Until user picks a button | No (one modal at a time) | No |
+| [`Snackbar`](../crates/bastyde-widgets/src/snackbar.rs) | Bottom-center, single-instance | Auto-dismiss (4s default) | No (calls `dismiss_all_except_hosts`) | No |
+| [`Banner`](../crates/bastyde-widgets/src/banner.rs) | Inline persistent strip | Until user dismisses | No (inline) | No |
+| [`MessageBox`](../crates/bastyde-widgets/src/message_box.rs) | Modal dialog | Until user picks a button | No (one modal at a time) | No |
 | **`Toast`** | Corner-anchored, stackable | Auto-dismiss (10s default) or persistent | **Yes** | **Yes** (persistent across restarts) |
 
 End-to-end demo: `cargo run -p toast-demo`. Source:
@@ -27,11 +27,11 @@ End-to-end demo: `cargo run -p toast-demo`. Source:
 ## Quickstart
 
 ```rust
-use fern_ui::prelude::*;
-use fern_ui::settings::AppPaths;
+use bastyde::prelude::*;
+use bastyde::settings::AppPaths;
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .theme(intui::light())
         .app_paths(AppPaths::new("com", "FernTech", "MyApp").unwrap())
         .install_toast_default()                    // ← one-line install
@@ -83,8 +83,8 @@ ctx.show_toast(
 
 ## Installing the toast system
 
-One line at the builder. The `FernAppBuilderToastExt` extension trait
-is re-exported from the umbrella prelude (`fern_ui::prelude::*`) so
+One line at the builder. The `BastydeAppBuilderToastExt` extension trait
+is re-exported from the umbrella prelude (`bastyde::prelude::*`) so
 `install_toast(...)` / `install_toast_default()` are callable without
 an extra import:
 
@@ -99,7 +99,7 @@ an extra import:
 
 The toast subsystem ships behind the umbrella's `toast` feature
 (default-on). To drop it (and the bell-icon SVG + archive code),
-depend on `fern-ui` with `default-features = false` and re-add only
+depend on `bastyde` with `default-features = false` and re-add only
 the features you need.
 
 What `install_toast` does, internally:
@@ -110,7 +110,7 @@ What `install_toast` does, internally:
    message otherwise.
 2. Constructs a shared [`ToastRegistry`](#toastregistry) bound to the
    archive (or naked if no archive is configured).
-3. Registers a [`DefaultPostRoot`](../crates/fern-app/src/default_post_root.rs)
+3. Registers a [`DefaultPostRoot`](../crates/bastyde-app/src/default_post_root.rs)
    closure that wraps every window's root with
    `ZStack { user_root, ToastHost::new(registry, options) }`. The
    `DefaultPostRoot` fires for every window the app opens — initial
@@ -351,7 +351,7 @@ The persistent layer behind the live toast queue. Two backends:
 | `Persistent { file_name, limit }` | `<config>/<file>.toml` via [`PersistedListModel`](settings.md#listfile-and-persistedlistmodel). Survives restarts. |
 
 Default `limit`: `DEFAULT_ARCHIVE_LIMIT = 200`. IntelliJ keeps
-hundreds; FernUI picks a pragmatic cap so persistent files don't
+hundreds; Bastyde picks a pragmatic cap so persistent files don't
 grow unbounded.
 
 ### `NotificationEntry`
@@ -437,7 +437,7 @@ VStack {
 }
 ```
 
-Each row is a [`StandardListItem`](../crates/fern-widgets/src/standard_item.rs):
+Each row is a [`StandardListItem`](../crates/bastyde-widgets/src/standard_item.rs):
 severity glyph leading, title in `BodyBold` (unread) / `Body`
 (read), body as subtitle, action buttons trailing. Outer node
 carries `Role::List` + `set_name("Notifications")`.
@@ -615,7 +615,7 @@ Built-in keys (en-US source + fr-FR translation shipped):
 | `notifications-archive-replay-disabled` | "(no longer available)" |
 
 Apps that need more locales register them through the framework's
-standard `I18nConfig::framework_locales(fern_widgets::framework_locales())`.
+standard `I18nConfig::framework_locales(bastyde_widgets::framework_locales())`.
 
 ---
 
@@ -623,27 +623,27 @@ standard `I18nConfig::framework_locales(fern_widgets::framework_locales())`.
 
 | Concern | File |
 |---|---|
-| `Toast` request + `ToastAction` + `ToastDismissCause` + `ToastHandle` + `ToastInstallOptions` | [crates/fern-widgets/src/toast.rs](../crates/fern-widgets/src/toast.rs) |
-| `ToastRegistry` (queue + archive bridge + in-place merge) | [crates/fern-widgets/src/toast/registry.rs](../crates/fern-widgets/src/toast/registry.rs) |
-| `EventContextToastExt` (`ctx.show_toast` / `ctx.dismiss_toast`) | [crates/fern-widgets/src/toast/ext.rs](../crates/fern-widgets/src/toast/ext.rs) |
-| `ToastSurface` (chrome + a11y + custom actions) | [crates/fern-widgets/src/toast/surface.rs](../crates/fern-widgets/src/toast/surface.rs) |
-| `ToastHost` (queue display + timer + hover-pause) | [crates/fern-widgets/src/toast/host.rs](../crates/fern-widgets/src/toast/host.rs) |
-| `RecipeToastStyle` (default chrome) | [crates/fern-widgets/src/styles/recipe_toast_style.rs](../crates/fern-widgets/src/styles/recipe_toast_style.rs) |
-| `ToastStyle` trait + `ToastPriority` + `ToastStyleConfig` | [crates/fern-core/src/styles/toast_style.rs](../crates/fern-core/src/styles/toast_style.rs) |
-| `NotificationEntry` + `ArchivedAction` + `NotificationUpdate` | [crates/fern-widgets/src/notification.rs](../crates/fern-widgets/src/notification.rs) |
-| `NotificationArchiveModel` (`InMemory` / `Persistent`) | [crates/fern-widgets/src/notification/archive.rs](../crates/fern-widgets/src/notification/archive.rs) |
-| `NotificationLog` (toolbar + buckets + rows) | [crates/fern-widgets/src/notification/log.rs](../crates/fern-widgets/src/notification/log.rs) |
-| `NotificationCenterButton` (bell + badge + popover) | [crates/fern-widgets/src/notification/center_button.rs](../crates/fern-widgets/src/notification/center_button.rs) |
-| `NotificationLogDialog` (modal preset) | [crates/fern-widgets/src/notification/log_dialog.rs](../crates/fern-widgets/src/notification/log_dialog.rs) |
-| `install_toast` extension trait (`FernAppBuilderToastExt`) | [crates/fern-ui/src/toast_install.rs](../crates/fern-ui/src/toast_install.rs) |
+| `Toast` request + `ToastAction` + `ToastDismissCause` + `ToastHandle` + `ToastInstallOptions` | [crates/bastyde-widgets/src/toast.rs](../crates/bastyde-widgets/src/toast.rs) |
+| `ToastRegistry` (queue + archive bridge + in-place merge) | [crates/bastyde-widgets/src/toast/registry.rs](../crates/bastyde-widgets/src/toast/registry.rs) |
+| `EventContextToastExt` (`ctx.show_toast` / `ctx.dismiss_toast`) | [crates/bastyde-widgets/src/toast/ext.rs](../crates/bastyde-widgets/src/toast/ext.rs) |
+| `ToastSurface` (chrome + a11y + custom actions) | [crates/bastyde-widgets/src/toast/surface.rs](../crates/bastyde-widgets/src/toast/surface.rs) |
+| `ToastHost` (queue display + timer + hover-pause) | [crates/bastyde-widgets/src/toast/host.rs](../crates/bastyde-widgets/src/toast/host.rs) |
+| `RecipeToastStyle` (default chrome) | [crates/bastyde-widgets/src/styles/recipe_toast_style.rs](../crates/bastyde-widgets/src/styles/recipe_toast_style.rs) |
+| `ToastStyle` trait + `ToastPriority` + `ToastStyleConfig` | [crates/bastyde-core/src/styles/toast_style.rs](../crates/bastyde-core/src/styles/toast_style.rs) |
+| `NotificationEntry` + `ArchivedAction` + `NotificationUpdate` | [crates/bastyde-widgets/src/notification.rs](../crates/bastyde-widgets/src/notification.rs) |
+| `NotificationArchiveModel` (`InMemory` / `Persistent`) | [crates/bastyde-widgets/src/notification/archive.rs](../crates/bastyde-widgets/src/notification/archive.rs) |
+| `NotificationLog` (toolbar + buckets + rows) | [crates/bastyde-widgets/src/notification/log.rs](../crates/bastyde-widgets/src/notification/log.rs) |
+| `NotificationCenterButton` (bell + badge + popover) | [crates/bastyde-widgets/src/notification/center_button.rs](../crates/bastyde-widgets/src/notification/center_button.rs) |
+| `NotificationLogDialog` (modal preset) | [crates/bastyde-widgets/src/notification/log_dialog.rs](../crates/bastyde-widgets/src/notification/log_dialog.rs) |
+| `install_toast` extension trait (`BastydeAppBuilderToastExt`) | [crates/bastyde/src/toast_install.rs](../crates/bastyde/src/toast_install.rs) |
 | Runnable demo | [examples/toast_demo/src/main.rs](../examples/toast_demo/src/main.rs) |
 
 ## Related core API additions
 
-The toast system landed alongside small fern-core extensions reusable
+The toast system landed alongside small bastyde-core extensions reusable
 by other overlay-shaped widgets:
 
-- `fern_tokens::Corner` (`TopLeading` / `TopTrailing` / `BottomLeading` /
+- `bastyde_tokens::Corner` (`TopLeading` / `TopTrailing` / `BottomLeading` /
   `BottomTrailing`) with RTL-aware `resolve(content, viewport, margin, rtl)`.
 - `OverlayPlacement::ViewportCorner { corner, margin }` —
   anchor-independent corner-snapped overlay placement.
@@ -655,10 +655,10 @@ by other overlay-shaped widgets:
 - `EventContext::pause_overlay_auto_dismiss(id)` /
   `resume_overlay_auto_dismiss(id)` — handler-side queue that
   forwards to `OverlayManager` after the dispatcher returns.
-- `FernAppBuilder::configured_app_paths()` — read-side companion to
+- `BastydeAppBuilder::configured_app_paths()` — read-side companion to
   the existing `app_paths(paths)` setter. Builder-extension traits
   use it to open persistent files at install time before `run`.
-- `fern_core::styles::ToastStyle` slot + `ComponentStyleSlots::toast`.
+- `bastyde_core::styles::ToastStyle` slot + `ComponentStyleSlots::toast`.
 
 ## Limitations & explicit non-goals
 
@@ -670,7 +670,7 @@ by other overlay-shaped widgets:
   toast): out of scope. Toast is an *in-app* widget. Apps wanting
   OS notifications wire that through a separate crate.
 - **Inline reply / combo / picker inside a toast** (Windows toast
-  text-box / combo): non-portable, out of pattern for FernUI.
+  text-box / combo): non-portable, out of pattern for Bastyde.
 - **Cross-window deduplication**: `Toast::id` is per-app (the
   registry is app-singleton), but the `NotificationLog` rebuild
   signal is per-archive — multi-window apps see the SAME log in

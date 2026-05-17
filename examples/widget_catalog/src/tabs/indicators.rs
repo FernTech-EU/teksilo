@@ -1,13 +1,13 @@
 //! Indicators tab — read-only status: ProgressBar, Spinner, Link, Badge, Avatar.
 //!
 //! `classic()` constructs every widget with imperative builder calls
-//! (`Type::new().method(...)`). `fern()` constructs the *same* widget
-//! tree via the `fern!` macro DSL so the toggle visibly proves the two
+//! (`Type::new().method(...)`). `bati()` constructs the *same* widget
+//! tree via the `bati!` macro DSL so the toggle visibly proves the two
 //! authoring styles produce identical output.
 
-use fern_ui::prelude::*;
-use fern_ui::tokens::Orientation;
-use fern_ui::widgets::{
+use bastyde::prelude::*;
+use bastyde::tokens::Orientation;
+use bastyde::widgets::{
     Avatar, AvatarPresence, AvatarShape, AvatarSize, Badge, Divider, FixedSize, HStack, Link,
     ProgressBar, Spinner, TextWidget, VStack,
 };
@@ -110,15 +110,15 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-// ── fern! DSL version ──────────────────────────────────────────────────
+// ── bati! DSL version ──────────────────────────────────────────────────
 //
-// Same widget tree as `classic`, expressed in fern! syntax. The block
+// Same widget tree as `classic`, expressed in bati! syntax. The block
 // shape is `Type::ctor(args) { method: value … bare_child … }` per the
-// fern! reference. Children of a stack are written as bare expressions
+// bati! reference. Children of a stack are written as bare expressions
 // (UpperCamel calls) or via the `child:` property for free functions
 // returning Widget.
-pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
-    fern!(ctx => VStack {
+pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+    bati!(ctx => VStack {
             spacing: 20.0
 
             // header (title + refs)

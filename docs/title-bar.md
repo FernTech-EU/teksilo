@@ -1,13 +1,13 @@
 # TitleBar Reference
 
-FernUI replaces the native OS title bar with a widget-level one when an application opts into custom chrome. The title bar is a single cross-platform widget ([`TitleBar`](../crates/fern-widgets/src/title_bar.rs)); the window-manipulation plumbing (drag, zoom, close, inset measurements) lives behind a per-OS trait ([`PlatformTitleBarHost`](../crates/fern-core/src/window_chrome.rs)). The widget never touches `NSWindow`, `HWND`, or `xdg_toplevel` directly.
+Bastyde replaces the native OS title bar with a widget-level one when an application opts into custom chrome. The title bar is a single cross-platform widget ([`TitleBar`](../crates/bastyde-widgets/src/title_bar.rs)); the window-manipulation plumbing (drag, zoom, close, inset measurements) lives behind a per-OS trait ([`PlatformTitleBarHost`](../crates/bastyde-core/src/window_chrome.rs)). The widget never touches `NSWindow`, `HWND`, or `xdg_toplevel` directly.
 
 | Layer | Type | Crate | What it does |
 |-------|------|-------|--------------|
-| **Widget** | [`TitleBar`](../crates/fern-widgets/src/title_bar.rs) | `fern-widgets` | Lays out the bar, dispatches gestures, renders controls |
-| **Host trait** | [`PlatformTitleBarHost`](../crates/fern-core/src/window_chrome.rs) | `fern-core` | Seam between the widget and the OS |
-| **Backends** | `WaylandHost` / `MacOsHost` / `WindowsHost` / `X11Host` | `fern-platform` | Concrete per-OS implementations |
-| **Resize frame** | [`WindowFrame`](../crates/fern-widgets/src/title_bar/window_frame.rs) | `fern-widgets` | Optional invisible edge-resize overlay for borderless windows |
+| **Widget** | [`TitleBar`](../crates/bastyde-widgets/src/title_bar.rs) | `bastyde-widgets` | Lays out the bar, dispatches gestures, renders controls |
+| **Host trait** | [`PlatformTitleBarHost`](../crates/bastyde-core/src/window_chrome.rs) | `bastyde-core` | Seam between the widget and the OS |
+| **Backends** | `WaylandHost` / `MacOsHost` / `WindowsHost` / `X11Host` | `bastyde-platform` | Concrete per-OS implementations |
+| **Resize frame** | [`WindowFrame`](../crates/bastyde-widgets/src/title_bar/window_frame.rs) | `bastyde-widgets` | Optional invisible edge-resize overlay for borderless windows |
 
 The backend is constructed by `WindowManager` when the app opts into custom chrome, and handed to the widget tree. You retrieve it from the root-builder closure and pass it to `TitleBar::new`.
 
@@ -16,11 +16,11 @@ The backend is constructed by `WindowManager` when the app opts into custom chro
 ## Quick start
 
 ```rust
-use fern_ui::prelude::*;
-use fern_ui::widgets::{Expand, RectWidget, TextWidget, TitleBar, VStack, ZStack};
+use bastyde::prelude::*;
+use bastyde::widgets::{Expand, RectWidget, TextWidget, TitleBar, VStack, ZStack};
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .theme(intui::dark())
         .window_title("My App")
         .window_size(900, 600)
@@ -56,8 +56,8 @@ fn main() {
 
 Two entry points matter:
 
-1. [`FernAppBuilder::custom_chrome(true)`](../crates/fern-app/src/app.rs) — opts the initial window into custom chrome. When using `initial_window(WindowConfig)`, set `WindowConfig::custom_chrome(true)` directly instead.
-2. [`WidgetTree::title_bar_host()`](../crates/fern-core/src/widget_tree.rs) — returns `Option<Rc<dyn PlatformTitleBarHost>>`. `None` means *either* the app didn't opt in *or* the platform has no backend (X11). Always handle both arms; a fallback view keeps the app usable on the unsupported path.
+1. [`BastydeAppBuilder::custom_chrome(true)`](../crates/bastyde-app/src/app.rs) — opts the initial window into custom chrome. When using `initial_window(WindowConfig)`, set `WindowConfig::custom_chrome(true)` directly instead.
+2. [`WidgetTree::title_bar_host()`](../crates/bastyde-core/src/widget_tree.rs) — returns `Option<Rc<dyn PlatformTitleBarHost>>`. `None` means *either* the app didn't opt in *or* the platform has no backend (X11). Always handle both arms; a fallback view keeps the app usable on the unsupported path.
 
 Working demo: [`examples/title_bar_demo/src/main.rs`](../examples/title_bar_demo/src/main.rs) — `cargo run -p title-bar-demo`.
 
@@ -92,7 +92,7 @@ TitleBar::new(host)
     .close_action(|ctx| ctx.close_window())       // optional override
 ```
 
-Full builder surface in [title_bar.rs](../crates/fern-widgets/src/title_bar.rs).
+Full builder surface in [title_bar.rs](../crates/bastyde-widgets/src/title_bar.rs).
 
 ---
 
@@ -114,13 +114,13 @@ The widget is identical everywhere; the host decides what renders where. `TitleB
 
 On macOS, because `renders_custom_controls()` is `false`, `WindowControls` never enters the tree — the OS's native traffic lights are what you see.
 
-Window minimize / maximize / close are **not** trait methods. They flow through [`WindowState::placement`](../crates/fern-core/src/window/state.rs) (a `Signal<WindowPlacement>`) and `WindowState::close` — `WindowControls` mutates these and the app-level [`apply_window_command`](../crates/fern-app/src/window_manager.rs) translates each `WindowCommand` into the matching winit call. OS-initiated changes flow back via `set_placement_from_os` (re-entrancy guarded).
+Window minimize / maximize / close are **not** trait methods. They flow through [`WindowState::placement`](../crates/bastyde-core/src/window/state.rs) (a `Signal<WindowPlacement>`) and `WindowState::close` — `WindowControls` mutates these and the app-level [`apply_window_command`](../crates/bastyde-app/src/window_manager.rs) translates each `WindowCommand` into the matching winit call. OS-initiated changes flow back via `set_placement_from_os` (re-entrancy guarded).
 
 ---
 
 ## `PlatformTitleBarHost` trait
 
-Full signature in [fern-core/src/window_chrome.rs](../crates/fern-core/src/window_chrome.rs). The trait is intentionally `!Send + !Sync` (it owns platform-handle `Rc`s) and is passed around as `Rc<dyn PlatformTitleBarHost>`.
+Full signature in [bastyde-core/src/window_chrome.rs](../crates/bastyde-core/src/window_chrome.rs). The trait is intentionally `!Send + !Sync` (it owns platform-handle `Rc`s) and is passed around as `Rc<dyn PlatformTitleBarHost>`.
 
 | Method | Purpose |
 |---|---|
@@ -142,7 +142,7 @@ Window-state mutations (minimize, maximize, close) are **not** trait methods. Th
 
 ### `Widget::after_paint` aggregation
 
-`TitleBar` overrides [`Widget::after_paint`](../crates/fern-core/src/widget.rs) (gated on `wants_after_paint() == true`) to publish a single complete `HitRegions` snapshot per frame. The hook receives a read-only [`WidgetTreeView`](../crates/fern-core/src/widget.rs) so the parent can read the resolved bounds of memoised descendants — the drag region and the three `ControlButton`s registered by `WindowControls` via a shared layout sink. Wayland and macOS hosts ignore the published payload (their `update_hit_regions` is a no-op); the Windows host converts logical→physical via `GetDpiForWindow(hwnd)` and stores the snapshot under a `Mutex` for `WM_NCHITTEST` to consume.
+`TitleBar` overrides [`Widget::after_paint`](../crates/bastyde-core/src/widget.rs) (gated on `wants_after_paint() == true`) to publish a single complete `HitRegions` snapshot per frame. The hook receives a read-only [`WidgetTreeView`](../crates/bastyde-core/src/widget.rs) so the parent can read the resolved bounds of memoised descendants — the drag region and the three `ControlButton`s registered by `WindowControls` via a shared layout sink. Wayland and macOS hosts ignore the published payload (their `update_hit_regions` is a no-op); the Windows host converts logical→physical via `GetDpiForWindow(hwnd)` and stores the snapshot under a `Mutex` for `WM_NCHITTEST` to consume.
 
 This is also why per-button publishing from `ControlButton::paint` would be wrong: `update_hit_regions` is replace-semantics, so concurrent publishes by sibling controls would each clobber the previous payload. Aggregation in the parent is the only correct approach.
 
@@ -152,7 +152,7 @@ This is also why per-button publishing from `ControlButton::paint` would be wron
 
 The close button on `WindowControls` has two paths:
 
-1. **Default** — the button's `on_tap` calls [`EventContext::close_window`](../crates/fern-core/src/widget.rs), which queues a `WindowCommand::Close` on the window's `WindowState`. The app drains the queue on the next event-loop tick (winit 0.30 has no synchronous `Window::request_close`, so we hop through the command queue).
+1. **Default** — the button's `on_tap` calls [`EventContext::close_window`](../crates/bastyde-core/src/widget.rs), which queues a `WindowCommand::Close` on the window's `WindowState`. The app drains the queue on the next event-loop tick (winit 0.30 has no synchronous `Window::request_close`, so we hop through the command queue).
 2. **Override** — `TitleBar::close_action(|ctx| …)` replaces the default `on_tap` entirely. Useful when the app wants to confirm unsaved work first, or to send an `Intent` for a root-level `Action`:
 
 ```rust
@@ -161,13 +161,13 @@ TitleBar::new(host).close_action(|ctx| ctx.close_window())
 TitleBar::new(host).close_action(|ctx| ctx.send_intent(AppIntent::RequestQuit))
 ```
 
-The override fires on **every** backend including Windows: when the OS reports `WM_NCLBUTTONUP` over the close-button rect, fern-platform posts a `TitleBarSyntheticEvent` through `AppEvent::External`, the dispatcher resolves the button's `WidgetId` via `host.title_bar_widget_id(Close)`, and `WidgetTree::synthesise_tap` runs the same `on_tap` handler the override installed.
+The override fires on **every** backend including Windows: when the OS reports `WM_NCLBUTTONUP` over the close-button rect, bastyde-platform posts a `TitleBarSyntheticEvent` through `AppEvent::External`, the dispatcher resolves the button's `WidgetId` via `host.title_bar_widget_id(Close)`, and `WidgetTree::synthesise_tap` runs the same `on_tap` handler the override installed.
 
 ---
 
 ## Reactive maximize
 
-`TitleBar` derives the maximize signal from the hosting window's [`WindowState::placement`](../crates/fern-core/src/window/state.rs):
+`TitleBar` derives the maximize signal from the hosting window's [`WindowState::placement`](../crates/bastyde-core/src/window/state.rs):
 
 ```rust
 let is_maximized_signal = ctx
@@ -195,7 +195,7 @@ user clicks maximize ─► ControlButton on_tap fires:
                        OS zooms, fires WindowEvent::Resized
                                                     │
                                                     ▼
-              FernAppHandler::window_event → set_placement_from_os(...)
+              BastydeAppHandler::window_event → set_placement_from_os(...)
                                   (re-entrancy guarded — observers don't echo)
                                                     │
                                                     ▼
@@ -213,7 +213,7 @@ OS-initiated maximizes (macOS green-light zoom, Windows drag-to-top snap, Waylan
 
 ## `WindowFrame` — edge resize for borderless windows
 
-On Wayland and (eventually) Windows, a borderless window has no OS-drawn frame, so nothing catches clicks at the 1-pixel edge for a resize. [`WindowFrame`](../crates/fern-widgets/src/title_bar/window_frame.rs) solves that with an invisible overlay of resize strips along the four edges and four corners.
+On Wayland and (eventually) Windows, a borderless window has no OS-drawn frame, so nothing catches clicks at the 1-pixel edge for a resize. [`WindowFrame`](../crates/bastyde-widgets/src/title_bar/window_frame.rs) solves that with an invisible overlay of resize strips along the four edges and four corners.
 
 ```rust
 match tree.title_bar_host() {
@@ -240,7 +240,7 @@ The Windows host extends the DWM-drawn frame into the client area with a 1-pixel
 - `WM_NCCALCSIZE` — zero non-client insets so the client area covers the full window. When `IsZoomed` is true, restore the system `SM_CXFRAME + SM_CXPADDEDBORDER` insets and clamp to the monitor work area so the maximized window doesn't cover the taskbar.
 - `WM_NCHITTEST` — return `HTLEFT` / `HTTOP` / corner codes for the outer N pixels (so the OS handles the resize loop natively, with the right cursor and snap behavior), `HTCAPTION` for the widget's drag region, and `HTMINBUTTON` / `HTMAXBUTTON` / `HTCLOSE` for the control-button rects. Returning `HTMAXBUTTON` is what makes Win11 show the snap-layout flyout on hover.
 - `WM_NCLBUTTONDOWN` over a button hit code — return 0 to prevent `DefSubclassProc` from entering its built-in press-tracking modal loop, which would otherwise consume the matching `WM_NCLBUTTONUP` itself (user-visible symptom: the button appears to need a double-click).
-- `WM_NCLBUTTONUP` over a button hit code — post a [`TitleBarSyntheticEvent`](../crates/fern-core/src/window_chrome.rs) through `AppEventProxy::send_external_boxed`. The fern-app dispatcher resolves the matching `WidgetId` via `host.title_bar_widget_id(target)` and calls `WidgetTree::synthesise_tap` to run the button's `on_tap` handler. `close_action` overrides fire here.
+- `WM_NCLBUTTONUP` over a button hit code — post a [`TitleBarSyntheticEvent`](../crates/bastyde-core/src/window_chrome.rs) through `AppEventProxy::send_external_boxed`. The bastyde-app dispatcher resolves the matching `WidgetId` via `host.title_bar_widget_id(target)` and calls `WidgetTree::synthesise_tap` to run the button's `on_tap` handler. `close_action` overrides fire here.
 - `WM_NCMOUSEMOVE` / `WM_NCMOUSELEAVE` — post `TitleBarHoverEvent` for the same reason. The host writes the matching `Signal<bool>` (registered by `WindowControls` via `host.register_hover_signal(...)` at build time); an effect inside `ControlButton` maps the bool to its visual `bg_signal`, so OS-driven hover renders identically to widget-tree hover.
 - `WM_DPICHANGED` — re-call `DwmExtendFrameIntoClientArea` so rounded corners survive a DPI change (winit handles the resize but doesn't re-extend). Falls through to `DefSubclassProc` for the rest.
 - `WM_NCPAINT` / `WM_NCACTIVATE` — return early (`0` and `TRUE` respectively) so DWM doesn't paint legacy caption-button artwork over our pixels and the frame doesn't flicker on focus changes.
@@ -267,25 +267,25 @@ The `Vec<Rect>` for drag lets apps split the drag band around a centered search 
 ## File reference
 
 Widget layer:
-- [crates/fern-widgets/src/title_bar.rs](../crates/fern-widgets/src/title_bar.rs) — `TitleBar` builder + layout
-- [crates/fern-widgets/src/title_bar/controls.rs](../crates/fern-widgets/src/title_bar/controls.rs) — `WindowControls`, `ControlButton`
-- [crates/fern-widgets/src/title_bar/drag_region.rs](../crates/fern-widgets/src/title_bar/drag_region.rs) — `DragRegion`
-- [crates/fern-widgets/src/title_bar/window_frame.rs](../crates/fern-widgets/src/title_bar/window_frame.rs) — `WindowFrame`, `ResizeStrip`
+- [crates/bastyde-widgets/src/title_bar.rs](../crates/bastyde-widgets/src/title_bar.rs) — `TitleBar` builder + layout
+- [crates/bastyde-widgets/src/title_bar/controls.rs](../crates/bastyde-widgets/src/title_bar/controls.rs) — `WindowControls`, `ControlButton`
+- [crates/bastyde-widgets/src/title_bar/drag_region.rs](../crates/bastyde-widgets/src/title_bar/drag_region.rs) — `DragRegion`
+- [crates/bastyde-widgets/src/title_bar/window_frame.rs](../crates/bastyde-widgets/src/title_bar/window_frame.rs) — `WindowFrame`, `ResizeStrip`
 
 Core trait:
-- [crates/fern-core/src/window_chrome.rs](../crates/fern-core/src/window_chrome.rs)
+- [crates/bastyde-core/src/window_chrome.rs](../crates/bastyde-core/src/window_chrome.rs)
 
 Backends:
-- [crates/fern-platform/src/title_bar_host.rs](../crates/fern-platform/src/title_bar_host.rs) — factory
-- [crates/fern-platform/src/title_bar_host/macos.rs](../crates/fern-platform/src/title_bar_host/macos.rs)
-- [crates/fern-platform/src/title_bar_host/wayland.rs](../crates/fern-platform/src/title_bar_host/wayland.rs)
-- [crates/fern-platform/src/title_bar_host/windows.rs](../crates/fern-platform/src/title_bar_host/windows.rs)
-- [crates/fern-platform/src/title_bar_host/x11.rs](../crates/fern-platform/src/title_bar_host/x11.rs)
+- [crates/bastyde-platform/src/title_bar_host.rs](../crates/bastyde-platform/src/title_bar_host.rs) — factory
+- [crates/bastyde-platform/src/title_bar_host/macos.rs](../crates/bastyde-platform/src/title_bar_host/macos.rs)
+- [crates/bastyde-platform/src/title_bar_host/wayland.rs](../crates/bastyde-platform/src/title_bar_host/wayland.rs)
+- [crates/bastyde-platform/src/title_bar_host/windows.rs](../crates/bastyde-platform/src/title_bar_host/windows.rs)
+- [crates/bastyde-platform/src/title_bar_host/x11.rs](../crates/bastyde-platform/src/title_bar_host/x11.rs)
 
 App integration:
-- [crates/fern-app/src/app.rs](../crates/fern-app/src/app.rs) — `FernAppBuilder::custom_chrome`, `CloseWindowRequest`
-- [crates/fern-app/src/window_manager.rs](../crates/fern-app/src/window_manager.rs) — host construction + `WindowEvent::Resized` hook
-- [crates/fern-core/src/widget_tree.rs](../crates/fern-core/src/widget_tree.rs) — `WidgetTree::title_bar_host`
+- [crates/bastyde-app/src/app.rs](../crates/bastyde-app/src/app.rs) — `BastydeAppBuilder::custom_chrome`, `CloseWindowRequest`
+- [crates/bastyde-app/src/window_manager.rs](../crates/bastyde-app/src/window_manager.rs) — host construction + `WindowEvent::Resized` hook
+- [crates/bastyde-core/src/widget_tree.rs](../crates/bastyde-core/src/widget_tree.rs) — `WidgetTree::title_bar_host`
 
 Demo:
 - [examples/title_bar_demo/src/main.rs](../examples/title_bar_demo/src/main.rs)

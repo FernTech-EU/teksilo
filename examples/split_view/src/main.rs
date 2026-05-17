@@ -1,7 +1,7 @@
-use fern_ui::core::{Signal, WidgetPlacement};
-use fern_ui::prelude::*;
-use fern_ui::tokens::Orientation;
-use fern_ui::widgets::{
+use bastyde::core::{Signal, WidgetPlacement};
+use bastyde::prelude::*;
+use bastyde::tokens::Orientation;
+use bastyde::widgets::{
     Badge, Button, Expand, FixedSize, HStack, Panel, ScrollArea, Spacer, SplitView, TextWidget,
     Toolbar, VStack,
 };
@@ -13,9 +13,9 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                fern_ui::presets::intui::dark()
+                bastyde::presets::intui::dark()
             } else {
-                fern_ui::presets::intui::light()
+                bastyde::presets::intui::light()
             });
         }),
     ))
@@ -157,9 +157,9 @@ fn build_preview_pane(title: &str, text: &str, theme: &Theme) -> impl Widget {
 }
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .initial_window(WindowConfig::new().title("SplitView").size(980, 760).root(
             |tree, _state| {
                 tree.add(

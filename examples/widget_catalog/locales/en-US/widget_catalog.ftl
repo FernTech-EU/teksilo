@@ -1,17 +1,17 @@
-# FernUI Widget Catalog — English (source) translations.
+# Bastyde Widget Catalog — English (source) translations.
 #
 # Keys use kebab-case at the Fluent layer; Rust call sites use the
 # snake_case form, and the proc macro converts. Tab order is stable —
 # index N corresponds to the Nth `static_tab(...)` call in main.rs.
 
 # ── App chrome ──────────────────────────────────────────────────────────
-app-title = FernUI — Widget Catalog
+app-title = Bastyde — Widget Catalog
 app-subtitle = drag · double-click maximize · right-click for menu
 app-unsupported-chrome = (custom chrome unsupported on this platform — falling back to native decorations)
 
 # ── View mode toggle (TabWidget trailing slot) ──────────────────────────
-mode-label = fern! DSL
-mode-tooltip = Switch every tab between the classic builder and the fern! macro version of the same tree.
+mode-label = bati! DSL
+mode-tooltip = Switch every tab between the classic builder and the bati! macro version of the same tree.
 
 # ── Locale switcher ─────────────────────────────────────────────────────
 locale-en = English
@@ -86,7 +86,7 @@ demo-loading = Loading…
 
 # ── Indicators tab ──────────────────────────────────────────────────────
 ind-progress-determinate-label = 60 %
-ind-link-docs = Open the FernUI docs
+ind-link-docs = Open the Bastyde docs
 ind-link-handler = With a click handler
 
 # ── Inputs tab ──────────────────────────────────────────────────────────
@@ -115,7 +115,7 @@ btn-default = Default
 btn-regular = Regular
 btn-flat = Flat
 btn-confirm-label = Confirm
-btn-cmdlink-signin-title = Sign in to your FernUI account
+btn-cmdlink-signin-title = Sign in to your Bastyde account
 btn-cmdlink-signin-desc = Use your existing credentials to access projects.
 btn-cmdlink-signup-title = Create a new account
 btn-cmdlink-signup-desc = Free for personal and open-source use.
@@ -150,7 +150,7 @@ cnt-split-trailing = Trailing pane
 # ── Chrome tab ──────────────────────────────────────────────────────────
 chr-status = Ready · 1247 lines · UTF-8 · Rust
 chr-banner-info-title = Info
-chr-banner-info-body = Did you know FernUI is RTL-aware?
+chr-banner-info-body = Did you know Bastyde is RTL-aware?
 chr-banner-success-title = Success
 chr-banner-success-body = Settings saved.
 chr-banner-warning-title = Warning
@@ -159,11 +159,11 @@ chr-banner-error-title = Error
 chr-banner-error-body = Network connection lost.
 chr-breadcrumb-home = Home
 chr-breadcrumb-docs = Documents
-chr-breadcrumb-fernui = FernUI
+chr-breadcrumb-bastyde = Bastyde
 chr-breadcrumb-current = widget-catalog
 chr-wizard-title = Onboarding
 chr-wizard-step1 = Welcome
-chr-wizard-step1-body = Step 1 — welcome to FernUI
+chr-wizard-step1-body = Step 1 — welcome to Bastyde
 chr-wizard-step2 = Configure
 chr-wizard-step2-body = Step 2 — configure your editor
 chr-wizard-step3 = Finish

@@ -1,0 +1,27 @@
+[package]
+name = "bastyde-widgets-previewer"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# bastyde-widgets-previewer is the Bastyde-side previewer binary. It links
+# bastyde-widgets with the `preview` feature so all `WidgetCatalog` impls
+# under `#[cfg(feature = "preview")]` are visible to the inventory at
+# link time, and bastyde-preview-ui as the GUI library. Each downstream
+# application (Skribisto, …) builds its own analogous thin binary
+# with its own widget set.
+[dependencies]
+bastyde-widgets = { workspace = true, features = ["preview", "rich-text"] }
+bastyde-preview-ui = { workspace = true }
+bastyde-preview = { workspace = true }
+
+[dev-dependencies]
+# Tests exercise a few signal-chain corner cases directly,
+# build a `WidgetTree` to lay out every catalog variant, and
+# need basic geometry / theme types for that.
+bastyde-core = { workspace = true }
+bastyde-canvas = { workspace = true }
+bastyde-tokens = { workspace = true }

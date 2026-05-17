@@ -14,9 +14,9 @@
 //!    embeds an internal `TabWidget`. One sample includes a rare
 //!    `Button` to prove keyboard-focus reachability post-promotion.
 
-use fern_ui::prelude::*;
-use fern_ui::widgets::tooltip::TooltipContent;
-use fern_ui::widgets::{
+use bastyde::prelude::*;
+use bastyde::widgets::tooltip::TooltipContent;
+use bastyde::widgets::{
     Button, Expand, HStack, Padding, Panel, ProgressBar, Spacer, TabInfo, TabWidget, TextWidget,
     VStack,
 };
@@ -144,7 +144,7 @@ fn province_composite_body() -> impl Widget {
 /// Build the body of a tabbed composite tooltip — proves `TabWidget`
 /// works inside a tooltip surface.
 fn tabbed_composite_body() -> impl Widget {
-    let selected: Signal<Option<fern_ui::widgets::tab_widget::TabId>> = Signal::new(None);
+    let selected: Signal<Option<bastyde::widgets::tab_widget::TabId>> = Signal::new(None);
     let body = TabWidget::new(selected)
         .static_tab(
             TabInfo::new().title(LocalizedString::literal("Stats")),
@@ -204,7 +204,7 @@ fn root() -> impl Widget {
     VStack::new()
         .spacing(12.0)
         .child(Padding::uniform(12.0).child(
-            TextWidget::new_literal("FernUI — Tooltips Showcase").style(TextStyleRole::BodyBold),
+            TextWidget::new_literal("Bastyde — Tooltips Showcase").style(TextStyleRole::BodyBold),
         ))
         .child(
             Expand::new().child(
@@ -218,12 +218,12 @@ fn root() -> impl Widget {
 }
 
 fn main() {
-    FernAppBuilder::new()
-        .theme(fern_ui::presets::intui::dark())
+    BastydeAppBuilder::new()
+        .theme(bastyde::presets::intui::dark())
         .register_tooltips(build_tooltip_registry())
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — Tooltips Showcase")
+                .title("Bastyde — Tooltips Showcase")
                 .size(1200, 720)
                 .root(|tree, _state| tree.add(root())),
         )

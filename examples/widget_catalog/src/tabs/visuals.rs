@@ -1,10 +1,10 @@
 //! Visuals tab — RectWidget, TextWidget, IconWidget, ImageWidget,
 //! ImageMaskShape, TwistArrow, Panel.
 
-use fern_ui::prelude::*;
-use fern_ui::tokens::CornerRadius;
-use fern_ui::widgets::primitives::{ImageMaskShape, TwistArrow};
-use fern_ui::widgets::{
+use bastyde::prelude::*;
+use bastyde::tokens::CornerRadius;
+use bastyde::widgets::primitives::{ImageMaskShape, TwistArrow};
+use bastyde::widgets::{
     Divider, FixedSize, HStack, IconWidget, ImageFit, ImageWidget, Panel, RectWidget, TextWidget,
     VStack,
 };
@@ -68,7 +68,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .child(IconWidget::chevron_left(20.0))
             .child(IconWidget::chevron_up(20.0)),
     );
-    let star_icon = fern_ui::res!("resources/icons/star.png");
+    let star_icon = bastyde::res!("resources/icons/star.png");
     let image = section(
         ctx,
         "ImageWidget",
@@ -132,12 +132,12 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
-    let star_icon = fern_ui::res!("resources/icons/star.png");
+pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+    let star_icon = bastyde::res!("resources/icons/star.png");
     let twist_expanded = ctx.signal(true);
     let twist_for_click = twist_expanded.clone();
 
-    fern!(ctx => VStack {
+    bati!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

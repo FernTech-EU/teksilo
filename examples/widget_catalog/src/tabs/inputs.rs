@@ -1,8 +1,8 @@
 //! Inputs tab — Checkbox, RadioButton, Toggle, Slider, SegmentedControl, ComboBox.
 
-use fern_ui::prelude::*;
-use fern_ui::tokens::Orientation;
-use fern_ui::widgets::{
+use bastyde::prelude::*;
+use bastyde::tokens::Orientation;
+use bastyde::widgets::{
     Checkbox, ComboBox, Divider, FixedSize, RadioButton, SegmentedControl, Slider, TextWidget,
     Toggle, VStack,
 };
@@ -126,9 +126,9 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
+pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     // SegmentedControl + ComboBox have multi-arg constructors that
-    // fern! ctor syntax can't express on its own — pre-register them.
+    // bati! ctor syntax can't express on its own — pre-register them.
     let segmented_widget = ctx.add(SegmentedControl::new(
         vec![
             tr!(inp_segment_first()).resolve_now(),
@@ -161,7 +161,7 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let slider_step = sigs.slider_stepped.clone();
     let slider_v_val = sigs.slider_v_value.clone();
 
-    fern!(ctx => VStack {
+    bati!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

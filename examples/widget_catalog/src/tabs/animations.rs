@@ -1,10 +1,10 @@
 //! Animations tab — every wrapper widget under
-//! `fern_ui::widgets::animations::*`.
+//! `bastyde::widgets::animations::*`.
 
 use std::time::Duration;
 
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Blur, Button, Collapse, Crossfade, Cycle, Divider, Fade, FixedSize, HStack, Panel, Pulse,
     Rotate, Scale, Shake, Slide, SlideEdge, SmoothSize, TextWidget, Toggle, VStack,
 };
@@ -185,13 +185,13 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // Crossfade takes a builder closure as its second ctor arg —
     // pre-register. Pulse's `.opacity(min, max)` is the constructor
     // (so works in `Pulse::opacity(min, max) {}` form). Cycle's
     // `Cycle::new().period(...).child(...)` fits inline. Other
     // animations (Fade/Collapse/Slide/Scale/Rotate/Blur/SmoothSize)
-    // wrap a child via `.child(impl Widget)` — fits fern! children.
+    // wrap a child via `.child(impl Widget)` — fits bati! children.
     let fade_visible = ctx.signal(true);
     let fade_for_drive = fade_visible.clone();
     let crossfade_key = ctx.signal(0_u32);
@@ -212,7 +212,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let blur_radius: Signal<f32> = ctx.signal(0.0_f32);
     let blur_for_btn = blur_radius.clone();
 
-    fern!(ctx => VStack {
+    bati!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

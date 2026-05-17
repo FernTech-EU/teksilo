@@ -3,9 +3,9 @@
 //!
 //! Run with: `cargo run -p tool-box`
 
-use fern_ui::core::widget::WidgetPlacement;
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::core::widget::WidgetPlacement;
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Badge, Button, ButtonVariant, Card, Expand, HStack, IconWidget, Panel, Spacer, TextWidget,
     ToolBox, ToolBoxItem, Toolbar, VStack,
 };
@@ -17,9 +17,9 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                fern_ui::presets::intui::dark()
+                bastyde::presets::intui::dark()
             } else {
-                fern_ui::presets::intui::light()
+                bastyde::presets::intui::light()
             });
         }),
     ))
@@ -99,9 +99,9 @@ impl Widget for Root {
                 let next_dark = !is_dark.get();
                 is_dark.set(next_dark);
                 ctx.set_theme(if next_dark {
-                    fern_ui::presets::intui::dark()
+                    bastyde::presets::intui::dark()
                 } else {
-                    fern_ui::presets::intui::light()
+                    bastyde::presets::intui::light()
                 });
             });
 
@@ -179,9 +179,9 @@ impl Widget for Root {
 }
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("ToolBox")

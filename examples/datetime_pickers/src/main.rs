@@ -9,9 +9,9 @@
 //! - `TimeEdit` in 24h and 12h modes, with seconds toggle.
 //! - `DateTimeEdit` (composite).
 
-use fern_ui::core::WidgetPlacement;
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::core::WidgetPlacement;
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Button, Calendar, DateEdit, DateRange, DateRangeEdit, DateTimeEdit, Expand, GroupHeader,
     HStack, Padding, Panel, SecondsMode, Spacer, TextWidget, TimeEdit, TimeFormat, Toolbar, VStack,
 };
@@ -24,9 +24,9 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                fern_ui::presets::intui::dark()
+                bastyde::presets::intui::dark()
             } else {
-                fern_ui::presets::intui::light()
+                bastyde::presets::intui::light()
             });
         }),
     ))
@@ -306,7 +306,7 @@ fn main() {
     // `calendar-month-long-may`). Without this registration the
     // resolver falls back to the key itself — visible in the UI as
     // the literal key string.
-    let i18n_config = fern_ui::i18n::I18nConfig::new()
+    let i18n_config = bastyde::i18n::I18nConfig::new()
         .source_locale("en-US".parse().expect("en-US is a valid BCP-47 tag"))
         .supported_locales([
             "en-US".parse().expect("en-US is a valid BCP-47 tag"),
@@ -314,15 +314,15 @@ fn main() {
         ])
         .auto_detect_os_locale(true)
         .fallback_locale("en-US".parse().expect("en-US is a valid BCP-47 tag"))
-        .framework_locales(fern_ui::widgets::framework_locales());
+        .framework_locales(bastyde::widgets::framework_locales());
 
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .i18n(i18n_config)
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — Date / Time pickers")
+                .title("Bastyde — Date / Time pickers")
                 .size(960, 720)
                 .root(|tree, _state| {
                     tree.add(

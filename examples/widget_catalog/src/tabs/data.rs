@@ -2,9 +2,9 @@
 //! plus inline notes for TreeView/TableView/TreeTable (the heavyweights
 //! live in dedicated examples).
 
-use fern_ui::data::ListModel;
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::data::ListModel;
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Divider, FixedSize, ListView, Repeater, StandardListItem, StandardTreeItem, TextWidget, VStack,
 };
 
@@ -116,9 +116,9 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // Repeater + ListView take a closure delegate as a constructor
-    // arg. fern! can carry constructor args, but the delegate needs
+    // arg. bati! can carry constructor args, but the delegate needs
     // to be quoted as a single expression — pre-register both.
     let repeater_widget = ctx.add(
         Repeater::new(make_repeater_model(), |_idx, item: &String| {
@@ -135,7 +135,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         |_idx, item: &String, _sel| Box::new(StandardListItem::new_literal(item.clone())),
     ));
 
-    fern!(ctx => VStack {
+    bati!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

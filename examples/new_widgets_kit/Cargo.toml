@@ -14,4 +14,4 @@ path = "src/main.rs"
 # `rich-text` pulls in TextInput / RichTextEditor widgets + signals.
 # `file-dialog` is on by default (RfdAsyncBackend) — explicit here to
 # document the dependency for the FilePickerField demo.
-fern-ui = { workspace = true, features = ["rich-text", "file-dialog"] }
+bastyde = { workspace = true, features = ["rich-text", "file-dialog"] }

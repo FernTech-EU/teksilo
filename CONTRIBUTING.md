@@ -1,6 +1,6 @@
-# Contributing to FernUI
+# Contributing to Bastyde
 
-Thank you for your interest in contributing to FernUI! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to Bastyde! This document provides guidelines and information for contributors.
 
 ## Code of Conduct
 
@@ -75,7 +75,7 @@ git rebase --signoff HEAD~N
 
 ## License
 
-By contributing to FernUI, you agree that your contributions will be licensed under the [Mozilla Public License 2.0](LICENSE).
+By contributing to Bastyde, you agree that your contributions will be licensed under the [Mozilla Public License 2.0](LICENSE).
 
 ## Questions?
 

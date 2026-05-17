@@ -4,7 +4,7 @@
 //!
 //! Demonstrates:
 //!
-//! * `FernAppBuilder::install_toast_default()` — one-line install
+//! * `BastydeAppBuilder::install_toast_default()` — one-line install
 //!   that registers a `ToastRegistry` + persistent
 //!   `NotificationArchiveModel` in app-state and wraps every
 //!   window's root with a `ToastHost`.
@@ -22,9 +22,9 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use fern_ui::prelude::*;
-use fern_ui::settings::AppPaths;
-use fern_ui::widgets::{
+use bastyde::prelude::*;
+use bastyde::settings::AppPaths;
+use bastyde::widgets::{
     Button, ButtonVariant, HStack, Padding, Spacer, StatusBar, TextWidget, Toolbar, VStack,
 };
 
@@ -184,7 +184,7 @@ impl Widget for BellButton {
 
     fn layout_response(
         &self,
-        proposal: fern_ui::canvas::SizeProposal,
+        proposal: bastyde::canvas::SizeProposal,
         ctx: &LayoutContext,
     ) -> LayoutResponse {
         self.child_id
@@ -201,8 +201,8 @@ fn bump(cell: &Rc<Cell<usize>>) -> usize {
 }
 
 fn main() {
-    FernAppBuilder::new()
-        .theme(fern_ui::presets::intui::light())
+    BastydeAppBuilder::new()
+        .theme(bastyde::presets::intui::light())
         .app_paths(AppPaths::new("com", "FernTech", "ToastDemo").expect("config dir"))
         .install_toast_default()
         .initial_window(

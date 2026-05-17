@@ -1,8 +1,8 @@
 //! Buttons tab — Button (×3 variants × states), IconButton, CommandLinkButton,
 //! PopoverButton, PopoverIconButton, SplitButton.
 
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Button, ButtonVariant, CommandLinkButton, Divider, HStack, IconButton, IconLocation,
     IconWidget, MenuItem, Panel, PopoverButton, PopoverIconButton, SplitButton, TextWidget, VStack,
 };
@@ -155,10 +155,10 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
-    // Pre-register multi-arg / chained construction that fern! property
+pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+    // Pre-register multi-arg / chained construction that bati! property
     // syntax can't express directly. Each gets its own WidgetId so the
-    // fern! body can splice via `#{ id }`.
+    // bati! body can splice via `#{ id }`.
     let icon_btn_confirm = ctx.add(
         Button::new(tr!(btn_confirm_label()))
             .icon(IconWidget::checkmark(16.0), IconLocation::Leading)
@@ -181,7 +181,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         popover_surface(TextWidget::new(tr!(btn_popover_icon_body())).style(TextStyleRole::Small)),
     ));
 
-    fern!(ctx => VStack {
+    bati!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

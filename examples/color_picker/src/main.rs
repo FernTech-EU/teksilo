@@ -21,11 +21,11 @@
 //!    popover-style pickers (default, alpha, nullable).
 //! 9. **Disabled** — `.enabled(false)` on a ColorPicker.
 
-use fern_ui::core::WidgetPlacement;
-use fern_ui::i18n::I18nConfig;
-use fern_ui::prelude::*;
-use fern_ui::tokens::Color;
-use fern_ui::widgets::{
+use bastyde::core::WidgetPlacement;
+use bastyde::i18n::I18nConfig;
+use bastyde::prelude::*;
+use bastyde::tokens::Color;
+use bastyde::widgets::{
     Button, ColorEdit, ColorPicker, ColorPickerLayout, Expand, HStack, HexColorInput, Padding,
     Panel, ScrollArea, Spacer, TextWidget, Toolbar, VStack,
 };
@@ -37,9 +37,9 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                fern_ui::presets::intui::dark()
+                bastyde::presets::intui::dark()
             } else {
-                fern_ui::presets::intui::light()
+                bastyde::presets::intui::light()
             });
         }),
     ))
@@ -206,7 +206,7 @@ fn section(title: &'static str, body: impl Widget + 'static) -> impl Widget + 's
 /// A 64×64 panel filled with the bound color — visible feedback that the
 /// signal binding works end-to-end.
 fn live_preview(color: Signal<Color>) -> impl Widget + 'static {
-    use fern_ui::core::ColorProp;
+    use bastyde::core::ColorProp;
     let bg: ColorProp = color.into();
     Panel::new()
         .background(bg)
@@ -237,16 +237,16 @@ fn material_palette() -> Vec<Color> {
 }
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
-        // Register fern-widgets' own translatable strings so internal
+        .theme(bastyde::presets::intui::light())
+        // Register bastyde-widgets' own translatable strings so internal
         // labels (Role::Slider names, swatch hex readouts, etc.) resolve
         // instead of falling back to literal Fluent keys.
-        .i18n(I18nConfig::new().framework_locales(fern_ui::widgets::framework_locales()))
+        .i18n(I18nConfig::new().framework_locales(bastyde::widgets::framework_locales()))
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — ColorPicker gallery")
+                .title("Bastyde — ColorPicker gallery")
                 .size(960, 900)
                 .root(|tree, _state| {
                     tree.add(

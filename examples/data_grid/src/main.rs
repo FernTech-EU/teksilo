@@ -22,12 +22,12 @@
 //! Home / End / PgUp / PgDn / Tab on the focused cell to navigate.
 //! Press F2 (or just start typing) on a focused name cell to edit it.
 
-use fern_ui::core::signal::Signal;
-use fern_ui::data::{
+use bastyde::core::signal::Signal;
+use bastyde::data::{
     ListDataSource, ListModel, SelectionMode, SelectionModel, SortDirection, SortFilterListModel,
 };
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Button, CellContext, Column, ColumnWidth, EditTrigger, Expand, GridLines, HStack, Padding,
     Panel, Spacer, TableAlignment as Alignment, TableSelectionMode, TableView, TextInput,
     TextWidget, Toolbar, VStack,
@@ -71,7 +71,7 @@ fn id_column() -> Column<Employee> {
     })
     .width(ColumnWidth::Fixed(64.0))
     .sortable(true)
-    .pinned(fern_ui::widgets::PinnedSide::Leading)
+    .pinned(bastyde::widgets::PinnedSide::Leading)
 }
 
 fn name_column() -> Column<Employee> {
@@ -167,17 +167,17 @@ fn main() {
                 let next = !is_dark.get();
                 is_dark.set(next);
                 ctx.set_theme(if next {
-                    fern_ui::presets::intui::dark()
+                    bastyde::presets::intui::dark()
                 } else {
-                    fern_ui::presets::intui::light()
+                    bastyde::presets::intui::light()
                 });
             }),
         ))
     }
 
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .initial_window(WindowConfig::new().title("Data Grid").size(1100, 640).root(
             move |tree, _| {
                 let table = TableView::from_source(proxy.clone())

@@ -1,0 +1,17 @@
+[package]
+name = "bastyde-canvas"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+bastyde-tokens = { workspace = true }
+roxmltree = { workspace = true }
+png = { workspace = true }
+image-webp = { workspace = true }
+thiserror = { workspace = true }
+bytemuck = { workspace = true }
+serde = { workspace = true }

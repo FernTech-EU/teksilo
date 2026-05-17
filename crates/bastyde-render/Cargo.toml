@@ -1,0 +1,18 @@
+[package]
+name = "bastyde-render"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+bastyde-canvas = { workspace = true }
+wgpu = { workspace = true }
+tiny-skia = { workspace = true }
+bytemuck = { workspace = true }
+
+[dev-dependencies]
+bastyde-tokens = { workspace = true }
+pollster = "0.4"

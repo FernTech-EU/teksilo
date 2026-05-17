@@ -1,6 +1,6 @@
 # Accessibility Overrides Reference
 
-FernUI widgets declare their own a11y info via `Widget::accessibility(&self, builder: &mut AccessNodeBuilder)` — Button emits `Role::Button` + label, Slider emits `Role::Slider` + numeric range, Panel marks itself `set_hidden()` when it's `a11y_presentational`, etc. That covers ~95% of cases. The remaining 5% — when an icon-only Button needs an accessible label, when a card composite should read as one AT element, when a status region needs `aria-live`, when a custom action should appear in VoiceOver's Actions rotor — is where **builder-level accessibility overrides** come in.
+Bastyde widgets declare their own a11y info via `Widget::accessibility(&self, builder: &mut AccessNodeBuilder)` — Button emits `Role::Button` + label, Slider emits `Role::Slider` + numeric range, Panel marks itself `set_hidden()` when it's `a11y_presentational`, etc. That covers ~95% of cases. The remaining 5% — when an icon-only Button needs an accessible label, when a card composite should read as one AT element, when a status region needs `aria-live`, when a custom action should appear in VoiceOver's Actions rotor — is where **builder-level accessibility overrides** come in.
 
 The override layer is a one-method-per-concern surface (`.access_label`, `.access_role`, `.access_merge_subtree`, …) on `WidgetBuilder` and `WidgetWithHandlers`, analogous to SwiftUI's `.accessibility*` modifiers and Flutter's `Semantics(...)`. App authors annotate widgets from the outside without touching widget internals.
 
@@ -18,7 +18,7 @@ Mental model in one line:
 HandlerSet (carries) → WidgetNode (owns) → tree walker (applies) → accesskit::Node
 ```
 
-End-to-end example: [examples/widget_catalog/src/main.rs](../examples/widget_catalog/src/main.rs) — the icon-only buttons in the Controls section show the canonical pattern in both builder and `fern!` macro form.
+End-to-end example: [examples/widget_catalog/src/main.rs](../examples/widget_catalog/src/main.rs) — the icon-only buttons in the Controls section show the canonical pattern in both builder and `bati!` macro form.
 
 ---
 
@@ -27,8 +27,8 @@ End-to-end example: [examples/widget_catalog/src/main.rs](../examples/widget_cat
 The override surface piggy-backs on the existing handler-extraction plumbing — the same path that already mirrors `cursor`, `clips_children`, `focus_within_signal` from `HandlerSet` onto `WidgetNode`.
 
 1. **Builder chain** — `Widget::new(...).access_label(...).access_role(...)` each return a `WidgetWithHandlers<W>` whose `HandlerSet` carries an `Option<Box<AccessibilityOverrides>>`. The first `access_*` call lazily allocates the box; subsequent calls extend it.
-2. **Insertion** — `WidgetTree::add(...)` calls `take_handler_set()` on the wrapper and `apply_handler_set` ([crates/fern-core/src/arena.rs](../crates/fern-core/src/arena.rs)) mirrors the box onto the persistent `WidgetNode::access_overrides` field. After this point, the wrapper has no override state — the source of truth is on the node.
-3. **AT tree build** — when the framework calls `WidgetTree::sync_accessibility()`, the walker at [crates/fern-core/src/widget_tree/accessibility_impl.rs:139](../crates/fern-core/src/widget_tree/accessibility_impl.rs) runs `node.widget.accessibility(builder)` first (so the inner widget emits its defaults), then calls `node.access_overrides.apply(builder)` to layer the overrides on top.
+2. **Insertion** — `WidgetTree::add(...)` calls `take_handler_set()` on the wrapper and `apply_handler_set` ([crates/bastyde-core/src/arena.rs](../crates/bastyde-core/src/arena.rs)) mirrors the box onto the persistent `WidgetNode::access_overrides` field. After this point, the wrapper has no override state — the source of truth is on the node.
+3. **AT tree build** — when the framework calls `WidgetTree::sync_accessibility()`, the walker at [crates/bastyde-core/src/widget_tree/accessibility_impl.rs:139](../crates/bastyde-core/src/widget_tree/accessibility_impl.rs) runs `node.widget.accessibility(builder)` first (so the inner widget emits its defaults), then calls `node.access_overrides.apply(builder)` to layer the overrides on top.
 
 Subsequent `sync_accessibility()` calls re-run the walker if the AT cache is dirty — which now also dirties on `ShortcutRegistry::version()` bumps so `access_shortcut_id` tracks rebinds (see [Shortcuts](#shortcuts) below).
 
@@ -102,13 +102,13 @@ Keep the parent in the AT tree, prune all descendants. Equivalent to Flutter's `
 ```rust
 HStack::new()
     .child(IconWidget::from_svg_icon(logo_icon))
-    .child(TextWidget::new_literal("FernUI"))
+    .child(TextWidget::new_literal("Bastyde"))
     .child(TextWidget::new_literal("Pure-Rust GUI"))
-    .access_label_literal("FernUI logo")
+    .access_label_literal("Bastyde logo")
     .access_exclude_subtree();
 ```
 
-Without `access_exclude_subtree`, a screen reader would walk all three children individually: "graphic", "FernUI", "Pure-Rust GUI". With it, AT sees one node named "FernUI logo".
+Without `access_exclude_subtree`, a screen reader would walk all three children individually: "graphic", "Bastyde", "Pure-Rust GUI". With it, AT sees one node named "Bastyde logo".
 
 Use for purely decorative composites: animated logos, icon clusters, splash content.
 
@@ -155,7 +155,7 @@ AT-invoked actions arrive as `WidgetEvent::AccessAction { action, target, target
 ### Standard actions — `access_action`
 
 ```rust
-use fern_ui::core::accesskit::Action;
+use bastyde::core::accesskit::Action;
 
 let widget = my_widget
     .access_action(Action::ShowContextMenu, |ctx| {
@@ -204,7 +204,7 @@ Two variants for announcing a chord on the AT node — pick by where the binding
 
 ### `.access_shortcut_id("app.save")` — the production path
 
-Bind to a `Shortcut` registered in [`ShortcutRegistry`](../crates/fern-core/src/shortcut.rs). The walker resolves the current effective primary keystroke at AT-build time and writes it via `KeyStroke::Display` (`"Ctrl+S"`). On a user rebind via `ShortcutSettings`, the registry's `version()` signal bumps and `sync_accessibility` dirties the AT cache automatically — the announcement updates without any explicit signaling from the settings UI.
+Bind to a `Shortcut` registered in [`ShortcutRegistry`](../crates/bastyde-core/src/shortcut.rs). The walker resolves the current effective primary keystroke at AT-build time and writes it via `KeyStroke::Display` (`"Ctrl+S"`). On a user rebind via `ShortcutSettings`, the registry's `version()` signal bumps and `sync_accessibility` dirties the AT cache automatically — the announcement updates without any explicit signaling from the settings UI.
 
 ```rust
 // Somewhere in your root widget's build(), register the Shortcut.
@@ -239,7 +239,7 @@ See [shortcut-intent-action.md](shortcut-intent-action.md) for the full Shortcut
 
 ## Internationalization
 
-User-visible string methods (`access_label`, `access_description`, `access_hint`, `access_value`, `access_custom_action`) accept `impl Into<String>`. With the `i18n` feature enabled, [`fern_i18n::LocalizedString`](../crates/fern-i18n/src/localized_string.rs) (the type produced by `tr!(...)`) implements `From<LocalizedString> for String`, so:
+User-visible string methods (`access_label`, `access_description`, `access_hint`, `access_value`, `access_custom_action`) accept `impl Into<String>`. With the `i18n` feature enabled, [`bastyde_i18n::LocalizedString`](../crates/bastyde-i18n/src/localized_string.rs) (the type produced by `tr!(...)`) implements `From<LocalizedString> for String`, so:
 
 ```rust
 button
@@ -256,10 +256,10 @@ The `_literal` twins (`access_label_literal`, etc.) are `#[doc(hidden)]` grep ma
 
 ## State clearing
 
-`AccessNodeBuilder::set_hidden()` and `set_disabled()` flip flags on. Some widgets call those setters unconditionally (e.g. [Panel](../crates/fern-widgets/src/panel.rs) calls `set_hidden()` when `a11y_presentational`). To **un-set** widget-emitted state, the override system exposes:
+`AccessNodeBuilder::set_hidden()` and `set_disabled()` flip flags on. Some widgets call those setters unconditionally (e.g. [Panel](../crates/bastyde-widgets/src/panel.rs) calls `set_hidden()` when `a11y_presentational`). To **un-set** widget-emitted state, the override system exposes:
 
 - `.access_hidden(false)` — clears even widget-emitted `set_hidden()`. Full clear (no framework re-application of hidden).
-- `.access_disabled(false)` — clears widget-emitted disabled AND arena-driven disabled. The framework's gate at [`accessibility_impl.rs`](../crates/fern-core/src/widget_tree/accessibility_impl.rs) respects the override, so even a `.disabled(true)` set on the widget's enabled-state can be overridden for AT purposes.
+- `.access_disabled(false)` — clears widget-emitted disabled AND arena-driven disabled. The framework's gate at [`accessibility_impl.rs`](../crates/bastyde-core/src/widget_tree/accessibility_impl.rs) respects the override, so even a `.disabled(true)` set on the widget's enabled-state can be overridden for AT purposes.
 
 Real use cases:
 
@@ -321,7 +321,7 @@ For each widget the AT walker visits, the sequence is:
 All headless. Assertions go through `WidgetTree::accessibility_node(id)` (synthetic snapshot) or `WidgetTree::sync_accessibility()` (full TreeUpdate, useful when checking pruning, custom_actions, controls relationships, etc.).
 
 ```rust
-use fern_ui::core::accesskit::{Action, Role, HasPopup};
+use bastyde::core::accesskit::{Action, Role, HasPopup};
 
 // Scalar override
 let mut tree = WidgetTree::new();
@@ -365,13 +365,13 @@ let node = find_node(&tree.sync_accessibility(), id).unwrap();
 assert_eq!(node.keyboard_shortcut(), Some("Ctrl+Q"));
 ```
 
-The 36 in-crate tests at [`crates/fern-core/src/widget_tree/accessibility_impl.rs`](../crates/fern-core/src/widget_tree/accessibility_impl.rs) cover every method in this reference, including all subtree-mode edge cases (nested Exclude-in-Merge, Merge-in-Merge), action-callback layering with `on_access_action`, custom-action dispatch by index, state-clearing for both hidden and disabled, and the `i18n` `Into<String>` conversion path.
+The 36 in-crate tests at [`crates/bastyde-core/src/widget_tree/accessibility_impl.rs`](../crates/bastyde-core/src/widget_tree/accessibility_impl.rs) cover every method in this reference, including all subtree-mode edge cases (nested Exclude-in-Merge, Merge-in-Merge), action-callback layering with `on_access_action`, custom-action dispatch by index, state-clearing for both hidden and disabled, and the `i18n` `Into<String>` conversion path.
 
 ---
 
 ## End-to-end demo
 
-[`examples/widget_catalog`](../examples/widget_catalog/src/main.rs) — the icon-only buttons in the Controls section show the canonical pattern in both builder and `fern!` macro form. To verify a11y output against a real assistive tech stack:
+[`examples/widget_catalog`](../examples/widget_catalog/src/main.rs) — the icon-only buttons in the Controls section show the canonical pattern in both builder and `bati!` macro form. To verify a11y output against a real assistive tech stack:
 
 ```bash
 cargo run -p widget-catalog
@@ -393,6 +393,6 @@ The Tier-3 styling system (see [styling-system.md](styling-system.md)) lets an a
 - [shortcut-intent-action.md](shortcut-intent-action.md) — the `Shortcut` / `Intent` / `Action` pipeline that `.access_shortcut_id` binds to.
 - [events-and-gestures.md](events-and-gestures.md) — `on_access_action` and `on_access_action_request` event handlers (what `.access_action` layers on top of).
 - [reactive-theme.md](reactive-theme.md) — how locale and theme changes propagate via composite rebuilds (the same mechanism keeps `.access_label(tr!(...))` translations current).
-- [fern-macro-reference.md](fern-macro-reference.md) — `fern!` DSL syntax for `name: value` body items, used by the catalog demo's `controls_fern` block.
-- [crates/fern-core/src/widget_builder.rs](../crates/fern-core/src/widget_builder.rs) — `AccessibilityOverrides` struct, `AccessSubtreeMode` enum, every `access_*` method definition.
-- [crates/fern-core/src/widget_tree/accessibility_impl.rs](../crates/fern-core/src/widget_tree/accessibility_impl.rs) — walker integration, `merge_descendants_into` helper, the 36 unit tests.
+- [bastyde-macro-reference.md](bastyde-macro-reference.md) — `bati!` DSL syntax for `name: value` body items, used by the catalog demo's `controls_bati` block.
+- [crates/bastyde-core/src/widget_builder.rs](../crates/bastyde-core/src/widget_builder.rs) — `AccessibilityOverrides` struct, `AccessSubtreeMode` enum, every `access_*` method definition.
+- [crates/bastyde-core/src/widget_tree/accessibility_impl.rs](../crates/bastyde-core/src/widget_tree/accessibility_impl.rs) — walker integration, `merge_descendants_into` helper, the 36 unit tests.

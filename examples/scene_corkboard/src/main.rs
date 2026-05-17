@@ -1,6 +1,6 @@
-//! `scene-corkboard` — Phase 4 demo of `fern-scene`.
+//! `scene-corkboard` — Phase 4 demo of `bastyde-scene`.
 //!
-//! Renders a 3×3 grid of story cards on a fern-scene `SceneView`. Each
+//! Renders a 3×3 grid of story cards on a bastyde-scene `SceneView`. Each
 //! card is a real heavyweight widget — `Panel { VStack { TextWidget,
 //! TextWidget } }` — placed at a fixed scene-coordinate rectangle. The
 //! cards sit on top of a **lightweight** background grid (`RectItem`)
@@ -47,8 +47,8 @@
 //!   children to zero size, so layout / paint walks short-circuit
 //!   on them. The 9-card demo is too small to demonstrate this
 //!   visibly, but the same machinery scales to thousands of items;
-//!   see `crates/fern-scene/src/view.rs::tests::off_screen_items_*`
-//!   and `crates/fern-scene/src/index.rs::tests` for the
+//!   see `crates/bastyde-scene/src/view.rs::tests::off_screen_items_*`
+//!   and `crates/bastyde-scene/src/index.rs::tests` for the
 //!   correctness pins.
 //!
 //! Phase 6 will add drag-to-move, marquee select, and group-move on
@@ -56,10 +56,10 @@
 //!
 //! Run with: `cargo run -p scene-corkboard`
 
-use fern_scene::{A11yGroup, A11yNode, PathItem, RectItem, Scene, SceneView};
-use fern_ui::canvas::{Path, Point, Rect};
-use fern_ui::prelude::*;
-use fern_ui::widgets::{Button, Expand, HStack, Panel, Spacer, TextWidget, Toolbar, VStack};
+use bastyde_scene::{A11yGroup, A11yNode, PathItem, RectItem, Scene, SceneView};
+use bastyde::canvas::{Path, Point, Rect};
+use bastyde::prelude::*;
+use bastyde::widgets::{Button, Expand, HStack, Panel, Spacer, TextWidget, Toolbar, VStack};
 
 const CARDS_PER_ROW: usize = 3;
 const ROWS: usize = 3;
@@ -75,9 +75,9 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                fern_ui::presets::intui::dark()
+                bastyde::presets::intui::dark()
             } else {
-                fern_ui::presets::intui::light()
+                bastyde::presets::intui::light()
             });
         }),
     ))
@@ -167,7 +167,7 @@ fn build_corkboard() -> SceneView {
 
     // Heavyweight cards. The cards themselves don't yet route
     // through the logical-tree (Phase 5b heavyweight grouping is
-    // the deferred auto-graft work — see docs/fern-scene-a11y.md);
+    // the deferred auto-graft work — see docs/bastyde-scene-a11y.md);
     // we still bookkeep their ids so the demo source documents the
     // intent.
     // Heavyweight cards. Auto-graft places each card under its
@@ -239,12 +239,12 @@ fn build_corkboard() -> SceneView {
 }
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — Scene Corkboard (Phase 5b: cards auto-grafted into Act groups)")
+                .title("Bastyde — Scene Corkboard (Phase 5b: cards auto-grafted into Act groups)")
                 .size(900, 600)
                 .root(|tree, _state| {
                     tree.add(
@@ -260,11 +260,11 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fern_ui::core::WidgetTree;
+    use bastyde::core::WidgetTree;
 
     #[test]
     fn corkboard_lays_out_nine_cards_at_scene_coords() {
-        let mut tree = WidgetTree::new().with_theme(fern_ui::presets::intui::light());
+        let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
         let view_id = tree.add(build_corkboard());
         tree.layout(SizeProposal::exact(900.0, 600.0));
 

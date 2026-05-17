@@ -8,10 +8,10 @@
 //!
 //! Run with: `cargo run -p menus-and-dropdowns`
 
-use fern_ui::IntentKind;
-use fern_ui::core::Action;
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::IntentKind;
+use bastyde::core::Action;
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Button, ButtonVariant, ComboBox, Divider, Expand, HStack, IconButton, IconWidget, MenuBar,
     MenuItem, MenuList, Padding, Panel, PopoverButton, PopoverIconButton, ScrollArea, Slider,
     Spacer, StatusBar, TextWidget, Toolbar, VStack,
@@ -51,9 +51,9 @@ impl Widget for Root {
                 let dark = !is_dark_for_action.get();
                 is_dark_for_action.set(dark);
                 ctx.set_theme(if dark {
-                    fern_ui::presets::intui::dark()
+                    bastyde::presets::intui::dark()
                 } else {
-                    fern_ui::presets::intui::light()
+                    bastyde::presets::intui::light()
                 });
             },
         ));
@@ -672,7 +672,7 @@ impl Widget for Root {
         );
         let padded = ctx.add(Padding::uniform(24.0).child_id(content));
         let scroll = ctx.add(
-            ScrollArea::from_id(padded).scroll_bar_style(fern_ui::widgets::ScrollBarMode::Overlay),
+            ScrollArea::from_id(padded).scroll_bar_style(bastyde::widgets::ScrollBarMode::Overlay),
         );
 
         let menu_bar = ctx.add(
@@ -812,12 +812,12 @@ impl Widget for Root {
 // ---------------------------------------------------------------------------
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — Menus & Dropdowns (Milestone 4)")
+                .title("Bastyde — Menus & Dropdowns (Milestone 4)")
                 .size(900, 700)
                 .root(|tree, _state| tree.add(Root::new())),
         )

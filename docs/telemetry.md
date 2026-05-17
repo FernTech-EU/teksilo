@@ -1,6 +1,6 @@
 # Telemetry & Privacy Reference
 
-FernUI's telemetry is **consent-gated by construction** and
+Bastyde's telemetry is **consent-gated by construction** and
 **privacy-mode-switchable at runtime**. There is no path through which
 an event can reach a server while the user's `ConsentState` is
 `Unknown` or `Denied` — the gate lives in the dispatch tap, before
@@ -28,41 +28,41 @@ Three persistence shapes come with the crate:
 
 | Shape | Type | Use for |
 |-------|------|---------|
-| Consent state | [`ConsentStore`](../crates/fern-telemetry/src/consent.rs) → `Signal<ConsentState>` | The user's grant/deny/scope decision, atop `SettingsFile<ConsentFile>` |
-| Pseudonymous identity | [`InstallId`](../crates/fern-telemetry/src/install_id.rs) | Per-install UUID with 13-month rotation, atop `SettingsFile<InstallIdFile>` |
-| Event queue | [`InMemoryEventQueue`](../crates/fern-telemetry/src/queue/mem.rs) / [`PersistentEventQueue`](../crates/fern-telemetry/src/queue/persistent.rs) | Outbound buffering with retry; redb-backed for cross-restart durability |
+| Consent state | [`ConsentStore`](../crates/bastyde-telemetry/src/consent.rs) → `Signal<ConsentState>` | The user's grant/deny/scope decision, atop `SettingsFile<ConsentFile>` |
+| Pseudonymous identity | [`InstallId`](../crates/bastyde-telemetry/src/install_id.rs) | Per-install UUID with 13-month rotation, atop `SettingsFile<InstallIdFile>` |
+| Event queue | [`InMemoryEventQueue`](../crates/bastyde-telemetry/src/queue/mem.rs) / [`PersistentEventQueue`](../crates/bastyde-telemetry/src/queue/persistent.rs) | Outbound buffering with retry; redb-backed for cross-restart durability |
 
 Two reference adapters ship in tree:
 
 | Adapter | Crate | Mode(s) | Backend |
 |---------|-------|---------|---------|
-| `StubReporter` | [`fern-telemetry`](../crates/fern-telemetry/src/stub.rs) | Anonymous + Pseudonymous | In-memory `Vec` (testing only) |
-| `PlausibleAdapter` | [`fern-analytics-plausible`](../crates/fern-analytics-plausible/) | Anonymous | Plausible Cloud or self-hosted |
-| `FernAdapter` | [`fern-analytics-fern`](../crates/fern-analytics-fern/) | Anonymous + Pseudonymous | Self-hosted [`fern-collector`](../../fern-collector/) gRPC service |
+| `StubReporter` | [`bastyde-telemetry`](../crates/bastyde-telemetry/src/stub.rs) | Anonymous + Pseudonymous | In-memory `Vec` (testing only) |
+| `PlausibleAdapter` | [`bastyde-analytics-plausible`](../crates/bastyde-analytics-plausible/) | Anonymous | Plausible Cloud or self-hosted |
+| `BastydeAdapter` | [`bastyde-analytics-bastyde`](../crates/bastyde-analytics-bastyde/) | Anonymous + Pseudonymous | Self-hosted [`bastyde-collector`](../../bastyde-collector/) gRPC service |
 
 ---
 
 ## 1. Quick start
 
-Wire telemetry through `FernAppBuilder` alongside `settings(...)` —
+Wire telemetry through `BastydeAppBuilder` alongside `settings(...)` —
 both go through the same builder-time validation pattern:
 
 ```rust
-use fern_ui::prelude::*;
-use fern_ui::app::FernAppBuilder;
-use fern_ui::settings::SettingsBundle;
-use fern_analytics_fern::FernAdapter;
-use fern_telemetry::{TelemetryBundle, TelemetryMode, UsageReporter};
+use bastyde::prelude::*;
+use bastyde::app::BastydeAppBuilder;
+use bastyde::settings::SettingsBundle;
+use bastyde_analytics_bastyde::BastydeAdapter;
+use bastyde_telemetry::{TelemetryBundle, TelemetryMode, UsageReporter};
 use std::rc::Rc;
 
 const EVENT_SCHEMA_VERSION: u32 = 1;
 
 fn main() {
     let adapter = Rc::new(
-        FernAdapter::builder()
+        BastydeAdapter::builder()
             .endpoint("https://collector.example.com:50051")
             .product_id("my.app")
-            .bearer_token(std::env::var("FERN_TOKEN").unwrap())
+            .bearer_token(std::env::var("BASTYDE_TOKEN").unwrap())
             .build(),
     ) as Rc<dyn UsageReporter>;
 
@@ -71,7 +71,7 @@ fn main() {
         .with_default_mode(TelemetryMode::Anonymous)
         .with_data_processor_name("MyCo SAS");
 
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .application("eu", "MyCo", "my-app")
         .settings(SettingsBundle::new())
         .telemetry(telemetry)        // <— telemetry wires in here
@@ -87,13 +87,13 @@ Three things happen on `.run()`:
    `DynamicReporter` are constructed.
 2. The resulting `OpenedTelemetry` is registered into the
    `app_state` registry — accessible from any widget via
-   [`TelemetryExt`](../crates/fern-telemetry/src/ext.rs).
-3. The dispatch tap in `fern-core` starts forwarding every dispatched
+   [`TelemetryExt`](../crates/bastyde-telemetry/src/ext.rs).
+3. The dispatch tap in `bastyde-core` starts forwarding every dispatched
    intent through `DynamicReporter::record`, **but the consent gate
    silently drops everything until the user grants** — the app stays
    functional in the `Unknown` state, no events leave.
 
-Drop the [`PrivacySettings`](../crates/fern-widgets/src/privacy_settings.rs)
+Drop the [`PrivacySettings`](../crates/bastyde-widgets/src/privacy_settings.rs)
 widget anywhere in the tree (typically a settings tab or first-run
 modal) and the user's grant flow + every Art. 13/15/17/20 obligation
 is wired.
@@ -105,7 +105,7 @@ is wired.
 ### 2.1 `TelemetryBundle` — declarative configuration
 
 Mirror of [`SettingsBundle`](settings.md). Builder-time validation;
-opens at `FernAppBuilder::run()` time once `AppPaths` and the
+opens at `BastydeAppBuilder::run()` time once `AppPaths` and the
 `SettingsStore` are available.
 
 ```rust
@@ -129,7 +129,7 @@ The opened-bundle handle is `Clone`-cheap (every field is `Rc`/`Arc`).
 Surfaced through `TelemetryExt`:
 
 ```rust
-use fern_telemetry::TelemetryExt;
+use bastyde_telemetry::TelemetryExt;
 
 fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
     if let Some(t) = ctx.try_telemetry() {
@@ -170,7 +170,7 @@ pub trait UsageReporter {
 
 The trait is **single-threaded** — adapters are `Rc`-shared, called
 only from the UI-thread dispatch tap. Adapters that need I/O behind
-a worker thread (Plausible, Fern) own that thread internally and
+a worker thread (Plausible, Bastyde) own that thread internally and
 communicate via `mpsc` channels; the `UsageReporter` impl is just
 the sync surface.
 
@@ -221,7 +221,7 @@ consent.with_settings_mirror(settings_store);
 - The user runs `consent.reset()` (typically from the mode-switch flow).
 
 `with_settings_mirror(SettingsStore)` writes the per-scope booleans
-into [`scopes::TELEMETRY_ANONYMOUS_METRICS`](../crates/fern-telemetry/src/scopes.rs) /
+into [`scopes::TELEMETRY_ANONYMOUS_METRICS`](../crates/bastyde-telemetry/src/scopes.rs) /
 `TELEMETRY_CRASH_REPORTS` / `TELEMETRY_FEATURE_FLAGS` keys so power
 users editing `general.toml` directly see the live state. One-way
 (consent → settings, not the reverse — the consent file is
@@ -269,7 +269,7 @@ let queue = PersistentEventQueue::open_with(
 )?;
 ```
 
-The Plausible and Fern adapters expose a
+The Plausible and Bastyde adapters expose a
 `.persistent_queue_path(path)` builder method to opt into
 durability. Without it, they fall back to an `InMemoryEventQueue`
 (events lost on hard exit).
@@ -282,7 +282,7 @@ durability. See §3.4 for the full reasoning.
 
 ### 2.7 The dispatch tap
 
-`fern-core`'s `event_dispatch_impl.rs` taps every dispatched intent
+`bastyde-core`'s `event_dispatch_impl.rs` taps every dispatched intent
 through:
 
 ```text
@@ -345,20 +345,20 @@ Anonymous-by-design: no `install_id` ever, `fetch_remote_data` /
 `erase_remote_data` always return `Unsupported`. CNIL audience-
 measurement-exemption posture by default.
 
-See [`crates/fern-analytics-plausible/`](../crates/fern-analytics-plausible/)
+See [`crates/bastyde-analytics-plausible/`](../crates/bastyde-analytics-plausible/)
 and [`examples/telemetry_plausible/`](../examples/telemetry_plausible/).
 
-### 3.3 `FernAdapter` (anonymous + pseudonymous → fern-collector)
+### 3.3 `BastydeAdapter` (anonymous + pseudonymous → bastyde-collector)
 
-Home-grown gRPC adapter for the FernUI-operated
-[`fern-collector`](../../fern-collector/) backend. Single adapter
+Home-grown gRPC adapter for the Bastyde-operated
+[`bastyde-collector`](../../bastyde-collector/) backend. Single adapter
 covers both modes; flip via `.install_id(uuid)` on the builder.
 
 ```rust
-let adapter = FernAdapter::builder()
+let adapter = BastydeAdapter::builder()
     .endpoint("https://collector.example.com:50051")
     .product_id("my.app")
-    .bearer_token("fct_id_secret")                  // from `fern-collector token mint`
+    .bearer_token("fct_id_secret")                  // from `bastyde-collector token mint`
     .tls(TlsClientConfig {                          // optional — server may run plain
         ca_pem: Some(std::fs::read("/etc/ssl/ca.pem")?),
         client_cert_pem: None,                      // optional mTLS
@@ -368,7 +368,7 @@ let adapter = FernAdapter::builder()
     .install_id("UUID-STRING")                      // pseudonymous mode; omit for anonymous
     .max_batch_size(50)
     .flush_interval(Duration::from_secs(60))
-    .persistent_queue_path(paths.data_dir().join("fern-queue.redb"))
+    .persistent_queue_path(paths.data_dir().join("bastyde-queue.redb"))
     .build();
 ```
 
@@ -379,12 +379,12 @@ In pseudonymous mode (`install_id` set):
   `RemoteDataExport`.
 - `erase_remote_data()` calls `Telemetry.Erase`.
 
-Multiple instances of the same FernUI app, each with its own
-`install_id`, hit the same `fern-collector` endpoint with the same
+Multiple instances of the same Bastyde app, each with its own
+`install_id`, hit the same `bastyde-collector` endpoint with the same
 bearer token; per-product scope is enforced server-side.
 
-See [`crates/fern-analytics-fern/`](../crates/fern-analytics-fern/)
-and [`examples/telemetry_fern/`](../examples/telemetry_fern/).
+See [`crates/bastyde-analytics-bastyde/`](../crates/bastyde-analytics-bastyde/)
+and [`examples/telemetry_bastyde/`](../examples/telemetry_bastyde/).
 
 ### 3.4 `OtlpAdapter` (anonymous + pseudonymous → OTLP/HTTP logs)
 
@@ -406,14 +406,14 @@ let adapter = OtlpAdapter::builder()
 The mapping is:
 
 ```text
-FernUI Event             OTLP LogRecord
+Bastyde Event             OTLP LogRecord
 ──────────────────────── ────────────────────────────────────
 event.name               body.stringValue
-event.category           attributes["fern.category"]
+event.category           attributes["bastyde.category"]
 event.timestamp          timeUnixNano (string, OTLP/JSON)
 event.install_id         resource.service.instance.id (when set)
-event.session_id         attributes["fern.session_id"]
-event.props.<key>        attributes["fern.<key>"]
+event.session_id         attributes["bastyde.session_id"]
+event.props.<key>        attributes["bastyde.<key>"]
 ```
 
 Anonymous-mode batches (no `install_id`) omit
@@ -421,7 +421,7 @@ Anonymous-mode batches (no `install_id`) omit
 logs.
 
 **Queue durability — intentional asymmetry.** Unlike the Plausible
-and Fern adapters, `OtlpAdapter` has no `.persistent_queue_path(...)`
+and Bastyde adapters, `OtlpAdapter` has no `.persistent_queue_path(...)`
 method: pending events live in an in-memory `VecDeque` and are lost
 on hard exit. The OTel deployment model expects a *collector*
 (sidecar, system service, or `localhost:4318`) to own the durability
@@ -436,7 +436,7 @@ exits should run a local collector with `file_storage`.
 `PrivacySettings` widget hides the "Get my data" / "Erase my data"
 controls when these come back.
 
-See [`crates/fern-analytics-otlp/`](../crates/fern-analytics-otlp/).
+See [`crates/bastyde-analytics-otlp/`](../crates/bastyde-analytics-otlp/).
 
 ### 3.5 Retry semantics — comparison
 
@@ -445,7 +445,7 @@ failure, exponential backoff with jitter) but differ in how a
 failed batch interacts with the queue. The differences are
 visible in operations and in stats counters.
 
-| Behavior | Plausible | OTLP | Fern |
+| Behavior | Plausible | OTLP | Bastyde |
 | -------- | --------- | ---- | ---- |
 | Send unit | Per event (one HTTP POST per event) | Per batch (one OTLP request per drain) | Per batch (one gRPC call per drain) |
 | First failure inside a drain | Re-enqueue failed event at the **tail**, mark `hit_retry`, re-enqueue remaining events without trying | Push the whole batch back to the **front** of the buffer in reverse order | Re-enqueue every event, reset `channel = None` to force re-dial |
@@ -461,12 +461,12 @@ visible in operations and in stats counters.
   blocking the queue behind a poison event.
 - **OTLP's head-requeue** preserves strict log order, which OTel
   consumers (Tempo, Honeycomb) sometimes assume.
-- **Fern's batch-requeue + redial** matches the gRPC stream
+- **Bastyde's batch-requeue + redial** matches the gRPC stream
   model: a transient stream error is treated as fatal to the
   current channel; subsequent batches start from a fresh dial.
 
 Apps that need strict ordering across all events should prefer
-OTLP or Fern. Apps that prioritize availability under transient
+OTLP or Bastyde. Apps that prioritize availability under transient
 server flakiness should prefer Plausible.
 
 ---
@@ -474,10 +474,10 @@ server flakiness should prefer Plausible.
 ## 4. The `PrivacySettings` widget
 
 Drop-in widget that surfaces every consent + RGPD obligation. Lives
-in `fern-widgets`:
+in `bastyde-widgets`:
 
 ```rust
-use fern_ui::widgets::PrivacySettings;
+use bastyde::widgets::PrivacySettings;
 
 let widget = PrivacySettings::new()
     .data_processor_name("MyCo SAS")
@@ -521,9 +521,9 @@ the `recent_log_revision` signal triggers a widget rebuild whenever
 `DynamicReporter::record` or `discard_pending` fires.
 
 i18n: 42 keys under the `privacy-*` namespace in
-[`crates/fern-widgets/locales/en-US.ftl`](../crates/fern-widgets/locales/en-US.ftl)
-and [`fr-FR.ftl`](../crates/fern-widgets/locales/fr-FR.ftl). Apps install
-the framework bundle via `I18nConfig::framework_locales(fern_widgets::framework_locales())`.
+[`crates/bastyde-widgets/locales/en-US.ftl`](../crates/bastyde-widgets/locales/en-US.ftl)
+and [`fr-FR.ftl`](../crates/bastyde-widgets/locales/fr-FR.ftl). Apps install
+the framework bundle via `I18nConfig::framework_locales(bastyde_widgets::framework_locales())`.
 
 ---
 
@@ -540,7 +540,7 @@ Three places where telemetry behavior is set, in order of precedence:
 | Active mode | Runtime | `DynamicReporter::active`, mutated by the widget |
 | Install ID | Runtime, automatic | `SettingsFile<InstallIdFile>`, 13-month rotation |
 | Consent decision | Runtime, persistent | `SettingsFile<ConsentFile>` |
-| Pending events | Runtime, persistent (Plausible + Fern adapters) | redb at `AppPaths::data_dir().join("<adapter>-queue.redb")` |
+| Pending events | Runtime, persistent (Plausible + Bastyde adapters) | redb at `AppPaths::data_dir().join("<adapter>-queue.redb")` |
 | Pending events | Runtime, in-memory only (OTLP adapter) | `VecDeque<OwnedEvent>` — durability deferred to the OTel collector |
 
 ### Endpoint override
@@ -558,9 +558,9 @@ Apps wire it through:
 
 ```rust
 let override_url = settings
-    .signal_for(&fern_telemetry::scopes::TELEMETRY_ENDPOINT_OVERRIDE)
+    .signal_for(&bastyde_telemetry::scopes::TELEMETRY_ENDPOINT_OVERRIDE)
     .get();
-let adapter = FernAdapter::builder()
+let adapter = BastydeAdapter::builder()
     .endpoint("https://default-collector.example.com:50051")
     .endpoint_override(override_url)         // applies iff non-empty
     .product_id("my.app")
@@ -578,10 +578,10 @@ widget re-asks. RGPD Art. 13 transparency.
 
 The framework provides the SDK plumbing; the **app developer is the
 data controller** and remains responsible for the legal artifacts
-listed in [`telemetry-plan.md` §10](plans/telemetry-plan.md#10-controller-responsibilities-what-fernui-does-not-do).
-What FernUI *does* automate:
+listed in [`telemetry-plan.md` §10](plans/telemetry-plan.md#10-controller-responsibilities-what-bastyde-does-not-do).
+What Bastyde *does* automate:
 
-| Article | What FernUI does |
+| Article | What Bastyde does |
 |---------|------------------|
 | **Art. 6(1)(a)** consent | `ConsentStore`. No event flows in `Unknown` or `Denied`. |
 | **Art. 6(1)(f)** legitimate interest (anonymous mode) | Anonymous-mode adapters set `supported_scopes() = anonymous_metrics_only()` and report `install_id() = None`. CNIL audience-measurement-exemption posture by default. |
@@ -600,21 +600,21 @@ buttons hide automatically — there's nothing to fetch or erase.
 
 | File | Purpose |
 |------|---------|
-| [`crates/fern-core/src/telemetry/event.rs`](../crates/fern-core/src/telemetry/event.rs) | `Event`, `OwnedEvent`, `Prop`, `RemoteDataExport`, serde derives |
-| [`crates/fern-core/src/telemetry/reporter.rs`](../crates/fern-core/src/telemetry/reporter.rs) | `UsageReporter` trait, `TelemetryError` |
-| [`crates/fern-telemetry/src/bundle.rs`](../crates/fern-telemetry/src/bundle.rs) | `TelemetryBundle`, `OpenedTelemetry`, `PrivacyPolicy` |
-| [`crates/fern-telemetry/src/consent.rs`](../crates/fern-telemetry/src/consent.rs) | `ConsentStore`, `ConsentFile`, settings-mirror integration |
-| [`crates/fern-telemetry/src/install_id.rs`](../crates/fern-telemetry/src/install_id.rs) | `InstallId` with 13-month rotation |
-| [`crates/fern-telemetry/src/dynamic_reporter.rs`](../crates/fern-telemetry/src/dynamic_reporter.rs) | `DynamicReporter`, recent-log tee, revision signal |
-| [`crates/fern-telemetry/src/queue/`](../crates/fern-telemetry/src/queue/) | `EventQueue` trait, `InMemoryEventQueue`, `PersistentEventQueue` |
-| [`crates/fern-telemetry/src/scopes.rs`](../crates/fern-telemetry/src/scopes.rs) | `SettingsKey<bool>` constants for per-scope mirror, `TELEMETRY_ENDPOINT_OVERRIDE`, `TELEMETRY_REGION_OVERRIDE` |
-| [`crates/fern-telemetry/src/ext.rs`](../crates/fern-telemetry/src/ext.rs) | `TelemetryExt` accessors on `BuildContext` / `EventContext` |
-| [`crates/fern-widgets/src/privacy_settings.rs`](../crates/fern-widgets/src/privacy_settings.rs) | The widget |
-| [`crates/fern-widgets/locales/en-US.ftl`](../crates/fern-widgets/locales/en-US.ftl) | i18n keys (`privacy-*`) |
-| [`crates/fern-analytics-plausible/`](../crates/fern-analytics-plausible/) | Plausible adapter |
-| [`crates/fern-analytics-fern/`](../crates/fern-analytics-fern/) | Home-grown gRPC adapter |
+| [`crates/bastyde-core/src/telemetry/event.rs`](../crates/bastyde-core/src/telemetry/event.rs) | `Event`, `OwnedEvent`, `Prop`, `RemoteDataExport`, serde derives |
+| [`crates/bastyde-core/src/telemetry/reporter.rs`](../crates/bastyde-core/src/telemetry/reporter.rs) | `UsageReporter` trait, `TelemetryError` |
+| [`crates/bastyde-telemetry/src/bundle.rs`](../crates/bastyde-telemetry/src/bundle.rs) | `TelemetryBundle`, `OpenedTelemetry`, `PrivacyPolicy` |
+| [`crates/bastyde-telemetry/src/consent.rs`](../crates/bastyde-telemetry/src/consent.rs) | `ConsentStore`, `ConsentFile`, settings-mirror integration |
+| [`crates/bastyde-telemetry/src/install_id.rs`](../crates/bastyde-telemetry/src/install_id.rs) | `InstallId` with 13-month rotation |
+| [`crates/bastyde-telemetry/src/dynamic_reporter.rs`](../crates/bastyde-telemetry/src/dynamic_reporter.rs) | `DynamicReporter`, recent-log tee, revision signal |
+| [`crates/bastyde-telemetry/src/queue/`](../crates/bastyde-telemetry/src/queue/) | `EventQueue` trait, `InMemoryEventQueue`, `PersistentEventQueue` |
+| [`crates/bastyde-telemetry/src/scopes.rs`](../crates/bastyde-telemetry/src/scopes.rs) | `SettingsKey<bool>` constants for per-scope mirror, `TELEMETRY_ENDPOINT_OVERRIDE`, `TELEMETRY_REGION_OVERRIDE` |
+| [`crates/bastyde-telemetry/src/ext.rs`](../crates/bastyde-telemetry/src/ext.rs) | `TelemetryExt` accessors on `BuildContext` / `EventContext` |
+| [`crates/bastyde-widgets/src/privacy_settings.rs`](../crates/bastyde-widgets/src/privacy_settings.rs) | The widget |
+| [`crates/bastyde-widgets/locales/en-US.ftl`](../crates/bastyde-widgets/locales/en-US.ftl) | i18n keys (`privacy-*`) |
+| [`crates/bastyde-analytics-plausible/`](../crates/bastyde-analytics-plausible/) | Plausible adapter |
+| [`crates/bastyde-analytics-bastyde/`](../crates/bastyde-analytics-bastyde/) | Home-grown gRPC adapter |
 
-For the home-grown server backend, see the [`fern-collector`](../../fern-collector/) sibling repo.
+For the home-grown server backend, see the [`bastyde-collector`](../../bastyde-collector/) sibling repo.
 
 ---
 
@@ -626,9 +626,9 @@ For the home-grown server backend, see the [`fern-collector`](../../fern-collect
   `http://127.0.0.1:8000/api/event`; override via
   `PLAUSIBLE_ENDPOINT` env var.
 
-- **[`examples/telemetry_fern/`](../examples/telemetry_fern/)** —
-  anonymous OR pseudonymous against a self-hosted `fern-collector`.
-  Env vars: `FERN_ENDPOINT`, `FERN_PRODUCT_ID`, `FERN_TOKEN`,
-  `FERN_INSTALL_ID` (set to flip to pseudonymous), `FERN_TLS_CA`,
-  `FERN_TLS_DOMAIN`. See the example's docstring for the complete
-  run procedure including spinning up the sibling `fern-collector`.
+- **[`examples/telemetry_bastyde/`](../examples/telemetry_bastyde/)** —
+  anonymous OR pseudonymous against a self-hosted `bastyde-collector`.
+  Env vars: `BASTYDE_ENDPOINT`, `BASTYDE_PRODUCT_ID`, `BASTYDE_TOKEN`,
+  `BASTYDE_INSTALL_ID` (set to flip to pseudonymous), `BASTYDE_TLS_CA`,
+  `BASTYDE_TLS_DOMAIN`. See the example's docstring for the complete
+  run procedure including spinning up the sibling `bastyde-collector`.

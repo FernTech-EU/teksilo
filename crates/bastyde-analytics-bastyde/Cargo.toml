@@ -1,0 +1,27 @@
+[package]
+name = "bastyde-analytics-bastyde"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Bastyde analytics adapter for the home-grown gRPC `bastyde-collector` backend. Sub-phase A: localhost ingest, no auth, no TLS."
+
+[dependencies]
+bastyde-core = { workspace = true }
+bastyde-telemetry = { workspace = true }
+bastyde-collector-proto = { workspace = true }
+
+# gRPC + tokio — kept local to this crate. No other bastyde crate
+# uses them, so promoting them to workspace deps would leak the
+# transport choice to everyone.
+tonic = { version = "0.12", default-features = false, features = ["codegen", "prost", "transport", "tls"] }
+prost = "0.13"
+prost-types = "0.13"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
+tokio-stream = "0.1"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+bastyde-settings = { workspace = true }

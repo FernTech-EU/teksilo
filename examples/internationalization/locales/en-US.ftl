@@ -2,7 +2,7 @@
 # invocation in this crate against this file at compile time.
 
 window-title = Internationalization Demo
--brand = FernUI
+-brand = Bastyde
 heading = { -brand } i18n Showcase
 greeting = Hello, { $name }!
 body-paragraph = Pick a language from the list below. Switching to Arabic flips the layout direction — leading and trailing swap, so the row at the bottom visibly reverses its children. English and French are both left-to-right, so the row stays in the same order between them.
@@ -19,9 +19,9 @@ status-fr = Showing French
 status-ar = Showing Arabic
 
 # Locale-aware formatting showcase. Demonstrates the four pieces wired
-# by `fern-i18n`: bundle-side `NUMBER()` / `DATETIME()` (this file's
+# by `bastyde-i18n`: bundle-side `NUMBER()` / `DATETIME()` (this file's
 # `bundle-currency-row` and `bundle-date-row`), the Signal-side
-# `NumberFormatter` / `FernDateTimeFormatter` (no .ftl keys needed),
+# `NumberFormatter` / `BastydeDateTimeFormatter` (no .ftl keys needed),
 # and `tr_signal!` (this file's `cart-summary`).
 formatting-heading = Locale-aware formatting
 bundle-currency-row = Total (bundle): { NUMBER($price, style: "currency", currency: "USD") }

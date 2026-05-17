@@ -1,17 +1,17 @@
-# FernUI
+# Bastyde
 
 A pure-Rust, batteries-included GUI framework for desktop applications. Accessibility, internationalization, rich text, themes, persistent settings, drag-and-drop, charts, and a scene canvas all ship as first-class citizens.
 
 ```rust
-use fern_ui::prelude::*;
-use fern_ui::widgets::Button;
+use bastyde::prelude::*;
+use bastyde::widgets::Button;
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .theme(intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Hello FernUI")
+                .title("Hello Bastyde")
                 .size(400, 300)
                 .root(|tree, _state| {
                     tree.add(
@@ -27,11 +27,11 @@ fn main() {
 Add reactive state and derived bindings:
 
 ```rust
-use fern_ui::prelude::*;
-use fern_ui::widgets::{Button, TextWidget, VStack};
+use bastyde::prelude::*;
+use bastyde::widgets::{Button, TextWidget, VStack};
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .theme(intui::light())
         .initial_window(
             WindowConfig::new()
@@ -67,21 +67,21 @@ Also useful as a shelf of ready-to-use widgets if you're shopping the Rust GUI e
 
 ## Design priorities
 
-FernUI is a retained-tree framework inspired by Qt and the ShiftUI layouting.
+Bastyde is a retained-tree framework inspired by Qt and the ShiftUI layouting.
 
 - **Composition with painting layered on top.** The `Widget` trait offers both `build()` (compose children) and `paint()` (draw chrome); both methods are optional, and a single widget can do both. Most of the widgets are pure compositions of primitives (`RectWidget`, `TextWidget`, `HStack`, `Padding`); `Card`, `Panel`, overlays, and custom chrome layer paint on top of their composed children.
 - **Accessibility at the trait level.** Every widget declares its role and name in an `accessibility()` method that sits beside `layout_response` and `paint`. The AT tree is built alongside the widget tree, not reconstructed from it.
 - **Compile-time-checked i18n.** The `tr!` macro reads `.ftl` files at proc-macro expansion time and rejects missing keys, missing arguments, and unknown arguments at build time.
 - **Rich-text stack as foundation.** The document model, shaping, BiDi, color emoji, and undo/redo are the foundation, not a widget on top. Even the plain `TextWidget` routes through it.
-- **Two API surfaces, one semantics.** A fluent builder API for everything, plus an optional `fern!` macro for SwiftUI-style declarative syntax. The macro desugars one-to-one to builder calls, so you can mix both in one file.
+- **Two API surfaces, one semantics.** A fluent builder API for everything, plus an optional `bati!` macro for SwiftUI-style declarative syntax. The macro desugars one-to-one to builder calls, so you can mix both in one file.
 
 ## Status
 
 **Version 0.4, first public release.** Expect breaking changes between 0.x versions.
 
-The test suite is roughly 2,600 tests in fern-ui and over 4,000 across the whole stack. Tests target behavior (event dispatch, layout output, accessibility-tree structure), not implementation snapshots. The same widget tree runs under tests without a window, a GPU, or winit, and a simulated clock makes time-dependent behavior deterministic.
+The test suite is roughly 2,600 tests in bastyde and over 4,000 across the whole stack. Tests target behavior (event dispatch, layout output, accessibility-tree structure), not implementation snapshots. The same widget tree runs under tests without a window, a GPU, or winit, and a simulated clock makes time-dependent behavior deterministic.
 
-FernUI builds on two earlier MPL-2.0 crates already at v1.x: [text-document](https://github.com/jacquetc/text-document) (rich-text document model) and [text-typeset](https://github.com/jacquetc/text-typeset) (typesetting engine).
+Bastyde builds on two earlier MPL-2.0 crates already at v1.x: [text-document](https://github.com/jacquetc/text-document) (rich-text document model) and [text-typeset](https://github.com/jacquetc/text-typeset) (typesetting engine).
 
 Production deployment is currently limited to FernTech's own applications; the 0.x version label reflects this scope. The known gaps are listed at the end of this README.
 
@@ -134,14 +134,14 @@ For depth on any of these, see `docs/`.
 ```sh
 cargo new my-app
 cd my-app
-cargo add fern-ui
+cargo add bastyde
 ```
 
 Then read the examples:
 
 ```sh
-git clone https://github.com/ferntech/fern-ui
-cd fern-ui
+git clone https://github.com/ferntech/bastyde
+cd bastyde
 cargo run -p simple-button      # the minimal app
 cargo run -p widget-catalog     # browse every widget
 cargo run -p file-dialogs       # native file dialogs
@@ -175,17 +175,17 @@ What is not yet shipped:
 - **Cross-application drag and drop.** Intra-app DnD with typed payloads works fully; cross-app DnD via the OS clipboard needs platform IPC that isn't in place.
 - **X11 custom title bars.** Wayland, Windows, and macOS backends ship. On X11 the custom-chrome operations return `PlatformError::Unsupported` rather than failing silently, and the window falls back to native server-side decorations.
 - **Mobile and web.** Linux and Windows are the primary targets; macOS works modulo the menu bar gap. No mobile or web targets.
-- **Typed errors everywhere.** A few subsystems (notably parts of `fern-settings` and some SVG and date-time parsers) still panic on paths that should return typed errors.
+- **Typed errors everywhere.** A few subsystems (notably parts of `bastyde-settings` and some SVG and date-time parsers) still panic on paths that should return typed errors.
 - **API stability.** Pre-1.0; breaking changes are expected between minor versions.
 - **Issue response time.** Best-effort. Single maintainer.
 
 ## Architecture stack
 
-FernUI is part of a small stack:
+Bastyde is part of a small stack:
 
 - [text-document](https://github.com/jacquetc/text-document), the document model. **Required dependency.**
 - [text-typeset](https://github.com/jacquetc/text-typeset), the typesetting engine. **Required dependency.**
-- [Qleany](https://github.com/jacquetc/qleany), an architecture materializer that generates Clean Architecture in Rust or C++/Qt from a YAML manifest. Independent and optional; pairs naturally with FernUI for application backends.
+- [Qleany](https://github.com/jacquetc/qleany), an architecture materializer that generates Clean Architecture in Rust or C++/Qt from a YAML manifest. Independent and optional; pairs naturally with Bastyde for application backends.
 
 ## Contributing
 
@@ -194,13 +194,13 @@ Bug reports and patches are welcome. Please open an issue before sending a non-t
 - The framework was built to support FernTech's application portfolio; roadmap priorities are weighted by what those applications need.
 - Architectural changes need a design discussion first. Surface-level changes (new builder methods, bug fixes, new examples) are easier.
 - Tests are required for new code. The suite runs headlessly, with no GPU or display server.
-- The `fern!` macro and the builder API both need to keep working. New widgets should be usable from both.
+- The `bati!` macro and the builder API both need to keep working. New widgets should be usable from both.
 
 No CLA. A DCO sign-off (`git commit -s`) on each commit is enough.
 
 ## License
 
-Mozilla Public License 2.0. See `LICENSE`. FernUI can be used in commercial and closed-source software without restriction; modifications to the FernUI files themselves must be shared under MPL2 if distributed; application code that merely uses FernUI is under its own license.
+Mozilla Public License 2.0. See `LICENSE`. Bastyde can be used in commercial and closed-source software without restriction; modifications to the Bastyde files themselves must be shared under MPL2 if distributed; application code that merely uses Bastyde is under its own license.
 
 ## Commercial support
 
@@ -212,4 +212,4 @@ For priority bug fixes, written support, or an indemnification agreement, contac
 
 ## Acknowledgments
 
-FernUI builds on the work of others: AccessKit; winit and wgpu; HarfBuzz (via rustybuzz), swash, fontdb, etagere, and ICU4X; unicode-bidi and unicode-linebreak; Fluent and the Mozilla l10n team; the published design notes of the Druid, Masonry, and Xilem projects; and SwiftUI's layout protocol. Anthropic and Mistral provided the language models whose code generation contributed substantially under human review.
+Bastyde builds on the work of others: AccessKit; winit and wgpu; HarfBuzz (via rustybuzz), swash, fontdb, etagere, and ICU4X; unicode-bidi and unicode-linebreak; Fluent and the Mozilla l10n team; the published design notes of the Druid, Masonry, and Xilem projects; and SwiftUI's layout protocol. Anthropic and Mistral provided the language models whose code generation contributed substantially under human review.

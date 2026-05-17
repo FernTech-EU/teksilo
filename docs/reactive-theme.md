@@ -7,13 +7,13 @@
 > per-widget `*Variant` enums and `*Style` traits), see
 > [`styling-system.md`](styling-system.md).
 
-FernUI runs its theme through three layers of reactive primitives:
+Bastyde runs its theme through three layers of reactive primitives:
 
 | Layer | Type | Lives on | Purpose |
 |-------|------|----------|---------|
-| **Root signal** | [`Signal<Theme>`](../crates/fern-core/src/signal.rs) | [`WidgetTree`](../crates/fern-core/src/widget_tree.rs) | Source of truth; `set_theme` fires this |
-| **Role enums** | [`TextRole`](../crates/fern-tokens/src/roles.rs), `SurfaceRole`, `BorderRole`, `TextStyleRole` | `fern-tokens` | Name *what* a value represents, not *which* literal it is |
-| **Props** | [`ColorProp`](../crates/fern-core/src/color_prop.rs), [`TextStyleProp`](../crates/fern-core/src/color_prop.rs) | `fern-core` | Unified input type accepted by widget builders |
+| **Root signal** | [`Signal<Theme>`](../crates/bastyde-core/src/signal.rs) | [`WidgetTree`](../crates/bastyde-core/src/widget_tree.rs) | Source of truth; `set_theme` fires this |
+| **Role enums** | [`TextRole`](../crates/bastyde-tokens/src/roles.rs), `SurfaceRole`, `BorderRole`, `TextStyleRole` | `bastyde-tokens` | Name *what* a value represents, not *which* literal it is |
+| **Props** | [`ColorProp`](../crates/bastyde-core/src/color_prop.rs), [`TextStyleProp`](../crates/bastyde-core/src/color_prop.rs) | `bastyde-core` | Unified input type accepted by widget builders |
 
 The rules:
 
@@ -26,7 +26,7 @@ The rules:
 ## Quick reference
 
 ```rust
-use fern_ui::prelude::*;  // re-exports Color, Role enums, ColorProp, TextStyleProp
+use bastyde::prelude::*;  // re-exports Color, Role enums, ColorProp, TextStyleProp
 
 // Plain text — default role is TextRole::Primary.
 TextWidget::new("Hello")
@@ -66,7 +66,7 @@ RectWidget::new().background(bg_role)
 pub fn set_theme(&mut self, theme: Theme)
 ```
 
-Declared at [`crates/fern-core/src/widget_tree.rs`](../crates/fern-core/src/widget_tree.rs) (around line 759). Sequence:
+Declared at [`crates/bastyde-core/src/widget_tree.rs`](../crates/bastyde-core/src/widget_tree.rs) (around line 759). Sequence:
 
 1. `self.theme = theme.clone()` — the cached `&Theme` accessor still works.
 2. `self.theme_signal.set(theme)` — fires observers (derived `Signal<Theme>`s, role-carrying `ColorProp`s via their bindings).
@@ -83,7 +83,7 @@ tree.set_theme_override(panel_id, |theme| {
 });
 ```
 
-This only marks the subtree dirty; layout/paint contexts resolve ancestor overrides via [`WidgetArena::resolve_theme`](../crates/fern-core/src/arena.rs).
+This only marks the subtree dirty; layout/paint contexts resolve ancestor overrides via [`WidgetArena::resolve_theme`](../crates/bastyde-core/src/arena.rs).
 
 ---
 
@@ -92,12 +92,12 @@ This only marks the subtree dirty; layout/paint contexts resolve ancestor overri
 ### Built-in presets
 
 There is no `Theme::default()` / `Theme::*_default()`. `Theme` lives in
-`fern-core::styles` and is built through a preset constructor:
+`bastyde-core::styles` and is built through a preset constructor:
 
 ```rust
-use fern_ui::prelude::intui;
+use bastyde::prelude::intui;
 
-let light = intui::light();   // fern_core::presets::intui::light
+let light = intui::light();   // bastyde_core::presets::intui::light
 let dark  = intui::dark();
 ```
 
@@ -105,12 +105,12 @@ Both are neutral Int UI baselines — not visually distinctive, designed to be c
 
 ### Programmatic customization via struct spread
 
-`Theme` (`fern-core::styles`) and the token structs `ColorTokens`, `TypographyTokens`, `ShapeTokens`, `LayoutTokens`, `MotionTokens`, `ComponentStyles` (`fern-tokens`) are plain structs. Override the fields you want and spread the rest from a preset base:
+`Theme` (`bastyde-core::styles`) and the token structs `ColorTokens`, `TypographyTokens`, `ShapeTokens`, `LayoutTokens`, `MotionTokens`, `ComponentStyles` (`bastyde-tokens`) are plain structs. Override the fields you want and spread the rest from a preset base:
 
 ```rust
-use fern_core::styles::Theme;
-use fern_tokens::{ColorTokens, TypographyTokens, TextStyle, Color};
-use fern_ui::prelude::intui;
+use bastyde_core::styles::Theme;
+use bastyde_tokens::{ColorTokens, TypographyTokens, TextStyle, Color};
+use bastyde::prelude::intui;
 
 let editor_light = Theme {
     colors: ColorTokens {
@@ -134,7 +134,7 @@ let editor_light = Theme {
 tree.set_theme(editor_light);
 ```
 
-`ColorTokens::light_default()` and the other raw-token defaults still live in `fern-tokens` — only the `Theme`-level constructor moved.
+`ColorTokens::light_default()` and the other raw-token defaults still live in `bastyde-tokens` — only the `Theme`-level constructor moved.
 
 The same pattern works for sub-trees via `set_theme_override(panel_id, |theme| { ... })` (see above).
 
@@ -144,7 +144,7 @@ The same pattern works for sub-trees via `set_theme_override(panel_id, |theme| {
 
 ```rust
 use std::fs;
-use fern_core::styles::Theme;
+use bastyde_core::styles::Theme;
 
 let toml = fs::read_to_string("themes/editor-light.toml")?;
 let theme: Theme = toml::from_str(&toml)?;
@@ -161,7 +161,7 @@ The token structs **do not** carry `#[serde(default)]` on their fields, so a fil
 
 ## Role enums
 
-All defined in [`crates/fern-tokens/src/roles.rs`](../crates/fern-tokens/src/roles.rs), exported from `fern_tokens::{TextRole, SurfaceRole, BorderRole, TextStyleRole}` and re-exported through `fern_ui::prelude`.
+All defined in [`crates/bastyde-tokens/src/roles.rs`](../crates/bastyde-tokens/src/roles.rs), exported from `bastyde_tokens::{TextRole, SurfaceRole, BorderRole, TextStyleRole}` and re-exported through `bastyde::prelude`.
 
 ### `TextRole`
 Foreground text color.
@@ -185,7 +185,7 @@ Typography role.
 
 Every role has a `resolve(&ColorTokens)` (or `resolve(&TypographyTokens)` for `TextStyleRole`) method. Paint/layout code already calls those under the hood when reading a `ColorProp` / `TextStyleProp`.
 
-**Adding a role.** Add the variant to the enum, extend `resolve(..)`, re-export from `fern_ui::prelude`. Add a role only when more than one widget repeatedly wants the same token — otherwise a `.color(Color::..)` literal is fine.
+**Adding a role.** Add the variant to the enum, extend `resolve(..)`, re-export from `bastyde::prelude`. Add a role only when more than one widget repeatedly wants the same token — otherwise a `.color(Color::..)` literal is fine.
 
 ---
 
@@ -275,14 +275,14 @@ impl Widget for Button {
 
 The `interaction` signal is the *only* upstream root the role signals observe. When the user moves the mouse off the button, only `interaction` fires; when the theme changes, `mark_all_dirty` triggers the repaint and the paint-time `resolve(&theme)` picks up the new colors. Two separate triggers, same rendering path.
 
-See [`crates/fern-widgets/src/button.rs`](../crates/fern-widgets/src/button.rs) for the full widget; [`menu_list::KeyboardHighlightWrapper`](../crates/fern-widgets/src/menu_list.rs) and [`combo_box::DropdownItem`](../crates/fern-widgets/src/combo_box/item.rs) are smaller walk-throughs.
+See [`crates/bastyde-widgets/src/button.rs`](../crates/bastyde-widgets/src/button.rs) for the full widget; [`menu_list::KeyboardHighlightWrapper`](../crates/bastyde-widgets/src/menu_list.rs) and [`combo_box::DropdownItem`](../crates/bastyde-widgets/src/combo_box/item.rs) are smaller walk-throughs.
 
 ### When `Signal<Role>` doesn't fit
 
 Three cases keep an explicit `theme_signal`:
 
 1. **Color transformations** (`token.with_alpha(0.2)` etc.) — no role represents "accent at 12 % alpha"; use `theme_signal.map(|t| t.colors.accent.with_alpha(0.12))` to get a `Signal<Color>`.
-2. **Effects on external state** — the rich-text engine's per-frame palette, for instance. See [`primitives/text_input_field.rs`](../crates/fern-widgets/src/primitives/text_input_field.rs) for the `ctx.effect(&theme_signal, move |theme| { ... })` pattern.
+2. **Effects on external state** — the rich-text engine's per-frame palette, for instance. See [`primitives/text_input_field.rs`](../crates/bastyde-widgets/src/primitives/text_input_field.rs) for the `ctx.effect(&theme_signal, move |theme| { ... })` pattern.
 3. **Layout snapshots** — `let style = ctx.theme_signal().get().components.button` at the top of `build()` captures corner radii, padding, min sizes. These rarely differ across themes; the snapshot is fine.
 
 ---
@@ -293,11 +293,11 @@ Layout primitives accept `impl Into<Prop<f32>>` for dimensions that may come fro
 
 | Primitive | Method | File |
 |-----------|--------|------|
-| `HStack` / `VStack` / `Wrap` | `.spacing(...)` | [primitives/hstack.rs](../crates/fern-widgets/src/primitives/hstack.rs), `vstack.rs`, `wrap.rs` |
-| `Grid` | `.column_gap(...)` / `.row_gap(...)` | [primitives/grid.rs](../crates/fern-widgets/src/primitives/grid.rs) |
-| `Padding` | `Padding::new / uniform / symmetric` | [primitives/padding.rs](../crates/fern-widgets/src/primitives/padding.rs) |
+| `HStack` / `VStack` / `Wrap` | `.spacing(...)` | [primitives/hstack.rs](../crates/bastyde-widgets/src/primitives/hstack.rs), `vstack.rs`, `wrap.rs` |
+| `Grid` | `.column_gap(...)` / `.row_gap(...)` | [primitives/grid.rs](../crates/bastyde-widgets/src/primitives/grid.rs) |
+| `Padding` | `Padding::new / uniform / symmetric` | [primitives/padding.rs](../crates/bastyde-widgets/src/primitives/padding.rs) |
 | `MinSize` / `MaxSize` / `FixedSize` | `.bind_width` / `.bind_height` / etc. | existing `.bind_*` builders |
-| `RectWidget` | `.border_width(...)` / `.corner_radius(...)` | [primitives/rect_widget.rs](../crates/fern-widgets/src/primitives/rect_widget.rs) |
+| `RectWidget` | `.border_width(...)` / `.corner_radius(...)` | [primitives/rect_widget.rs](../crates/bastyde-widgets/src/primitives/rect_widget.rs) |
 
 Pass a static `f32`, a `Signal<f32>`, or a `Prop<f32>`; the builder registers a `BindingLevel::Relayout` binding for signal variants so layout re-runs on theme-driven spacing changes.
 
@@ -365,10 +365,10 @@ RectWidget::new().background(bg)
 
 | File | Contents |
 |------|----------|
-| [`crates/fern-tokens/src/roles.rs`](../crates/fern-tokens/src/roles.rs) | Role enums + `resolve` |
-| [`crates/fern-core/src/color_prop.rs`](../crates/fern-core/src/color_prop.rs) | `ColorProp`, `TextStyleProp`, `From` impls |
-| [`crates/fern-core/src/widget_tree.rs`](../crates/fern-core/src/widget_tree.rs) | `set_theme`, `set_locale`, `theme_signal`, `locale_signal` |
-| [`crates/fern-core/src/build_context.rs`](../crates/fern-core/src/build_context.rs) | `BuildContext::theme()`, `theme_signal()`, `locale_signal()` |
-| [`crates/fern-widgets/src/button.rs`](../crates/fern-widgets/src/button.rs) | Canonical `Signal<Role>` pattern |
-| [`crates/fern-widgets/src/primitives/text_widget.rs`](../crates/fern-widgets/src/primitives/text_widget.rs) | Default role usage, paint-time resolve |
-| [`crates/fern-widgets/src/panel.rs`](../crates/fern-widgets/src/panel.rs) | `ColorProp` props + default fallbacks |
+| [`crates/bastyde-tokens/src/roles.rs`](../crates/bastyde-tokens/src/roles.rs) | Role enums + `resolve` |
+| [`crates/bastyde-core/src/color_prop.rs`](../crates/bastyde-core/src/color_prop.rs) | `ColorProp`, `TextStyleProp`, `From` impls |
+| [`crates/bastyde-core/src/widget_tree.rs`](../crates/bastyde-core/src/widget_tree.rs) | `set_theme`, `set_locale`, `theme_signal`, `locale_signal` |
+| [`crates/bastyde-core/src/build_context.rs`](../crates/bastyde-core/src/build_context.rs) | `BuildContext::theme()`, `theme_signal()`, `locale_signal()` |
+| [`crates/bastyde-widgets/src/button.rs`](../crates/bastyde-widgets/src/button.rs) | Canonical `Signal<Role>` pattern |
+| [`crates/bastyde-widgets/src/primitives/text_widget.rs`](../crates/bastyde-widgets/src/primitives/text_widget.rs) | Default role usage, paint-time resolve |
+| [`crates/bastyde-widgets/src/panel.rs`](../crates/bastyde-widgets/src/panel.rs) | `ColorProp` props + default fallbacks |

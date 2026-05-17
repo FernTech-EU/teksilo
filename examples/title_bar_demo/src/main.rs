@@ -17,8 +17,8 @@
 //! returns `None` and the demo falls back to a plain content view with no
 //! title bar.
 
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Button, Expand, HStack, RectWidget, Spacer, TextWidget, TitleBar, Toolbar, VStack, WindowFrame,
     ZStack,
 };
@@ -30,21 +30,21 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                fern_ui::presets::intui::dark()
+                bastyde::presets::intui::dark()
             } else {
-                fern_ui::presets::intui::light()
+                bastyde::presets::intui::light()
             });
         }),
     ))
 }
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::dark())
+        .theme(bastyde::presets::intui::dark())
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — Title Bar Demo")
+                .title("Bastyde — Title Bar Demo")
                 .size(900, 600)
                 .decorations(DecorationsMode::CustomChrome)
                 .root(|tree, _state| {
@@ -63,7 +63,7 @@ fn main() {
                                 .background(theme.colors.surface_pressed)
                                 .border(theme.colors.text_secondary, 2.0)
                                 .leading(
-                                    TextWidget::new_literal("  FernUI — Title Bar Demo")
+                                    TextWidget::new_literal("  Bastyde — Title Bar Demo")
                                         .style(theme.typography.body_bold.clone())
                                         .color(theme.colors.text_primary),
                                 )

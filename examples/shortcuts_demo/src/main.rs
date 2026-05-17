@@ -19,11 +19,11 @@
 //! - **Per-intent Action handlers** that extract the typed payload
 //!   from the runtime intent and use it.
 
-use fern_ui::IntentKind;
-use fern_ui::core::Action;
-use fern_ui::core::shortcut::{KeyStroke, Shortcut};
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::IntentKind;
+use bastyde::core::Action;
+use bastyde::core::shortcut::{KeyStroke, Shortcut};
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Button, ButtonVariant, Expand, HStack, MenuBar, MenuItem, MenuList, Padding, Panel,
     ShortcutSettings, Spacer, TextWidget, Toolbar, VStack, tooltip::TooltipContent,
 };
@@ -35,9 +35,9 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                fern_ui::presets::intui::dark()
+                bastyde::presets::intui::dark()
             } else {
-                fern_ui::presets::intui::light()
+                bastyde::presets::intui::light()
             });
         }),
     ))
@@ -332,7 +332,7 @@ impl Widget for Root {
 
         let tooltip = TooltipContent::new(
             "save-tip",
-            fern_ui::i18n::LocalizedString::literal("Save the current document."),
+            bastyde::i18n::LocalizedString::literal("Save the current document."),
         )
         .for_shortcut("app.save");
         let save_button = Button::new_literal("Save (button)")
@@ -417,12 +417,12 @@ impl Widget for Root {
 }
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — Shortcuts Demo")
+                .title("Bastyde — Shortcuts Demo")
                 .size(1100, 720)
                 .root(|tree, _state| {
                     tree.add(
@@ -442,7 +442,7 @@ fn main() {
 #[cfg(test)]
 mod intent_kind_shapes {
     use super::*;
-    use fern_ui::core::Intent;
+    use bastyde::core::Intent;
 
     #[derive(Debug, PartialEq)]
     struct CreateItemDto {
@@ -538,7 +538,7 @@ mod intent_kind_shapes {
 #[cfg(test)]
 mod dispatch_tests {
     use super::*;
-    use fern_ui::core::WidgetTree;
+    use bastyde::core::WidgetTree;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -552,7 +552,7 @@ mod dispatch_tests {
         // the Root so our log-actions live on the outer root widget.
         let log: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
 
-        let mut tree = WidgetTree::new().with_theme(fern_ui::presets::intui::light());
+        let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
         // Add Root (installs its own Actions on the Root node).
         let _ = tree.add(Root::new());
         tree.layout(SizeProposal::exact(1100.0, 720.0));

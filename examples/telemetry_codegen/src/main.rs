@@ -1,4 +1,4 @@
-//! Demonstrates `fern_telemetry_codegen::include_telemetry_schema!`:
+//! Demonstrates `bastyde_telemetry_codegen::include_telemetry_schema!`:
 //! the macro reads `telemetry/events.yaml` at compile time and expands
 //! to typed `emit_*` functions and enum types.
 
@@ -10,10 +10,10 @@
 //   pub fn emit_lifecycle_app_started(…)
 //   pub fn emit_lifecycle_app_exited(…)
 //   pub fn emit_widget_census(…)
-fern_telemetry_codegen::include_telemetry_schema!("telemetry/events.yaml");
+bastyde_telemetry_codegen::include_telemetry_schema!("telemetry/events.yaml");
 
 fn main() {
-    let stub = fern_telemetry::StubReporter::anonymous();
+    let stub = bastyde_telemetry::StubReporter::anonymous();
     let session = "demo-session";
 
     emit_lifecycle_app_started(

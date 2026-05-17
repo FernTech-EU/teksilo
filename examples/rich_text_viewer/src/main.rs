@@ -8,16 +8,16 @@
 //! layout, paint, and `on_change` event plumbing end to end without
 //! depending on a file on disk.
 
-use fern_ui::prelude::*;
-use fern_ui::text_document::TextDocument;
-use fern_ui::widgets::rich_text::RichTextEditor;
-use fern_ui::widgets::{Button, Expand, HStack, Spacer, Toolbar};
+use bastyde::prelude::*;
+use bastyde::text_document::TextDocument;
+use bastyde::widgets::rich_text::RichTextEditor;
+use bastyde::widgets::{Button, Expand, HStack, Spacer, Toolbar};
 
-const SAMPLE: &str = r#"# FernUI Rich Text Viewer
+const SAMPLE: &str = r#"# Bastyde Rich Text Viewer
 
 This window holds a single `RichTextEditor::read_only` bound to a
 `TextDocument` loaded from an embedded markdown string. It is the
-live target of Milestone 8a of §27.10 of the FernUI architecture.
+live target of Milestone 8a of §27.10 of the Bastyde architecture.
 
 ## What works today
 
@@ -26,7 +26,7 @@ live target of Milestone 8a of §27.10 of the FernUI architecture.
   screen coords back down, so nearest-neighbor atlas sampling still
   produces pixel-perfect text on HiDPI).
 - The editor shares the application's `SharedTypesetter`, so its
-  glyphs land in the same atlas fern-render uploads to the GPU.
+  glyphs land in the same atlas bastyde-render uploads to the GPU.
 - Mouse wheel scrolling.
 - Click to place the caret, Shift+click to extend the selection.
 - Arrow keys for character navigation, Ctrl+Arrow for word jumps,
@@ -76,9 +76,9 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                fern_ui::presets::intui::dark()
+                bastyde::presets::intui::dark()
             } else {
-                fern_ui::presets::intui::light()
+                bastyde::presets::intui::light()
             });
         }),
     ))
@@ -89,16 +89,16 @@ fn main() {
     doc.set_markdown(SAMPLE)
         .expect("failed to parse embedded markdown");
 
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — Rich Text Viewer")
+                .title("Bastyde — Rich Text Viewer")
                 .size(720, 540)
                 .root(move |tree, _state| {
                     tree.add(
-                        fern_ui::widgets::VStack::new()
+                        bastyde::widgets::VStack::new()
                             .child(dark_mode_toolbar())
                             .child(Expand::new().child(RichTextEditor::read_only(doc.clone()))),
                     )

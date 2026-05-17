@@ -3,8 +3,8 @@
 
 use std::time::Duration;
 
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Button, ButtonVariant, Divider, EventContextMessageBoxExt, Expand, HStack, MessageBox,
     MessageBoxButtons, Panel, Popover, ProgressBar, Snackbar, Spacer, TabInfo, TabWidget,
     TextWidget, VStack,
@@ -122,7 +122,7 @@ fn province_composite_body() -> impl Widget + 'static {
 /// (dark-on-dark in the light theme). Tab content text uses
 /// `TextRole::TooltipText` for the same reason.
 fn tabbed_composite_body() -> impl Widget + 'static {
-    let selected: Signal<Option<fern_ui::widgets::tab_widget::TabId>> = Signal::new(None);
+    let selected: Signal<Option<bastyde::widgets::tab_widget::TabId>> = Signal::new(None);
     let body = TabWidget::new(selected)
         .selected_text_role(TextRole::TooltipText)
         .idle_text_role(TextRole::TooltipShortcut)
@@ -371,7 +371,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // Popover.content(VStack with chained children), Snackbar
     // .content+.trigger+chained — the chained imperative form is the
     // straightforward reading; pre-register and splice via #{...}.
@@ -398,7 +398,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .auto_dismiss_after(Duration::from_secs(3)),
     );
 
-    fern!(ctx => VStack {
+    bati!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

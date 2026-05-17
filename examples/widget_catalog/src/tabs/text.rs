@@ -1,7 +1,7 @@
 //! Text tab — TextInput, SpinBox, SearchField, FilePickerField, InputDialog.
 
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Button, ButtonVariant, Divider, FilePickerField, FilePickerKind, InputDialog, SearchField,
     SpinBox, TextInput, TextWidget, VStack,
 };
@@ -140,17 +140,17 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
+pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let username_sig = sigs.username_text.clone();
     let readonly_sig = sigs.readonly_text.clone();
     let spin_sig = sigs.spin_value.clone();
     let file_path_signal = ctx.signal(String::new());
     // Pre-register: `with_suggestions` / `on_select` / `on_submit_fn`
-    // each take a non-trivial closure; the fern! property syntax handles
+    // each take a non-trivial closure; the bati! property syntax handles
     // single-line closures fine but the suggestion closure is multi-line.
     let search_id = ctx.add(search_field(sigs.search_text.clone()));
 
-    fern!(ctx => VStack {
+    bati!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

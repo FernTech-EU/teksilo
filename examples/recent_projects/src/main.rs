@@ -1,14 +1,14 @@
-//! Recent Projects Demo — end-to-end exercise of `fern-settings`.
+//! Recent Projects Demo — end-to-end exercise of `bastyde-settings`.
 //!
 //! Run with: `cargo run -p recent-projects`
 //!
 //! Demonstrates:
 //!
-//! * `FernAppBuilder::application(...)` + `.settings(SettingsBundle)`
+//! * `BastydeAppBuilder::application(...)` + `.settings(SettingsBundle)`
 //!   wiring the dynamic K/V store and the window-state service into
 //!   the app's `app_state` registry. Window geometry save/restore is
 //!   automatic when the `WindowConfig` carries an `id("main")` —
-//!   `fern-app` reads the saved state, sanitizes it against the
+//!   `bastyde-app` reads the saved state, sanitizes it against the
 //!   current monitor (so a coordinate from a now-disconnected screen
 //!   is recentered, never spawned off-screen), then opens the
 //!   window. Every move/resize/maximize is debounced into the
@@ -28,11 +28,11 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use fern_ui::IntentKind;
-use fern_ui::core::Action;
-use fern_ui::prelude::*;
-use fern_ui::settings::{AppPaths, MruEntry, MruList, SettingsBundle, SettingsExt, SettingsKey};
-use fern_ui::widgets::{
+use bastyde::IntentKind;
+use bastyde::core::Action;
+use bastyde::prelude::*;
+use bastyde::settings::{AppPaths, MruEntry, MruList, SettingsBundle, SettingsExt, SettingsKey};
+use bastyde::widgets::{
     Button, ButtonVariant, Expand, HStack, Padding, Panel, Repeater, Spacer, TextWidget, Toolbar,
     VStack,
 };
@@ -45,9 +45,9 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                fern_ui::presets::intui::dark()
+                bastyde::presets::intui::dark()
             } else {
-                fern_ui::presets::intui::light()
+                bastyde::presets::intui::light()
             });
         }),
     ))
@@ -178,7 +178,7 @@ impl Widget for Root {
             let mru = ctx.mru::<RecentProject>();
             for (path, name, pinned) in [
                 ("/projects/skribisto", "Skribisto", true),
-                ("/projects/fern-ui", "FernUI", false),
+                ("/projects/bastyde", "Bastyde", false),
                 ("/notes/journal-2026.md", "journal-2026.md", false),
                 ("/sandbox/playground", "playground", false),
             ] {
@@ -190,7 +190,7 @@ impl Widget for Root {
             }
         }));
 
-        // (No widget-side window-persist call needed — fern-app's
+        // (No widget-side window-persist call needed — bastyde-app's
         // window manager handles it automatically when the
         // WindowConfig carries `id(WINDOW_LABEL)` and a
         // WindowStateService is registered via `.settings(...)`.)
@@ -405,22 +405,22 @@ fn main() {
     let recents: MruList<RecentProject> =
         MruList::open(&paths, "recent_projects", 8).expect("open recent_projects.toml");
 
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .app_paths(paths)
         .settings(SettingsBundle::new().with_window_state(true))
         .app_state(recents)
         .initial_window(
             // Auto save/restore is enabled by `.id(WINDOW_LABEL)`:
-            // fern-app's window manager looks up the saved geometry
+            // bastyde-app's window manager looks up the saved geometry
             // for that id, sanitizes it against the current monitor,
             // and opens the window at the corrected size/position.
             // Subsequent move/resize/maximize events flow back to
             // disk debounced.
             WindowConfig::new()
                 .id(WINDOW_LABEL)
-                .title("FernUI — Recent Projects Demo")
+                .title("Bastyde — Recent Projects Demo")
                 .size(DEFAULT_SIZE.0, DEFAULT_SIZE.1)
                 .min_size(MIN_SIZE.0, MIN_SIZE.1)
                 .root(|tree, _state| {

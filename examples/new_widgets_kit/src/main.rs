@@ -12,9 +12,9 @@
 //! 4. A "Rename…" button that opens an InputDialog modal.
 //! 5. Two CommandLinkButtons in a "Welcome" landing pane.
 
-use fern_ui::core::widget::WidgetPlacement;
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::core::widget::WidgetPlacement;
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Banner, Button, ButtonVariant, Card, Collapse, CommandLinkButton, Expand, FilePickerField,
     FilePickerKind, GroupHeader, HStack, IconWidget, Panel, SearchField, Spacer, TextWidget,
     Toolbar, VStack,
@@ -27,9 +27,9 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                fern_ui::presets::intui::dark()
+                bastyde::presets::intui::dark()
             } else {
-                fern_ui::presets::intui::light()
+                bastyde::presets::intui::light()
             });
         }),
     ))
@@ -66,7 +66,7 @@ impl Root {
         let warn_visible = self.show_warn_banner.clone();
         let error_visible = self.show_error_banner.clone();
 
-        let info_banner = Banner::info_literal("Welcome to FernUI")
+        let info_banner = Banner::info_literal("Welcome to Bastyde")
             .description_literal("Persistent inline status strips for app-level conditions.");
         let warn_banner = Banner::warning_literal("Unsaved changes")
             .description_literal("Closing the document now will discard your edits.")
@@ -266,7 +266,7 @@ impl Root {
                 move |ctx| {
                     let rename_text = rename_text.clone();
                     let last_action = last_action.clone();
-                    use fern_ui::widgets::InputDialog;
+                    use bastyde::widgets::InputDialog;
                     InputDialog::new_literal("Rename document")
                         .prompt_literal("Enter the new file name:")
                         .default_text(rename_text.get())
@@ -298,8 +298,8 @@ impl Root {
         // inlined into the binary and parsed once into an SvgIcon
         // resource; `IconWidget::from_svg_icon` then produces a fresh
         // tintable IconWidget on each build call.
-        let save_icon = fern_ui::res!("resources/icons/save.svg");
-        let home_icon = fern_ui::res!("resources/icons/home.svg");
+        let save_icon = bastyde::res!("resources/icons/save.svg");
+        let home_icon = bastyde::res!("resources/icons/home.svg");
 
         let new_project = CommandLinkButton::new_literal("Create new project")
             .description_literal("Start with a blank workspace.")
@@ -366,9 +366,9 @@ impl Widget for Root {
 }
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .install_file_dialog()
         .initial_window(
             WindowConfig::new()

@@ -1,42 +1,42 @@
 # Charts
 
-**Companion to:** [fern-ui-architecture.md](fern-ui-architecture.md)
-**Scope:** The `fern-charts` crate — `BarChart`, `LineChart`, `PieChart`
+**Companion to:** [bastyde-architecture.md](bastyde-architecture.md)
+**Scope:** The `bastyde-charts` crate — `BarChart`, `LineChart`, `PieChart`
 (pie + donut), the `ChartSeries<T>` / `ChartDatum<T>` data model, the
 shared axis / palette / legend infrastructure, and the rendering and
 reactivity contracts that connect them to the widget tree.
 
 ---
 
-## 1. Why fern-charts is its own crate
+## 1. Why bastyde-charts is its own crate
 
 Charts are widget-shaped — they implement
-[`Widget`](../crates/fern-core/src/widget.rs) and live inside the
+[`Widget`](../crates/bastyde-core/src/widget.rs) and live inside the
 retained tree like any other view — but the catalog is large enough
-that bundling it into [`fern-widgets`](../crates/fern-widgets/) would
+that bundling it into [`bastyde-widgets`](../crates/bastyde-widgets/) would
 mean every chart-free desktop app drags ~3,000 lines of axis math,
 nice-numbers tick generation, polygonal slice paths, and the Okabe-Ito
-palette into its binary. So `fern-charts` sits *at the same layering
-tier* as `fern-widgets`, not on top of it:
+palette into its binary. So `bastyde-charts` sits *at the same layering
+tier* as `bastyde-widgets`, not on top of it:
 
 ```
-fern-tokens → fern-canvas → fern-core ── fern-data ─┬→ fern-widgets
-                                                    └→ fern-charts
+bastyde-tokens → bastyde-canvas → bastyde-core ── bastyde-data ─┬→ bastyde-widgets
+                                                    └→ bastyde-charts
 ```
 
-`fern-charts` deliberately does **not** depend on `fern-widgets`. The
+`bastyde-charts` deliberately does **not** depend on `bastyde-widgets`. The
 hover tooltip, the legend, the donut center placeholder all live inside
-`fern-charts` and use only `fern-core` + `fern-canvas` primitives.
-Tests reach for `fern-widgets::TextWidget` as a *dev-dependency* to
+`bastyde-charts` and use only `bastyde-core` + `bastyde-canvas` primitives.
+Tests reach for `bastyde-widgets::TextWidget` as a *dev-dependency* to
 populate the donut center slot, but no production code path crosses
 the boundary.
 
-What this buys an app: depending on `fern-charts` brings just charts.
-Depending on `fern-widgets` brings just widgets. The umbrella
-[`fern-ui`](../crates/fern-ui/) crate re-exports both, so apps that
+What this buys an app: depending on `bastyde-charts` brings just charts.
+Depending on `bastyde-widgets` brings just widgets. The umbrella
+[`bastyde`](../crates/bastyde/) crate re-exports both, so apps that
 want the union pay nothing extra.
 
-The directory layout under [crates/fern-charts/src/](../crates/fern-charts/src/)
+The directory layout under [crates/bastyde-charts/src/](../crates/bastyde-charts/src/)
 is module-flat (no `mod.rs` per coding conventions): one file per
 public widget plus shared helpers for axes, palette, legend, and
 plot-area carving.
@@ -57,7 +57,7 @@ grid lines, axis titles, and an embedded legend are all opt-in flags
 on the builder.
 
 ```rust
-use fern_charts::{AxisConfig, BarChart, BarGrouping, ChartDatum, ChartSeries, LegendPosition};
+use bastyde_charts::{AxisConfig, BarChart, BarGrouping, ChartDatum, ChartSeries, LegendPosition};
 
 let mut revenue = ChartSeries::<String>::new("Revenue");
 revenue.push("Q1".into(), 12.5);
@@ -90,7 +90,7 @@ Polyline per series with optional area fill, hover tooltips, and
 embedded legend. PR-3 / PR-4 territory.
 
 ```rust
-use fern_charts::{AxisConfig, ChartSeries, LineChart};
+use bastyde_charts::{AxisConfig, ChartSeries, LineChart};
 
 let mut series = ChartSeries::<String>::new("Latency p99");
 series.push("Mon".into(), 142.0);
@@ -119,8 +119,8 @@ default) for a pie; any positive value is a donut. The optional
 so swapping pie ↔ donut at runtime is safe.
 
 ```rust
-use fern_charts::{ChartDatum, LegendPosition, PieChart, PieLabelMode};
-use fern_ui::widgets::{TextWidget, VStack};
+use bastyde_charts::{ChartDatum, LegendPosition, PieChart, PieLabelMode};
+use bastyde::widgets::{TextWidget, VStack};
 
 let total = data.map(|d| d.iter().map(|x| x.value).sum::<f32>())
                 .map(|t| format!("${:.0}", t));
@@ -139,9 +139,9 @@ PieChart::new(data)
 ```
 
 The center slot follows the existing `Option<PendingChild>` pattern
-used by [`Card`](../crates/fern-widgets/src/card.rs:13),
-[`DialogContent`](../crates/fern-widgets/src/dialog.rs:206), and
-[`GroupBox`](../crates/fern-widgets/src/group_box.rs:23): two builders
+used by [`Card`](../crates/bastyde-widgets/src/card.rs:13),
+[`DialogContent`](../crates/bastyde-widgets/src/dialog.rs:206), and
+[`GroupBox`](../crates/bastyde-widgets/src/group_box.rs:23): two builders
 (`.center(impl Widget)` and `.center_id(WidgetId)`), resolved in
 `build()` via `ctx.add_boxed`.
 
@@ -153,7 +153,7 @@ larger compositions need to be self-clipping.
 ## 3. Data model
 
 `ChartSeries<T>` and `ChartDatum<T>` live in
-[crates/fern-charts/src/series.rs](../crates/fern-charts/src/series.rs).
+[crates/bastyde-charts/src/series.rs](../crates/bastyde-charts/src/series.rs).
 
 ```rust
 pub struct ChartDatum<T> {
@@ -175,7 +175,7 @@ update; data sets that fit a chart (typically <500 points across
 <10 series) don't need incremental change events. If profiling shows
 clone cost from `Signal<Vec<…>>::get()`, the next step is wrapping
 the vec in `Rc<…>` rather than introducing a `ChartListModel` analog
-of [`ListModel<T>`](../crates/fern-data/src/list_model.rs).
+of [`ListModel<T>`](../crates/bastyde-data/src/list_model.rs).
 
 `T` is the **category / x-axis** type. Common choices: `String` for
 human-readable labels, an `enum` for fixed buckets, `chrono::DateTime`
@@ -190,7 +190,7 @@ are dropped from the y-domain and skipped in paint.
 
 ## 4. Axes — `nice_ticks` and formatting
 
-[crates/fern-charts/src/axis.rs](../crates/fern-charts/src/axis.rs)
+[crates/bastyde-charts/src/axis.rs](../crates/bastyde-charts/src/axis.rs)
 implements the Wilkinson / Heckbert nice-numbers algorithm extended
 with the d3 / matplotlib `2.5` step (so `0..100 / target=4` produces
 `[0, 25, 50, 75, 100]` instead of degrading to step 20):
@@ -231,7 +231,7 @@ formatter can hook in here without API churn.
 
 ## 5. Palette
 
-[`ChartPalette`](../crates/fern-charts/src/palette.rs) is the
+[`ChartPalette`](../crates/bastyde-charts/src/palette.rs) is the
 mechanism that decides series colors when a series didn't pick its
 own:
 
@@ -243,7 +243,7 @@ pub enum ChartPalette {
 ```
 
 Default is `FromTheme`, which reads
-[`ColorTokens::chart_palette`](../crates/fern-tokens/src/theme.rs).
+[`ColorTokens::chart_palette`](../crates/bastyde-tokens/src/theme.rs).
 The built-in light and dark themes ship the **Okabe-Ito**
 colorblind-safe sequence (Okabe & Ito 2008), the same palette used by
 ggplot2 and seaborn:
@@ -280,12 +280,12 @@ constructed with `.legend(true)`, lays it out at `legend_position`
 (`Top` / `Bottom` / `Leading` / `Trailing`), and shares the same
 `series` and `palette` props.
 
-**Standalone** — build a [`ChartLegend`](../crates/fern-charts/src/legend.rs)
+**Standalone** — build a [`ChartLegend`](../crates/bastyde-charts/src/legend.rs)
 yourself and place it anywhere in your widget tree, sharing the
 same series prop the chart binds to:
 
 ```rust
-use fern_charts::{ChartLegend, LegendOrientation};
+use bastyde_charts::{ChartLegend, LegendOrientation};
 
 let series_signal = Signal::new(make_series());
 let chart = LineChart::new(series_signal.clone())
@@ -310,12 +310,12 @@ Override with the standalone widget if you need something different.
 All three charts are **proposal-driven**: `layout_response` returns
 whatever the parent proposes, with a 320×200 (line / bar) or 320×220
 (pie) fallback when the proposal is unbounded. This matches
-[`ProgressBar`](../crates/fern-widgets/src/progress_bar.rs) and
-[`ScrollArea`](../crates/fern-widgets/src/scroll_area.rs) — charts
+[`ProgressBar`](../crates/bastyde-widgets/src/progress_bar.rs) and
+[`ScrollArea`](../crates/bastyde-widgets/src/scroll_area.rs) — charts
 fit any container.
 
 Inside `paint`, the bounds are carved into a plot rect by
-[`carve_plot_area`](../crates/fern-charts/src/layout.rs), which:
+[`carve_plot_area`](../crates/bastyde-charts/src/layout.rs), which:
 
 1. Reserves the legend band on the requested edge (when shown).
 2. Reserves a y-axis band on the leading edge: max tick label
@@ -323,7 +323,7 @@ Inside `paint`, the bounds are carved into a plot rect by
 3. Reserves an x-axis band on the bottom edge: tick label height +
    tick length + gap + axis-title height.
 4. Insets the inner plot by `plot_padding_*` from the
-   [`ChartStyle`](../crates/fern-tokens/src/components.rs) tokens.
+   [`ChartStyle`](../crates/bastyde-tokens/src/components.rs) tokens.
 
 Y-tick labels need actual values to measure widths, so the order is:
 domain → `nice_ticks` → measure widest label string → carve y-band →
@@ -373,7 +373,7 @@ repaint without a full relayout. This is the right path for
 LineChart and PieChart draw their hover tooltips **inline inside
 their own `paint()`**, clipped to the plot rect. This is
 deliberately different from
-[`TooltipWidget`](../crates/fern-widgets/src/tooltip.rs):
+[`TooltipWidget`](../crates/bastyde-widgets/src/tooltip.rs):
 
 - Chart tooltips track the cursor across the plot to the **nearest
   data point**, snapping per-pixel. `TooltipWidget` is anchored to a
@@ -408,7 +408,7 @@ For pie/donut, the hit-test is polar: convert pointer position to
 whose angular range covers the pointer. The angle conversion has to
 subtract `start_angle_degrees` and flip for non-clockwise charts —
 both are easy to forget; the
-[`pie_hit_test_uses_logical_angle_space`](../crates/fern-charts/src/pie_chart.rs)
+[`pie_hit_test_uses_logical_angle_space`](../crates/bastyde-charts/src/pie_chart.rs)
 test locks this.
 
 Disable with `.hover_tooltip(false)` if you'd rather the chart not
@@ -417,7 +417,7 @@ a busy overlay).
 
 ## 10. Theming — the `ChartStyle` token
 
-[`ChartStyle`](../crates/fern-tokens/src/components.rs) carries
+[`ChartStyle`](../crates/bastyde-tokens/src/components.rs) carries
 chart-specific dimensions: padding, tick lengths, label gaps,
 gridline width, default line / point sizes, legend swatch and item
 gaps, tooltip padding, and the four pie-related fields
@@ -476,7 +476,7 @@ matplotlib / d3 users follow.
   matches Excel's "highlight one slice" — no slice-pull-on-hover yet.
 
 For each of these, the file pattern in
-[crates/fern-charts/src/](../crates/fern-charts/src/) is the place
+[crates/bastyde-charts/src/](../crates/bastyde-charts/src/) is the place
 to look — the modules are intentionally split so future work lands
 in one or two files at most.
 
@@ -494,5 +494,5 @@ cargo run -p chart-demo
 It's the smallest non-trivial integration — bar/line share the same
 series prop, the donut consumes a parallel `Signal<Vec<ChartDatum>>`
 with a center-slot `VStack` showing the live total. Useful as a
-sanity-check after any change to fern-charts; `cargo test -p
-fern-charts` (51 headless tests, no GPU) is the faster CI path.
+sanity-check after any change to bastyde-charts; `cargo test -p
+bastyde-charts` (51 headless tests, no GPU) is the faster CI path.

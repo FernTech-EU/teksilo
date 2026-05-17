@@ -8,5 +8,5 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-fern-telemetry = { workspace = true }
-fern-telemetry-codegen = { workspace = true }
+bastyde-telemetry = { workspace = true }
+bastyde-telemetry-codegen = { workspace = true }

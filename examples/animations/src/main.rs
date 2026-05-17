@@ -14,7 +14,7 @@
 //!
 //! Measure with the project's idle-drain tools:
 //! ```sh
-//! FERN_IDLE_TRACE=1 /tmp/measure_long.sh
+//! BASTYDE_IDLE_TRACE=1 /tmp/measure_long.sh
 //! ```
 //! Expected: Animated tab → ~30 Hz rendered_frames, modest CPU (the
 //! shader path keeps paint() out of the hot loop). Static tab →
@@ -23,9 +23,9 @@
 use std::thread;
 use std::time::Duration;
 
-use fern_ui::core::app_event::AppEvent;
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::core::app_event::AppEvent;
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Button, Expand, HStack, ProgressBar, Spacer, TabId, TabInfo, TabWidget, TextWidget, Toolbar,
     VStack,
 };
@@ -42,9 +42,9 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                fern_ui::presets::intui::dark()
+                bastyde::presets::intui::dark()
             } else {
-                fern_ui::presets::intui::light()
+                bastyde::presets::intui::light()
             });
         }),
     ))
@@ -66,12 +66,12 @@ fn main() {
     let selected_for_root = selected.clone();
 
     let mut builder =
-        FernAppBuilder::new()
+        BastydeAppBuilder::new()
             .install_inspector_in_debug()
-            .theme(fern_ui::presets::intui::light())
+            .theme(bastyde::presets::intui::light())
             .initial_window(
                 WindowConfig::new()
-                    .title("FernUI — Animations Drain Test")
+                    .title("Bastyde — Animations Drain Test")
                     .size(640, 420)
                     .root(move |tree, _state| {
                         tree.add(VStack::new().child(dark_mode_toolbar()).child(
@@ -137,12 +137,12 @@ impl Widget for AnimationsRoot {
             TabWidget::new(self.selected.clone())
                 .static_tab_with_id(
                     self.animated_tab,
-                    TabInfo::new().title(fern_ui::i18n::LocalizedString::literal("Animated")),
+                    TabInfo::new().title(bastyde::i18n::LocalizedString::literal("Animated")),
                     animated_page(),
                 )
                 .static_tab_with_id(
                     self.static_tab,
-                    TabInfo::new().title(fern_ui::i18n::LocalizedString::literal("Static")),
+                    TabInfo::new().title(bastyde::i18n::LocalizedString::literal("Static")),
                     static_page(),
                 ),
         );
@@ -203,7 +203,7 @@ fn static_page() -> impl Widget + 'static {
     VStack::new().spacing(20.0).child(
         TextWidget::new_literal(
             "Static tab — no animations, no timers, no per-frame work. CPU and GPU \
-             should drop to idle; FERN_IDLE_TRACE=1 should emit zero lines.",
+             should drop to idle; BASTYDE_IDLE_TRACE=1 should emit zero lines.",
         )
         .style(TextStyleRole::BodyBold),
     )

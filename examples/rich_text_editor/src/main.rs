@@ -34,10 +34,10 @@
 //!
 //! Run with: `cargo run -p rich-text-editor --features "rich-text clipboard"`
 
-use fern_ui::prelude::*;
-use fern_ui::text_document::TextDocument;
-use fern_ui::widgets::rich_text::{RichTextEditor, ScrollPolicy};
-use fern_ui::widgets::{Button, Expand, HStack, Spacer, SplitView, Toolbar};
+use bastyde::prelude::*;
+use bastyde::text_document::TextDocument;
+use bastyde::widgets::rich_text::{RichTextEditor, ScrollPolicy};
+use bastyde::widgets::{Button, Expand, HStack, Spacer, SplitView, Toolbar};
 
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
@@ -46,9 +46,9 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                fern_ui::presets::intui::dark()
+                bastyde::presets::intui::dark()
             } else {
-                fern_ui::presets::intui::light()
+                bastyde::presets::intui::light()
             });
         }),
     ))
@@ -119,19 +119,19 @@ fn main() {
     doc.set_markdown(SAMPLE)
         .expect("embedded markdown should parse");
 
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — Rich Text Editor")
+                .title("Bastyde — Rich Text Editor")
                 .size(1100, 640)
                 .root(move |tree, _state| {
                     let doc_editor = doc.clone();
                     let doc_preview = doc.clone();
                     let split = Signal::new(0.55);
                     tree.add(
-                        fern_ui::widgets::VStack::new()
+                        bastyde::widgets::VStack::new()
                             .child(dark_mode_toolbar())
                             .child(
                                 Expand::new().child(

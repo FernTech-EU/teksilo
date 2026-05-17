@@ -183,14 +183,14 @@ dependencies = [
 name = "animations"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
 name = "animations-kit"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
@@ -530,6 +530,415 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "bastyde"
+version = "0.2.0"
+dependencies = [
+ "bastyde-app",
+ "bastyde-canvas",
+ "bastyde-core",
+ "bastyde-data",
+ "bastyde-i18n",
+ "bastyde-inspector",
+ "bastyde-macros",
+ "bastyde-platform",
+ "bastyde-render",
+ "bastyde-resources",
+ "bastyde-settings",
+ "bastyde-text",
+ "bastyde-theme-fluent",
+ "bastyde-theme-macos",
+ "bastyde-theme-material3",
+ "bastyde-tokens",
+ "bastyde-widgets",
+ "tempfile",
+ "trybuild",
+]
+
+[[package]]
+name = "bastyde-analytics-otlp"
+version = "0.2.0"
+dependencies = [
+ "bastyde-core",
+ "bastyde-settings",
+ "bastyde-telemetry",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "ureq",
+]
+
+[[package]]
+name = "bastyde-analytics-plausible"
+version = "0.2.0"
+dependencies = [
+ "bastyde-core",
+ "bastyde-settings",
+ "bastyde-telemetry",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "ureq",
+]
+
+[[package]]
+name = "bastyde-app"
+version = "0.2.0"
+dependencies = [
+ "bastyde-canvas",
+ "bastyde-core",
+ "bastyde-i18n",
+ "bastyde-platform",
+ "bastyde-render",
+ "bastyde-settings",
+ "bastyde-telemetry",
+ "bastyde-text",
+ "bastyde-tokens",
+ "bastyde-widgets",
+ "pollster",
+ "serde",
+ "tempfile",
+ "uuid",
+ "winit",
+]
+
+[[package]]
+name = "bastyde-canvas"
+version = "0.2.0"
+dependencies = [
+ "bastyde-tokens",
+ "bytemuck",
+ "image-webp",
+ "png 0.17.16",
+ "roxmltree",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "bastyde-charts"
+version = "0.2.0"
+dependencies = [
+ "bastyde-canvas",
+ "bastyde-core",
+ "bastyde-data",
+ "bastyde-i18n",
+ "bastyde-preview",
+ "bastyde-tokens",
+ "bastyde-widgets",
+]
+
+[[package]]
+name = "bastyde-core"
+version = "0.2.0"
+dependencies = [
+ "accesskit",
+ "accesskit_consumer",
+ "bastyde-canvas",
+ "bastyde-tokens",
+ "raw-window-handle",
+ "serde",
+ "slotmap",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "bastyde-data"
+version = "0.2.0"
+dependencies = [
+ "bastyde-core",
+ "slotmap",
+]
+
+[[package]]
+name = "bastyde-fmt"
+version = "0.2.0"
+dependencies = [
+ "bastyde-parse",
+ "proc-macro2",
+ "quote",
+ "syn",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "bastyde-fmt-lsp"
+version = "0.2.0"
+dependencies = [
+ "bastyde-fmt",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "bastyde-i18n"
+version = "0.2.0"
+dependencies = [
+ "bastyde-core",
+ "bastyde-i18n-macros",
+ "fixed_decimal",
+ "fluent-bundle",
+ "fluent-syntax",
+ "icu_calendar",
+ "icu_datetime",
+ "icu_decimal",
+ "icu_locale_core",
+ "intl-memoizer",
+ "jiff",
+ "notify",
+ "sys-locale",
+ "thiserror 2.0.18",
+ "trybuild",
+ "unic-langid",
+]
+
+[[package]]
+name = "bastyde-i18n-macros"
+version = "0.2.0"
+dependencies = [
+ "fluent-syntax",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "bastyde-inspector"
+version = "0.2.0"
+dependencies = [
+ "bastyde-app",
+ "bastyde-canvas",
+ "bastyde-core",
+ "bastyde-data",
+ "bastyde-i18n",
+ "bastyde-platform",
+ "bastyde-settings",
+ "bastyde-tokens",
+ "bastyde-widgets",
+ "serde_json",
+]
+
+[[package]]
+name = "bastyde-macros"
+version = "0.2.0"
+dependencies = [
+ "bastyde-parse",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "bastyde-parse"
+version = "0.2.0"
+dependencies = [
+ "proc-macro2",
+ "syn",
+]
+
+[[package]]
+name = "bastyde-platform"
+version = "0.2.0"
+dependencies = [
+ "accesskit",
+ "accesskit_winit",
+ "arboard",
+ "async-std",
+ "bastyde-canvas",
+ "bastyde-core",
+ "bastyde-render",
+ "bastyde-tokens",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "raw-window-handle",
+ "rfd",
+ "thiserror 2.0.18",
+ "wgpu",
+ "windows 0.61.3",
+ "winit",
+]
+
+[[package]]
+name = "bastyde-preview"
+version = "0.2.0"
+dependencies = [
+ "bastyde-core",
+ "bastyde-tokens",
+ "inventory",
+]
+
+[[package]]
+name = "bastyde-preview-ui"
+version = "0.2.0"
+dependencies = [
+ "bastyde-app",
+ "bastyde-canvas",
+ "bastyde-core",
+ "bastyde-data",
+ "bastyde-i18n",
+ "bastyde-platform",
+ "bastyde-preview",
+ "bastyde-render",
+ "bastyde-tokens",
+ "bastyde-widgets",
+ "png 0.17.16",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
+name = "bastyde-render"
+version = "0.2.0"
+dependencies = [
+ "bastyde-canvas",
+ "bastyde-tokens",
+ "bytemuck",
+ "pollster",
+ "tiny-skia 0.12.0",
+ "wgpu",
+]
+
+[[package]]
+name = "bastyde-resources"
+version = "0.2.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "roxmltree",
+ "syn",
+]
+
+[[package]]
+name = "bastyde-scene"
+version = "0.2.0"
+dependencies = [
+ "accesskit",
+ "bastyde-canvas",
+ "bastyde-core",
+ "bastyde-data",
+ "bastyde-i18n",
+ "bastyde-tokens",
+ "bastyde-widgets",
+]
+
+[[package]]
+name = "bastyde-settings"
+version = "0.2.0"
+dependencies = [
+ "bastyde-core",
+ "bastyde-data",
+ "directories",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.18",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "bastyde-telemetry"
+version = "0.2.0"
+dependencies = [
+ "bastyde-core",
+ "bastyde-settings",
+ "redb",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "bastyde-telemetry-codegen"
+version = "0.2.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_yaml",
+ "syn",
+]
+
+[[package]]
+name = "bastyde-text"
+version = "0.2.0"
+dependencies = [
+ "bastyde-canvas",
+ "bastyde-tokens",
+ "memmap2",
+ "text-document",
+ "text-typeset",
+]
+
+[[package]]
+name = "bastyde-theme-fluent"
+version = "0.2.0"
+dependencies = [
+ "bastyde-core",
+ "bastyde-tokens",
+]
+
+[[package]]
+name = "bastyde-theme-macos"
+version = "0.2.0"
+dependencies = [
+ "bastyde-core",
+ "bastyde-tokens",
+]
+
+[[package]]
+name = "bastyde-theme-material3"
+version = "0.2.0"
+dependencies = [
+ "bastyde-core",
+ "bastyde-tokens",
+]
+
+[[package]]
+name = "bastyde-tokens"
+version = "0.2.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "bastyde-widgets"
+version = "0.2.0"
+dependencies = [
+ "accesskit_consumer",
+ "bastyde-canvas",
+ "bastyde-core",
+ "bastyde-data",
+ "bastyde-i18n",
+ "bastyde-platform",
+ "bastyde-preview",
+ "bastyde-settings",
+ "bastyde-telemetry",
+ "bastyde-text",
+ "bastyde-tokens",
+ "jiff",
+ "open",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "bastyde-widgets-previewer"
+version = "0.2.0"
+dependencies = [
+ "bastyde-canvas",
+ "bastyde-core",
+ "bastyde-preview",
+ "bastyde-preview-ui",
+ "bastyde-tokens",
+ "bastyde-widgets",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -677,16 +1086,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "cargo-fern-fmt"
+name = "cargo-bastyde-fmt"
 version = "0.2.0"
 dependencies = [
- "fern-fmt",
+ "bastyde-fmt",
  "tempfile",
  "thiserror 2.0.18",
 ]
 
 [[package]]
-name = "cargo-fern-telemetry-lint"
+name = "cargo-bastyde-telemetry-lint"
 version = "0.2.0"
 dependencies = [
  "serde",
@@ -722,8 +1131,8 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 name = "chart-demo"
 version = "0.2.0"
 dependencies = [
- "fern-charts",
- "fern-ui",
+ "bastyde",
+ "bastyde-charts",
 ]
 
 [[package]]
@@ -764,7 +1173,7 @@ dependencies = [
 name = "color-picker-demo"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
@@ -895,21 +1304,21 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 name = "data-collections"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
 name = "data-grid"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
 name = "datetime-pickers"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
  "jiff",
 ]
 
@@ -938,7 +1347,7 @@ dependencies = [
 name = "dialogs-and-popovers"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
@@ -1040,7 +1449,7 @@ checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 name = "drag-and-drop"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
@@ -1203,419 +1612,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "fern-analytics-otlp"
-version = "0.2.0"
-dependencies = [
- "fern-core",
- "fern-settings",
- "fern-telemetry",
- "serde",
- "serde_json",
- "tempfile",
- "ureq",
-]
-
-[[package]]
-name = "fern-analytics-plausible"
-version = "0.2.0"
-dependencies = [
- "fern-core",
- "fern-settings",
- "fern-telemetry",
- "serde",
- "serde_json",
- "tempfile",
- "ureq",
-]
-
-[[package]]
-name = "fern-app"
-version = "0.2.0"
-dependencies = [
- "fern-canvas",
- "fern-core",
- "fern-i18n",
- "fern-platform",
- "fern-render",
- "fern-settings",
- "fern-telemetry",
- "fern-text",
- "fern-tokens",
- "fern-widgets",
- "pollster",
- "serde",
- "tempfile",
- "uuid",
- "winit",
-]
-
-[[package]]
-name = "fern-canvas"
-version = "0.2.0"
-dependencies = [
- "bytemuck",
- "fern-tokens",
- "image-webp",
- "png 0.17.16",
- "roxmltree",
- "serde",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "fern-charts"
-version = "0.2.0"
-dependencies = [
- "fern-canvas",
- "fern-core",
- "fern-data",
- "fern-i18n",
- "fern-preview",
- "fern-tokens",
- "fern-widgets",
-]
-
-[[package]]
-name = "fern-core"
-version = "0.2.0"
-dependencies = [
- "accesskit",
- "accesskit_consumer",
- "fern-canvas",
- "fern-tokens",
- "raw-window-handle",
- "serde",
- "slotmap",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "fern-data"
-version = "0.2.0"
-dependencies = [
- "fern-core",
- "slotmap",
-]
-
-[[package]]
-name = "fern-fmt"
-version = "0.2.0"
-dependencies = [
- "fern-parse",
- "proc-macro2",
- "quote",
- "syn",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "fern-fmt-lsp"
-version = "0.2.0"
-dependencies = [
- "fern-fmt",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "fern-i18n"
-version = "0.2.0"
-dependencies = [
- "fern-core",
- "fern-i18n-macros",
- "fixed_decimal",
- "fluent-bundle",
- "fluent-syntax",
- "icu_calendar",
- "icu_datetime",
- "icu_decimal",
- "icu_locale_core",
- "intl-memoizer",
- "jiff",
- "notify",
- "sys-locale",
- "thiserror 2.0.18",
- "trybuild",
- "unic-langid",
-]
-
-[[package]]
-name = "fern-i18n-macros"
-version = "0.2.0"
-dependencies = [
- "fluent-syntax",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "fern-inspector"
-version = "0.2.0"
-dependencies = [
- "fern-app",
- "fern-canvas",
- "fern-core",
- "fern-data",
- "fern-i18n",
- "fern-platform",
- "fern-settings",
- "fern-tokens",
- "fern-widgets",
- "serde_json",
-]
-
-[[package]]
-name = "fern-parse"
-version = "0.2.0"
-dependencies = [
- "proc-macro2",
- "syn",
-]
-
-[[package]]
-name = "fern-platform"
-version = "0.2.0"
-dependencies = [
- "accesskit",
- "accesskit_winit",
- "arboard",
- "async-std",
- "fern-canvas",
- "fern-core",
- "fern-render",
- "fern-tokens",
- "objc2 0.6.4",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "raw-window-handle",
- "rfd",
- "thiserror 2.0.18",
- "wgpu",
- "windows 0.61.3",
- "winit",
-]
-
-[[package]]
-name = "fern-preview"
-version = "0.2.0"
-dependencies = [
- "fern-core",
- "fern-tokens",
- "inventory",
-]
-
-[[package]]
-name = "fern-preview-ui"
-version = "0.2.0"
-dependencies = [
- "fern-app",
- "fern-canvas",
- "fern-core",
- "fern-data",
- "fern-i18n",
- "fern-platform",
- "fern-preview",
- "fern-render",
- "fern-tokens",
- "fern-widgets",
- "png 0.17.16",
- "pollster",
- "wgpu",
-]
-
-[[package]]
-name = "fern-render"
-version = "0.2.0"
-dependencies = [
- "bytemuck",
- "fern-canvas",
- "fern-tokens",
- "pollster",
- "tiny-skia 0.12.0",
- "wgpu",
-]
-
-[[package]]
-name = "fern-resources"
-version = "0.2.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "roxmltree",
- "syn",
-]
-
-[[package]]
-name = "fern-scene"
-version = "0.2.0"
-dependencies = [
- "accesskit",
- "fern-canvas",
- "fern-core",
- "fern-data",
- "fern-i18n",
- "fern-tokens",
- "fern-widgets",
-]
-
-[[package]]
-name = "fern-settings"
-version = "0.2.0"
-dependencies = [
- "directories",
- "fern-core",
- "fern-data",
- "serde",
- "tempfile",
- "thiserror 2.0.18",
- "toml 0.8.23",
-]
-
-[[package]]
-name = "fern-telemetry"
-version = "0.2.0"
-dependencies = [
- "fern-core",
- "fern-settings",
- "redb",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "uuid",
-]
-
-[[package]]
-name = "fern-telemetry-codegen"
-version = "0.2.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "serde",
- "serde_yaml",
- "syn",
-]
-
-[[package]]
-name = "fern-text"
-version = "0.2.0"
-dependencies = [
- "fern-canvas",
- "fern-tokens",
- "memmap2",
- "text-document",
- "text-typeset",
-]
-
-[[package]]
-name = "fern-theme-fluent"
-version = "0.2.0"
-dependencies = [
- "fern-core",
- "fern-tokens",
-]
-
-[[package]]
-name = "fern-theme-macos"
-version = "0.2.0"
-dependencies = [
- "fern-core",
- "fern-tokens",
-]
-
-[[package]]
-name = "fern-theme-material3"
-version = "0.2.0"
-dependencies = [
- "fern-core",
- "fern-tokens",
-]
-
-[[package]]
-name = "fern-tokens"
-version = "0.2.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "fern-ui"
-version = "0.2.0"
-dependencies = [
- "fern-app",
- "fern-canvas",
- "fern-core",
- "fern-data",
- "fern-i18n",
- "fern-inspector",
- "fern-platform",
- "fern-render",
- "fern-resources",
- "fern-settings",
- "fern-text",
- "fern-theme-fluent",
- "fern-theme-macos",
- "fern-theme-material3",
- "fern-tokens",
- "fern-ui-macros",
- "fern-widgets",
- "tempfile",
- "trybuild",
-]
-
-[[package]]
-name = "fern-ui-macros"
-version = "0.2.0"
-dependencies = [
- "fern-parse",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "fern-widgets"
-version = "0.2.0"
-dependencies = [
- "accesskit_consumer",
- "fern-canvas",
- "fern-core",
- "fern-data",
- "fern-i18n",
- "fern-platform",
- "fern-preview",
- "fern-settings",
- "fern-telemetry",
- "fern-text",
- "fern-tokens",
- "jiff",
- "open",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "toml 0.8.23",
-]
-
-[[package]]
-name = "fern-widgets-previewer"
-version = "0.2.0"
-dependencies = [
- "fern-canvas",
- "fern-core",
- "fern-preview",
- "fern-preview-ui",
- "fern-tokens",
- "fern-widgets",
-]
-
-[[package]]
 name = "file-dialogs"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
@@ -2460,7 +2460,7 @@ dependencies = [
 name = "internationalization"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
  "jiff",
 ]
 
@@ -2799,7 +2799,7 @@ dependencies = [
 name = "menus-and-dropdowns"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
@@ -2838,7 +2838,7 @@ dependencies = [
 name = "multi-window"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
@@ -2901,7 +2901,7 @@ dependencies = [
 name = "new-widgets-kit"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
@@ -3852,7 +3852,7 @@ dependencies = [
 name = "recent-projects"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
  "serde",
 ]
 
@@ -3966,14 +3966,14 @@ dependencies = [
 name = "rich-text-editor"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
 name = "rich-text-viewer"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
@@ -4131,16 +4131,16 @@ dependencies = [
 name = "scene-corkboard"
 version = "0.2.0"
 dependencies = [
- "fern-scene",
- "fern-ui",
+ "bastyde",
+ "bastyde-scene",
 ]
 
 [[package]]
 name = "scene-showcase"
 version = "0.2.0"
 dependencies = [
- "fern-scene",
- "fern-ui",
+ "bastyde",
+ "bastyde-scene",
 ]
 
 [[package]]
@@ -4318,7 +4318,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 name = "shortcuts-demo"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
@@ -4357,7 +4357,7 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 name = "simple-button"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
@@ -4454,7 +4454,7 @@ dependencies = [
 name = "spin-box"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
@@ -4470,7 +4470,7 @@ dependencies = [
 name = "split-view"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
@@ -4573,7 +4573,7 @@ dependencies = [
 name = "tab-widget"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
@@ -4586,19 +4586,19 @@ checksum = "591ef38edfb78ca4771ee32cf494cb8771944bee237a9b91fc9c1424ac4b777b"
 name = "telemetry-codegen"
 version = "0.2.0"
 dependencies = [
- "fern-telemetry",
- "fern-telemetry-codegen",
+ "bastyde-telemetry",
+ "bastyde-telemetry-codegen",
 ]
 
 [[package]]
 name = "telemetry-plausible"
 version = "0.2.0"
 dependencies = [
- "fern-analytics-plausible",
- "fern-core",
- "fern-settings",
- "fern-telemetry",
- "fern-ui",
+ "bastyde",
+ "bastyde-analytics-plausible",
+ "bastyde-core",
+ "bastyde-settings",
+ "bastyde-telemetry",
 ]
 
 [[package]]
@@ -4637,7 +4637,7 @@ dependencies = [
 name = "text-and-layout"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
@@ -4801,7 +4801,7 @@ dependencies = [
 name = "theme-styles"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
@@ -4939,14 +4939,14 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 name = "title-bar-demo"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
 name = "toast-demo"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
@@ -5045,14 +5045,14 @@ checksum = "756daf9b1013ebe47a8776667b466417e2d4c5679d441c26230efd9ef78692db"
 name = "tool-box"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
 name = "tooltips-showcase"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
@@ -5090,7 +5090,7 @@ dependencies = [
 name = "tree-table"
 version = "0.2.0"
 dependencies = [
- "fern-ui",
+ "bastyde",
 ]
 
 [[package]]
@@ -5789,8 +5789,8 @@ dependencies = [
 name = "widget-catalog"
 version = "0.2.0"
 dependencies = [
- "fern-render",
- "fern-ui",
+ "bastyde",
+ "bastyde-render",
  "jiff",
  "pollster",
  "wgpu",

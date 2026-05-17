@@ -38,7 +38,7 @@ So Phase A's substantive work (the `MAP_WRITE` staging buffer) is the wrong fix 
    - `malloc` 2.01 % — same path, 1.27 % attributable.
    - `malloc_consolidate` 1.28 %, `unlink_chunk` 0.51 %, plus contributions from `__memmove_avx512_unaligned_erms` 3.07 %.
    - `__memmove_avx512`'s call graph terminates at `handle_window_event_inner` without further breakdown — likely a mix of layout's `Vec<WidgetPlacement>` shuffling and `RenderFrame::merge`'s draw-command Vec cloning.
-2. **`fern_render::renderer::Renderer::render`** — 2.57 % (raw function body, excluding callees).
+2. **`bastyde_render::renderer::Renderer::render`** — 2.57 % (raw function body, excluding callees).
 3. **`build_accessibility_recursive`** — 1.42 %. Surprising for an animation that shouldn't touch the a11y tree. Worth investigating separately — accessibility rebuilds should fire only on layout / structural changes, not on each frame an animation tick runs.
 
 ## Top cost sources (widget_catalog `--tab animations`, 10 135 samples ≈ 50.7 % CPU)
@@ -47,7 +47,7 @@ This is the only scene profiled where the per-frame-effect path (`Pulse` + `Cycl
 
 | % | Symbol | What it is |
 | ---: | --- | --- |
-| 9.58 % | `fern_core::arena::WidgetArena::active_ids` | Walks the arena, allocates a fresh `Vec<WidgetId>`. Called from layout, render, gesture tick, a11y rebuild — multiple times per frame. |
+| 9.58 % | `bastyde_core::arena::WidgetArena::active_ids` | Walks the arena, allocates a fresh `Vec<WidgetId>`. Called from layout, render, gesture tick, a11y rebuild — multiple times per frame. |
 | 6.25 % | `WidgetTree::layout_impl::process_state_changes` | Processes pending signal-binding updates. Every Pulse/Cycle effect mutates a signal which lands here. |
 | 4.94 % | `WidgetArena::visibility_checks` | The visibility predicate runner shared by all three motion subsystems. |
 | 3.95 % | `_int_malloc` | Heap allocation. |
@@ -59,7 +59,7 @@ This is the only scene profiled where the per-frame-effect path (`Pulse` + `Cycl
 | 2.29 % | `malloc` | Heap allocation. |
 | 1.91 % | `next_gesture_deadline` | Re-computing gesture timing every frame. |
 | 1.68 % | `Hasher::write` | HashMap operations (one of several Hasher entries totalling ~3 % combined). |
-| 1.52 % | `fern_render::renderer::Renderer::render` | The renderer is now a small fraction of cost. |
+| 1.52 % | `bastyde_render::renderer::Renderer::render` | The renderer is now a small fraction of cost. |
 | 1.40 % | `<String as Clone>::clone` | String cloning (likely i18n LocalizedString resolves or tooltip text). |
 | 0.95 % | `layout_widget_recursive` | Layout itself is now relatively minor. |
 | 0.65 % | `<ColorTokens as Clone>::clone` | Theme tokens being cloned per query. |
@@ -82,7 +82,7 @@ The plan's three optimisations (persistent uniform buffer, slot-delta, damage re
 
 The animations_kit scene is heavier (every animation wrapper visible) and the costs cluster differently:
 
-1. **`fern_render::renderer::Renderer::render`** — 5.26 %. Dominant on this scene.
+1. **`bastyde_render::renderer::Renderer::render`** — 5.26 %. Dominant on this scene.
 2. **wgpu pipeline state-change machinery** — combined ~3.2 %:
    - `wgpu_core::command::render::encode_render_pass` 1.54 %
    - `render_pass_set_pipeline` 1.04 %

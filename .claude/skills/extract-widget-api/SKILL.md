@@ -1,6 +1,6 @@
 ---
 name: extract-widget-api
-description: Extract the public API and inline documentation of a fern-widgets widget. Use when the user wants to see a widget's public surface (struct, builder methods, enums, module doc) without opening the file, or asks things like "show me Button's API", "what are HStack's builder methods", "list fern-widgets", or "/extract-widget-api <Widget>". Also use when packing widget docs into context for a downstream task.
+description: Extract the public API and inline documentation of a bastyde-widgets widget. Use when the user wants to see a widget's public surface (struct, builder methods, enums, module doc) without opening the file, or asks things like "show me Button's API", "what are HStack's builder methods", "list bastyde-widgets", or "/extract-widget-api <Widget>". Also use when packing widget docs into context for a downstream task.
 user_invocable: true
 ---
 
@@ -49,4 +49,4 @@ If no arguments were given, ask the user which widget(s) they want, or suggest `
 ## Errors
 
 - Unknown widget names exit with code 2 and print `Did you mean: X, Y, Z?` suggestions. Relay the suggestions to the user.
-- If the script reports "fern-widgets src not found", you're likely not at the repo root — `cd` into `/home/cyril/Devel/fern-ui` first (or use an absolute path to the script).
+- If the script reports "bastyde-widgets src not found", you're likely not at the repo root — `cd` into `/home/cyril/Devel/bastyde` first (or use an absolute path to the script).

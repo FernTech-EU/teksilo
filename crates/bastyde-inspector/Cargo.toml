@@ -1,0 +1,42 @@
+[package]
+name = "bastyde-inspector"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# In-app debug inspector for Bastyde. Active only in debug builds
+# (`cfg(debug_assertions)`); release builds compile to no-ops.
+#
+# Apps wire it in with one line:
+#
+# ```rust
+# use bastyde_inspector::BastydeAppBuilderInspectorExt;
+# BastydeAppBuilder::new()
+#     .install_inspector_in_debug()   // no-op in release
+#     .initial_window(...)
+#     .run();
+# ```
+#
+# Toggle at runtime with F12, at launch with `--bastyde-inspector` or
+# `BASTYDE_INSPECTOR=1`.
+
+[dependencies]
+bastyde-canvas = { workspace = true }
+bastyde-core = { workspace = true }
+bastyde-app = { workspace = true }
+bastyde-data = { workspace = true }
+bastyde-i18n = { workspace = true }
+bastyde-platform = { workspace = true }
+bastyde-settings = { workspace = true }
+bastyde-tokens = { workspace = true }
+# `rich-text` is needed for the Tree tab's filter `TextInput`. It pulls
+# in `bastyde-text` (text-typeset) which is the only realistic way to get
+# a polished editable input. Inspector is debug-only so the cost is
+# acceptable; release builds compile out everything in this crate.
+bastyde-widgets = { workspace = true, features = ["rich-text"] }
+serde_json = { workspace = true }
+
+[dev-dependencies]

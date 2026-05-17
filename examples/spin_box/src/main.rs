@@ -11,7 +11,7 @@
 //! - A percentage SpinBox with suffix, wrap mode enabled, and a
 //!   custom single/page step combo.
 //! - An "Auto" SpinBox whose minimum shows
-//!   [`special_value_text`](fern_widgets::SpinBox::special_value_text).
+//!   [`special_value_text`](bastyde_widgets::SpinBox::special_value_text).
 //! - A scientific-notation adaptive-step SpinBox over six orders of
 //!   magnitude.
 //! - A read-only SpinBox that mirrors one of the other values.
@@ -19,16 +19,16 @@
 //! A `Reset all` button below returns every value to a sensible
 //! default so the demo can be re-played without restarting.
 
-use fern_ui::core::WidgetPlacement;
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::core::WidgetPlacement;
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Button, ButtonVariant, Expand, HStack, Padding, Panel, Spacer, SpinBox, StepType, TextWidget,
     Toolbar, VStack, WheelMode, WrapMode,
 };
 
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
-    fern!(
+    bati!(
         Toolbar {
             HStack {
                 Spacer
@@ -37,9 +37,9 @@ fn dark_mode_toolbar() -> impl Widget {
                         let next = !is_dark.get();
                         is_dark.set(next);
                         ctx.set_theme(if next {
-                            fern_ui::presets::intui::dark()
+                            bastyde::presets::intui::dark()
                         } else {
-                            fern_ui::presets::intui::light()
+                            bastyde::presets::intui::light()
                         });
                     }
                 }
@@ -110,7 +110,7 @@ impl Widget for Root {
         let reset_timeout = self.values.timeout.clone();
         let reset_frequency = self.values.frequency.clone();
 
-        let root = fern!(ctx => Padding::uniform(24.0) {
+        let root = bati!(ctx => Padding::uniform(24.0) {
                 Panel {
                     Padding::uniform(20.0) {
                         VStack {
@@ -304,10 +304,10 @@ impl Widget for Root {
 /// Single demo row: [label | SpinBox | live readout].
 fn row(
     label: &str,
-    spin: SpinBox<impl fern_ui::widgets::SpinValue>,
+    spin: SpinBox<impl bastyde::widgets::SpinValue>,
     readout: Signal<String>,
 ) -> impl Widget {
-    fern!(
+    bati!(
         HStack {
             spacing: 12.0
             MinSizeForLabel::new(TextWidget::new_literal(label)) {
@@ -382,15 +382,15 @@ impl Widget for MinSizeForLabel {
 }
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — SpinBox gallery")
+                .title("Bastyde — SpinBox gallery")
                 .size(720, 560)
                 .root(|tree, _state| {
-                    fern!(tree => VStack {
+                    bati!(tree => VStack {
                             child: dark_mode_toolbar()
                             Expand {
                                 Root::new()

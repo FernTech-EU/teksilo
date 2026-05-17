@@ -1,7 +1,7 @@
 # Tooltip Reference
 
 Tooltips are hover-/focus-triggered overlays that surface ancillary information
-about a control. FernUI ships **three tiers** that share one attachment pipeline:
+about a control. Bastyde ships **three tiers** that share one attachment pipeline:
 
 - **Plain tooltips** — a single localized string in a themed rounded-rect
   surface. Pure-text, ephemeral, no interaction.
@@ -25,14 +25,14 @@ the other two.
 
 | Layer | Type | Crate | What it does |
 |-------|------|-------|--------------|
-| Plain content widget | [`TooltipWidget`](../crates/fern-widgets/src/tooltip.rs) | `fern-widgets` | Themed rounded-rect with one line of text |
-| Rich content widget | [`RichTooltipWidget`](../crates/fern-widgets/src/tooltip/rich.rs) | `fern-widgets` | Body + shortcut chip + "more" disclosure + dwell indicator |
-| Composite content widget | [`CompositeTooltipWidget`](../crates/fern-widgets/src/tooltip/composite.rs) | `fern-widgets` | Surface hosting an arbitrary widget tree (TabWidget, charts, progress bars, conditional rows, dynamic values) with dwell-to-sticky promotion |
-| Registry | [`TooltipRegistry`](../crates/fern-widgets/src/tooltip/registry.rs) / [`TooltipContent`](../crates/fern-widgets/src/tooltip/registry.rs) | `fern-widgets` | Thread-local catalog keyed by short stable ids |
-| Attach helpers | [`attach_rich_tooltip*`](../crates/fern-widgets/src/tooltip/attach.rs) / [`attach_composite_tooltip*`](../crates/fern-widgets/src/tooltip/attach.rs) | `fern-widgets` | Wire a tooltip onto an anchor inside `build()` |
-| Tree machinery | [`WidgetTree::attach_tooltip*`](../crates/fern-core/src/widget_tree/overlay_impl.rs) | `fern-core` | Hover/focus tracking, dwell promotion, overlay lifetime |
-| Visual progress | [`DwellIndicator`](../crates/fern-widgets/src/tooltip/dwell_indicator.rs) | `fern-widgets` | Pie-wedge / pin glyph for sticky-on-dwell |
-| Tokens | [`TooltipStyle`](../crates/fern-tokens/src/components.rs) / [`CompositeTooltipStyle`](../crates/fern-tokens/src/components.rs) | `fern-tokens` | `padding_*`, `corner_radius`, `max_width`, `max_height` (composite only), `shadow_density` |
+| Plain content widget | [`TooltipWidget`](../crates/bastyde-widgets/src/tooltip.rs) | `bastyde-widgets` | Themed rounded-rect with one line of text |
+| Rich content widget | [`RichTooltipWidget`](../crates/bastyde-widgets/src/tooltip/rich.rs) | `bastyde-widgets` | Body + shortcut chip + "more" disclosure + dwell indicator |
+| Composite content widget | [`CompositeTooltipWidget`](../crates/bastyde-widgets/src/tooltip/composite.rs) | `bastyde-widgets` | Surface hosting an arbitrary widget tree (TabWidget, charts, progress bars, conditional rows, dynamic values) with dwell-to-sticky promotion |
+| Registry | [`TooltipRegistry`](../crates/bastyde-widgets/src/tooltip/registry.rs) / [`TooltipContent`](../crates/bastyde-widgets/src/tooltip/registry.rs) | `bastyde-widgets` | Thread-local catalog keyed by short stable ids |
+| Attach helpers | [`attach_rich_tooltip*`](../crates/bastyde-widgets/src/tooltip/attach.rs) / [`attach_composite_tooltip*`](../crates/bastyde-widgets/src/tooltip/attach.rs) | `bastyde-widgets` | Wire a tooltip onto an anchor inside `build()` |
+| Tree machinery | [`WidgetTree::attach_tooltip*`](../crates/bastyde-core/src/widget_tree/overlay_impl.rs) | `bastyde-core` | Hover/focus tracking, dwell promotion, overlay lifetime |
+| Visual progress | [`DwellIndicator`](../crates/bastyde-widgets/src/tooltip/dwell_indicator.rs) | `bastyde-widgets` | Pie-wedge / pin glyph for sticky-on-dwell |
+| Tokens | [`TooltipStyle`](../crates/bastyde-tokens/src/components.rs) / [`CompositeTooltipStyle`](../crates/bastyde-tokens/src/components.rs) | `bastyde-tokens` | `padding_*`, `corner_radius`, `max_width`, `max_height` (composite only), `shadow_density` |
 
 ---
 
@@ -41,7 +41,7 @@ the other two.
 ### Plain tooltip on any widget
 
 ```rust
-use fern_ui::prelude::*;
+use bastyde::prelude::*;
 
 Button::new(tr!("save"))
     .tooltip(tr!("save_hint"))                 // i18n
@@ -55,11 +55,11 @@ scaffolding.
 ### Rich tooltip from the registry
 
 ```rust
-use fern_ui::prelude::*;
-use fern_widgets::tooltip::TooltipContent;
+use bastyde::prelude::*;
+use bastyde_widgets::tooltip::TooltipContent;
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .register_tooltips(vec![
             TooltipContent::new("save-as", tr!("save_as_tooltip"))
                 .for_shortcut("app.save_as"),
@@ -86,7 +86,7 @@ For tooltips that need a full widget tree — tabs, charts, progress bars,
 conditional rows, dynamic numeric values — use `.composite_tooltip(content)`:
 
 ```rust
-use fern_ui::prelude::*;
+use bastyde::prelude::*;
 
 Button::new(tr!("province_info"))
     .composite_tooltip(
@@ -149,7 +149,7 @@ strips.
 
 ---
 
-## Registration: `FernAppBuilder::register_tooltips`
+## Registration: `BastydeAppBuilder::register_tooltips`
 
 The application's tooltip catalog is a single `Vec<TooltipContent>` registered
 once at boot. The bundle is frozen into a thread-local `TooltipRegistry` *before
@@ -158,7 +158,7 @@ before invoking the root builder, so tooltip widgets created during the very
 first build can resolve their content immediately.
 
 ```rust
-FernAppBuilder::new()
+BastydeAppBuilder::new()
     .register_tooltips(vec![ /* ... */ ])
     .run();
 ```
@@ -201,7 +201,7 @@ entries:
 ```rust
 TooltipContent::new(
     "autosave",
-    tr!("autosave_with_link"),    // "FernUI autosaves. See [details](:autosave-details)…"
+    tr!("autosave_with_link"),    // "Bastyde autosaves. See [details](:autosave-details)…"
 )
 ```
 
@@ -286,8 +286,8 @@ The attach helpers do three things:
 
 | Path | Delay | Where it's defined |
 |------|-------|--------------------|
-| Rich tooltip | `200 ms` | `DEFAULT_RICH_TOOLTIP_DELAY` in [tooltip/attach.rs](../crates/fern-widgets/src/tooltip/attach.rs) |
-| `Button` plain tooltip | `200 ms` | inline literal in [button.rs](../crates/fern-widgets/src/button.rs) |
+| Rich tooltip | `200 ms` | `DEFAULT_RICH_TOOLTIP_DELAY` in [tooltip/attach.rs](../crates/bastyde-widgets/src/tooltip/attach.rs) |
+| `Button` plain tooltip | `200 ms` | inline literal in [button.rs](../crates/bastyde-widgets/src/button.rs) |
 | `Checkbox`, `RadioButton`, `MenuItem`, `SplitButton`, `Link`, `IconButton`, `TextInput` plain tooltip | `500 ms` | inline literal in each widget |
 
 There is no token for plain-tooltip delay yet; widgets that need a custom
@@ -333,9 +333,9 @@ delayed-overlay deadline so the idle-event loop knows when to wake (see
 
 Rich tooltips opt into a 2-second dwell timer that promotes a hover-shown
 tooltip into a focusable, click-through Dialog. The threshold lives in
-[`DWELL_PROMOTION`](../crates/fern-widgets/src/tooltip/rich.rs) and is
+[`DWELL_PROMOTION`](../crates/bastyde-widgets/src/tooltip/rich.rs) and is
 `Duration::from_secs(2)`; it's split into 4 visible quarters of 500 ms each,
-driving the [`DwellIndicator`](../crates/fern-widgets/src/tooltip/dwell_indicator.rs)
+driving the [`DwellIndicator`](../crates/bastyde-widgets/src/tooltip/dwell_indicator.rs)
 in the tooltip's top-right corner.
 
 Visual progression of the indicator:
@@ -425,7 +425,7 @@ bound at `BindingLevel::Rebuild`).
 
 ## Theming knobs
 
-`Theme::components.tooltip` is a [`TooltipStyle`](../crates/fern-tokens/src/components.rs):
+`Theme::components.tooltip` is a [`TooltipStyle`](../crates/bastyde-tokens/src/components.rs):
 
 ```rust
 pub struct TooltipStyle {
@@ -447,7 +447,7 @@ Color tokens (`Theme::colors`):
 
 Int UI's house style: tooltip surfaces stay dark in both light and dark themes
 for high-contrast popups (also reused by `Snackbar`). The OS-theme bridge
-([`theme.rs`](../crates/fern-tokens/src/theme.rs)) lets a host OS override
+([`theme.rs`](../crates/bastyde-tokens/src/theme.rs)) lets a host OS override
 `tooltip_bg` / `tooltip_text` if the platform exposes corresponding values.
 
 Motion knobs come from `MotionTokens`:
@@ -473,15 +473,15 @@ the rich source, and vice versa.
 
 | Widget | Plain | Rich (key) | Rich (inline) |
 |--------|-------|------------|---------------|
-| [`Button`](../crates/fern-widgets/src/button.rs) | `tooltip(text)` | `rich_tooltip(key)` | `rich_tooltip_content(content)` |
-| [`Link`](../crates/fern-widgets/src/link.rs) | `tooltip(text)` | `rich_tooltip(key)` | `rich_tooltip_content(content)` |
-| [`MenuItem`](../crates/fern-widgets/src/menu_item.rs) | `tooltip(text)` | `rich_tooltip(key)` | `rich_tooltip_content(content)` |
-| [`Checkbox`](../crates/fern-widgets/src/checkbox.rs) | `tooltip(text)` | — | — |
-| [`RadioButton`](../crates/fern-widgets/src/radio_button.rs) | `tooltip(text)` | — | — |
-| [`SplitButton`](../crates/fern-widgets/src/split_button.rs) | `tooltip(text)` | — | — |
-| [`IconButton`](../crates/fern-widgets/src/icon_button.rs) | `tooltip(text)` | — | — |
-| [`TextInput`](../crates/fern-widgets/src/text_input.rs) | `tooltip_literal(text)` | `rich_tooltip_key(key)` | `rich_tooltip(content)` |
-| [`ToolBox`](../crates/fern-widgets/src/tool_box.rs) | — | `tooltip(impl Into<RichTooltipSource>)` | `tooltip_content(content)` |
+| [`Button`](../crates/bastyde-widgets/src/button.rs) | `tooltip(text)` | `rich_tooltip(key)` | `rich_tooltip_content(content)` |
+| [`Link`](../crates/bastyde-widgets/src/link.rs) | `tooltip(text)` | `rich_tooltip(key)` | `rich_tooltip_content(content)` |
+| [`MenuItem`](../crates/bastyde-widgets/src/menu_item.rs) | `tooltip(text)` | `rich_tooltip(key)` | `rich_tooltip_content(content)` |
+| [`Checkbox`](../crates/bastyde-widgets/src/checkbox.rs) | `tooltip(text)` | — | — |
+| [`RadioButton`](../crates/bastyde-widgets/src/radio_button.rs) | `tooltip(text)` | — | — |
+| [`SplitButton`](../crates/bastyde-widgets/src/split_button.rs) | `tooltip(text)` | — | — |
+| [`IconButton`](../crates/bastyde-widgets/src/icon_button.rs) | `tooltip(text)` | — | — |
+| [`TextInput`](../crates/bastyde-widgets/src/text_input.rs) | `tooltip_literal(text)` | `rich_tooltip_key(key)` | `rich_tooltip(content)` |
+| [`ToolBox`](../crates/bastyde-widgets/src/tool_box.rs) | — | `tooltip(impl Into<RichTooltipSource>)` | `tooltip_content(content)` |
 
 `tooltip_literal` is a permanent `#[doc(hidden)]` shim that wraps a raw
 `String` in `LocalizedString::literal` — same grep marker as
@@ -519,7 +519,7 @@ by the `attach_*` call.
 
 ## See also
 
-- [Overlays in fern-ui-architecture.md](fern-ui-architecture.md) — overlay
+- [Overlays in bastyde-architecture.md](bastyde-architecture.md) — overlay
   manager, `OverlayRequest`, dismiss behaviors.
 - [reactive-theme.md](reactive-theme.md) — `ColorProp`, role-driven colors,
   Signal-bound theme switching.

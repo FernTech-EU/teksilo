@@ -1,0 +1,147 @@
+[package]
+name = "bastyde"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[features]
+# Default set: widgets, text backend, i18n runtime, plus Arabic and
+# Hebrew fallback fonts so the internationalization demo and common
+# RTL cases work out of the box. Applications that want a Latin-only
+# minimal build can disable fonts via `default-features = false` and
+# re-add only the features they need (e.g. `features = ["widgets",
+# "text", "i18n"]` for text support without the Noto bundles).
+default = [
+    "widgets",
+    "text",
+    "i18n",
+    "inspector",
+    "toast",
+    "file-dialog",
+    "fonts-arabic",
+    "fonts-hebrew",
+]
+
+widgets = ["dep:bastyde-widgets"]
+text = ["dep:bastyde-text", "bastyde-app/text"]
+i18n = ["dep:bastyde-i18n"]
+rich-text = ["widgets", "bastyde-widgets/rich-text"]
+# Debug-only in-app inspector (`F12`, picker, AllBounds overlay,
+# theme/locale switchers, models tab, …). Pulls in `rich-text`
+# transitively because the Tree tab's filter input requires it. The
+# crate itself is `cfg(debug_assertions)` — release builds compile to
+# a no-op — but the Cargo dep is unconditional; turn this feature off
+# if you want to drop the transitive `rich-text` cost too.
+inspector = ["dep:bastyde-inspector", "rich-text"]
+# Toast notifications. The `BastydeAppBuilderToastExt::install_toast`
+# entry point lives in this crate (mirroring how `inspector` declares
+# `BastydeAppBuilderInspectorExt` in `bastyde-inspector`); the actual Toast
+# widget types live in `bastyde-widgets`. Pulls in `widgets` because the
+# install closure constructs a `ToastHost` and the archive model. On
+# by default — apps that don't show toasts pay only the lookup of the
+# `ToastRegistry` slot in `app_state` (one HashMap miss).
+toast = ["widgets"]
+# Forwards clipboard support through bastyde-app so `RichTextEditor::editor`
+# can copy/cut/paste via the system clipboard. Without this feature the
+# editor silently no-ops clipboard commands (they are filtered at the
+# command level; `arboard` is not pulled into the build).
+clipboard = ["bastyde-app/clipboard"]
+
+# Native file dialogs via `rfd`, with `RfdAsyncBackend` auto-installable
+# through `BastydeAppBuilder::install_file_dialog`. On by default — the
+# extra binary cost is small and the pattern (open / save / pick folder)
+# is core to most desktop apps. Apps that want only the trait surface
+# (e.g. to ship a custom backend) opt in to the leaner `file-dialog-trait`.
+file-dialog = ["bastyde-app/rfd-backend"]
+# Just the trait surface, mock backend, and `EventContextFileDialogExt`
+# extension trait — no rfd, no async-std. For apps that bring their own
+# backend.
+file-dialog-trait = ["bastyde-app/file-dialog"]
+
+# Telemetry support. Forwards to the `telemetry` features on
+# `bastyde-app` (gates `.telemetry(bundle)` + the install wiring) and on
+# `bastyde-widgets` (gates the `PrivacySettings` widget). Off by default
+# — apps that don't ship analytics pay nothing. Standalone analytics
+# adapter crates (`bastyde-analytics-{plausible,bastyde,otlp}`) are not
+# pulled in by this feature; apps add them as direct deps.
+telemetry = ["bastyde-app/telemetry", "bastyde-widgets?/telemetry"]
+
+# Sibling preset crates — opt-in alternatives to the bundled IntUI
+# preset (`bastyde::prelude::intui::{light, dark}`). Each is a
+# stub today that returns an IntUI-shaped baseline with TODO markers;
+# the per-tier customisation work lands incrementally as the
+# four-tier styling refactor finishes the remaining widget
+# migrations. Apps that opt in get a stable import path
+# (`bastyde::prelude::material3::{light, dark}`, etc.) so the
+# refactor's surface stays additive — when the styles fill in,
+# existing code automatically picks them up.
+theme-material3 = ["dep:bastyde-theme-material3"]
+theme-macos = ["dep:bastyde-theme-macos"]
+theme-fluent = ["dep:bastyde-theme-fluent"]
+
+# Font bundle features — forwarded to `bastyde-text`'s own feature set
+# via the `bastyde-text?/...` optional-dep syntax. The `?` means the
+# forwarding only activates when `bastyde-text` itself is in the build
+# (i.e., when the `text` feature is enabled); a user that only wants
+# i18n-without-text will see these as silent no-ops. Applications
+# enable the scripts they ship for and disable the rest.
+#
+# Each feature maps 1:1 to a feature of the same name on `bastyde-text`,
+# which in turn decides whether to `include_bytes!` the corresponding
+# Noto Sans variable font at compile time and register it with the
+# typesetter's fallback chain.
+fonts-arabic = ["bastyde-text?/fonts-arabic"]
+fonts-hebrew = ["bastyde-text?/fonts-hebrew"]
+fonts-thai = ["bastyde-text?/fonts-thai"]
+fonts-devanagari = ["bastyde-text?/fonts-devanagari"]
+fonts-cjk-sc = ["bastyde-text?/fonts-cjk-sc"]
+fonts-cjk-jp = ["bastyde-text?/fonts-cjk-jp"]
+fonts-cjk-kr = ["bastyde-text?/fonts-cjk-kr"]
+
+# Convenience meta-features, again forwarded to `bastyde-text`.
+fonts-all-non-cjk = ["bastyde-text?/fonts-all-non-cjk"]
+fonts-all = ["bastyde-text?/fonts-all"]
+
+# Opt-in runtime color-emoji fallback. Forwards to
+# `bastyde-text/system-emoji`, which loads Noto Color Emoji / Apple
+# Color Emoji / Segoe UI Emoji from a hard-coded list of installed
+# system paths at startup. Off by default — color-emoji fonts are
+# large (20-30 MB) and not always present; apps that ship cross-
+# platform UI with emoji should opt in here.
+system-emoji = ["bastyde-text?/system-emoji"]
+
+[dependencies]
+bastyde-tokens = { workspace = true }
+bastyde-canvas = { workspace = true }
+bastyde-core = { workspace = true }
+bastyde-macros = { workspace = true }
+bastyde-data = { workspace = true }
+bastyde-render = { workspace = true }
+bastyde-platform = { workspace = true }
+bastyde-app = { workspace = true }
+bastyde-settings = { workspace = true }
+bastyde-widgets = { workspace = true, optional = true }
+# Declared directly (not via `workspace = true`) so we can set
+# `default-features = false` — Cargo rejects overriding
+# `default-features` on a workspace-inherited dep. bastyde's own
+# feature flags are then the authoritative control over which Noto
+# Sans fonts get bundled: `default = ["fonts-arabic", "fonts-hebrew"]`
+# restores the out-of-the-box behavior, and downstream apps that use
+# `default-features = false` on bastyde get a clean slate with no
+# Noto fonts bundled.
+bastyde-text = { path = "../bastyde-text", version = "0.2.0", optional = true, default-features = false }
+bastyde-i18n = { workspace = true, optional = true }
+bastyde-inspector = { workspace = true, optional = true }
+bastyde-resources = { workspace = true }
+bastyde-theme-material3 = { workspace = true, optional = true }
+bastyde-theme-macos = { workspace = true, optional = true }
+bastyde-theme-fluent = { workspace = true, optional = true }
+
+[dev-dependencies]
+trybuild = "1"
+# Toast install tests build a builder with a `Persistent` archive
+# against a temp directory.
+tempfile = { workspace = true }

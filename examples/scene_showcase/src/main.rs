@@ -1,4 +1,4 @@
-//! `scene-showcase` — comprehensive demo of every `fern-scene` capability.
+//! `scene-showcase` — comprehensive demo of every `bastyde-scene` capability.
 //!
 //! One pannable / zoomable scene divided into eight labelled sections.
 //! Pan with two-finger trackpad / mouse wheel; zoom with Ctrl+wheel or
@@ -33,15 +33,15 @@
 
 use std::time::Duration;
 
-use fern_scene::{
+use bastyde_scene::{
     A11yGroup, A11yNode, GroupItem, ItemId, PathItem, RectItem, Scene, SceneItem,
     SceneItemPaintContext, SceneSelectionMode, SceneView, TextItem, register_animated_item_signal,
 };
-use fern_ui::canvas::{Canvas, Path, Point, Rect, StrokeStyle};
-use fern_ui::core::binding::BindingLevel;
-use fern_ui::prelude::*;
-use fern_ui::tokens::Easing;
-use fern_ui::widgets::{
+use bastyde::canvas::{Canvas, Path, Point, Rect, StrokeStyle};
+use bastyde::core::binding::BindingLevel;
+use bastyde::prelude::*;
+use bastyde::tokens::Easing;
+use bastyde::widgets::{
     Button, ComboBox, Expand, HStack, Panel, ScrollArea, Spacer, TextWidget, Toolbar, VStack,
 };
 
@@ -184,7 +184,7 @@ fn add_scene_header(scene: &mut Scene) {
 
     scene.add_item(
         TextItem::new(
-            "fern-scene showcase — eight labelled sections, all visible at zoom 1.0",
+            "bastyde-scene showcase — eight labelled sections, all visible at zoom 1.0",
             Rect::new(SCENE_PAD, SCENE_PAD, usable_w, 30.0),
         )
         .color(ink()),
@@ -825,7 +825,7 @@ fn build_showcase_view() -> SceneView {
         // 50,000-unit scene we still emit only the lines on screen.
         .background(|canvas, _ctx, region| {
             let step = 50.0_f32;
-            let color = fern_ui::tokens::Color::new(0.85, 0.85, 0.88, 0.5);
+            let color = bastyde::tokens::Color::new(0.85, 0.85, 0.88, 0.5);
             let x0 = (region.x / step).floor() * step;
             let y0 = (region.y / step).floor() * step;
             let x_end = region.x + region.width;
@@ -833,8 +833,8 @@ fn build_showcase_view() -> SceneView {
             let mut x = x0;
             while x <= x_end {
                 canvas.draw_line(
-                    fern_ui::canvas::Point::new(x, region.y),
-                    fern_ui::canvas::Point::new(x, y_end),
+                    bastyde::canvas::Point::new(x, region.y),
+                    bastyde::canvas::Point::new(x, y_end),
                     color,
                     0.5_f32,
                 );
@@ -843,8 +843,8 @@ fn build_showcase_view() -> SceneView {
             let mut y = y0;
             while y <= y_end {
                 canvas.draw_line(
-                    fern_ui::canvas::Point::new(region.x, y),
-                    fern_ui::canvas::Point::new(x_end, y),
+                    bastyde::canvas::Point::new(region.x, y),
+                    bastyde::canvas::Point::new(x_end, y),
                     color,
                     0.5_f32,
                 );
@@ -895,9 +895,9 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                fern_ui::presets::intui::dark()
+                bastyde::presets::intui::dark()
             } else {
-                fern_ui::presets::intui::light()
+                bastyde::presets::intui::light()
             });
         }),
     ))
@@ -909,18 +909,18 @@ fn build_root() -> impl Widget + 'static {
 
     VStack::new()
         .spacing(8.0)
-        .child(TextWidget::new_literal("fern-scene showcase").style(TextStyleRole::BodyBold))
+        .child(TextWidget::new_literal("bastyde-scene showcase").style(TextStyleRole::BodyBold))
         .child(status)
         .child(view)
 }
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — fern-scene showcase")
+                .title("Bastyde — bastyde-scene showcase")
                 .size(1500, 950)
                 .root(|tree, _state| {
                     tree.add(
@@ -936,11 +936,11 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fern_ui::core::WidgetTree;
+    use bastyde::core::WidgetTree;
 
     #[test]
     fn showcase_root_lays_out_without_panicking() {
-        let mut tree = WidgetTree::new().with_theme(fern_ui::presets::intui::light());
+        let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
         let _root = tree.add(build_root());
         tree.layout(SizeProposal::exact(1500.0, 950.0));
     }
@@ -949,7 +949,7 @@ mod tests {
     fn outer_scene_has_two_heavyweight_children() {
         // 1 ScrollArea (§4, wraps 3 cards as ScrollArea descendants)
         // + 1 inner SceneView (§7) = 2 direct heavyweight children.
-        let mut tree = WidgetTree::new().with_theme(fern_ui::presets::intui::light());
+        let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
         let view_id = tree.add(build_showcase_view());
         tree.layout(SizeProposal::exact(1500.0, 950.0));
         let kids = tree.children(view_id);

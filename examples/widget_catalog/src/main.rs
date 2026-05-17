@@ -1,4 +1,4 @@
-//! FernUI Widget Catalog — every public widget, classic vs `fern!` side-by-side.
+//! Bastyde Widget Catalog — every public widget, classic vs `bati!` side-by-side.
 //!
 //! Run with: `cargo run -p widget-catalog`
 //!
@@ -15,10 +15,10 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use fern_ui::core::PlatformTitleBarHost;
-use fern_ui::core::widget::WidgetPlacement;
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::core::PlatformTitleBarHost;
+use bastyde::core::widget::WidgetPlacement;
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Button, ButtonVariant, Expand, HStack, Padding, ScrollArea, StatusBar, Switcher, TabId,
     TabInfo, TabWidget, TextWidget, TitleBar, Toggle, VStack, WindowFrame,
 };
@@ -62,17 +62,17 @@ fn main() {
         ])
         .auto_detect_os_locale(false)
         .fallback_locale("en-US".parse().expect("en-US is a valid BCP-47 tag"))
-        .framework_locales(fern_ui::widgets::framework_locales());
+        .framework_locales(bastyde::widgets::framework_locales());
 
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
         .install_file_dialog()
         .register_tooltips(build_tooltip_registry())
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .i18n(i18n)
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — Widget Catalog")
+                .title("Bastyde — Widget Catalog")
                 .size(1400, 900)
                 .decorations(DecorationsMode::CustomChrome)
                 .root({
@@ -86,7 +86,7 @@ fn main() {
                         // every tab's Switcher and the currently-active
                         // TabId. Lives at the window root so the title
                         // bar can read/write the same signals.
-                        let show_fern: Signal<bool> = Signal::new(opts.fern_mode);
+                        let show_bati: Signal<bool> = Signal::new(opts.bati_mode);
                         let selected_tab: Signal<Option<TabId>> =
                             Signal::new(Some(tab_ids[opts.initial_tab]));
 
@@ -105,7 +105,7 @@ fn main() {
                         let catalog = tree.add(WidgetCatalog::new(
                             opts.clone(),
                             tab_ids.clone(),
-                            show_fern.clone(),
+                            show_bati.clone(),
                             selected_tab.clone(),
                         ));
                         let catalog_filled =
@@ -169,9 +169,9 @@ fn build_title_bar(host: Rc<dyn PlatformTitleBarHost>, _theme: &Theme) -> impl W
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                fern_ui::presets::intui::dark()
+                bastyde::presets::intui::dark()
             } else {
-                fern_ui::presets::intui::light()
+                bastyde::presets::intui::light()
             });
         });
 
@@ -200,7 +200,7 @@ fn build_title_bar(host: Rc<dyn PlatformTitleBarHost>, _theme: &Theme) -> impl W
 struct WidgetCatalog {
     options: cli::CliOptions,
     tab_ids: Rc<Vec<TabId>>,
-    show_fern: Signal<bool>,
+    show_bati: Signal<bool>,
     selected_tab: Signal<Option<TabId>>,
     root_child_id: Option<WidgetId>,
 }
@@ -209,13 +209,13 @@ impl WidgetCatalog {
     fn new(
         options: cli::CliOptions,
         tab_ids: Rc<Vec<TabId>>,
-        show_fern: Signal<bool>,
+        show_bati: Signal<bool>,
         selected_tab: Signal<Option<TabId>>,
     ) -> Self {
         Self {
             options,
             tab_ids,
-            show_fern,
+            show_bati,
             selected_tab,
             root_child_id: None,
         }
@@ -226,9 +226,9 @@ impl Widget for WidgetCatalog {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let sigs = Signals::new(ctx);
 
-        // `view_mode: Signal<usize>` — derived from `show_fern` so that
+        // `view_mode: Signal<usize>` — derived from `show_bati` so that
         // every tab's Switcher binds to the same source.
-        let view_mode = self.show_fern.map(|b| if *b { 1 } else { 0 });
+        let view_mode = self.show_bati.map(|b| if *b { 1 } else { 0 });
 
         // ── --cycle: auto-advance the tab on a timer ─────────────────
         if let Some(period) = self.options.cycle {
@@ -298,7 +298,7 @@ impl Widget for WidgetCatalog {
 
 impl WidgetCatalog {
     fn build_mode_toggle(&self) -> impl Widget + 'static {
-        Toggle::new(self.show_fern.clone()).label(tr!(mode_label()))
+        Toggle::new(self.show_bati.clone()).label(tr!(mode_label()))
     }
 
     fn install_cycle(&self, ctx: &mut BuildContext, period: Duration) {
@@ -334,7 +334,7 @@ impl WidgetCatalog {
 }
 
 // ---------------------------------------------------------------------------
-// TabContent — the per-tab widget that hosts the classic/fern Switcher.
+// TabContent — the per-tab widget that hosts the classic/bati Switcher.
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
@@ -359,12 +359,12 @@ impl TabContent {
 impl Widget for TabContent {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let classic_id = (self.entry.classic)(ctx, &self.sigs);
-        let fern_id = (self.entry.fern)(ctx, &self.sigs);
+        let bati_id = (self.entry.bati)(ctx, &self.sigs);
 
         let switcher = ctx.add(
             Switcher::new(self.view_mode.clone())
                 .child_id(classic_id)
-                .child_id(fern_id),
+                .child_id(bati_id),
         );
         let padded = ctx.add(Padding::uniform(20.0).child_id(switcher));
         let scrolled = ctx.add(ScrollArea::from_id(padded));

@@ -1,0 +1,18 @@
+[package]
+name = "bastyde-fmt-lsp"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "LSP server for the basti! DSL formatter"
+
+[[bin]]
+name = "bastyde-fmt-lsp"
+path = "src/main.rs"
+
+[dependencies]
+bastyde-fmt = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

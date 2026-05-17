@@ -22,10 +22,10 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use fern_ui::core::widget::WidgetPlacement;
-use fern_ui::data::ListModel;
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::core::widget::WidgetPlacement;
+use bastyde::data::ListModel;
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Badge, Breadcrumb, BreadcrumbItem, Button, ButtonVariant, Card, HStack, IconWidget, MessageBox,
     MessageBoxButtons, Panel, StandardButton, TabBarOrientation, TabHandle, TabId, TabInfo,
     TabSizing, TabWidget, TextWidget, VStack,
@@ -146,9 +146,9 @@ impl Widget for Root {
                 let next = !is_dark.get();
                 is_dark.set(next);
                 ctx.set_theme(if next {
-                    fern_ui::presets::intui::dark()
+                    bastyde::presets::intui::dark()
                 } else {
-                    fern_ui::presets::intui::light()
+                    bastyde::presets::intui::light()
                 });
             });
 
@@ -365,7 +365,7 @@ impl Widget for Root {
         // TabWidget collapses to its natural height and the
         // window's vertical area shows mostly empty Panel.
         let tabs_filling = ctx.add(
-            fern_ui::widgets::Expand::vertical()
+            bastyde::widgets::Expand::vertical()
                 .respect_intrinsic()
                 .child_id(tabs),
         );
@@ -577,9 +577,9 @@ fn doc_pane(state: &DocState) -> impl Widget + 'static {
 }
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("TabWidget — Showcase")

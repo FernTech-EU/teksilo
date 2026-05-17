@@ -1,15 +1,15 @@
-# FernUI Documentation Index
+# Bastyde Documentation Index
 
-Reference and design documents for FernUI. All paths are relative to this
+Reference and design documents for Bastyde. All paths are relative to this
 directory; in-progress design work lives separately under [plans/](plans/).
 
 ## Architecture & roadmap
 
-- [fern-ui-architecture.md](fern-ui-architecture.md) — framework-internals
+- [barchitecture.md](architecture.md) — framework-internals
   reference: scrolling, arena, Canvas API, rendering pipeline, HiDPI,
   threading, testability, crate dependency graph, design comparisons,
   open questions. Per-subsystem APIs live in the focused docs below.
-- [fern-ui-milestones.md](fern-ui-milestones.md) — the demo-driven milestone
+- [bastyde-milestones.md](bastyde-milestones.md) — the demo-driven milestone
   roadmap; each milestone produces a runnable example exercising one slice
   of the architecture.
 
@@ -47,16 +47,16 @@ directory; in-progress design work lives separately under [plans/](plans/).
   `.access_*` modifiers (label, description, subtree merge/exclude, custom
   actions, shortcut binding) for the cases widget-emitted a11y misses.
 
-## `fern!` DSL & formatting
+## `bati!` DSL & formatting
 
-- [fern-macro-reference.md](fern-macro-reference.md) — user-facing reference
-  for the `fern!` block-DSL (parse → IR → builder calls).
-- [fern-language-spec-v3.md](fern-language-spec-v3.md) — design spec with
+- [bati-macro-reference.md](bati-macro-reference.md) — user-facing reference
+  for the `bati!` block-DSL (parse → IR → builder calls).
+- [bati-language-spec-v3.md](bati-language-spec-v3.md) — design spec with
   full grammar, structural forms, and worked translations of catalog
   examples.
-- [fern-fmt.md](fern-fmt.md) — `cargo fern-fmt`, the formatter for `fern!`
+- [bastyde-fmt.md](bastyde-fmt.md) — `cargo bastyde-fmt`, the formatter for `bati!`
   blocks (`rustfmt` skips macro bodies).
-- [fern-fmt-vscode.md](fern-fmt-vscode.md) — wiring `fern-fmt-lsp` into
+- [bastyde-fmt-vscode.md](bastyde-fmt-vscode.md) — wiring `bastyde-fmt-lsp` into
   VS Code for in-editor formatting.
 
 ## Input, navigation, chrome
@@ -72,7 +72,7 @@ directory; in-progress design work lives separately under [plans/](plans/).
   button actions, `Toast::id` update-in-place) + `ToastHost` queue +
   persistent `NotificationArchiveModel` + `NotificationLog` / bell
   `NotificationCenterButton` / `NotificationLogDialog` UI;
-  `FernAppBuilder::install_toast_default()` one-line install.
+  `BastydeAppBuilder::install_toast_default()` one-line install.
 - [drag-and-drop.md](drag-and-drop.md) — drag payloads, drop targets,
   hit testing, the three user stories that share the underlying machinery.
 - [multi-window.md](multi-window.md) — `WindowConfig`, signal-driven
@@ -91,7 +91,7 @@ directory; in-progress design work lives separately under [plans/](plans/).
   `SettingsStore`, `SettingsFile<T>`, `MruList<T>`, window-state auto
   save/restore.
 - [telemetry.md](telemetry.md) — consent-gated event reporting, the
-  fern-collector / Plausible / OTLP adapters, the `events.yaml` schema
+  bastyde-collector / Plausible / OTLP adapters, the `events.yaml` schema
   pipeline.
 
 ## Specialized widgets
@@ -104,10 +104,10 @@ directory; in-progress design work lives separately under [plans/](plans/).
   reorder, overflow dropdown, horizontal + vertical orientations).
 - [charts.md](charts.md) — `BarChart` / `LineChart` / `PieChart`
   (shared axis / palette / legend / tooltip infrastructure).
-- [fern-scene.md](fern-scene.md) — the pannable, zoomable scene viewport
+- [bastyde-scene.md](bastyde-scene.md) — the pannable, zoomable scene viewport
   (canvases, board layouts, diagram editors).
-- [fern-scene-a11y.md](fern-scene-a11y.md) — shaping the accessibility
-  tree of a `fern-scene` viewport.
+- [bastyde-scene-a11y.md](bastyde-scene-a11y.md) — shaping the accessibility
+  tree of a `bastyde-scene` viewport.
 
 ## Visuals & resources
 
@@ -116,7 +116,7 @@ directory; in-progress design work lives separately under [plans/](plans/).
 
 ## Tooling
 
-- [inspector.md](inspector.md) — `fern-inspector`, the in-app debug
+- [inspector.md](inspector.md) — `bastyde-inspector`, the in-app debug
   surface (Tree / Properties / Accessibility / Theme / Models tabs;
   picker + bounds overlay; debug-only).
 

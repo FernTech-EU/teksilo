@@ -5,7 +5,7 @@
 //! Usage:
 //!
 //! ```text
-//! cargo run -p widget-catalog -- [--tab NAME|INDEX] [--cycle [MS]] [--mode classic|fern]
+//! cargo run -p widget-catalog -- [--tab NAME|INDEX] [--cycle [MS]] [--mode classic|bati]
 //! ```
 
 use std::time::Duration;
@@ -16,8 +16,8 @@ pub struct CliOptions {
     pub initial_tab: usize,
     /// If `Some`, auto-advance the selected tab on this interval.
     pub cycle: Option<Duration>,
-    /// `false` → start in classic builder view; `true` → start in `fern!` view.
-    pub fern_mode: bool,
+    /// `false` → start in classic builder view; `true` → start in `bati!` view.
+    pub bati_mode: bool,
 }
 
 /// Parse command-line args. On `--help`, prints usage and exits 0.
@@ -63,13 +63,13 @@ pub fn parse(tab_names: &[&str]) -> CliOptions {
             }
             "--mode" => {
                 let Some(value) = iter.next() else {
-                    eprintln!("--mode expects `classic` or `fern`");
+                    eprintln!("--mode expects `classic` or `bati`");
                     continue;
                 };
                 match value.as_str() {
-                    "classic" => opts.fern_mode = false,
-                    "fern" => opts.fern_mode = true,
-                    other => eprintln!("--mode: expected `classic` or `fern`, got `{other}`"),
+                    "classic" => opts.bati_mode = false,
+                    "bati" => opts.bati_mode = true,
+                    other => eprintln!("--mode: expected `classic` or `bati`, got `{other}`"),
                 }
             }
             other if other.starts_with("--") => {
@@ -94,7 +94,7 @@ fn resolve_tab(value: &str, tab_names: &[&str]) -> Option<usize> {
 
 fn print_help(tab_names: &[&str]) {
     println!(
-        "FernUI Widget Catalog — every public widget, classic vs fern! side-by-side.\n\
+        "Bastyde Widget Catalog — every public widget, classic vs bati! side-by-side.\n\
          \n\
          USAGE:\n  \
            widget-catalog [OPTIONS]\n\
@@ -103,7 +103,7 @@ fn print_help(tab_names: &[&str]) {
            --tab <NAME|INDEX>   Open the catalog directly on this tab.\n  \
            --cycle [MS]         Auto-advance the selected tab every MS milliseconds\n  \
                                 (default 100). Stops on user interaction.\n  \
-           --mode <classic|fern>  Initial view mode (default `classic`).\n  \
+           --mode <classic|bati>  Initial view mode (default `classic`).\n  \
            --help, -h           Show this help and exit.\n\
          \n\
          TABS:\n  \

@@ -13,10 +13,10 @@
 //!
 //! Run with: `cargo run -p drag-and-drop`
 
-use fern_ui::core::WidgetPlacement;
-use fern_ui::data::{ListModel, SelectionMode, SelectionModel, TreeModel};
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::core::WidgetPlacement;
+use bastyde::data::{ListModel, SelectionMode, SelectionModel, TreeModel};
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Button, Divider, Expand, HStack, ListView, Padding, Panel, Spacer, StandardListItem,
     StandardTreeItem, TextWidget, Toolbar, TreeView, VStack,
 };
@@ -28,21 +28,21 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                fern_ui::presets::intui::dark()
+                bastyde::presets::intui::dark()
             } else {
-                fern_ui::presets::intui::light()
+                bastyde::presets::intui::light()
             });
         }),
     ))
 }
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — Drag and Drop")
+                .title("Bastyde — Drag and Drop")
                 .size(960, 640)
                 .root(|tree, _state| {
                     let songs = ListModel::from_vec(
@@ -79,7 +79,7 @@ fn build_folder_tree() -> TreeModel<String> {
     tree.insert_child(documents, 0, "notes.md".to_string());
     tree.insert_child(documents, 1, "taxes.pdf".to_string());
     let projects = tree.insert_child(documents, 2, "Projects".to_string());
-    tree.insert_child(projects, 0, "fern-ui".to_string());
+    tree.insert_child(projects, 0, "bastyde".to_string());
     tree.insert_child(projects, 1, "skribisto".to_string());
 
     let downloads = tree.insert_root(1, "Downloads".to_string());
@@ -207,7 +207,7 @@ impl Root {
 }
 
 impl Widget for Root {
-    fn build(&mut self, ctx: &mut fern_ui::core::BuildContext) -> Vec<WidgetId> {
+    fn build(&mut self, ctx: &mut bastyde::core::BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme().clone();
         let root = ctx.add(
             Panel::new().child(
@@ -225,7 +225,7 @@ impl Widget for Root {
     fn layout_response(
         &self,
         proposal: SizeProposal,
-        ctx: &fern_ui::core::LayoutContext,
+        ctx: &bastyde::core::LayoutContext,
     ) -> LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
@@ -238,7 +238,7 @@ impl Widget for Root {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &fern_ui::core::LayoutContext,
+        _ctx: &bastyde::core::LayoutContext,
     ) {
         for child in children.iter_mut() {
             child.origin = bounds.origin();

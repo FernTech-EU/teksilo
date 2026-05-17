@@ -1,6 +1,6 @@
 # Styling System
 
-FernUI's theming is a four-tier ladder. Each tier is independently
+Bastyde's theming is a four-tier ladder. Each tier is independently
 opt-in: an app that only needs dark mode never sees the higher tiers;
 an app shipping a brutalist redesign uses every rung.
 
@@ -12,7 +12,7 @@ Tier 3:  Style protocols  (`trait FooStyle { fn make_body(...) -> WidgetId }`)
 ```
 
 The default implementations of Tier 3 (the `Recipe*Style` types
-shipped in `fern-widgets/src/styles/`) read Tier 2 recipes; the
+shipped in `bastyde-widgets/src/styles/`) read Tier 2 recipes; the
 default recipes read Tier 0 tokens. So Tier 3 *contains* Tiers 0-2 for
 the IntUI preset — but the trait protocol at Tier 3 is the escape
 hatch that lets apps replace the entire chrome of any widget without
@@ -43,7 +43,7 @@ and install it.
 
 The five token groups (`ColorTokens`, `ShapeTokens`, `LayoutTokens`,
 `TypographyTokens`, `MotionTokens`) live in
-[`fern-tokens/src/`](../crates/fern-tokens/src/). They're pure data
+[`bastyde-tokens/src/`](../crates/bastyde-tokens/src/). They're pure data
 structs with no widget knowledge.
 
 `Theme` aggregates the five token groups plus appearance, component
@@ -66,7 +66,7 @@ pub struct Theme {
 There is no `Theme::default()`. Apps explicitly pick a preset:
 
 ```rust
-use fern_ui::prelude::intui;
+use bastyde::prelude::intui;
 let theme = intui::light();   // or intui::dark()
 ```
 
@@ -146,7 +146,7 @@ distinctly.
 ## Tier 2 — Recipes
 
 Recipes are pure data describing paint vocabulary. They live in
-[`fern-core/src/styles/recipe.rs`](../crates/fern-core/src/styles/recipe.rs).
+[`bastyde-core/src/styles/recipe.rs`](../crates/bastyde-core/src/styles/recipe.rs).
 Primitive recipe types:
 
 ```rust
@@ -181,7 +181,7 @@ pub struct ShadowRecipe {
 
 **Per-state cascades.** Most widgets need different recipes for hover
 / pressed / focused / disabled. The plan's answer is
-`PerStateRecipe<T>` with an explicit fallback chain — FernUI's
+`PerStateRecipe<T>` with an explicit fallback chain — Bastyde's
 take on Flutter's `WidgetStateProperty<T>`:
 
 ```rust
@@ -205,9 +205,9 @@ and TOML image-theme manifests).
 
 As of this branch every themable widget holds its recipe-equivalent
 data inside its `Recipe*Style` default. The IntUI dimension constants
-that used to live in `fern-tokens::components` per-widget structs were
+that used to live in `bastyde-tokens::components` per-widget structs were
 deleted (Step 7) and folded directly into the matching
-`fern-widgets/src/styles/recipe_*_style.rs` module as `pub const`
+`bastyde-widgets/src/styles/recipe_*_style.rs` module as `pub const`
 blocks — the recipe *is* the dimension data now, with no parallel
 store. `ButtonRecipe` is the one standalone Tier-2 struct surfaced so
 far; a future commit will surface `ToggleRecipe`, `CardRecipe`, etc.
@@ -238,12 +238,12 @@ signals), hands the bag to the active style, and uses the returned
 `WidgetId` as its root child. Everything else — background, border,
 focus ring, padding, min size — is the style's responsibility.
 
-The trait is `'static` only (not `Send + Sync`) because all FernUI
+The trait is `'static` only (not `Send + Sync`) because all Bastyde
 trees are single-threaded by construction; `Rc<dyn FooStyle>` is the
 public alias (`SharedButtonStyle` and friends).
 
 **Same shape across widgets.** All 32 style traits live in
-[`fern-core/src/styles/`](../crates/fern-core/src/styles/), all
+[`bastyde-core/src/styles/`](../crates/bastyde-core/src/styles/), all
 return `WidgetId` from their `make_*` methods, all take a
 `*StyleConfig` describing the inputs that vary by widget. The trait
 is the public API; everything below it is implementation. The full
@@ -254,11 +254,11 @@ list lives in the [migration status table](#migration-status-as-of-this-branch).
 ```rust
 use std::rc::Rc;
 
-use fern_core::build_context::BuildContext;
-use fern_core::styles::{ButtonStyle, ButtonStyleConfig};
-use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, CornerRadius, SurfaceRole};
-use fern_widgets::primitives::{Padding, RectWidget, ZStack};
+use bastyde_core::build_context::BuildContext;
+use bastyde_core::styles::{ButtonStyle, ButtonStyleConfig};
+use bastyde_core::widget_id::WidgetId;
+use bastyde_tokens::{Color, CornerRadius, SurfaceRole};
+use bastyde_widgets::primitives::{Padding, RectWidget, ZStack};
 
 struct MaterialFilledButton;
 
@@ -309,7 +309,7 @@ per-call .style(...)  >  theme.style_slots.button  >  RecipeButtonStyle::default
 ```
 
 Tested end-to-end in
-[`fern-widgets/src/button.rs`](../crates/fern-widgets/src/button.rs)
+[`bastyde-widgets/src/button.rs`](../crates/bastyde-widgets/src/button.rs)
 under `theme_slot_supplies_button_style_when_no_override` /
 `per_call_style_override_wins_over_theme_slot`.
 
@@ -317,11 +317,11 @@ under `theme_slot_supplies_button_style_when_no_override` /
 
 | Preset | Where | Status |
 | --- | --- | --- |
-| `intui::light` / `intui::dark` | `fern_core::presets::intui` | shipped — the default look |
-| `material3::light` / `material3::dark` | `fern-theme-material3` crate | stub (Step 11) |
-| `macos::light` / `macos::dark` | `fern-theme-macos` crate | stub (Step 11) |
-| `fluent::light` / `fluent::dark` | `fern-theme-fluent` crate | stub (Step 11) |
-| Image-backed themes | `fern-image-theme` crate | not yet shipped (Step 10) |
+| `intui::light` / `intui::dark` | `bastyde_core::presets::intui` | shipped — the default look |
+| `material3::light` / `material3::dark` | `bastyde-theme-material3` crate | stub (Step 11) |
+| `macos::light` / `macos::dark` | `bastyde-theme-macos` crate | stub (Step 11) |
+| `fluent::light` / `fluent::dark` | `bastyde-theme-fluent` crate | stub (Step 11) |
+| Image-backed themes | `bastyde-image-theme` crate | not yet shipped (Step 10) |
 
 Each preset is just a function returning `Theme`. Apps can write their
 own without depending on any sibling crate:
@@ -409,9 +409,9 @@ across six families:
 below.
 
 Step 7 (delete legacy per-widget dimension structs) is done: the 17
-old `fern-tokens::components::*Style` structs were deleted and their
+old `bastyde-tokens::components::*Style` structs were deleted and their
 IntUI constants folded into the matching
-`fern-widgets/src/styles/recipe_*_style.rs` modules.
+`bastyde-widgets/src/styles/recipe_*_style.rs` modules.
 `theme.components` (`ComponentStyles`) still exists but now carries
 dimension data only for the *non-themable* widgets (toolbar, status
 bar, accordion, …) — anything that isn't yet on a style trait.
@@ -420,7 +420,7 @@ Migrated widgets read entirely from `theme.style_slots.*` plus their
 
 Still ahead on the styling roadmap: image-backed styles (Step 9), the
 `ImageTheme` TOML manifest loader (Step 10), and the sibling preset
-crates `fern-theme-material3` / `-macos` / `-fluent` (Step 11).
+crates `bastyde-theme-material3` / `-macos` / `-fluent` (Step 11).
 
 ### Multi-method styles
 
@@ -468,7 +468,7 @@ Writing your own composing widget? Three steps to make it themable:
    your own slot-bag struct (or attach via `theme.extensions` if you
    only need app-internal use).
 
-The trait pattern doesn't require buying into FernUI's slot bag —
+The trait pattern doesn't require buying into Bastyde's slot bag —
 you can ship the trait + default impl and let users override via
 `MyWidget::style(...)` per call. The slot bag is for theme-wide
 installation; it's optional, but it's how the framework's themable

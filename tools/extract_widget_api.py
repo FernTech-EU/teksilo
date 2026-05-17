@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Extract public API and inline documentation from fern-widgets source files.
+Extract public API and inline documentation from bastyde-widgets source files.
 
-Walks `crates/fern-widgets/src/` (and `src/primitives/`), looks up the widget
+Walks `crates/bastyde-widgets/src/` (and `src/primitives/`), looks up the widget
 file for each requested name, and emits:
 
   - The file's `//!` module header doc
@@ -33,7 +33,7 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
-WIDGETS_SRC = REPO_ROOT / "crates" / "fern-widgets" / "src"
+WIDGETS_SRC = REPO_ROOT / "crates" / "bastyde-widgets" / "src"
 PRIMITIVES_DIR = WIDGETS_SRC / "primitives"
 ANIMATIONS_DIR = WIDGETS_SRC / "animations"
 
@@ -84,7 +84,7 @@ class BlockCommentTracker:
     """Removes /* ... */ content (possibly multi-line), keeping line length.
 
     Does not try to handle nested block comments correctly for depth > 1;
-    fern-widgets code does not use them.
+    bastyde-widgets code does not use them.
     """
 
     def __init__(self) -> None:
@@ -847,7 +847,7 @@ def _collect_cfgs_from_aggregator(aggregator: Path, base: Path) -> dict[Path, li
 
 def build_registry() -> Registry:
     if not WIDGETS_SRC.exists():
-        raise SystemExit(f"fern-widgets src not found at {WIDGETS_SRC}")
+        raise SystemExit(f"bastyde-widgets src not found at {WIDGETS_SRC}")
 
     files: list[Path] = []
     for p in sorted(WIDGETS_SRC.glob("*.rs")):
@@ -1133,7 +1133,7 @@ def cmd_list(reg: Registry) -> int:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Extract public API + docs from fern-widgets source files."
+            "Extract public API + docs from bastyde-widgets source files."
         ),
     )
     parser.add_argument(

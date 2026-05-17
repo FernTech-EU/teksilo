@@ -1,0 +1,22 @@
+[package]
+name = "bastyde-scene"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+bastyde-tokens = { workspace = true }
+bastyde-canvas = { workspace = true }
+bastyde-core = { workspace = true }
+bastyde-data = { workspace = true }
+bastyde-i18n = { workspace = true }
+accesskit = { workspace = true }
+
+[dev-dependencies]
+# Used by tests for end-to-end checks against real widgets. Not part of
+# the runtime dep graph — keeps bastyde-scene at the same tier as
+# bastyde-charts (no dep on bastyde-widgets).
+bastyde-widgets = { workspace = true }

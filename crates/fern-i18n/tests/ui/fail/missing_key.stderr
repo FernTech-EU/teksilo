@@ -1,5 +1,0 @@
-error: fern-i18n: translation key `nonexistent` not found in `$DIR/tests/ui/locales/en-US.ftl`
- --> tests/ui/fail/missing_key.rs:6:17
-  |
-6 |     let _ = tr!(nonexistent());
-  |                 ^^^^^^^^^^^

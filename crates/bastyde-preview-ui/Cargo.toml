@@ -1,0 +1,23 @@
+[package]
+name = "bastyde-preview-ui"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+bastyde-core = { workspace = true }
+bastyde-tokens = { workspace = true }
+bastyde-canvas = { workspace = true }
+bastyde-data = { workspace = true }
+bastyde-app = { workspace = true }
+bastyde-i18n = { workspace = true }
+bastyde-widgets = { workspace = true, features = ["rich-text"] }
+bastyde-preview = { workspace = true }
+bastyde-render = { workspace = true }
+bastyde-platform = { workspace = true }
+png = { workspace = true }
+wgpu = { workspace = true }
+pollster = "0.4"

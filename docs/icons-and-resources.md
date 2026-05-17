@@ -2,7 +2,7 @@
 
 ## Overview
 
-FernUI supports three icon formats — SVG, PNG, and WebP — embedded at compile time via the `res!()` macro. Icons are tintable by default: their color follows the theme and interaction state (hover, pressed, disabled) automatically.
+Bastyde supports three icon formats — SVG, PNG, and WebP — embedded at compile time via the `res!()` macro. Icons are tintable by default: their color follows the theme and interaction state (hover, pressed, disabled) automatically.
 
 ## Supported Formats
 
@@ -35,16 +35,16 @@ Embed and use them:
 
 ```rust
 // SVG — returns &'static SvgIcon, compile-time validated
-let save = fern_ui::res!("resources/icons/save.svg");
+let save = bastyde::res!("resources/icons/save.svg");
 
 // PNG — returns &'static RasterIcon, compile-time validated
-let star = fern_ui::res!("resources/icons/star.png");
+let star = bastyde::res!("resources/icons/star.png");
 
 // WebP — returns &'static RasterIcon (static) or &'static AnimatedIcon (animated)
-let clock = fern_ui::res!("resources/icons/clock.webp");
+let clock = bastyde::res!("resources/icons/clock.webp");
 
 // Unknown extensions — returns &'static [u8], existence checked only
-let font = fern_ui::res!("resources/fonts/custom.ttf");
+let font = bastyde::res!("resources/fonts/custom.ttf");
 ```
 
 The macro validates known formats at compile time (XML structure for SVG, magic bytes for PNG/WebP). Unknown extensions are embedded as raw bytes without validation — only file existence is checked.
@@ -52,7 +52,7 @@ The macro validates known formats at compile time (XML structure for SVG, magic 
 ### Using icons in buttons
 
 ```rust
-let save = fern_ui::res!("resources/icons/save.svg");
+let save = bastyde::res!("resources/icons/save.svg");
 
 // Leading icon — most common
 Button::new_literal("Save")
@@ -65,7 +65,7 @@ Button::new_literal("Save")
     .style(ButtonVariant::Flat)
 
 // Raster icon
-let star = fern_ui::res!("resources/icons/star.png");
+let star = bastyde::res!("resources/icons/star.png");
 Button::new_literal("Favorite")
     .icon(IconWidget::from_raster(star, 24.0), IconLocation::Leading)
 ```

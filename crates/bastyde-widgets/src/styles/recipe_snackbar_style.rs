@@ -1,0 +1,128 @@
+//! Default `SnackbarStyle` impl driven by paint-recipe data.
+//!
+//! `RecipeSnackbarStyle` ships the IntUI snackbar chrome: the
+//! high-contrast (dark) `tooltip_bg` surface with a `tooltip_border`
+//! stroke and rounded corners, content inset by the snackbar padding.
+//!
+//! Apps that want a different notification look (light surface,
+//! status-tinted background, branded chrome) write their own
+//! `impl SnackbarStyle` block and install it per-call
+//! (`Snackbar::style(...)`) or theme-wide (`theme.style_slots.snackbar`).
+
+use bastyde_canvas::{Canvas, Rect, Size, SizeProposal};
+use bastyde_core::accessibility::AccessNodeBuilder;
+use bastyde_core::build_context::BuildContext;
+use bastyde_core::styles::{SnackbarStyle, SnackbarStyleConfig};
+use bastyde_core::widget::{
+    LayoutContext, LayoutResponse, PaintContext, PendingChild, Widget, WidgetPlacement,
+};
+use bastyde_core::widget_id::WidgetId;
+use bastyde_tokens::CornerRadius;
+
+// IntUI design tokens for Snackbar. Relocated from
+// `theme.components.notification` in Stage B of the group-5 styling
+// migration — the recipe owns its own dimensions.
+pub const SNACKBAR_PADDING_HORIZONTAL: f32 = 12.0;
+pub const SNACKBAR_PADDING_VERTICAL: f32 = 10.0;
+pub const SNACKBAR_CORNER_RADIUS: f32 = 8.0;
+
+/// Default `SnackbarStyle` shipped with Bastyde. Chrome from
+/// `theme.colors.tooltip_bg` + `tooltip_border`.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct RecipeSnackbarStyle;
+
+impl SnackbarStyle for RecipeSnackbarStyle {
+    fn make_body(&self, cfg: &SnackbarStyleConfig, ctx: &mut BuildContext) -> WidgetId {
+        ctx.add(SnackbarFrame {
+            child_id: None,
+            pending_child: Some(PendingChild::Id(cfg.content)),
+        })
+    }
+}
+
+/// Internal container that paints the snackbar chrome (dark
+/// `tooltip_bg` surface + `tooltip_border` stroke + corner radius) and
+/// positions the content with the snackbar padding inset. Mirrors the
+/// pre-migration `SnackbarSurface` layout exactly.
+struct SnackbarFrame {
+    child_id: Option<WidgetId>,
+    pending_child: Option<PendingChild>,
+}
+
+impl std::fmt::Debug for SnackbarFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SnackbarFrame").finish()
+    }
+}
+
+impl Widget for SnackbarFrame {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        if let Some(pending) = self.pending_child.take() {
+            self.child_id = Some(match pending {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            });
+        }
+        self.child_id.into_iter().collect()
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        let inset_x = SNACKBAR_PADDING_HORIZONTAL * 2.0;
+        let inset_y = SNACKBAR_PADDING_VERTICAL * 2.0;
+        let content = self
+            .child_id
+            .and_then(|id| {
+                ctx.child_size(
+                    id,
+                    SizeProposal {
+                        width: proposal.width.map(|width| (width - inset_x).max(0.0)),
+                        height: proposal.height.map(|height| (height - inset_y).max(0.0)),
+                    },
+                )
+            })
+            .unwrap_or_else(|| proposal.resolve(220.0, 44.0));
+
+        Size::new(content.width + inset_x, content.height + inset_y).into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bastyde_canvas::Point::new(
+                bounds.x + SNACKBAR_PADDING_HORIZONTAL,
+                bounds.y + SNACKBAR_PADDING_VERTICAL,
+            );
+            child.size = Size::new(
+                (bounds.width - SNACKBAR_PADDING_HORIZONTAL * 2.0).max(0.0),
+                (bounds.height - SNACKBAR_PADDING_VERTICAL * 2.0).max(0.0),
+            );
+        }
+    }
+
+    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        let radius = CornerRadius::uniform(SNACKBAR_CORNER_RADIUS);
+        // Notifications use the (dark) tooltip surface for high-contrast popups.
+        canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.tooltip_bg);
+        canvas.stroke_rounded_rect(
+            bounds,
+            radius,
+            ctx.theme.colors.tooltip_border,
+            ctx.theme.shape.border_width,
+        );
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // Presentational — the parent `SnackbarSurface` emits the
+        // `Role::Alert` + `Live::Polite` node with the announcement.
+        builder.set_hidden();
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.child_id.into_iter().collect()
+    }
+}

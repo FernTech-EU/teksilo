@@ -7,5 +7,5 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-fern-ui = { workspace = true, features = ["fonts-arabic"] }
+bastyde = { workspace = true, features = ["fonts-arabic"] }
 jiff = { workspace = true }

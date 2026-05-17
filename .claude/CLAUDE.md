@@ -1,10 +1,10 @@
-# FernUI — Claude Code Reference
+# Bastyde — Claude Code Reference
 
 ## Project Overview
 
-FernUI is a pure-Rust GUI framework for serious desktop applications. Architecture: retained widget tree with SwiftUI-style layout, AccessKit accessibility, wgpu rendering.
+Bastyde is a pure-Rust GUI framework for serious desktop applications. Architecture: retained widget tree with SwiftUI-style layout, AccessKit accessibility, wgpu rendering.
 
-- **License:** Proprietary — Copyright (c) 2026-2026 FernTech, all rights reserved
+- **License:** MPL2.0 — Copyright (c) 2026-2026 FernTech, all rights reserved
 - **Rust edition:** 2024 (resolver 3)
 - **Author:** Cyril Jacquet
 
@@ -17,8 +17,8 @@ cargo run -p simple-button                     # Milestone 1 demo
 cargo run -p text-and-layout                   # Milestone 2 demo
 cargo run -p text-and-layout --release         # Release mode (much faster rendering)
 cargo run -p widget-catalog                    # Browse all available widgets
-cargo test -p fern-core                        # Test a specific crate
-cargo test -p fern-widgets                     # Includes layout integration tests
+cargo test -p bastyde-core                        # Test a specific crate
+cargo test -p bastyde-widgets                     # Includes layout integration tests
 cargo doc --no-deps --open                     # Generate docs
 cargo run -p drag-and-drop                      # Drag-and-drop showcase
 cargo run -p multi_window                      # Multi-window demo
@@ -27,7 +27,7 @@ cargo run -p rich_text_editor                  # Rich text editing
 cargo run -p rich_text_viewer                  # Rich text viewing
 cargo run -p spin_box                          # Numeric input demo
 cargo run -p tool_box                          # Tool box widget demo
-cargo run -p fern-widgets-previewer            # Widget catalog previewer
+cargo run -p bastyde-widgets-previewer            # Widget catalog previewer
 cargo run -p data-grid                          # TableView showcase (1k rows × 6 cols)
 cargo run -p tree-table                         # TreeTable showcase (mock filesystem)
 cargo run -p datetime-pickers                   # Calendar / DateEdit / TimeEdit / DateTimeEdit gallery
@@ -49,13 +49,13 @@ python3 tools/extract_widget_api.py Button -f json -o out.json   # JSON for tool
 python3 tools/bench_examples.py                          # Run benchmarks with report generation
 ```
 
-[tools/extract_widget_api.py](tools/extract_widget_api.py) parses widget source files in [crates/fern-widgets/src/](crates/fern-widgets/src/) and emits their `//!` module header, `pub struct`/`enum`/`type`/`const` declarations with `///` docs, and `pub fn` builder methods from inherent `impl Foo { ... }` blocks. Skips `impl Widget for Foo` trait plumbing and `pub(crate)` items. Accepts type names (`Button`) or module names (`button`); flags `#[doc(hidden)]` and `#[cfg(...)]`. Use when reading a widget's public surface without opening the file, packing widget docs into LLM context, or auditing API coverage.
+[tools/extract_widget_api.py](tools/extract_widget_api.py) parses widget source files in [crates/bastyde-widgets/src/](crates/bastyde-widgets/src/) and emits their `//!` module header, `pub struct`/`enum`/`type`/`const` declarations with `///` docs, and `pub fn` builder methods from inherent `impl Foo { ... }` blocks. Skips `impl Widget for Foo` trait plumbing and `pub(crate)` items. Accepts type names (`Button`) or module names (`button`); flags `#[doc(hidden)]` and `#[cfg(...)]`. Use when reading a widget's public surface without opening the file, packing widget docs into LLM context, or auditing API coverage.
 
 The workspace has two member globs: `crates/*` for libraries and `examples/*` for runnable demos. Examples live under [examples/](examples/) (e.g. `simple_button`, `text_and_layout`, `widget_catalog`, `data_collections`, `dialogs_and_popovers`, `menus_and_dropdowns`, `split_view`, `tab_widget`, `title_bar_demo`, `internationalization`, `shortcuts_demo`, `recent_projects`, `drag_and_drop`, `multi_window`, `rich_text_editor`, `rich_text_viewer`, `spin_box`, `tool_box`).
 
 ## Widget Previewer
 
-Storybook-style 3-pane (navigator / canvas / knob-form) explorer for the entire widget catalog. Run with `cargo run -p fern-widgets-previewer`. Widgets self-register via `inventory::submit!(&'static dyn CatalogEntry)` — no central registry file; adding a previewable widget is a single submission. Each entry declares typed `KnobSpec`s (live-editable properties) and `PreviewVariant`s (Default / Disabled / Loading / Error / etc.); the UI generates an editing form and a multi-variant canvas. Built-in PNG export (`png_export.rs`) per widget — useful for design review, marketing assets, and visual regression testing. Two CLI modes: standalone (whole catalog, default) and targeted (preview just one widget for fast iteration). Architecture is split deliberately: `fern-preview` is the trait + registry crate with no GUI dep — third-party widget libraries implement `WidgetCatalog` without depending on the previewer GUI; `fern-preview-ui` is the reusable GUI library so apps can build their own previewer binaries for app-specific widget catalogs; `fern-widgets-previewer` is the bundle binary for the stock catalog. Mode C (VS Code extension with CodeLens "Preview ▶" buttons inline in source) is designed but deferred.
+Storybook-style 3-pane (navigator / canvas / knob-form) explorer for the entire widget catalog. Run with `cargo run -p bastyde-widgets-previewer`. Widgets self-register via `inventory::submit!(&'static dyn CatalogEntry)` — no central registry file; adding a previewable widget is a single submission. Each entry declares typed `KnobSpec`s (live-editable properties) and `PreviewVariant`s (Default / Disabled / Loading / Error / etc.); the UI generates an editing form and a multi-variant canvas. Built-in PNG export (`png_export.rs`) per widget — useful for design review, marketing assets, and visual regression testing. Two CLI modes: standalone (whole catalog, default) and targeted (preview just one widget for fast iteration). Architecture is split deliberately: `bastyde-preview` is the trait + registry crate with no GUI dep — third-party widget libraries implement `WidgetCatalog` without depending on the previewer GUI; `bastyde-preview-ui` is the reusable GUI library so apps can build their own previewer binaries for app-specific widget catalogs; `bastyde-widgets-previewer` is the bundle binary for the stock catalog. Mode C (VS Code extension with CodeLens "Preview ▶" buttons inline in source) is designed but deferred.
 
 Tests are fully headless — no Xvfb, no GPU, no display server needed.
 
@@ -75,11 +75,11 @@ Tests are fully headless — no Xvfb, no GPU, no display server needed.
 ## Crate Architecture
 
 ```
-fern-tokens          Pure data: Theme, Color, TextStyle, SpacingTokens, alignment
-fern-canvas          Canvas API, RenderFrame, Path, Paint, geometry, TextBackend trait
-fern-core            Widget traits, arena, layout, events, focus, state, gestures, overlays
-fern-data            Reactive data models, designed as a *peer* of the GUI, not part of it: depends on
-                     fern-core only for `Signal<T>` + `ObserverHandle`, so a CLI tool, validation pass,
+bastyde-tokens          Pure data: Theme, Color, TextStyle, SpacingTokens, alignment
+bastyde-canvas          Canvas API, RenderFrame, Path, Paint, geometry, TextBackend trait
+bastyde-core            Widget traits, arena, layout, events, focus, state, gestures, overlays
+bastyde-data            Reactive data models, designed as a *peer* of the GUI, not part of it: depends on
+                     bastyde-core only for `Signal<T>` + `ObserverHandle`, so a CLI tool, validation pass,
                      Qleany ViewModel layer, or headless test can share a `ListModel<Project>` with a
                      `ListView` without pulling in the renderer. All handles are `Rc<RefCell<…>>` under
                      the hood — `.clone()` = share-by-handle, not deep-copy. Mutation methods drop the
@@ -109,27 +109,27 @@ fern-data            Reactive data models, designed as a *peer* of the GUI, not 
                          `ListModel::debug_named("…")` / `TreeModel::debug_named` /
                          `SelectionModel::debug_named`.
                      Reference: [docs/data-models.md](docs/data-models.md).
-fern-settings        Persistent reactive prefs: SettingsStore (dotted-key Signal<T>), SettingsFile<T>,
+bastyde-settings        Persistent reactive prefs: SettingsStore (dotted-key Signal<T>), SettingsFile<T>,
                      PersistedListModel/PersistedTreeModel, MruList<T: MruEntry>, WindowStateService
-fern-telemetry       Privacy-respecting product analytics built on fern-settings: ConsentStore,
+bastyde-telemetry       Privacy-respecting product analytics built on bastyde-settings: ConsentStore,
                      InstallId, TelemetryBundle, recent-log ring buffer. RGPD-compliant by
                      construction. Reference: docs/telemetry.md.
-fern-analytics-plausible  Plausible adapter (anonymous mode). HTTP + retry/backoff + redb queue.
-fern-analytics-fern  Home-grown gRPC adapter for the FernUI-operated fern-collector backend.
+bastyde-analytics-plausible  Plausible adapter (anonymous mode). HTTP + retry/backoff + redb queue.
+bastyde-analytics-bastyde  Home-grown gRPC adapter for the Bastyde-operated bastyde-collector backend.
                      Anonymous + pseudonymous modes; bearer token + TLS; fetch + erase wired.
-fern-analytics-otlp  OTLP/HTTP-logs adapter. Maps FernUI events to OTLP LogRecords; worker
+bastyde-analytics-otlp  OTLP/HTTP-logs adapter. Maps Bastyde events to OTLP LogRecords; worker
                      thread with batching, exponential backoff, flush-on-shutdown.
-fern-telemetry-codegen  Proc-macro: `include_telemetry_schema!("events.yaml")` reads a YAML
+bastyde-telemetry-codegen  Proc-macro: `include_telemetry_schema!("events.yaml")` reads a YAML
                      manifest at compile time and expands to typed `emit_*` functions + enum
                      types. Validates required fields, prop types, enum variants, expiry dates.
-cargo-fern-telemetry-lint  CLI schema-drift linter. Checks expiry, required fields, unused
+cargo-bastyde-telemetry-lint  CLI schema-drift linter. Checks expiry, required fields, unused
                      events (declared but not emitted in src/), unknown prop types. Run as
-                     `cargo fern-telemetry-lint`. CI mode: `--fail-on-warnings`.
-fern-widgets         ~56 widgets + ~21 layout primitives (Button, ListView, TreeView, TableView,
+                     `cargo bastyde-telemetry-lint`. CI mode: `--fail-on-warnings`.
+bastyde-widgets         ~56 widgets + ~21 layout primitives (Button, ListView, TreeView, TableView,
                      TreeTable, MenuBar, Dialog, TextInput, SpinBox, etc.)
-fern-charts          BarChart, LineChart, PieChart (pie + donut, with center slot). Sits at the same tier
-                     as fern-widgets — no dep on widgets.
-fern-scene           Pannable/zoomable scene viewport (Qt QGraphicsScene equivalent). Two-tier content
+bastyde-charts          BarChart, LineChart, PieChart (pie + donut, with center slot). Sits at the same tier
+                     as bastyde-widgets — no dep on widgets.
+bastyde-scene           Pannable/zoomable scene viewport (Qt QGraphicsScene equivalent). Two-tier content
                      under one view transform: heavyweight `Widget`s placed at scene coordinates (focus,
                      animation, DnD, AT all survive embedding) + lightweight `SceneItem`s (paint-only,
                      no arena overhead, thousands cheap). Built-in minimap, exact-shape hit-test,
@@ -137,42 +137,42 @@ fern-scene           Pannable/zoomable scene viewport (Qt QGraphicsScene equival
                      synthetic AT nodes per lightweight item with screen-projected bounds, rotor
                      categories, reparenting (visual tree ≠ AT tree), landmark roles, live regions.
                      Use cases: story corkboards, mind maps, node-graph editors, timeline views, CAD
-                     canvases, simple maps. Sits at the fern-widgets tier; depends on widgets so the
-                     heavyweight tier can be any widget in the catalog. See docs/fern-scene.md +
-                     docs/fern-scene-a11y.md.
-fern-text            TextBackend impl via text-typeset (external path dep)
-fern-i18n            Fluent-rs runtime: LocalizedString, I18nManager, locale resolution, file watcher.
-                     Also locale-aware formatters: NumberFormatter / FernDateTimeFormatter
-                     (Signal<T> → Signal<String>), FernDateTime, plus a custom DATETIME() Fluent
+                     canvases, simple maps. Sits at the bastyde-widgets tier; depends on widgets so the
+                     heavyweight tier can be any widget in the catalog. See docs/bastyde-scene.md +
+                     docs/bastyde-scene-a11y.md.
+bastyde-text            TextBackend impl via text-typeset (external path dep)
+bastyde-i18n            Fluent-rs runtime: LocalizedString, I18nManager, locale resolution, file watcher.
+                     Also locale-aware formatters: NumberFormatter / BastydeDateTimeFormatter
+                     (Signal<T> → Signal<String>), BastydeDateTime, plus a custom DATETIME() Fluent
                      function and a `bundle.set_formatter` callback so `{ NUMBER(...) }` and
                      `{ DATETIME(...) }` inside .ftl messages render correctly across locales.
                      Built on icu_decimal + icu_datetime + icu_calendar + intl-memoizer.
-fern-i18n-macros     Compile-time tr! / tr_widget! proc macros (re-exported by fern-i18n).
+bastyde-i18n-macros     Compile-time tr! / tr_widget! proc macros (re-exported by bastyde-i18n).
                      Also tr_signal! / tr_signal_widget! — reactive variants that accept
                      Signal<T> args and return Signal<String> re-rendering on (any arg ∪
                      locale ∪ hot-reload) change.
-fern-ui-macros       fern! DSL proc macro (re-exported by fern-ui as fern!)
-fern-render          wgpu renderer: rect/SDF/quad pipelines, atlas upload, path atlas
-fern-platform        winit + AccessKit adapter, event translation, clipboard, OS theme,
+bastyde-macros       bati! DSL proc macro (re-exported by bastyde as bati!)
+bastyde-render          wgpu renderer: rect/SDF/quad pipelines, atlas upload, path atlas
+bastyde-platform        winit + AccessKit adapter, event translation, clipboard, OS theme,
                      native file dialogs (FileDialogBackend trait + RfdAsyncBackend)
-fern-app             FernAppBuilder, WindowManager, event loop
-fern-ui              Umbrella crate with re-exports and feature flags
-fern-resources       Resource handling and embedding infrastructure
-fern-preview         Storybook-equivalent infrastructure for desktop Rust widgets. `WidgetCatalog`
+bastyde-app             BastydeAppBuilder, WindowManager, event loop
+bastyde              Umbrella crate with re-exports and feature flags
+bastyde-resources       Resource handling and embedding infrastructure
+bastyde-preview         Storybook-equivalent infrastructure for desktop Rust widgets. `WidgetCatalog`
                      trait + object-safe `CatalogEntry` collected via `inventory`. Typed
                      `KnobSpec`/`KnobValue`/`KnobOverrides` for live property editing, `PreviewVariant`
                      enum for multi-state showcasing (Default/Disabled/Loading/Error/...), `SourceLoc`
                      for "open in editor" navigation. Zero GUI dep — third-party widget libraries can
                      implement the trait and stay independent of the previewer UI.
-fern-preview-ui      Reusable 3-pane previewer GUI (navigator + canvas + knob-form, plus toolbar,
+bastyde-preview-ui      Reusable 3-pane previewer GUI (navigator + canvas + knob-form, plus toolbar,
                      inspector pane, CLI parsing, PNG export). Apps build their own previewer binary
                      for app-specific catalogs by depending on this crate + their widget set.
-fern-widgets-previewer Bundle binary that combines fern-widgets + fern-preview + fern-preview-ui to
+bastyde-widgets-previewer Bundle binary that combines bastyde-widgets + bastyde-preview + bastyde-preview-ui to
                      preview the stock catalog. Two CLI modes: standalone (whole catalog) and
                      targeted (preview one widget).
 ```
 
-Dependency flow: `tokens → canvas → core → data → widgets`, `canvas → text`, `core + data → settings`, `canvas → render → platform → app → ui`, `settings → app`, `i18n-macros → i18n`, `ui-macros → ui`, `core → preview`, `preview-ui → preview + widgets`, `widgets-previewer → (preview + preview-ui + widgets)`, `widgets → scene` (scene sits at the fern-widgets tier and reuses the full widget catalog as its heavyweight content)
+Dependency flow: `tokens → canvas → core → data → widgets`, `canvas → text`, `core + data → settings`, `canvas → render → platform → app → ui`, `settings → app`, `i18n-macros → i18n`, `ui-macros → ui`, `core → preview`, `preview-ui → preview + widgets`, `widgets-previewer → (preview + preview-ui + widgets)`, `widgets → scene` (scene sits at the bastyde-widgets tier and reuses the full widget catalog as its heavyweight content)
 
 External path dependency: `text-typeset` lives at `../text-typeset` (outside workspace).
 
@@ -220,7 +220,7 @@ HStack::new()
 
 `Expand::new()` defaults to `flex(1)` and stretches its child to its bounds. Default basis is **zero** (CSS flex-basis: 0) so ratios divide bounds cleanly. Call `.respect_intrinsic()` for **auto** basis, where the wrapped child's natural size acts as a floor and slack is added on top — useful in unconstrained parents (e.g. an outer `VStack` with `height = None`) where zero-basis would let the child overflow. Use `.align_child(Alignment::X)` to opt out of fill and align the child at its natural size. `Center::new()` is sugar for `Expand::new().align_child(CENTER)`.
 
-**Layout primitives** (in [crates/fern-widgets/src/primitives/](crates/fern-widgets/src/primitives/)): `HStack`, `VStack`, `ZStack`, `Grid`, `Wrap`, `Padding`, `Spacer`, `Center`, `Expand`, `FixedSize`, `MinSize`, `MaxSize`, `AspectRatio`, `Switcher`, `Divider`, `IconWidget`, `ImageWidget`, `ImageMask`, `MasonryLayout`, `FormLayout`, `ValidationStrip`, `TextInputField`
+**Layout primitives** (in [crates/bastyde-widgets/src/primitives/](crates/bastyde-widgets/src/primitives/)): `HStack`, `VStack`, `ZStack`, `Grid`, `Wrap`, `Padding`, `Spacer`, `Center`, `Expand`, `FixedSize`, `MinSize`, `MaxSize`, `AspectRatio`, `Switcher`, `Divider`, `IconWidget`, `ImageWidget`, `ImageMask`, `MasonryLayout`, `FormLayout`, `ValidationStrip`, `TextInputField`
 
 **Rendering primitives:** `RectWidget`, `TextWidget`
 
@@ -238,7 +238,7 @@ HStack::new()
 - `ctx.signal(value)` — create in build(), `ctx.effect(&signal, |v| ...)` — scoped effect (auto-cleaned on rebuild)
 - `Signal<f32>::animate_to(target, duration, easing)` — smooth animation
 
-Legacy types (`State<T>`, `DerivedState<T>`, `Reactive<T>`) exist in `fern-core::state` but are not used by widgets. All widget code uses `Signal`/`Prop`.
+Legacy types (`State<T>`, `DerivedState<T>`, `Reactive<T>`) exist in `bastyde-core::state` but are not used by widgets. All widget code uses `Signal`/`Prop`.
 
 ## Animation System
 
@@ -304,60 +304,60 @@ animated `0 → target_radius` patterns pay zero cost when fully off.
 Scope nesting order on a single node, outermost to innermost:
 `Begin (blur) → SetOpacity → PushTransform → ...paint...`.
 
-**Animated wrapper widgets** (live in [crates/fern-widgets/src/animations/](crates/fern-widgets/src/animations/), re-exported flat from `fern_ui::widgets`):
+**Animated wrapper widgets** (live in [crates/bastyde-widgets/src/animations/](crates/bastyde-widgets/src/animations/), re-exported flat from `bastyde::widgets`):
 
 - `Collapse { expanded: Signal<bool>, child }` — wraps a child and animates
   its height (and width gate) between zero and natural when `expanded` flips.
-  Used internally by `Accordion`. See [crates/fern-widgets/src/animations/collapse.rs](crates/fern-widgets/src/animations/collapse.rs).
+  Used internally by `Accordion`. See [crates/bastyde-widgets/src/animations/collapse.rs](crates/bastyde-widgets/src/animations/collapse.rs).
 - `Fade { visible: Prop<bool>, child }` — wraps a child and animates the
   entire subtree's opacity between 0 and 1. Layout-transparent: the child
   reports its full natural size at all opacity values. Built on
   `BuildContext::set_opacity` (a node-level opacity scope, parallel to
-  `clips_children`). See [crates/fern-widgets/src/animations/fade.rs](crates/fern-widgets/src/animations/fade.rs).
+  `clips_children`). See [crates/bastyde-widgets/src/animations/fade.rs](crates/bastyde-widgets/src/animations/fade.rs).
 - `Pulse::opacity(min, max).period(d).child(w)` — sine-driven looping
   opacity oscillation. The blinking-red-light / recording-indicator
   pattern. Layout-transparent (same as `Fade`). Reduced motion: pins
   at midpoint. Uses the per-frame-effect path
   (`ctx.subscribe_frame_tick()`) — chain auto-pauses when parked in a
-  hidden Switcher branch, resumes on show. See [crates/fern-widgets/src/animations/pulse.rs](crates/fern-widgets/src/animations/pulse.rs).
+  hidden Switcher branch, resumes on show. See [crates/bastyde-widgets/src/animations/pulse.rs](crates/bastyde-widgets/src/animations/pulse.rs).
 - `Cycle::new().period(d).child(a).child(b)…` — steps through children
   on a fixed period (rotating loading tips, status displays). Internally
   a `Switcher` driven by a frame-tick effect. Same per-frame-effect
-  visibility-aware path as `Pulse`. See [crates/fern-widgets/src/animations/cycle.rs](crates/fern-widgets/src/animations/cycle.rs).
+  visibility-aware path as `Pulse`. See [crates/bastyde-widgets/src/animations/cycle.rs](crates/bastyde-widgets/src/animations/cycle.rs).
 - `SmoothSize::new().child(w)` — auto-sizes the slot to the child's
   current intrinsic size, *animating* every change. The "empty panel
   that suddenly must grow gracefully to accept new content" case.
   Distinct from `FixedSize::bind_width(animated_signal)` (numeric target)
   — `SmoothSize` watches the child measure each frame. `.axes(Width|Height|Both)`
   to restrict. Reuses Collapse's "child laid out at natural, framework
-  clips overflow" trick. See [crates/fern-widgets/src/animations/smooth_size.rs](crates/fern-widgets/src/animations/smooth_size.rs).
+  clips overflow" trick. See [crates/bastyde-widgets/src/animations/smooth_size.rs](crates/bastyde-widgets/src/animations/smooth_size.rs).
 - `Crossfade::new(key_signal, |k| build_for(k))` — when the key
   changes, mounts both old and new content side by side in a `ZStack`,
   fades old → 0 and new → 1. Builders may run more than once per
   lifetime as keys recur. `.duration(d)` overrides the default.
-  See [crates/fern-widgets/src/animations/crossfade.rs](crates/fern-widgets/src/animations/crossfade.rs).
+  See [crates/bastyde-widgets/src/animations/crossfade.rs](crates/bastyde-widgets/src/animations/crossfade.rs).
 - `Slide::new(visible).from(SlideEdge).child(w)` — slides a child in/out
   from the chosen edge (Leading/Trailing/Top/Bottom). Translates child
   position via `place_children`, doesn't change layout size — siblings
   don't reflow. Pair with `Fade` for the snackbar pattern. Clips so the
-  off-edge child doesn't bleed past the slot. See [crates/fern-widgets/src/animations/slide.rs](crates/fern-widgets/src/animations/slide.rs).
+  off-edge child doesn't bleed past the slot. See [crates/bastyde-widgets/src/animations/slide.rs](crates/bastyde-widgets/src/animations/slide.rs).
 - `Shake::new(trigger).child(w)` — bumping `trigger: Signal<u32>`
   plays a damped horizontal oscillation (defaults to
   `MotionTokens::duration_slow`, 4 cycles). Invalid-input feedback.
   Layout-stable, clips. Reduced motion: trigger is a no-op. See
-  [crates/fern-widgets/src/animations/shake.rs](crates/fern-widgets/src/animations/shake.rs).
+  [crates/bastyde-widgets/src/animations/shake.rs](crates/bastyde-widgets/src/animations/shake.rs).
 - `Scale::new(visible).child(w)` — uniform 2D visual scale 0↔1 driven
   by `Prop<bool>`. Built on `BuildContext::set_transform` (a node-level
   transform scope, parallel to `set_opacity`). Default: visual-only
   (slot stays at natural size, only the visual scales around the
   origin). `.reflow(true)` switches to layout-driving mode where the
   slot itself shrinks (siblings reflow); pair with `.origin(ScaleOrigin::TopLeading)`
-  for the "card removal" pattern. See [crates/fern-widgets/src/animations/scale.rs](crates/fern-widgets/src/animations/scale.rs).
+  for the "card removal" pattern. See [crates/bastyde-widgets/src/animations/scale.rs](crates/bastyde-widgets/src/animations/scale.rs).
 - `Rotate::new(angle_signal).child(w)` — rotates a child subtree by
   `angle: Prop<f32>` (radians). No internal animation; caller drives
   the angle signal and pairs with `Signal::animate_to` for animated
   rotations. Layout-stable. Use for chevrons, dial controls, rotation
-  feedback. See [crates/fern-widgets/src/animations/rotate.rs](crates/fern-widgets/src/animations/rotate.rs).
+  feedback. See [crates/bastyde-widgets/src/animations/rotate.rs](crates/bastyde-widgets/src/animations/rotate.rs).
 - `Blur::new(radius).child(w)` — Gaussian-equivalent blur applied to
   the entire child subtree. `radius: Prop<f32>` in logical pixels;
   accepts static, signal, or animated values. Built on
@@ -369,12 +369,12 @@ Scope nesting order on a single node, outermost to innermost:
   (numerics/characters obscured), out-of-focus emphasis, animated
   frosted glass on modal show. The most expensive paint scope; don't
   use it for items that animate radius every frame at full radius.
-  See [crates/fern-widgets/src/animations/blur.rs](crates/fern-widgets/src/animations/blur.rs).
+  See [crates/bastyde-widgets/src/animations/blur.rs](crates/bastyde-widgets/src/animations/blur.rs).
 - `Spinner::new(size)` — circular-arc loading indicator backed by the
   shader-driven `AnimatedQuadKind::SpinnerArc` pipeline (~one uniform
   write + one `draw_indexed` per frame, no `paint()` re-runs). Honours
   `prefers-reduced-motion` with a static three-quarter arc fallback.
-  See [crates/fern-widgets/src/spinner.rs](crates/fern-widgets/src/spinner.rs).
+  See [crates/bastyde-widgets/src/spinner.rs](crates/bastyde-widgets/src/spinner.rs).
 - `OverlayRequest::with_fade(duration)` — fade-in / fade-out animation
   for any overlay (tooltip, popover, snackbar, …). The framework wires
   everything internally: creates an animated opacity signal, applies it
@@ -391,11 +391,11 @@ Scope nesting order on a single node, outermost to innermost:
 - `Signal<f32>::try_animate_with_options(AnimationRequest)` — full control (epsilon, max_duration)
 - `BuildContext::animated_signal(value)` — creates the `Signal<f32>` itself
 - `BuildContext::prefers_reduced_motion()` — raw platform pref query
-- `Easing` — `Linear`, `EaseIn`, `EaseOut`, `EaseInOut` (in fern-tokens)
+- `Easing` — `Linear`, `EaseIn`, `EaseOut`, `EaseInOut` (in bastyde-tokens)
 
 **Three motion subsystems share one visibility primitive.** All
 three sit on `WidgetTree`, all three consult
-[`motion_visibility`](crates/fern-core/src/motion_visibility.rs)
+[`motion_visibility`](crates/bastyde-core/src/motion_visibility.rs)
 (`alive` / `painted_this_frame` / `painted_recently`) to decide
 whether their owner widget is visible enough to keep waking the event
 loop. Pick by shape:
@@ -408,14 +408,14 @@ loop. Pick by shape:
 
 The third path replaces the older "manual `frame_request_handle().set(true)` re-arm inside a `frame_tick` effect" pattern for visual continuous animations — the manual re-arm has no visibility gate and was the source of the catalog idle-fps bug. Keep `frame_request_handle` for owner-driven, non-visibility-bound needs (caret blink, drag auto-scroll while pointer captured).
 
-**Files:** [crates/fern-tokens/src/motion.rs](crates/fern-tokens/src/motion.rs),
-[crates/fern-core/src/animation.rs](crates/fern-core/src/animation.rs),
-[crates/fern-core/src/animation_builder.rs](crates/fern-core/src/animation_builder.rs),
-[crates/fern-core/src/animated_quad.rs](crates/fern-core/src/animated_quad.rs),
-[crates/fern-core/src/frame_tick_scheduler.rs](crates/fern-core/src/frame_tick_scheduler.rs),
-[crates/fern-core/src/motion_visibility.rs](crates/fern-core/src/motion_visibility.rs),
-[crates/fern-core/src/signal.rs](crates/fern-core/src/signal.rs),
-[crates/fern-widgets/src/animations/](crates/fern-widgets/src/animations/) (all wrapper widgets).
+**Files:** [crates/bastyde-tokens/src/motion.rs](crates/bastyde-tokens/src/motion.rs),
+[crates/bastyde-core/src/animation.rs](crates/bastyde-core/src/animation.rs),
+[crates/bastyde-core/src/animation_builder.rs](crates/bastyde-core/src/animation_builder.rs),
+[crates/bastyde-core/src/animated_quad.rs](crates/bastyde-core/src/animated_quad.rs),
+[crates/bastyde-core/src/frame_tick_scheduler.rs](crates/bastyde-core/src/frame_tick_scheduler.rs),
+[crates/bastyde-core/src/motion_visibility.rs](crates/bastyde-core/src/motion_visibility.rs),
+[crates/bastyde-core/src/signal.rs](crates/bastyde-core/src/signal.rs),
+[crates/bastyde-widgets/src/animations/](crates/bastyde-widgets/src/animations/) (all wrapper widgets).
 Visual showcase: `cargo run -p animations-kit`.
 
 ## Event System (V2 Attached Handlers)
@@ -458,7 +458,7 @@ combo_button.access_controls(listbox_id);
 field.access_described_by(error_message_id);
 ```
 
-**Naming and i18n.** All user-visible-string methods (`access_label`, `access_description`, `access_hint`, `access_value`, `access_custom_action`) accept `impl Into<String>`. With the `i18n` feature, `fern_i18n::LocalizedString` (the type produced by `tr!`) implements `From<LocalizedString> for String`, so `.access_label(tr!("save"))` resolves and stores the translated literal. Each translated method has a `#[doc(hidden)]` `_literal` twin (`access_label_literal`, etc.) — the same grep marker as `Button::new_literal`/`tooltip_literal` for explicitly-untranslated call sites.
+**Naming and i18n.** All user-visible-string methods (`access_label`, `access_description`, `access_hint`, `access_value`, `access_custom_action`) accept `impl Into<String>`. With the `i18n` feature, `bastyde_i18n::LocalizedString` (the type produced by `tr!`) implements `From<LocalizedString> for String`, so `.access_label(tr!("save"))` resolves and stores the translated literal. Each translated method has a `#[doc(hidden)]` `_literal` twin (`access_label_literal`, etc.) — the same grep marker as `Button::new_literal`/`tooltip_literal` for explicitly-untranslated call sites.
 
 **Merge rules.** Scalars (`label`, `description`, `value`, `role`, `identifier`, `shortcut`, `live`, `aria_current`, `has_popup`, `orientation`, numeric range/step) replace if `Some`. Lists (`controls`, `described_by`, `labelled_by`, advertised actions, custom actions) append. `access_remove_action` suppresses an action the widget emitted before override-advertised actions are added. `access_customize(|b| ...)` runs **last** with full `&mut AccessNodeBuilder` access (including `inner_mut()`) — it's the supported escape hatch for synthetic-children surgery (rich-text paragraphs / text runs) and any AccessKit field the typed surface doesn't cover.
 
@@ -477,16 +477,16 @@ field.access_described_by(error_message_id);
 
 **Action callbacks.** `.access_action(action, callback)` advertises the action AND registers the callback. The dispatcher routes AT-invoked actions through `WidgetEvent::AccessAction` to the callback, layered on top of any user-installed `.on_access_action(...)` (both fire). Custom actions (SwiftUI `accessibilityAction(named:)`) use `accesskit::ActionData::CustomAction(idx)` and route by index in declaration order.
 
-Full reference: [docs/accessibility-overrides.md](docs/accessibility-overrides.md). Implementation: [crates/fern-core/src/widget_builder.rs](crates/fern-core/src/widget_builder.rs) (`AccessibilityOverrides`, `AccessSubtreeMode`, `.access_*` methods); [crates/fern-core/src/widget_tree/accessibility_impl.rs](crates/fern-core/src/widget_tree/accessibility_impl.rs) (walker integration, `merge_descendants_into`).
+Full reference: [docs/accessibility-overrides.md](docs/accessibility-overrides.md). Implementation: [crates/bastyde-core/src/widget_builder.rs](crates/bastyde-core/src/widget_builder.rs) (`AccessibilityOverrides`, `AccessSubtreeMode`, `.access_*` methods); [crates/bastyde-core/src/widget_tree/accessibility_impl.rs](crates/bastyde-core/src/widget_tree/accessibility_impl.rs) (walker integration, `merge_descendants_into`).
 
 ## Actions, Intents & Shortcuts
 
 Three-layer input-to-behavior pipeline. There is **no** `AppCommand`/`on_command` anymore — widgets fire `Intent`s, ancestor widgets register `Action`s keyed by intent name, and `Shortcut`s bind rebindable keystrokes to intent names.
 
 ```rust
-use fern_ui::IntentKind;
-use fern_ui::core::{Action, shortcut::{KeyStroke, Shortcut}};
-use fern_ui::prelude::*;
+use bastyde::IntentKind;
+use bastyde::core::{Action, shortcut::{KeyStroke, Shortcut}};
+use bastyde::prelude::*;
 
 #[derive(Debug, IntentKind)]
 enum AppIntent {
@@ -534,7 +534,7 @@ Full reference: [docs/shortcut-intent-action.md](docs/shortcut-intent-action.md)
 
 ## Settings & Persistence
 
-Persistent, reactive user preferences via `fern-settings`. **In-memory is the source of truth** — `Signal<T>` and `*Model<T>` handles drive both UI and disk; the disk side is a debounced atomic projection (write-temp + rename, single shared I/O thread per process).
+Persistent, reactive user preferences via `bastyde-settings`. **In-memory is the source of truth** — `Signal<T>` and `*Model<T>` handles drive both UI and disk; the disk side is a debounced atomic projection (write-temp + rename, single shared I/O thread per process).
 
 Three persistence shapes:
 
@@ -545,25 +545,25 @@ Three persistence shapes:
 Built-in services on top:
 
 - **`MruList<T: MruEntry>`** — generic dedupe + pin + LRU-cap recents. Apps define their own item type implementing `MruEntry { type Key; fn key(); fn is_pinned()/set_pinned(); fn touch(); }`. The framework knows nothing about projects / files / palettes.
-- **`WindowStateService`** — per-`label` window geometry. **Auto-restored and auto-saved by `fern-app`'s window manager** when a `WindowConfig` carries `id(...)` and the bundle has `with_window_state(true)`. No widget-side wiring.
+- **`WindowStateService`** — per-`label` window geometry. **Auto-restored and auto-saved by `bastyde-app`'s window manager** when a `WindowConfig` carries `id(...)` and the bundle has `with_window_state(true)`. No widget-side wiring.
 
 ```rust
-use fern_ui::settings::{AppPaths, MruEntry, MruList, SettingsBundle, SettingsExt, SettingsKey};
+use bastyde::settings::{AppPaths, MruEntry, MruList, SettingsBundle, SettingsExt, SettingsKey};
 
 const FONT_SIZE: SettingsKey<f32> = SettingsKey::new("editor.font_size", || 14.0);
 
 fn main() {
-    let paths = AppPaths::new("com", "FernTech", "FernUI").expect("config dir");
+    let paths = AppPaths::new("com", "FernTech", "Bastyde").expect("config dir");
     let recents: MruList<RecentProject> = MruList::open(&paths, "recent_projects", 10).unwrap();
 
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .app_paths(paths)                                         // OR .application(qual, org, app)
         .settings(SettingsBundle::new().with_window_state(true))  // store + window state
         .app_state(recents)                                       // app-typed MRU
         .initial_window(
             WindowConfig::new()
                 .id("main")                                       // <- enables auto save/restore
-                .title("FernUI")
+                .title("Bastyde")
                 .size(1200, 800),
         )
         .run();
@@ -582,23 +582,23 @@ Key rules:
 - Window auto-persist requires both `.with_window_state(true)` on the bundle AND `WindowConfig::id("...")`. Modal dialogs and popovers are naturally excluded — they don't carry stable ids.
 - Saved geometry is sanitized on restore against the current monitor's work area: oversized rectangles clamp, off-screen positions recenter per-axis (so a saved coordinate from a now-disconnected secondary monitor gets recentered onto the primary while keeping the other axis if it was visible). `WindowPlacement::Minimized` is downgraded to `Floating` on restore.
 - Wayland ignores window position by protocol design (compositor-authority); size and `WindowPlacement` round-trip, position is a no-op there.
-- `SettingsExt` accessors (`use fern_settings::SettingsExt;`): `ctx.settings()`, `ctx.window_state()`, `ctx.mru::<T>()`. `try_*` variants return `Option`.
+- `SettingsExt` accessors (`use bastyde_settings::SettingsExt;`): `ctx.settings()`, `ctx.window_state()`, `ctx.mru::<T>()`. `try_*` variants return `Option`.
 - Tests use `AppPaths::for_testing(tmp.path())` and `Duration::ZERO` for the debounce — never the real `ProjectDirs`.
 
 Full reference: [docs/settings.md](docs/settings.md). Working demo: [examples/recent_projects](examples/recent_projects/src/main.rs).
 
 ## Locale-aware Formatting
 
-Numbers, dates, and times that change with the user's locale flow through one ICU4X-backed layer in `fern-i18n`. Two consumer paths share the same cache, so a UI mixing translated and untranslated displays stays internally consistent on `,` vs `.`, grouping, currency suffixes, etc.
+Numbers, dates, and times that change with the user's locale flow through one ICU4X-backed layer in `bastyde-i18n`. Two consumer paths share the same cache, so a UI mixing translated and untranslated displays stays internally consistent on `,` vs `.`, grouping, currency suffixes, etc.
 
-**Bundle-side path — `tr!` / `tr_signal!` messages.** `manager::configure_bundle` installs a `set_formatter` callback on every Fluent bundle and registers a custom `DATETIME()` function. So `{ NUMBER($v) }` and `{ DATETIME($ts, dateStyle: "long") }` inside `.ftl` messages render correctly across locales — no app-side wiring. Pass numeric args as ordinary `f64`/`i32`/etc.; pass datetimes as [`FernDateTime`](crates/fern-i18n/src/format.rs):
+**Bundle-side path — `tr!` / `tr_signal!` messages.** `manager::configure_bundle` installs a `set_formatter` callback on every Fluent bundle and registers a custom `DATETIME()` function. So `{ NUMBER($v) }` and `{ DATETIME($ts, dateStyle: "long") }` inside `.ftl` messages render correctly across locales — no app-side wiring. Pass numeric args as ordinary `f64`/`i32`/etc.; pass datetimes as [`BastydeDateTime`](crates/bastyde-i18n/src/format.rs):
 
 ```rust
 let dt: jiff::civil::DateTime = ...;
-tr!(last_saved(ts = FernDateTime::from(dt)))
+tr!(last_saved(ts = BastydeDateTime::from(dt)))
 ```
 
-**Signal-side path — non-translated displays.** `NumberFormatter` and `FernDateTimeFormatter` produce a `Signal<String>` from a value (static or `Signal<T>`-bound) plus the i18n manager's locale signal. Re-renders on either change. Used for SpinBox values, TableView cells, status bars, numeric inputs — anywhere the value isn't part of a translated sentence:
+**Signal-side path — non-translated displays.** `NumberFormatter` and `BastydeDateTimeFormatter` produce a `Signal<String>` from a value (static or `Signal<T>`-bound) plus the i18n manager's locale signal. Re-renders on either change. Used for SpinBox values, TableView cells, status bars, numeric inputs — anywhere the value isn't part of a translated sentence:
 
 ```rust
 let display = NumberFormatter::new()
@@ -606,7 +606,7 @@ let display = NumberFormatter::new()
     .fraction_digits(2, 2)
     .format(price_signal);  // Signal<f64> → Signal<String>
 
-let when = FernDateTimeFormatter::new()
+let when = BastydeDateTimeFormatter::new()
     .date_style(DateStyle::Long)
     .format(timestamp_signal);
 ```
@@ -626,7 +626,7 @@ The macro auto-clones the `Signal<T>` arg expressions, so the caller's handles s
 
 **ICU coverage and known limitations.** `Decimal` is fully ICU-correct (locale-aware grouping, digit shaping, signs). `Percent` multiplies by 100 and appends ASCII `%` (the locale-correct percent sign lives in unstable `icu_experimental`). `Currency` formats as decimal and appends the ISO-4217 code as a suffix (`"42,50 EUR"`); no symbol substitution or per-locale prefix/suffix positioning. Both percent and currency promote to full ICU once `icu_experimental` stabilises. `DateTime` is fully ICU-correct via `CompositeDateTimeFieldSet`.
 
-**Files:** [crates/fern-i18n/src/format.rs](crates/fern-i18n/src/format.rs) (Memoizable types, ICU bridge, `FernDateTime`, public formatter types, bundle callback, `DATETIME` function); [crates/fern-i18n/src/manager.rs](crates/fern-i18n/src/manager.rs) `configure_bundle` (one helper, three call sites at the `FluentBundle::new` boundary); [crates/fern-i18n-macros/src/lib.rs](crates/fern-i18n-macros/src/lib.rs) (`tr_signal!` / `tr_signal_widget!` lowering — branches off `tr_impl(input, kind, signal)`); [crates/fern-i18n/tests/format_integration.rs](crates/fern-i18n/tests/format_integration.rs) (end-to-end tests for both paths plus the macro).
+**Files:** [crates/bastyde-i18n/src/format.rs](crates/bastyde-i18n/src/format.rs) (Memoizable types, ICU bridge, `BastydeDateTime`, public formatter types, bundle callback, `DATETIME` function); [crates/bastyde-i18n/src/manager.rs](crates/bastyde-i18n/src/manager.rs) `configure_bundle` (one helper, three call sites at the `FluentBundle::new` boundary); [crates/bastyde-i18n-macros/src/lib.rs](crates/bastyde-i18n-macros/src/lib.rs) (`tr_signal!` / `tr_signal_widget!` lowering — branches off `tr_impl(input, kind, signal)`); [crates/bastyde-i18n/tests/format_integration.rs](crates/bastyde-i18n/tests/format_integration.rs) (end-to-end tests for both paths plus the macro).
 
 ## Three-Tier Rendering
 
@@ -646,13 +646,13 @@ Four-tier ladder: **tokens → variants → recipes → style protocols**. Full 
 **Theme construction.** No `Theme::default()` / `Theme::*_default()` — apps explicitly pick a preset:
 
 ```rust
-use fern_ui::prelude::intui;
+use bastyde::prelude::intui;
 let theme = intui::light();   // or intui::dark()
 ```
 
 `appearance: ThemeAppearance::{Light, Dark}` is a required field on every theme. Drives shadow density, OS-theme matching, and asset variant selection.
 
-`Theme` (in `fern-core::styles`) carries five token groups (`ColorTokens`, `LayoutTokens`, `TypographyTokens`, `ShapeTokens`, `MotionTokens`), `ComponentStyles` (dimension data for the *non-themable* widgets only — the 17 per-themable-widget dim structs were deleted in Step 7 and folded into the recipe modules), `ComponentStyleSlots` (typed `Rc<dyn FooStyle>` slot bag for theme-wide style overrides), and `ThemeExtensions` (typed app registry).
+`Theme` (in `bastyde-core::styles`) carries five token groups (`ColorTokens`, `LayoutTokens`, `TypographyTokens`, `ShapeTokens`, `MotionTokens`), `ComponentStyles` (dimension data for the *non-themable* widgets only — the 17 per-themable-widget dim structs were deleted in Step 7 and folded into the recipe modules), `ComponentStyleSlots` (typed `Rc<dyn FooStyle>` slot bag for theme-wide style overrides), and `ThemeExtensions` (typed app registry).
 
 **Theme is reactive.** `set_theme` updates an internal `Signal<Theme>` and dirty-marks every node — no rebuild. Focus, scroll offsets, and all interaction state survive theme changes.
 
@@ -665,7 +665,7 @@ Toggle::new(on).variant(ToggleVariant::Switch)                  // default
 
 `ButtonVariant {Filled, Tinted, Outlined, Plain, Ghost, Link, Destructive}` — default `Plain`. IntUI maps `Destructive` → Filled, `Tinted`/`Outlined` → Plain, `Link` → Ghost. Other widgets follow the same shape (see styling-system.md).
 
-**Tier 2 — Recipes** (paint vocabulary): `ShapeRecipe`, `FillRecipe` (Solid/LinearGradient/RadialGradient), `BorderRecipe` (with `BorderStyle`/`BorderPosition`), `ShadowRecipe`, `PerStateRecipe<T>` (FernUI's answer to Flutter's `WidgetStateProperty<T>` — explicit fallback chain `pressed → hover → idle`), `WidgetState`. All in `fern_core::styles::*`. Recipes use `RecipeColor` (plain data) instead of `ColorProp` so they serialize cleanly.
+**Tier 2 — Recipes** (paint vocabulary): `ShapeRecipe`, `FillRecipe` (Solid/LinearGradient/RadialGradient), `BorderRecipe` (with `BorderStyle`/`BorderPosition`), `ShadowRecipe`, `PerStateRecipe<T>` (Bastyde's answer to Flutter's `WidgetStateProperty<T>` — explicit fallback chain `pressed → hover → idle`), `WidgetState`. All in `bastyde_core::styles::*`. Recipes use `RecipeColor` (plain data) instead of `ColorProp` so they serialize cleanly.
 
 **Tier 3 — Style protocols** (the escape hatch):
 
@@ -679,9 +679,9 @@ Three precedence levels (highest wins):
 
 1. **Per-call:** `Button::new("X").style(MyGlow)` — instance override.
 2. **Theme-wide:** `theme.style_slots.button = Some(Rc::new(MyGlow))` — applies to every Button using the active theme.
-3. **Default:** `RecipeButtonStyle::default()` shipped in `fern-widgets/src/styles/` reading IntUI tokens.
+3. **Default:** `RecipeButtonStyle::default()` shipped in `bastyde-widgets/src/styles/` reading IntUI tokens.
 
-Migration status (as of this branch): **all 32 themable widgets are on Tier 3.** Controls: `Button`, `IconButton`, `Toggle`, `Checkbox`, `RadioButton`, `Slider`, `SegmentedControl`, `ProgressBar`, `Link`, `Avatar`, `Badge`. Inputs: `TextInput`, `SearchField`, `ComboBox`, `SpinBox`, `DateEdit`, `ColorPicker`, `Calendar`, `RichTextEditor`. Containers: `Panel`, `Card`, `TabBar`, `ListView`/`TreeView` (via `ListContainerStyle`), `TableView`/`TreeTable` (via `TableStyle`). Overlays: `TooltipWidget`, `Popover`, `Dialog`, `Snackbar`, `Banner`. Rows: `MenuItem`, `StandardListItem`/`StandardTreeItem`. Chrome: `ScrollBar`. No themable widget self-paints anymore; each delegates chrome to `style.make_*(cfg, ctx)`. Four traits are multi-method: `TabStyle` (`make_body` + `make_bar`), `DialogStyle` (`make_panel` + `make_scrim`), `TableStyle` (`make_header_cell` + `make_sort_indicator` + `make_row_background`), `CalendarStyle` (`make_day_cell` + `make_zoom_cell` + `make_header`). Step 7 is done — the per-widget dim structs are deleted and their IntUI constants live in `fern-widgets/src/styles/recipe_*_style.rs`. Still ahead: image-backed styles (Step 9), `ImageTheme` TOML loader (Step 10), sibling preset crates (Step 11).
+Migration status (as of this branch): **all 32 themable widgets are on Tier 3.** Controls: `Button`, `IconButton`, `Toggle`, `Checkbox`, `RadioButton`, `Slider`, `SegmentedControl`, `ProgressBar`, `Link`, `Avatar`, `Badge`. Inputs: `TextInput`, `SearchField`, `ComboBox`, `SpinBox`, `DateEdit`, `ColorPicker`, `Calendar`, `RichTextEditor`. Containers: `Panel`, `Card`, `TabBar`, `ListView`/`TreeView` (via `ListContainerStyle`), `TableView`/`TreeTable` (via `TableStyle`). Overlays: `TooltipWidget`, `Popover`, `Dialog`, `Snackbar`, `Banner`. Rows: `MenuItem`, `StandardListItem`/`StandardTreeItem`. Chrome: `ScrollBar`. No themable widget self-paints anymore; each delegates chrome to `style.make_*(cfg, ctx)`. Four traits are multi-method: `TabStyle` (`make_body` + `make_bar`), `DialogStyle` (`make_panel` + `make_scrim`), `TableStyle` (`make_header_cell` + `make_sort_indicator` + `make_row_background`), `CalendarStyle` (`make_day_cell` + `make_zoom_cell` + `make_header`). Step 7 is done — the per-widget dim structs are deleted and their IntUI constants live in `bastyde-widgets/src/styles/recipe_*_style.rs`. Still ahead: image-backed styles (Step 9), `ImageTheme` TOML loader (Step 10), sibling preset crates (Step 11).
 
 **Roles** stay relevant — they name *what* a value represents (`TextRole::Primary`, `SurfaceRole::Hover`), resolved against the current theme at paint time. Widget builders accept `impl Into<ColorProp>` so any of `Color | Signal<Color> | TextRole | SurfaceRole | BorderRole | DynamicTextRole(Signal<TextRole>) | DynamicSurfaceRole(..) | DynamicBorderRole(..)` works.
 
@@ -712,7 +712,7 @@ MockTextBackend::new()         // Fixed 8px char width
 LayoutContext::for_testing(&theme)
 ```
 
-Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) — in `fern-core::test_widgets` (pub(crate)).
+Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) — in `bastyde-core::test_widgets` (pub(crate)).
 
 ## Implementation Status
 
@@ -723,34 +723,34 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Signal-based reactivity (Signal, Prop, ObserverHandle, scoped effects)
 - Gesture recognition (UIKit-style state machines, auto-wired from handlers)
 - Overlay system (OverlayManager, OverlayRequest, positioning)
-- Design tokens (full Theme system) + four-tier styling ladder (tokens → variants → recipes → style protocols). `ThemeAppearance::{Light, Dark}` required field. `presets::intui::{light, dark}` shipped in `fern-core`; no `Theme::default()` / `Theme::*_default()`. Recipe types (`ShapeRecipe`, `FillRecipe`, `BorderRecipe`, `ShadowRecipe`, `PerStateRecipe<T>`, `WidgetState`) in `fern_core::styles`. Per-widget style traits (`ButtonStyle`, `ToggleStyle`, `CheckboxStyle`, `RadioStyle`, `IconButtonStyle`, `PanelStyle`, `CardStyle`, `TooltipStyle`, `MenuItemStyle`, `PopoverStyle`, `SliderStyle`, `TextInputStyle`, `ComboBoxStyle`, `ScrollBarStyle`, `StandardItemStyle`, `TabStyle`) with default `Recipe*Style` impls in `fern-widgets/src/styles/`. All 16 themable widgets delegate visual chrome via `style.make_body(cfg, ctx)`; apps install per-call (`.style(impl …Style)`) or theme-wide (`theme.style_slots.<widget> = Some(Rc::new(...))`). Step 7 done — the legacy per-widget dim structs are deleted. Image-backed styles + `ImageTheme` manifest loader + sibling preset crates (Material 3 / macOS / Fluent) are still pending. Reference: [docs/styling-system.md](docs/styling-system.md).
+- Design tokens (full Theme system) + four-tier styling ladder (tokens → variants → recipes → style protocols). `ThemeAppearance::{Light, Dark}` required field. `presets::intui::{light, dark}` shipped in `bastyde-core`; no `Theme::default()` / `Theme::*_default()`. Recipe types (`ShapeRecipe`, `FillRecipe`, `BorderRecipe`, `ShadowRecipe`, `PerStateRecipe<T>`, `WidgetState`) in `bastyde_core::styles`. Per-widget style traits (`ButtonStyle`, `ToggleStyle`, `CheckboxStyle`, `RadioStyle`, `IconButtonStyle`, `PanelStyle`, `CardStyle`, `TooltipStyle`, `MenuItemStyle`, `PopoverStyle`, `SliderStyle`, `TextInputStyle`, `ComboBoxStyle`, `ScrollBarStyle`, `StandardItemStyle`, `TabStyle`) with default `Recipe*Style` impls in `bastyde-widgets/src/styles/`. All 16 themable widgets delegate visual chrome via `style.make_body(cfg, ctx)`; apps install per-call (`.style(impl …Style)`) or theme-wide (`theme.style_slots.<widget> = Some(Rc::new(...))`). Step 7 done — the legacy per-widget dim structs are deleted. Image-backed styles + `ImageTheme` manifest loader + sibling preset crates (Material 3 / macOS / Fluent) are still pending. Reference: [docs/styling-system.md](docs/styling-system.md).
 - Window management (multi-window, modal dialogs, custom title bar — Wayland + macOS + Windows; X11 falls back to native decorations)
 - GPU rendering (3 pipelines, glyph atlas, path atlas)
 - All ~21 layout primitives (including Grid, Wrap, AspectRatio, Switcher, MasonryLayout, FormLayout)
 - Accessibility (AccessKit integration at trait level + builder-level overrides: `.access_label`, `.access_description`, `.access_hidden`, `.access_role`, `.access_disabled`, `.access_controls`/`described_by`/`labelled_by`, `.access_live`, `.access_shortcut_id`/`access_shortcut_literal`, `.access_action`/`access_remove_action`/`access_custom_action`, `.access_exclude_subtree`/`access_merge_subtree`, `.access_customize` — see "Accessibility Overrides" above)
 - Animation system (`Signal<f32>::animate_to`, easing, per-frame scheduler)
-- Internationalization (fern-i18n + fern-i18n-macros: Fluent-rs, `tr!`/`tr_widget!`, locale resolution, file watcher, RTL direction signal). Locale-aware formatting via `NumberFormatter` / `FernDateTimeFormatter` (`Signal<T>` → `Signal<String>`) and `FernDateTime` (jiff wrapper for the `DATETIME()` Fluent function). The framework auto-installs a `set_formatter` callback + custom `DATETIME` function on every bundle, so `{ NUMBER(...) }` / `{ DATETIME(...) }` inside `.ftl` messages render correctly across locales. Reactive `tr_signal!` / `tr_signal_widget!` macros bind `Signal<T>` arguments inside translated sentences and re-render on any-arg / locale / hot-reload change. Backed by ICU4X (`icu_decimal` / `icu_datetime` / `icu_calendar`); see "Locale-aware Formatting" below.
-- `fern!` DSL (fern-ui-macros: block-structured widget-tree syntax, desugars to V2 builder calls — see `docs/fern-macro-reference.md`)
+- Internationalization (bastyde-i18n + bastyde-i18n-macros: Fluent-rs, `tr!`/`tr_widget!`, locale resolution, file watcher, RTL direction signal). Locale-aware formatting via `NumberFormatter` / `BastydeDateTimeFormatter` (`Signal<T>` → `Signal<String>`) and `BastydeDateTime` (jiff wrapper for the `DATETIME()` Fluent function). The framework auto-installs a `set_formatter` callback + custom `DATETIME` function on every bundle, so `{ NUMBER(...) }` / `{ DATETIME(...) }` inside `.ftl` messages render correctly across locales. Reactive `tr_signal!` / `tr_signal_widget!` macros bind `Signal<T>` arguments inside translated sentences and re-render on any-arg / locale / hot-reload change. Backed by ICU4X (`icu_decimal` / `icu_datetime` / `icu_calendar`); see "Locale-aware Formatting" below.
+- `bati!` DSL (bastyde-macros: block-structured widget-tree syntax, desugars to V2 builder calls — see `docs/bastyde-macro-reference.md`)
 - Actions / Intents / Shortcuts (`Action`, `Intent`, `Shortcut`, `ShortcutRegistry`, `#[derive(IntentKind)]`, `ShortcutSettings` — rebindable keystrokes, typed-enum DTO bridge, source → root dispatch; see `docs/shortcut-intent-action.md`)
 - Ancestor key intercept (`.on_key_preview`) and subtree state signals (`.focus_within(Signal<bool>)` / `.hover_within(Signal<bool>)`) — strict-ancestors-only, see Event System above
-- Reactive data models (fern-data: `ListModel`, `TreeModel`, `TreeSlice`, `SelectionModel`, `SortFilterListModel<T>`, `SortFilterTreeModel<T>` with `TreeFilterMode` `HideNonMatching`/`KeepAncestors`/`KeepDescendants`, `CheckedModel` + `TreeCheckedModel<T>` for per-row checkbox state with optional descendant→ancestor tristate aggregation, `CheckState`)
-- Settings & persistence (fern-settings: `SettingsStore` dotted-key Signal<T> K/V, `SettingsFile<T>` with versioned migrations, `PersistedListModel`/`PersistedTreeModel`, generic `MruList<T: MruEntry>`, `WindowStateService` with framework-driven auto save/restore + monitor-aware sanitize on restore; see `docs/settings.md`)
-- Native file dialogs (fern-platform/file_dialog: `FileDialogBackend` trait + `FileDialogHandle` registered in app-state, `FileDialogRequest` builder for open / open-multi / pick-folder / save, `FileDialogResult`, `MemoryFileDialog` test backend, `RfdAsyncBackend` real implementation behind the `rfd-backend` feature using rfd 0.15 + xdg-portal + async-std; `EventContextFileDialogExt` extension trait adds `ctx.pick_file(...)`, `ctx.pick_files(...)`, `ctx.pick_folder(...)`, `ctx.save_file(...)`. Result delivery: backend posts `FileDialogEventPayload` through `AppEventPoster::post_external` → fern-app's `AppEvent::External` arm downcasts and routes to the originating window's tree → `FileDialogHandle::deliver` pops the callback and invokes it on the main thread with a fresh `EventContext`. macOS NSOpenPanel runs on the AppKit main run loop internally; the future drives the wakeup machinery from an async-std worker. Pending callbacks are tagged with the originating `FernWindowId` and purged via `WindowManager::close_window` when the window closes — no use-after-free of widget state. Apps wire up with `FernAppBuilder::install_file_dialog()` (or `.app_state(FileDialogHandle::new(my_backend))` for a custom backend). Demo: `examples/file_dialogs`.)
-- Debug inspector (fern-inspector: in-app introspection panel, debug builds only, gated by `cfg(debug_assertions)`; F12 toggles a bottom panel with 9 tabs (Tree, Properties, Accessibility, Theme, Locale, Focus, Shortcuts, Overlays, Models); bounds-overlay visualization (Off/Selection/All) with cursor-following type+size tooltip and Padding/StackGap tinted bands; picker tool with multi-window subtree exclusion; theme JSON Export/Import; resizable panel with persisted height; tree filter input + auto-scroll-into-view; Properties Copy button + right-click `Copy value` context menu + Debug repr row; Models tab with click-to-select per row; panel-scoped Ctrl+P/Ctrl+B/Ctrl+Tab/Ctrl+Shift+Tab/Esc keyboard shortcuts; persistence via `__fern_inspector.*` settings keys when `SettingsStore` is wired. Apps opt in with `FernAppBuilder.install_inspector_in_debug()` (no-op in release) — the extension trait is re-exported from `fern_ui::prelude::*` behind the umbrella's default-on `inspector` feature, so no separate `fern-inspector` dep is needed. See `docs/inspector.md`. Data models opt into the Models tab via `ListModel::debug_named("…")` / `TreeModel::debug_named` / `SelectionModel::debug_named`.)
-- Widget previewer (fern-preview + fern-preview-ui + fern-widgets-previewer): Storybook-equivalent for desktop Rust widgets. `inventory`-backed registry where widgets self-register via `inventory::submit!(&'static dyn CatalogEntry)`. Typed `KnobSpec`/`KnobValue` for live property editing, `PreviewVariant` for multi-state showcasing, `SourceLoc` for "open in editor" navigation, PNG export per widget. 3-pane GUI (navigator/canvas/knob-form). Two CLI modes (standalone catalog vs single-widget targeting). Architecture splits trait+registry (no GUI dep, third-party widget libraries integrate cleanly) from the reusable GUI library (apps build their own previewer for app-specific catalogs) from the stock-catalog bundle binary. Mode C (VS Code extension with CodeLens "Preview ▶") designed but deferred. Run with `cargo run -p fern-widgets-previewer`.
+- Reactive data models (bastyde-data: `ListModel`, `TreeModel`, `TreeSlice`, `SelectionModel`, `SortFilterListModel<T>`, `SortFilterTreeModel<T>` with `TreeFilterMode` `HideNonMatching`/`KeepAncestors`/`KeepDescendants`, `CheckedModel` + `TreeCheckedModel<T>` for per-row checkbox state with optional descendant→ancestor tristate aggregation, `CheckState`)
+- Settings & persistence (bastyde-settings: `SettingsStore` dotted-key Signal<T> K/V, `SettingsFile<T>` with versioned migrations, `PersistedListModel`/`PersistedTreeModel`, generic `MruList<T: MruEntry>`, `WindowStateService` with framework-driven auto save/restore + monitor-aware sanitize on restore; see `docs/settings.md`)
+- Native file dialogs (bastyde-platform/file_dialog: `FileDialogBackend` trait + `FileDialogHandle` registered in app-state, `FileDialogRequest` builder for open / open-multi / pick-folder / save, `FileDialogResult`, `MemoryFileDialog` test backend, `RfdAsyncBackend` real implementation behind the `rfd-backend` feature using rfd 0.15 + xdg-portal + async-std; `EventContextFileDialogExt` extension trait adds `ctx.pick_file(...)`, `ctx.pick_files(...)`, `ctx.pick_folder(...)`, `ctx.save_file(...)`. Result delivery: backend posts `FileDialogEventPayload` through `AppEventPoster::post_external` → bastyde-app's `AppEvent::External` arm downcasts and routes to the originating window's tree → `FileDialogHandle::deliver` pops the callback and invokes it on the main thread with a fresh `EventContext`. macOS NSOpenPanel runs on the AppKit main run loop internally; the future drives the wakeup machinery from an async-std worker. Pending callbacks are tagged with the originating `BastydeWindowId` and purged via `WindowManager::close_window` when the window closes — no use-after-free of widget state. Apps wire up with `BastydeAppBuilder::install_file_dialog()` (or `.app_state(FileDialogHandle::new(my_backend))` for a custom backend). Demo: `examples/file_dialogs`.)
+- Debug inspector (bastyde-inspector: in-app introspection panel, debug builds only, gated by `cfg(debug_assertions)`; F12 toggles a bottom panel with 9 tabs (Tree, Properties, Accessibility, Theme, Locale, Focus, Shortcuts, Overlays, Models); bounds-overlay visualization (Off/Selection/All) with cursor-following type+size tooltip and Padding/StackGap tinted bands; picker tool with multi-window subtree exclusion; theme JSON Export/Import; resizable panel with persisted height; tree filter input + auto-scroll-into-view; Properties Copy button + right-click `Copy value` context menu + Debug repr row; Models tab with click-to-select per row; panel-scoped Ctrl+P/Ctrl+B/Ctrl+Tab/Ctrl+Shift+Tab/Esc keyboard shortcuts; persistence via `__bastyde_inspector.*` settings keys when `SettingsStore` is wired. Apps opt in with `BastydeAppBuilder.install_inspector_in_debug()` (no-op in release) — the extension trait is re-exported from `bastyde::prelude::*` behind the umbrella's default-on `inspector` feature, so no separate `bastyde-inspector` dep is needed. See `docs/inspector.md`. Data models opt into the Models tab via `ListModel::debug_named("…")` / `TreeModel::debug_named` / `SelectionModel::debug_named`.)
+- Widget previewer (bastyde-preview + bastyde-preview-ui + bastyde-widgets-previewer): Storybook-equivalent for desktop Rust widgets. `inventory`-backed registry where widgets self-register via `inventory::submit!(&'static dyn CatalogEntry)`. Typed `KnobSpec`/`KnobValue` for live property editing, `PreviewVariant` for multi-state showcasing, `SourceLoc` for "open in editor" navigation, PNG export per widget. 3-pane GUI (navigator/canvas/knob-form). Two CLI modes (standalone catalog vs single-widget targeting). Architecture splits trait+registry (no GUI dep, third-party widget libraries integrate cleanly) from the reusable GUI library (apps build their own previewer for app-specific catalogs) from the stock-catalog bundle binary. Mode C (VS Code extension with CodeLens "Preview ▶") designed but deferred. Run with `cargo run -p bastyde-widgets-previewer`.
 - Tooltip system — three tiers sharing one attachment pipeline:
-  1. **Plain** ([`TooltipWidget`](crates/fern-widgets/src/tooltip.rs)) — single-line localized text; ephemeral.
-  2. **Rich** ([`RichTooltipWidget`](crates/fern-widgets/src/tooltip/rich.rs)) — registry-driven (`TooltipContent`), inline markup + shortcut chip + "more" Accordion; `[label](:key)` cascade to other rich tooltips; dwell-to-sticky promotes to focusable `Role::Dialog`.
-  3. **Composite** ([`CompositeTooltipWidget`](crates/fern-widgets/src/tooltip/composite.rs)) — hosts arbitrary `impl Widget + 'static` body (CK3-style: TabWidget, charts, progress bars, conditional rows). Same dwell-to-sticky machinery, separate `composite_tooltip` token bundle, larger default 480 × 480 with vertical-scroll-as-needed. "Primary-only" by construction (no registry key, can't be a `:key` cascade target). Child widgets inside the body keep their own tooltip setters and cascade normally. `attach_composite_tooltip` / `attach_composite_tooltip_boxed` helpers; `DEFAULT_COMPOSITE_TOOLTIP_DELAY = 400 ms`.
+  1. **Plain** ([`TooltipWidget`](crates/bastyde-widgets/src/tooltip.rs)) — single-line localized text; ephemeral.
+  2. **Rich** ([`RichTooltipWidget`](crates/bastyde-widgets/src/tooltip/rich.rs)) — registry-driven (`TooltipContent`), inline markup + shortcut chip + "more" Accordion; `[label](:key)` cascade to other rich tooltips; dwell-to-sticky promotes to focusable `Role::Dialog`.
+  3. **Composite** ([`CompositeTooltipWidget`](crates/bastyde-widgets/src/tooltip/composite.rs)) — hosts arbitrary `impl Widget + 'static` body (CK3-style: TabWidget, charts, progress bars, conditional rows). Same dwell-to-sticky machinery, separate `composite_tooltip` token bundle, larger default 480 × 480 with vertical-scroll-as-needed. "Primary-only" by construction (no registry key, can't be a `:key` cascade target). Child widgets inside the body keep their own tooltip setters and cascade normally. `attach_composite_tooltip` / `attach_composite_tooltip_boxed` helpers; `DEFAULT_COMPOSITE_TOOLTIP_DELAY = 400 ms`.
   Per-widget setters are mutually exclusive (last-call-wins, every setter clears the other two): `.tooltip(...)` / `.tooltip_literal(...)` / `.rich_tooltip(key)` / `.rich_tooltip_content(c)` / `.composite_tooltip(w)`. Available on `Button`, `Link`, `MenuItem`, `TextInput`, `IconButton`, `Checkbox`, `RadioButton`, `SplitButton` (+ `.chevron_*` family), and `TabInfo` / `TabDelegate` for tabs. Reference: [docs/tooltips.md](docs/tooltips.md). Demo: `cargo run -p tooltips-showcase`.
 - **Full widget catalog with source links**: [docs/widgets-overview.md](docs/widgets-overview.md). The bullets below are a quick-reference cheat sheet; the catalog is the authoritative list and the place to start for "what widgets ship?".
 - Controls: Button, IconButton, CommandLinkButton, PopoverButton, PopoverIconButton, SplitButton, Checkbox, RadioButton, Toggle, Slider, ComboBox, SegmentedControl, ProgressBar, Spinner, Link, Badge, SpinBox, Avatar
-- Containers: Panel, Card, Accordion, ToolBox, ScrollArea, ScrollBar, Tooltip, SplitView, **TabWidget / TabBar / Tabs** (data-source-driven `TabBar<T>` with `TabDelegate<T>` for per-tab label/icon/leading/trailing/context-menu/closable/pinned/enabled/tooltip; `TabSizing::Shared` (uniform extent) vs `Independent` (per-content); horizontal scroll with leading + trailing arrow buttons + mouse-wheel-to-horizontal mapping + Shift+wheel; "show all tabs" overflow `Popover` dropdown; close button on closable tabs + middle-click close + selection adjustment on close; drag-to-reorder with insertion-line indicator + edge auto-scroll; pinned tab strip (icon-only, fixed-width, no close button — Firefox/Chrome convention) at the leading edge separate from the scrollable region; locale-reactive labels + AT names; legacy `TabWidget::new(...).tab(...)` shim still supported. Generic `Tabs<T>` composes `TabBar<T>` above a `Switcher` driven by a content delegate.), Dialog, Popover, Snackbar, **Toast** (stackable, action-rich, severity-aware floating notification — `info`/`success`/`warning`/`error`/`loading` constructors, Link + Button actions, `Toast::id` update-in-place, hover-pause-group, `Role::Alert`/`Status` per severity × priority, persistent `NotificationArchiveModel`-backed log via [`NotificationLog`](crates/fern-widgets/src/notification/log.rs) / [`NotificationCenterButton`](crates/fern-widgets/src/notification/center_button.rs) / [`NotificationLogDialog`](crates/fern-widgets/src/notification/log_dialog.rs); one-line `FernAppBuilder::install_toast_default()` wires the host + archive + bell glyph. Demo: `cargo run -p toast-demo`. Reference: [docs/toast.md](docs/toast.md)), Wizard, Breadcrumb, GroupBox, MessageBox
+- Containers: Panel, Card, Accordion, ToolBox, ScrollArea, ScrollBar, Tooltip, SplitView, **TabWidget / TabBar / Tabs** (data-source-driven `TabBar<T>` with `TabDelegate<T>` for per-tab label/icon/leading/trailing/context-menu/closable/pinned/enabled/tooltip; `TabSizing::Shared` (uniform extent) vs `Independent` (per-content); horizontal scroll with leading + trailing arrow buttons + mouse-wheel-to-horizontal mapping + Shift+wheel; "show all tabs" overflow `Popover` dropdown; close button on closable tabs + middle-click close + selection adjustment on close; drag-to-reorder with insertion-line indicator + edge auto-scroll; pinned tab strip (icon-only, fixed-width, no close button — Firefox/Chrome convention) at the leading edge separate from the scrollable region; locale-reactive labels + AT names; legacy `TabWidget::new(...).tab(...)` shim still supported. Generic `Tabs<T>` composes `TabBar<T>` above a `Switcher` driven by a content delegate.), Dialog, Popover, Snackbar, **Toast** (stackable, action-rich, severity-aware floating notification — `info`/`success`/`warning`/`error`/`loading` constructors, Link + Button actions, `Toast::id` update-in-place, hover-pause-group, `Role::Alert`/`Status` per severity × priority, persistent `NotificationArchiveModel`-backed log via [`NotificationLog`](crates/bastyde-widgets/src/notification/log.rs) / [`NotificationCenterButton`](crates/bastyde-widgets/src/notification/center_button.rs) / [`NotificationLogDialog`](crates/bastyde-widgets/src/notification/log_dialog.rs); one-line `BastydeAppBuilder::install_toast_default()` wires the host + archive + bell glyph. Demo: `cargo run -p toast-demo`. Reference: [docs/toast.md](docs/toast.md)), Wizard, Breadcrumb, GroupBox, MessageBox
 - Menus: MenuBar, MenuList, MenuItem, MenuContext (context menu)
 - Chrome: Toolbar, StatusBar, TitleBar, GroupHeader
 - Data-driven: ListView, TreeView (with 4-arg `new_with_context(...)` exposing a `TreeRowContext` for one-line chevron-toggle wiring), Repeater, **TableView** (multi-column, virtualized, sort/filter via `SortFilterListModel`, drag-resize + drag-reorder of columns, pinned Leading/Trailing, cell-level + row-level selection, full keyboard nav with focus ring, edit hooks via `editing_cell_signal` + `on_cell_edit_request`, row drag-drop reorder, `Role::Table > Role::Row > Role::Cell` accessibility), **TreeTable** (hierarchical multi-column, twist-arrow indent, ArrowLeft/Right collapse/expand, `Role::TreeGrid` with per-row `set_level`/`set_expanded`), **StandardListItem** + **StandardTreeItem** (canonical row layout — `[checkbox?] [leading_slot?] [center_slot?] [label] [Spacer] [trailing_slot?]` with optional subtitle line carrying its own `[subtitle_leading_slot?] [subtitle] [subtitle_trailing_slot?]`; selection bg mirrors MenuItem/ComboBox rounded `item_corner_radius: 8.0` / `SurfaceRole::Selected | AccentSubtle | Pressed`; tree variant adds depth-driven indent + always-reserved chevron column; `.from_entry(&FlatEntry)` shortcut, `.on_toggle_rc(ctx.toggle_callback())` from the new TreeView delegate; both accept two-state `Signal<bool>` or tri-state `Signal<CheckState>` checkbox; `_literal` shims for untranslated strings)
 - Text: TextInput (styled single-line), rich text viewer; `RichTextEditor::editor` / `read_only` accept `.min_lines(n)` / `.max_lines(n)` for intrinsic-mode sizing (greedy by default; intrinsic when either knob is set, clamping `content_height` to `[min, max] × default_line_height` — the messenger-composer pattern)
-- Scene viewport (fern-scene: `Scene`, `SceneView`, `SceneItem` trait, built-in `RectItem` and friends, `minimap`). Two-tier — heavyweight `Widget` (full focus/animation/DnD/AT survives embedding) + lightweight `SceneItem` (paint-only, no arena cost). Pan / zoom gestures with per-axis policy, drag modes, exact-shape hit-test via `shape_contains`, per-item `CacheMode::ItemCoordinate` GPU cache, collision API, reactive `item_change_signal`, background/foreground paint hooks, signal-driven dynamic bounds, selection, z-order, removal. **Accessibility-complete**: every visible heavyweight widget participates as a normal child; every visible lightweight item gets a synthetic AT node with role + screen-projected bounds; Tab cycles in scene-insertion order. Override surface mirrors widget-level: logical groups, reparenting (visual tree ≠ AT tree), relations (controls/described_by/labelled_by), live regions, landmark roles, rotor/quick-nav categories, subtree mode (`Merge`/`Exclude`), custom focus order, `access_*` builder chain. Intended for story corkboards, mind maps, node-graph editors, timeline views, CAD canvases, simple maps. Demos: `cargo run -p scene_showcase`, `cargo run -p scene_corkboard`. References: [docs/fern-scene.md](docs/fern-scene.md), [docs/fern-scene-a11y.md](docs/fern-scene-a11y.md).
+- Scene viewport (bastyde-scene: `Scene`, `SceneView`, `SceneItem` trait, built-in `RectItem` and friends, `minimap`). Two-tier — heavyweight `Widget` (full focus/animation/DnD/AT survives embedding) + lightweight `SceneItem` (paint-only, no arena cost). Pan / zoom gestures with per-axis policy, drag modes, exact-shape hit-test via `shape_contains`, per-item `CacheMode::ItemCoordinate` GPU cache, collision API, reactive `item_change_signal`, background/foreground paint hooks, signal-driven dynamic bounds, selection, z-order, removal. **Accessibility-complete**: every visible heavyweight widget participates as a normal child; every visible lightweight item gets a synthetic AT node with role + screen-projected bounds; Tab cycles in scene-insertion order. Override surface mirrors widget-level: logical groups, reparenting (visual tree ≠ AT tree), relations (controls/described_by/labelled_by), live regions, landmark roles, rotor/quick-nav categories, subtree mode (`Merge`/`Exclude`), custom focus order, `access_*` builder chain. Intended for story corkboards, mind maps, node-graph editors, timeline views, CAD canvases, simple maps. Demos: `cargo run -p scene_showcase`, `cargo run -p scene_corkboard`. References: [docs/bastyde-scene.md](docs/bastyde-scene.md), [docs/bastyde-scene-a11y.md](docs/bastyde-scene-a11y.md).
 
 ### Partial / In Progress
 
@@ -762,49 +762,49 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 ## Key Files
 
 - Workspace config: `Cargo.toml`
-- Widget trait: `crates/fern-core/src/widget.rs`
-- Signal/Prop system: `crates/fern-core/src/signal.rs`
-- BuildContext: `crates/fern-core/src/build_context.rs`
-- Event handlers: `crates/fern-core/src/event_handlers.rs`
-- WidgetBuilder trait: `crates/fern-core/src/widget_builder.rs`
-- Arena: `crates/fern-core/src/arena.rs`
-- Widget tree orchestrator: `crates/fern-core/src/widget_tree.rs`
-- State system: `crates/fern-core/src/state.rs`
-- Event types: `crates/fern-core/src/event.rs`
-- Theme + styling system: [crates/fern-core/src/styles/](crates/fern-core/src/styles/) (`theme.rs`, `theme_appearance.rs`, `theme_extension.rs`, `recipe.rs`, `component_style_slots.rs`, one `*_style.rs` trait file per themable widget). IntUI preset: [crates/fern-core/src/presets/intui.rs](crates/fern-core/src/presets/intui.rs). Default `Recipe*Style` impls: [crates/fern-widgets/src/styles/](crates/fern-widgets/src/styles/). Reference: [docs/styling-system.md](docs/styling-system.md)
-- Color tokens: `crates/fern-tokens/src/color.rs`
-- Motion subsystems: [crates/fern-core/src/animation.rs](crates/fern-core/src/animation.rs) (signal-tween `AnimationScheduler`), [crates/fern-core/src/animated_quad.rs](crates/fern-core/src/animated_quad.rs) (shader-quad `AnimatedQuadRegistry`), [crates/fern-core/src/frame_tick_scheduler.rs](crates/fern-core/src/frame_tick_scheduler.rs) (per-frame-effect `FrameTickScheduler` — `Pulse` / `Cycle`), [crates/fern-core/src/motion_visibility.rs](crates/fern-core/src/motion_visibility.rs) (shared `alive` / `painted_this_frame` / `painted_recently` helpers). Reference: [docs/idle-and-animation.md](docs/idle-and-animation.md), [docs/animation.md](docs/animation.md).
-- Button (reference widget): [crates/fern-widgets/src/button.rs](crates/fern-widgets/src/button.rs)
-- Switcher: [crates/fern-widgets/src/primitives/switcher.rs](crates/fern-widgets/src/primitives/switcher.rs)
-- Layout primitives: [crates/fern-widgets/src/primitives/](crates/fern-widgets/src/primitives/)
-- Data models: [crates/fern-data/src/](crates/fern-data/src/) (`list_model.rs`, `list_data_source.rs`, `tree_model.rs`, `tree_slice.rs` — per-view expand state, `selection_model.rs`, `sort_filter_list_model.rs`, `sort_filter_tree_model.rs`, `checked_model.rs`, `tree_checked_model.rs`, `check_state.rs`, `data_change.rs`, `tree_change.rs`, `debug_registry.rs`). Reference: [docs/data-models.md](docs/data-models.md). Design rules: per-view independent expand state via `TreeSlice<T>`; concrete `T` (no `QVariant`); `Rc<RefCell<…>>` share-by-clone; mutation-then-notify discipline; the crate is GUI-free so a ViewModel layer or headless consumer can use it without pulling in `fern-widgets`
-- Standard row items: [crates/fern-widgets/src/standard_item.rs](crates/fern-widgets/src/standard_item.rs) (`StandardListItem`, `StandardTreeItem`); chevron primitive: [crates/fern-widgets/src/primitives/twist_arrow.rs](crates/fern-widgets/src/primitives/twist_arrow.rs); style trait: `StandardItemStyle` in [crates/fern-core/src/styles/standard_item_style.rs](crates/fern-core/src/styles/standard_item_style.rs), default impl + dim constants in [crates/fern-widgets/src/styles/recipe_standard_item_style.rs](crates/fern-widgets/src/styles/recipe_standard_item_style.rs)
-- TableView: [crates/fern-widgets/src/table_view.rs](crates/fern-widgets/src/table_view.rs) + submodules at [crates/fern-widgets/src/table_view/](crates/fern-widgets/src/table_view/) (`column.rs`, `selection.rs`, `a11y.rs`, `body.rs`, `header.rs`, `keyboard.rs`, `layout.rs`, `row_navigator.rs`, `tests.rs`). Demo: [examples/data_grid/src/main.rs](examples/data_grid/src/main.rs)
-- TreeTable: [crates/fern-widgets/src/tree_table.rs](crates/fern-widgets/src/tree_table.rs) (reuses table_view's column/header/keyboard modules; adds `TreeNavigator` + `TwistArrow`). Demo: [examples/tree_table/src/main.rs](examples/tree_table/src/main.rs)
-- Toast notifications: [crates/fern-widgets/src/toast.rs](crates/fern-widgets/src/toast.rs) (request + builder + `ToastAction` + `ToastDismissCause` + `ToastHandle` + `ToastInstallOptions`) + submodules at [crates/fern-widgets/src/toast/](crates/fern-widgets/src/toast/) (`registry.rs` — queue + archive bridge + in-place merge; `ext.rs` — `EventContextToastExt::show_toast`; `surface.rs` — chrome + a11y; `host.rs` — per-window queue + frame-tick timer + hover-pause). Style: [crates/fern-widgets/src/styles/recipe_toast_style.rs](crates/fern-widgets/src/styles/recipe_toast_style.rs) + trait at [crates/fern-core/src/styles/toast_style.rs](crates/fern-core/src/styles/toast_style.rs). Persistent archive + log family: [crates/fern-widgets/src/notification.rs](crates/fern-widgets/src/notification.rs) + [crates/fern-widgets/src/notification/](crates/fern-widgets/src/notification/) (`archive.rs` — `NotificationArchiveModel` with `InMemory` / `Persistent` backends + bounded eviction + unread-count signal + version signal; `log.rs` — toolbar + day-bucket sections + replayable action rows; `center_button.rs` — bell + badge + popover; `log_dialog.rs` — one-liner modal preset). Install hook: [crates/fern-ui/src/toast_install.rs](crates/fern-ui/src/toast_install.rs) (`FernAppBuilderToastExt::install_toast` / `install_toast_default`). Reference: [docs/toast.md](docs/toast.md). Demo: [examples/toast_demo/src/main.rs](examples/toast_demo/src/main.rs).
-- Scene viewport: [crates/fern-scene/src/](crates/fern-scene/src/) — `scene.rs` (65 KB core scene model), `view.rs` (137 KB `SceneView` widget with pan/zoom/gestures), `item.rs` + `items/` (`SceneItem` trait and built-in items), `a11y.rs` (AT walker), `minimap.rs`, `cache.rs`, `transform.rs`, `selection.rs`, `index.rs` (spatial index), `flags.rs`, `item_handlers.rs`, `animation.rs`, `state.rs`. References: [docs/fern-scene.md](docs/fern-scene.md), [docs/fern-scene-a11y.md](docs/fern-scene-a11y.md). Demos: [examples/scene_showcase/src/main.rs](examples/scene_showcase/src/main.rs), [examples/scene_corkboard/src/main.rs](examples/scene_corkboard/src/main.rs)
-- i18n runtime: [crates/fern-i18n/src/manager.rs](crates/fern-i18n/src/manager.rs), [crates/fern-i18n/src/localized_string.rs](crates/fern-i18n/src/localized_string.rs)
-- i18n locale-aware formatting: [crates/fern-i18n/src/format.rs](crates/fern-i18n/src/format.rs) (Memoizable types, ICU bridge, `FernDateTime` + `FluentType` impl, public `NumberFormatter` / `FernDateTimeFormatter`, bundle `set_formatter` callback, `DATETIME()` Fluent function). Bundle wiring: `configure_bundle` helper in [manager.rs](crates/fern-i18n/src/manager.rs). Tests: [crates/fern-i18n/tests/format_integration.rs](crates/fern-i18n/tests/format_integration.rs)
-- i18n macros: [crates/fern-i18n-macros/src/lib.rs](crates/fern-i18n-macros/src/lib.rs) (`tr!`, `tr_widget!`, `tr_signal!`, `tr_signal_widget!`)
-- fern! DSL macro: [crates/fern-ui-macros/src/](crates/fern-ui-macros/src/) (parse → IR → lower). Trybuild fixtures at [crates/fern-ui/tests/fern_ui/pass/](crates/fern-ui/tests/fern_ui/pass/)
-- fern! reference: [docs/fern-macro-reference.md](docs/fern-macro-reference.md) (user-facing), [docs/fern-language-spec-v3.md](docs/fern-language-spec-v3.md) (design spec)
-- Actions/Intents/Shortcuts: [crates/fern-core/src/action.rs](crates/fern-core/src/action.rs), [intent.rs](crates/fern-core/src/intent.rs), [shortcut.rs](crates/fern-core/src/shortcut.rs). `IntentKind` derive: [crates/fern-ui-macros/src/intent_kind.rs](crates/fern-ui-macros/src/intent_kind.rs). Settings widget: [crates/fern-widgets/src/shortcut_settings.rs](crates/fern-widgets/src/shortcut_settings.rs). Reference doc: [docs/shortcut-intent-action.md](docs/shortcut-intent-action.md)
-- Settings/persistence: [crates/fern-settings/src/](crates/fern-settings/src/) (`store.rs`, `file.rs`, `mru.rs`, `window_state.rs`, `bundle.rs`, `ext.rs`, `migration.rs`, `flush.rs`, `path.rs`). Auto window save/restore wiring: [crates/fern-app/src/window_persist.rs](crates/fern-app/src/window_persist.rs). Reference doc: [docs/settings.md](docs/settings.md). Demo: [examples/recent_projects/src/main.rs](examples/recent_projects/src/main.rs)
-- Canvas API: `crates/fern-canvas/src/canvas.rs`
-- Renderer: `crates/fern-render/src/renderer.rs`
-- App builder: `crates/fern-app/src/app.rs`
-- Umbrella exports: `crates/fern-ui/src/lib.rs`
-- Resources: `crates/fern-resources/src/lib.rs`
-- Previewer: [crates/fern-preview/src/](crates/fern-preview/src/) (`catalog.rs` — `WidgetCatalog` / `CatalogEntry`, `knob.rs` — `KnobSpec`/`KnobValue`/`KnobOverrides`/`KnobValues`, `variant.rs` — `PreviewVariant`, `registry.rs` — `inventory::iter` wrappers, `source_loc.rs` — `SourceLoc`). GUI library: [crates/fern-preview-ui/src/](crates/fern-preview-ui/src/) (`app_state.rs`, `canvas.rs`, `navigator.rs`, `knob_form.rs`, `inspector.rs`, `toolbar.rs`, `cli.rs`, `png_export.rs`). Stock binary: [crates/fern-widgets-previewer/src/main.rs](crates/fern-widgets-previewer/src/main.rs). Run: `cargo run -p fern-widgets-previewer`
-- Drag-and-drop: `crates/fern-core/src/drag_payload.rs`, `crates/fern-core/src/drag_state.rs`
-- Clipboard: `crates/fern-platform/src/clipboard.rs`
-- File dialogs: [crates/fern-platform/src/file_dialog.rs](crates/fern-platform/src/file_dialog.rs) (trait, handle, request, result, payload, mock, `RfdAsyncBackend`, `EventContextFileDialogExt`). Wiring: `WindowOps::current_parent_handle` in [crates/fern-core/src/window/ops.rs](crates/fern-core/src/window/ops.rs); `EventContext::parent_window_handle` + `EventContext::poster` in [crates/fern-core/src/widget.rs](crates/fern-core/src/widget.rs); `WidgetTree::run_with_event_context` in [crates/fern-core/src/widget_tree.rs](crates/fern-core/src/widget_tree.rs); `FernAppHandler::try_route_file_dialog_payload` and the `AppEvent::External` downcast arm in [crates/fern-app/src/app.rs](crates/fern-app/src/app.rs); window-close purge hook in [crates/fern-app/src/window_manager.rs](crates/fern-app/src/window_manager.rs)'s `close_window`. Demo: [examples/file_dialogs/src/main.rs](examples/file_dialogs/src/main.rs).
-- Text input: `crates/fern-widgets/src/text_input.rs`, `crates/fern-widgets/src/primitives/text_input_field.rs`
-- Rich text: `crates/fern-widgets/src/rich_text/` (state, paint, clipboard, keyboard, mouse, hit_test, context_menu, frame_loop, policy, image_cache)
-- New widgets: `crates/fern-widgets/src/spin_box.rs`, `crates/fern-widgets/src/split_button.rs`, `crates/fern-widgets/src/group_box.rs`, `crates/fern-widgets/src/group_header.rs`, `crates/fern-widgets/src/message_box.rs`, `crates/fern-widgets/src/tool_box.rs`, `crates/fern-widgets/src/keystroke_format.rs`, `crates/fern-widgets/src/privacy_settings.rs`
-- New primitives: `crates/fern-widgets/src/primitives/masonry.rs`, `crates/fern-widgets/src/primitives/form_layout.rs`, `crates/fern-widgets/src/primitives/image_widget.rs`
-- OS integration: `crates/fern-platform/src/os_theme.rs`, `crates/fern-platform/src/accessibility_prefs.rs`
-- Title bar hosts: `crates/fern-platform/src/title_bar_host/` (wayland.rs, x11.rs, windows.rs, macos.rs)
+- Widget trait: `crates/bastyde-core/src/widget.rs`
+- Signal/Prop system: `crates/bastyde-core/src/signal.rs`
+- BuildContext: `crates/bastyde-core/src/build_context.rs`
+- Event handlers: `crates/bastyde-core/src/event_handlers.rs`
+- WidgetBuilder trait: `crates/bastyde-core/src/widget_builder.rs`
+- Arena: `crates/bastyde-core/src/arena.rs`
+- Widget tree orchestrator: `crates/bastyde-core/src/widget_tree.rs`
+- State system: `crates/bastyde-core/src/state.rs`
+- Event types: `crates/bastyde-core/src/event.rs`
+- Theme + styling system: [crates/bastyde-core/src/styles/](crates/bastyde-core/src/styles/) (`theme.rs`, `theme_appearance.rs`, `theme_extension.rs`, `recipe.rs`, `component_style_slots.rs`, one `*_style.rs` trait file per themable widget). IntUI preset: [crates/bastyde-core/src/presets/intui.rs](crates/bastyde-core/src/presets/intui.rs). Default `Recipe*Style` impls: [crates/bastyde-widgets/src/styles/](crates/bastyde-widgets/src/styles/). Reference: [docs/styling-system.md](docs/styling-system.md)
+- Color tokens: `crates/bastyde-tokens/src/color.rs`
+- Motion subsystems: [crates/bastyde-core/src/animation.rs](crates/bastyde-core/src/animation.rs) (signal-tween `AnimationScheduler`), [crates/bastyde-core/src/animated_quad.rs](crates/bastyde-core/src/animated_quad.rs) (shader-quad `AnimatedQuadRegistry`), [crates/bastyde-core/src/frame_tick_scheduler.rs](crates/bastyde-core/src/frame_tick_scheduler.rs) (per-frame-effect `FrameTickScheduler` — `Pulse` / `Cycle`), [crates/bastyde-core/src/motion_visibility.rs](crates/bastyde-core/src/motion_visibility.rs) (shared `alive` / `painted_this_frame` / `painted_recently` helpers). Reference: [docs/idle-and-animation.md](docs/idle-and-animation.md), [docs/animation.md](docs/animation.md).
+- Button (reference widget): [crates/bastyde-widgets/src/button.rs](crates/bastyde-widgets/src/button.rs)
+- Switcher: [crates/bastyde-widgets/src/primitives/switcher.rs](crates/bastyde-widgets/src/primitives/switcher.rs)
+- Layout primitives: [crates/bastyde-widgets/src/primitives/](crates/bastyde-widgets/src/primitives/)
+- Data models: [crates/bastyde-data/src/](crates/bastyde-data/src/) (`list_model.rs`, `list_data_source.rs`, `tree_model.rs`, `tree_slice.rs` — per-view expand state, `selection_model.rs`, `sort_filter_list_model.rs`, `sort_filter_tree_model.rs`, `checked_model.rs`, `tree_checked_model.rs`, `check_state.rs`, `data_change.rs`, `tree_change.rs`, `debug_registry.rs`). Reference: [docs/data-models.md](docs/data-models.md). Design rules: per-view independent expand state via `TreeSlice<T>`; concrete `T` (no `QVariant`); `Rc<RefCell<…>>` share-by-clone; mutation-then-notify discipline; the crate is GUI-free so a ViewModel layer or headless consumer can use it without pulling in `bastyde-widgets`
+- Standard row items: [crates/bastyde-widgets/src/standard_item.rs](crates/bastyde-widgets/src/standard_item.rs) (`StandardListItem`, `StandardTreeItem`); chevron primitive: [crates/bastyde-widgets/src/primitives/twist_arrow.rs](crates/bastyde-widgets/src/primitives/twist_arrow.rs); style trait: `StandardItemStyle` in [crates/bastyde-core/src/styles/standard_item_style.rs](crates/bastyde-core/src/styles/standard_item_style.rs), default impl + dim constants in [crates/bastyde-widgets/src/styles/recipe_standard_item_style.rs](crates/bastyde-widgets/src/styles/recipe_standard_item_style.rs)
+- TableView: [crates/bastyde-widgets/src/table_view.rs](crates/bastyde-widgets/src/table_view.rs) + submodules at [crates/bastyde-widgets/src/table_view/](crates/bastyde-widgets/src/table_view/) (`column.rs`, `selection.rs`, `a11y.rs`, `body.rs`, `header.rs`, `keyboard.rs`, `layout.rs`, `row_navigator.rs`, `tests.rs`). Demo: [examples/data_grid/src/main.rs](examples/data_grid/src/main.rs)
+- TreeTable: [crates/bastyde-widgets/src/tree_table.rs](crates/bastyde-widgets/src/tree_table.rs) (reuses table_view's column/header/keyboard modules; adds `TreeNavigator` + `TwistArrow`). Demo: [examples/tree_table/src/main.rs](examples/tree_table/src/main.rs)
+- Toast notifications: [crates/bastyde-widgets/src/toast.rs](crates/bastyde-widgets/src/toast.rs) (request + builder + `ToastAction` + `ToastDismissCause` + `ToastHandle` + `ToastInstallOptions`) + submodules at [crates/bastyde-widgets/src/toast/](crates/bastyde-widgets/src/toast/) (`registry.rs` — queue + archive bridge + in-place merge; `ext.rs` — `EventContextToastExt::show_toast`; `surface.rs` — chrome + a11y; `host.rs` — per-window queue + frame-tick timer + hover-pause). Style: [crates/bastyde-widgets/src/styles/recipe_toast_style.rs](crates/bastyde-widgets/src/styles/recipe_toast_style.rs) + trait at [crates/bastyde-core/src/styles/toast_style.rs](crates/bastyde-core/src/styles/toast_style.rs). Persistent archive + log family: [crates/bastyde-widgets/src/notification.rs](crates/bastyde-widgets/src/notification.rs) + [crates/bastyde-widgets/src/notification/](crates/bastyde-widgets/src/notification/) (`archive.rs` — `NotificationArchiveModel` with `InMemory` / `Persistent` backends + bounded eviction + unread-count signal + version signal; `log.rs` — toolbar + day-bucket sections + replayable action rows; `center_button.rs` — bell + badge + popover; `log_dialog.rs` — one-liner modal preset). Install hook: [crates/bastyde/src/toast_install.rs](crates/bastyde/src/toast_install.rs) (`BastydeAppBuilderToastExt::install_toast` / `install_toast_default`). Reference: [docs/toast.md](docs/toast.md). Demo: [examples/toast_demo/src/main.rs](examples/toast_demo/src/main.rs).
+- Scene viewport: [crates/bastyde-scene/src/](crates/bastyde-scene/src/) — `scene.rs` (65 KB core scene model), `view.rs` (137 KB `SceneView` widget with pan/zoom/gestures), `item.rs` + `items/` (`SceneItem` trait and built-in items), `a11y.rs` (AT walker), `minimap.rs`, `cache.rs`, `transform.rs`, `selection.rs`, `index.rs` (spatial index), `flags.rs`, `item_handlers.rs`, `animation.rs`, `state.rs`. References: [docs/bastyde-scene.md](docs/bastyde-scene.md), [docs/bastyde-scene-a11y.md](docs/bastyde-scene-a11y.md). Demos: [examples/scene_showcase/src/main.rs](examples/scene_showcase/src/main.rs), [examples/scene_corkboard/src/main.rs](examples/scene_corkboard/src/main.rs)
+- i18n runtime: [crates/bastyde-i18n/src/manager.rs](crates/bastyde-i18n/src/manager.rs), [crates/bastyde-i18n/src/localized_string.rs](crates/bastyde-i18n/src/localized_string.rs)
+- i18n locale-aware formatting: [crates/bastyde-i18n/src/format.rs](crates/bastyde-i18n/src/format.rs) (Memoizable types, ICU bridge, `BastydeDateTime` + `FluentType` impl, public `NumberFormatter` / `BastydeDateTimeFormatter`, bundle `set_formatter` callback, `DATETIME()` Fluent function). Bundle wiring: `configure_bundle` helper in [manager.rs](crates/bastyde-i18n/src/manager.rs). Tests: [crates/bastyde-i18n/tests/format_integration.rs](crates/bastyde-i18n/tests/format_integration.rs)
+- i18n macros: [crates/bastyde-i18n-macros/src/lib.rs](crates/bastyde-i18n-macros/src/lib.rs) (`tr!`, `tr_widget!`, `tr_signal!`, `tr_signal_widget!`)
+- bati! DSL macro: [crates/bastyde-macros/src/](crates/bastyde-macros/src/) (parse → IR → lower). Trybuild fixtures at [crates/bastyde/tests/bastyde/pass/](crates/bastyde/tests/bastyde/pass/)
+- bati! reference: [docs/bastyde-macro-reference.md](docs/bastyde-macro-reference.md) (user-facing), [docs/bastyde-language-spec-v3.md](docs/bastyde-language-spec-v3.md) (design spec)
+- Actions/Intents/Shortcuts: [crates/bastyde-core/src/action.rs](crates/bastyde-core/src/action.rs), [intent.rs](crates/bastyde-core/src/intent.rs), [shortcut.rs](crates/bastyde-core/src/shortcut.rs). `IntentKind` derive: [crates/bastyde-macros/src/intent_kind.rs](crates/bastyde-macros/src/intent_kind.rs). Settings widget: [crates/bastyde-widgets/src/shortcut_settings.rs](crates/bastyde-widgets/src/shortcut_settings.rs). Reference doc: [docs/shortcut-intent-action.md](docs/shortcut-intent-action.md)
+- Settings/persistence: [crates/bastyde-settings/src/](crates/bastyde-settings/src/) (`store.rs`, `file.rs`, `mru.rs`, `window_state.rs`, `bundle.rs`, `ext.rs`, `migration.rs`, `flush.rs`, `path.rs`). Auto window save/restore wiring: [crates/bastyde-app/src/window_persist.rs](crates/bastyde-app/src/window_persist.rs). Reference doc: [docs/settings.md](docs/settings.md). Demo: [examples/recent_projects/src/main.rs](examples/recent_projects/src/main.rs)
+- Canvas API: `crates/bastyde-canvas/src/canvas.rs`
+- Renderer: `crates/bastyde-render/src/renderer.rs`
+- App builder: `crates/bastyde-app/src/app.rs`
+- Umbrella exports: `crates/bastyde/src/lib.rs`
+- Resources: `crates/bastyde-resources/src/lib.rs`
+- Previewer: [crates/bastyde-preview/src/](crates/bastyde-preview/src/) (`catalog.rs` — `WidgetCatalog` / `CatalogEntry`, `knob.rs` — `KnobSpec`/`KnobValue`/`KnobOverrides`/`KnobValues`, `variant.rs` — `PreviewVariant`, `registry.rs` — `inventory::iter` wrappers, `source_loc.rs` — `SourceLoc`). GUI library: [crates/bastyde-preview-ui/src/](crates/bastyde-preview-ui/src/) (`app_state.rs`, `canvas.rs`, `navigator.rs`, `knob_form.rs`, `inspector.rs`, `toolbar.rs`, `cli.rs`, `png_export.rs`). Stock binary: [crates/bastyde-widgets-previewer/src/main.rs](crates/bastyde-widgets-previewer/src/main.rs). Run: `cargo run -p bastyde-widgets-previewer`
+- Drag-and-drop: `crates/bastyde-core/src/drag_payload.rs`, `crates/bastyde-core/src/drag_state.rs`
+- Clipboard: `crates/bastyde-platform/src/clipboard.rs`
+- File dialogs: [crates/bastyde-platform/src/file_dialog.rs](crates/bastyde-platform/src/file_dialog.rs) (trait, handle, request, result, payload, mock, `RfdAsyncBackend`, `EventContextFileDialogExt`). Wiring: `WindowOps::current_parent_handle` in [crates/bastyde-core/src/window/ops.rs](crates/bastyde-core/src/window/ops.rs); `EventContext::parent_window_handle` + `EventContext::poster` in [crates/bastyde-core/src/widget.rs](crates/bastyde-core/src/widget.rs); `WidgetTree::run_with_event_context` in [crates/bastyde-core/src/widget_tree.rs](crates/bastyde-core/src/widget_tree.rs); `BastydeAppHandler::try_route_file_dialog_payload` and the `AppEvent::External` downcast arm in [crates/bastyde-app/src/app.rs](crates/bastyde-app/src/app.rs); window-close purge hook in [crates/bastyde-app/src/window_manager.rs](crates/bastyde-app/src/window_manager.rs)'s `close_window`. Demo: [examples/file_dialogs/src/main.rs](examples/file_dialogs/src/main.rs).
+- Text input: `crates/bastyde-widgets/src/text_input.rs`, `crates/bastyde-widgets/src/primitives/text_input_field.rs`
+- Rich text: `crates/bastyde-widgets/src/rich_text/` (state, paint, clipboard, keyboard, mouse, hit_test, context_menu, frame_loop, policy, image_cache)
+- New widgets: `crates/bastyde-widgets/src/spin_box.rs`, `crates/bastyde-widgets/src/split_button.rs`, `crates/bastyde-widgets/src/group_box.rs`, `crates/bastyde-widgets/src/group_header.rs`, `crates/bastyde-widgets/src/message_box.rs`, `crates/bastyde-widgets/src/tool_box.rs`, `crates/bastyde-widgets/src/keystroke_format.rs`, `crates/bastyde-widgets/src/privacy_settings.rs`
+- New primitives: `crates/bastyde-widgets/src/primitives/masonry.rs`, `crates/bastyde-widgets/src/primitives/form_layout.rs`, `crates/bastyde-widgets/src/primitives/image_widget.rs`
+- OS integration: `crates/bastyde-platform/src/os_theme.rs`, `crates/bastyde-platform/src/accessibility_prefs.rs`
+- Title bar hosts: `crates/bastyde-platform/src/title_bar_host/` (wayland.rs, x11.rs, windows.rs, macos.rs)
 
 ## Widget Construction Patterns
 
@@ -876,16 +876,16 @@ fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
 }
 ```
 
-## `fern!` DSL
+## `bati!` DSL
 
 Block-structured DSL for widget trees. Desugars one-to-one to builder
 calls at macro-expansion time — no runtime, no virtual tree.
 
 ```rust
-use fern_ui::prelude::*;
+use bastyde::prelude::*;
 
 fn build(ctx: &mut BuildContext) -> WidgetId {
-    fern!(ctx =>
+    bati!(ctx =>
         VStack {
             spacing: 12.0
             TextWidget::new_literal("Title") { style: t.body_bold.clone() }
@@ -906,18 +906,18 @@ the `#{ expr }` escape work as documented. Category B widgets (Card,
 Dialog, TabWidget, etc.) address content by named slots; a bare child
 there emits a targeted hint pointing at the right slot name.
 
-See [docs/fern-macro-reference.md](docs/fern-macro-reference.md) for
+See [docs/bastyde-macro-reference.md](docs/bastyde-macro-reference.md) for
 the full surface language, desugaring cheat sheet, and limitations;
-[docs/fern-language-spec-v3.md](docs/fern-language-spec-v3.md) for the
+[docs/bastyde-language-spec-v3.md](docs/bastyde-language-spec-v3.md) for the
 design spec with worked translations of the widget-catalog examples.
-Slash command `/fern-macro` loads the skill for read/write/explain/
+Slash command `/bastyde-macro` loads the skill for read/write/explain/
 translate/debug workflows.
 
 ## App Entry Point Pattern
 
 ```rust
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .theme(intui::light())
         .initial_window(
             WindowConfig::new()
@@ -929,7 +929,7 @@ fn main() {
 }
 ```
 
-Every window — initial or runtime-opened — is described by a `WindowConfig`. There is no `.window_title` / `.window_size` / `.root` on `FernAppBuilder` directly; secondary windows are opened from handler code via `ctx.open_window(WindowConfig::new()...)`. See [docs/multi-window.md](docs/multi-window.md) for the full multi-window API.
+Every window — initial or runtime-opened — is described by a `WindowConfig`. There is no `.window_title` / `.window_size` / `.root` on `BastydeAppBuilder` directly; secondary windows are opened from handler code via `ctx.open_window(WindowConfig::new()...)`. See [docs/multi-window.md](docs/multi-window.md) for the full multi-window API.
 
 App-wide behavior lives inside the root widget: register `Shortcut`s, declare `Action`s keyed by intent name, and react to them via handlers. See "Actions, Intents & Shortcuts" above and [docs/shortcut-intent-action.md](docs/shortcut-intent-action.md) for the full pattern. Ambient mutations are available on `EventContext` from any handler: `ctx.set_theme(...)`, `ctx.set_locale(...)`, `ctx.close_window()`.
 
@@ -937,6 +937,6 @@ If the app uses persistence, chain `.app_paths(...)` (or `.application(qualifier
 
 ## Architecture Reference
 
-Framework-internals reference: [docs/fern-ui-architecture.md](docs/fern-ui-architecture.md) — scrolling, arena state, Canvas API, rendering pipeline, HiDPI, threading, testability, crate dependency graph, architectural comparisons, open questions. Subsystems with a dedicated reference doc (events, layout, animation, theming, i18n, shortcuts, accessibility, settings, multi-window, drag-and-drop, data models, …) are stubbed with one-paragraph pointers; section numbers are preserved so external `§N` refs still resolve. Doc index: [docs/SUMMARY.md](docs/SUMMARY.md).
+Framework-internals reference: [docs/bastyde-architecture.md](docs/bastyde-architecture.md) — scrolling, arena state, Canvas API, rendering pipeline, HiDPI, threading, testability, crate dependency graph, architectural comparisons, open questions. Subsystems with a dedicated reference doc (events, layout, animation, theming, i18n, shortcuts, accessibility, settings, multi-window, drag-and-drop, data models, …) are stubbed with one-paragraph pointers; section numbers are preserved so external `§N` refs still resolve. Doc index: [docs/SUMMARY.md](docs/SUMMARY.md).
 
 Additional documentation: [docs/widgets-overview.md](docs/widgets-overview.md), [docs/accessibility-overrides.md](docs/accessibility-overrides.md), [docs/settings.md](docs/settings.md), [docs/drag-and-drop.md](docs/drag-and-drop.md), [docs/title-bar.md](docs/title-bar.md), [docs/multi-window.md](docs/multi-window.md), [docs/idle-and-animation.md](docs/idle-and-animation.md), [docs/telemetry.md](docs/telemetry.md), [docs/table-view.md](docs/table-view.md), [docs/inspector.md](docs/inspector.md)

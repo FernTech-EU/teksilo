@@ -12,9 +12,9 @@
 //! - Nested HStack-in-VStack arrangements
 //! - Composite widget rebuild on theme change
 
-use fern_ui::prelude::*;
-use fern_ui::tokens::{FontWeight, TextStyle};
-use fern_ui::widgets::{Button, ButtonVariant, HStack, Padding, Panel, Spacer, TextWidget, VStack};
+use bastyde::prelude::*;
+use bastyde::tokens::{FontWeight, TextStyle};
+use bastyde::widgets::{Button, ButtonVariant, HStack, Padding, Panel, Spacer, TextWidget, VStack};
 
 // ---------------------------------------------------------------------------
 // Application commands
@@ -63,9 +63,9 @@ impl Widget for RootContent {
                                         let next = !is_dark.get();
                                         is_dark.set(next);
                                         ctx.set_theme(if next {
-                                            fern_ui::presets::intui::dark()
+                                            bastyde::presets::intui::dark()
                                         } else {
-                                            fern_ui::presets::intui::light()
+                                            bastyde::presets::intui::light()
                                         });
                                     })
                             }),
@@ -170,7 +170,7 @@ impl Widget for RootContent {
 
 /// Helper — returns a widget value, not a WidgetId.
 /// Works with the inline child() pattern.
-fn build_color_box(color: impl Into<fern_ui::core::ColorProp>, label: &str) -> Panel {
+fn build_color_box(color: impl Into<bastyde::core::ColorProp>, label: &str) -> Panel {
     Panel::new()
         .background(color)
         .corner_radius(6.0)
@@ -193,12 +193,12 @@ fn build_color_box(color: impl Into<fern_ui::core::ColorProp>, label: &str) -> P
 // ---------------------------------------------------------------------------
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — Text & Layout")
+                .title("Bastyde — Text & Layout")
                 .size(600, 500)
                 .root(|tree, _state| tree.add(RootContent::new())),
         )
@@ -211,9 +211,9 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use fern_ui::core::WidgetTree;
-    use fern_ui::prelude::*;
-    use fern_ui::widgets::{HStack, Spacer, TextWidget, VStack};
+    use bastyde::core::WidgetTree;
+    use bastyde::prelude::*;
+    use bastyde::widgets::{HStack, Spacer, TextWidget, VStack};
 
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
@@ -240,7 +240,7 @@ mod tests {
 
     #[test]
     fn text_widget_measures_correctly_without_backend() {
-        let theme = fern_ui::presets::intui::light();
+        let theme = bastyde::presets::intui::light();
         let w = TextWidget::new_literal("Hello World").style(theme.typography.body.clone());
         let ctx = LayoutContext::for_testing(&theme);
         let size = w.layout_response(SizeProposal::unspecified(), &ctx).size;
@@ -250,8 +250,8 @@ mod tests {
 
     #[test]
     fn theme_swap_changes_color_tokens() {
-        let light = fern_ui::presets::intui::light();
-        let dark = fern_ui::presets::intui::dark();
+        let light = bastyde::presets::intui::light();
+        let dark = bastyde::presets::intui::dark();
         assert_ne!(
             light.colors.surface_main.to_array(),
             dark.colors.surface_main.to_array()
@@ -284,13 +284,13 @@ mod tests {
     fn composite_rebuild_on_theme_change() {
         use super::RootContent;
 
-        let mut tree = WidgetTree::new().with_theme(fern_ui::presets::intui::light());
+        let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
         let _root = tree.add(RootContent::new());
         tree.layout(SizeProposal::exact(600.0, 500.0));
         let frame_light = tree.render();
 
         // Switch to dark theme — triggers composite rebuild
-        tree.set_theme(fern_ui::presets::intui::dark());
+        tree.set_theme(bastyde::presets::intui::dark());
         tree.layout(SizeProposal::exact(600.0, 500.0));
         let frame_dark = tree.render();
 

@@ -1,13 +1,13 @@
 //! Shared state and helpers for the widget catalog.
 //!
 //! `Signals` is the single bundle of reactive values that every tab
-//! reads from and writes to. Both the classic and `fern!` builds of a
+//! reads from and writes to. Both the classic and `bati!` builds of a
 //! tab share this struct, so flipping the mode toggle preserves all
 //! interactive state (slider positions, checkbox states, etc.).
 
-use fern_ui::prelude::*;
-use fern_ui::widgets::tooltip::TooltipContent;
-use fern_ui::widgets::{CheckState, Panel, TabId};
+use bastyde::prelude::*;
+use bastyde::widgets::tooltip::TooltipContent;
+use bastyde::widgets::{CheckState, Panel, TabId};
 
 // ── Cascading-tooltip registry keys ───────────────────────────────────
 // Three-deep cascade: each tip's body links into the next via the
@@ -166,7 +166,7 @@ pub fn tab_header(
     title: impl Into<LocalizedString>,
     refs: impl Into<LocalizedString>,
 ) -> WidgetId {
-    use fern_ui::widgets::{TextWidget, VStack};
+    use bastyde::widgets::{TextWidget, VStack};
     ctx.add(
         VStack::new()
             .spacing(4.0)
@@ -190,7 +190,7 @@ pub fn tab_header(
 /// only when you want emphasis; the text will still resolve via the
 /// theme's contrast tokens.
 pub fn color_cell(role: impl Into<ColorProp>, label: &'static str) -> impl Widget + 'static {
-    use fern_ui::widgets::TextWidget;
+    use bastyde::widgets::TextWidget;
     Panel::new()
         .background(role)
         .corner_radius(4.0)
@@ -212,7 +212,7 @@ pub fn section(
     title: &'static str,
     body: impl Widget + 'static,
 ) -> WidgetId {
-    use fern_ui::widgets::{TextWidget, VStack};
+    use bastyde::widgets::{TextWidget, VStack};
     ctx.add(
         VStack::new()
             .spacing(6.0)

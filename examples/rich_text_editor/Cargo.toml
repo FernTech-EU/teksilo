@@ -7,4 +7,4 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-fern-ui = { workspace = true, features = ["rich-text", "clipboard"] }
+bastyde = { workspace = true, features = ["rich-text", "clipboard"] }

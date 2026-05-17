@@ -1,6 +1,6 @@
 # Settings & Persisted State Reference
 
-FernUI's persistence layer (`fern-settings`) is **reactive end-to-end**:
+Bastyde's persistence layer (`bastyde-settings`) is **reactive end-to-end**:
 disk values live as `Signal<T>`s and `ListModel<T>`s, mutating either
 the in-memory handle or the underlying file flows to the other side
 automatically. There is no separate "config object" you remember to
@@ -17,9 +17,9 @@ Three persistence shapes share one storage backbone:
 
 | Shape | Type | Use for |
 |---|---|---|
-| Dynamic K/V | [`SettingsStore`](../crates/fern-settings/src/store.rs) → `Signal<T>` | Scalar prefs (font size, theme name, bools, arrays of scalars) |
-| Typed file | [`SettingsFile<T>`](../crates/fern-settings/src/file.rs) | App-shaped structs with their own schema + migrations |
-| Reactive collection | [`PersistedListModel<T>`](../crates/fern-settings/src/collection/list.rs) / [`PersistedTreeModel<T>`](../crates/fern-settings/src/collection/tree.rs) | Recents, palettes, custom hierarchies — anything that drives a `Repeater` / `ListView` / `TreeView` |
+| Dynamic K/V | [`SettingsStore`](../crates/bastyde-settings/src/store.rs) → `Signal<T>` | Scalar prefs (font size, theme name, bools, arrays of scalars) |
+| Typed file | [`SettingsFile<T>`](../crates/bastyde-settings/src/file.rs) | App-shaped structs with their own schema + migrations |
+| Reactive collection | [`PersistedListModel<T>`](../crates/bastyde-settings/src/collection/list.rs) / [`PersistedTreeModel<T>`](../crates/bastyde-settings/src/collection/tree.rs) | Recents, palettes, custom hierarchies — anything that drives a `Repeater` / `ListView` / `TreeView` |
 
 Two built-in services are layered on those primitives:
 
@@ -36,22 +36,22 @@ End-to-end example:
 ## Canonical app shape
 
 ```rust
-use fern_ui::prelude::*;
-use fern_ui::app::FernAppBuilder;
-use fern_ui::settings::{AppPaths, MruList, SettingsBundle};
+use bastyde::prelude::*;
+use bastyde::app::BastydeAppBuilder;
+use bastyde::settings::{AppPaths, MruList, SettingsBundle};
 
 fn main() {
-    let paths = AppPaths::new("com", "FernTech", "FernUI")
+    let paths = AppPaths::new("com", "FernTech", "Bastyde")
         .expect("could not resolve OS config directory");
 
     // App-typed MRU list — the framework knows nothing about projects.
     let recents: MruList<RecentProject> =
         MruList::open(&paths, "recent_projects", 10).unwrap();
 
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .theme(intui::light())
         .app_paths(paths)                                // explicit
-        // or .application("com", "FernTech", "FernUI") // shortcut
+        // or .application("com", "FernTech", "Bastyde") // shortcut
         .settings(
             SettingsBundle::new()
                 .with_window_state(true),                // opt-in
@@ -60,7 +60,7 @@ fn main() {
         .initial_window(
             WindowConfig::new()
                 .id("main")                              // <- enables auto save/restore
-                .title("FernUI")
+                .title("Bastyde")
                 .size(1200, 800)
                 .min_size(640, 400)
                 .root(|tree, _state| tree.add(AppRoot::new())),
@@ -134,15 +134,15 @@ impl AppPaths {
 ```
 
 `new(...)` returns `Option` because OS path resolution can fail
-(sandboxed CI, missing `HOME`). `FernAppBuilder::application(...)`
+(sandboxed CI, missing `HOME`). `BastydeAppBuilder::application(...)`
 panics with a clear message in that case; production apps that want
 to fall back to a portable directory use the `Option` directly:
 
 ```rust
-let paths = AppPaths::new("com", "FernTech", "FernUI")
+let paths = AppPaths::new("com", "FernTech", "Bastyde")
     .or_else(|| {
         let cwd = std::env::current_dir().ok()?;
-        Some(AppPaths::for_testing(&cwd.join(".ferni-state")))
+        Some(AppPaths::for_testing(&cwd.join(".bastyde-state")))
     })
     .expect("no usable directory");
 ```
@@ -172,7 +172,7 @@ let opened: OpenedSettings = bundle.open(&paths)?;
 `OpenedSettings` is a cheap-to-clone handle bundle. Each contained
 service is `Rc<>`-shaped internally; cloning produces a second handle
 to the same in-memory state and the same shared I/O thread queue.
-`FernAppBuilder::run` keeps one `OpenedSettings` on the stack while
+`BastydeAppBuilder::run` keeps one `OpenedSettings` on the stack while
 clones of each service live in the `app_state` registry — when the
 registry is dropped at exit, the `Drop` impls flush every pending
 payload synchronously.
@@ -281,7 +281,7 @@ reasons. Concretely:
 
 - `winit::Window::set_outer_position(...)` silently no-ops on
   Wayland; `outer_position()` returns `Err(NotSupportedError)`.
-- The position observer in [`window_persist.rs`](../crates/fern-app/src/window_persist.rs)
+- The position observer in [`window_persist.rs`](../crates/bastyde-app/src/window_persist.rs)
   almost never fires on Wayland because the compositor doesn't
   notify apps of their position.
 - `WindowState.position` keeps whatever value we initialized it with.
@@ -291,7 +291,7 @@ The framework persists `(x, y)` regardless because the saved value is
 session. On Wayland itself, compositors with per-app placement
 memory (KWin's window rules, sway's `for_window`, GNOME's heuristic
 stickiness) match windows by their Wayland `app_id` (typically
-derived from the binary name by winit), not by anything fern-app
+derived from the binary name by winit), not by anything bastyde-app
 wires from `WindowConfig::id(...)` — that string is purely an
 internal lookup key for `find_window` and the persistence service.
 The result for users is fine on Wayland: the compositor remembers
@@ -304,7 +304,7 @@ coordinates apply.
 `PerWindowState` originally stored a single `maximized: bool`. v2
 replaces it with the full `WindowPlacement` enum so Fullscreen
 round-trips properly. The migrator
-([`window_state.rs:164-188`](../crates/fern-settings/src/window_state.rs))
+([`window_state.rs:164-188`](../crates/bastyde-settings/src/window_state.rs))
 converts each entry's `maximized: true` to `placement = "Maximized"`,
 otherwise `"Floating"`. Files are upgraded transparently on first
 read; the new shape is written back on the next mutation.
@@ -318,7 +318,7 @@ provides dedupe, pin-aware cap, and persistence.
 
 ```rust
 use std::path::{Path, PathBuf};
-use fern_ui::settings::{MruEntry, MruList};
+use bastyde::settings::{MruEntry, MruList};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -393,7 +393,7 @@ that's outside this doc's scope.
 A single extension trait on `BuildContext` and `EventContext`.
 
 ```rust
-use fern_ui::settings::SettingsExt;
+use bastyde::settings::SettingsExt;
 
 // Inside any handler / build method:
 let store = ctx.settings();                     // panics if not registered
@@ -413,7 +413,7 @@ the call to register it; `try_*` variants return `Option`.
 **Window-geometry persistence is not an extension method.** When a
 `WindowStateService` is registered, every `WindowConfig` carrying an
 `id(...)` is automatically restored on creation and recorded on every
-change by `fern-app`'s window manager. No `ctx.persist_window_state(...)`
+change by `bastyde-app`'s window manager. No `ctx.persist_window_state(...)`
 call needed.
 
 ---
@@ -425,7 +425,7 @@ trait). Migrations operate on raw `toml::Value` *before* deserialize,
 so a v1 file that no longer matches the v2 type can still be upgraded:
 
 ```rust
-use fern_ui::settings::{Migrator, Versioned};
+use bastyde::settings::{Migrator, Versioned};
 
 #[derive(Serialize, Deserialize, Default)]
 struct Recents {
@@ -479,7 +479,7 @@ are debounced through a single shared I/O thread (one
 the `Unregister` ack so end-of-process state is never lost.
 
 ```rust
-use fern_ui::settings::DebouncedWriter;
+use bastyde::settings::DebouncedWriter;
 use std::time::Duration;
 
 let w = DebouncedWriter::new(path, Duration::from_millis(500));
@@ -535,15 +535,15 @@ unchanged.
 
 ## Reference
 
-- Source: [`crates/fern-settings/src/`](../crates/fern-settings/src/)
-- Window persist integration: [`crates/fern-app/src/window_persist.rs`](../crates/fern-app/src/window_persist.rs)
+- Source: [`crates/bastyde-settings/src/`](../crates/bastyde-settings/src/)
+- Window persist integration: [`crates/bastyde-app/src/window_persist.rs`](../crates/bastyde-app/src/window_persist.rs)
 - End-to-end demo: [`examples/recent_projects/src/main.rs`](../examples/recent_projects/src/main.rs)
 - Related architecture topics: [`docs/multi-window.md`](multi-window.md), [`docs/data-models.md`](data-models.md), [`docs/reactive-theme.md`](reactive-theme.md)
 
 ### Out of scope — intentional
 
 - **Encryption.** Plaintext TOML. Secrets go through a future
-  `fern-secrets` crate against the OS keychain.
+  `bastyde-secrets` crate against the OS keychain.
 - **Cloud sync.** No.
 - **Multi-instance write coordination.** Last-write-wins, documented.
 - **Large persisted collections (> ~1k items).** Use SQLite via

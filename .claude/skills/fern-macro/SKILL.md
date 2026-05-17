@@ -1,53 +1,53 @@
 ---
-name: fern-macro
-description: Read, write, explain, or translate `fern!` DSL blocks. Use when the user asks to convert a builder chain to `fern!` (or vice versa), to explain what an existing `fern!` block expands to, to debug a `fern!` compile error, to write a new widget tree in `fern!` form, or asks how to express a specific pattern (`if`/`for`/`match`/`let`/`rust`/spread/escape/binding/Category B slot). Also use for `/fern-macro` invocations.
+name: bati-macro
+description: Read, write, explain, or translate `bati!` DSL blocks. Use when the user asks to convert a builder chain to `bati!` (or vice versa), to explain what an existing `bati!` block expands to, to debug a `bati!` compile error, to write a new widget tree in `bati!` form, or asks how to express a specific pattern (`if`/`for`/`match`/`let`/`rust`/spread/escape/binding/Category B slot). Also use for `/bati-macro` invocations.
 user_invocable: true
 ---
 
-# fern-macro
+# bati-macro
 
-The `fern!` macro is a block-structured DSL that desugars one-to-one to
-FernUI V2 builder calls. This skill covers reading, writing, and
+The `bati!` macro is a block-structured DSL that desugars one-to-one to
+Bastyde V2 builder calls. This skill covers reading, writing, and
 translating between the two forms.
 
-## Primary references (read these before writing non-trivial `fern!`)
+## Primary references (read these before writing non-trivial `bati!`)
 
-- [docs/fern-macro-reference.md](../../../docs/fern-macro-reference.md)
+- [docs/bati-macro-reference.md](../../../docs/bati-macro-reference.md)
   — user-facing reference with every surface form, desugaring table,
   diagnostics, and limitations. Consult this for syntax questions.
-- [docs/fern-language-spec-v3.md](../../../docs/fern-language-spec-v3.md)
+- [docs/bati-language-spec-v3.md](../../../docs/bati-language-spec-v3.md)
   — design spec with worked translations of 9 widget-catalog examples
   (`§7`). Consult this for canonical patterns.
-- [crates/fern-ui/tests/fern_ui/pass/](../../../crates/fern-ui/tests/fern_ui/pass/)
+- [crates/bastyde/tests/bati/pass/](../../../crates/bastyde/tests/bati/pass/)
   — runnable trybuild fixtures, one per DSL feature. Consult these
   when you need a minimal self-contained example.
 
 ## Mental model
 
-Every `fern!` block desugars at macro-expansion time to the builder
+Every `bati!` block desugars at macro-expansion time to the builder
 calls you could have written by hand. There is no runtime. Knowing the
 desugaring lets you translate in either direction confidently.
 
-The desugaring cheat sheet in [fern-macro-reference.md#desugaring-cheat-sheet](../../../docs/fern-macro-reference.md#desugaring-cheat-sheet)
+The desugaring cheat sheet in [bati-macro-reference.md#desugaring-cheat-sheet](../../../docs/bati-macro-reference.md#desugaring-cheat-sheet)
 is the single source of truth — quote from it when explaining a block.
 
 ## Slash-command invocation
 
-If the user types `/fern-macro` with no further context, don't guess —
+If the user types `/bati-macro` with no further context, don't guess —
 ask which of the triage situations below applies, or ask them to paste
 the block / builder chain they want to work on. If they pasted a code
 block together with the invocation, pick the matching row.
 
 ## Quick triage
 
-When the user asks about `fern!`, match against these situations:
+When the user asks about `bati!`, match against these situations:
 
 | User wants | What to do |
 |---|---|
 | Explain a block | Walk through it top-down, annotating each body item with its desugaring. Use the cheat-sheet expansions. |
 | Write from scratch | Start from a builder-chain mental model, then rewrite as DSL. Keep closures and Rust expressions verbatim. |
-| Convert builder → `fern!` | Element-by-element. Flatten `.child(...)` chains into bare elements at body position. Move `.prop(v)` into `name: v` body items. Preserve explicit constructors (`Button::new_literal`, `Padding::uniform`, etc.). |
-| Convert `fern!` → builder | Mechanical: elements to `Type::new(args)`, properties to `.prop(args)`, bare children to `.child(...)`, bindings to hoisted `let name = ctx.add(...); ...add_child(name)`. |
+| Convert builder → `bati!` | Element-by-element. Flatten `.child(...)` chains into bare elements at body position. Move `.prop(v)` into `name: v` body items. Preserve explicit constructors (`Button::new_literal`, `Padding::uniform`, etc.). |
+| Convert `bati!` → builder | Mechanical: elements to `Type::new(args)`, properties to `.prop(args)`, bare children to `.child(...)`, bindings to hoisted `let name = ctx.add(...); ...add_child(name)`. |
 | Debug a compile error | First check whether rust-analyzer or cargo surfaced it (see Diagnostics below). For cargo errors on `.child()`/arity/type mismatch, the usual cause is the macro routing through the wrong method. |
 | Migrate widget_catalog / example | Stage by logical section, verify with `cargo test -p <example>` after each chunk. The existing `scroll_area_fills_remaining_space`-style structural tests catch tree shape regressions. |
 
@@ -83,9 +83,9 @@ When the user asks about `fern!`, match against these situations:
    only needed when you want the `_id` auto-suffix or when the value
    looks like an element prefix the parser would commit on.
 
-5. **Bindings (`name = Element`) hoist to the outermost `fern!` block**
+5. **Bindings (`name = Element`) hoist to the outermost `bati!` block**
    and always use `ctx.add(...)`. `ctx` must be in scope — either via
-   the `fern!(ctx => ...)` preamble or as a local at the call site.
+   the `bati!(ctx => ...)` preamble or as a local at the call site.
 
 6. **Handler-attachment properties are auto-reordered to the end** of
    the emitted chain. Methods on `WidgetBuilder` (`on_tap`, `on_hover`,
@@ -100,12 +100,12 @@ When the user asks about `fern!`, match against these situations:
    method and ordering within the widget's own setters is the
    builder's concern.
 
-## Writing `fern!` — preferred patterns
+## Writing `bati!` — preferred patterns
 
 **Simple tree**:
 
 ```rust
-fern!(ctx =>
+bati!(ctx =>
     VStack {
         spacing: 12.0
         TextWidget::new_literal("Title") { style: t.body_bold.clone() }
@@ -117,7 +117,7 @@ fern!(ctx =>
 **Referencing a binding from a closure** (Spec §7.9):
 
 ```rust
-fern!(ctx =>
+bati!(ctx =>
     Card {
         header: title = TextWidget("Manuscript") { style: bold }
         content: VStack {
@@ -132,7 +132,7 @@ fern!(ctx =>
 **Mixing imperative logic**:
 
 ```rust
-fern!(ctx =>
+bati!(ctx =>
     VStack {
         let accent = theme.colors.accent;
         rust {
@@ -147,7 +147,7 @@ fern!(ctx =>
 chains — see the limitations section):
 
 ```rust
-fern!(ctx =>
+bati!(ctx =>
     Menu {
         item: MenuItem::new_literal("Run") {
             on_activate_fn: |ctx| ctx.send_intent(AppIntent::Run)
@@ -162,7 +162,7 @@ The body reads uniformly with top-level elements — same `name: value`
 shape, no mental switch to Rust's method-chain syntax. Prefer this
 over `item: (MenuItem::new_literal("Run").on_activate_fn(...).tooltip(...))`.
 
-## Reading `fern!` — translation shortcuts
+## Reading `bati!` — translation shortcuts
 
 Scan for these shapes and translate mentally:
 
@@ -175,7 +175,7 @@ Scan for these shapes and translate mentally:
 - `name = Element` → hoisted `let name = ctx.add(...); ... .add_child(name)`
 - `#{ id }` → routes through `add_child(id)` or `.slot_id(id)` per position
 - `if cond { E }` (no else) → `.child_opt(if cond { Some(E) } else { None })`
-- `if cond { A } else { B }` / multi-arm `if` / `match` → `.child(FernBranch[N]::...(E))` dispatched by arm index
+- `if cond { A } else { B }` / multi-arm `if` / `match` → `.child(BatiBranch[N]::...(E))` dispatched by arm index
 - `for pat in iter { E }` → `.children(iter.map(|pat| E))`
 - `..expr` → statement-form spread: `for id in expr { __parent = __parent.add_child(id); }`
 - `rust { ... }` → block either produces a child (no trailing `;`) or runs for side effect
@@ -198,7 +198,7 @@ constructor typo → "cannot find type" on the ident, etc.).
 
 ### rust-analyzer
 
-If rust-analyzer shows "expected an expression" at a `fern!` token, its
+If rust-analyzer shows "expected an expression" at a `bati!` token, its
 proc-macro server has stopped expanding. Reload via Command Palette →
 `rust-analyzer: Restart server`. The macro itself works — the DSL
 syntax is only visible as errors when pre-expansion fallback parsing
@@ -219,7 +219,7 @@ kicks in.
   `prop: Widget::ctor(args).method(arg)` doesn't parse as you'd expect
   because the DSL already provides the body-form equivalent. Rewrite
   as `prop: Widget::ctor(args) { method: arg }` — that's the canonical
-  fern! way to apply builder methods to a widget value. For lowercase-
+  bati! way to apply builder methods to a widget value. For lowercase-
   rooted chains (`prop: signal.map(...)`), no workaround is needed.
   For UpperCamel chains that can't fit body form, wrap in parens:
   `prop: (MyWrapper::from(x).finalize())`.
@@ -229,14 +229,14 @@ kicks in.
 
 ## Formatting
 
-After writing or editing a `fern!` block, run the dedicated formatter
+After writing or editing a `bati!` block, run the dedicated formatter
 to canonicalize indentation, spacing, and line-wrapping inside the
-block (rustfmt skips `fern!` body content):
+block (rustfmt skips `bati!` body content):
 
-- `cargo fern-fmt path/to/file.rs` — format a single file.
-- `cargo fern-fmt examples/widget_catalog` — walk a directory.
-- `cargo fern-fmt` — format from CWD (recurses, skips `target/`).
-- `cargo fern-fmt --check` — read-only; exits 1 if any file would
+- `cargo bastyde-fmt path/to/file.rs` — format a single file.
+- `cargo bastyde-fmt examples/widget_catalog` — walk a directory.
+- `cargo bastyde-fmt` — format from CWD (recurses, skips `target/`).
+- `cargo bastyde-fmt --check` — read-only; exits 1 if any file would
   change. Use in CI / pre-merge verification.
 
 Run this **after** confirming the block compiles — formatting a
@@ -245,16 +245,16 @@ syntactically broken block can mask the original error.
 ## Verifying changes
 
 - `cargo check -p <user-crate>` — fastest feedback after writing or
-  editing a `fern!` block in an example or widget.
-- `cargo fern-fmt <path>` — canonicalize formatting once it compiles
+  editing a `bati!` block in an example or widget.
+- `cargo bastyde-fmt <path>` — canonicalize formatting once it compiles
   (see "Formatting" above).
 - `cargo test -p widget-catalog` — existing structural assertions (e.g.
   `scroll_area_fills_remaining_space`) catch tree-shape regressions
   after a migration.
-- `cargo test -p fern-ui --test fern_trybuild` — only needed when
+- `cargo test -p bastyde --test bastyde_trybuild` — only needed when
   editing the macro crate itself; exercises every pass/fail fixture.
 - `cargo test --workspace` — full regression after non-trivial changes.
 
-Do not claim a `fern!` block "works" unless it compiles. The macro's
+Do not claim a `bati!` block "works" unless it compiles. The macro's
 desugaring is mechanical; the compilation step is where routing errors
 (wrong method name, missing trait impl) surface.

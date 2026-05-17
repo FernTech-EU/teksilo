@@ -15,12 +15,12 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use fern_ui::core::widget::WidgetPlacement;
-use fern_ui::data::{
+use bastyde::core::widget::WidgetPlacement;
+use bastyde::data::{
     CheckedModel, ListModel, SelectionMode, SelectionModel, TreeCheckedModel, TreeModel,
 };
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Button, ButtonVariant, Card, Expand, HStack, ListView, Padding, Panel, Repeater, Spacer,
     StandardListItem, StandardTreeItem, TabId, TabInfo, TabWidget, TextWidget, Toolbar, TreeView,
     VStack,
@@ -33,9 +33,9 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                fern_ui::presets::intui::dark()
+                bastyde::presets::intui::dark()
             } else {
-                fern_ui::presets::intui::light()
+                bastyde::presets::intui::light()
             });
         }),
     ))
@@ -342,15 +342,15 @@ impl Widget for Root {
             Panel::new().child(
                 TabWidget::new(selected_tab)
                     .static_tab(
-                        TabInfo::new().title(fern_ui::i18n::LocalizedString::literal("Repeater")),
+                        TabInfo::new().title(bastyde::i18n::LocalizedString::literal("Repeater")),
                         repeater_tab,
                     )
                     .static_tab(
-                        TabInfo::new().title(fern_ui::i18n::LocalizedString::literal("ListView")),
+                        TabInfo::new().title(bastyde::i18n::LocalizedString::literal("ListView")),
                         listview_tab,
                     )
                     .static_tab(
-                        TabInfo::new().title(fern_ui::i18n::LocalizedString::literal("TreeView")),
+                        TabInfo::new().title(bastyde::i18n::LocalizedString::literal("TreeView")),
                         treeview_tab,
                     ),
             ),
@@ -395,7 +395,7 @@ fn main() {
     let tags = ListModel::from_vec(vec![
         "Rust".into(),
         "GUI".into(),
-        "FernUI".into(),
+        "Bastyde".into(),
         "Desktop".into(),
     ]);
 
@@ -404,7 +404,7 @@ fn main() {
     let tree_model = TreeModel::new();
     let docs = tree_model.insert_root(0, "Documents".into());
     let proj = tree_model.insert_child(docs, 0, "Projects".into());
-    tree_model.insert_child(proj, 0, "FernUI".into());
+    tree_model.insert_child(proj, 0, "Bastyde".into());
     tree_model.insert_child(proj, 1, "Skribisto".into());
     let notes = tree_model.insert_child(docs, 1, "Notes".into());
     tree_model.insert_child(notes, 0, "Meeting 2026-04-01".into());
@@ -414,9 +414,9 @@ fn main() {
     tree_model.insert_child(pics, 1, "Screenshots".into());
     tree_model.insert_root(2, "Downloads".into());
 
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("Data Collections — Milestone 6")

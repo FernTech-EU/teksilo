@@ -20,12 +20,12 @@
 
 use std::rc::Rc;
 
-use fern_ui::core::styles::{ButtonStyle, ButtonStyleConfig, CardVariant};
-use fern_ui::core::{BuildContext, WidgetId};
-use fern_ui::prelude::*;
-use fern_ui::tokens::{Color, CornerRadius, SurfaceRole, TextRole, TextStyleRole};
-use fern_ui::widgets::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
-use fern_ui::widgets::{Button, ButtonVariant, Card, Toggle};
+use bastyde::core::styles::{ButtonStyle, ButtonStyleConfig, CardVariant};
+use bastyde::core::{BuildContext, WidgetId};
+use bastyde::prelude::*;
+use bastyde::tokens::{Color, CornerRadius, SurfaceRole, TextRole, TextStyleRole};
+use bastyde::widgets::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
+use bastyde::widgets::{Button, ButtonVariant, Card, Toggle};
 
 // ── Custom ButtonStyle #1: a soft glow + pill shape ─────────────────────────
 struct GlowButton;
@@ -91,12 +91,12 @@ fn main() {
     let mut theme = intui::light();
     theme.style_slots.button = Some(Rc::new(GlowButton));
 
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .theme(theme)
         .install_inspector_in_debug()
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — Styling System Demo")
+                .title("Bastyde — Styling System Demo")
                 .size(900, 500)
                 .root(|tree, _state| tree.add(Demo)),
         )
@@ -177,8 +177,8 @@ impl Widget for Demo {
     fn layout_response(
         &self,
         proposal: SizeProposal,
-        _ctx: &fern_ui::core::widget::LayoutContext,
-    ) -> fern_ui::core::widget::LayoutResponse {
+        _ctx: &bastyde::core::widget::LayoutContext,
+    ) -> bastyde::core::widget::LayoutResponse {
         proposal.resolve(0.0, 0.0).into()
     }
 }

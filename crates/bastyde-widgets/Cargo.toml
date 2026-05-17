@@ -1,0 +1,76 @@
+[package]
+name = "bastyde-widgets"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[features]
+# Rich-text widgets. bastyde-platform is now an unconditional dep of
+# the crate (used by the privacy widget for the file-dialog API),
+# so the `dep:bastyde-platform` gate it previously carried is dropped.
+rich-text = ["dep:bastyde-text"]
+# Preview catalog impls — opt-in `WidgetCatalog` implementations
+# alongside each widget, registered with the `inventory` crate so the
+# `bastyde-preview-ui` previewer GUI discovers them at link time. Off by
+# default — pulls in no runtime cost and adds no symbols when not
+# enabled. Standard production builds and headless tests ignore it.
+preview = ["dep:bastyde-preview"]
+# Telemetry support. Gates the `PrivacySettings` widget (the only
+# widget that binds to `bastyde-telemetry` types) and its `serde_json`
+# dep. Off by default — apps that don't ship analytics pay nothing.
+telemetry = ["dep:bastyde-telemetry", "dep:serde_json"]
+
+[dependencies]
+bastyde-core = { workspace = true }
+bastyde-data = { workspace = true }
+# `notification::archive` uses `PersistedListModel` for the persistent
+# notification log; pulls in nothing extra for in-memory-only apps.
+bastyde-settings = { workspace = true }
+bastyde-tokens = { workspace = true }
+bastyde-canvas = { workspace = true }
+bastyde-i18n = { workspace = true }
+# Serialization of `NotificationEntry` for the persistent archive
+# (writes through PersistedListModel's TOML file). The derive feature
+# is on at the workspace level.
+serde = { workspace = true }
+# `PrivacySettings` widget binds to `OpenedTelemetry` and `ConsentStore`.
+# Gated behind the `telemetry` feature — apps that don't ship analytics
+# pay nothing. Without the feature, the widget and its re-export are
+# absent from the public surface.
+bastyde-telemetry = { workspace = true, optional = true }
+# JSON rendering for the privacy widget's "Get my data" viewer. Only
+# pulled in with the `telemetry` feature.
+serde_json = { workspace = true, optional = true }
+# `PrivacySettings` widget reaches native file dialogs through
+# `bastyde_platform::file_dialog::EventContextFileDialogExt`. The
+# `file-dialog` feature on bastyde-platform brings in just the trait
+# surface — no rfd, no async-std. The real `RfdAsyncBackend` is opt-in
+# via `bastyde-app/rfd-backend` (chained from `bastyde/file-dialog`).
+bastyde-platform = { workspace = true, features = ["file-dialog"] }
+bastyde-preview = { workspace = true, optional = true }
+# `open` powers rich-tooltip links that point at real URLs
+# (http, https, mailto, file paths, …). Small, pure-Rust, no deps
+# on GUI toolkits — just spawns the OS default handler.
+open = { workspace = true }
+# Date/time backing for Calendar / DateEdit / TimeEdit / DateTimeEdit. The
+# four widgets re-export the relevant types through `common::datetime` so
+# the rest of the codebase never names `jiff` directly. The `serde`
+# feature is needed by `notification::NotificationEntry` so the
+# persistent archive can round-trip `jiff::Timestamp` through TOML.
+jiff = { workspace = true, features = ["serde"] }
+thiserror = { workspace = true }
+# text-typeset + text-document come through bastyde-text's re-exports
+# (`bastyde_text::text_document`, `bastyde_text::RichTextEngine`, …) under
+# its own `rich-text` feature. Widgets never name either crate
+# directly, keeping bastyde-widgets's dependency surface minimal.
+bastyde-text = { workspace = true, optional = true, features = ["rich-text"] }
+
+[dev-dependencies]
+accesskit_consumer = "0.35.0"
+# `notification::archive` tests round-trip `NotificationEntry` through
+# `tempfile` directories and TOML serialization.
+tempfile = { workspace = true }
+toml = { workspace = true }

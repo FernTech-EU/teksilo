@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build all FernUI examples, run each briefly, and report binary size,
+"""Build all Bastyde examples, run each briefly, and report binary size,
 memory footprint, and idle CPU/GPU usage.
 
 Usage:
@@ -383,7 +383,7 @@ def render_report(
     finished: datetime.datetime,
 ) -> str:
     lines: list[str] = []
-    lines.append("# FernUI examples — runtime benchmark")
+    lines.append("# Bastyde examples — runtime benchmark")
     lines.append("")
     lines.append(f"- **Date:** {started.strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append(f"- **Duration:** {(finished - started).total_seconds():.1f}s")

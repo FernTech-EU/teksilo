@@ -14,11 +14,11 @@
 //!   window.
 //! - A main-window button that fires the same shortcut's intent.
 
-use fern_ui::IntentKind;
-use fern_ui::core::Action;
-use fern_ui::core::shortcut::{KeyStroke, Shortcut};
-use fern_ui::prelude::*;
-use fern_ui::widgets::{Button, ButtonVariant, Expand, HStack, Spacer, Toolbar};
+use bastyde::IntentKind;
+use bastyde::core::Action;
+use bastyde::core::shortcut::{KeyStroke, Shortcut};
+use bastyde::prelude::*;
+use bastyde::widgets::{Button, ButtonVariant, Expand, HStack, Spacer, Toolbar};
 
 #[derive(Debug, IntentKind)]
 enum AppIntent {
@@ -36,28 +36,28 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                fern_ui::presets::intui::dark()
+                bastyde::presets::intui::dark()
             } else {
-                fern_ui::presets::intui::light()
+                bastyde::presets::intui::light()
             });
         }),
     ))
 }
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — Multi-Window Demo")
+                .title("Bastyde — Multi-Window Demo")
                 .id("main")
                 .size(520, 320)
                 .min_size(320, 200)
                 .initial_placement(WindowPlacement::Floating)
                 .root(|tree, _state| {
                     tree.add(
-                        fern_ui::widgets::VStack::new()
+                        bastyde::widgets::VStack::new()
                             .child(dark_mode_toolbar())
                             .child(Expand::new().child(MainRoot::default())),
                     )
@@ -93,7 +93,7 @@ impl Widget for MainRoot {
             }
             ctx.open_window(
                 WindowConfig::new()
-                    .title("FernUI — Help")
+                    .title("Bastyde — Help")
                     .id("help")
                     .size(360, 220)
                     .root(|tree, _state| {

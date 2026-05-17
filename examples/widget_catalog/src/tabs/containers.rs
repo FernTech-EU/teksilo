@@ -1,10 +1,10 @@
 //! Containers tab — Panel, Card, GroupBox, GroupHeader, Accordion, ToolBox,
 //! ScrollArea, ScrollBar, SplitView.
 
-use fern_ui::prelude::*;
-use fern_ui::tokens::Orientation;
-use fern_ui::widgets::scroll_bar::ScrollBarOrientation;
-use fern_ui::widgets::{
+use bastyde::prelude::*;
+use bastyde::tokens::Orientation;
+use bastyde::widgets::scroll_bar::ScrollBarOrientation;
+use bastyde::widgets::{
     Accordion, Card, Checkbox, Divider, FixedSize, GroupBox, GroupHeader, Panel, ScrollArea,
     ScrollBar, SplitView, TextWidget, ToolBox, ToolBoxItem, VStack,
 };
@@ -174,7 +174,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
+pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     // Card.header/.content/.footer take Widgets — pre-register where
     // chained method calls are unavoidable. ToolBox::add takes
     // ToolBoxItem; chained .add() calls don't translate to one
@@ -252,7 +252,7 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let acc_open = sigs.accordion_expanded.clone();
     let acc2_open = sigs.accordion2_expanded.clone();
 
-    fern!(ctx => VStack {
+    bati!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

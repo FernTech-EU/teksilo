@@ -1,17 +1,17 @@
-# FernUI Widget Catalog — Arabic translations.
+# Bastyde Widget Catalog — Arabic translations.
 #
 # المفاتيح بصيغة kebab-case في طبقة Fluent، وتُحوَّل إلى snake_case في
 # Rust بواسطة الماكرو. ترتيب علامات التبويب ثابت — الفهرس N يقابل
 # استدعاء `static_tab(...)` رقم N في main.rs.
 
 # ── واجهة التطبيق ───────────────────────────────────────────────────────
-app-title = FernUI — كتالوج الودجات
+app-title = Bastyde — كتالوج الودجات
 app-subtitle = اسحب · انقر مزدوجًا للتكبير · انقر بزر الماوس الأيمن للقائمة
 app-unsupported-chrome = (الإطار المخصص غير مدعوم على هذه المنصة — العودة إلى الزخارف الأصلية)
 
 # ── مفتاح وضع العرض (الفتحة الخلفية لـ TabWidget) ────────────────────────
-mode-label = ‏fern! DSL
-mode-tooltip = بدّل كل علامة تبويب بين البنّاء التقليدي ونسخة الماكرو fern! للشجرة نفسها.
+mode-label = ‏bati! DSL
+mode-tooltip = بدّل كل علامة تبويب بين البنّاء التقليدي ونسخة الماكرو bati! للشجرة نفسها.
 
 # ── مبدِّل اللغة ────────────────────────────────────────────────────────
 locale-en = English
@@ -86,7 +86,7 @@ demo-loading = جاري التحميل…
 
 # ── علامة تبويب المؤشرات ────────────────────────────────────────────────
 ind-progress-determinate-label = ٦٠ ٪
-ind-link-docs = افتح وثائق FernUI
+ind-link-docs = افتح وثائق Bastyde
 ind-link-handler = مع معالج نقر
 
 # ── علامة تبويب الإدخال ─────────────────────────────────────────────────
@@ -115,7 +115,7 @@ btn-default = افتراضي
 btn-regular = عادي
 btn-flat = مسطّح
 btn-confirm-label = تأكيد
-btn-cmdlink-signin-title = تسجيل الدخول إلى حساب FernUI الخاص بك
+btn-cmdlink-signin-title = تسجيل الدخول إلى حساب Bastyde الخاص بك
 btn-cmdlink-signin-desc = استخدم بيانات الاعتماد الموجودة للوصول إلى المشاريع.
 btn-cmdlink-signup-title = إنشاء حساب جديد
 btn-cmdlink-signup-desc = مجاني للاستخدام الشخصي ومفتوح المصدر.
@@ -150,7 +150,7 @@ cnt-split-trailing = اللوحة الخلفية
 # ── علامة تبويب الإطار ──────────────────────────────────────────────────
 chr-status = جاهز · ١٢٤٧ سطرًا · UTF-8 · Rust
 chr-banner-info-title = معلومة
-chr-banner-info-body = هل علمت أن FernUI يدعم الكتابة من اليمين إلى اليسار؟
+chr-banner-info-body = هل علمت أن Bastyde يدعم الكتابة من اليمين إلى اليسار؟
 chr-banner-success-title = نجاح
 chr-banner-success-body = تم حفظ الإعدادات.
 chr-banner-warning-title = تحذير
@@ -159,11 +159,11 @@ chr-banner-error-title = خطأ
 chr-banner-error-body = انقطع الاتصال بالشبكة.
 chr-breadcrumb-home = الرئيسية
 chr-breadcrumb-docs = المستندات
-chr-breadcrumb-fernui = FernUI
+chr-breadcrumb-bastyde = Bastyde
 chr-breadcrumb-current = widget-catalog
 chr-wizard-title = الإعداد الأوّلي
 chr-wizard-step1 = مرحبًا
-chr-wizard-step1-body = الخطوة ١ — مرحبًا بك في FernUI
+chr-wizard-step1-body = الخطوة ١ — مرحبًا بك في Bastyde
 chr-wizard-step2 = إعداد
 chr-wizard-step2-body = الخطوة ٢ — أعدّ المحرّر
 chr-wizard-step3 = إنهاء

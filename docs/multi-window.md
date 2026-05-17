@@ -1,11 +1,11 @@
 # Multi-Window Reference
 
-FernUI's multi-window system is **signal-driven** and **synchronous**.
+Bastyde's multi-window system is **signal-driven** and **synchronous**.
 A single `WindowConfig` describes any window you want to open (initial
 or runtime); per-window state lives in a reactive
-[`WindowState`](../crates/fern-core/src/window/state.rs) that widgets
+[`WindowState`](../crates/bastyde-core/src/window/state.rs) that widgets
 bind against; handlers open, focus, and close windows through
-[`EventContext`](../crates/fern-core/src/widget.rs) methods that
+[`EventContext`](../crates/bastyde-core/src/widget.rs) methods that
 return real ids immediately.
 
 Mental model in one line:
@@ -25,16 +25,16 @@ Full end-to-end example:
 
 ## Canonical app shape
 
-Every FernUI app opens exactly one initial window via
-`FernAppBuilder::initial_window(WindowConfig)`. Secondary windows are
+Every Bastyde app opens exactly one initial window via
+`BastydeAppBuilder::initial_window(WindowConfig)`. Secondary windows are
 opened from handler code via `EventContext::open_window`.
 
 ```rust
-use fern_ui::prelude::*;
-use fern_ui::app::FernAppBuilder;
+use bastyde::prelude::*;
+use bastyde::app::BastydeAppBuilder;
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .theme(intui::light())
         .initial_window(
             WindowConfig::new()
@@ -50,7 +50,7 @@ fn main() {
 
 Notes:
 
-- `FernAppBuilder` has no `.window_title`, `.window_size`, `.root`, or
+- `BastydeAppBuilder` has no `.window_title`, `.window_size`, `.root`, or
   `.custom_chrome` — every window is described by `WindowConfig`.
   One conceptual surface, no special-casing for the initial window.
 - `root_builder` receives `(tree, WindowState)` — the state clone is
@@ -62,7 +62,7 @@ Notes:
 ## `WindowConfig`
 
 The single entry point for creating any window. Uniform whether you
-pass it to `FernAppBuilder::initial_window` at startup or to
+pass it to `BastydeAppBuilder::initial_window` at startup or to
 `EventContext::open_window` from a handler.
 
 ```rust
@@ -179,7 +179,7 @@ clone from `ctx.window()` (in both `BuildContext` and `EventContext`).
 pub struct WindowState(Rc<WindowStateInner>);
 
 impl WindowState {
-    pub fn id(&self) -> FernWindowId;
+    pub fn id(&self) -> BastydeWindowId;
     pub fn string_id(&self) -> Option<&str>;
 
     // Writable signals. App-side writes queue a `WindowCommand` to the
@@ -251,7 +251,7 @@ observer:
 
 Each event-loop tick:
 
-1. `fern-app`'s `handle_window_event_inner` translates winit
+1. `bastyde-app`'s `handle_window_event_inner` translates winit
    `Resized` / `Moved` / `Focused` events into calls like
    `state.set_placement_from_os(new)` / `set_size_from_os(size)`. These
    flip `applying_from_os` to `true` before writing the signal,
@@ -267,8 +267,8 @@ observer as an app-initiated OS call, desynchronizing OS and app mid-
 animation. The guard is the single concrete mechanism that makes
 `WindowState` safe as a shared source of truth.
 
-See [`state.rs`](../crates/fern-core/src/window/state.rs) for the
-implementation; see [`state.rs` tests](../crates/fern-core/src/window/state.rs)
+See [`state.rs`](../crates/bastyde-core/src/window/state.rs) for the
+implementation; see [`state.rs` tests](../crates/bastyde-core/src/window/state.rs)
 for `os_side_write_does_not_enqueue_command` and
 `os_side_write_still_notifies_derived_signals`.
 
@@ -283,13 +283,13 @@ the duration of dispatch.
 ```rust
 impl EventContext<'_> {
     pub fn window(&self) -> Option<&WindowState>;
-    pub fn open_window(&mut self, config: WindowConfig) -> FernWindowId;
-    pub fn open_modal(&mut self, request: ModalRequest) -> Option<FernWindowId>;
-    pub fn find_window(&self, string_id: &str) -> Option<FernWindowId>;
-    pub fn focus_window(&mut self, id: FernWindowId);
+    pub fn open_window(&mut self, config: WindowConfig) -> BastydeWindowId;
+    pub fn open_modal(&mut self, request: ModalRequest) -> Option<BastydeWindowId>;
+    pub fn find_window(&self, string_id: &str) -> Option<BastydeWindowId>;
+    pub fn focus_window(&mut self, id: BastydeWindowId);
     pub fn close_window(&mut self);                         // the current window
-    pub fn close_window_by_id(&mut self, id: FernWindowId);
-    pub fn window_state(&self, id: FernWindowId) -> Option<WindowState>;
+    pub fn close_window_by_id(&mut self, id: BastydeWindowId);
+    pub fn window_state(&self, id: BastydeWindowId) -> Option<WindowState>;
     pub fn windows(&self) -> Vec<WindowState>;
 }
 ```
@@ -297,7 +297,7 @@ impl EventContext<'_> {
 ### `open_window` is synchronous
 
 When you call `ctx.open_window(config)`, the winit-level window is
-created **before the call returns**. The returned `FernWindowId` is
+created **before the call returns**. The returned `BastydeWindowId` is
 immediately usable — you can pass it to `focus_window`, read its
 `window_state(id)`, or reference it as a modal parent in a subsequent
 `open_window` call in the same handler.
@@ -399,9 +399,9 @@ based on `ModalPresentation::Auto` and platform capability.
 
 ---
 
-## `FernAppBuilder::run()` lifecycle
+## `BastydeAppBuilder::run()` lifecycle
 
-1. `run()` builds a `FernAppHandler` and spins up the winit event loop.
+1. `run()` builds a `BastydeAppHandler` and spins up the winit event loop.
 2. On `resumed()`, the handler calls
    `WindowManager::create_window(initial_window_config, event_loop)` —
    synchronous winit creation, widget tree built, first paint requested.
@@ -432,26 +432,26 @@ based on `ModalPresentation::Auto` and platform capability.
 
 ## `WindowOps` and the dispatch re-entry pattern
 
-`WindowOps` is a trait in `fern-core`; `fern-app` provides
+`WindowOps` is a trait in `bastyde-core`; `bastyde-app` provides
 `WindowOpsImpl`. This is what lets `EventContext::open_window` route
-into `WindowManager::create_window` synchronously without fern-core
-depending on fern-app.
+into `WindowManager::create_window` synchronously without bastyde-core
+depending on bastyde-app.
 
 ```rust
-// fern-core
+// bastyde-core
 pub trait WindowOps {
-    fn open_window(&mut self, config: WindowConfig) -> FernWindowId;
-    fn find_window(&self, string_id: &str) -> Option<FernWindowId>;
-    fn window_state(&self, id: FernWindowId) -> Option<WindowState>;
+    fn open_window(&mut self, config: WindowConfig) -> BastydeWindowId;
+    fn find_window(&self, string_id: &str) -> Option<BastydeWindowId>;
+    fn window_state(&self, id: BastydeWindowId) -> Option<WindowState>;
     fn windows(&self) -> Vec<WindowState>;
-    fn focus_window(&mut self, id: FernWindowId);
-    fn close_window_by_id(&mut self, id: FernWindowId);
+    fn focus_window(&mut self, id: BastydeWindowId);
+    fn close_window_by_id(&mut self, id: BastydeWindowId);
 }
 ```
 
 ### Temporary-removal re-entry
 
-Inside `FernAppHandler::dispatch_in_window`:
+Inside `BastydeAppHandler::dispatch_in_window`:
 
 ```rust
 let Some(mut current) = self.wm.take_managed(winit_id) else { return };
@@ -461,7 +461,7 @@ let Some(mut current) = self.wm.take_managed(winit_id) else { return };
 // modal parents pointing at it still resolve.
 {
     let mut ops = WindowOpsImpl::new(&mut self.wm, event_loop,
-                                      current.fern_id,
+                                      current.bastyde_id,
                                       current_handle);
     current.tree.dispatch_event_with_ops(evt, &mut ops);
 }
@@ -518,7 +518,7 @@ panics (by design — the test has no event loop to create a window in).
 `ctx.find_window`, `ctx.window_state`, `ctx.windows` return `None` /
 empty.
 
-`fern-app` uses the `_with_ops` variants internally so real apps get
+`bastyde-app` uses the `_with_ops` variants internally so real apps get
 fully-threaded ops on every code path.
 
 ---
@@ -596,10 +596,10 @@ installing an observer through the current window's build context.
 - End-to-end demo:
   [`examples/multi_window`](../examples/multi_window/src/main.rs).
 - Implementation:
-  - Types — [`crates/fern-core/src/window/`](../crates/fern-core/src/window/)
-  - Dispatch — [`crates/fern-core/src/widget_tree/event_dispatch_impl.rs`](../crates/fern-core/src/widget_tree/event_dispatch_impl.rs)
-  - Window manager — [`crates/fern-app/src/window_manager.rs`](../crates/fern-app/src/window_manager.rs)
-  - `EventContext` methods — [`crates/fern-core/src/widget.rs`](../crates/fern-core/src/widget.rs)
+  - Types — [`crates/bastyde-core/src/window/`](../crates/bastyde-core/src/window/)
+  - Dispatch — [`crates/bastyde-core/src/widget_tree/event_dispatch_impl.rs`](../crates/bastyde-core/src/widget_tree/event_dispatch_impl.rs)
+  - Window manager — [`crates/bastyde-app/src/window_manager.rs`](../crates/bastyde-app/src/window_manager.rs)
+  - `EventContext` methods — [`crates/bastyde-core/src/widget.rs`](../crates/bastyde-core/src/widget.rs)
 - Related docs:
   - [`title-bar.md`](title-bar.md) — custom chrome integration
   - [`shortcut-intent-action.md`](shortcut-intent-action.md) — the

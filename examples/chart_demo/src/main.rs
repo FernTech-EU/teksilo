@@ -2,13 +2,13 @@
 //!
 //! Run with: `cargo run -p chart-demo`
 
-use fern_charts::{
+use bastyde_charts::{
     AxisConfig, BarChart, BarGrouping, ChartDatum, ChartSeries, LegendPosition, LineChart,
     PieChart, PieLabelMode,
 };
-use fern_ui::prelude::*;
-use fern_ui::tokens::HAlignment;
-use fern_ui::widgets::{
+use bastyde::prelude::*;
+use bastyde::tokens::HAlignment;
+use bastyde::widgets::{
     Button, ButtonVariant, Center, Expand, GroupHeader, HStack, Padding, SegmentedControl, Spacer,
     Switcher, TextWidget, Toolbar, VStack,
 };
@@ -20,9 +20,9 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                fern_ui::presets::intui::dark()
+                bastyde::presets::intui::dark()
             } else {
-                fern_ui::presets::intui::light()
+                bastyde::presets::intui::light()
             });
         }),
     ))
@@ -61,12 +61,12 @@ fn make_pie_data(seed: u32) -> Vec<ChartDatum<String>> {
 }
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — Chart Demo")
+                .title("Bastyde — Chart Demo")
                 .size(820, 720)
                 .root(|tree, _state| {
                     let series = Signal::new(make_series(1));

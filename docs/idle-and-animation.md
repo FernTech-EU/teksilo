@@ -4,7 +4,7 @@
 
 **An idle app must draw zero frames.** Not "almost zero". Not "a
 cheap 60 Hz". Zero — `rendered_frames == 0` in the
-`FERN_IDLE_TRACE=1` trace, `ControlFlow::Wait` in winit, no GPU submit,
+`BASTYDE_IDLE_TRACE=1` trace, `ControlFlow::Wait` in winit, no GPU submit,
 no CPU wake, no battery drain.
 
 "Idle" means:
@@ -18,7 +18,7 @@ bug. Track it down.
 
 ## Why so absolute
 
-FernUI is meant for long-running desktop apps. A 60 Hz idle pump costs CPU, GPU, battery, fan noise, and — on laptops — holds the package out of deep C-states. Compounded
+Bastyde is meant for long-running desktop apps. A 60 Hz idle pump costs CPU, GPU, battery, fan noise, and — on laptops — holds the package out of deep C-states. Compounded
 across every running animation, every unfocused window, every
 background process, it is the difference between "I left it open" and
 "my battery is dead".
@@ -31,18 +31,18 @@ Four gates, applied uniformly across **three** motion subsystems:
 
 - **Signal-tween path** — `Signal<f32>::animate_to` /
   `animate_looping`, scheduled by
-  [`AnimationScheduler`](../crates/fern-core/src/animation.rs).
+  [`AnimationScheduler`](../crates/bastyde-core/src/animation.rs).
 - **Shader-quad path** — `ctx.animated_quad(kind)`, scheduled by
-  [`AnimatedQuadRegistry`](../crates/fern-core/src/animated_quad.rs).
+  [`AnimatedQuadRegistry`](../crates/bastyde-core/src/animated_quad.rs).
 - **Per-frame-effect path** — `ctx.subscribe_frame_tick()`, scheduled
   by
-  [`FrameTickScheduler`](../crates/fern-core/src/frame_tick_scheduler.rs).
+  [`FrameTickScheduler`](../crates/bastyde-core/src/frame_tick_scheduler.rs).
   Used by widgets whose tick is neither a linear tween nor a quad
   uniform — `Pulse` (sine oscillation), `Cycle` (discrete index
   step), and any future hand-rolled `frame_tick` consumer.
 
 All three consult the same visibility primitives in
-[`motion_visibility`](../crates/fern-core/src/motion_visibility.rs)
+[`motion_visibility`](../crates/bastyde-core/src/motion_visibility.rs)
 (`alive`, `painted_this_frame`, `painted_recently`) so the
 "is my owner visible enough to keep waking?" decision has one
 canonical answer per scheduler shape. Any new source of idle wakes
@@ -56,8 +56,8 @@ scheduler that consults the same helpers.
    `destroy_subtree` both call `scheduler.cancel_by_widget(id)` before
    reconstructing. If you add a new lifecycle path that replaces
    widget state, it must do the same.
-   ([animation.rs](../crates/fern-core/src/animation.rs),
-   [widget_tree.rs](../crates/fern-core/src/widget_tree.rs))
+   ([animation.rs](../crates/bastyde-core/src/animation.rs),
+   [widget_tree.rs](../crates/bastyde-core/src/widget_tree.rs))
 
 2. **Per-window active flag.** `WindowEvent::Focused(false)` (and
    on macOS, `Occluded(true)`) calls `tree.set_window_active(false)`,
@@ -66,14 +66,14 @@ scheduler that consults the same helpers.
    `ControlFlow::Wait`. On resume, each animation's `start_time` is
    rebased by the paused duration so phase is continuous — a
    half-swept sweep resumes at 50%, not snapped forward.
-   ([app.rs](../crates/fern-app/src/app.rs),
-   [window_manager.rs](../crates/fern-app/src/window_manager.rs))
+   ([app.rs](../crates/bastyde-app/src/app.rs),
+   [window_manager.rs](../crates/bastyde-app/src/window_manager.rs))
 
 3. **Per-widget paint-epoch visibility.** `WidgetTree::paint_epoch`
    ticks on every non-cache-hit `render()`. `paint_widget_cached`
    stamps `last_painted_epoch` on each widget whose bounds survive
    clip intersection. The shared
-   [`motion_visibility`](../crates/fern-core/src/motion_visibility.rs)
+   [`motion_visibility`](../crates/bastyde-core/src/motion_visibility.rs)
    helpers turn that into a yes/no for each scheduler:
 
    - **Signal-tween path** uses `painted_recently`
@@ -105,7 +105,7 @@ scheduler that consults the same helpers.
    resumes phase-continuous.
 
    **Signal-path one-shots are *not* gated by visibility.** A
-   widget like [`Collapse`](../crates/fern-widgets/src/collapse.rs)
+   widget like [`Collapse`](../crates/bastyde-widgets/src/collapse.rs)
    drives a one-shot 0..1 progress signal that determines its own
    height — so when collapsed, its bounds are zero, it never paints,
    never re-stamps `last_painted_epoch`, and a visibility gate
@@ -117,11 +117,11 @@ scheduler that consults the same helpers.
    `paint_epoch == 0` is the "never rendered" sentinel: always
    visible, so headless unit tests that only call `layout()` don't
    regress.
-   ([rendering_impl.rs](../crates/fern-core/src/widget_tree/rendering_impl.rs),
-   [arena.rs](../crates/fern-core/src/arena.rs),
-   [animation.rs](../crates/fern-core/src/animation.rs),
-   [animated_quad.rs](../crates/fern-core/src/animated_quad.rs),
-   [frame_tick_scheduler.rs](../crates/fern-core/src/frame_tick_scheduler.rs))
+   ([rendering_impl.rs](../crates/bastyde-core/src/widget_tree/rendering_impl.rs),
+   [arena.rs](../crates/bastyde-core/src/arena.rs),
+   [animation.rs](../crates/bastyde-core/src/animation.rs),
+   [animated_quad.rs](../crates/bastyde-core/src/animated_quad.rs),
+   [frame_tick_scheduler.rs](../crates/bastyde-core/src/frame_tick_scheduler.rs))
 
 4. **Pixel-stable ε, mandatory terminal bypass.** Each
    `AnimationRequest` can carry an `epsilon` (unit: the signal's own
@@ -152,7 +152,7 @@ line):
 
 ```bash
 cargo build --profile profiling -p widget-catalog
-FERN_IDLE_TRACE=1 timeout 10 ./target/profiling/widget-catalog 2> /tmp/idle.log
+BASTYDE_IDLE_TRACE=1 timeout 10 ./target/profiling/widget-catalog 2> /tmp/idle.log
 wc -l /tmp/idle.log   # expect 0
 ```
 
@@ -172,7 +172,7 @@ the loop. Classify it:
   and the widget's `last_painted_epoch` vs. `tree.paint_epoch`.
 - **Timer source you forgot?** Every timer-backed deadline must flow
   through `next_timer_deadline` in
-  [overlay_impl.rs](../crates/fern-core/src/widget_tree/overlay_impl.rs).
+  [overlay_impl.rs](../crates/bastyde-core/src/widget_tree/overlay_impl.rs).
   If it doesn't, the event loop can't decide whether to sleep.
 - **Poll mode forced?** `ControlFlow::Poll` is used for
   `frame_tick_requested` (caret blink, drag auto-scroll). It must
@@ -197,7 +197,7 @@ accessibility behavior and a free idle win.
 
 ## Three animation paths — signal vs shader vs per-frame-effect
 
-FernUI carries three motion paths that coexist. Pick by shape:
+Bastyde carries three motion paths that coexist. Pick by shape:
 
 | Path | When to use | Cost when visible | `paint()` re-runs per frame? |
 | --- | --- | --- | --- |
@@ -274,7 +274,7 @@ canvas.draw_animated_quad(bounds, handle.slot(), AnimatedQuadClass::Procedural);
 The four gates (pause-on-window-unfocused, per-widget paint-epoch
 visibility, widget-drop/rebuild auto-cancel, `prefers_reduced_motion`)
 apply to all three paths in identical shape — they share the
-[`motion_visibility`](../crates/fern-core/src/motion_visibility.rs)
+[`motion_visibility`](../crates/bastyde-core/src/motion_visibility.rs)
 helpers and rebuild auto-cancel by RAII (the signal scheduler via
 `scheduler.cancel_by_widget(id)`, the shader registry via slot
 deallocation on widget destruction, the frame-tick scheduler via
@@ -358,4 +358,4 @@ skips recompositing the rest of the window. Wayland has
 `take_dirty_ranges` (Phase 0 of the plan). A future renderer
 revision can use that to upload only the changed slots instead of
 the full `scratch_slice` — single-call-site change in
-`fern-render`, useful when many quads idle (e.g. paused indicators).
+`bastyde-render`, useful when many quads idle (e.g. paused indicators).

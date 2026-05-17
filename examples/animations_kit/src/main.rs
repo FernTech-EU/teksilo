@@ -20,8 +20,8 @@
 
 use std::time::Duration;
 
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Blur, Button, ButtonVariant, Card, Center, Collapse, Crossfade, Cycle, Divider, Expand, Fade,
     FixedSize, HStack, Padding, Panel, ProgressBar, Pulse, RectWidget, Rotate, Scale, ScaleOrigin,
     ScrollArea, Shake, Slide, SlideEdge, SmoothSize, Spacer, Spinner, TextWidget, Toggle, Toolbar,
@@ -35,21 +35,21 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                fern_ui::presets::intui::dark()
+                bastyde::presets::intui::dark()
             } else {
-                fern_ui::presets::intui::light()
+                bastyde::presets::intui::light()
             });
         }),
     ))
 }
 
 fn main() {
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — Animations Kit")
+                .title("Bastyde — Animations Kit")
                 .size(560, 720)
                 .root(|tree, _state| {
                     let toggle_state = Signal::new(false);
@@ -348,7 +348,7 @@ fn build_kit(
                             angle.animate_to(
                                 target,
                                 Duration::from_millis(400),
-                                fern_ui::tokens::Easing::EaseOut,
+                                bastyde::tokens::Easing::EaseOut,
                             );
                         })
                 }),
@@ -376,7 +376,7 @@ fn build_kit(
                             radius.animate_to(
                                 target,
                                 Duration::from_millis(220),
-                                fern_ui::tokens::Easing::EaseOut,
+                                bastyde::tokens::Easing::EaseOut,
                             );
                         }),
                 )

@@ -1,4 +1,4 @@
-# FernUI examples — runtime benchmark
+# Bastyde examples — runtime benchmark
 
 - **Date:** 2026-05-09 18:18:24
 - **Duration:** 203.0s
@@ -20,7 +20,7 @@ Memory and CPU are per-process (RSS, sum of children). GPU busy% and VRAM are *s
 ### `animations`
 
 - Build: ok (73.5s)
-- Binary: `/home/cyril/Devel/fern-ui/target/release/animations`
+- Binary: `/home/cyril/Devel/bastyde/target/release/animations`
 - Binary size: 14.8 MiB
 - Samples collected: 116
 - RSS avg / peak: 113.9 MiB / 114.2 MiB
@@ -33,7 +33,7 @@ Memory and CPU are per-process (RSS, sum of children). GPU busy% and VRAM are *s
 ### `animations-kit`
 
 - Build: ok (58.5s)
-- Binary: `/home/cyril/Devel/fern-ui/target/release/animations-kit`
+- Binary: `/home/cyril/Devel/bastyde/target/release/animations-kit`
 - Binary size: 14.6 MiB
 - Samples collected: 116
 - RSS avg / peak: 112.8 MiB / 113.1 MiB

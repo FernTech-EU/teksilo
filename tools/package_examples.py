@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Build every FernUI example in release mode and bundle the resulting
+"""Build every Bastyde example in release mode and bundle the resulting
 binaries into a single .tar.gz archive.
 
 Usage:
     python3 tools/package_examples.py
-    python3 tools/package_examples.py --output dist/fern-examples.tar.gz
+    python3 tools/package_examples.py --output dist/bastyde-examples.tar.gz
     python3 tools/package_examples.py --only simple-button widget-catalog
     python3 tools/package_examples.py --skip drag-and-drop
     python3 tools/package_examples.py --no-build      # reuse existing binaries
@@ -64,7 +64,7 @@ def main() -> int:
         "--output", "-o",
         type=Path,
         default=None,
-        help="Output archive path (default: dist/fern-examples-<date>.tar.gz)",
+        help="Output archive path (default: dist/bastyde-examples-<date>.tar.gz)",
     )
     parser.add_argument("--only", nargs="+", metavar="PKG", help="Only these packages")
     parser.add_argument("--skip", nargs="+", metavar="PKG", default=[], help="Skip these packages")
@@ -74,7 +74,7 @@ def main() -> int:
 
     if args.output is None:
         stamp = datetime.date.today().isoformat()
-        args.output = REPO_ROOT / "dist" / f"fern-examples-{stamp}.tar.gz"
+        args.output = REPO_ROOT / "dist" / f"bastyde-examples-{stamp}.tar.gz"
 
     examples = discover_examples()
     if args.only:

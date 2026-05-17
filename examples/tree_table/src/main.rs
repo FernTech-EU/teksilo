@@ -13,11 +13,11 @@
 //! - `Role::TreeGrid` accessibility with per-row level + expanded.
 //! - ArrowLeft / ArrowRight on the tree column collapse / expand.
 
-use fern_ui::data::{
+use bastyde::data::{
     SelectionMode, SelectionModel, SortDirection, SortFilterTreeModel, TreeFilterMode, TreeModel,
 };
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Button, CellContext, Column, ColumnWidth, Expand, GridLines, HStack, Spacer,
     TableAlignment as Alignment, TableSelectionMode, TextWidget, Toolbar, TreeTable, VStack,
 };
@@ -29,9 +29,9 @@ fn dark_mode_toolbar() -> impl Widget {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
-                fern_ui::presets::intui::dark()
+                bastyde::presets::intui::dark()
             } else {
-                fern_ui::presets::intui::light()
+                bastyde::presets::intui::light()
             });
         }),
     ))
@@ -100,9 +100,9 @@ fn main() {
 
     let selection = SelectionModel::new(SelectionMode::Multi);
 
-    FernAppBuilder::new()
+    BastydeAppBuilder::new()
         .install_inspector_in_debug()
-        .theme(fern_ui::presets::intui::light())
+        .theme(bastyde::presets::intui::light())
         .initial_window(WindowConfig::new().title("TreeTable").size(900, 580).root(
             move |tree, _| {
                 let proxy_for_table = proxy.clone();

@@ -1,7 +1,7 @@
 //! Date & Time tab — Calendar, DateEdit, TimeEdit, DateTimeEdit, DateRangeEdit.
 
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::prelude::*;
+use bastyde::widgets::{
     Calendar, DateEdit, DateRange, DateRangeEdit, DateTimeEdit, Divider, FixedSize, TextWidget,
     TimeEdit, VStack,
 };
@@ -59,7 +59,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let cal_single_signal: Signal<Option<Date>> = ctx.signal(None);
     let cal_range_signal: Signal<Option<DateRange>> = ctx.signal(None);
     let date_signal: Signal<Option<Date>> = ctx.signal(None);
@@ -67,7 +67,7 @@ pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let dt_signal: Signal<Option<DateTime>> = ctx.signal(None);
     let range_signal: Signal<Option<DateRange>> = ctx.signal(None);
 
-    fern!(ctx => VStack {
+    bati!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

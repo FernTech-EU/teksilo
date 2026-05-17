@@ -1,0 +1,337 @@
+use bastyde_canvas::{Point, Rect, Size, SizeProposal};
+use bastyde_core::widget::{
+    LayoutContext, LayoutResponse, PaintContext, PendingChild, Widget, WidgetPlacement,
+};
+use bastyde_core::widget_id::WidgetId;
+use bastyde_tokens::Alignment;
+
+/// Layout modifier that claims space along one or both axes from its parent
+/// and stretches its child to fill it.
+///
+/// In an `HStack` / `VStack`, `Expand` participates in flex slack
+/// distribution: it returns a `LayoutResponse` with `flex` (default `1.0`),
+/// so the parent stack hands it a share of the leftover space proportional
+/// to flex. Default basis is **zero** — the wrapped child's natural size
+/// does NOT count in the rigid pool, which gives clean ratio layouts. Call
+/// [`Expand::respect_intrinsic`] to switch to **auto** basis (CSS
+/// flex-basis: auto), where the child's natural size acts as a floor and
+/// flex adds slack on top.
+///
+/// `Expand::new()` is the common case: claim space, fill the child.
+/// Use `.flex(n)` to change the ratio (e.g. 1:2 by pairing `flex(1)` with
+/// `flex(2)`). Use `.align_child(...)` to opt out of fill and align the
+/// child at its natural size within the claimed bounds.
+///
+/// **`horizontal()` / `vertical()` semantics.** The named axis is the one
+/// the wrapper *competes for slack on*. Both sizing and flex behavior
+/// follow from that:
+///
+/// - **Sizing:** when the parent binds an axis (`proposal.{axis} = Some`),
+///   the wrapper claims that axis regardless of its name. So
+///   `Expand::vertical(child)` inside a `VStack` (which binds width and
+///   leaves height open) fills the VStack's full width AND distributes
+///   vertical slack via flex. Cross-axis collapse to child intrinsic only
+///   happens when the parent left that axis open too.
+///
+/// - **Flex contribution:** the wrapper reports its `flex` weight only on
+///   axes the parent is distributing (i.e. left open). `Expand::horizontal()`
+///   inside a `VStack` reports `flex = 0` on the open vertical axis, so it
+///   does NOT compete for vertical slack with siblings — it just claims
+///   the cross-axis width and sits at its child's intrinsic height. Symmetric
+///   for `Expand::vertical()` inside an `HStack`.
+#[derive(Debug)]
+pub struct Expand {
+    child_id: Option<WidgetId>,
+    pending_child: Option<PendingChild>,
+    horizontal: bool,
+    vertical: bool,
+    flex: f32,
+    /// When `Some`, the child is laid out at its natural size and aligned;
+    /// when `None`, the child is stretched to the full Expand bounds.
+    child_alignment: Option<Alignment>,
+    /// When `true`, the wrapped child's natural size acts as a floor on the
+    /// flex axis (CSS flex-basis: auto). When `false` (default), the
+    /// wanted size on flex axes is `0` so the parent stack divides bounds
+    /// purely by flex weight (CSS flex-basis: 0).
+    respect_intrinsic: bool,
+}
+
+impl Expand {
+    /// Expand on both axes. Default `flex(1)`, child fills bounds.
+    pub fn new() -> Self {
+        Self {
+            child_id: None,
+            pending_child: None,
+            horizontal: true,
+            vertical: true,
+            flex: 1.0,
+            child_alignment: None,
+            respect_intrinsic: false,
+        }
+    }
+
+    /// Compete for slack on the horizontal axis only. Inside an `HStack`,
+    /// distributes flex on width while claiming bound height as-is. Inside
+    /// a `VStack` (which binds width and distributes height), claims the
+    /// VStack's full width but reports `flex = 0` so it doesn't steal
+    /// vertical slack from siblings — height stays at child intrinsic.
+    pub fn horizontal() -> Self {
+        Self {
+            child_id: None,
+            pending_child: None,
+            horizontal: true,
+            vertical: false,
+            flex: 1.0,
+            child_alignment: None,
+            respect_intrinsic: false,
+        }
+    }
+
+    /// Compete for slack on the vertical axis only. Inside a `VStack`,
+    /// distributes flex on height while claiming bound width as-is. Inside
+    /// an `HStack` (which binds height and distributes width), claims the
+    /// HStack's full height but reports `flex = 0` so it doesn't steal
+    /// horizontal slack from siblings — width stays at child intrinsic.
+    pub fn vertical() -> Self {
+        Self {
+            child_id: None,
+            pending_child: None,
+            horizontal: false,
+            vertical: true,
+            flex: 1.0,
+            child_alignment: None,
+            respect_intrinsic: false,
+        }
+    }
+
+    /// Override the flex weight reported to a parent stack. `flex(0)` opts
+    /// out of slack distribution (the wrapper still claims any offered
+    /// proposal, useful inside non-stack containers). Default: `1.0`.
+    pub fn flex(mut self, flex: f32) -> Self {
+        self.flex = flex.max(0.0);
+        self
+    }
+
+    /// Opt out of stretching the child. The child is laid out at its
+    /// natural size and positioned within the Expand's bounds according
+    /// to `alignment`.
+    pub fn align_child(mut self, alignment: Alignment) -> Self {
+        self.child_alignment = Some(alignment);
+        self
+    }
+
+    /// Switch to **auto** flex basis — the wrapped child's natural size
+    /// acts as a floor on each flex axis, and the parent stack adds slack
+    /// on top via the flex weight. Useful when the wrapper sits inside an
+    /// unconstrained parent (e.g. an outer `VStack` with `height = None`),
+    /// where the default zero-basis would let the child overflow because
+    /// the parent has no bound to share.
+    ///
+    /// Trade-off: with `respect_intrinsic`, exact ratios bend by content
+    /// width — `[Expand::flex(1).child(60), Expand::flex(2).child(40)]` in
+    /// 300 px gives `60 + 66 = 126` and `40 + 133 = 173` rather than
+    /// `100 / 200`. Without it (the default), the same layout splits
+    /// exactly `100 / 200`.
+    pub fn respect_intrinsic(mut self) -> Self {
+        self.respect_intrinsic = true;
+        self
+    }
+
+    /// Set child by pre-registered ID.
+    pub fn child_id(mut self, id: WidgetId) -> Self {
+        self.pending_child = Some(PendingChild::Id(id));
+        self
+    }
+
+    /// Set an inline child widget (deferred insertion).
+    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
+        self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
+        self
+    }
+}
+
+impl Default for Expand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Widget for Expand {
+    fn build(&mut self, ctx: &mut bastyde_core::build_context::BuildContext) -> Vec<WidgetId> {
+        if let Some(pending) = self.pending_child.take() {
+            self.child_id = Some(match pending {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            });
+        }
+        self.child_id.into_iter().collect()
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        let child_size = self
+            .child_id
+            .and_then(|id| ctx.child_size(id, SizeProposal::unspecified()))
+            .unwrap_or(Size::ZERO);
+
+        // Two separate concerns:
+        //
+        // 1. **Sizing.** Whether we *can* fill an axis depends on whether
+        //    the parent bound it. If `proposal.{axis}` is `Some(_)`, the
+        //    parent is offering exact space — claim it on every axis,
+        //    regardless of `horizontal` / `vertical` (otherwise an
+        //    `Expand::vertical` inside a `VStack` would collapse on the
+        //    cross axis to its child's intrinsic width). When the parent
+        //    leaves an axis open (`None`), we want pure slack on flex
+        //    axes (basis 0) or child's natural size as a floor when
+        //    `respect_intrinsic` is set.
+        //
+        // 2. **Flex contribution.** A wrapper should only ask for slack
+        //    on its *named* axis: `Expand::horizontal()` in a `VStack`
+        //    must NOT compete for the VStack's vertical slack, otherwise
+        //    a horizontal-fill wrapper would steal vertical space from
+        //    siblings. The parent's distributing axis is whichever side
+        //    of the proposal it left open. So we report `self.flex` only
+        //    when the open axis matches one of our named axes.
+        let basis_w = if self.respect_intrinsic {
+            child_size.width
+        } else {
+            0.0
+        };
+        let basis_h = if self.respect_intrinsic {
+            child_size.height
+        } else {
+            0.0
+        };
+        let w = match proposal.width {
+            Some(pw) => pw,
+            None if self.horizontal => basis_w,
+            None => child_size.width,
+        };
+        let h = match proposal.height {
+            Some(ph) => ph,
+            None if self.vertical => basis_h,
+            None => child_size.height,
+        };
+
+        // Flex axis logic: a parent stack distributes slack on the axis
+        // it left open in the proposal. Only contribute flex on an axis
+        // where (a) the parent is distributing (proposal=None on it),
+        // and (b) we want to expand on that axis. When both axes are
+        // bound or both are unspecified, report the full flex weight —
+        // the value is moot in non-stack contexts and the unspecified
+        // case happens during intrinsic measurement where the caller
+        // wants to know our "would-be" flex.
+        let flex = match (proposal.width, proposal.height) {
+            (None, Some(_)) if !self.horizontal => 0.0,
+            (Some(_), None) if !self.vertical => 0.0,
+            _ => self.flex,
+        };
+
+        LayoutResponse::flexible(Size::new(w, h), flex)
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            if let Some(alignment) = self.child_alignment {
+                // Align mode: child takes its natural size; we position it.
+                let child_size = ctx
+                    .child_size(child.id, SizeProposal::unspecified())
+                    .unwrap_or(bounds.size());
+                let rtl = ctx.is_rtl();
+                let (dx, dy) = alignment.resolve(
+                    (child_size.width, child_size.height),
+                    (bounds.width, bounds.height),
+                    rtl,
+                );
+                child.origin = Point::new(bounds.x + dx, bounds.y + dy);
+                child.size = child_size;
+            } else {
+                // Fill mode (default): child takes the full Expand bounds.
+                child.origin = bounds.origin();
+                child.size = bounds.size();
+            }
+        }
+    }
+
+    fn paint(&self, _bounds: Rect, _canvas: &mut bastyde_canvas::Canvas, _ctx: &PaintContext) {}
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.child_id.into_iter().collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bastyde_core::widget_tree::WidgetTree;
+
+    #[derive(Debug)]
+    struct FixedLeaf(f32, f32);
+    impl Widget for FixedLeaf {
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            Size::new(self.0, self.1).into()
+        }
+    }
+
+    #[test]
+    fn expand_at_root_fills_proposal() {
+        // At the tree root, the proposal IS the bounds. Expand claims it
+        // and fills its child to those bounds.
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FixedLeaf(40.0, 20.0));
+        let expand = tree.add(Expand::new().child_id(child));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let eb = tree.bounds(expand);
+        assert!((eb.width - 200.0).abs() < 0.01);
+        assert!((eb.height - 100.0).abs() < 0.01);
+
+        // Default fill mode: child stretches to full Expand bounds.
+        let cb = tree.bounds(child);
+        assert!((cb.width - 200.0).abs() < 0.01);
+        assert!((cb.height - 100.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn align_child_top_trailing() {
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FixedLeaf(40.0, 20.0));
+        let _expand = tree.add(
+            Expand::new()
+                .align_child(Alignment::TOP_TRAILING)
+                .child_id(child),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let cb = tree.bounds(child);
+        // Child stays at natural 40x20, placed top-trailing.
+        assert!((cb.width - 40.0).abs() < 0.01);
+        assert!((cb.height - 20.0).abs() < 0.01);
+        assert!((cb.x - 160.0).abs() < 0.01); // 200 - 40
+        assert!((cb.y - 0.0).abs() < 0.01); // top
+    }
+
+    #[test]
+    fn flex_default_is_one() {
+        let theme = bastyde_core::presets::intui::light();
+        let ctx = LayoutContext::for_testing(&theme);
+        let r = Expand::new().layout_response(SizeProposal::unspecified(), &ctx);
+        assert_eq!(r.flex, 1.0);
+    }
+
+    #[test]
+    fn flex_zero_opts_out() {
+        let theme = bastyde_core::presets::intui::light();
+        let ctx = LayoutContext::for_testing(&theme);
+        let r = Expand::new()
+            .flex(0.0)
+            .layout_response(SizeProposal::unspecified(), &ctx);
+        assert_eq!(r.flex, 0.0);
+    }
+}

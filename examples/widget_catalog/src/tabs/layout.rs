@@ -1,8 +1,8 @@
 //! Layout primitives tab — every container/spacing primitive in
-//! `fern_widgets::primitives`.
+//! `bastyde_widgets::primitives`.
 
-use fern_ui::prelude::*;
-use fern_ui::widgets::{
+use bastyde::prelude::*;
+use bastyde::widgets::{
     AspectRatio, Badge, Button, Center, Divider, Expand, FixedSize, FormLayout, Grid, HStack,
     MasonryLayout, MaxSize, MinSize, Padding, Panel, RectWidget, Spacer, Switcher, TextWidget,
     TrackSize, VStack, Wrap, ZStack,
@@ -280,12 +280,12 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
-    // FormLayout's `.line(label, field)` is a 2-arg method — no fern!
+pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
+    // FormLayout's `.line(label, field)` is a 2-arg method — no bati!
     // property form for it; pre-register. MasonryLayout, Grid, Wrap
     // express fine inline. Switcher's children are `.child(impl Widget)`
-    // which fern! handles, but switcher takes a Signal in the
-    // constructor — that fits fern! ctor syntax.
+    // which bati! handles, but switcher takes a Signal in the
+    // constructor — that fits bati! ctor syntax.
     let form_widget = ctx.add(
         FormLayout::new()
             .row_spacing(6.0)
@@ -301,7 +301,7 @@ pub fn fern(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let switcher_idx = sigs.tool_box_selected.clone();
     let switcher_idx_for_btn = switcher_idx.clone();
 
-    fern!(ctx => VStack {
+    bati!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

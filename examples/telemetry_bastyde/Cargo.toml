@@ -1,0 +1,15 @@
+[package]
+name = "telemetry-bastyde"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+bastyde = { workspace = true, features = ["telemetry"] }
+bastyde-analytics-bastyde = { workspace = true }
+bastyde-settings = { workspace = true }
+bastyde-telemetry = { workspace = true }
+bastyde-core = { workspace = true }
+uuid = { workspace = true }

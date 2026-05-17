@@ -11,4 +11,4 @@ name = "file-dialogs"
 path = "src/main.rs"
 
 [dependencies]
-fern-ui = { workspace = true, features = ["file-dialog"] }
+bastyde = { workspace = true, features = ["file-dialog"] }

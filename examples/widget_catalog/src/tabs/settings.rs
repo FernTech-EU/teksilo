@@ -1,7 +1,7 @@
 //! Settings tab — ShortcutSettings (and PrivacySettings note).
 
-use fern_ui::prelude::*;
-use fern_ui::widgets::{Divider, FixedSize, ShortcutSettings, TextWidget, VStack};
+use bastyde::prelude::*;
+use bastyde::widgets::{Divider, FixedSize, ShortcutSettings, TextWidget, VStack};
 
 use crate::shared::{Signals, section, tab_header};
 
@@ -39,8 +39,8 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
-    fern!(ctx => VStack {
+pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+    bati!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0

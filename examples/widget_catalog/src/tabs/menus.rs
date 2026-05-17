@@ -1,7 +1,7 @@
 //! Menus tab — MenuBar, MenuList, MenuItem.
 
-use fern_ui::prelude::*;
-use fern_ui::widgets::{Divider, MenuBar, MenuItem, MenuList, TextWidget, VStack};
+use bastyde::prelude::*;
+use bastyde::widgets::{Divider, MenuBar, MenuItem, MenuList, TextWidget, VStack};
 
 use crate::shared::{Signals, section, tab_header};
 
@@ -70,13 +70,13 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     )
 }
 
-pub fn fern(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
-    // MenuBar's `.menu(...)` method takes a closure — fern! property
+pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+    // MenuBar's `.menu(...)` method takes a closure — bati! property
     // syntax can't express that cleanly, so we pre-register.
     let menu_bar = ctx.add(make_menu_bar());
     let menu_list = ctx.add(make_menu_list());
 
-    fern!(ctx => VStack {
+    bati!(ctx => VStack {
             spacing: 20.0
             VStack {
                 spacing: 4.0
