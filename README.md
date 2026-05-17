@@ -206,6 +206,10 @@ Mozilla Public License 2.0. See `LICENSE`. FernUI can be used in commercial and 
 
 For priority bug fixes, written support, or an indemnification agreement, contact <support@ferntech.eu>. For everyone else, the issue tracker is the right place.
 
+## Trademark
+
+"Bastyde" and the Bastyde logo are trademarks of [FernTech / Cyril Jacquet] (EUIPO [application / registration] [#XXXXX], [filed / granted] [YYYY-MM-DD]). The MPL-2.0 source license does **not** grant trademark rights. Forks and derivative works may use the source code under MPL-2.0 but must adopt a distinct name and distinct branding when distributed (compare Firefox / Iceweasel, Chromium / Chrome). Nominative use ("built with Bastyde", "Bastyde-compatible widget", articles describing Bastyde) is fine. For other uses, contact <trademarks@ferntech.eu>.
+
 ## Acknowledgments
 
 FernUI builds on the work of others: AccessKit; winit and wgpu; HarfBuzz (via rustybuzz), swash, fontdb, etagere, and ICU4X; unicode-bidi and unicode-linebreak; Fluent and the Mozilla l10n team; the published design notes of the Druid, Masonry, and Xilem projects; and SwiftUI's layout protocol. Anthropic and Mistral provided the language models whose code generation contributed substantially under human review.
