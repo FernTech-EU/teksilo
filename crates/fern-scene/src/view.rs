@@ -71,6 +71,97 @@ const DEFAULT_MAX_ZOOM: f32 = 10.0;
 /// PointerUp for the gesture to count as a tap rather than a drag.
 const TAP_MOVEMENT_THRESHOLD: f32 = 4.0;
 
+/// Take the tightening intersection of two optional zoom ranges:
+/// `(max(lo), min(hi))`. `None` on either side leaves the other
+/// untouched; `None` on both returns `None`. Used to compose
+/// Scene-level + view-level constraints — neither side can loosen.
+fn intersect_zoom_range(
+    a: Option<&std::ops::RangeInclusive<f32>>,
+    b: Option<&std::ops::RangeInclusive<f32>>,
+) -> Option<std::ops::RangeInclusive<f32>> {
+    match (a, b) {
+        (None, None) => None,
+        (Some(r), None) | (None, Some(r)) => Some(r.clone()),
+        (Some(a), Some(b)) => {
+            let lo = a.start().max(*b.start());
+            let hi = a.end().min(*b.end());
+            // Guard against degenerate intersect: if the ranges
+            // don't overlap (lo > hi), collapse to the tighter
+            // side's lo so callers see a single allowed value
+            // rather than NaN-clamping.
+            Some(lo..=hi.max(lo))
+        }
+    }
+}
+
+/// Clamp a zoom factor through an optional range. `None` is the
+/// identity — no clamp applied.
+fn clamp_zoom(z: f32, range: Option<&std::ops::RangeInclusive<f32>>) -> f32 {
+    match range {
+        None => z,
+        Some(r) => z.clamp(*r.start(), *r.end()),
+    }
+}
+
+/// Take the tightening intersection of two optional pan-bounds
+/// rects. `None` on either side leaves the other untouched; `None`
+/// on both returns `None`. If both are `Some` and the rect
+/// intersection is empty (no overlap), falls back to the first
+/// (Scene-declared) bounds — the more authoritative side.
+fn intersect_pan_bounds(scene: Option<Rect>, view: Option<Rect>) -> Option<Rect> {
+    match (scene, view) {
+        (None, None) => None,
+        (Some(r), None) | (None, Some(r)) => Some(r),
+        (Some(a), Some(b)) => {
+            let x = a.x.max(b.x);
+            let y = a.y.max(b.y);
+            let right = a.right().min(b.right());
+            let bottom = a.bottom().min(b.bottom());
+            if right > x && bottom > y {
+                Some(Rect::new(x, y, right - x, bottom - y))
+            } else {
+                Some(a)
+            }
+        }
+    }
+}
+
+/// Clamp a pan vector against `bounds` so the visible scene region
+/// (derived from `viewport` and `zoom`) stays inside the bounds rect.
+/// When the rect is smaller than the visible viewport on an axis,
+/// that axis is centered on the bounds rather than clamped.
+///
+/// `bounds` is in scene coords; `viewport` is the SceneView's
+/// resolved size in screen pixels; `zoom` is the current zoom
+/// factor. Returns `pan` unchanged when `bounds` is `None`.
+fn clamp_pan_to_bounds(pan: Vec2, bounds: Option<&Rect>, viewport: Size, zoom: f32) -> Vec2 {
+    let Some(b) = bounds else { return pan };
+    if zoom <= 0.0 || viewport.width <= 0.0 || viewport.height <= 0.0 {
+        return pan;
+    }
+    // visible_scene_x = [-pan.x / zoom, (viewport_w - pan.x) / zoom]
+    // For visible to lie inside [b.x, b.right]:
+    //   pan.x in [viewport_w - b.right * zoom, -b.x * zoom]
+    let clamp_axis = |pan_c: f32, b_lo: f32, b_hi: f32, vp: f32| {
+        let lo = vp - b_hi * zoom;
+        let hi = -b_lo * zoom;
+        if hi >= lo {
+            pan_c.clamp(lo, hi)
+        } else {
+            // Bounds smaller than viewport on this axis — center.
+            // visible_center = b_lo + (b_hi - b_lo)/2
+            //                = (b_lo + b_hi) / 2
+            //                = (vp/2 - pan_c) / zoom
+            // → pan_c = vp/2 - (b_lo + b_hi)/2 * zoom
+            vp / 2.0 - ((b_lo + b_hi) / 2.0) * zoom
+        }
+    };
+    Vec2::new(
+        clamp_axis(pan.x, b.x, b.right(), viewport.width),
+        clamp_axis(pan.y, b.y, b.bottom(), viewport.height),
+    )
+}
+
 /// In-flight marquee box-select state. Tracked in scene
 /// coordinates so pan/zoom mid-drag (e.g. the user holds shift
 /// and scrolls while dragging) doesn't break the rectangle's
@@ -268,8 +359,20 @@ pub struct SceneView {
     rotation: Signal<f32>,
 
     // --- View configuration ----------------------------------------
-    min_zoom: f32,
-    max_zoom: f32,
+    /// View-level *tightening* override on the underlying
+    /// [`Scene`]'s zoom range. The effective clamp applied at
+    /// gesture / set_zoom / pan_to time is the intersection of
+    /// `Scene::current_zoom_range()` and this override (see
+    /// `effective_zoom_range`). `None` means the view does not
+    /// constrain zoom; the default is `Some(0.1..=10.0)` so
+    /// existing callers see the historical clamp behaviour.
+    zoom_range_override: Signal<Option<std::ops::RangeInclusive<f32>>>,
+    /// View-level *tightening* override on the underlying
+    /// [`Scene`]'s pan bounds. The effective clamp is the rect
+    /// intersection of `Scene::current_pan_bounds()` and this
+    /// override. `None` (the default) leaves pan unconstrained
+    /// from the view side.
+    pan_bounds_override: Signal<Option<Rect>>,
     pan_anim_duration: Duration,
     zoom_anim_duration: Duration,
     line_height: f32,
@@ -440,8 +543,8 @@ impl std::fmt::Debug for SceneView {
             .field("materialized_count", &self.materialized.len())
             .field("default_size", &self.default_size)
             .field("interactive", &self.interactive)
-            .field("min_zoom", &self.min_zoom)
-            .field("max_zoom", &self.max_zoom)
+            .field("zoom_range_override", &self.zoom_range_override.get())
+            .field("pan_bounds_override", &self.pan_bounds_override.get())
             .field("a11y_mode", &self.a11y_mode)
             .field("a11y_off_screen_mode", &self.a11y_off_screen_mode)
             .field("selection_mode", &self.selection.mode())
@@ -496,8 +599,8 @@ impl SceneView {
             zoom,
             rotation,
             bounds_origin_signal,
-            min_zoom: DEFAULT_MIN_ZOOM,
-            max_zoom: DEFAULT_MAX_ZOOM,
+            zoom_range_override: Signal::new(Some(DEFAULT_MIN_ZOOM..=DEFAULT_MAX_ZOOM)),
+            pan_bounds_override: Signal::new(None),
             pan_anim_duration: DEFAULT_PAN_DURATION,
             zoom_anim_duration: DEFAULT_ZOOM_DURATION,
             line_height: DEFAULT_LINE_HEIGHT,
@@ -914,17 +1017,62 @@ impl SceneView {
     }
 
     /// Minimum zoom factor (default 0.1×). Applied as a clamp to all
-    /// programmatic and gesture-driven zoom changes.
-    pub fn min_zoom(mut self, v: f32) -> Self {
-        self.min_zoom = v.max(0.0001);
+    /// programmatic and gesture-driven zoom changes via the
+    /// view-level [`zoom_range_override`](Self::zoom_range_override).
+    /// Shim — updates the lower bound of the override range. The
+    /// effective clamp is the intersection of Scene-level
+    /// [`Scene::set_zoom_range`](crate::Scene::set_zoom_range) and
+    /// this override (tightening-only — neither side can loosen).
+    pub fn min_zoom(self, v: f32) -> Self {
+        let lo = v.max(0.0001);
+        let current = self.zoom_range_override.get();
+        let hi = current.as_ref().map(|r| *r.end()).unwrap_or(DEFAULT_MAX_ZOOM);
+        self.zoom_range_override.set(Some(lo..=hi.max(lo)));
         self
     }
 
-    /// Maximum zoom factor (default 10×). Applied as a clamp to all
-    /// programmatic and gesture-driven zoom changes.
-    pub fn max_zoom(mut self, v: f32) -> Self {
-        self.max_zoom = v.max(self.min_zoom);
+    /// Maximum zoom factor (default 10×). Shim — updates the upper
+    /// bound of the override range. See [`min_zoom`](Self::min_zoom).
+    pub fn max_zoom(self, v: f32) -> Self {
+        let current = self.zoom_range_override.get();
+        let lo = current.as_ref().map(|r| *r.start()).unwrap_or(DEFAULT_MIN_ZOOM);
+        self.zoom_range_override.set(Some(lo..=v.max(lo)));
         self
+    }
+
+    /// Replace the view-level zoom-range override wholesale.
+    /// `None` clears the override so this view imposes no zoom
+    /// clamp of its own (Scene-level constraints still apply).
+    /// Tightening rule: the effective clamp is the intersection
+    /// with `Scene::current_zoom_range()` — neither can loosen.
+    pub fn zoom_range_override(self, range: Option<std::ops::RangeInclusive<f32>>) -> Self {
+        self.zoom_range_override.set(range);
+        self
+    }
+
+    /// Reactive accessor for the view-level zoom-range override.
+    /// Use this to mutate the override at runtime (e.g. from a
+    /// toolbar). Mutations take effect on the next gesture.
+    pub fn zoom_range_override_signal(&self) -> Signal<Option<std::ops::RangeInclusive<f32>>> {
+        self.zoom_range_override.clone()
+    }
+
+    /// View-level *tightening* override on pan bounds, in scene
+    /// coords. The effective clamp at gesture-time is the rect
+    /// intersection with `Scene::current_pan_bounds()` — view
+    /// overrides cannot loosen what the `Scene` declares. `None`
+    /// (default) means no view-side clamp.
+    pub fn pan_bounds_override(self, bounds: Option<Rect>) -> Self {
+        self.pan_bounds_override.set(bounds);
+        self
+    }
+
+    /// Reactive accessor for the view-level pan-bounds override.
+    /// Use this to mutate the override at runtime (e.g. dynamically
+    /// shrinking the navigable area). Mutations take effect on the
+    /// next gesture.
+    pub fn pan_bounds_override_signal(&self) -> Signal<Option<Rect>> {
+        self.pan_bounds_override.clone()
     }
 
     /// Logical pixels of pan applied per scroll-wheel line notch.
@@ -1026,7 +1174,7 @@ impl SceneView {
         if !self.scene.is_zoomable() || self.adopt_scene_size {
             return;
         }
-        let clamped = target.clamp(self.min_zoom, self.max_zoom);
+        let clamped = self.gate_zoom_target(target);
         self.zoom.animate_to(clamped, duration, Easing::EaseOut);
     }
 
@@ -1036,7 +1184,7 @@ impl SceneView {
         if !self.scene.is_zoomable() || self.adopt_scene_size {
             return;
         }
-        let clamped = target.clamp(self.min_zoom, self.max_zoom);
+        let clamped = self.gate_zoom_target(target);
         self.zoom.set(clamped);
     }
 
@@ -1104,21 +1252,55 @@ impl SceneView {
         self.pan_to(new_pan, self.pan_anim_duration);
     }
 
-    /// Project `target` through the scene's pan-axes policy. The
-    /// orthogonal axis is held at its current value when the policy
-    /// excludes it; `PanAxes::None` (and `adopt_scene_size`) holds
-    /// both axes at their current pan.
+    /// Project `target` through the scene's pan-axes policy AND
+    /// clamp to the effective pan-bounds (intersection of Scene-
+    /// declared pan_bounds and view-level pan_bounds_override —
+    /// tightening-only). The orthogonal axis is held at its current
+    /// value when the policy excludes it; `PanAxes::None` (and
+    /// `adopt_scene_size`) holds both axes at their current pan.
     fn gate_pan_target(&self, target: Vec2) -> Vec2 {
         use crate::scene::PanAxes;
         if self.adopt_scene_size {
             return Vec2::new(self.pan_x.get(), self.pan_y.get());
         }
-        match self.scene.current_pan_axes() {
+        let axes = self.scene.current_pan_axes();
+        let after_axes = match axes {
             PanAxes::Both => target,
             PanAxes::None => Vec2::new(self.pan_x.get(), self.pan_y.get()),
             PanAxes::Horizontal => Vec2::new(target.x, self.pan_y.get()),
             PanAxes::Vertical => Vec2::new(self.pan_x.get(), target.y),
-        }
+        };
+        clamp_pan_to_bounds(
+            after_axes,
+            self.effective_pan_bounds().as_ref(),
+            self.last_viewport.get(),
+            self.zoom.get(),
+        )
+    }
+
+    /// Clamp `zoom` to the effective zoom range (intersection of
+    /// Scene-declared `zoom_range` and view-level `zoom_range_override`).
+    /// `None` on either side means "no constraint from that side";
+    /// when both are `None` this is the identity. Tightening-only —
+    /// neither side can loosen what the other imposes.
+    fn gate_zoom_target(&self, zoom: f32) -> f32 {
+        clamp_zoom(zoom, self.effective_zoom_range().as_ref())
+    }
+
+    /// Effective zoom range = intersect(Scene declared, view override).
+    fn effective_zoom_range(&self) -> Option<std::ops::RangeInclusive<f32>> {
+        intersect_zoom_range(
+            self.scene.current_zoom_range().as_ref(),
+            self.zoom_range_override.get().as_ref(),
+        )
+    }
+
+    /// Effective pan bounds = intersect(Scene declared, view override).
+    fn effective_pan_bounds(&self) -> Option<Rect> {
+        intersect_pan_bounds(
+            self.scene.current_pan_bounds(),
+            self.pan_bounds_override.get(),
+        )
     }
 
     /// Animate rotation to `target` over `duration` (radians).
@@ -1160,8 +1342,7 @@ impl SceneView {
     pub fn restore_state(&self, state: crate::SceneViewState) {
         self.pan_x.set(state.pan_x);
         self.pan_y.set(state.pan_y);
-        self.zoom
-            .set(state.zoom.clamp(self.min_zoom, self.max_zoom));
+        self.zoom.set(self.gate_zoom_target(state.zoom));
         self.rotation.set(state.rotation);
     }
 
@@ -1219,9 +1400,8 @@ impl SceneView {
         let margin = 24.0;
         let avail_w = (viewport.width - margin * 2.0).max(1.0);
         let avail_h = (viewport.height - margin * 2.0).max(1.0);
-        let scale = (avail_w / rect.width.max(1.0))
-            .min(avail_h / rect.height.max(1.0))
-            .clamp(self.min_zoom, self.max_zoom);
+        let raw_scale = (avail_w / rect.width.max(1.0)).min(avail_h / rect.height.max(1.0));
+        let scale = self.gate_zoom_target(raw_scale);
         let center = rect.center();
         let pan = Vec2::new(
             viewport.width * 0.5 - scale * center.x,
@@ -1385,12 +1565,14 @@ impl Widget for SceneView {
         self.self_widget_id.set(Some(self_id));
 
         // Wire scroll + pinch handlers. Captures are by clone so they
-        // outlive the build call.
+        // outlive the build call. Reactive constraint signals
+        // (pan_axes, zoom_range, pan_bounds, zoomable) are captured
+        // as Signal clones — the closures read `.get()` per event,
+        // so runtime mutations of the underlying signals take effect
+        // on the next gesture without rebuilding the view.
         let prefers_reduced = ctx.prefers_reduced_motion();
         let line_height = self.line_height;
         let pan_dur = self.pan_anim_duration;
-        let min_zoom = self.min_zoom;
-        let max_zoom = self.max_zoom;
 
         let mut handlers = HandlerSet::new();
 
@@ -1638,11 +1820,13 @@ impl Widget for SceneView {
                 let bounds_origin_for_scroll = self.bounds_origin_signal.clone();
                 let last_viewport_for_scroll = self.last_viewport.clone();
                 let cursor_pos_for_scroll = self.cursor_pos.clone();
-                // Snapshot the scene's interaction policy at build time.
-                // Subsequent `Scene::pan_axes` / `Scene::zoomable` changes
-                // take effect on the next rebuild.
-                let pan_axes = self.scene.current_pan_axes();
-                let zoomable = self.scene.is_zoomable() && !self.adopt_scene_size;
+                let pan_axes_sig = self.scene.pan_axes_signal();
+                let zoomable_sig = self.scene.zoomable_signal();
+                let scene_zoom_range_sig = self.scene.zoom_range_signal();
+                let view_zoom_range_sig = self.zoom_range_override.clone();
+                let scene_pan_bounds_sig = self.scene.pan_bounds_signal();
+                let view_pan_bounds_sig = self.pan_bounds_override.clone();
+                let adopt_scene_size = self.adopt_scene_size;
                 handlers = handlers.on_scroll(move |event, _ctx| {
                     use crate::scene::PanAxes;
                     let WidgetEvent::Scroll { delta, modifiers } = event else {
@@ -1652,10 +1836,10 @@ impl Widget for SceneView {
                         ScrollDelta::Pixels { x, y } => (*x, *y),
                         ScrollDelta::Lines { x, y } => (*x * line_height, *y * line_height),
                     };
-                    // Apply the scene's pan-axes policy: zero out the
-                    // restricted axis so it passes through to ancestor
+                    // Apply the scene's pan-axes policy live: zero out
+                    // the restricted axis so it passes through to ancestor
                     // scrollables instead of being absorbed.
-                    match pan_axes {
+                    match pan_axes_sig.get() {
                         PanAxes::Both => {}
                         PanAxes::None => {
                             dx = 0.0;
@@ -1668,6 +1852,7 @@ impl Widget for SceneView {
                             dx = 0.0;
                         }
                     }
+                    let zoomable = zoomable_sig.get() && !adopt_scene_size;
                     // Ctrl+wheel = zoom about the viewport center.
                     // Unmodified wheel / trackpad pan = pan the view.
                     if modifiers.ctrl() {
@@ -1692,7 +1877,11 @@ impl Widget for SceneView {
                         let factor = (-step_px * 0.1).exp();
                         let z_old = zoom.get();
                         let r_now = rotation.get();
-                        let z_new = (z_old * factor).clamp(min_zoom, max_zoom);
+                        let scene_range = scene_zoom_range_sig.get();
+                        let view_range = view_zoom_range_sig.get();
+                        let effective_zoom =
+                            intersect_zoom_range(scene_range.as_ref(), view_range.as_ref());
+                        let z_new = clamp_zoom(z_old * factor, effective_zoom.as_ref());
                         if (z_new - z_old).abs() < 1e-6 {
                             return EventResponse::Handled;
                         }
@@ -1720,6 +1909,20 @@ impl Widget for SceneView {
                             bo,
                         )
                         .unwrap_or(pan_old);
+                        // Clamp the zoom-induced pan adjustment against
+                        // the effective pan_bounds so wheel-zoom over
+                        // a doc-style bounded scene doesn't push the
+                        // viewport off the document.
+                        let effective_bounds = intersect_pan_bounds(
+                            scene_pan_bounds_sig.get(),
+                            view_pan_bounds_sig.get(),
+                        );
+                        let new_pan = clamp_pan_to_bounds(
+                            new_pan,
+                            effective_bounds.as_ref(),
+                            viewport_size,
+                            z_new,
+                        );
                         // Snap zoom + pan together. Animating the two
                         // signals independently with EaseOut would drift
                         // mid-tween (the anchor math is exact only at
@@ -1744,14 +1947,23 @@ impl Widget for SceneView {
                     // the natural-scroll feel of trackpads.
                     let base_x = pan_x.animation_target().unwrap_or_else(|| pan_x.get());
                     let base_y = pan_y.animation_target().unwrap_or_else(|| pan_y.get());
-                    let target_x = base_x + dx;
-                    let target_y = base_y + dy;
+                    // Clamp the projected pan against effective bounds.
+                    let effective_bounds = intersect_pan_bounds(
+                        scene_pan_bounds_sig.get(),
+                        view_pan_bounds_sig.get(),
+                    );
+                    let clamped = clamp_pan_to_bounds(
+                        Vec2::new(base_x + dx, base_y + dy),
+                        effective_bounds.as_ref(),
+                        last_viewport_for_scroll.get(),
+                        zoom.get(),
+                    );
                     if prefers_reduced {
-                        pan_x.set(target_x);
-                        pan_y.set(target_y);
+                        pan_x.set(clamped.x);
+                        pan_y.set(clamped.y);
                     } else {
-                        pan_x.animate_to(target_x, pan_dur, Easing::EaseOut);
-                        pan_y.animate_to(target_y, pan_dur, Easing::EaseOut);
+                        pan_x.animate_to(clamped.x, pan_dur, Easing::EaseOut);
+                        pan_y.animate_to(clamped.y, pan_dur, Easing::EaseOut);
                     }
                     EventResponse::Handled
                 });
@@ -1763,11 +1975,17 @@ impl Widget for SceneView {
                 let zoom = self.zoom.clone();
                 let rotation = self.rotation.clone();
                 let bounds_origin_for_pinch = self.bounds_origin_signal.clone();
-                let zoomable_pinch = self.scene.is_zoomable() && !self.adopt_scene_size;
-                let pan_axes_pinch = self.scene.current_pan_axes();
+                let last_viewport_for_pinch = self.last_viewport.clone();
+                let zoomable_sig_pinch = self.scene.zoomable_signal();
+                let pan_axes_sig_pinch = self.scene.pan_axes_signal();
+                let scene_zoom_range_sig_pinch = self.scene.zoom_range_signal();
+                let view_zoom_range_sig_pinch = self.zoom_range_override.clone();
+                let scene_pan_bounds_sig_pinch = self.scene.pan_bounds_signal();
+                let view_pan_bounds_sig_pinch = self.pan_bounds_override.clone();
+                let adopt_scene_size_pinch = self.adopt_scene_size;
                 handlers = handlers.on_pinch(move |phase, _ctx| {
                     use crate::scene::PanAxes;
-                    if !zoomable_pinch {
+                    if !zoomable_sig_pinch.get() || adopt_scene_size_pinch {
                         return;
                     }
                     let PinchPhase::Changed {
@@ -1783,7 +2001,11 @@ impl Widget for SceneView {
                     }
                     let z_old = zoom.get();
                     let r_old = rotation.get();
-                    let z_new = (z_old * scale).clamp(min_zoom, max_zoom);
+                    let scene_range = scene_zoom_range_sig_pinch.get();
+                    let view_range = view_zoom_range_sig_pinch.get();
+                    let effective_zoom =
+                        intersect_zoom_range(scene_range.as_ref(), view_range.as_ref());
+                    let z_new = clamp_zoom(z_old * scale, effective_zoom.as_ref());
                     let r_new = r_old + rotation_delta;
                     let pan_old = Vec2::new(pan_x.get(), pan_y.get());
                     let bo = bounds_origin_for_pinch.get();
@@ -1797,15 +2019,25 @@ impl Widget for SceneView {
                     // requested.
                     zoom.set(z_new);
                     rotation.set(r_new);
-                    // Apply pan-axes policy to the pinch's pan
-                    // adjustment so a horizontal-only scene doesn't
-                    // accidentally drift on Y from the gesture math.
-                    let new_pan = match pan_axes_pinch {
+                    // Apply pan-axes policy live, then clamp to
+                    // effective pan_bounds (intersection of Scene +
+                    // view-override).
+                    let new_pan = match pan_axes_sig_pinch.get() {
                         PanAxes::Both => new_pan,
                         PanAxes::None => pan_old,
                         PanAxes::Horizontal => Vec2::new(new_pan.x, pan_old.y),
                         PanAxes::Vertical => Vec2::new(pan_old.x, new_pan.y),
                     };
+                    let effective_bounds = intersect_pan_bounds(
+                        scene_pan_bounds_sig_pinch.get(),
+                        view_pan_bounds_sig_pinch.get(),
+                    );
+                    let new_pan = clamp_pan_to_bounds(
+                        new_pan,
+                        effective_bounds.as_ref(),
+                        last_viewport_for_pinch.get(),
+                        z_new,
+                    );
                     pan_x.set(new_pan.x);
                     pan_y.set(new_pan.y);
                 });
@@ -1837,23 +2069,42 @@ impl Widget for SceneView {
                 let zoom = self.zoom.clone();
                 let pan_dur = self.pan_anim_duration;
                 let zoom_dur = self.zoom_anim_duration;
-                let min_zoom = self.min_zoom;
-                let max_zoom = self.max_zoom;
                 let viewport_size = self.last_viewport.clone();
                 let pan_x_for_xform = self.pan_x.clone();
                 let pan_y_for_xform = self.pan_y.clone();
                 let zoom_for_xform = self.zoom.clone();
                 let rotation_for_xform = self.rotation.clone();
                 let bounds_origin_for_xform = self.bounds_origin_signal.clone();
-                let pan_axes_keys = self.scene.current_pan_axes();
-                let zoomable_keys = self.scene.is_zoomable() && !self.adopt_scene_size;
+                let pan_axes_sig_keys = self.scene.pan_axes_signal();
+                let zoomable_sig_keys = self.scene.zoomable_signal();
+                let scene_zoom_range_sig_keys = self.scene.zoom_range_signal();
+                let view_zoom_range_sig_keys = self.zoom_range_override.clone();
+                let scene_pan_bounds_sig_keys = self.scene.pan_bounds_signal();
+                let view_pan_bounds_sig_keys = self.pan_bounds_override.clone();
+                let adopt_scene_size_keys = self.adopt_scene_size;
                 handlers = handlers.on_key(move |event, _ctx| {
                     use crate::scene::PanAxes;
                     let WidgetEvent::KeyDown { key, .. } = event else {
                         return EventResponse::Ignored;
                     };
+                    let pan_axes_keys = pan_axes_sig_keys.get();
+                    let zoomable_keys = zoomable_sig_keys.get() && !adopt_scene_size_keys;
                     let allow_pan_x = matches!(pan_axes_keys, PanAxes::Both | PanAxes::Horizontal);
                     let allow_pan_y = matches!(pan_axes_keys, PanAxes::Both | PanAxes::Vertical);
+                    let clamp_to_zoom = |z: f32| -> f32 {
+                        let scene_range = scene_zoom_range_sig_keys.get();
+                        let view_range = view_zoom_range_sig_keys.get();
+                        let effective =
+                            intersect_zoom_range(scene_range.as_ref(), view_range.as_ref());
+                        clamp_zoom(z, effective.as_ref())
+                    };
+                    let clamp_to_pan = |p: Vec2, z: f32| -> Vec2 {
+                        let effective_bounds = intersect_pan_bounds(
+                            scene_pan_bounds_sig_keys.get(),
+                            view_pan_bounds_sig_keys.get(),
+                        );
+                        clamp_pan_to_bounds(p, effective_bounds.as_ref(), viewport_size.get(), z)
+                    };
                     // Pan step = quarter of the smaller viewport axis,
                     // capped to a sensible minimum so unusually small
                     // viewports still feel responsive.
@@ -1880,38 +2131,41 @@ impl Widget for SceneView {
                             pan_y_for_xform.animate_to(new_pan.y, pan_dur, Easing::EaseOut);
                         }
                     };
+                    // Arrow-key pan helper: take the current animation
+                    // target (or live value if no tween in flight),
+                    // shift by step on the requested axis, clamp the
+                    // resulting pan vector against the effective
+                    // pan_bounds, then animate to the clamped target.
+                    let pan_axis = |dx: f32, dy: f32| {
+                        let base_x = pan_x.animation_target().unwrap_or_else(|| pan_x.get());
+                        let base_y = pan_y.animation_target().unwrap_or_else(|| pan_y.get());
+                        let target = clamp_to_pan(
+                            Vec2::new(base_x + dx, base_y + dy),
+                            zoom.get(),
+                        );
+                        if dx != 0.0 {
+                            pan_x.animate_to(target.x, pan_dur, Easing::EaseOut);
+                        }
+                        if dy != 0.0 {
+                            pan_y.animate_to(target.y, pan_dur, Easing::EaseOut);
+                        }
+                    };
                     match key {
-                        Key::ArrowLeft if allow_pan_x => {
-                            let target =
-                                pan_x.animation_target().unwrap_or_else(|| pan_x.get()) + pan_step;
-                            pan_x.animate_to(target, pan_dur, Easing::EaseOut);
-                        }
-                        Key::ArrowRight if allow_pan_x => {
-                            let target =
-                                pan_x.animation_target().unwrap_or_else(|| pan_x.get()) - pan_step;
-                            pan_x.animate_to(target, pan_dur, Easing::EaseOut);
-                        }
-                        Key::ArrowUp if allow_pan_y => {
-                            let target =
-                                pan_y.animation_target().unwrap_or_else(|| pan_y.get()) + pan_step;
-                            pan_y.animate_to(target, pan_dur, Easing::EaseOut);
-                        }
-                        Key::ArrowDown if allow_pan_y => {
-                            let target =
-                                pan_y.animation_target().unwrap_or_else(|| pan_y.get()) - pan_step;
-                            pan_y.animate_to(target, pan_dur, Easing::EaseOut);
-                        }
+                        Key::ArrowLeft if allow_pan_x => pan_axis(pan_step, 0.0),
+                        Key::ArrowRight if allow_pan_x => pan_axis(-pan_step, 0.0),
+                        Key::ArrowUp if allow_pan_y => pan_axis(0.0, pan_step),
+                        Key::ArrowDown if allow_pan_y => pan_axis(0.0, -pan_step),
                         other
                             if zoomable_keys
                                 && (other.to_char() == Some('+')
                                     || other.to_char() == Some('=')) =>
                         {
-                            let z_new = (zoom.get() * 1.25).clamp(min_zoom, max_zoom);
+                            let z_new = clamp_to_zoom(zoom.get() * 1.25);
                             zoom.animate_to(z_new, zoom_dur, Easing::EaseOut);
                             recenter_zoom(z_new);
                         }
                         other if zoomable_keys && other.to_char() == Some('-') => {
-                            let z_new = (zoom.get() * 0.8).clamp(min_zoom, max_zoom);
+                            let z_new = clamp_to_zoom(zoom.get() * 0.8);
                             zoom.animate_to(z_new, zoom_dur, Easing::EaseOut);
                             recenter_zoom(z_new);
                         }
@@ -1963,12 +2217,13 @@ impl Widget for SceneView {
             let pan_x_for_drag = self.pan_x.clone();
             let pan_y_for_drag = self.pan_y.clone();
             let drag_mode_inner = drag_mode;
-            // Snapshot the scene's pan-axes policy for the hand-drag
-            // path. Mirrors the on_scroll / on_pinch / on_key
-            // capture pattern — runtime policy changes take effect
-            // on the next rebuild. Unit 3 will lift this to a live
-            // signal read.
-            let pan_axes_for_drag = self.scene.current_pan_axes();
+            // Live signal captures — runtime mutations to pan_axes /
+            // pan_bounds take effect on the next drag event.
+            let pan_axes_sig_drag = self.scene.pan_axes_signal();
+            let scene_pan_bounds_sig_drag = self.scene.pan_bounds_signal();
+            let view_pan_bounds_sig_drag = self.pan_bounds_override.clone();
+            let zoom_for_drag = self.zoom.clone();
+            let last_viewport_for_drag = self.last_viewport.clone();
             handlers = handlers.on_drag(move |phase, _ctx| {
                 // ScrollHandDrag mode bypasses item / marquee logic
                 // entirely — drag pans the view by the cursor
@@ -1979,12 +2234,12 @@ impl Widget for SceneView {
                     use fern_core::gesture::DragPhase;
                     if let DragPhase::Moved { delta, .. } = phase {
                         // `delta` is in screen coords. Apply the
-                        // scene's pan-axes policy: zero out the
+                        // scene's pan-axes policy live: zero out the
                         // restricted axis so an axis-locked scene
                         // can't be hand-dragged off-axis. Sign
                         // convention matches scroll (drag right →
                         // pan right).
-                        let (dx, dy) = match pan_axes_for_drag {
+                        let (dx, dy) = match pan_axes_sig_drag.get() {
                             PanAxes::Both => (delta.x, delta.y),
                             PanAxes::None => (0.0, 0.0),
                             PanAxes::Horizontal => (delta.x, 0.0),
@@ -1993,10 +2248,21 @@ impl Widget for SceneView {
                         if dx == 0.0 && dy == 0.0 {
                             return;
                         }
-                        let target_x = pan_x_for_drag.get() + dx;
-                        let target_y = pan_y_for_drag.get() + dy;
-                        pan_x_for_drag.set(target_x);
-                        pan_y_for_drag.set(target_y);
+                        // Clamp to effective pan_bounds (intersection of
+                        // Scene + view-override) so the user can't drag
+                        // the document off the viewport.
+                        let effective_bounds = intersect_pan_bounds(
+                            scene_pan_bounds_sig_drag.get(),
+                            view_pan_bounds_sig_drag.get(),
+                        );
+                        let target = clamp_pan_to_bounds(
+                            Vec2::new(pan_x_for_drag.get() + dx, pan_y_for_drag.get() + dy),
+                            effective_bounds.as_ref(),
+                            last_viewport_for_drag.get(),
+                            zoom_for_drag.get(),
+                        );
+                        pan_x_for_drag.set(target.x);
+                        pan_y_for_drag.set(target.y);
                     }
                     return;
                 }

@@ -79,6 +79,86 @@ pub enum PanAxes {
     Both,
 }
 
+/// Reactive interaction-policy bundle owned by [`Scene`]. Apps
+/// configure pan/zoom behaviour by writing to these signals; gesture
+/// closures in [`SceneView`](crate::SceneView) read them live, so
+/// runtime mode switches (e.g. a toolbar toggling pan locks) take
+/// effect on the next event without rebuilding the view.
+///
+/// All four signals are exposed individually via [`Scene`] accessors
+/// (`pan_axes_signal`, `pan_bounds_signal`, `zoom_range_signal`,
+/// `zoomable_signal`). Per-(sub-)scene independence falls out of the
+/// model: each nested `SceneView` carries its own `Scene` with its
+/// own `SceneConstraints`.
+///
+/// View-level *tightening* overrides (`pan_bounds_override`,
+/// `zoom_range_override`) layer on top per-`SceneView` — the
+/// effective constraint is the intersection. Two views over the
+/// same `Scene` can lock down independently; neither can loosen
+/// what the `Scene` declares.
+pub struct SceneConstraints {
+    pan_axes: Signal<PanAxes>,
+    /// Scene-coord rectangle that the visible viewport must stay
+    /// inside. `None` (default) = unconstrained. When `Some(r)`,
+    /// pan is clamped so the visible scene region overlaps the
+    /// rect; when the viewport is bigger than the rect, the rect
+    /// is centered.
+    pan_bounds: Signal<Option<Rect>>,
+    /// Inclusive `[min, max]` clamp on zoom factor. `None` =
+    /// unconstrained from the `Scene` side (the `SceneView` may
+    /// still impose its own range override).
+    zoom_range: Signal<Option<std::ops::RangeInclusive<f32>>>,
+    zoomable: Signal<bool>,
+}
+
+impl SceneConstraints {
+    fn new() -> Self {
+        Self {
+            pan_axes: Signal::new(PanAxes::Both),
+            pan_bounds: Signal::new(None),
+            zoom_range: Signal::new(None),
+            zoomable: Signal::new(true),
+        }
+    }
+
+    /// Reactive pan-axes signal. Gesture handlers read live.
+    pub fn pan_axes_signal(&self) -> Signal<PanAxes> {
+        self.pan_axes.clone()
+    }
+    /// Reactive pan-bounds signal. `None` = unconstrained.
+    pub fn pan_bounds_signal(&self) -> Signal<Option<Rect>> {
+        self.pan_bounds.clone()
+    }
+    /// Reactive zoom-range signal. `None` = unconstrained from
+    /// the Scene side.
+    pub fn zoom_range_signal(&self) -> Signal<Option<std::ops::RangeInclusive<f32>>> {
+        self.zoom_range.clone()
+    }
+    /// Reactive zoomable-on/off signal. Equivalent to a zero-width
+    /// zoom_range — kept as a separate boolean for clarity and
+    /// efficient short-circuit at gesture time.
+    pub fn zoomable_signal(&self) -> Signal<bool> {
+        self.zoomable.clone()
+    }
+}
+
+impl Default for SceneConstraints {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for SceneConstraints {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SceneConstraints")
+            .field("pan_axes", &self.pan_axes.get())
+            .field("pan_bounds", &self.pan_bounds.get())
+            .field("zoom_range", &self.zoom_range.get())
+            .field("zoomable", &self.zoomable.get())
+            .finish()
+    }
+}
+
 /// A single entry in a [`Scene`]. The two variants mirror the two
 /// content tiers: heavyweight `Widget`s consumed into the arena at
 /// build time, and lightweight `SceneItem`s painted directly from the
@@ -160,15 +240,18 @@ pub struct Scene {
     index: Box<dyn SpatialIndex>,
 
     /// User-declared scene extent. `None` means "auto-compute from
-    /// items each query". Set via [`Scene::set_scene_rect`]. When
-    /// `Some`, [`SceneView`] uses this for pan clamping.
+    /// items each query". Set via [`Scene::set_scene_rect`]. Used
+    /// by [`SceneView::adopt_scene_size`](crate::SceneView::adopt_scene_size).
+    /// (Distinct from `constraints.pan_bounds` which clamps the
+    /// visible viewport.)
     user_scene_rect: Option<Rect>,
-    /// Which axes the view is allowed to pan along. Default
-    /// [`PanAxes::Both`].
-    pan_axes: PanAxes,
-    /// Whether the view honors zoom gestures (Ctrl+wheel, pinch,
-    /// keyboard `+`/`-`). Default `true`.
-    zoomable: bool,
+    /// Reactive interaction policy: pan axes, pan bounds, zoom
+    /// range, zoomable on/off. Apps mutate via the dedicated
+    /// `Scene::pan_axes` / `set_pan_bounds` / `set_zoom_range` /
+    /// `zoomable` methods (still classic mutator shape) or read
+    /// the underlying signals via the `*_signal` accessors for
+    /// live observation.
+    constraints: SceneConstraints,
     /// Reactive change signal. Every mutation fires an
     /// [`ItemChange`] through this signal so apps can observe
     /// geometry / visibility / parent / z / opacity changes.
@@ -197,8 +280,7 @@ impl Scene {
             entry_index: HashMap::new(),
             index,
             user_scene_rect: None,
-            pan_axes: PanAxes::Both,
-            zoomable: true,
+            constraints: SceneConstraints::new(),
             item_change_signal: Signal::new(ItemChange::Added { id: ItemId(0) }),
             a11y_groups: Vec::new(),
             a11y_group_index: HashMap::new(),
@@ -688,24 +770,86 @@ impl Scene {
     }
 
     /// Set the axes the view may pan along. Default
-    /// [`PanAxes::Both`].
+    /// [`PanAxes::Both`]. Writes to the reactive signal; gesture
+    /// closures pick the change up on the next event.
     pub fn pan_axes(&mut self, axes: PanAxes) {
-        self.pan_axes = axes;
+        self.constraints.pan_axes.set(axes);
     }
 
-    /// The currently-declared pan axes.
+    /// The currently-declared pan axes. Live read of the signal.
     pub fn current_pan_axes(&self) -> PanAxes {
-        self.pan_axes
+        self.constraints.pan_axes.get()
     }
 
     /// Set whether the view honors zoom gestures. Default `true`.
+    /// Writes to the reactive signal.
     pub fn zoomable(&mut self, on: bool) {
-        self.zoomable = on;
+        self.constraints.zoomable.set(on);
     }
 
-    /// Whether the scene currently allows zoom.
+    /// Whether the scene currently allows zoom. Live read.
     pub fn is_zoomable(&self) -> bool {
-        self.zoomable
+        self.constraints.zoomable.get()
+    }
+
+    /// Clamp the visible viewport to this scene-coord rect. `None`
+    /// (default) leaves pan unconstrained. When `Some(r)`, the
+    /// [`SceneView`](crate::SceneView)'s pan is clamped so the
+    /// visible scene region overlaps `r`. When `r` is smaller than
+    /// the visible viewport, the rect is centered.
+    ///
+    /// Distinct from [`set_scene_rect`](Self::set_scene_rect):
+    /// `scene_rect` declares the scene's logical extent (used by
+    /// `adopt_scene_size`); `pan_bounds` controls what region the
+    /// user can scroll to. A doc-style app typically sets both to
+    /// the same rect.
+    pub fn set_pan_bounds(&mut self, bounds: Option<Rect>) {
+        self.constraints.pan_bounds.set(bounds);
+    }
+
+    /// The currently-declared pan-bounds rect. Live read.
+    pub fn current_pan_bounds(&self) -> Option<Rect> {
+        self.constraints.pan_bounds.get()
+    }
+
+    /// Inclusive `[min, max]` zoom-factor clamp. `None` (default)
+    /// is unconstrained from the `Scene` side — the `SceneView`
+    /// may still impose its own override.
+    ///
+    /// The effective range applied by the `SceneView` is the
+    /// intersection of `Scene` + view-level override, so apps
+    /// cannot loosen a `Scene`-declared range by setting a wider
+    /// override on the view.
+    pub fn set_zoom_range(&mut self, range: Option<std::ops::RangeInclusive<f32>>) {
+        self.constraints.zoom_range.set(range);
+    }
+
+    /// The currently-declared zoom range. Live read.
+    pub fn current_zoom_range(&self) -> Option<std::ops::RangeInclusive<f32>> {
+        self.constraints.zoom_range.get()
+    }
+
+    /// Reactive accessors for live observation.
+    pub fn pan_axes_signal(&self) -> Signal<PanAxes> {
+        self.constraints.pan_axes_signal()
+    }
+    /// Reactive pan-bounds signal.
+    pub fn pan_bounds_signal(&self) -> Signal<Option<Rect>> {
+        self.constraints.pan_bounds_signal()
+    }
+    /// Reactive zoom-range signal.
+    pub fn zoom_range_signal(&self) -> Signal<Option<std::ops::RangeInclusive<f32>>> {
+        self.constraints.zoom_range_signal()
+    }
+    /// Reactive zoomable on/off signal.
+    pub fn zoomable_signal(&self) -> Signal<bool> {
+        self.constraints.zoomable_signal()
+    }
+
+    /// Read-only view of the full constraint bundle. Useful when
+    /// passing all four signals to a custom view implementation.
+    pub fn constraints(&self) -> &SceneConstraints {
+        &self.constraints
     }
 
     // -----------------------------------------------------------------

@@ -2950,8 +2950,14 @@ fn fit_to_selection_uses_selected_ids() {
     // computed target happens to also be 1.0). Loose check: the
     // pan signal is no longer at the origin since `a` is at
     // (100,100) and we're centering it in an 800x600 viewport.
-    assert!(view.zoom() >= view.min_zoom);
-    assert!(view.zoom() <= view.max_zoom);
+    // The effective zoom-range override (default Some(0.1..=10.0))
+    // should contain the current zoom.
+    let range = view
+        .zoom_range_override_signal()
+        .get()
+        .expect("default override is Some(0.1..=10.0)");
+    assert!(view.zoom() >= *range.start());
+    assert!(view.zoom() <= *range.end());
 }
 
 #[test]
@@ -4448,4 +4454,258 @@ fn ignores_xform_debug_overlay_paints_screen_anchored_bounds() {
         "union screen height should be ~42, got {}",
         union_screen.height
     );
+}
+
+// -----------------------------------------------------------------
+// Unit 3 — SceneConstraints (reactive pan_axes, pan_bounds, zoom_range)
+// -----------------------------------------------------------------
+
+#[test]
+fn pan_axes_signal_is_reactive_at_runtime() {
+    // Regression for the build-time snapshot of pan_axes. After
+    // Unit 3, mutating Scene::pan_axes at runtime takes effect on
+    // the very next set_pan / pan_to call — no rebuild needed.
+    let scene = Scene::new();
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let view = view_handle(&tree, view_id);
+    // Initial policy: Both. set_pan should apply both axes.
+    view.set_pan(Vec2::new(50.0, 60.0));
+    assert_eq!(view.pan(), Vec2::new(50.0, 60.0));
+
+    // Flip to Vertical at runtime via the signal (clone the signal
+    // accessor; Signals are Rc-backed so this just shares state).
+    view.scene()
+        .pan_axes_signal()
+        .set(crate::scene::PanAxes::Vertical);
+    view.set_pan(Vec2::new(99.0, 75.0));
+    // X axis is locked → stays at 50; Y updates.
+    assert!(
+        (view.pan().x - 50.0).abs() < 1e-3,
+        "X axis locked, expected 50, got {}",
+        view.pan().x
+    );
+    assert!(
+        (view.pan().y - 75.0).abs() < 1e-3,
+        "Y axis open, expected 75, got {}",
+        view.pan().y
+    );
+}
+
+#[test]
+fn pan_bounds_clamps_set_pan_to_keep_viewport_inside() {
+    // Scene declares a 1000×800 doc bounds. A 400×300 viewport
+    // pans into it; pan must keep the visible scene region
+    // entirely inside [0, 1000] × [0, 800]. At zoom 1, that
+    // means pan_x in [400-1000, 0] = [-600, 0]; pan_y similar.
+    let mut scene = Scene::new();
+    scene.set_pan_bounds(Some(Rect::new(0.0, 0.0, 1000.0, 800.0)));
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let view = view_handle(&tree, view_id);
+
+    // Try to pan past the right edge (pan_x = 100 would shift
+    // the visible region into negative scene x).
+    view.set_pan(Vec2::new(100.0, 50.0));
+    assert!(
+        view.pan().x <= 1e-3,
+        "pan_x must be <= 0 to keep visible inside scene bounds, got {}",
+        view.pan().x
+    );
+
+    // Try to pan past the left edge.
+    view.set_pan(Vec2::new(-9999.0, -9999.0));
+    // pan_x lower bound = viewport_w - bounds.right * zoom = 400 - 1000 = -600
+    assert!(
+        (view.pan().x - -600.0).abs() < 1e-3,
+        "pan_x must clamp to -600 (viewport - bounds.right), got {}",
+        view.pan().x
+    );
+    // pan_y lower bound = 300 - 800 = -500
+    assert!(
+        (view.pan().y - -500.0).abs() < 1e-3,
+        "pan_y must clamp to -500, got {}",
+        view.pan().y
+    );
+}
+
+#[test]
+fn pan_bounds_centers_when_viewport_larger_than_bounds() {
+    // 200×200 bounds, 400×300 viewport — bounds smaller than
+    // viewport on both axes → center: pan_x = vp/2 - bounds_center_x
+    //   = 200 - 100 = 100. pan_y = 150 - 100 = 50.
+    let mut scene = Scene::new();
+    scene.set_pan_bounds(Some(Rect::new(0.0, 0.0, 200.0, 200.0)));
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let view = view_handle(&tree, view_id);
+
+    view.set_pan(Vec2::new(9999.0, 9999.0));
+    assert!(
+        (view.pan().x - 100.0).abs() < 1e-3,
+        "centered pan_x, expected 100, got {}",
+        view.pan().x
+    );
+    assert!(
+        (view.pan().y - 50.0).abs() < 1e-3,
+        "centered pan_y, expected 50, got {}",
+        view.pan().y
+    );
+
+    // Setting an arbitrary pan still snaps to the centered value.
+    view.set_pan(Vec2::new(-50.0, 0.0));
+    assert!((view.pan().x - 100.0).abs() < 1e-3);
+    assert!((view.pan().y - 50.0).abs() < 1e-3);
+}
+
+#[test]
+fn view_pan_bounds_override_tightens_scene_bounds() {
+    // Scene declares 1000×800 bounds; view tightens to inner
+    // 500×400 region. Effective = intersect = (250, 200, 500, 400)
+    // (centered intersect for this example). Pan clamps against
+    // the tighter rect — view-side tightens, never loosens.
+    let mut scene = Scene::new();
+    scene.set_pan_bounds(Some(Rect::new(0.0, 0.0, 1000.0, 800.0)));
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(
+        SceneView::new(scene).pan_bounds_override(Some(Rect::new(250.0, 200.0, 500.0, 400.0))),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let view = view_handle(&tree, view_id);
+
+    // Effective bounds = (250, 200, 500, 400).
+    // pan_x clamp: [vp_w - bounds.right * zoom, -bounds.x * zoom]
+    //            = [400 - 750, -250] = [-350, -250].
+    view.set_pan(Vec2::new(9999.0, 9999.0));
+    assert!(
+        (view.pan().x - -250.0).abs() < 1e-3,
+        "pan_x upper clamp at -250 (view-tightened intersect), got {}",
+        view.pan().x
+    );
+    view.set_pan(Vec2::new(-9999.0, -9999.0));
+    assert!(
+        (view.pan().x - -350.0).abs() < 1e-3,
+        "pan_x lower clamp at -350, got {}",
+        view.pan().x
+    );
+}
+
+#[test]
+fn zoom_range_intersects_scene_and_view_overrides() {
+    // Scene declares zoom_range 0.5..=4.0. View override default
+    // is 0.1..=10.0. Effective intersection: 0.5..=4.0.
+    let mut scene = Scene::new();
+    scene.set_zoom_range(Some(0.5..=4.0));
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let view = view_handle(&tree, view_id);
+
+    view.set_zoom(10.0);
+    assert!(
+        (view.zoom() - 4.0).abs() < 1e-3,
+        "zoom should clamp to 4.0 (scene's upper), got {}",
+        view.zoom()
+    );
+    view.set_zoom(0.01);
+    assert!(
+        (view.zoom() - 0.5).abs() < 1e-3,
+        "zoom should clamp to 0.5 (scene's lower), got {}",
+        view.zoom()
+    );
+}
+
+#[test]
+fn view_zoom_range_override_tightens_scene_range() {
+    // Scene declares 0.1..=10.0. View tightens to 0.5..=2.0.
+    // Intersection: 0.5..=2.0. set_zoom(5.0) clamps to 2.0.
+    let mut scene = Scene::new();
+    scene.set_zoom_range(Some(0.1..=10.0));
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene).zoom_range_override(Some(0.5..=2.0)));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let view = view_handle(&tree, view_id);
+
+    view.set_zoom(5.0);
+    assert!(
+        (view.zoom() - 2.0).abs() < 1e-3,
+        "view-side tightening — should clamp to 2.0, got {}",
+        view.zoom()
+    );
+    view.set_zoom(0.05);
+    assert!(
+        (view.zoom() - 0.5).abs() < 1e-3,
+        "should clamp to 0.5, got {}",
+        view.zoom()
+    );
+}
+
+#[test]
+fn view_cannot_loosen_scene_zoom_range() {
+    // Scene says 1.0..=2.0. View override tries 0.1..=10.0. The
+    // intersection is 1.0..=2.0 — view can't loosen.
+    let mut scene = Scene::new();
+    scene.set_zoom_range(Some(1.0..=2.0));
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene).zoom_range_override(Some(0.1..=10.0)));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let view = view_handle(&tree, view_id);
+
+    view.set_zoom(5.0);
+    assert!(
+        (view.zoom() - 2.0).abs() < 1e-3,
+        "scene tighter than view override — must clamp to scene's 2.0, got {}",
+        view.zoom()
+    );
+    view.set_zoom(0.5);
+    assert!(
+        (view.zoom() - 1.0).abs() < 1e-3,
+        "must clamp to scene's lower 1.0, got {}",
+        view.zoom()
+    );
+}
+
+#[test]
+fn min_zoom_max_zoom_shims_still_work_after_refactor() {
+    // Back-compat: existing .min_zoom(v) / .max_zoom(v) builder
+    // methods should still clamp zoom, now as shims over
+    // zoom_range_override.
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(Scene::new()).min_zoom(0.5).max_zoom(3.0));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let view = view_handle(&tree, view_id);
+
+    view.set_zoom(10.0);
+    assert!((view.zoom() - 3.0).abs() < 1e-3, "got {}", view.zoom());
+    view.set_zoom(0.01);
+    assert!((view.zoom() - 0.5).abs() < 1e-3, "got {}", view.zoom());
+}
+
+#[test]
+fn scene_constraints_helper_accessors_return_signals() {
+    // Surface check: the Scene exposes the four signal accessors
+    // and they reflect the mutator state.
+    let mut scene = Scene::new();
+    let pan_axes_sig = scene.pan_axes_signal();
+    let pan_bounds_sig = scene.pan_bounds_signal();
+    let zoom_range_sig = scene.zoom_range_signal();
+    let zoomable_sig = scene.zoomable_signal();
+
+    assert_eq!(pan_axes_sig.get(), crate::scene::PanAxes::Both);
+    assert_eq!(pan_bounds_sig.get(), None);
+    assert_eq!(zoom_range_sig.get(), None);
+    assert_eq!(zoomable_sig.get(), true);
+
+    scene.pan_axes(crate::scene::PanAxes::Horizontal);
+    scene.set_pan_bounds(Some(Rect::new(0.0, 0.0, 10.0, 10.0)));
+    scene.set_zoom_range(Some(0.5..=3.0));
+    scene.zoomable(false);
+
+    assert_eq!(pan_axes_sig.get(), crate::scene::PanAxes::Horizontal);
+    assert_eq!(pan_bounds_sig.get(), Some(Rect::new(0.0, 0.0, 10.0, 10.0)));
+    assert_eq!(zoom_range_sig.get(), Some(0.5..=3.0));
+    assert_eq!(zoomable_sig.get(), false);
 }
