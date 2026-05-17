@@ -62,6 +62,28 @@ pub use fern_i18n as i18n;
 #[cfg(feature = "inspector")]
 pub use fern_inspector as inspector;
 
+/// Toast notification install hook. Apps wire it in one line:
+///
+/// ```ignore
+/// use fern_ui::prelude::*;
+///
+/// FernAppBuilder::new()
+///     .theme(intui::light())
+///     .app_paths(AppPaths::new("com", "FernTech", "MyApp").unwrap())
+///     .install_toast_default()
+///     .initial_window(WindowConfig::new()...)
+///     .run();
+/// ```
+///
+/// The `install_toast(…)` and `install_toast_default()` methods come
+/// from [`FernAppBuilderToastExt`](toast_install::FernAppBuilderToastExt),
+/// re-exported through [`prelude`] so the umbrella import makes them
+/// callable directly. See `docs/plans/widgets-plan.md §3.9` and
+/// `.claude/plans/plan-for-the-creation-clever-stearns.md` for the
+/// full design.
+#[cfg(feature = "toast")]
+pub mod toast_install;
+
 pub mod prelude {
     // DSL entry point
     pub use fern_ui_macros::fern;
@@ -141,6 +163,24 @@ pub mod prelude {
     // don't pull in the dep.
     #[cfg(feature = "inspector")]
     pub use fern_inspector::FernAppBuilderInspectorExt;
+
+    // Toast notification install hook + the public types apps work
+    // with. The extension trait adds `install_toast(...)` /
+    // `install_toast_default()` to `FernAppBuilder`. Public types
+    // (`Toast`, `ToastAction`, `ToastSeverity`, `ToastPriority`,
+    // `ToastHandle`, `ToastInstallOptions`, `NotificationArchive`,
+    // `EventContextToastExt::show_toast`, the log widgets) are
+    // re-exported so `use fern_ui::prelude::*` brings the entire
+    // toast surface into scope.
+    #[cfg(feature = "toast")]
+    pub use crate::toast_install::FernAppBuilderToastExt;
+    #[cfg(feature = "toast")]
+    pub use fern_widgets::{
+        EventContextToastExt, NotificationArchive, NotificationArchiveModel,
+        NotificationCenterButton, NotificationEntry, NotificationLog, NotificationLogDialog, Toast,
+        ToastAction, ToastActionStyle, ToastDismissCause, ToastHandle, ToastHost,
+        ToastInstallOptions, ToastPriority, ToastRegistry, ToastSeverity,
+    };
 
     // Native file dialogs. The extension trait brings
     // `ctx.pick_file(...)`, `ctx.save_file(...)`, etc. into scope.

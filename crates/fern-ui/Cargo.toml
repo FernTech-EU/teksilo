@@ -19,6 +19,7 @@ default = [
     "text",
     "i18n",
     "inspector",
+    "toast",
     "file-dialog",
     "fonts-arabic",
     "fonts-hebrew",
@@ -35,6 +36,14 @@ rich-text = ["widgets", "fern-widgets/rich-text"]
 # a no-op — but the Cargo dep is unconditional; turn this feature off
 # if you want to drop the transitive `rich-text` cost too.
 inspector = ["dep:fern-inspector", "rich-text"]
+# Toast notifications. The `FernAppBuilderToastExt::install_toast`
+# entry point lives in this crate (mirroring how `inspector` declares
+# `FernAppBuilderInspectorExt` in `fern-inspector`); the actual Toast
+# widget types live in `fern-widgets`. Pulls in `widgets` because the
+# install closure constructs a `ToastHost` and the archive model. On
+# by default — apps that don't show toasts pay only the lookup of the
+# `ToastRegistry` slot in `app_state` (one HashMap miss).
+toast = ["widgets"]
 # Forwards clipboard support through fern-app so `RichTextEditor::editor`
 # can copy/cut/paste via the system clipboard. Without this feature the
 # editor silently no-ops clipboard commands (they are filtered at the
@@ -133,3 +142,6 @@ fern-theme-fluent = { workspace = true, optional = true }
 
 [dev-dependencies]
 trybuild = "1"
+# Toast install tests build a builder with a `Persistent` archive
+# against a temp directory.
+tempfile = { workspace = true }

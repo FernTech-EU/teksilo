@@ -126,7 +126,6 @@ impl NotificationLog {
     }
 
     fn build_row(
-        archive: &Rc<NotificationArchiveModel>,
         entry: &NotificationEntry,
         on_entry: Option<&Rc<dyn Fn(&NotificationEntry, &mut EventContext)>>,
         on_action: Option<&Rc<dyn Fn(&NotificationEntry, &ArchivedAction, &mut EventContext)>>,
@@ -135,7 +134,17 @@ impl NotificationLog {
             severity: entry.severity,
             size: 14.0,
         });
-        let mut row = StandardListItem::new_literal(entry.title.clone()).leading_slot_boxed(glyph);
+        let mut row = StandardListItem::new_literal(entry.title.clone())
+            .leading_slot_boxed(glyph)
+            // Unread rows get a bold title (`BodyBold`); read rows
+            // fall back to the StandardListItem default (`Body`).
+            // This is the visual differentiation between "you
+            // haven't seen this yet" and archived history.
+            .label_style(if entry.read {
+                TextStyleRole::Body
+            } else {
+                TextStyleRole::BodyBold
+            });
         if let Some(body) = &entry.body {
             row = row.subtitle_literal(body.clone());
         }
@@ -143,25 +152,9 @@ impl NotificationLog {
             // Trailing action strip — Links inline, Buttons as buttons.
             // The trailing slot accepts a single widget; we wrap the
             // multiple actions in an HStack.
-            let entry_clone_for_actions = entry.clone();
-            let archive_clone = archive.clone();
-            let on_action_clone = on_action.cloned();
-            let on_entry_for_actions = on_entry.cloned();
-            let actions_row = build_actions_row(
-                &entry_clone_for_actions,
-                archive_clone,
-                on_action_clone,
-                on_entry_for_actions,
-            );
+            let actions_row = build_actions_row(entry, on_action.cloned());
             row = row.trailing_slot_boxed(actions_row);
         }
-        // Unread rows render with a slight bold-title accent; we
-        // approximate that via a subtitle of "•" prefix on the title
-        // only when unread. For Phase 4 MVP we use the entry's `read`
-        // bit informationally only (the visual differentiation lands
-        // with a future styling pass that exposes a "row variant" on
-        // StandardListItem).
-        let _ = entry.read;
         // Wire the body-click handler if requested.
         if let Some(cb) = on_entry {
             let cb = cb.clone();
@@ -233,14 +226,8 @@ impl Widget for NotificationLog {
             column = column.add_child(empty);
         } else {
             let model = archive.entries().clone();
-            let archive_for_delegate = archive.clone();
             let list = ListView::new(model, move |_idx, entry, _selected| {
-                Self::build_row(
-                    &archive_for_delegate,
-                    entry,
-                    on_entry.as_ref(),
-                    on_action.as_ref(),
-                )
+                Self::build_row(entry, on_entry.as_ref(), on_action.as_ref())
             })
             .item_height(64.0);
             column = column.add_child(ctx.add(list));
@@ -294,9 +281,7 @@ impl Widget for NotificationLog {
 /// live toast is long gone.
 fn build_actions_row(
     entry: &NotificationEntry,
-    _archive: Rc<NotificationArchiveModel>,
     on_action: Option<Rc<dyn Fn(&NotificationEntry, &ArchivedAction, &mut EventContext)>>,
-    _on_entry: Option<Rc<dyn Fn(&NotificationEntry, &mut EventContext)>>,
 ) -> Box<dyn Widget> {
     let mut row = HStack::new().spacing(8.0);
     for action in entry.actions.iter() {
@@ -480,18 +465,13 @@ mod tests {
             }],
         ));
         let tree = tree_with(NotificationLog::new(archive));
-        // No clickable "Retry" — the action renders as a Small
-        // TextWidget with the disabled-suffix appended. The label
-        // (with the suffix) IS in the AT tree as a text node, but
-        // there's no Role::Button "Retry".
-        let buttons: Vec<_> = (0..1000)
-            .filter_map(|_| tree.find_by_label("Retry"))
-            .collect();
-        // find_by_label looks for an EXACT match; the tag includes
-        // " (no longer available)" so a plain "Retry" lookup misses.
+        // The inert tag's label is "Retry" + the localized
+        // "(no longer available)" suffix; an exact lookup of just
+        // "Retry" misses — that's the contract.
         assert!(
-            buttons.is_empty(),
-            "no exact-'Retry' label without the on_action hook"
+            tree.find_by_label("Retry").is_none(),
+            "without on_action_invoked, archive actions render as inert text tags with a \
+             suffix — no exact-'Retry' label appears"
         );
     }
 

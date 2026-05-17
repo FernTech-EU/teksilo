@@ -1532,6 +1532,14 @@ impl FernAppBuilder {
         self
     }
 
+    /// Read the currently-configured [`AppPaths`], if any. Used by
+    /// builder-extension traits (e.g. `install_toast` in `fern-ui`)
+    /// that need to open persistent files at install time before
+    /// `run` fires.
+    pub fn configured_app_paths(&self) -> Option<&fern_settings::AppPaths> {
+        self.app_paths.as_ref()
+    }
+
     /// Configure the persistence bundle. When `run`/`build_headless`
     /// fires, the bundle is opened against the configured `AppPaths`
     /// and every active service is registered in `app_state`, where
