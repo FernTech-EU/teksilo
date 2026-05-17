@@ -128,6 +128,14 @@ impl SceneItem for PathItem {
         })
     }
 
+    fn thumbnail_color(&self) -> Color {
+        // Connector-line and outline use cases dominate stroke-only
+        // paths; fill takes precedence when present.
+        self.fill
+            .or_else(|| self.stroke.map(|(c, _)| c))
+            .unwrap_or_else(|| Color::new(0.6, 0.6, 0.6, 1.0))
+    }
+
     fn label(&self) -> Option<String> {
         self.label.clone()
     }

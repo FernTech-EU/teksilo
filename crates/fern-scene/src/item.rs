@@ -165,6 +165,21 @@ pub trait SceneItem: std::fmt::Debug + 'static {
         Box::new(move |p| bounds.contains(p))
     }
 
+    /// Dominant color to draw as the item's representation in
+    /// minimap-style thumbnails. Default: an opaque mid-grey,
+    /// which gives a recognisable but neutral marker for any item.
+    /// Built-in items override: [`RectItem`](crate::items::RectItem)
+    /// returns its fill, [`PathItem`](crate::items::PathItem)
+    /// returns stroke or fill, [`ImageItem`](crate::items::ImageItem)
+    /// returns the image's dominant tint placeholder.
+    ///
+    /// Consumed by [`Scene::item_thumbnails`](crate::Scene::item_thumbnails)
+    /// — the typical minimap input. Apps with non-standard items
+    /// can override on their own `SceneItem` impls.
+    fn thumbnail_color(&self) -> fern_tokens::Color {
+        fern_tokens::Color::new(0.6, 0.6, 0.6, 1.0)
+    }
+
     /// The flags this item should carry into the Scene at insert
     /// time. Default: `ItemFlags::default()` — visible, enabled,
     /// selectable. Built-ins read their accumulated builder state

@@ -10,23 +10,29 @@
 //!
 //! let mut scene = Scene::new();
 //! /* …populate scene… */
-//! let content = scene.content_bounds().unwrap_or(Rect::new(0.0, 0.0, 1000.0, 1000.0));
+//! // Build the SceneView FIRST so we can read its reactive
+//! // viewport signal and its scene's snapshot of items.
 //! let view = SceneView::new(scene);
+//! let content = view
+//!     .scene_content_bounds()
+//!     .unwrap_or(Rect::new(0.0, 0.0, 1000.0, 1000.0));
 //! let viewport_signal = view.viewport_in_scene_signal();
-//! let item_thumbs = view.scene().item_thumbnails();   // Vec<(Rect, Color)>
+//! let item_thumbs = view.scene().item_thumbnails(); // Vec<(Rect, Color)>
 //!
 //! VStack::new()
 //!     .child(view)
-//!     .child(SceneMinimap::new(content, viewport_signal)
-//!         .items(item_thumbs)
-//!         .size(200.0, 150.0)
-//!         .on_click({
-//!             let view = view_handle.clone();
-//!             move |scene_pt, ctx| {
-//!                 view.pan_to_center(scene_pt, Duration::from_millis(180));
-//!             }
-//!         }));
+//!     .child(
+//!         SceneMinimap::new(content, viewport_signal)
+//!             .items(item_thumbs)
+//!             .size(200.0, 150.0),
+//!     );
 //! ```
+//!
+//! For a live "items as they move" minimap, re-call
+//! [`Scene::item_thumbnails`](crate::Scene::item_thumbnails) on
+//! scene mutations and rebuild the widget tree (or wire a
+//! `Signal<Vec<(Rect, Color)>>` if your app needs per-frame
+//! reactivity).
 //!
 //! ## Design
 //!

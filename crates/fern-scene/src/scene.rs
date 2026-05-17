@@ -1068,6 +1068,39 @@ impl Scene {
             .collect()
     }
 
+    /// Snapshot every visible lightweight item as a `(scene_rect,
+    /// color)` pair suitable for a minimap thumbnail. Filters out
+    /// items with `HAS_NO_CONTENTS` (logical-only) and items hidden
+    /// by `IS_VISIBLE` / a hidden ancestor — the visible-effective
+    /// set matches what the SceneView's paint walk renders.
+    /// Heavyweight widget entries are skipped (they paint via the
+    /// arena walker and don't have a `thumbnail_color`).
+    ///
+    /// Ordered by insertion (low z first). The color comes from
+    /// [`SceneItem::thumbnail_color`]; built-in items return their
+    /// fill / stroke / a neutral grey.
+    pub fn item_thumbnails(&self) -> Vec<(Rect, fern_tokens::Color)> {
+        let mut out = Vec::new();
+        for entry in &self.entries {
+            // Skip heavyweight items.
+            let SceneEntryKind::Item(item) = &entry.kind else {
+                continue;
+            };
+            // Skip invisible / logical-only items.
+            if !self.is_effectively_visible(entry.id) {
+                continue;
+            }
+            if entry.flags.contains(ItemFlags::HAS_NO_CONTENTS) {
+                continue;
+            }
+            let Some(rect) = self.scene_rect(entry.id) else {
+                continue;
+            };
+            out.push((rect, item.thumbnail_color()));
+        }
+        out
+    }
+
     /// Topmost lightweight item whose `shape_contains` fires for
     /// `scene_pt`. Iterates `items_in_rect` for a tiny rect around
     /// the point, sorts by z descending, and returns the first hit.

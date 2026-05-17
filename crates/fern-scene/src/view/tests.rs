@@ -4911,3 +4911,202 @@ fn rect_item_default_clone_shape_test_aabb_hits_as_before() {
     assert!(!test(Point::new(5.0, 5.0)));
     assert!(!test(Point::new(45.0, 45.0)));
 }
+
+// -----------------------------------------------------------------
+// Unit 5 — documented-but-missing APIs
+//   (map_*, viewport_in_scene_signal, Scene::item_thumbnails)
+// -----------------------------------------------------------------
+
+#[test]
+fn map_to_scene_and_map_from_scene_round_trip() {
+    let scene = Scene::new();
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let view = view_handle(&tree, view_id);
+
+    // Pan and zoom so the transform is non-trivial.
+    view.set_pan(Vec2::new(40.0, 20.0));
+    view.set_zoom(2.5);
+
+    let view_pt = Point::new(123.0, 87.0);
+    let round_trip = view.map_from_scene(view.map_to_scene(view_pt));
+    assert!(
+        (round_trip.x - view_pt.x).abs() < 1e-3,
+        "round-trip x: expected {}, got {}",
+        view_pt.x,
+        round_trip.x
+    );
+    assert!(
+        (round_trip.y - view_pt.y).abs() < 1e-3,
+        "round-trip y: expected {}, got {}",
+        view_pt.y,
+        round_trip.y
+    );
+
+    // map_from_scene should match the view transform.
+    let xform = view.view_transform();
+    let scene_pt = Point::new(10.0, 10.0);
+    let expected = xform.apply_point(scene_pt);
+    let actual = view.map_from_scene(scene_pt);
+    assert!((actual.x - expected.x).abs() < 1e-3);
+    assert!((actual.y - expected.y).abs() < 1e-3);
+}
+
+#[test]
+fn map_rect_round_trips_under_pan_zoom() {
+    let scene = Scene::new();
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let view = view_handle(&tree, view_id);
+    view.set_pan(Vec2::new(10.0, -20.0));
+    view.set_zoom(1.5);
+
+    let view_rect = Rect::new(50.0, 60.0, 100.0, 80.0);
+    let scene_rect = view.map_rect_to_scene(view_rect);
+    let back = view.map_rect_from_scene(scene_rect);
+    assert!((back.x - view_rect.x).abs() < 1e-2);
+    assert!((back.y - view_rect.y).abs() < 1e-2);
+    assert!((back.width - view_rect.width).abs() < 1e-2);
+    assert!((back.height - view_rect.height).abs() < 1e-2);
+}
+
+#[test]
+fn viewport_in_scene_signal_reflects_pan_zoom_and_viewport() {
+    // At pan=0, zoom=1, viewport 400×300: visible scene region =
+    // (0, 0, 400, 300). After set_pan(100, 50) at zoom 1: visible
+    // shifts to (-100, -50, 400, 300). After set_zoom(2) (which
+    // re-anchors pan, so we set pan again post-zoom to control
+    // for it): visible becomes (-50, -25, 200, 150) under pan 100.
+    let scene = Scene::new();
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let view = view_handle(&tree, view_id);
+
+    let region_sig = view.viewport_in_scene_signal();
+    let r0 = region_sig.get();
+    assert!((r0.x - 0.0).abs() < 1e-3, "initial x, got {}", r0.x);
+    assert!((r0.y - 0.0).abs() < 1e-3, "initial y, got {}", r0.y);
+    assert!((r0.width - 400.0).abs() < 1e-3);
+    assert!((r0.height - 300.0).abs() < 1e-3);
+
+    view.set_pan(Vec2::new(100.0, 50.0));
+    let r1 = region_sig.get();
+    assert!((r1.x - -100.0).abs() < 1e-3, "after pan x, got {}", r1.x);
+    assert!((r1.y - -50.0).abs() < 1e-3, "after pan y, got {}", r1.y);
+    assert!((r1.width - 400.0).abs() < 1e-3, "width unchanged at zoom 1");
+
+    view.set_zoom(2.0);
+    let r2 = region_sig.get();
+    // Width halves under zoom 2.
+    assert!(
+        (r2.width - 200.0).abs() < 1e-3,
+        "zoom 2 width: expected 200, got {}",
+        r2.width
+    );
+    assert!(
+        (r2.height - 150.0).abs() < 1e-3,
+        "zoom 2 height: expected 150, got {}",
+        r2.height
+    );
+}
+
+#[test]
+fn viewport_size_signal_fires_when_layout_resolves_new_size() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let scene = Scene::new();
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // Capture the initial size + install an observer that counts
+    // fires on subsequent set_pan calls (which should NOT fire) vs
+    // resize calls (which SHOULD).
+    let view = view_handle(&tree, view_id);
+    let sig = view.viewport_size_signal();
+    let fires = Rc::new(Cell::new(0_u32));
+    let fires_clone = fires.clone();
+    let _h = sig.observe(move |_| fires_clone.set(fires_clone.get() + 1));
+
+    // Re-layout with the same size — observer should NOT fire
+    // (the layout_response gates set() on inequality).
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(
+        fires.get(),
+        0,
+        "same-size layout pass must not fire viewport observers"
+    );
+
+    // Re-layout with a new size — observer fires once.
+    tree.layout(SizeProposal::exact(500.0, 400.0));
+    assert_eq!(
+        fires.get(),
+        1,
+        "size change should fire viewport observer once, got {}",
+        fires.get()
+    );
+}
+
+#[test]
+fn item_thumbnails_returns_visible_lightweight_items_with_colors() {
+    use crate::items::RectItem;
+    let mut scene = Scene::new();
+    let red = scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 30.0, 30.0)).fill(fern_tokens::Color::RED),
+        Point::new(10.0, 10.0),
+    );
+    let blue = scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 40.0, 50.0)).fill(fern_tokens::Color::BLUE),
+        Point::new(100.0, 100.0),
+    );
+
+    let thumbs = scene.item_thumbnails();
+    assert_eq!(thumbs.len(), 2);
+    // Insertion order.
+    let (rect_red, color_red) = thumbs[0];
+    assert_eq!(rect_red, Rect::new(10.0, 10.0, 30.0, 30.0));
+    assert_eq!(color_red, fern_tokens::Color::RED);
+    let (rect_blue, color_blue) = thumbs[1];
+    assert_eq!(rect_blue, Rect::new(100.0, 100.0, 40.0, 50.0));
+    assert_eq!(color_blue, fern_tokens::Color::BLUE);
+    let _ = (red, blue);
+}
+
+#[test]
+fn item_thumbnails_skips_invisible_and_logical_items() {
+    use crate::flags::ItemFlags;
+    use crate::items::{GroupItem, RectItem};
+
+    let mut scene = Scene::new();
+    let visible = scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)).fill(fern_tokens::Color::RED),
+        Point::ZERO,
+    );
+    let invisible = scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)).fill(fern_tokens::Color::BLUE),
+        Point::ZERO,
+    );
+    scene.set_flag(invisible, ItemFlags::IS_VISIBLE, false);
+    // Logical-only group: no fill/stroke/label. HAS_NO_CONTENTS
+    // would also exclude; but a logical-only group keeps the
+    // default flags. We add a separate HAS_NO_CONTENTS item to
+    // exercise that exclusion path.
+    let logical = scene.add_item(
+        GroupItem::new(Rect::new(0.0, 0.0, 100.0, 100.0)),
+        Point::ZERO,
+    );
+    scene.set_flag(logical, ItemFlags::HAS_NO_CONTENTS, true);
+
+    let thumbs = scene.item_thumbnails();
+    assert_eq!(
+        thumbs.len(),
+        1,
+        "should return only the visible content-bearing item"
+    );
+    assert_eq!(thumbs[0].1, fern_tokens::Color::RED);
+    let _ = visible;
+}

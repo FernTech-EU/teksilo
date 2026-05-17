@@ -191,6 +191,22 @@ impl SceneItem for GroupItem {
         Box::new(move |p| is_visual && bounds.contains(p))
     }
 
+    fn thumbnail_color(&self) -> Color {
+        // Visual groups: fill dominates, then stroke. Logical
+        // groups are invisible — paint as fully transparent so
+        // minimap consumers can suppress them.
+        if let Some(c) = self.fill {
+            return c;
+        }
+        if let Some((c, _)) = self.stroke {
+            return c;
+        }
+        if self.is_visual() {
+            return Color::new(0.6, 0.6, 0.6, 1.0);
+        }
+        Color::new(0.0, 0.0, 0.0, 0.0)
+    }
+
     fn label(&self) -> Option<String> {
         self.label.clone()
     }

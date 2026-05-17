@@ -350,7 +350,13 @@ pub struct SceneView {
     /// reason about the visible rectangle without re-running layout.
     /// `Rc<Cell>` so event-handler closures (e.g. Ctrl+wheel zoom-
     /// about-viewport-center) can read it without touching `&mut self`.
-    last_viewport: Rc<Cell<Size>>,
+    /// Last viewport size resolved by `layout_response`. Stored as a
+    /// `Signal` (not `Cell`) so derived signals like
+    /// [`viewport_in_scene_signal`](Self::viewport_in_scene_signal)
+    /// can react to viewport changes. Writes are gated by an
+    /// equality check at the call site to avoid notifying on
+    /// unchanged values.
+    last_viewport: Signal<Size>,
 
     // --- View transform state ---------------------------------
     pan_x: Signal<f32>,
@@ -593,7 +599,7 @@ impl SceneView {
             handler_snapshot: Rc::new(RefCell::new(Vec::new())),
             hovered_item: Rc::new(Cell::new(None)),
             pending_tap: Rc::new(Cell::new(None)),
-            last_viewport: Rc::new(Cell::new(Size::new(800.0, 600.0))),
+            last_viewport: Signal::new(Size::new(800.0, 600.0)),
             pan_x,
             pan_y,
             zoom,
@@ -934,7 +940,9 @@ impl SceneView {
     /// an axis. Defaults to 800×600 logical pixels.
     pub fn default_size(mut self, w: f32, h: f32) -> Self {
         self.default_size = Size::new(w, h);
-        self.last_viewport.set(self.default_size);
+        if self.last_viewport.get() != self.default_size {
+            self.last_viewport.set(self.default_size);
+        }
         self
     }
 
@@ -1146,6 +1154,71 @@ impl SceneView {
             self.zoom.get(),
             self.rotation.get(),
         )
+    }
+
+    /// Project a point in **view space** (screen-pixel coords —
+    /// the same frame pointer events arrive in) into scene
+    /// coordinates. Inverse of [`map_from_scene`](Self::map_from_scene).
+    /// Returns the scene origin when the view transform is
+    /// degenerate (e.g. zoom = 0).
+    pub fn map_to_scene(&self, view_pt: Point) -> Point {
+        match self.view_transform().inverse() {
+            Some(inv) => inv.apply_point(view_pt),
+            None => Point::ZERO,
+        }
+    }
+
+    /// Project a point in **scene coords** to view space (screen
+    /// pixels). Inverse of [`map_to_scene`](Self::map_to_scene).
+    pub fn map_from_scene(&self, scene_pt: Point) -> Point {
+        self.view_transform().apply_point(scene_pt)
+    }
+
+    /// Project a rectangle in view space into scene coordinates.
+    /// Returns the AABB of the four projected corners under
+    /// rotation. Empty rect when the view transform is degenerate.
+    pub fn map_rect_to_scene(&self, view_rect: Rect) -> Rect {
+        match self.view_transform().inverse() {
+            Some(inv) => inv.apply_rect(view_rect),
+            None => Rect::ZERO,
+        }
+    }
+
+    /// Project a rectangle in scene coords into view space.
+    pub fn map_rect_from_scene(&self, scene_rect: Rect) -> Rect {
+        self.view_transform().apply_rect(scene_rect)
+    }
+
+    /// Reactive signal of the **visible scene region** — the
+    /// portion of scene space currently inside the SceneView's
+    /// viewport. Fires whenever pan / zoom / rotation /
+    /// bounds_origin / viewport-size changes.
+    ///
+    /// Use to drive a minimap viewport indicator, lazy-load only
+    /// the visible scene region, or implement "scroll into view"
+    /// guards. The value is the AABB of the viewport rectangle
+    /// projected through `view_transform.inverse()`.
+    pub fn viewport_in_scene_signal(&self) -> Signal<Rect> {
+        let xform_sig = self.view_transform_signal.clone();
+        let vp_sig = self.last_viewport.clone();
+        let bo_sig = self.bounds_origin_signal.clone();
+        xform_sig
+            .zip(&vp_sig)
+            .zip(&bo_sig)
+            .map_coalesced(|((xform, vp), bo)| {
+                let screen_rect = Rect::new(bo.x, bo.y, vp.width, vp.height);
+                match xform.inverse() {
+                    Some(inv) => inv.apply_rect(screen_rect),
+                    None => Rect::ZERO,
+                }
+            })
+    }
+
+    /// Reactive signal of the SceneView's resolved viewport size.
+    /// Fires whenever `layout_response` resolves a new size that
+    /// differs from the previous.
+    pub fn viewport_size_signal(&self) -> Signal<Size> {
+        self.last_viewport.clone()
     }
 
     /// Animate pan to `target` over `duration`. Bounded by
@@ -2409,8 +2482,11 @@ impl Widget for SceneView {
         // refreshed in `place_children`, which runs whenever the
         // SceneView has at least one child — i.e. always in real
         // apps, since an empty SceneView doesn't render anything to
-        // interact with.
-        self.last_viewport.set(size);
+        // interact with. The set is gated by an equality check so
+        // unchanged sizes don't spuriously fire viewport observers.
+        if self.last_viewport.get() != size {
+            self.last_viewport.set(size);
+        }
 
         // Refresh the lightweight-bounds snapshot used
         // by the on_drag closure for hit-test. Done here (rather

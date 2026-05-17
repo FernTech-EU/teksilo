@@ -94,6 +94,14 @@ impl SceneItem for RectItem {
         }
     }
 
+    fn thumbnail_color(&self) -> fern_tokens::Color {
+        // Fill dominates; fall through to stroke; fall through to
+        // the default grey if the rect has no visible chrome.
+        self.fill
+            .or_else(|| self.stroke.map(|(c, _)| c))
+            .unwrap_or_else(|| fern_tokens::Color::new(0.6, 0.6, 0.6, 1.0))
+    }
+
     fn label(&self) -> Option<String> {
         self.label.clone()
     }
