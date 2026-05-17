@@ -4709,3 +4709,205 @@ fn scene_constraints_helper_accessors_return_signals() {
     assert_eq!(zoom_range_sig.get(), Some(0.5..=3.0));
     assert_eq!(zoomable_sig.get(), false);
 }
+
+// -----------------------------------------------------------------
+// Unit 4 — shape-aware hit-test in handler_snapshot
+// -----------------------------------------------------------------
+
+#[test]
+fn path_item_stroke_only_dispatch_uses_segment_distance_not_aabb() {
+    // Regression for the handler_snapshot dispatch path falling
+    // back to AABB. A stroke-only PathItem drawn as an L-shape
+    // has a 100×100 AABB but only thin pixels along the actual
+    // segments. The corner point opposite the L's bend lies
+    // inside the AABB but FAR from any stroke — a tap there must
+    // miss after Unit 4 (it would have hit under the old AABB
+    // fallback).
+    use crate::items::PathItem;
+    use fern_canvas::Path;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    // L-shape: down from (10, 10) to (10, 90), then right to (90, 90).
+    let mut path = Path::new();
+    path.move_to(Point::new(10.0, 10.0));
+    path.line_to(Point::new(10.0, 90.0));
+    path.line_to(Point::new(90.0, 90.0));
+    let item = PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 100.0))
+        .stroke(fern_tokens::Color::RED, 2.0);
+
+    let mut scene = Scene::new();
+    let id = scene.add_item(item, Point::ZERO);
+    let count = Rc::new(Cell::new(0_u32));
+    let count_clone = count.clone();
+    scene.handlers_mut(id).unwrap().on_tap(move |_pt, _ctx| {
+        count_clone.set(count_clone.get() + 1);
+    });
+
+    let mut tree = WidgetTree::new();
+    tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let tap = |tree: &mut WidgetTree, x: f32, y: f32| {
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: fern_canvas::Point::new(x, y),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: fern_canvas::Point::new(x, y),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+    };
+
+    // Tap squarely ON the vertical stroke segment.
+    tap(&mut tree, 10.0, 50.0);
+    assert_eq!(count.get(), 1, "tap on stroke should hit");
+
+    // Tap inside the AABB but FAR from any stroke (the L's
+    // inner corner, around (60, 30)). Old code AABB-hit; Unit 4
+    // segment-distance test misses.
+    tap(&mut tree, 60.0, 30.0);
+    assert_eq!(
+        count.get(),
+        1,
+        "tap inside AABB but outside stroke must miss; old AABB fallback would have hit"
+    );
+}
+
+#[test]
+fn group_item_logical_only_dispatch_passes_through_to_item_beneath() {
+    // Regression for the GroupItem-shaped pass-through. A
+    // logical-only GroupItem (no fill, no stroke, no inline
+    // label) should NOT capture pointer events — clicks must
+    // fall through to items painted beneath / behind it. Old
+    // AABB fallback in dispatch captured every event in the
+    // group's rect, blocking the inner item.
+    use crate::items::{GroupItem, RectItem};
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    // Inner RectItem at (20, 20, 30, 30); GroupItem AABB
+    // (0, 0, 100, 100) overlapping it. Group is logical-only
+    // (default — no fill, no stroke, no label).
+    let inner_item = RectItem::new(Rect::new(0.0, 0.0, 30.0, 30.0)).fill(fern_tokens::Color::RED);
+    let group = GroupItem::new(Rect::new(0.0, 0.0, 100.0, 100.0));
+
+    let mut scene = Scene::new();
+    let group_id = scene.add_item(group, Point::ZERO);
+    let inner_id = scene.add_item(inner_item, Point::new(20.0, 20.0));
+    // Higher z on the inner so it's the topmost — confirms the
+    // dispatch order isn't the issue.
+    scene.set_z(group_id, 0.0);
+    scene.set_z(inner_id, 10.0);
+
+    let group_hits = Rc::new(Cell::new(0_u32));
+    let inner_hits = Rc::new(Cell::new(0_u32));
+    {
+        let group_hits = group_hits.clone();
+        scene.handlers_mut(group_id).unwrap().on_tap(move |_pt, _ctx| {
+            group_hits.set(group_hits.get() + 1);
+        });
+    }
+    {
+        let inner_hits = inner_hits.clone();
+        scene.handlers_mut(inner_id).unwrap().on_tap(move |_pt, _ctx| {
+            inner_hits.set(inner_hits.get() + 1);
+        });
+    }
+
+    let mut tree = WidgetTree::new();
+    tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let tap = |tree: &mut WidgetTree, x: f32, y: f32| {
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: fern_canvas::Point::new(x, y),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: fern_canvas::Point::new(x, y),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+    };
+
+    // Tap inside the inner rect (inside both the inner item AND
+    // the logical group's AABB). Inner item should receive the
+    // tap; the logical group must NOT.
+    tap(&mut tree, 30.0, 30.0);
+    assert_eq!(inner_hits.get(), 1, "inner rect should receive the tap");
+    assert_eq!(
+        group_hits.get(),
+        0,
+        "logical-only group must NOT capture events that fall inside its AABB; \
+         old AABB fallback would have given it count=1"
+    );
+
+    // Tap inside the group's AABB but OUTSIDE the inner rect:
+    // logical-only group misses, no item receives the tap.
+    tap(&mut tree, 80.0, 80.0);
+    assert_eq!(inner_hits.get(), 1, "inner rect untouched");
+    assert_eq!(
+        group_hits.get(),
+        0,
+        "logical-only group must miss this tap too"
+    );
+}
+
+#[test]
+fn group_item_visual_dispatch_uses_aabb_as_before() {
+    // Counter-test for the above: VISUAL groups (with fill /
+    // stroke / inline label) should still AABB-hit and receive
+    // group-level click handlers — Unit 4 only changes the
+    // logical-only case.
+    use crate::items::GroupItem;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let group = GroupItem::new(Rect::new(0.0, 0.0, 100.0, 100.0)).fill(fern_tokens::Color::BLUE);
+
+    let mut scene = Scene::new();
+    let id = scene.add_item(group, Point::ZERO);
+    let hits = Rc::new(Cell::new(0_u32));
+    let hits_clone = hits.clone();
+    scene.handlers_mut(id).unwrap().on_tap(move |_pt, _ctx| {
+        hits_clone.set(hits_clone.get() + 1);
+    });
+
+    let mut tree = WidgetTree::new();
+    tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: fern_canvas::Point::new(50.0, 50.0),
+        button: fern_core::event::PointerButton::Primary,
+        modifiers: fern_core::event::Modifiers::default(),
+    });
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: fern_canvas::Point::new(50.0, 50.0),
+        button: fern_core::event::PointerButton::Primary,
+        modifiers: fern_core::event::Modifiers::default(),
+    });
+    assert_eq!(
+        hits.get(),
+        1,
+        "visual group should still receive AABB-based taps"
+    );
+}
+
+#[test]
+fn rect_item_default_clone_shape_test_aabb_hits_as_before() {
+    // Surface check: items that don't override clone_shape_test
+    // get the default AABB closure, which matches their
+    // shape_contains exactly (since RectItem IS its AABB).
+    use crate::item::SceneItem;
+    use crate::items::RectItem;
+    let item = RectItem::new(Rect::new(10.0, 10.0, 30.0, 30.0));
+    let test = item.clone_shape_test();
+    assert!(test(Point::new(20.0, 20.0)));
+    assert!(!test(Point::new(5.0, 5.0)));
+    assert!(!test(Point::new(45.0, 45.0)));
+}

@@ -104,42 +104,28 @@ impl SceneItem for PathItem {
     }
 
     fn shape_contains(&self, local_pt: Point) -> bool {
-        // Stroke-only paths use per-segment distance to match what
-        // users see; filled and mixed fill+stroke paths use AABB
-        // (the fill region is the dominant target). Quad/cubic/arc
-        // segments fall back to AABB.
-        let stroke_width = match self.stroke {
-            Some((_, w)) => w,
-            None => return self.local_bounds.contains(local_pt),
-        };
-        if self.fill.is_some() {
-            return self.local_bounds.contains(local_pt);
-        }
-        let tolerance = stroke_width.max(0.0) * 0.5 + 2.0;
-        let mut current = Point::ZERO;
-        let mut start = Point::ZERO;
-        for cmd in &self.path.commands {
-            match cmd {
-                fern_canvas::PathCommand::MoveTo(p) => {
-                    current = *p;
-                    start = *p;
-                }
-                fern_canvas::PathCommand::LineTo(p) => {
-                    if point_to_segment_distance(local_pt, current, *p) <= tolerance {
-                        return true;
-                    }
-                    current = *p;
-                }
-                fern_canvas::PathCommand::Close => {
-                    if point_to_segment_distance(local_pt, current, start) <= tolerance {
-                        return true;
-                    }
-                    current = start;
-                }
-                _ => return self.local_bounds.contains(local_pt),
-            }
-        }
-        false
+        path_shape_contains(
+            &self.path,
+            self.local_bounds,
+            self.fill.is_some(),
+            self.stroke,
+            local_pt,
+        )
+    }
+
+    fn clone_shape_test(&self) -> Box<dyn Fn(Point) -> bool + 'static> {
+        // Capture the data needed for hit-test without holding a
+        // borrow on `self`. The `SceneView` snapshot stores the
+        // returned closure and consults it on every pointer event,
+        // so we have to be cloneable and `'static`. `Path` is
+        // `Clone`; the rest of the captured state is `Copy`.
+        let path = self.path.clone();
+        let local_bounds = self.local_bounds;
+        let has_fill = self.fill.is_some();
+        let stroke = self.stroke;
+        Box::new(move |local_pt| {
+            path_shape_contains(&path, local_bounds, has_fill, stroke, local_pt)
+        })
     }
 
     fn label(&self) -> Option<String> {
@@ -161,6 +147,54 @@ impl SceneItem for PathItem {
         }
         self.a11y.apply(builder);
     }
+}
+
+/// Hit-test logic shared between [`PathItem::shape_contains`] and
+/// the snapshotted closure returned by
+/// [`PathItem::clone_shape_test`]. Stroke-only paths walk each
+/// segment and test point-to-segment distance against
+/// `stroke_width/2 + 2px` tolerance; filled or mixed-fill paths
+/// fall through to AABB; non-line segments (quad / cubic / arc)
+/// fall through to AABB.
+fn path_shape_contains(
+    path: &Path,
+    local_bounds: Rect,
+    has_fill: bool,
+    stroke: Option<(Color, f32)>,
+    local_pt: Point,
+) -> bool {
+    let stroke_width = match stroke {
+        Some((_, w)) => w,
+        None => return local_bounds.contains(local_pt),
+    };
+    if has_fill {
+        return local_bounds.contains(local_pt);
+    }
+    let tolerance = stroke_width.max(0.0) * 0.5 + 2.0;
+    let mut current = Point::ZERO;
+    let mut start = Point::ZERO;
+    for cmd in &path.commands {
+        match cmd {
+            fern_canvas::PathCommand::MoveTo(p) => {
+                current = *p;
+                start = *p;
+            }
+            fern_canvas::PathCommand::LineTo(p) => {
+                if point_to_segment_distance(local_pt, current, *p) <= tolerance {
+                    return true;
+                }
+                current = *p;
+            }
+            fern_canvas::PathCommand::Close => {
+                if point_to_segment_distance(local_pt, current, start) <= tolerance {
+                    return true;
+                }
+                current = start;
+            }
+            _ => return local_bounds.contains(local_pt),
+        }
+    }
+    false
 }
 
 /// Shortest distance from a point to a line segment.

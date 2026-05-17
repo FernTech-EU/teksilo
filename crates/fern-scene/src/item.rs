@@ -143,6 +143,28 @@ pub trait SceneItem: std::fmt::Debug + 'static {
         self.local_bounds().contains(local_pt)
     }
 
+    /// Produce a stand-alone `Fn(Point) -> bool` that closes over
+    /// whatever state this item needs to answer `shape_contains`
+    /// without retaining a borrow on `self`. The
+    /// [`SceneView`](crate::SceneView) snapshots one of these for
+    /// every item at layout time and consults it on every pointer
+    /// event — direct calls to `shape_contains(&self, ...)` can't
+    /// be cached because `&dyn SceneItem` is not `Clone`.
+    ///
+    /// Default: AABB containment of `local_bounds()`. Items with a
+    /// non-AABB shape (notably [`crate::items::PathItem`] for
+    /// stroke-only paths and [`crate::items::GroupItem`] for the
+    /// logical-only / pass-through case) override this so dispatch
+    /// hits along the actual painted geometry. Returning the
+    /// default for an item with a custom `shape_contains` is a
+    /// silent dispatch bug — the eager `Scene::item_at` path still
+    /// calls `shape_contains` correctly, but pointer-event routing
+    /// goes through the snapshot.
+    fn clone_shape_test(&self) -> Box<dyn Fn(Point) -> bool + 'static> {
+        let bounds = self.local_bounds();
+        Box::new(move |p| bounds.contains(p))
+    }
+
     /// The flags this item should carry into the Scene at insert
     /// time. Default: `ItemFlags::default()` — visible, enabled,
     /// selectable. Built-ins read their accumulated builder state

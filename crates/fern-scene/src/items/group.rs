@@ -180,6 +180,17 @@ impl SceneItem for GroupItem {
         }
     }
 
+    /// Override the default AABB-only snapshot: logical-only groups
+    /// (no fill, no stroke, no inline label) must MISS for dispatch
+    /// so clicks fall through to items beneath. Without this
+    /// override the snapshot would AABB-hit and capture every event
+    /// over the group's rect, blocking the items it contains.
+    fn clone_shape_test(&self) -> Box<dyn Fn(Point) -> bool + 'static> {
+        let is_visual = self.is_visual();
+        let bounds = self.local_bounds;
+        Box::new(move |p| is_visual && bounds.contains(p))
+    }
+
     fn label(&self) -> Option<String> {
         self.label.clone()
     }

@@ -2470,17 +2470,15 @@ impl Widget for SceneView {
                 let scene_xform = self.scene.scene_transform(id);
                 let z = self.scene.z(id).unwrap_or(0.0);
                 let handlers = self.scene.handlers(id).cloned().map(Box::new);
-                let _ = item;
-                // We can't clone `&dyn SceneItem`; capture the
-                // local-bounds for an AABB predicate. Items with a
-                // non-AABB shape (PathItem stroke-only, GroupItem
-                // logical-only) fall back to AABB hit-test in the
-                // dispatch path — full `shape_contains` invocation
-                // lives in the eager `Scene::item_at` path.
+                // Capture the item's shape-test as a stand-alone
+                // closure so the snapshot can answer narrow-phase
+                // hit-test without holding a borrow on the Scene.
+                // Items with non-AABB geometry (PathItem stroke-only,
+                // GroupItem logical-only) override `clone_shape_test`
+                // to capture the data they need; default impl returns
+                // an AABB predicate over `local_bounds`.
+                let shape_contains: Rc<dyn Fn(Point) -> bool> = item.clone_shape_test().into();
                 let local_bounds = self.scene.local_bounds(id).unwrap_or(Rect::ZERO);
-                let local_bounds_for_closure = local_bounds;
-                let shape_contains: Rc<dyn Fn(Point) -> bool> =
-                    Rc::new(move |p: Point| local_bounds_for_closure.contains(p));
                 let flags = self.scene.flags(id).unwrap_or_default();
                 let ignores_xform =
                     flags.contains(crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS);
