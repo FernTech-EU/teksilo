@@ -272,7 +272,7 @@ impl WidgetTree {
             proposal.height.unwrap_or(600.0),
         );
         self.overlay_manager
-            .position_overlays(anchor_bounds, viewport);
+            .position_overlays(anchor_bounds, viewport, self.layout_direction);
         for content_id in &overlay_content_ids {
             if !self.arena.is_active(*content_id) {
                 continue;
@@ -312,8 +312,11 @@ impl WidgetTree {
                 let anchor_bounds = |id: WidgetId| -> Option<Rect> {
                     self.arena.is_active(id).then(|| self.arena.bounds(id))
                 };
-                self.overlay_manager
-                    .position_overlays(anchor_bounds, viewport);
+                self.overlay_manager.position_overlays(
+                    anchor_bounds,
+                    viewport,
+                    self.layout_direction,
+                );
             }
             let overlay_bounds = overlay_id
                 .and_then(|overlay_id| {

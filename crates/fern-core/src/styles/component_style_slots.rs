@@ -32,7 +32,7 @@ use crate::styles::{
     SharedProgressBarStyle, SharedRadioStyle, SharedRichTextEditorStyle, SharedScrollBarStyle,
     SharedSearchFieldStyle, SharedSegmentedControlStyle, SharedSliderStyle, SharedSnackbarStyle,
     SharedSpinBoxStyle, SharedStandardItemStyle, SharedTabStyle, SharedTableStyle,
-    SharedTextInputStyle, SharedToggleStyle, SharedTooltipStyle,
+    SharedTextInputStyle, SharedToastStyle, SharedToggleStyle, SharedTooltipStyle,
 };
 
 /// Typed slot bag living on [`crate::styles::Theme`]. One slot per
@@ -58,6 +58,7 @@ pub struct ComponentStyleSlots {
     pub tab: Option<SharedTabStyle>,
     pub dialog: Option<SharedDialogStyle>,
     pub snackbar: Option<SharedSnackbarStyle>,
+    pub toast: Option<SharedToastStyle>,
     pub banner: Option<SharedBannerStyle>,
     pub badge: Option<SharedBadgeStyle>,
     pub progress_bar: Option<SharedProgressBarStyle>,
@@ -98,6 +99,7 @@ impl std::fmt::Debug for ComponentStyleSlots {
             .field("tab", &self.tab.is_some())
             .field("dialog", &self.dialog.is_some())
             .field("snackbar", &self.snackbar.is_some())
+            .field("toast", &self.toast.is_some())
             .field("banner", &self.banner.is_some())
             .field("badge", &self.badge.is_some())
             .field("progress_bar", &self.progress_bar.is_some())
@@ -146,6 +148,7 @@ impl PartialEq for ComponentStyleSlots {
             && rc_eq(&self.tab, &other.tab)
             && rc_eq(&self.dialog, &other.dialog)
             && rc_eq(&self.snackbar, &other.snackbar)
+            && rc_eq(&self.toast, &other.toast)
             && rc_eq(&self.banner, &other.banner)
             && rc_eq(&self.badge, &other.badge)
             && rc_eq(&self.progress_bar, &other.progress_bar)

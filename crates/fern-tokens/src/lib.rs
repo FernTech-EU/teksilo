@@ -10,7 +10,7 @@ pub mod text_style;
 pub mod theme;
 pub mod typography;
 
-pub use alignment::{Alignment, HAlignment, VAlignment};
+pub use alignment::{Alignment, Corner, HAlignment, VAlignment};
 pub use color::Color;
 pub use layout::LayoutTokens;
 pub use motion::{Easing, MotionTokens, lerp};

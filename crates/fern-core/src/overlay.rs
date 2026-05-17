@@ -9,7 +9,9 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use fern_canvas::{Point, Rect, Size, Vec2};
+use fern_tokens::Corner;
 
+use crate::environment::LayoutDirection;
 use crate::signal::Signal;
 use crate::widget_id::WidgetId;
 
@@ -56,6 +58,13 @@ pub enum OverlayPlacement {
     /// Below the anchor if space allows, otherwise above (combo box dropdown).
     /// The viewport height is supplied by `position_overlays()` at layout time.
     BelowPreferred,
+    /// Snaps content to a viewport corner with a per-axis margin
+    /// (used by `ToastHost` for stacked toast notifications, also
+    /// suitable for picture-in-picture, floating action overlays).
+    /// Anchor bounds are ignored. The leading/trailing axis honours
+    /// `LayoutDirection`: `TopTrailing` is top-right under LTR and
+    /// top-left under RTL.
+    ViewportCorner { corner: Corner, margin: Vec2 },
     /// Fills the entire viewport, anchor-independent. Used by the
     /// modal-presentation pipeline to mount a dialog scrim behind a
     /// centered modal panel — the scrim covers the full window so the
@@ -848,8 +857,10 @@ impl OverlayManager {
         &mut self,
         anchor_bounds_fn: impl Fn(WidgetId) -> Option<Rect>,
         viewport: (f32, f32),
+        layout_direction: LayoutDirection,
     ) {
         let (vw, vh) = viewport;
+        let rtl = matches!(layout_direction, LayoutDirection::RightToLeft);
         for overlay in &mut self.stack {
             let Some(anchor) = anchor_bounds_fn(overlay.anchor) else {
                 // Anchor destroyed; preserve the previous bounds.
@@ -942,6 +953,20 @@ impl OverlayManager {
                         y,
                         content_size.width.max(anchor.width),
                         content_size.height,
+                    )
+                }
+                OverlayPlacement::ViewportCorner { corner, margin } => {
+                    let (x, y) = corner.resolve(
+                        (content_size.width, content_size.height),
+                        (vw, vh),
+                        (margin.x, margin.y),
+                        rtl,
+                    );
+                    Rect::new(
+                        x,
+                        y,
+                        content_size.width.min(vw),
+                        content_size.height.min(vh),
                     )
                 }
                 OverlayPlacement::FullViewport => Rect::new(0.0, 0.0, vw, vh),
@@ -1441,7 +1466,11 @@ mod tests {
         });
 
         mgr.set_content_bounds(id, Size::new(240.0, 120.0));
-        mgr.position_overlays(|_| Some(Rect::new(0.0, 0.0, 10.0, 10.0)), (800.0, 600.0));
+        mgr.position_overlays(
+            |_| Some(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            (800.0, 600.0),
+            LayoutDirection::LeftToRight,
+        );
 
         let bounds = mgr
             .stack
@@ -1468,7 +1497,11 @@ mod tests {
         });
 
         mgr.set_content_bounds(id, Size::new(240.0, 64.0));
-        mgr.position_overlays(|_| Some(Rect::new(0.0, 0.0, 10.0, 10.0)), (800.0, 600.0));
+        mgr.position_overlays(
+            |_| Some(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            (800.0, 600.0),
+            LayoutDirection::LeftToRight,
+        );
 
         let bounds = mgr
             .stack
@@ -1478,5 +1511,185 @@ mod tests {
             .bounds;
         assert!((bounds.x - 280.0).abs() < 0.01);
         assert!((bounds.y - 512.0).abs() < 0.01);
+    }
+
+    // --- ViewportCorner placement ---
+
+    fn show_corner_overlay(
+        mgr: &mut OverlayManager,
+        corner: Corner,
+        margin: Vec2,
+        size: Size,
+    ) -> OverlayId {
+        let id = mgr.show(OverlayRequest {
+            content_id: fake_id(10),
+            anchor: fake_id(1),
+            placement: OverlayPlacement::ViewportCorner { corner, margin },
+            dismiss: DismissBehavior::Manual,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        mgr.set_content_bounds(id, size);
+        id
+    }
+
+    fn overlay_bounds(mgr: &OverlayManager, id: OverlayId) -> Rect {
+        mgr.stack.iter().find(|o| o.id == id).unwrap().bounds
+    }
+
+    #[test]
+    fn viewport_corner_top_leading_ltr() {
+        let mut mgr = OverlayManager::new();
+        let id = show_corner_overlay(
+            &mut mgr,
+            Corner::TopLeading,
+            Vec2::new(24.0, 24.0),
+            Size::new(380.0, 100.0),
+        );
+        mgr.position_overlays(
+            |_| Some(Rect::ZERO),
+            (800.0, 600.0),
+            LayoutDirection::LeftToRight,
+        );
+        let b = overlay_bounds(&mgr, id);
+        assert!((b.x - 24.0).abs() < 0.01, "x = {}", b.x);
+        assert!((b.y - 24.0).abs() < 0.01, "y = {}", b.y);
+    }
+
+    #[test]
+    fn viewport_corner_top_trailing_ltr() {
+        let mut mgr = OverlayManager::new();
+        let id = show_corner_overlay(
+            &mut mgr,
+            Corner::TopTrailing,
+            Vec2::new(24.0, 24.0),
+            Size::new(380.0, 100.0),
+        );
+        mgr.position_overlays(
+            |_| Some(Rect::ZERO),
+            (800.0, 600.0),
+            LayoutDirection::LeftToRight,
+        );
+        let b = overlay_bounds(&mgr, id);
+        // 800 - 380 - 24 = 396
+        assert!((b.x - 396.0).abs() < 0.01, "x = {}", b.x);
+        assert!((b.y - 24.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn viewport_corner_bottom_leading_ltr() {
+        let mut mgr = OverlayManager::new();
+        let id = show_corner_overlay(
+            &mut mgr,
+            Corner::BottomLeading,
+            Vec2::new(24.0, 24.0),
+            Size::new(380.0, 100.0),
+        );
+        mgr.position_overlays(
+            |_| Some(Rect::ZERO),
+            (800.0, 600.0),
+            LayoutDirection::LeftToRight,
+        );
+        let b = overlay_bounds(&mgr, id);
+        // 600 - 100 - 24 = 476
+        assert!((b.x - 24.0).abs() < 0.01);
+        assert!((b.y - 476.0).abs() < 0.01, "y = {}", b.y);
+    }
+
+    #[test]
+    fn viewport_corner_bottom_trailing_ltr() {
+        let mut mgr = OverlayManager::new();
+        let id = show_corner_overlay(
+            &mut mgr,
+            Corner::BottomTrailing,
+            Vec2::new(24.0, 24.0),
+            Size::new(380.0, 100.0),
+        );
+        mgr.position_overlays(
+            |_| Some(Rect::ZERO),
+            (800.0, 600.0),
+            LayoutDirection::LeftToRight,
+        );
+        let b = overlay_bounds(&mgr, id);
+        assert!((b.x - 396.0).abs() < 0.01);
+        assert!((b.y - 476.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn viewport_corner_top_trailing_rtl_flips_to_left() {
+        let mut mgr = OverlayManager::new();
+        let id = show_corner_overlay(
+            &mut mgr,
+            Corner::TopTrailing,
+            Vec2::new(24.0, 24.0),
+            Size::new(380.0, 100.0),
+        );
+        mgr.position_overlays(
+            |_| Some(Rect::ZERO),
+            (800.0, 600.0),
+            LayoutDirection::RightToLeft,
+        );
+        let b = overlay_bounds(&mgr, id);
+        // RTL flips Trailing to physical left
+        assert!((b.x - 24.0).abs() < 0.01, "x = {}", b.x);
+        assert!((b.y - 24.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn viewport_corner_bottom_leading_rtl_flips_to_right() {
+        let mut mgr = OverlayManager::new();
+        let id = show_corner_overlay(
+            &mut mgr,
+            Corner::BottomLeading,
+            Vec2::new(24.0, 24.0),
+            Size::new(380.0, 100.0),
+        );
+        mgr.position_overlays(
+            |_| Some(Rect::ZERO),
+            (800.0, 600.0),
+            LayoutDirection::RightToLeft,
+        );
+        let b = overlay_bounds(&mgr, id);
+        assert!((b.x - 396.0).abs() < 0.01, "x = {}", b.x);
+        assert!((b.y - 476.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn viewport_corner_ignores_anchor_bounds() {
+        let mut mgr = OverlayManager::new();
+        let id = show_corner_overlay(
+            &mut mgr,
+            Corner::BottomTrailing,
+            Vec2::new(0.0, 0.0),
+            Size::new(100.0, 100.0),
+        );
+        // Even with an absurd anchor location, ViewportCorner only uses viewport.
+        mgr.position_overlays(
+            |_| Some(Rect::new(123.0, 456.0, 7.0, 8.0)),
+            (800.0, 600.0),
+            LayoutDirection::LeftToRight,
+        );
+        let b = overlay_bounds(&mgr, id);
+        assert_eq!((b.x, b.y), (700.0, 500.0));
+    }
+
+    #[test]
+    fn viewport_corner_zero_margin_snaps_to_edge() {
+        let mut mgr = OverlayManager::new();
+        let id = show_corner_overlay(
+            &mut mgr,
+            Corner::TopLeading,
+            Vec2::ZERO,
+            Size::new(50.0, 50.0),
+        );
+        mgr.position_overlays(
+            |_| Some(Rect::ZERO),
+            (800.0, 600.0),
+            LayoutDirection::LeftToRight,
+        );
+        let b = overlay_bounds(&mgr, id);
+        assert_eq!((b.x, b.y), (0.0, 0.0));
     }
 }

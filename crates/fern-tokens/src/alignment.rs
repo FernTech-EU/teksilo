@@ -55,6 +55,63 @@ impl VAlignment {
     }
 }
 
+/// A viewport corner — used by overlay placement (toast notifications,
+/// floating action buttons) and any UI that anchors to a corner of the
+/// containing surface. The leading/trailing axis respects
+/// `LayoutDirection`: `TopTrailing` is top-right in LTR and top-left
+/// in RTL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Corner {
+    TopLeading,
+    TopTrailing,
+    BottomLeading,
+    BottomTrailing,
+}
+
+impl Corner {
+    /// Decompose into independent `HAlignment` + `VAlignment` so the
+    /// caller can reuse their existing axis-resolution paths.
+    pub fn axes(self) -> (HAlignment, VAlignment) {
+        match self {
+            Self::TopLeading => (HAlignment::Leading, VAlignment::Top),
+            Self::TopTrailing => (HAlignment::Trailing, VAlignment::Top),
+            Self::BottomLeading => (HAlignment::Leading, VAlignment::Bottom),
+            Self::BottomTrailing => (HAlignment::Trailing, VAlignment::Bottom),
+        }
+    }
+
+    /// Resolve to the top-left corner of a `content_size`-sized rect
+    /// anchored to `self` inside a `viewport`-sized area, with the
+    /// content inset by `margin` from both axes of the chosen corner.
+    ///
+    /// The leading/trailing axis flips for RTL: in LTR, `TopTrailing`
+    /// places the content at the top-right with the margin measured
+    /// from the right edge; in RTL, it places it at the top-left with
+    /// the margin from the left edge. The vertical axis is independent
+    /// of direction.
+    pub fn resolve(
+        self,
+        content_size: (f32, f32),
+        viewport: (f32, f32),
+        margin: (f32, f32),
+        rtl: bool,
+    ) -> (f32, f32) {
+        let (cw, ch) = content_size;
+        let (vw, vh) = viewport;
+        let (mx, my) = margin;
+        let (h, v) = self.axes();
+        // Insetting is symmetric: shrink the available area by 2 * margin
+        // on each axis, resolve alignment inside the shrunk box, then
+        // translate by margin to bring it back. Equivalent to "stick to
+        // the chosen edge then back off by margin" in one expression.
+        let inner_w = (vw - 2.0 * mx).max(0.0);
+        let inner_h = (vh - 2.0 * my).max(0.0);
+        let x = mx + h.resolve(cw, inner_w, rtl);
+        let y = my + v.resolve(ch, inner_h);
+        (x, y)
+    }
+}
+
 /// Combined two-axis alignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Alignment {
@@ -226,5 +283,108 @@ mod tests {
         // When child is larger, offsets go negative — that's fine
         let x = HAlignment::Center.resolve(200.0, 100.0, false);
         assert_eq!(x, -50.0);
+    }
+
+    // --- Corner ---
+
+    #[test]
+    fn corner_axes_decomposition() {
+        assert_eq!(
+            Corner::TopLeading.axes(),
+            (HAlignment::Leading, VAlignment::Top)
+        );
+        assert_eq!(
+            Corner::TopTrailing.axes(),
+            (HAlignment::Trailing, VAlignment::Top)
+        );
+        assert_eq!(
+            Corner::BottomLeading.axes(),
+            (HAlignment::Leading, VAlignment::Bottom)
+        );
+        assert_eq!(
+            Corner::BottomTrailing.axes(),
+            (HAlignment::Trailing, VAlignment::Bottom)
+        );
+    }
+
+    #[test]
+    fn corner_resolve_top_leading_ltr() {
+        // 380x100 content in 800x600 viewport with margin (24, 24).
+        // TopLeading in LTR: x = 24, y = 24.
+        let (x, y) =
+            Corner::TopLeading.resolve((380.0, 100.0), (800.0, 600.0), (24.0, 24.0), false);
+        assert_eq!(x, 24.0);
+        assert_eq!(y, 24.0);
+    }
+
+    #[test]
+    fn corner_resolve_top_trailing_ltr() {
+        // TopTrailing in LTR: right-anchored, x = 800 - 380 - 24 = 396, y = 24.
+        let (x, y) =
+            Corner::TopTrailing.resolve((380.0, 100.0), (800.0, 600.0), (24.0, 24.0), false);
+        assert_eq!(x, 396.0);
+        assert_eq!(y, 24.0);
+    }
+
+    #[test]
+    fn corner_resolve_bottom_leading_ltr() {
+        // BottomLeading: x = 24, y = 600 - 100 - 24 = 476.
+        let (x, y) =
+            Corner::BottomLeading.resolve((380.0, 100.0), (800.0, 600.0), (24.0, 24.0), false);
+        assert_eq!(x, 24.0);
+        assert_eq!(y, 476.0);
+    }
+
+    #[test]
+    fn corner_resolve_bottom_trailing_ltr() {
+        // BottomTrailing: x = 396, y = 476.
+        let (x, y) =
+            Corner::BottomTrailing.resolve((380.0, 100.0), (800.0, 600.0), (24.0, 24.0), false);
+        assert_eq!(x, 396.0);
+        assert_eq!(y, 476.0);
+    }
+
+    #[test]
+    fn corner_resolve_top_trailing_rtl_flips_to_left() {
+        // RTL: TopTrailing becomes top-left visually. x = 24, y = 24.
+        let (x, y) =
+            Corner::TopTrailing.resolve((380.0, 100.0), (800.0, 600.0), (24.0, 24.0), true);
+        assert_eq!(x, 24.0);
+        assert_eq!(y, 24.0);
+    }
+
+    #[test]
+    fn corner_resolve_top_leading_rtl_flips_to_right() {
+        // RTL: TopLeading becomes top-right visually. x = 396, y = 24.
+        let (x, y) = Corner::TopLeading.resolve((380.0, 100.0), (800.0, 600.0), (24.0, 24.0), true);
+        assert_eq!(x, 396.0);
+        assert_eq!(y, 24.0);
+    }
+
+    #[test]
+    fn corner_resolve_bottom_corners_rtl() {
+        let (x, _) =
+            Corner::BottomTrailing.resolve((380.0, 100.0), (800.0, 600.0), (24.0, 24.0), true);
+        assert_eq!(x, 24.0, "BottomTrailing flips to bottom-left under RTL");
+        let (x, _) =
+            Corner::BottomLeading.resolve((380.0, 100.0), (800.0, 600.0), (24.0, 24.0), true);
+        assert_eq!(x, 396.0, "BottomLeading flips to bottom-right under RTL");
+    }
+
+    #[test]
+    fn corner_resolve_zero_margin() {
+        let (x, y) =
+            Corner::BottomTrailing.resolve((100.0, 100.0), (800.0, 600.0), (0.0, 0.0), false);
+        assert_eq!((x, y), (700.0, 500.0));
+    }
+
+    #[test]
+    fn corner_resolve_oversized_content_clamps_to_zero_inner_area() {
+        // If 2 * margin exceeds viewport, the inner area goes to zero
+        // and the content snaps to the margin offset (not negative).
+        let (x, y) = Corner::TopLeading.resolve((10.0, 10.0), (40.0, 40.0), (30.0, 30.0), false);
+        // inner_w = max(40 - 60, 0) = 0, so HAlignment::Leading.resolve(10, 0, false) = 0
+        // x = 30 + 0 = 30; same for y.
+        assert_eq!((x, y), (30.0, 30.0));
     }
 }

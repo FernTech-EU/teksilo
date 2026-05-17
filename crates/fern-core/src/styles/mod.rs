@@ -39,6 +39,7 @@ pub mod text_input_style;
 pub mod theme;
 pub mod theme_appearance;
 pub mod theme_extension;
+pub mod toast_style;
 pub mod toggle_style;
 pub mod tooltip_style;
 
@@ -119,5 +120,6 @@ pub use text_input_style::{
 pub use theme::Theme;
 pub use theme_appearance::ThemeAppearance;
 pub use theme_extension::ThemeExtensions;
+pub use toast_style::{SharedToastStyle, ToastPriority, ToastStyle, ToastStyleConfig};
 pub use toggle_style::{SharedToggleStyle, ToggleStyle, ToggleStyleConfig, ToggleVariant};
 pub use tooltip_style::{SharedTooltipStyle, TooltipStyle, TooltipStyleConfig};
