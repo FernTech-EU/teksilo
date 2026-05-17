@@ -187,7 +187,23 @@ impl SceneSelection {
     /// widget entries are both candidates — the spatial index
     /// returns ids regardless of kind.
     pub fn commit_marquee(&self, scene: &Scene, marquee_rect: Rect, additive: bool) {
-        let hits = scene.items_in_rect(marquee_rect);
+        // Filter to items carrying `IS_SELECTABLE`. The spatial
+        // index returns every entry whose AABB intersects — both
+        // selectable and non-selectable (locked layers, decoration-
+        // only items, logical groups). The marquee commit must
+        // respect the flag so single-click + marquee agree about
+        // what can be selected. (Unit 9: was previously unfiltered;
+        // see edge_cases::marquee_commit_respects_is_selectable_flag.)
+        let hits: Vec<crate::item::ItemId> = scene
+            .items_in_rect(marquee_rect)
+            .into_iter()
+            .filter(|id| {
+                scene
+                    .flags(*id)
+                    .map(|f| f.contains(crate::flags::ItemFlags::IS_SELECTABLE))
+                    .unwrap_or(false)
+            })
+            .collect();
         if additive {
             self.extend(hits);
         } else {

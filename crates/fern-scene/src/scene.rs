@@ -882,12 +882,25 @@ impl Scene {
     /// the caller compensates. Re-buckets `child`'s subtree.
     ///
     /// Pass `parent = None` to detach (child's local frame becomes
-    /// scene-rooted again). No cycle check.
+    /// scene-rooted again).
+    ///
+    /// **Cycle guard:** if the proposed parent is `child` itself
+    /// or a descendant of `child`, the call is a no-op (no parent
+    /// change, no rebucket, no signal fire). Without this guard
+    /// the downstream `rebucket_subtree` walk loops indefinitely.
+    /// Added in Unit 9 alongside the regression test.
     pub fn set_item_parent(&mut self, child: ItemId, parent: Option<ItemId>) {
         if let Some(&pos) = self.entry_index.get(&child) {
             let old = self.entries[pos].parent;
             if old == parent {
                 return;
+            }
+            // Reject self-parent and any parent in the child's
+            // subtree (would create a cycle).
+            if let Some(p) = parent {
+                if p == child || self.is_descendant_of(p, child) {
+                    return;
+                }
             }
             self.entries[pos].parent = parent;
             self.rebucket_subtree(child);

@@ -1,3 +1,11 @@
+// Sub-modules — added in Unit 9 to fill the audit-flagged
+// coverage gaps without bulk-moving the existing legacy tests
+// out of this file. The mechanical split of the legacy section
+// is a follow-up.
+mod a11y;
+mod edge_cases;
+mod nested;
+
 use super::*;
 use fern_core::widget_tree::WidgetTree;
 
