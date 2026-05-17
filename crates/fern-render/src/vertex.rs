@@ -219,12 +219,24 @@ impl SdfVertex {
         let v_pad = if sh > 0.0 { pad / sh } else { 0.0 };
 
         let params = [sw, sh, stroke, paint_type as f32];
+        // Corner radii are authored in logical px but the shader compares
+        // them against `shape_params.xy`, which is in physical px after the
+        // scale_factor multiply above. Without scaling here, a 19×19
+        // logical circle (radius 9.5) renders as a 38×38 physical rect
+        // with 9.5 px corners on Retina — a rounded square instead of a
+        // circle.
+        let scaled_corner_radii = [
+            shape.corner_radii[0] * scale_factor,
+            shape.corner_radii[1] * scale_factor,
+            shape.corner_radii[2] * scale_factor,
+            shape.corner_radii[3] * scale_factor,
+        ];
 
         let base = SdfVertex {
             position: [0.0, 0.0],
             local_uv: [0.0, 0.0],
             color: srgb_to_linear_rgba(shape.color),
-            corner_radii: shape.corner_radii,
+            corner_radii: scaled_corner_radii,
             shape_params: params,
             gradient_geo,
             gradient_color0: srgb_to_linear_rgba(colors[0]),
@@ -390,13 +402,23 @@ impl ShadowVertex {
             shadow.spread * scale_factor,
         ];
         let offset = [offset_x, offset_y, 0.0, 0.0];
+        // Match the SDF pipeline: shadow_params.xy is in physical px after
+        // scale_factor, so the matching corner radii also have to be in
+        // physical px. Otherwise circular/pill shadow shapes degenerate
+        // into rounded squares on Retina.
+        let scaled_corner_radii = [
+            shadow.corner_radii[0] * scale_factor,
+            shadow.corner_radii[1] * scale_factor,
+            shadow.corner_radii[2] * scale_factor,
+            shadow.corner_radii[3] * scale_factor,
+        ];
 
         [
             ShadowVertex {
                 position: [sx, sy],
                 local_uv: [0.0, 0.0],
                 shadow_color: srgb_to_linear_rgba(shadow.color),
-                corner_radii: shadow.corner_radii,
+                corner_radii: scaled_corner_radii,
                 shadow_params: params,
                 shape_offset: offset,
             },
@@ -404,7 +426,7 @@ impl ShadowVertex {
                 position: [sx + sw, sy],
                 local_uv: [1.0, 0.0],
                 shadow_color: srgb_to_linear_rgba(shadow.color),
-                corner_radii: shadow.corner_radii,
+                corner_radii: scaled_corner_radii,
                 shadow_params: params,
                 shape_offset: offset,
             },
@@ -412,7 +434,7 @@ impl ShadowVertex {
                 position: [sx + sw, sy + sh],
                 local_uv: [1.0, 1.0],
                 shadow_color: srgb_to_linear_rgba(shadow.color),
-                corner_radii: shadow.corner_radii,
+                corner_radii: scaled_corner_radii,
                 shadow_params: params,
                 shape_offset: offset,
             },
@@ -420,7 +442,7 @@ impl ShadowVertex {
                 position: [sx, sy + sh],
                 local_uv: [0.0, 1.0],
                 shadow_color: srgb_to_linear_rgba(shadow.color),
-                corner_radii: shadow.corner_radii,
+                corner_radii: scaled_corner_radii,
                 shadow_params: params,
                 shape_offset: offset,
             },
@@ -581,6 +603,31 @@ mod tests {
         // (stroke/2 + 1) = (2*2)/2 + 1 = 3 pixels.
         assert_eq!(verts[0].position, [17.0, 17.0]);
         assert_eq!(verts[0].shape_params[2], 4.0); // stroke_width * 2
+        // Corner radii must scale with the rect so a circle stays a circle
+        // on HiDPI. shape_params.xy is in physical px; corner_radii has to
+        // match or radius/half_size diverges.
+        assert_eq!(verts[0].corner_radii, [8.0; 4]);
+    }
+
+    #[test]
+    fn sdf_circle_stays_circle_on_hidpi() {
+        // Regression: a 19×19 logical rect with 9.5 px corner radius is a
+        // perfect circle. On Retina (scale_factor 2) the shader works in
+        // physical px against `shape_params.xy`. If corner_radii is left in
+        // logical px, the radio button / toggle pill renders as a rounded
+        // square instead of a circle.
+        let shape = ShapeQuad {
+            screen: [0.0, 0.0, 19.0, 19.0],
+            color: [0.0, 0.0, 0.0, 1.0],
+            shape: ShapeKind::RoundedRect,
+            stroke_width: 0.0,
+            corner_radii: [9.5; 4],
+            paint_data: PaintData::Solid,
+        };
+        let verts = SdfVertex::from_shape_quad(&shape, 2.0);
+        assert_eq!(verts[0].shape_params[0], 38.0);
+        assert_eq!(verts[0].shape_params[1], 38.0);
+        assert_eq!(verts[0].corner_radii, [19.0; 4]);
     }
 
     #[test]
@@ -698,5 +745,8 @@ mod tests {
         assert_eq!(verts[0].shadow_params[0], 200.0); // shape_w * 2
         assert_eq!(verts[0].shadow_params[2], 8.0); // blur * 2
         assert_eq!(verts[0].shadow_params[3], 4.0); // spread * 2
+        // Corner radii are compared against shadow_params.xy in the
+        // shadow shader's SDF; both have to live in the same px space.
+        assert_eq!(verts[0].corner_radii, [12.0; 4]);
     }
 }
