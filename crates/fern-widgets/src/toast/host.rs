@@ -30,6 +30,7 @@ use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::Corner;
 
+use crate::notification::NotificationArchive;
 use crate::toast::registry::ToastRegistry;
 use crate::toast::surface::{ToastSurface, ToastSurfaceData};
 
@@ -57,6 +58,16 @@ pub struct ToastInstallOptions {
     /// When false, only the hovered toast pauses (libadwaita
     /// behaviour).
     pub pause_on_hover_group: bool,
+    /// Notification archive — `None` disables archival entirely
+    /// (apps don't need a NotificationLog). Default:
+    /// `Some(NotificationArchive::persistent(ARCHIVE_FILE_NAME))`,
+    /// which writes to `<config>/notifications.toml` via
+    /// `PersistedListModel`. Apps that don't have `AppPaths`
+    /// configured (`SettingsBundle` not installed) should explicitly
+    /// override to `Some(NotificationArchive::in_memory())` or
+    /// `None` — `Persistent` will fail at install time without a
+    /// `config_dir`.
+    pub archive: Option<NotificationArchive>,
 }
 
 impl Default for ToastInstallOptions {
@@ -68,6 +79,9 @@ impl Default for ToastInstallOptions {
             max_visible: 5,
             entry_width: 380.0,
             pause_on_hover_group: true,
+            archive: Some(NotificationArchive::persistent(
+                crate::notification::ARCHIVE_FILE_NAME,
+            )),
         }
     }
 }

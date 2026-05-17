@@ -45,7 +45,6 @@ impl EventContextToastExt for EventContext<'_> {
             // toast.
             return ToastHandle::new(crate::toast::ToastHandleInner {
                 entry_id: 0,
-                slot_index: None,
                 dismissed: std::cell::Cell::new(true),
                 registry: ToastRegistry::new(crate::toast::host::ToastInstallOptions::default()),
             });

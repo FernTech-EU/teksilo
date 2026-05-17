@@ -15,6 +15,8 @@
 
 use std::rc::Rc;
 
+use serde::{Deserialize, Serialize};
+
 use crate::build_context::BuildContext;
 use crate::styles::BannerSeverity;
 use crate::widget_id::WidgetId;
@@ -22,7 +24,7 @@ use crate::widget_id::WidgetId;
 /// Queue / assertiveness level — shared with the public `Toast` builder
 /// API. Lives here in fern-core so the style trait can take it in its
 /// config without depending on fern-widgets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum ToastPriority {
     /// Queues if `max_visible` reached; admits in order. Default.
     #[default]

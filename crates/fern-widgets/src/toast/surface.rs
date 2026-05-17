@@ -183,6 +183,7 @@ impl ToastSurface {
         let callback = action.callback();
         let closes_toast = action.closes_toast_flag();
         let label_owned = action.label().to_string();
+        let tooltip_owned = action.tooltip_ref().map(|t| t.to_string());
         let registry_for_handler = registry.clone();
         let activate = move |ctx: &mut fern_core::widget::EventContext| {
             callback(ctx);
@@ -190,15 +191,29 @@ impl ToastSurface {
                 registry_for_handler.dismiss_entry(entry_id, ToastDismissCause::ActionInvoked, ctx);
             }
         };
+        // `shortcut_id` is stored on the action for archive replay
+        // (Phase 4 — NotificationLog renders archived entries' actions
+        // as `ctx.send_intent(Intent::by_name(id))` buttons). For the
+        // live toast itself the action's own callback is the source
+        // of truth, so we don't wire shortcut_id into the rendered
+        // widget here.
         match action.style_ref() {
             ToastActionStyle::Link => {
-                ctx.add(Link::new_literal(label_owned).on_activate_fn(activate))
+                let mut link = Link::new_literal(label_owned).on_activate_fn(activate);
+                if let Some(tip) = tooltip_owned {
+                    link = link.tooltip_literal(tip);
+                }
+                ctx.add(link)
             }
-            ToastActionStyle::Button { variant } => ctx.add(
-                Button::new_literal(label_owned)
+            ToastActionStyle::Button { variant } => {
+                let mut btn = Button::new_literal(label_owned)
                     .variant(*variant)
-                    .on_activate_fn(activate),
-            ),
+                    .on_activate_fn(activate);
+                if let Some(tip) = tooltip_owned {
+                    btn = btn.tooltip_literal(tip);
+                }
+                ctx.add(btn)
+            }
         }
     }
 }

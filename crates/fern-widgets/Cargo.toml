@@ -26,9 +26,16 @@ telemetry = ["dep:fern-telemetry", "dep:serde_json"]
 [dependencies]
 fern-core = { workspace = true }
 fern-data = { workspace = true }
+# `notification::archive` uses `PersistedListModel` for the persistent
+# notification log; pulls in nothing extra for in-memory-only apps.
+fern-settings = { workspace = true }
 fern-tokens = { workspace = true }
 fern-canvas = { workspace = true }
 fern-i18n = { workspace = true }
+# Serialization of `NotificationEntry` for the persistent archive
+# (writes through PersistedListModel's TOML file). The derive feature
+# is on at the workspace level.
+serde = { workspace = true }
 # `PrivacySettings` widget binds to `OpenedTelemetry` and `ConsentStore`.
 # Gated behind the `telemetry` feature — apps that don't ship analytics
 # pay nothing. Without the feature, the widget and its re-export are
@@ -50,8 +57,10 @@ fern-preview = { workspace = true, optional = true }
 open = { workspace = true }
 # Date/time backing for Calendar / DateEdit / TimeEdit / DateTimeEdit. The
 # four widgets re-export the relevant types through `common::datetime` so
-# the rest of the codebase never names `jiff` directly.
-jiff = { workspace = true }
+# the rest of the codebase never names `jiff` directly. The `serde`
+# feature is needed by `notification::NotificationEntry` so the
+# persistent archive can round-trip `jiff::Timestamp` through TOML.
+jiff = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
 # text-typeset + text-document come through fern-text's re-exports
 # (`fern_text::text_document`, `fern_text::RichTextEngine`, …) under
@@ -61,3 +70,7 @@ fern-text = { workspace = true, optional = true, features = ["rich-text"] }
 
 [dev-dependencies]
 accesskit_consumer = "0.35.0"
+# `notification::archive` tests round-trip `NotificationEntry` through
+# `tempfile` directories and TOML serialization.
+tempfile = { workspace = true }
+toml = { workspace = true }

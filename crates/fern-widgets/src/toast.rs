@@ -89,10 +89,11 @@ pub enum ToastDismissCause {
 // =====================================================================
 
 /// How a [`ToastAction`] should be rendered inside the toast surface.
-#[derive(Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum ToastActionStyle {
     /// JetBrains-style hyperlink. Rendered inline with the body row.
     /// Default — minimal visual weight, scales to many actions.
+    #[default]
     Link,
     /// Material / Windows-style button. Rendered in a dedicated row
     /// below the body. Use for primary calls-to-action ("Retry",
@@ -102,21 +103,6 @@ pub enum ToastActionStyle {
         /// primaries, Plain / Tinted for secondaries.
         variant: crate::button::ButtonVariant,
     },
-}
-
-impl std::fmt::Debug for ToastActionStyle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Link => f.write_str("Link"),
-            Self::Button { variant } => f.debug_struct("Button").field("variant", variant).finish(),
-        }
-    }
-}
-
-impl Default for ToastActionStyle {
-    fn default() -> Self {
-        Self::Link
-    }
 }
 
 /// Type-erased callback for a [`ToastAction`]. `Fn` (not `FnMut`) so
@@ -269,15 +255,13 @@ pub struct ToastHandle {
 
 pub(crate) struct ToastHandleInner {
     pub(crate) entry_id: u64,
-    /// The slot the toast was assigned to. `None` if the host's pool
-    /// was full at show time (overflow drop) — `dismiss` then is a
-    /// no-op and `is_alive` returns `false`.
-    pub(crate) slot_index: Option<usize>,
-    /// Marked once the on_dismiss callback fires for this entry so
-    /// subsequent `dismiss()` calls don't re-enqueue.
+    /// Marked when the host has dropped the entry (overflow at enqueue
+    /// time, or any dismiss path). Cheap short-circuit for the
+    /// `dismiss` / `is_alive` handle methods so they don't have to
+    /// walk the registry to know "this toast is gone".
     pub(crate) dismissed: Cell<bool>,
-    /// Back-reference to the registry so we can issue dismiss requests
-    /// and probe for the OverlayId.
+    /// Back-reference to the registry so the handle can fire dismiss
+    /// requests and check liveness.
     pub(crate) registry: registry::ToastRegistry,
 }
 
@@ -296,14 +280,14 @@ impl ToastHandle {
         self.inner.entry_id
     }
 
-    /// Whether the toast is still mounted (timer hasn't expired, user
-    /// hasn't dismissed, host hasn't shut down). Always `false` for
-    /// overflow-dropped toasts.
-    pub fn is_alive(&self, ctx: &mut EventContext) -> bool {
-        if self.inner.dismissed.get() || self.inner.slot_index.is_none() {
+    /// Whether the toast is still in the registry's live set (timer
+    /// hasn't expired, user hasn't dismissed, host hasn't shut down).
+    /// Always `false` for overflow-dropped toasts.
+    pub fn is_alive(&self) -> bool {
+        if self.inner.dismissed.get() {
             return false;
         }
-        self.inner.registry.is_entry_alive(self.inner.entry_id, ctx)
+        self.inner.registry.is_entry_alive(self.inner.entry_id)
     }
 
     /// Programmatically dismiss the toast with cause
@@ -325,7 +309,6 @@ impl std::fmt::Debug for ToastHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ToastHandle")
             .field("entry_id", &self.inner.entry_id)
-            .field("slot_index", &self.inner.slot_index)
             .field("dismissed", &self.inner.dismissed.get())
             .finish()
     }
@@ -673,9 +656,10 @@ mod tests {
     }
 
     fn small_registry(max_visible: usize) -> ToastRegistry {
-        let mut opts = host::ToastInstallOptions::default();
-        opts.max_visible = max_visible;
-        ToastRegistry::new(opts)
+        ToastRegistry::new(host::ToastInstallOptions {
+            max_visible,
+            ..host::ToastInstallOptions::default()
+        })
     }
 
     #[test]
@@ -709,11 +693,9 @@ mod tests {
             2,
             "third Normal-priority toast must be dropped when pool is full"
         );
-        // Returned handle is in the "dropped" state.
-        assert!(
-            !h3.inner.dismissed.get() || h3.inner.slot_index.is_none(),
-            "overflow handle should not be alive"
-        );
+        // Returned handle is in the "dropped" state — `is_alive` is
+        // the public surface for this check.
+        assert!(!h3.is_alive(), "overflow handle should not be alive");
         // overflow callback is None because we didn't attach on_dismiss
         assert!(overflow.is_none());
     }
@@ -836,6 +818,87 @@ mod tests {
         r.tick_timers(Duration::from_millis(10), false);
         let post_dismiss = r.version_signal().get();
         assert_ne!(pre_dismiss, post_dismiss, "version bumps on timer dismiss");
+    }
+
+    #[test]
+    fn registry_with_archive_mirrors_pushes() {
+        use crate::notification::NotificationArchiveModel;
+        let archive = std::rc::Rc::new(NotificationArchiveModel::in_memory());
+        let registry =
+            ToastRegistry::with_archive(host::ToastInstallOptions::default(), archive.clone());
+        let (_h1, _) = registry.enqueue(Toast::error_literal("Build failed"));
+        let (_h2, _) = registry.enqueue(Toast::success_literal("Deploy ok"));
+        // Both toasts mirrored.
+        assert_eq!(archive.entries().len(), 2);
+        // Newest first (the archive inserts at index 0).
+        assert_eq!(
+            archive.entries().with_item(0, |e| e.title.clone()),
+            Some("Deploy ok".into())
+        );
+        assert_eq!(archive.unread_count().get(), 2);
+    }
+
+    #[test]
+    fn registry_archive_false_skips_mirroring() {
+        use crate::notification::NotificationArchiveModel;
+        let archive = std::rc::Rc::new(NotificationArchiveModel::in_memory());
+        let registry =
+            ToastRegistry::with_archive(host::ToastInstallOptions::default(), archive.clone());
+        // Default toast is archived.
+        let (_archived, _) = registry.enqueue(Toast::info_literal("logged"));
+        // Opt-out toast is NOT archived.
+        let (_silent, _) = registry.enqueue(Toast::info_literal("Copied!").archive(false));
+        assert_eq!(archive.entries().len(), 1);
+        assert_eq!(
+            archive.entries().with_item(0, |e| e.title.clone()),
+            Some("logged".into())
+        );
+    }
+
+    #[test]
+    fn registry_with_id_merges_into_archive_in_place() {
+        use crate::notification::NotificationArchiveModel;
+        let archive = std::rc::Rc::new(NotificationArchiveModel::in_memory());
+        let registry =
+            ToastRegistry::with_archive(host::ToastInstallOptions::default(), archive.clone());
+        let (_a, _) = registry.enqueue(Toast::info_literal("Uploading 1 of 7").id("upload"));
+        assert_eq!(archive.entries().len(), 1);
+        let (_b, _) = registry.enqueue(Toast::info_literal("Uploading 4 of 7").id("upload"));
+        // No new entry — the existing one was updated.
+        assert_eq!(archive.entries().len(), 1);
+        let merged = archive.entries().with_item(0, |e| e.clone()).unwrap();
+        assert_eq!(merged.title, "Uploading 4 of 7");
+        assert_eq!(merged.updates.len(), 1);
+    }
+
+    #[test]
+    fn registry_without_archive_does_not_panic() {
+        // No archive configured — pushes still succeed; archive lookup
+        // is just None.
+        let registry = ToastRegistry::new(host::ToastInstallOptions::default());
+        let (_h, _) = registry.enqueue(Toast::info_literal("no archive here"));
+        assert!(registry.archive().is_none());
+    }
+
+    #[test]
+    fn registry_archive_intent_name_survives_on_action() {
+        use crate::notification::{ArchivedActionStyle, NotificationArchiveModel};
+        let archive = std::rc::Rc::new(NotificationArchiveModel::in_memory());
+        let registry =
+            ToastRegistry::with_archive(host::ToastInstallOptions::default(), archive.clone());
+        let (_h, _) = registry.enqueue(
+            Toast::error_literal("Build failed")
+                .action(ToastAction::primary("Retry", |_| {}).shortcut_id("app.build.retry")),
+        );
+        let entry = archive.entries().with_item(0, |e| e.clone()).unwrap();
+        assert_eq!(entry.actions.len(), 1);
+        assert_eq!(entry.actions[0].label, "Retry");
+        assert_eq!(
+            entry.actions[0].intent_name.as_deref(),
+            Some("app.build.retry")
+        );
+        assert_eq!(entry.actions[0].style, ArchivedActionStyle::PrimaryButton);
+        assert!(entry.actions[0].closes_on_invoke);
     }
 
     #[test]
@@ -1051,6 +1114,38 @@ mod tests {
             tree.find_by_role(fern_core::accesskit::Role::Alert)
                 .is_some(),
             "Error toast emits Role::Alert via the surface widget"
+        );
+    }
+
+    #[test]
+    fn hover_count_flips_paused_state_observed_by_host_tick() {
+        // Direct test of the contract between the surface (which writes
+        // to hover_count) and the host tick (which reads it). We don't
+        // need a full WidgetTree — the registry is the integration
+        // surface.
+        let r = fresh_registry();
+        let (h, _) = r.enqueue(
+            Toast::info_literal("hover me").auto_dismiss_after(Duration::from_millis(200)),
+        );
+        // Simulate pointer-enter on the surface: hover_count = 1.
+        r.hover_count_signal().set(1);
+        // 10 ticks of 100 ms each (total 1 s, well past 200 ms) with
+        // paused=hover_count>0 → entry survives.
+        for _ in 0..10 {
+            let hover = r.hover_count_signal().get() > 0;
+            r.tick_timers(Duration::from_millis(100), hover);
+        }
+        assert!(
+            r.live_entry_ids().contains(&h.entry_id()),
+            "hover-paused entry must survive past its auto-dismiss window"
+        );
+        // Pointer-leave: hover_count = 0, timer resumes.
+        r.hover_count_signal().set(0);
+        let hover = r.hover_count_signal().get() > 0;
+        r.tick_timers(Duration::from_millis(250), hover);
+        assert!(
+            !r.live_entry_ids().contains(&h.entry_id()),
+            "after un-hover, entry expires"
         );
     }
 

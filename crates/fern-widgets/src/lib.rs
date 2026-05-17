@@ -54,6 +54,7 @@ pub(crate) mod menu_context;
 pub mod menu_item;
 pub mod menu_list;
 pub mod message_box;
+pub mod notification;
 pub(crate) mod overlay_trigger;
 pub mod panel;
 pub mod popover;
@@ -151,6 +152,10 @@ pub use menu_list::{MenuList, MenuSeparator};
 pub use message_box::{
     ButtonRole, EventContextMessageBoxExt, MessageBox, MessageBoxButton, MessageBoxButtons,
     MessageBoxResult, MessageBoxSeverity, StandardButton,
+};
+pub use notification::{
+    ARCHIVE_FILE_NAME, ArchivedAction, ArchivedActionStyle, DEFAULT_ARCHIVE_LIMIT,
+    NotificationArchive, NotificationArchiveModel, NotificationEntry, NotificationUpdate,
 };
 pub use panel::Panel;
 pub use popover::Popover;

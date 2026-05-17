@@ -20,15 +20,18 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use fern_core::signal::Signal;
 use fern_core::styles::{SharedToastStyle, ToastPriority};
 use fern_core::widget::{EventContext, Widget};
 
+use crate::notification::{
+    ArchivedAction, ArchivedActionStyle, NotificationArchiveModel, NotificationEntry,
+};
 use crate::toast::{
-    DEFAULT_TOAST_AUTO_DISMISS, Toast, ToastAction, ToastDismissCallback, ToastDismissCause,
-    ToastHandle, ToastHandleInner, ToastSeverity,
+    Toast, ToastAction, ToastActionStyle, ToastDismissCallback, ToastDismissCause, ToastHandle,
+    ToastHandleInner, ToastSeverity,
 };
 
 /// Cheap to clone (`Rc<RefCell<…>>`). All public methods take `&self`
@@ -46,6 +49,13 @@ pub struct ToastRegistry {
     /// to this at `BindingLevel::Rebuild` so any
     /// show/dismiss/timer-tick triggers a fresh host rebuild.
     version: Signal<u64>,
+    /// Optional persistent / in-memory notification archive. Each
+    /// enqueue mirrors the toast (when its `archive` flag is true)
+    /// into the model — this is what
+    /// [`NotificationLog`](crate::notification) renders and what
+    /// drives the bell-button badge. `None` when the install helper
+    /// was configured with `archive: None`.
+    archive: Option<Rc<NotificationArchiveModel>>,
 }
 
 pub(crate) struct ToastRegistryInner {
@@ -60,7 +70,6 @@ pub(crate) struct ToastRegistryInner {
     /// with cause `SlotPoolFull` (Normal priority) or evict the
     /// oldest Normal entry (High / Urgent priority).
     pub(crate) max_visible: usize,
-    pub(crate) auto_dismiss_default: Duration,
     pub(crate) pause_on_hover_group: bool,
 }
 
@@ -96,21 +105,48 @@ pub(crate) struct LiveEntry {
 }
 
 impl ToastRegistry {
-    /// Construct a registry with the given options. Called by
-    /// `install_toast` in `fern-ui`.
+    /// Construct a registry with the given options and no archive.
+    /// Used by tests and by apps that don't want notification
+    /// persistence. The install helper in fern-ui calls
+    /// [`with_archive`](Self::with_archive) instead.
     pub fn new(options: super::host::ToastInstallOptions) -> Self {
+        Self::build(options, None)
+    }
+
+    /// Construct a registry that mirrors every archived-eligible
+    /// toast push into `archive`. Toasts presented with
+    /// `archive(false)` are NOT mirrored (used for transient
+    /// "Copied!" feedback that shouldn't pollute the log).
+    pub fn with_archive(
+        options: super::host::ToastInstallOptions,
+        archive: Rc<NotificationArchiveModel>,
+    ) -> Self {
+        Self::build(options, Some(archive))
+    }
+
+    fn build(
+        options: super::host::ToastInstallOptions,
+        archive: Option<Rc<NotificationArchiveModel>>,
+    ) -> Self {
         Self {
             inner: Rc::new(RefCell::new(ToastRegistryInner {
                 next_entry_id: 1,
                 live_entries: VecDeque::new(),
                 pending_user_dismiss_callbacks: Vec::new(),
                 max_visible: options.max_visible,
-                auto_dismiss_default: DEFAULT_TOAST_AUTO_DISMISS,
                 pause_on_hover_group: options.pause_on_hover_group,
             })),
             hover_count: Signal::new(0),
             version: Signal::new(0),
+            archive,
         }
+    }
+
+    /// Access the underlying notification archive (if configured).
+    /// `NotificationLog` and `NotificationCenterButton` read from
+    /// this directly.
+    pub fn archive(&self) -> Option<Rc<NotificationArchiveModel>> {
+        self.archive.clone()
     }
 
     /// Reactive signal bumped on every queue mutation. The host binds
@@ -157,7 +193,6 @@ impl ToastRegistry {
                     drop(inner);
                     let handle = ToastHandle::new(ToastHandleInner {
                         entry_id,
-                        slot_index: None,
                         dismissed: std::cell::Cell::new(true),
                         registry: self.clone(),
                     });
@@ -209,22 +244,73 @@ impl ToastRegistry {
             id: toast.id,
             archive: toast.archive,
         };
-        let slot_index = inner.live_entries.len();
+        // Mirror to the archive BEFORE the entry is pushed to the
+        // live queue — that way an `archive(false)` toast (e.g. a
+        // quick "Copied!" feedback) is excluded, but a normal toast's
+        // archive record is populated even if a subsequent
+        // priority-eviction immediately knocks it out of the live set
+        // (the user still saw it; the log row is what survives).
+        if let Some(archive) = self.archive.as_ref() {
+            if entry.archive {
+                archive.push(Self::entry_to_archive(&entry));
+            }
+        }
+
         inner.live_entries.push_back(entry);
         drop(inner);
         self.bump_version();
 
         let handle = ToastHandle::new(ToastHandleInner {
             entry_id,
-            slot_index: Some(slot_index),
             dismissed: std::cell::Cell::new(false),
             registry: self.clone(),
         });
         (handle, None)
     }
 
+    /// Project a `LiveEntry` (the in-memory toast state) into a
+    /// `NotificationEntry` (the persistent archive shape). Drops
+    /// callbacks (`on_dismiss`, `on_click`, action callbacks) — only
+    /// `intent_name` on actions survives, used by the log for replay
+    /// through the existing intent dispatcher.
+    fn entry_to_archive(entry: &LiveEntry) -> NotificationEntry {
+        NotificationEntry {
+            id: 0, // overwritten by NotificationArchiveModel::push
+            severity: entry.severity,
+            priority: entry.priority,
+            title: entry.title.clone(),
+            body: entry.body.clone(),
+            actions: entry.actions.iter().map(Self::action_to_archive).collect(),
+            timestamp: jiff::Timestamp::now(),
+            group: None,
+            source: None,
+            read: false,
+            dedup_id: entry.id.clone(),
+            updates: Vec::new(),
+        }
+    }
+
+    fn action_to_archive(action: &ToastAction) -> ArchivedAction {
+        ArchivedAction {
+            label: action.label().to_string(),
+            intent_name: action.shortcut_id_ref().map(|s| s.to_string()),
+            style: match action.style_ref() {
+                ToastActionStyle::Link => ArchivedActionStyle::Link,
+                ToastActionStyle::Button { variant } => {
+                    use crate::button::ButtonVariant;
+                    match variant {
+                        ButtonVariant::Filled => ArchivedActionStyle::PrimaryButton,
+                        ButtonVariant::Destructive => ArchivedActionStyle::Destructive,
+                        _ => ArchivedActionStyle::SecondaryButton,
+                    }
+                }
+            },
+            closes_on_invoke: action.closes_toast_flag(),
+        }
+    }
+
     /// Whether an entry with the given id is still in the live set.
-    pub(crate) fn is_entry_alive(&self, entry_id: u64, _ctx: &mut EventContext) -> bool {
+    pub(crate) fn is_entry_alive(&self, entry_id: u64) -> bool {
         self.inner
             .borrow()
             .live_entries
@@ -295,9 +381,9 @@ impl ToastRegistry {
 
     /// Tick the per-entry timers by `dt`. When `paused` is true (any
     /// surface is hovered or focused), this is a no-op. Returns `true`
-    /// if at least one entry expired (host then calls `bump_version`
-    /// + rebuilds, removing the surfaces). Called from the host's
-    /// frame-tick effect.
+    /// if at least one entry expired (host then bumps the version
+    /// signal and rebuilds, dropping the surfaces). Called from the
+    /// host's frame-tick effect.
     pub(crate) fn tick_timers(&self, dt: Duration, paused: bool) -> bool {
         if paused {
             return false;
@@ -381,10 +467,4 @@ impl std::fmt::Debug for ToastRegistry {
             .field("hover_count", &self.hover_count.get())
             .finish()
     }
-}
-
-// Used by tests + Toast::loading; kept here for module cohesion.
-#[allow(dead_code)]
-pub(crate) fn now_for_test() -> Instant {
-    Instant::now()
 }
