@@ -184,6 +184,11 @@ See [tooltips.md](tooltips.md) for the tooltip system.
 - [Dialog](../crates/fern-widgets/src/dialog.rs) — modal dialog frame; `DialogContent` / `ModalContainer` for content + presentation.
 - [MessageBox](../crates/fern-widgets/src/message_box.rs) — predefined info/warning/error/question modals (`MessageBoxSeverity`); semantic-role buttons (`ButtonRole`, `StandardButton`, `MessageBoxButton`, `MessageBoxButtons`) with platform-aware ordering; result via `MessageBoxResult`.
 - [Snackbar](../crates/fern-widgets/src/snackbar.rs) — queued auto-dismissing toast with animated slide-in.
+- [Toast](../crates/fern-widgets/src/toast.rs) — stackable, action-rich, severity-aware floating notification (`info` / `success` / `warning` / `error` / `loading`); link + button actions; `Toast::id` update-in-place; persistent archive backing; corner-anchored hover-pause stack. The "upgrade path" from `Snackbar`. Full reference: [toast.md](toast.md).
+- [ToastHost](../crates/fern-widgets/src/toast/host.rs) — per-window invisible widget owning the toast queue + per-frame timer + hover-pause; mounted by `install_toast`.
+- [NotificationLog](../crates/fern-widgets/src/notification/log.rs) — archive UI: mark-all-read / clear toolbar + day-bucket section headers (Today / Yesterday / This week / Earlier) + replayable action buttons.
+- [NotificationCenterButton](../crates/fern-widgets/src/notification/center_button.rs) — bell icon + live unread-count badge + popover containing a `NotificationLog`. Marks-all-read on popover open.
+- [NotificationLogDialog](../crates/fern-widgets/src/notification/log_dialog.rs) — one-liner `::show(archive, ctx)` modal preset.
 - [Shadow](../crates/fern-widgets/src/shadow.rs) — drop-shadow primitive used by elevated surfaces (`AttachedSide` for one-sided shadows).
 
 ---

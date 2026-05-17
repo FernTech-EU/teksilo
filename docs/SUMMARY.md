@@ -67,6 +67,12 @@ directory; in-progress design work lives separately under [plans/](plans/).
 - [tooltips.md](tooltips.md) — plain `TooltipWidget`, registry-driven
   `RichTooltipWidget`, sticky-on-dwell promotion, focus-driven a11y
   promotion, attach helpers.
+- [toast.md](toast.md) — `Toast` floating notifications (`info` /
+  `success` / `warning` / `error` / `loading` severities, link +
+  button actions, `Toast::id` update-in-place) + `ToastHost` queue +
+  persistent `NotificationArchiveModel` + `NotificationLog` / bell
+  `NotificationCenterButton` / `NotificationLogDialog` UI;
+  `FernAppBuilder::install_toast_default()` one-line install.
 - [drag-and-drop.md](drag-and-drop.md) — drag payloads, drop targets,
   hit testing, the three user stories that share the underlying machinery.
 - [multi-window.md](multi-window.md) — `WindowConfig`, signal-driven
