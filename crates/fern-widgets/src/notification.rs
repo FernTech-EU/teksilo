@@ -32,6 +32,9 @@
 //! ```
 
 pub mod archive;
+pub mod center_button;
+pub mod log;
+pub mod log_dialog;
 
 use fern_core::styles::{BannerSeverity, ToastPriority};
 use serde::{Deserialize, Serialize};
@@ -40,6 +43,9 @@ pub use archive::{
     ARCHIVE_FILE_NAME, DEFAULT_ARCHIVE_LIMIT, NotificationArchive, NotificationArchiveError,
     NotificationArchiveModel,
 };
+pub use center_button::NotificationCenterButton;
+pub use log::NotificationLog;
+pub use log_dialog::NotificationLogDialog;
 
 /// A single archived notification — what
 /// [`NotificationLog`](Phase 4 widget) renders, what survives across

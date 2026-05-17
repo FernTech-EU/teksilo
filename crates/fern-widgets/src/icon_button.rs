@@ -433,6 +433,14 @@ impl IconButton {
         Self::new((BuiltInIcons::global().add)()).tooltip(fern_i18n::tr_widget!(a11y_builtin_add()))
     }
 
+    /// Notification bell. Used by
+    /// [`NotificationCenterButton`](crate::notification::NotificationCenterButton)
+    /// — the bell-icon trigger that opens the notification log popover.
+    pub fn bell() -> Self {
+        Self::new((BuiltInIcons::global().bell)())
+            .tooltip(fern_i18n::tr_widget!(a11y_builtin_bell()))
+    }
+
     /// Visibility toggle (eye / eye-off). Toggles password visibility.
     /// Uses the icon-swap bistate mode internally — the icon advertises
     /// the **expected action**, matching the prevailing password-field
@@ -882,6 +890,7 @@ pub struct BuiltInIcons {
     pub copy: fn() -> IconWidget,
     pub clear: fn() -> IconWidget,
     pub add: fn() -> IconWidget,
+    pub bell: fn() -> IconWidget,
     pub eye: fn() -> IconWidget,
     pub eye_off: fn() -> IconWidget,
 }
@@ -898,6 +907,7 @@ impl BuiltInIcons {
             copy: default_copy_icon,
             clear: default_clear_icon,
             add: default_add_icon,
+            bell: default_bell_icon,
             eye: default_eye_icon,
             eye_off: default_eye_off_icon,
         }
@@ -945,6 +955,10 @@ fn default_clear_icon() -> IconWidget {
 
 fn default_add_icon() -> IconWidget {
     IconWidget::from_svg(include_str!("../resources/icons/builtin-add.svg"))
+}
+
+fn default_bell_icon() -> IconWidget {
+    IconWidget::from_svg(include_str!("../resources/icons/builtin-bell.svg"))
 }
 
 fn default_eye_icon() -> IconWidget {

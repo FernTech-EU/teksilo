@@ -155,7 +155,8 @@ pub use message_box::{
 };
 pub use notification::{
     ARCHIVE_FILE_NAME, ArchivedAction, ArchivedActionStyle, DEFAULT_ARCHIVE_LIMIT,
-    NotificationArchive, NotificationArchiveModel, NotificationEntry, NotificationUpdate,
+    NotificationArchive, NotificationArchiveModel, NotificationCenterButton, NotificationEntry,
+    NotificationLog, NotificationLogDialog, NotificationUpdate,
 };
 pub use panel::Panel;
 pub use popover::Popover;
