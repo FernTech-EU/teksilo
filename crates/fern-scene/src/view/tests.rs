@@ -3595,13 +3595,16 @@ fn ensure_visible_pans_only() {
 
     // Zoom unchanged.
     assert!((view.zoom() - zoom_before).abs() < 1e-6);
-    // Pan shifted leftward (negative x) so the item at x=500 is
-    // now visible inside the 400-wide viewport.
-    let pan = view.pan();
+    // Pan is animated (Unit 1 fix), so the live value at t=0 is
+    // still the starting pan. Inspect the in-flight animation
+    // target instead — that's where the tween is heading.
+    let target_x = view
+        .pan_x_animation_target()
+        .expect("ensure_visible should now animate pan, not snap");
     assert!(
-        pan.x < 0.0,
-        "expected leftward pan to bring item into view, got {:?}",
-        pan
+        target_x < 0.0,
+        "expected leftward pan target to bring item into view, got {}",
+        target_x
     );
 }
 
@@ -3804,5 +3807,231 @@ fn cache_evicts_on_item_change_signal() {
     assert!(
         !view.item_cache.borrow().contains(id),
         "LocalBoundsChanged via item_change_signal must evict cache entry"
+    );
+}
+
+// -----------------------------------------------------------------
+// Unit 1 — P1 correctness fixes
+// -----------------------------------------------------------------
+
+#[test]
+fn adopt_scene_size_uses_extent_dimensions_not_far_corner() {
+    // Regression for the right()/bottom() vs width/height confusion
+    // in `layout_response`. An item positioned at negative scene
+    // coords has a scene_rect whose `right()` and `bottom()` are
+    // smaller than its `width` / `height` — under the old code
+    // `adopt_scene_size` would request (right, bottom) and the
+    // SceneView would lay out smaller than the scene extent,
+    // hiding content.
+    use crate::items::RectItem;
+
+    let mut scene = Scene::new();
+    scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 200.0, 200.0)),
+        // Position at negative scene origin so the scene's bounding
+        // rect is (-100, -100, 200, 200): right()=100, bottom()=100,
+        // but width=200, height=200.
+        fern_canvas::Point::new(-100.0, -100.0),
+    );
+
+    let extent = scene.scene_rect_extent().expect("extent exists");
+    assert_eq!(extent.width, 200.0);
+    assert_eq!(extent.height, 200.0);
+    assert!(
+        (extent.right() - 100.0).abs() < 1e-3,
+        "sanity: right() is smaller than width when origin is negative"
+    );
+
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene).adopt_scene_size(true));
+    tree.layout(SizeProposal::unspecified());
+
+    let bounds = tree.bounds(view_id);
+    assert_eq!(
+        bounds.width, 200.0,
+        "adopt_scene_size must size to extent.width, not extent.right()"
+    );
+    assert_eq!(
+        bounds.height, 200.0,
+        "adopt_scene_size must size to extent.height, not extent.bottom()"
+    );
+}
+
+#[test]
+fn ensure_visible_animates_pan_via_pan_to() {
+    // Regression for ensure_visible snapping with `set_pan` instead
+    // of animating via `pan_to`. The live `pan()` reading is the
+    // pre-tween value at t=0; the *animation target* is what was
+    // scheduled by `pan_to`. If `ensure_visible` snapped, no target
+    // would be in flight.
+    use crate::items::RectItem;
+
+    let mut scene = Scene::new();
+    let target = scene.add_item(
+        RectItem::new(Rect::new(800.0, 0.0, 50.0, 50.0)),
+        Point::ZERO,
+    );
+
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let view = view_handle(&tree, view_id);
+
+    let scene_rect = view.scene().scene_rect(target).expect("rect");
+    view.ensure_visible(scene_rect, 10.0);
+
+    let target_x = view
+        .pan_x_animation_target()
+        .expect("ensure_visible must schedule a pan animation, not snap");
+    assert!(
+        target_x < 0.0,
+        "expected leftward pan target, got {}",
+        target_x
+    );
+    // Live pan still at starting value (animation in flight).
+    assert!(
+        view.pan().x.abs() < 1e-6,
+        "live pan should still be at starting value during tween, got {}",
+        view.pan().x
+    );
+}
+
+#[test]
+fn scroll_hand_drag_honors_pan_axes_horizontal() {
+    // Regression for the ScrollHandDrag bypass — under the bug,
+    // a horizontal-locked scene could still be panned vertically
+    // by the hand-tool because the drag handler wrote pan_x/pan_y
+    // directly without consulting `pan_axes`.
+    let mut scene = Scene::new();
+    scene.pan_axes(crate::scene::PanAxes::Horizontal);
+
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(
+        SceneView::new(scene)
+            .selection_mode(crate::SceneSelectionMode::Multi)
+            .drag_mode(crate::DragMode::ScrollHandDrag),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // Press, then two Moves (the first crosses the recognizer's
+    // 5px threshold and emits DragStarted; the second is the one
+    // that fires DragMoved with a delta), then release. We assert
+    // on the delta of the SECOND move only — diagonal (+25, +35),
+    // of which only the x component should move pan.
+    tree.pointer_move(fern_canvas::Point::new(100.0, 100.0));
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: fern_canvas::Point::new(100.0, 100.0),
+        button: fern_core::event::PointerButton::Primary,
+        modifiers: fern_core::event::Modifiers::default(),
+    });
+    // First move: crosses threshold, fires DragStarted (no pan).
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: fern_canvas::Point::new(105.0, 105.0),
+    });
+    // Second move: fires DragMoved with delta (+25, +35).
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: fern_canvas::Point::new(130.0, 140.0),
+    });
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: fern_canvas::Point::new(130.0, 140.0),
+        button: fern_core::event::PointerButton::Primary,
+        modifiers: fern_core::event::Modifiers::default(),
+    });
+
+    let view = view_handle(&tree, view_id);
+    let pan = view.pan();
+    assert!(
+        (pan.x - 25.0).abs() < 1e-3,
+        "horizontal hand-drag should move pan_x by 25 (second-move delta), got {}",
+        pan.x
+    );
+    assert!(
+        pan.y.abs() < 1e-3,
+        "vertical axis is locked — pan_y must stay 0, got {}",
+        pan.y
+    );
+}
+
+#[test]
+fn scroll_hand_drag_blocked_when_pan_axes_none() {
+    let mut scene = Scene::new();
+    scene.pan_axes(crate::scene::PanAxes::None);
+
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(
+        SceneView::new(scene)
+            .selection_mode(crate::SceneSelectionMode::Multi)
+            .drag_mode(crate::DragMode::ScrollHandDrag),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    tree.pointer_move(fern_canvas::Point::new(50.0, 50.0));
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: fern_canvas::Point::new(50.0, 50.0),
+        button: fern_core::event::PointerButton::Primary,
+        modifiers: fern_core::event::Modifiers::default(),
+    });
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: fern_canvas::Point::new(120.0, 90.0),
+    });
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: fern_canvas::Point::new(120.0, 90.0),
+        button: fern_core::event::PointerButton::Primary,
+        modifiers: fern_core::event::Modifiers::default(),
+    });
+
+    let view = view_handle(&tree, view_id);
+    assert_eq!(
+        view.pan(),
+        Vec2::ZERO,
+        "PanAxes::None must block hand-drag on both axes"
+    );
+}
+
+#[test]
+fn ctrl_wheel_zoom_snaps_without_animation_target() {
+    // The Ctrl+wheel zoom path intentionally snaps (the anchor math
+    // is exact only at start/end, so animating zoom + pan
+    // independently drifts mid-tween). This test pins that intent:
+    // after a Ctrl+wheel event, zoom changed but neither zoom nor
+    // pan_x/pan_y has an in-flight animation target. The Unit 1
+    // cleanup removed a `let _ = zoom_dur;` no-op binding; this
+    // test guards against accidentally re-introducing animation in
+    // the scroll-zoom branch.
+    let scene = Scene::new();
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let view = view_handle(&tree, view_id);
+    let z_before = view.zoom();
+
+    // Position the cursor inside the view first so the zoom-about-
+    // pointer anchor has a defined position.
+    tree.pointer_move(fern_canvas::Point::new(200.0, 150.0));
+
+    tree.dispatch_event(WidgetEvent::Scroll {
+        delta: fern_core::event::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+        modifiers: fern_core::event::Modifiers::CTRL,
+    });
+
+    let view = view_handle(&tree, view_id);
+    assert!(
+        (view.zoom() - z_before).abs() > 1e-3,
+        "Ctrl+wheel must change zoom (was {}, now {})",
+        z_before,
+        view.zoom()
+    );
+    assert!(
+        view.zoom_animation_target().is_none(),
+        "Ctrl+wheel zoom is intentionally a snap — no in-flight animation"
+    );
+    assert!(
+        view.pan_x_animation_target().is_none(),
+        "Ctrl+wheel pan adjustment is intentionally a snap"
+    );
+    assert!(
+        view.pan_y_animation_target().is_none(),
+        "Ctrl+wheel pan adjustment is intentionally a snap"
     );
 }

@@ -1079,7 +1079,13 @@ impl SceneView {
         }
         let pan = self.pan();
         let new_pan = Vec2::new(pan.x - dx * zoom, pan.y - dy * zoom);
-        self.set_pan(new_pan);
+        // Animate the scroll instead of snapping — matches
+        // `pan_to`, `fit_to_rect`, and the surrounding gesture-driven
+        // animations. Reduced-motion handling is a follow-up
+        // (this call goes through `Signal::animate_to`, which is
+        // unconditional; `prefers-reduced-motion` consultation
+        // lives at the higher-level `ctx.animate()` builder).
+        self.pan_to(new_pan, self.pan_anim_duration);
     }
 
     /// Project `target` through the scene's pan-axes policy. The
@@ -1579,7 +1585,6 @@ impl Widget for SceneView {
                 let bounds_origin_for_scroll = self.bounds_origin_signal.clone();
                 let last_viewport_for_scroll = self.last_viewport.clone();
                 let cursor_pos_for_scroll = self.cursor_pos.clone();
-                let zoom_dur = self.zoom_anim_duration;
                 // Snapshot the scene's interaction policy at build time.
                 // Subsequent `Scene::pan_axes` / `Scene::zoomable` changes
                 // take effect on the next rebuild.
@@ -1628,8 +1633,6 @@ impl Widget for SceneView {
                         if step_px == 0.0 {
                             return EventResponse::Handled;
                         }
-                        let factor = (1.0_f32).copysign(-step_px) * 0.0;
-                        let _ = factor;
                         // Compute multiplicative factor: each notch = 1.1×
                         // (or 1/1.1 for zoom-out). Using exp-form keeps
                         // repeated notches consistent.
@@ -1669,10 +1672,8 @@ impl Widget for SceneView {
                         // mid-tween (the anchor math is exact only at
                         // start and end states). Snap is also the
                         // standard wheel-zoom feel — each notch produces
-                        // an immediate, predictable step. The `zoom_dur`
-                        // capture stays for symmetry with `set_zoom` /
-                        // `zoom_to` callers.
-                        let _ = zoom_dur;
+                        // an immediate, predictable step. The pinch
+                        // path uses the same snap rule.
                         zoom.set(z_new);
                         pan_x.set(new_pan.x);
                         pan_y.set(new_pan.y);
@@ -1909,19 +1910,38 @@ impl Widget for SceneView {
             let pan_x_for_drag = self.pan_x.clone();
             let pan_y_for_drag = self.pan_y.clone();
             let drag_mode_inner = drag_mode;
+            // Snapshot the scene's pan-axes policy for the hand-drag
+            // path. Mirrors the on_scroll / on_pinch / on_key
+            // capture pattern — runtime policy changes take effect
+            // on the next rebuild. Unit 3 will lift this to a live
+            // signal read.
+            let pan_axes_for_drag = self.scene.current_pan_axes();
             handlers = handlers.on_drag(move |phase, _ctx| {
                 // ScrollHandDrag mode bypasses item / marquee logic
                 // entirely — drag pans the view by the cursor
                 // delta in scene coords. Marquee and drag-to-move
                 // are inactive in this mode.
                 if drag_mode_inner == crate::item_handlers::DragMode::ScrollHandDrag {
+                    use crate::scene::PanAxes;
                     use fern_core::gesture::DragPhase;
                     if let DragPhase::Moved { delta, .. } = phase {
-                        // `delta` is in screen coords. Apply
-                        // verbatim to pan; sign matches scroll
-                        // direction (drag right → pan right).
-                        let target_x = pan_x_for_drag.get() + delta.x;
-                        let target_y = pan_y_for_drag.get() + delta.y;
+                        // `delta` is in screen coords. Apply the
+                        // scene's pan-axes policy: zero out the
+                        // restricted axis so an axis-locked scene
+                        // can't be hand-dragged off-axis. Sign
+                        // convention matches scroll (drag right →
+                        // pan right).
+                        let (dx, dy) = match pan_axes_for_drag {
+                            PanAxes::Both => (delta.x, delta.y),
+                            PanAxes::None => (0.0, 0.0),
+                            PanAxes::Horizontal => (delta.x, 0.0),
+                            PanAxes::Vertical => (0.0, delta.y),
+                        };
+                        if dx == 0.0 && dy == 0.0 {
+                            return;
+                        }
+                        let target_x = pan_x_for_drag.get() + dx;
+                        let target_y = pan_y_for_drag.get() + dy;
                         pan_x_for_drag.set(target_x);
                         pan_y_for_drag.set(target_y);
                     }
@@ -2053,9 +2073,13 @@ impl Widget for SceneView {
         // the scene's resolved extent so the entire scene fits
         // inside the view's bounds. Falls back to `default_size`
         // when the scene has no extent declared and no items.
+        // We size to the extent's width/height, NOT its right/bottom
+        // — for scenes with items at non-origin (e.g. negative) scene
+        // coordinates, right/bottom is inflated by the bounding rect's
+        // origin offset.
         let (default_w, default_h) = if self.adopt_scene_size {
             match self.scene.scene_rect_extent() {
-                Some(r) => (r.right(), r.bottom()),
+                Some(r) => (r.width, r.height),
                 None => (self.default_size.width, self.default_size.height),
             }
         } else {
