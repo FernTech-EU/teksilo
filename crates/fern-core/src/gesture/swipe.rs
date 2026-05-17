@@ -2,9 +2,7 @@ use std::time::Instant;
 
 use fern_canvas::Point;
 
-use super::{
-    GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, SwipeDirection,
-};
+use super::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, SwipeDirection};
 
 /// Recognizes a swipe gesture (quick directional movement above velocity threshold).
 #[derive(Debug)]

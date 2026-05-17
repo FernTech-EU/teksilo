@@ -4,9 +4,7 @@ use fern_canvas::Point;
 
 use crate::event::{ButtonMask, Modifiers, PointerButton};
 
-use super::{
-    GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapEvent, distance,
-};
+use super::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapEvent, distance};
 
 /// Recognizes a long press (pointer held down beyond a duration without movement).
 ///

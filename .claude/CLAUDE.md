@@ -33,6 +33,9 @@ cargo run -p tree-table                         # TreeTable showcase (mock files
 cargo run -p datetime-pickers                   # Calendar / DateEdit / TimeEdit / DateTimeEdit gallery
 cargo run -p file-dialogs                       # Native file open / save / pick-folder showcase
 cargo run -p tooltips-showcase                  # Three-tier tooltip cascade demo (plain / rich / composite)
+cargo run -p scene_showcase                     # Scene viewport: pan/zoom + heavyweight+lightweight tier mix
+cargo run -p scene_corkboard                    # Scene-based story corkboard (worked-example use case)
+cargo run -p chart-demo                         # BarChart / LineChart / PieChart (+ donut + center slot)
 ```
 
 ## Tools
@@ -48,6 +51,10 @@ python3 tools/bench_examples.py                          # Run benchmarks with r
 [tools/extract_widget_api.py](tools/extract_widget_api.py) parses widget source files in [crates/fern-widgets/src/](crates/fern-widgets/src/) and emits their `//!` module header, `pub struct`/`enum`/`type`/`const` declarations with `///` docs, and `pub fn` builder methods from inherent `impl Foo { ... }` blocks. Skips `impl Widget for Foo` trait plumbing and `pub(crate)` items. Accepts type names (`Button`) or module names (`button`); flags `#[doc(hidden)]` and `#[cfg(...)]`. Use when reading a widget's public surface without opening the file, packing widget docs into LLM context, or auditing API coverage.
 
 The workspace has two member globs: `crates/*` for libraries and `examples/*` for runnable demos. Examples live under [examples/](examples/) (e.g. `simple_button`, `text_and_layout`, `widget_catalog`, `data_collections`, `dialogs_and_popovers`, `menus_and_dropdowns`, `split_view`, `tab_widget`, `title_bar_demo`, `internationalization`, `shortcuts_demo`, `recent_projects`, `drag_and_drop`, `multi_window`, `rich_text_editor`, `rich_text_viewer`, `spin_box`, `tool_box`).
+
+## Widget Previewer
+
+Storybook-style 3-pane (navigator / canvas / knob-form) explorer for the entire widget catalog. Run with `cargo run -p fern-widgets-previewer`. Widgets self-register via `inventory::submit!(&'static dyn CatalogEntry)` — no central registry file; adding a previewable widget is a single submission. Each entry declares typed `KnobSpec`s (live-editable properties) and `PreviewVariant`s (Default / Disabled / Loading / Error / etc.); the UI generates an editing form and a multi-variant canvas. Built-in PNG export (`png_export.rs`) per widget — useful for design review, marketing assets, and visual regression testing. Two CLI modes: standalone (whole catalog, default) and targeted (preview just one widget for fast iteration). Architecture is split deliberately: `fern-preview` is the trait + registry crate with no GUI dep — third-party widget libraries implement `WidgetCatalog` without depending on the previewer GUI; `fern-preview-ui` is the reusable GUI library so apps can build their own previewer binaries for app-specific widget catalogs; `fern-widgets-previewer` is the bundle binary for the stock catalog. Reference: [docs/plans/previewer-plan.md](docs/plans/previewer-plan.md). Mode C (VS Code extension with CodeLens "Preview ▶" buttons inline in source) is designed but deferred.
 
 Tests are fully headless — no Xvfb, no GPU, no display server needed.
 
@@ -70,12 +77,37 @@ Tests are fully headless — no Xvfb, no GPU, no display server needed.
 fern-tokens          Pure data: Theme, Color, TextStyle, SpacingTokens, alignment
 fern-canvas          Canvas API, RenderFrame, Path, Paint, geometry, TextBackend trait
 fern-core            Widget traits, arena, layout, events, focus, state, gestures, overlays
-fern-data            Reactive data models: ListModel, TreeModel, SelectionModel, ListDataSource,
-                     SortFilterListModel<T> (sort + filter projection over a flat source),
-                     SortFilterTreeModel<T> (same for trees, with TreeFilterMode strategies),
-                     CheckedModel + TreeCheckedModel<T> (per-row checkbox state, parallels
-                     SelectionModel; tree variant supports descendant→ancestor tristate
-                     aggregation), CheckState (Unchecked/Checked/Indeterminate)
+fern-data            Reactive data models, designed as a *peer* of the GUI, not part of it: depends on
+                     fern-core only for `Signal<T>` + `ObserverHandle`, so a CLI tool, validation pass,
+                     Qleany ViewModel layer, or headless test can share a `ListModel<Project>` with a
+                     `ListView` without pulling in the renderer. All handles are `Rc<RefCell<…>>` under
+                     the hood — `.clone()` = share-by-handle, not deep-copy. Mutation methods drop the
+                     mutable borrow *before* notifying observers (prevents the classic reactive
+                     deadlock). Concrete generic typing throughout — `ListModel<T>` / `TreeModel<T>` give
+                     `&T` directly to delegates, no `QVariant`, no role integers.
+                       • `ListModel<T>` / `ListDataSource` (escape hatch for huge / external sources).
+                       • `TreeModel<T>` — tree *shape* only.
+                       • `TreeSlice<T>` — **per-view** flattening + expand state. Two `TreeView`s on the
+                         same `TreeModel` have independent expand state, so dual-pane file managers,
+                         overview panes, and side-panel search results are one-line each. Slice exposes
+                         `version: Signal<u64>` + `with_entry(idx, |t, FlatEntry| …)`.
+                       • `SelectionModel` — shared by ListView/TreeView, `Single`/`Multi`/`None` modes,
+                         `selection_signal(): Signal<BTreeSet<usize>>`, anchor for Shift+click range.
+                       • `SortFilterListModel<T>` — sort + filter projection over a flat source.
+                       • `SortFilterTreeModel<T>` — same for trees, with three first-class strategies
+                         via `TreeFilterMode`: `HideNonMatching` | `KeepAncestors` (show the path to
+                         each match — VS Code / Spotlight behaviour) | `KeepDescendants` (match a node,
+                         show its subtree).
+                       • `CheckedModel` + `TreeCheckedModel<T>` — per-row checkbox state parallel to
+                         `SelectionModel`. Tree variant aggregates **descendant → ancestor**: 3 of 5
+                         children checked = parent `Indeterminate`; all 5 = parent `Checked`. The
+                         "Permissions" / "select files to back up" pattern everyone hand-rolls and
+                         everyone gets subtly wrong, done in the data layer.
+                       • `CheckState` (`Unchecked` / `Checked` / `Indeterminate`).
+                       • `debug_registry.rs` — opt-in registration for the Inspector's Models tab via
+                         `ListModel::debug_named("…")` / `TreeModel::debug_named` /
+                         `SelectionModel::debug_named`.
+                     Reference: [docs/data-models.md](docs/data-models.md).
 fern-settings        Persistent reactive prefs: SettingsStore (dotted-key Signal<T>), SettingsFile<T>,
                      PersistedListModel/PersistedTreeModel, MruList<T: MruEntry>, WindowStateService
 fern-telemetry       Privacy-respecting product analytics built on fern-settings: ConsentStore,
@@ -97,6 +129,17 @@ fern-widgets         ~56 widgets + ~21 layout primitives (Button, ListView, Tree
                      TreeTable, MenuBar, Dialog, TextInput, SpinBox, etc.)
 fern-charts          BarChart, LineChart, PieChart (pie + donut, with center slot). Sits at the same tier
                      as fern-widgets — no dep on widgets. See docs/plans/charts-plan.md.
+fern-scene           Pannable/zoomable scene viewport (Qt QGraphicsScene equivalent). Two-tier content
+                     under one view transform: heavyweight `Widget`s placed at scene coordinates (focus,
+                     animation, DnD, AT all survive embedding) + lightweight `SceneItem`s (paint-only,
+                     no arena overhead, thousands cheap). Built-in minimap, exact-shape hit-test,
+                     per-item GPU cache, collision API, reactive `item_change_signal`. Full a11y:
+                     synthetic AT nodes per lightweight item with screen-projected bounds, rotor
+                     categories, reparenting (visual tree ≠ AT tree), landmark roles, live regions.
+                     Use cases: story corkboards, mind maps, node-graph editors, timeline views, CAD
+                     canvases, simple maps. Sits at the fern-widgets tier; depends on widgets so the
+                     heavyweight tier can be any widget in the catalog. See docs/fern-scene.md +
+                     docs/fern-scene-a11y.md.
 fern-text            TextBackend impl via text-typeset (external path dep)
 fern-i18n            Fluent-rs runtime: LocalizedString, I18nManager, locale resolution, file watcher.
                      Also locale-aware formatters: NumberFormatter / FernDateTimeFormatter
@@ -115,12 +158,21 @@ fern-platform        winit + AccessKit adapter, event translation, clipboard, OS
 fern-app             FernAppBuilder, WindowManager, event loop
 fern-ui              Umbrella crate with re-exports and feature flags
 fern-resources       Resource handling and embedding infrastructure
-fern-preview         Widget previewer infrastructure (trait + types + inventory registry)
-fern-preview-ui      GUI library for widget previewer
-fern-widgets-previewer Previewer binary for fern-widgets catalog
+fern-preview         Storybook-equivalent infrastructure for desktop Rust widgets. `WidgetCatalog`
+                     trait + object-safe `CatalogEntry` collected via `inventory`. Typed
+                     `KnobSpec`/`KnobValue`/`KnobOverrides` for live property editing, `PreviewVariant`
+                     enum for multi-state showcasing (Default/Disabled/Loading/Error/...), `SourceLoc`
+                     for "open in editor" navigation. Zero GUI dep — third-party widget libraries can
+                     implement the trait and stay independent of the previewer UI.
+fern-preview-ui      Reusable 3-pane previewer GUI (navigator + canvas + knob-form, plus toolbar,
+                     inspector pane, CLI parsing, PNG export). Apps build their own previewer binary
+                     for app-specific catalogs by depending on this crate + their widget set.
+fern-widgets-previewer Bundle binary that combines fern-widgets + fern-preview + fern-preview-ui to
+                     preview the stock catalog. Two CLI modes: standalone (whole catalog) and
+                     targeted (preview one widget). See docs/plans/previewer-plan.md.
 ```
 
-Dependency flow: `tokens → canvas → core → data → widgets`, `canvas → text`, `core + data → settings`, `canvas → render → platform → app → ui`, `settings → app`, `i18n-macros → i18n`, `ui-macros → ui`, `core → preview`, `preview-ui → preview + widgets`, `widgets-previewer → (preview + preview-ui + widgets)`
+Dependency flow: `tokens → canvas → core → data → widgets`, `canvas → text`, `core + data → settings`, `canvas → render → platform → app → ui`, `settings → app`, `i18n-macros → i18n`, `ui-macros → ui`, `core → preview`, `preview-ui → preview + widgets`, `widgets-previewer → (preview + preview-ui + widgets)`, `widgets → scene` (scene sits at the fern-widgets tier and reuses the full widget catalog as its heavyweight content)
 
 External path dependency: `text-typeset` lives at `../text-typeset` (outside workspace).
 
@@ -685,6 +737,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Settings & persistence (fern-settings: `SettingsStore` dotted-key Signal<T> K/V, `SettingsFile<T>` with versioned migrations, `PersistedListModel`/`PersistedTreeModel`, generic `MruList<T: MruEntry>`, `WindowStateService` with framework-driven auto save/restore + monitor-aware sanitize on restore; see `docs/settings.md`)
 - Native file dialogs (fern-platform/file_dialog: `FileDialogBackend` trait + `FileDialogHandle` registered in app-state, `FileDialogRequest` builder for open / open-multi / pick-folder / save, `FileDialogResult`, `MemoryFileDialog` test backend, `RfdAsyncBackend` real implementation behind the `rfd-backend` feature using rfd 0.15 + xdg-portal + async-std; `EventContextFileDialogExt` extension trait adds `ctx.pick_file(...)`, `ctx.pick_files(...)`, `ctx.pick_folder(...)`, `ctx.save_file(...)`. Result delivery: backend posts `FileDialogEventPayload` through `AppEventPoster::post_external` → fern-app's `AppEvent::External` arm downcasts and routes to the originating window's tree → `FileDialogHandle::deliver` pops the callback and invokes it on the main thread with a fresh `EventContext`. macOS NSOpenPanel runs on the AppKit main run loop internally; the future drives the wakeup machinery from an async-std worker. Pending callbacks are tagged with the originating `FernWindowId` and purged via `WindowManager::close_window` when the window closes — no use-after-free of widget state. Apps wire up with `FernAppBuilder::install_file_dialog()` (or `.app_state(FileDialogHandle::new(my_backend))` for a custom backend). Demo: `examples/file_dialogs`.)
 - Debug inspector (fern-inspector: in-app introspection panel, debug builds only, gated by `cfg(debug_assertions)`; F12 toggles a bottom panel with 9 tabs (Tree, Properties, Accessibility, Theme, Locale, Focus, Shortcuts, Overlays, Models); bounds-overlay visualization (Off/Selection/All) with cursor-following type+size tooltip and Padding/StackGap tinted bands; picker tool with multi-window subtree exclusion; theme JSON Export/Import; resizable panel with persisted height; tree filter input + auto-scroll-into-view; Properties Copy button + right-click `Copy value` context menu + Debug repr row; Models tab with click-to-select per row; panel-scoped Ctrl+P/Ctrl+B/Ctrl+Tab/Ctrl+Shift+Tab/Esc keyboard shortcuts; persistence via `__fern_inspector.*` settings keys when `SettingsStore` is wired. Apps opt in with `FernAppBuilder.install_inspector_in_debug()` (no-op in release) — the extension trait is re-exported from `fern_ui::prelude::*` behind the umbrella's default-on `inspector` feature, so no separate `fern-inspector` dep is needed. See `docs/inspector.md`. Data models opt into the Models tab via `ListModel::debug_named("…")` / `TreeModel::debug_named` / `SelectionModel::debug_named`.)
+- Widget previewer (fern-preview + fern-preview-ui + fern-widgets-previewer): Storybook-equivalent for desktop Rust widgets. `inventory`-backed registry where widgets self-register via `inventory::submit!(&'static dyn CatalogEntry)`. Typed `KnobSpec`/`KnobValue` for live property editing, `PreviewVariant` for multi-state showcasing, `SourceLoc` for "open in editor" navigation, PNG export per widget. 3-pane GUI (navigator/canvas/knob-form). Two CLI modes (standalone catalog vs single-widget targeting). Architecture splits trait+registry (no GUI dep, third-party widget libraries integrate cleanly) from the reusable GUI library (apps build their own previewer for app-specific catalogs) from the stock-catalog bundle binary. Mode C (VS Code extension with CodeLens "Preview ▶") designed but deferred. Run with `cargo run -p fern-widgets-previewer`. Reference: [docs/plans/previewer-plan.md](docs/plans/previewer-plan.md).
 - Tooltip system — three tiers sharing one attachment pipeline:
   1. **Plain** ([`TooltipWidget`](crates/fern-widgets/src/tooltip.rs)) — single-line localized text; ephemeral.
   2. **Rich** ([`RichTooltipWidget`](crates/fern-widgets/src/tooltip/rich.rs)) — registry-driven (`TooltipContent`), inline markup + shortcut chip + "more" Accordion; `[label](:key)` cascade to other rich tooltips; dwell-to-sticky promotes to focusable `Role::Dialog`.
@@ -697,6 +750,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Chrome: Toolbar, StatusBar, TitleBar, GroupHeader
 - Data-driven: ListView, TreeView (with 4-arg `new_with_context(...)` exposing a `TreeRowContext` for one-line chevron-toggle wiring), Repeater, **TableView** (multi-column, virtualized, sort/filter via `SortFilterListModel`, drag-resize + drag-reorder of columns, pinned Leading/Trailing, cell-level + row-level selection, full keyboard nav with focus ring, edit hooks via `editing_cell_signal` + `on_cell_edit_request`, row drag-drop reorder, `Role::Table > Role::Row > Role::Cell` accessibility), **TreeTable** (hierarchical multi-column, twist-arrow indent, ArrowLeft/Right collapse/expand, `Role::TreeGrid` with per-row `set_level`/`set_expanded`), **StandardListItem** + **StandardTreeItem** (canonical row layout — `[checkbox?] [leading_slot?] [center_slot?] [label] [Spacer] [trailing_slot?]` with optional subtitle line carrying its own `[subtitle_leading_slot?] [subtitle] [subtitle_trailing_slot?]`; selection bg mirrors MenuItem/ComboBox rounded `item_corner_radius: 8.0` / `SurfaceRole::Selected | AccentSubtle | Pressed`; tree variant adds depth-driven indent + always-reserved chevron column; `.from_entry(&FlatEntry)` shortcut, `.on_toggle_rc(ctx.toggle_callback())` from the new TreeView delegate; both accept two-state `Signal<bool>` or tri-state `Signal<CheckState>` checkbox; `_literal` shims for untranslated strings)
 - Text: TextInput (styled single-line), rich text viewer; `RichTextEditor::editor` / `read_only` accept `.min_lines(n)` / `.max_lines(n)` for intrinsic-mode sizing (greedy by default; intrinsic when either knob is set, clamping `content_height` to `[min, max] × default_line_height` — the messenger-composer pattern)
+- Scene viewport (fern-scene: `Scene`, `SceneView`, `SceneItem` trait, built-in `RectItem` and friends, `minimap`). Two-tier — heavyweight `Widget` (full focus/animation/DnD/AT survives embedding) + lightweight `SceneItem` (paint-only, no arena cost). Pan / zoom gestures with per-axis policy, drag modes, exact-shape hit-test via `shape_contains`, per-item `CacheMode::ItemCoordinate` GPU cache, collision API, reactive `item_change_signal`, background/foreground paint hooks, signal-driven dynamic bounds, selection, z-order, removal. **Accessibility-complete**: every visible heavyweight widget participates as a normal child; every visible lightweight item gets a synthetic AT node with role + screen-projected bounds; Tab cycles in scene-insertion order. Override surface mirrors widget-level: logical groups, reparenting (visual tree ≠ AT tree), relations (controls/described_by/labelled_by), live regions, landmark roles, rotor/quick-nav categories, subtree mode (`Merge`/`Exclude`), custom focus order, `access_*` builder chain. Intended for story corkboards, mind maps, node-graph editors, timeline views, CAD canvases, simple maps. Demos: `cargo run -p scene_showcase`, `cargo run -p scene_corkboard`. References: [docs/fern-scene.md](docs/fern-scene.md), [docs/fern-scene-a11y.md](docs/fern-scene-a11y.md).
 
 ### Partial / In Progress
 
@@ -723,10 +777,11 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Button (reference widget): [crates/fern-widgets/src/button.rs](crates/fern-widgets/src/button.rs)
 - Switcher: [crates/fern-widgets/src/primitives/switcher.rs](crates/fern-widgets/src/primitives/switcher.rs)
 - Layout primitives: [crates/fern-widgets/src/primitives/](crates/fern-widgets/src/primitives/)
-- Data models: [crates/fern-data/src/](crates/fern-data/src/) (`list_model.rs`, `tree_model.rs`, `selection_model.rs`, `sort_filter_list_model.rs`, `sort_filter_tree_model.rs`, `checked_model.rs`, `tree_checked_model.rs`, `check_state.rs`)
+- Data models: [crates/fern-data/src/](crates/fern-data/src/) (`list_model.rs`, `list_data_source.rs`, `tree_model.rs`, `tree_slice.rs` — per-view expand state, `selection_model.rs`, `sort_filter_list_model.rs`, `sort_filter_tree_model.rs`, `checked_model.rs`, `tree_checked_model.rs`, `check_state.rs`, `data_change.rs`, `tree_change.rs`, `debug_registry.rs`). Reference: [docs/data-models.md](docs/data-models.md). Design rules: per-view independent expand state via `TreeSlice<T>`; concrete `T` (no `QVariant`); `Rc<RefCell<…>>` share-by-clone; mutation-then-notify discipline; the crate is GUI-free so a ViewModel layer or headless consumer can use it without pulling in `fern-widgets`
 - Standard row items: [crates/fern-widgets/src/standard_item.rs](crates/fern-widgets/src/standard_item.rs) (`StandardListItem`, `StandardTreeItem`); chevron primitive: [crates/fern-widgets/src/primitives/twist_arrow.rs](crates/fern-widgets/src/primitives/twist_arrow.rs); style trait: `StandardItemStyle` in [crates/fern-core/src/styles/standard_item_style.rs](crates/fern-core/src/styles/standard_item_style.rs), default impl + dim constants in [crates/fern-widgets/src/styles/recipe_standard_item_style.rs](crates/fern-widgets/src/styles/recipe_standard_item_style.rs)
 - TableView: [crates/fern-widgets/src/table_view.rs](crates/fern-widgets/src/table_view.rs) + submodules at [crates/fern-widgets/src/table_view/](crates/fern-widgets/src/table_view/) (`column.rs`, `selection.rs`, `a11y.rs`, `body.rs`, `header.rs`, `keyboard.rs`, `layout.rs`, `row_navigator.rs`, `tests.rs`). Demo: [examples/data_grid/src/main.rs](examples/data_grid/src/main.rs)
 - TreeTable: [crates/fern-widgets/src/tree_table.rs](crates/fern-widgets/src/tree_table.rs) (reuses table_view's column/header/keyboard modules; adds `TreeNavigator` + `TwistArrow`). Demo: [examples/tree_table/src/main.rs](examples/tree_table/src/main.rs)
+- Scene viewport: [crates/fern-scene/src/](crates/fern-scene/src/) — `scene.rs` (65 KB core scene model), `view.rs` (137 KB `SceneView` widget with pan/zoom/gestures), `item.rs` + `items/` (`SceneItem` trait and built-in items), `a11y.rs` (AT walker), `minimap.rs`, `cache.rs`, `transform.rs`, `selection.rs`, `index.rs` (spatial index), `flags.rs`, `item_handlers.rs`, `animation.rs`, `state.rs`. References: [docs/fern-scene.md](docs/fern-scene.md), [docs/fern-scene-a11y.md](docs/fern-scene-a11y.md). Demos: [examples/scene_showcase/src/main.rs](examples/scene_showcase/src/main.rs), [examples/scene_corkboard/src/main.rs](examples/scene_corkboard/src/main.rs)
 - i18n runtime: [crates/fern-i18n/src/manager.rs](crates/fern-i18n/src/manager.rs), [crates/fern-i18n/src/localized_string.rs](crates/fern-i18n/src/localized_string.rs)
 - i18n locale-aware formatting: [crates/fern-i18n/src/format.rs](crates/fern-i18n/src/format.rs) (Memoizable types, ICU bridge, `FernDateTime` + `FluentType` impl, public `NumberFormatter` / `FernDateTimeFormatter`, bundle `set_formatter` callback, `DATETIME()` Fluent function). Bundle wiring: `configure_bundle` helper in [manager.rs](crates/fern-i18n/src/manager.rs). Tests: [crates/fern-i18n/tests/format_integration.rs](crates/fern-i18n/tests/format_integration.rs)
 - i18n macros: [crates/fern-i18n-macros/src/lib.rs](crates/fern-i18n-macros/src/lib.rs) (`tr!`, `tr_widget!`, `tr_signal!`, `tr_signal_widget!`)
@@ -739,7 +794,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - App builder: `crates/fern-app/src/app.rs`
 - Umbrella exports: `crates/fern-ui/src/lib.rs`
 - Resources: `crates/fern-resources/src/lib.rs`
-- Previewer infrastructure: `crates/fern-preview/src/lib.rs` (trait + registry), `crates/fern-preview-ui/src/lib.rs` (GUI library)
+- Previewer: [crates/fern-preview/src/](crates/fern-preview/src/) (`catalog.rs` — `WidgetCatalog` / `CatalogEntry`, `knob.rs` — `KnobSpec`/`KnobValue`/`KnobOverrides`/`KnobValues`, `variant.rs` — `PreviewVariant`, `registry.rs` — `inventory::iter` wrappers, `source_loc.rs` — `SourceLoc`). GUI library: [crates/fern-preview-ui/src/](crates/fern-preview-ui/src/) (`app_state.rs`, `canvas.rs`, `navigator.rs`, `knob_form.rs`, `inspector.rs`, `toolbar.rs`, `cli.rs`, `png_export.rs`). Stock binary: [crates/fern-widgets-previewer/src/main.rs](crates/fern-widgets-previewer/src/main.rs). Plan + rationale (41 sections): [docs/plans/previewer-plan.md](docs/plans/previewer-plan.md). Run: `cargo run -p fern-widgets-previewer`
 - Drag-and-drop: `crates/fern-core/src/drag_payload.rs`, `crates/fern-core/src/drag_state.rs`
 - Clipboard: `crates/fern-platform/src/clipboard.rs`
 - File dialogs: [crates/fern-platform/src/file_dialog.rs](crates/fern-platform/src/file_dialog.rs) (trait, handle, request, result, payload, mock, `RfdAsyncBackend`, `EventContextFileDialogExt`). Wiring: `WindowOps::current_parent_handle` in [crates/fern-core/src/window/ops.rs](crates/fern-core/src/window/ops.rs); `EventContext::parent_window_handle` + `EventContext::poster` in [crates/fern-core/src/widget.rs](crates/fern-core/src/widget.rs); `WidgetTree::run_with_event_context` in [crates/fern-core/src/widget_tree.rs](crates/fern-core/src/widget_tree.rs); `FernAppHandler::try_route_file_dialog_payload` and the `AppEvent::External` downcast arm in [crates/fern-app/src/app.rs](crates/fern-app/src/app.rs); window-close purge hook in [crates/fern-app/src/window_manager.rs](crates/fern-app/src/window_manager.rs)'s `close_window`. Demo: [examples/file_dialogs/src/main.rs](examples/file_dialogs/src/main.rs).

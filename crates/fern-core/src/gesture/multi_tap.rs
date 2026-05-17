@@ -4,9 +4,7 @@ use fern_canvas::Point;
 
 use crate::event::{ButtonMask, PointerButton};
 
-use super::{
-    GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapEvent, distance,
-};
+use super::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapEvent, distance};
 
 /// Recognizes a double-tap (two taps within a time window and distance,
 /// using the same button).
