@@ -229,10 +229,10 @@ impl RichTextEditor {
     }
 
     pub fn text_color(self, color: Color) -> Self {
-        self.state
-            .borrow_mut()
-            .engine
-            .set_text_color(color.to_array());
+        let mut st = self.state.borrow_mut();
+        st.engine.set_text_color(color.to_array());
+        st.text_color_user_set = true;
+        drop(st);
         self
     }
 
@@ -1120,8 +1120,20 @@ impl Widget for RichTextEditorBody {
         st.viewport_height = bounds.height;
     }
 
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
+    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let mut st = self.state.borrow_mut();
+
+        // Sync the engine's default text color with the active theme
+        // so dark / light mode swaps reach the rendered glyphs. The
+        // engine reads `text_color` fresh on every `render()` and
+        // does not bake it into a glyph cache, so a per-paint write
+        // is cheap and produces correct output on the next frame
+        // without forcing a relayout. Skipped when the app pinned a
+        // color via `RichTextEditor::text_color(...)`.
+        if !st.text_color_user_set {
+            st.engine
+                .set_text_color(ctx.theme.colors.editor_fg.to_array());
+        }
 
         // The engine reads the HiDPI display scale factor from the
         // shared `TypesetterBridge` on every `layout_full`, exactly

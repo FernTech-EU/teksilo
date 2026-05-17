@@ -78,6 +78,14 @@ pub(crate) struct EditorState {
     // Wrap mode as configured by the builder.
     pub wrap_mode: WrapMode,
 
+    /// `true` once the app explicitly set a text color via
+    /// [`RichTextEditor::text_color`](super::RichTextEditor::text_color).
+    /// While `false` the paint pass syncs the engine's default text
+    /// color with the active theme's `editor_fg` role each frame so
+    /// light / dark theme swaps reach the rendered glyphs without
+    /// caller-side wiring.
+    pub text_color_user_set: bool,
+
     // Focus — mirrored from `on_focus` so paint can gate the caret.
     pub has_focus: bool,
 
@@ -345,6 +353,7 @@ impl EditorState {
             last_relayout_block_id: None,
             content_dirty: true,
             wrap_mode,
+            text_color_user_set: false,
             has_focus: false,
             focus_signal: Signal::new(false),
             event_queue,
