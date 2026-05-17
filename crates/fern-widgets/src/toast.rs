@@ -947,6 +947,50 @@ mod tests {
     }
 
     #[test]
+    fn registry_in_place_update_preserves_on_dismiss_when_not_provided() {
+        // Mirrors the leading-widget preservation test:
+        // First toast attaches an on_dismiss callback; the update
+        // has none, so the original callback must survive on the
+        // live entry. (We can't easily simulate the callback firing
+        // without a real EventContext, but the entry inspection
+        // proves the preservation behaviour up to the fire point.)
+        let r = fresh_registry();
+        let (h, _) = r.enqueue(
+            Toast::info_literal("step 1")
+                .id("preserve-on-dismiss")
+                .on_dismiss(|_cause, _ctx| {}),
+        );
+        // Sanity: the callback is attached.
+        assert!(
+            r.with_entry(h.entry_id(), |e| e.on_dismiss.is_some())
+                .unwrap(),
+            "original entry has on_dismiss attached"
+        );
+
+        // Update with no on_dismiss — original must survive.
+        let _ = r.enqueue(Toast::success_literal("step 2").id("preserve-on-dismiss"));
+        assert!(
+            r.with_entry(h.entry_id(), |e| e.on_dismiss.is_some())
+                .unwrap(),
+            "in-place update with no .on_dismiss(...) preserves the existing callback"
+        );
+
+        // Update WITH a new on_dismiss replaces (we just verify the
+        // field stays Some — the OLD callback gets dropped silently,
+        // per the documented contract).
+        let _ = r.enqueue(
+            Toast::info_literal("step 3")
+                .id("preserve-on-dismiss")
+                .on_dismiss(|_cause, _ctx| {}),
+        );
+        assert!(
+            r.with_entry(h.entry_id(), |e| e.on_dismiss.is_some())
+                .unwrap(),
+            "in-place update WITH new on_dismiss installs the replacement"
+        );
+    }
+
+    #[test]
     fn registry_in_place_update_without_id_appends_normally() {
         let r = fresh_registry();
         let _ = r.enqueue(Toast::info_literal("a"));

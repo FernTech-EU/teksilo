@@ -206,22 +206,41 @@ impl ToastRegistry {
             // Replace the on_dismiss callback only if the update
             // provided one — apps that just want to update title /
             // body don't have to re-supply on_dismiss every time.
+            // When the update DOES provide a new callback, the
+            // previous one is dropped silently (never fires). The
+            // contract is "the most recent caller's expectations win"
+            // — `on_dismiss` fires once per entry, with the
+            // most-recently-supplied callback.
             if toast.on_dismiss.is_some() {
                 existing.on_dismiss = toast.on_dismiss;
             }
             existing.style_override = toast.style_override;
             existing.time_left = toast.auto_dismiss_after;
-            // Same for the leading widget: only replace when the
-            // update sets one. Otherwise the original leading
-            // (typically a Spinner from `Toast::loading`) survives.
+            // Same preservation semantic for the leading widget:
+            // only replace when the update sets one. Otherwise the
+            // original leading (typically a Spinner from
+            // `Toast::loading`) survives the mutation.
             if toast.leading.is_some() {
                 existing.leading = toast.leading;
             }
+            // `archive` flag tracks the latest call's intent. If
+            // the update sets `archive(false)` after an initial
+            // archived toast, the existing archive record stays in
+            // place but this and subsequent updates stop mirroring
+            // (no new `NotificationUpdate` is recorded). Apps that
+            // want the archive to keep capturing updates should
+            // leave `archive` at its default `true` across updates.
             existing.archive = toast.archive;
             let entry_id = existing.entry_id;
-            // Snapshot for archive mirror — done before we drop the
-            // borrow so the snapshot is consistent with the mutation.
-            let archive_entry = existing.archive.then(|| Self::entry_to_archive(existing));
+            // Snapshot for archive mirror BEFORE dropping the
+            // RefCell borrow — the snapshot must be consistent with
+            // the mutation, and `archive.push(...)` cannot run while
+            // `inner` is still borrowed.
+            let archive_entry = if existing.archive {
+                Some(Self::entry_to_archive(existing))
+            } else {
+                None
+            };
             drop(inner);
             if let (Some(archive), Some(entry)) = (self.archive.as_ref(), archive_entry) {
                 archive.push(entry);
