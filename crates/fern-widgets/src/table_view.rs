@@ -3,9 +3,8 @@
 //! Built atop the [`ListModel<T>`](fern_data::ListModel) /
 //! [`ListDataSource`](fern_data::ListDataSource) data layer in
 //! `fern-data` and the `fern-tokens` `TableStyle`. Mirrors Qt's
-//! `QTableView`, SwiftUI's `Table`, and JavaFX's `TableView`. See
-//! `docs/plans/plan-for-the-creation-snuggly-codd.md` for the full
-//! roadmap. Phase 2 ships the core skeleton: single body pane,
+//! `QTableView`, SwiftUI's `Table`, and JavaFX's `TableView`.
+//! Phase 2 ships the core skeleton: single body pane,
 //! row-virtualized with alternating backgrounds, grid lines,
 //! `Role::Table > Role::Row > Role::Cell` accessibility, multi-row
 //! selection, and an empty-state slot. Headers, sort, filter, resize,

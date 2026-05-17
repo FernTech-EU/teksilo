@@ -536,7 +536,6 @@ unchanged.
 ## Reference
 
 - Source: [`crates/fern-settings/src/`](../crates/fern-settings/src/)
-- Plan: [`docs/plans/settings-plan.md`](plans/settings-plan.md)
 - Window persist integration: [`crates/fern-app/src/window_persist.rs`](../crates/fern-app/src/window_persist.rs)
 - End-to-end demo: [`examples/recent_projects/src/main.rs`](../examples/recent_projects/src/main.rs)
 - Related architecture topics: [`docs/multi-window.md`](multi-window.md), [`docs/data-models.md`](data-models.md), [`docs/reactive-theme.md`](reactive-theme.md)

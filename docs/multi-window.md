@@ -593,7 +593,6 @@ installing an observer through the current window's build context.
 
 ## Reference
 
-- Plan: [`docs/plans/multi-window-plan.md`](plans/multi-window-plan.md).
 - End-to-end demo:
   [`examples/multi_window`](../examples/multi_window/src/main.rs).
 - Implementation:

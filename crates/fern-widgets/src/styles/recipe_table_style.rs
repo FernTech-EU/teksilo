@@ -14,8 +14,7 @@
 //! own their paint passes for performance reasons (grid lines need a
 //! single batched pass over the virtualized viewport — composing one
 //! `RectWidget` per line would defeat virtualization). The full
-//! chrome decomposition is deferred — see the follow-up entry in
-//! `docs/plans/group-5-styling-migration.md`.
+//! chrome decomposition is deferred.
 
 use fern_core::build_context::BuildContext;
 use fern_core::color_prop::ColorProp;

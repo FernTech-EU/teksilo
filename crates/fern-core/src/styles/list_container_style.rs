@@ -14,8 +14,7 @@
 //! `ListInsertionRecipe` carries the role + thickness data consumed
 //! by `ListView::paint` / `TreeView::paint`. Replacing the inline
 //! paint with a composed `RectWidget` leaf (the Stage A `TabBar`
-//! drop-indicator pattern) is deferred — see the follow-up entry in
-//! `docs/plans/group-5-styling-migration.md`. The slot's data is
+//! drop-indicator pattern) is deferred. The slot's data is
 //! already read by both widgets' paint passes (no more hard-coded
 //! `Color::from_rgba(0.2, 0.4, 0.9, 0.8)`).
 

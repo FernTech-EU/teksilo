@@ -15,8 +15,6 @@
 //! `app_state::<dyn UsageReporter>()` if registered and emits an
 //! `intent.dispatched` event with the intent's `name`. Apps that don't
 //! install a reporter pay nothing.
-//!
-//! See `docs/plans/telemetry-plan.md` for the full design.
 
 pub mod event;
 pub mod reporter;

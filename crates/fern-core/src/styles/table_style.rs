@@ -14,8 +14,7 @@
 //!
 //! The trait surface, the `TableGridRecipe`, and the
 //! `style_slots.table` slot are in place. Wiring `TableView` /
-//! `TreeTable` through `make_*` is intentionally deferred — see the
-//! follow-up entry in `docs/plans/group-5-styling-migration.md`. The
+//! `TreeTable` through `make_*` is intentionally deferred. The
 //! widgets currently still own their cell / row / header / grid-line
 //! chrome directly; what they no longer read is `theme.components.table`
 //! — every dimension lives on `fern_widgets::styles::recipe_table_style`

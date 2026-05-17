@@ -952,9 +952,7 @@ mod tests {
 
     // ── Builder-level accessibility override tests ───────────────────
     //
-    // Tests for `WidgetBuilder::access_*` methods. The 36-test plan from
-    // `docs/plans/...` is realized below — each test name maps to the
-    // numbered entry in the plan's "Test plan" section.
+    // Tests for `WidgetBuilder::access_*` methods.
 
     use crate::widget_builder::WidgetBuilder;
     use accesskit::{Action, AriaCurrent, HasPopup, Live, Orientation, Role};

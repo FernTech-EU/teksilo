@@ -10,8 +10,7 @@ filter popover, keyboard map, and accessibility wrappers; only the body
 pane differs.
 
 This page is the reference for the public surface and the design
-contracts you can rely on. For the underlying plan and phase notes see
-[docs/plans/plan-for-the-creation-snuggly-codd.md](plans/plan-for-the-creation-snuggly-codd.md).
+contracts you can rely on.
 
 ---
 

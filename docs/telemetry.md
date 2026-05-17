@@ -614,12 +614,7 @@ buttons hide automatically — there's nothing to fetch or erase.
 | [`crates/fern-analytics-plausible/`](../crates/fern-analytics-plausible/) | Plausible adapter |
 | [`crates/fern-analytics-fern/`](../crates/fern-analytics-fern/) | Home-grown gRPC adapter |
 
-For the full design rationale (RGPD article-by-article mapping,
-phased rollout history, controller responsibilities, configuration
-matrix), see [`docs/plans/telemetry-plan.md`](plans/telemetry-plan.md).
-For the home-grown server backend, see
-[`docs/plans/fern-collector-plan.md`](plans/fern-collector-plan.md)
-and the [`fern-collector`](../../fern-collector/) sibling repo.
+For the home-grown server backend, see the [`fern-collector`](../../fern-collector/) sibling repo.
 
 ---
 

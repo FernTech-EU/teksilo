@@ -1,7 +1,6 @@
 # Charts
 
 **Companion to:** [fern-ui-architecture.md](fern-ui-architecture.md)
-**Plan:** [docs/plans/charts-plan.md](plans/charts-plan.md)
 **Scope:** The `fern-charts` crate — `BarChart`, `LineChart`, `PieChart`
 (pie + donut), the `ChartSeries<T>` / `ChartDatum<T>` data model, the
 shared axis / palette / legend infrastructure, and the rendering and

@@ -1,7 +1,6 @@
 //! `fern-telemetry` — privacy-respecting product analytics for FernUI.
 //!
-//! See `docs/plans/telemetry-plan.md` for the full design. Phase 1
-//! (this crate today) ships the foundational pieces:
+//! Phase 1 (this crate today) ships the foundational pieces:
 //!
 //! - [`ConsentStore`] — persisted consent state atop
 //!   [`fern_settings::SettingsFile`].

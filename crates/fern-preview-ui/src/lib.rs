@@ -6,9 +6,6 @@
 //! plus `fern-preview` plus their own widget set with the `preview`
 //! feature enabled. Each binary's `inventory` link graph determines
 //! which widgets the previewer surfaces.
-//!
-//! See [`docs/plans/previewer-plan.md`](../../../docs/plans/previewer-plan.md)
-//! for the architecture and phasing.
 
 mod app_state;
 mod canvas;

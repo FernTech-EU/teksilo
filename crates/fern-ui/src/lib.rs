@@ -78,9 +78,7 @@ pub use fern_inspector as inspector;
 /// The `install_toast(…)` and `install_toast_default()` methods come
 /// from [`FernAppBuilderToastExt`](toast_install::FernAppBuilderToastExt),
 /// re-exported through [`prelude`] so the umbrella import makes them
-/// callable directly. See `docs/plans/widgets-plan.md §3.9` and
-/// `.claude/plans/plan-for-the-creation-clever-stearns.md` for the
-/// full design.
+/// callable directly.
 #[cfg(feature = "toast")]
 pub mod toast_install;
 

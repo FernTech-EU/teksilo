@@ -15,8 +15,7 @@ window, a different splitter pane, or a flat document area below).
 content" pattern.
 
 This page is the reference for the public surface and the contracts you
-can rely on. The session-by-session design log lives at
-[docs/plans/widgets-plan.md](plans/widgets-plan.md).
+can rely on.
 
 ---
 

@@ -5,8 +5,7 @@
 //! no fingerprint. Plausible derives a per-day session hash
 //! server-side from `X-Forwarded-For` + `User-Agent` + a daily-
 //! rotating server-held salt; this scheme is on the CNIL
-//! consent-exempt audience-measurement list under the conditions
-//! documented in `docs/plans/telemetry-plan.md`.
+//! consent-exempt audience-measurement list.
 //!
 //! ```ignore
 //! use fern_analytics_plausible::PlausibleAdapter;
