@@ -133,7 +133,7 @@ Default is `IS_VISIBLE | IS_ENABLED | IS_SELECTABLE`.
 | `IS_FOCUSABLE` | The item can receive keyboard focus. |
 | `ACCEPTS_HOVER` | Reserved — tracks hover entrance / exit. |
 | `CLIPS_TO_SHAPE` / `CLIPS_CHILDREN_TO_SHAPE` | Reserved for clip-region paint. |
-| `IGNORES_TRANSFORMATIONS` | Item paints / hit-tests at fixed pixel size regardless of view zoom. |
+| `IGNORES_TRANSFORMATIONS` | Item paints / hit-tests at fixed pixel size regardless of view zoom. Anchor (parent-relative scene point) still follows pan/zoom — so the item tracks the data point underneath, but its size stays constant. Mirrors Qt's `ItemIgnoresTransformations`. |
 | `HAS_NO_CONTENTS` | Logical-only entry, skipped by the paint walk. |
 
 Read / mutate via `Scene::flags(id)` / `Scene::set_flag(id, flag, on)` /

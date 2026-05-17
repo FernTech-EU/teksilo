@@ -4035,3 +4035,305 @@ fn ctrl_wheel_zoom_snaps_without_animation_target() {
         "Ctrl+wheel pan adjustment is intentionally a snap"
     );
 }
+
+// -----------------------------------------------------------------
+// Unit 2 — IGNORES_TRANSFORMATIONS enforcement
+// -----------------------------------------------------------------
+
+/// A test-only `SceneItem` that records `canvas.current_transform()`
+/// whenever its `paint` runs. Lets tests assert what effective
+/// transform the item rendered under — which is the only directly
+/// observable signal of IGNORES_TRANSFORMATIONS doing its job.
+#[derive(Debug)]
+struct TransformRecorder {
+    bounds: Rect,
+    captured: std::rc::Rc<std::cell::Cell<Option<fern_canvas::Transform2D>>>,
+}
+
+impl crate::item::SceneItem for TransformRecorder {
+    fn local_bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_local_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn paint(&self, canvas: &mut fern_canvas::Canvas, _ctx: &crate::item::SceneItemPaintContext) {
+        self.captured.set(Some(canvas.current_transform()));
+        // Emit something so the renderer doesn't elide the whole
+        // item — also gives a draw_order entry to inspect if needed.
+        canvas.fill_rect(self.bounds, fern_tokens::Color::new(0.5, 0.5, 0.5, 1.0));
+    }
+}
+
+#[test]
+fn ignores_xform_paints_under_pure_translate_at_screen_anchor() {
+    // Regression for the IGNORES_TRANSFORMATIONS flag previously
+    // being inert. Each widget paints into a fresh canvas (identity
+    // start), and the render walker composes the SceneView's
+    // `set_transform(view_transform)` scope on top at frame
+    // playback time. So the captured `canvas.current_transform()`
+    // is the transform SceneView::paint emitted; the COMPOSED
+    // transform actually applied at the renderer is
+    // `captured.then(&view_transform)`. For IGNORES items we want
+    // that composition to be a pure `Translate(screen_anchor)` —
+    // no scale from zoom, no rotation from the view.
+    use std::cell::Cell;
+    use std::rc::Rc;
+    let captured = Rc::new(Cell::new(None));
+    let mut scene = Scene::new();
+    let id = scene.add_item(
+        TransformRecorder {
+            bounds: Rect::new(0.0, 0.0, 10.0, 10.0),
+            captured: captured.clone(),
+        },
+        Point::new(50.0, 60.0),
+    );
+    scene.set_flag(id, crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS, true);
+
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let view = view_handle(&tree, view_id);
+    // Move the view: pan to (100, 50) and zoom to 2.0×.
+    view.set_pan(Vec2::new(100.0, 50.0));
+    view.set_zoom(2.0);
+    let view_xform = view.view_transform();
+    let scene_anchor = Point::new(50.0, 60.0);
+    let expected_screen_anchor = view_xform.apply_point(scene_anchor);
+
+    let _ = tree.render();
+
+    let captured_xform = captured
+        .get()
+        .expect("IGNORES item should have painted at least once");
+    let composed = captured_xform.then(&view_xform);
+    let m = composed.m;
+    // Composed: pure translate to the screen anchor — linear part
+    // is identity (no zoom scale, no view rotation leaking in).
+    assert!((m[0] - 1.0).abs() < 1e-3, "composed a == 1, got {}", m[0]);
+    assert!(m[1].abs() < 1e-3, "composed b == 0, got {}", m[1]);
+    assert!(m[2].abs() < 1e-3, "composed c == 0, got {}", m[2]);
+    assert!((m[3] - 1.0).abs() < 1e-3, "composed d == 1, got {}", m[3]);
+    // Translation = screen anchor.
+    assert!(
+        (m[4] - expected_screen_anchor.x).abs() < 1e-3,
+        "composed tx == screen_anchor.x ({}), got {}",
+        expected_screen_anchor.x,
+        m[4]
+    );
+    assert!(
+        (m[5] - expected_screen_anchor.y).abs() < 1e-3,
+        "composed ty == screen_anchor.y ({}), got {}",
+        expected_screen_anchor.y,
+        m[5]
+    );
+}
+
+#[test]
+fn ignores_xform_off_paints_under_full_view_composition() {
+    // Sanity check: without the flag, the item paints under the
+    // FULL composed `view_transform * local_to_scene` chain, so
+    // a rect of width 10 in item-local coords renders at width
+    // 10×zoom on screen. SceneView::paint emits only the
+    // local_to_scene transform; the renderer composes view_xform
+    // on top at frame playback.
+    use std::cell::Cell;
+    use std::rc::Rc;
+    let captured = Rc::new(Cell::new(None));
+    let mut scene = Scene::new();
+    scene.add_item(
+        TransformRecorder {
+            bounds: Rect::new(0.0, 0.0, 10.0, 10.0),
+            captured: captured.clone(),
+        },
+        Point::new(50.0, 60.0),
+    );
+    // No flag set — default behavior.
+
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    {
+        let view = view_handle(&tree, view_id);
+        view.set_zoom(2.0);
+    }
+
+    let _ = tree.render();
+
+    let captured_xform = captured
+        .get()
+        .expect("normal item should have painted at least once");
+    let view_xform = view_handle(&tree, view_id).view_transform();
+    let composed = captured_xform.then(&view_xform);
+    // Composed linear should equal view zoom (2.0).
+    assert!(
+        (composed.m[0] - 2.0).abs() < 1e-3,
+        "without IGNORES, composed linear == view zoom (2.0), got {}",
+        composed.m[0]
+    );
+    assert!(
+        (composed.m[3] - 2.0).abs() < 1e-3,
+        "without IGNORES, composed linear == view zoom (2.0), got {}",
+        composed.m[3]
+    );
+    // And translation = view_xform(scene_anchor) = Scale(2)(50,60) = (100,120).
+    assert!(
+        (composed.m[4] - 100.0).abs() < 1e-3,
+        "composed tx, got {}",
+        composed.m[4]
+    );
+    assert!(
+        (composed.m[5] - 120.0).abs() < 1e-3,
+        "composed ty, got {}",
+        composed.m[5]
+    );
+}
+
+#[test]
+fn ignores_xform_hit_test_anchor_tracks_scene_point_but_size_fixed_under_zoom() {
+    // The IGNORES_TRANSFORMATIONS semantic mirrors Qt's
+    // `ItemIgnoresTransformations`: the item's anchor follows
+    // its scene point through pan/zoom (the visible position
+    // tracks the data point underneath), but its SIZE stays
+    // fixed in screen pixels (it doesn't grow with zoom).
+    //
+    // So under 2× zoom, the screen anchor doubles (the scene
+    // point at (100, 100) is now at screen (200, 200)), but
+    // the item's bounding rect is still 40×40 screen pixels.
+    // Contrast with a normal item, which would be 80×80
+    // screen pixels at (200, 200) under 2× zoom.
+    use crate::items::RectItem;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let mut scene = Scene::new();
+    // Item local_bounds (0,0,40,40), local_pos (100, 100).
+    // scene_anchor = (100, 100). At zoom 1, pan 0: screen_anchor = (100, 100).
+    let id = scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 40.0, 40.0)).fill(fern_tokens::Color::RED),
+        Point::new(100.0, 100.0),
+    );
+    scene.set_flag(id, crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS, true);
+
+    let count = Rc::new(Cell::new(0_u32));
+    let count_clone = count.clone();
+    scene.handlers_mut(id).unwrap().on_tap(move |_pt, _ctx| {
+        count_clone.set(count_clone.get() + 1);
+    });
+
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let tap = |tree: &mut WidgetTree, x: f32, y: f32| {
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: fern_canvas::Point::new(x, y),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: fern_canvas::Point::new(x, y),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+    };
+    // Zoom 1: screen anchor = (100, 100). Tap inside (110, 110).
+    tap(&mut tree, 110.0, 110.0);
+    assert_eq!(count.get(), 1, "zoom 1: tap at (110, 110) should hit");
+
+    // Zoom to 2×. screen anchor = view_xform(scene_anchor)
+    //   = Scale(2)(100, 100) = (200, 200). Size stays 40×40.
+    // Tap inside the new screen rect (200..240, 200..240).
+    let view = view_handle(&tree, view_id);
+    view.set_zoom(2.0);
+    tap(&mut tree, 210.0, 210.0);
+    assert_eq!(
+        count.get(),
+        2,
+        "zoom 2: tap at (210, 210) (inside the screen-projected anchor + 40px) should hit"
+    );
+
+    // A tap at (110, 110), the OLD anchor before zoom, must miss
+    // — the anchor follows the scene point.
+    tap(&mut tree, 110.0, 110.0);
+    assert_eq!(
+        count.get(),
+        2,
+        "zoom 2: the pre-zoom anchor (110, 110) must MISS — anchor tracks scene point"
+    );
+
+    // A tap at (250, 250), which is INSIDE what a normal item's
+    // zoom-scaled rect would cover (200..280 = 40×2 = 80px wide),
+    // must MISS the IGNORES item — its size is fixed at 40px.
+    tap(&mut tree, 250.0, 250.0);
+    assert_eq!(
+        count.get(),
+        2,
+        "zoom 2: tap inside what would be a normal item's scaled rect must MISS \
+         IGNORES item (size stays at 40px, not 80px)"
+    );
+}
+
+#[test]
+fn ignores_xform_hit_test_anchor_follows_pan() {
+    // Panning shifts the screen anchor; the IGNORES item stays
+    // attached to its scene anchor (the parent-relative scene
+    // point), so panning the view moves the item's screen
+    // position by the same screen delta.
+    use crate::items::RectItem;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let mut scene = Scene::new();
+    let id = scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 40.0, 40.0)).fill(fern_tokens::Color::RED),
+        Point::new(100.0, 100.0),
+    );
+    scene.set_flag(id, crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS, true);
+
+    let count = Rc::new(Cell::new(0_u32));
+    let count_clone = count.clone();
+    scene.handlers_mut(id).unwrap().on_tap(move |_pt, _ctx| {
+        count_clone.set(count_clone.get() + 1);
+    });
+
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let view = view_handle(&tree, view_id);
+
+    // Pan by (+50, +50): screen_anchor = view_xform(scene_anchor)
+    //   = pan + zoom * scene_anchor = (50,50) + 1*(100,100) = (150, 150).
+    view.set_pan(Vec2::new(50.0, 50.0));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let tap = |tree: &mut WidgetTree, x: f32, y: f32| {
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: fern_canvas::Point::new(x, y),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: fern_canvas::Point::new(x, y),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+    };
+
+    // (160, 160) is inside (150..190, 150..190) — should hit.
+    tap(&mut tree, 160.0, 160.0);
+    assert_eq!(
+        count.get(),
+        1,
+        "after pan, IGNORES item is at screen anchor (150, 150) — tap (160, 160) must hit"
+    );
+
+    // The OLD pre-pan anchor (110, 110) should now MISS.
+    tap(&mut tree, 110.0, 110.0);
+    assert_eq!(
+        count.get(),
+        1,
+        "after pan, the pre-pan anchor must miss — IGNORES items follow pan"
+    );
+    let _ = id;
+}

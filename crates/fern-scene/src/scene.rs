@@ -929,6 +929,15 @@ impl Scene {
     /// the point, sorts by z descending, and returns the first hit.
     /// Heavyweight widget entries are skipped (their hit-testing is
     /// handled by the arena event dispatch).
+    ///
+    /// **Limitation:** items flagged
+    /// [`IGNORES_TRANSFORMATIONS`](crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS)
+    /// hit-test in screen space, not scene space — so this scene-only
+    /// query may incorrectly hit them or miss them depending on the
+    /// current view transform. Apps that route pointer events through
+    /// `SceneView`'s dispatch get screen-space hit-test for IGNORES
+    /// items automatically; only use `item_at` directly for normal
+    /// items, or pair with the view transform to filter.
     pub fn item_at(&self, scene_pt: Point) -> Option<ItemId> {
         let probe = Rect::new(scene_pt.x, scene_pt.y, 0.0, 0.0);
         let mut candidates = self.items_in_rect(probe);

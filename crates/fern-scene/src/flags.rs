@@ -54,10 +54,15 @@ impl ItemFlags {
     /// off; mirrors Qt's `ItemClipsChildrenToShape`.
     pub const CLIPS_CHILDREN_TO_SHAPE: Self = Self(1 << 7);
 
-    /// Item is **not** affected by the view's pan/zoom/rotation —
-    /// it pins at its parent-relative position regardless of the
-    /// view transform. Annotation pins for graph editors / fixed-
-    /// pixel-size badges. Default off.
+    /// Item paints and hit-tests at a fixed pixel size, independent
+    /// of the view's zoom and rotation. Its anchor (the item's
+    /// parent-relative scene point) is projected through the view
+    /// transform like any other point, so the visible position
+    /// follows pan/zoom and tracks the underlying scene data —
+    /// but the item itself does not grow with zoom or rotate with
+    /// the view. Mirrors Qt's `ItemIgnoresTransformations`.
+    /// Annotation pins for graph editors, fixed-pixel-size badges
+    /// over moving content, chart axis labels. Default off.
     pub const IGNORES_TRANSFORMATIONS: Self = Self(1 << 8);
 
     /// Item has nothing to paint — the paint walk skips it

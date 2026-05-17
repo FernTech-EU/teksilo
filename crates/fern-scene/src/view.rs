@@ -116,7 +116,7 @@ struct DragTarget {
 #[derive(Clone)]
 struct HandlerSnapshotEntry {
     id: crate::item::ItemId,
-    /// Scene-coord AABB used for broad-phase hit-test.
+    /// Scene-coord AABB used for broad-phase hit-test (normal items).
     scene_rect: Rect,
     /// Local→scene transform — used to inverse-project the
     /// scene-coord pointer into local coords for shape_contains
@@ -132,6 +132,22 @@ struct HandlerSnapshotEntry {
     /// Item-level handler closures, cloned at snapshot time. `None`
     /// when the item has no handler set installed.
     handlers: Option<Box<crate::item_handlers::SceneItemHandlerSet>>,
+    /// `true` when the item carries `ItemFlags::IGNORES_TRANSFORMATIONS`.
+    /// Dispatch routes hit-test through screen space: the visible
+    /// area is `local_bounds` rooted at the screen-projected
+    /// `scene_anchor`, and pan/zoom of the view don't change that
+    /// area. `scene_rect` is meaningless for these items because
+    /// they don't scale with zoom.
+    ignores_xform: bool,
+    /// For IGNORES items: the item's origin (local `(0,0)`) mapped
+    /// to scene coords through the parent chain. The current view
+    /// transform projects this to the screen-space anchor at
+    /// dispatch time. For normal items, unused.
+    scene_anchor: Point,
+    /// For IGNORES items: the item's `local_bounds`. Combined with
+    /// the screen anchor at dispatch time to form the screen-space
+    /// AABB. For normal items, unused.
+    local_bounds: Rect,
 }
 
 /// Visual debug overlays painted on top of normal scene rendering.
@@ -1430,10 +1446,47 @@ impl Widget for SceneView {
                 };
 
                 // Hit-test the handler-snapshot for the topmost
-                // item under `scene_pt`. Snapshot is z-sorted desc.
-                let hit_handler_item = |scene_pt: Point| -> Option<HandlerSnapshotEntry> {
+                // item under the pointer. Snapshot is z-sorted desc.
+                //
+                // Normal items: broad-phase tests `scene_pt` against
+                // `scene_rect`, narrow-phase inverse-projects to
+                // local and calls `shape_contains`.
+                //
+                // IGNORES_TRANSFORMATIONS items: pin at a fixed
+                // screen position with their natural local-pixel
+                // size, so we project `scene_anchor` through the
+                // CURRENT view transform (snapshot stores the
+                // pan/zoom-invariant scene_anchor; the snapshot
+                // doesn't rebuild on pan/zoom). Broad-phase tests
+                // `screen_pt` against the projected screen rect;
+                // narrow-phase passes `(screen_pt - screen_anchor)`
+                // as the item-local point.
+                let hit_handler_item = |screen_pt: Point,
+                                        scene_pt: Point|
+                 -> Option<HandlerSnapshotEntry> {
                     let snap = handler_snapshot.borrow();
+                    let view_xform = view_xform_signal.get();
                     for entry in snap.iter() {
+                        if entry.ignores_xform {
+                            let screen_anchor = view_xform.apply_point(entry.scene_anchor);
+                            let screen_rect = Rect::new(
+                                screen_anchor.x + entry.local_bounds.x,
+                                screen_anchor.y + entry.local_bounds.y,
+                                entry.local_bounds.width,
+                                entry.local_bounds.height,
+                            );
+                            if !screen_rect.contains(screen_pt) {
+                                continue;
+                            }
+                            let local_pt = Point::new(
+                                screen_pt.x - screen_anchor.x,
+                                screen_pt.y - screen_anchor.y,
+                            );
+                            if (entry.shape_contains)(local_pt) {
+                                return Some(entry.clone());
+                            }
+                            continue;
+                        }
                         if !entry.scene_rect.contains(scene_pt) {
                             continue;
                         }
@@ -1459,7 +1512,7 @@ impl Widget for SceneView {
                         // with previously-hovered item; fire
                         // on_hover(false) on the old, on_hover(true)
                         // on the new.
-                        let new_hit = hit_handler_item(scene_pt);
+                        let new_hit = hit_handler_item(*position, scene_pt);
                         let new_id = new_hit.as_ref().map(|e| e.id);
                         let prev_id = hovered_item.get();
                         if prev_id != new_id {
@@ -1504,7 +1557,7 @@ impl Widget for SceneView {
                     } => {
                         cursor_pos.set(Some(*position));
                         let scene_pt = to_scene(*position);
-                        let hit = hit_handler_item(scene_pt);
+                        let hit = hit_handler_item(*position, scene_pt);
                         match button {
                             PointerButton::Secondary => {
                                 if let Some(entry) = hit.as_ref()
@@ -2159,8 +2212,21 @@ impl Widget for SceneView {
                 // dispatch path — full `shape_contains` invocation
                 // lives in the eager `Scene::item_at` path.
                 let local_bounds = self.scene.local_bounds(id).unwrap_or(Rect::ZERO);
+                let local_bounds_for_closure = local_bounds;
                 let shape_contains: Rc<dyn Fn(Point) -> bool> =
-                    Rc::new(move |p: Point| local_bounds.contains(p));
+                    Rc::new(move |p: Point| local_bounds_for_closure.contains(p));
+                let flags = self.scene.flags(id).unwrap_or_default();
+                let ignores_xform =
+                    flags.contains(crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS);
+                // For IGNORES items the scene_anchor is fixed across
+                // pan/zoom (it lives in scene coords); the dispatch
+                // closure projects it through the live view transform
+                // at event time to obtain the current screen anchor.
+                let scene_anchor = if ignores_xform {
+                    scene_xform.apply_point(Point::ZERO)
+                } else {
+                    Point::ZERO
+                };
                 snap.push(HandlerSnapshotEntry {
                     id,
                     scene_rect,
@@ -2168,6 +2234,9 @@ impl Widget for SceneView {
                     shape_contains,
                     z,
                     handlers,
+                    ignores_xform,
+                    scene_anchor,
+                    local_bounds,
                 });
             }
             // Sort by z descending so hit-test picks topmost first.
@@ -2355,7 +2424,30 @@ impl Widget for SceneView {
                 local_to_scene = local_to_scene.then(&t);
             }
             canvas.save();
-            canvas.apply_transform(local_to_scene);
+            // IGNORES_TRANSFORMATIONS items pin at their parent-relative
+            // position but render at a fixed pixel size — they don't
+            // grow with zoom and don't rotate with the view. (Same
+            // semantic as Qt's `ItemIgnoresTransformations`.) We compute
+            // the screen-projected anchor through the full parent chain
+            // + view transform, then push a transform that — when
+            // composed with the outer view transform already on the
+            // canvas — collapses to a pure `Translate(screen_anchor)`.
+            // For the common case (no rotation, identity bounds_origin
+            // adjust) this is `Translate(screen_anchor) ∘
+            // view_transform_inverse`; we don't special-case to keep
+            // the math simple and correct under rotation.
+            if flags.contains(crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS) {
+                let scene_anchor = local_to_scene.apply_point(Point::ZERO);
+                let screen_anchor = view_transform.apply_point(scene_anchor);
+                let view_inv = view_transform
+                    .inverse()
+                    .unwrap_or_else(Transform2D::identity);
+                let t = Transform2D::translate(screen_anchor.x, screen_anchor.y)
+                    .then(&view_inv);
+                canvas.apply_transform(t);
+            } else {
+                canvas.apply_transform(local_to_scene);
+            }
             // Effective opacity composes through the parent chain.
             // Pushed via `Canvas::set_opacity` / `restore_opacity`
             // so the scope is balanced regardless of paint paths.
