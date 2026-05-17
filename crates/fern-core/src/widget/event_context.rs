@@ -31,6 +31,12 @@ pub struct EventContext<'ops> {
     pub(crate) dismiss_modal: bool,
     pub(crate) overlay_requests: Vec<crate::overlay::OverlayRequest>,
     pub(crate) overlay_dismissals: Vec<crate::overlay::OverlayId>,
+    /// Overlay ids whose `auto_dismiss_after` timer should be paused
+    /// or resumed after the handler returns (`true` = pause, `false`
+    /// = resume). Drained by `WidgetTree::process_overlay_requests`
+    /// against `OverlayManager::pause_auto_dismiss` /
+    /// `resume_auto_dismiss`. Used by `ToastHost` for hover-pause.
+    pub(crate) overlay_pause_requests: Vec<(crate::overlay::OverlayId, bool)>,
     /// The dismissal scope chosen by the handler, if any. Set by
     /// `dismiss_all_overlays()` / `dismiss_all_except_hosts()` /
     /// `dismiss_self_overlay_chain()` / `dismiss_top_overlay()` —
@@ -156,6 +162,7 @@ impl<'ops> EventContext<'ops> {
             dismiss_modal: false,
             overlay_requests: Vec::new(),
             overlay_dismissals: Vec::new(),
+            overlay_pause_requests: Vec::new(),
             dismiss_scope: None,
             pointer_capture: None,
             delayed_overlay_requests: Vec::new(),
@@ -476,6 +483,27 @@ impl<'ops> EventContext<'ops> {
     /// Dismiss an overlay by ID.
     pub fn dismiss_overlay(&mut self, id: crate::overlay::OverlayId) {
         self.overlay_dismissals.push(id);
+    }
+
+    /// Queue a request to pause an overlay's `auto_dismiss_after`
+    /// timer. Drained by the framework after this handler returns —
+    /// equivalent to calling
+    /// [`OverlayManager::pause_auto_dismiss`](crate::overlay::OverlayManager::pause_auto_dismiss)
+    /// at the next safe point. Idempotent.
+    ///
+    /// Used by `ToastHost` for hover-pause: on pointer-enter the
+    /// host queues `pause_overlay_auto_dismiss(id)` for every live
+    /// toast; on pointer-leave it queues `resume_overlay_auto_dismiss`.
+    pub fn pause_overlay_auto_dismiss(&mut self, id: crate::overlay::OverlayId) {
+        self.overlay_pause_requests.push((id, true));
+    }
+
+    /// Queue a request to resume an overlay's `auto_dismiss_after`
+    /// timer paused via
+    /// [`pause_overlay_auto_dismiss`](Self::pause_overlay_auto_dismiss).
+    /// Idempotent on un-paused overlays.
+    pub fn resume_overlay_auto_dismiss(&mut self, id: crate::overlay::OverlayId) {
+        self.overlay_pause_requests.push((id, false));
     }
 
     /// Dismiss all active overlays (e.g., after a menu item is activated).

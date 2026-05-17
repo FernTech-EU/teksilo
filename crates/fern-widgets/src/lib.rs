@@ -93,6 +93,7 @@ pub mod text_input;
 #[cfg(feature = "rich-text")]
 pub mod time_edit;
 pub mod title_bar;
+pub mod toast;
 pub mod toggle;
 pub mod tool_box;
 pub mod toolbar;
@@ -199,6 +200,10 @@ pub use text_input::{TextInput, ValidationState};
 #[cfg(feature = "rich-text")]
 pub use time_edit::{SecondsMode, TimeEdit, TimeFormat};
 pub use title_bar::{DragRegion, ResizeStrip, TitleBar, WindowControls, WindowFrame};
+pub use toast::{
+    EventContextToastExt, Toast, ToastAction, ToastActionStyle, ToastDismissCause, ToastHandle,
+    ToastHost, ToastInstallOptions, ToastPriority, ToastRegistry, ToastSeverity, ToastSurface,
+};
 pub use toggle::Toggle;
 pub use tool_box::{ToolBox, ToolBoxItem};
 pub use toolbar::Toolbar;

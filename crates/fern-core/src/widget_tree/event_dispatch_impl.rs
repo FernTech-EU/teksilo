@@ -1085,6 +1085,19 @@ impl WidgetTree {
                 }
             }
         }
+        // Apply pause/resume queue (ToastHost hover-pause). Drained
+        // here so the handler-side `ctx.pause_overlay_auto_dismiss(id)`
+        // is order-independent with `dismiss_overlay(id)` and the
+        // scope-based dismissals: pause/resume on an overlay that
+        // was concurrently dismissed is silently dropped (the find
+        // inside the OverlayManager methods misses on the gone id).
+        for (id, pause) in ctx.overlay_pause_requests {
+            if pause {
+                self.overlay_manager.pause_auto_dismiss(id);
+            } else {
+                self.overlay_manager.resume_auto_dismiss(id);
+            }
+        }
         for preserve_content in ctx.dismiss_descendant_overlays {
             self.dismiss_child_overlays_for_source(source_widget, preserve_content, &mut *ops);
         }

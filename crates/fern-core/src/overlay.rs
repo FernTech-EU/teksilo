@@ -200,6 +200,13 @@ pub(crate) struct ActiveOverlay {
     pub pointer_leave_started_sim: Option<std::time::Instant>,
     /// Dismiss automatically after this duration, if set.
     pub auto_dismiss_after: Option<Duration>,
+    /// While the auto-dismiss timer is paused (via
+    /// [`OverlayManager::pause_auto_dismiss`]), `auto_dismiss_after`
+    /// is cleared and the time that *would have remained* is stashed
+    /// here. [`OverlayManager::resume_auto_dismiss`] restores
+    /// `auto_dismiss_after = Some(this)` and stamps a fresh
+    /// `shown_at_*`. `None` whenever the overlay is not paused.
+    pub paused_remaining: Option<Duration>,
     /// When the overlay was shown (real time).
     pub shown_at_real: std::time::Instant,
     /// When the overlay was shown (simulated time).
@@ -328,6 +335,7 @@ impl OverlayManager {
             pointer_leave_started_real: None,
             pointer_leave_started_sim: None,
             auto_dismiss_after,
+            paused_remaining: None,
             shown_at_real: now,
             shown_at_sim: now,
             on_dismiss: request.on_dismiss,
@@ -375,6 +383,58 @@ impl OverlayManager {
                     .map(|delay| overlay.shown_at_real + delay)
             })
             .min()
+    }
+
+    /// Pause the auto-dismiss timer for an overlay shown with
+    /// [`show_for`](Self::show_for). The remaining time
+    /// (`auto_dismiss_after - elapsed`) is stashed; subsequent calls
+    /// to [`next_auto_dismiss_deadline`](Self::next_auto_dismiss_deadline)
+    /// ignore this overlay until [`resume_auto_dismiss`](Self::resume_auto_dismiss)
+    /// is called. Idempotent — pausing an already-paused overlay is
+    /// a no-op (the originally-stashed remaining time is preserved).
+    ///
+    /// Used by `ToastHost` to implement hover-pause: when the user
+    /// is hovering over any live toast, all live toasts pause their
+    /// timers so the user can read each one without losing the
+    /// notification they're about to act on.
+    ///
+    /// No-op on overlays without `auto_dismiss_after` (persistent
+    /// overlays don't have a timer to pause) and on unknown ids.
+    pub fn pause_auto_dismiss(&mut self, id: OverlayId) {
+        if let Some(overlay) = self.stack.iter_mut().find(|o| o.id == id)
+            && overlay.paused_remaining.is_none()
+            && let Some(delay) = overlay.auto_dismiss_after.take()
+        {
+            let elapsed = overlay.shown_at_real.elapsed();
+            overlay.paused_remaining = Some(delay.saturating_sub(elapsed));
+        }
+    }
+
+    /// Resume an auto-dismiss timer paused via
+    /// [`pause_auto_dismiss`](Self::pause_auto_dismiss). The stashed
+    /// remaining time becomes the new `auto_dismiss_after`, and
+    /// `shown_at_real` / `shown_at_sim` are reset to now so the
+    /// deadline computation works correctly. Idempotent — resuming
+    /// an un-paused overlay is a no-op.
+    pub fn resume_auto_dismiss(&mut self, id: OverlayId) {
+        if let Some(overlay) = self.stack.iter_mut().find(|o| o.id == id)
+            && let Some(remaining) = overlay.paused_remaining.take()
+        {
+            overlay.auto_dismiss_after = Some(remaining);
+            let now = std::time::Instant::now();
+            overlay.shown_at_real = now;
+            overlay.shown_at_sim = self.sim_clock;
+        }
+    }
+
+    /// Whether the auto-dismiss timer for an overlay is currently paused.
+    /// `false` for overlays without `auto_dismiss_after`, unknown ids,
+    /// and overlays whose timer is running.
+    pub fn is_auto_dismiss_paused(&self, id: OverlayId) -> bool {
+        self.stack
+            .iter()
+            .find(|o| o.id == id)
+            .is_some_and(|o| o.paused_remaining.is_some())
     }
 
     pub(crate) fn set_shown_at_sim(&mut self, id: OverlayId, shown_at_sim: std::time::Instant) {
@@ -1673,6 +1733,150 @@ mod tests {
         );
         let b = overlay_bounds(&mgr, id);
         assert_eq!((b.x, b.y), (700.0, 500.0));
+    }
+
+    // --- Auto-dismiss pause / resume ---
+
+    #[test]
+    fn pause_auto_dismiss_removes_overlay_from_deadline_set() {
+        let mut mgr = OverlayManager::new();
+        let id = mgr.show_for(
+            OverlayRequest {
+                content_id: fake_id(10),
+                anchor: fake_id(1),
+                placement: OverlayPlacement::Centered,
+                dismiss: DismissBehavior::Manual,
+                layer: OverlayLayer::InTree,
+                parent_overlay: None,
+                on_dismiss: None,
+                fade_duration: None,
+            },
+            Duration::from_secs(10),
+        );
+        assert!(mgr.next_auto_dismiss_deadline().is_some());
+        assert!(!mgr.is_auto_dismiss_paused(id));
+
+        mgr.pause_auto_dismiss(id);
+        assert!(mgr.is_auto_dismiss_paused(id));
+        assert!(
+            mgr.next_auto_dismiss_deadline().is_none(),
+            "paused overlay must drop out of the deadline-min query"
+        );
+
+        mgr.resume_auto_dismiss(id);
+        assert!(!mgr.is_auto_dismiss_paused(id));
+        assert!(mgr.next_auto_dismiss_deadline().is_some());
+    }
+
+    #[test]
+    fn pause_then_resume_restores_remaining_time() {
+        let mut mgr = OverlayManager::new();
+        let id = mgr.show_for(
+            OverlayRequest {
+                content_id: fake_id(11),
+                anchor: fake_id(1),
+                placement: OverlayPlacement::Centered,
+                dismiss: DismissBehavior::Manual,
+                layer: OverlayLayer::InTree,
+                parent_overlay: None,
+                on_dismiss: None,
+                fade_duration: None,
+            },
+            Duration::from_secs(10),
+        );
+
+        mgr.pause_auto_dismiss(id);
+        // Sleep equivalent: rely on the fact pausing right after show
+        // captures ~10s remaining (elapsed is ~0).
+        let overlay = mgr.stack.iter().find(|o| o.id == id).unwrap();
+        let remaining = overlay.paused_remaining.unwrap();
+        assert!(
+            remaining >= Duration::from_secs(9),
+            "remaining should be near the original 10s, got {remaining:?}"
+        );
+        assert!(remaining <= Duration::from_secs(10));
+
+        mgr.resume_auto_dismiss(id);
+        let overlay = mgr.stack.iter().find(|o| o.id == id).unwrap();
+        // After resume, auto_dismiss_after equals the previously-stashed
+        // remaining, and shown_at_real has been refreshed so the new
+        // deadline starts from "now + remaining".
+        assert_eq!(overlay.auto_dismiss_after, Some(remaining));
+        assert!(overlay.paused_remaining.is_none());
+    }
+
+    #[test]
+    fn pause_is_idempotent() {
+        let mut mgr = OverlayManager::new();
+        let id = mgr.show_for(
+            OverlayRequest {
+                content_id: fake_id(12),
+                anchor: fake_id(1),
+                placement: OverlayPlacement::Centered,
+                dismiss: DismissBehavior::Manual,
+                layer: OverlayLayer::InTree,
+                parent_overlay: None,
+                on_dismiss: None,
+                fade_duration: None,
+            },
+            Duration::from_secs(10),
+        );
+        mgr.pause_auto_dismiss(id);
+        let first_remaining = mgr.stack[0].paused_remaining;
+        mgr.pause_auto_dismiss(id); // second pause must not overwrite
+        let second_remaining = mgr.stack[0].paused_remaining;
+        assert_eq!(
+            first_remaining, second_remaining,
+            "double-pause must preserve the original stashed remaining"
+        );
+    }
+
+    #[test]
+    fn resume_on_unpaused_is_noop() {
+        let mut mgr = OverlayManager::new();
+        let id = mgr.show_for(
+            OverlayRequest {
+                content_id: fake_id(13),
+                anchor: fake_id(1),
+                placement: OverlayPlacement::Centered,
+                dismiss: DismissBehavior::Manual,
+                layer: OverlayLayer::InTree,
+                parent_overlay: None,
+                on_dismiss: None,
+                fade_duration: None,
+            },
+            Duration::from_secs(10),
+        );
+        let before = mgr.stack[0].auto_dismiss_after;
+        mgr.resume_auto_dismiss(id); // never paused
+        let after = mgr.stack[0].auto_dismiss_after;
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn pause_on_persistent_overlay_is_noop() {
+        let mut mgr = OverlayManager::new();
+        let id = mgr.show(OverlayRequest {
+            content_id: fake_id(14),
+            anchor: fake_id(1),
+            placement: OverlayPlacement::Centered,
+            dismiss: DismissBehavior::Manual,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        // No auto_dismiss_after — pause should be a no-op.
+        mgr.pause_auto_dismiss(id);
+        assert!(!mgr.is_auto_dismiss_paused(id));
+        assert!(mgr.stack[0].paused_remaining.is_none());
+    }
+
+    #[test]
+    fn pause_on_unknown_id_is_noop() {
+        let mut mgr = OverlayManager::new();
+        mgr.pause_auto_dismiss(OverlayId::new(9999)); // must not panic
+        mgr.resume_auto_dismiss(OverlayId::new(9999));
     }
 
     #[test]

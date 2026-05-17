@@ -39,6 +39,7 @@ pub mod recipe_standard_item_style;
 pub mod recipe_tab_style;
 pub mod recipe_table_style;
 pub mod recipe_text_input_style;
+pub mod recipe_toast_style;
 pub mod recipe_toggle_style;
 pub mod recipe_tooltip_style;
 
@@ -72,5 +73,6 @@ pub use recipe_standard_item_style::RecipeStandardItemStyle;
 pub use recipe_tab_style::RecipeTabStyle;
 pub use recipe_table_style::RecipeTableStyle;
 pub use recipe_text_input_style::RecipeTextInputStyle;
+pub use recipe_toast_style::RecipeToastStyle;
 pub use recipe_toggle_style::RecipeToggleStyle;
 pub use recipe_tooltip_style::RecipeTooltipStyle;
