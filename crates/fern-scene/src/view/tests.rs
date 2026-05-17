@@ -5243,6 +5243,247 @@ fn bind_drag_mode_shares_app_owned_signal() {
     assert_eq!(app_owned.get(), crate::DragMode::NoDrag);
 }
 
+// -----------------------------------------------------------------
+// Unit 7 — SceneItem handler parity (TapEvent shape + accept_tap_buttons)
+// -----------------------------------------------------------------
+
+#[test]
+fn on_tap_event_receives_modifiers_and_button() {
+    // The rich `on_tap_event` setter exposes the full
+    // SceneTapEvent so handlers can read modifiers and button.
+    // Old `on_tap(Fn(Point, _))` callers still work via the
+    // back-compat shim.
+    use crate::item_handlers::SceneTapEvent;
+    use crate::items::RectItem;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let mut scene = Scene::new();
+    let id = scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)).fill(fern_tokens::Color::RED),
+        Point::new(20.0, 20.0),
+    );
+    let captured: Rc<RefCell<Option<SceneTapEvent>>> = Rc::new(RefCell::new(None));
+    let captured_clone = captured.clone();
+    scene
+        .handlers_mut(id)
+        .unwrap()
+        .on_tap_event(move |ev, _ctx| {
+            *captured_clone.borrow_mut() = Some(*ev);
+        });
+
+    let mut tree = WidgetTree::new();
+    tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // Tap with Shift held.
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: fern_canvas::Point::new(40.0, 40.0),
+        button: fern_core::event::PointerButton::Primary,
+        modifiers: fern_core::event::Modifiers::SHIFT,
+    });
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: fern_canvas::Point::new(40.0, 40.0),
+        button: fern_core::event::PointerButton::Primary,
+        modifiers: fern_core::event::Modifiers::SHIFT,
+    });
+
+    let ev = captured.borrow().expect("on_tap_event must fire");
+    assert_eq!(ev.position_scene, fern_canvas::Point::new(40.0, 40.0));
+    assert_eq!(ev.button, fern_core::event::PointerButton::Primary);
+    assert!(ev.modifiers.shift(), "Shift modifier should be set");
+    assert!(!ev.modifiers.ctrl());
+}
+
+#[test]
+fn on_tap_point_shim_still_compiles_and_fires() {
+    // Back-compat: legacy callers that pass a Fn(Point, &mut ctx)
+    // should keep working — the setter wraps the closure to
+    // extract event.position_scene.
+    use crate::items::RectItem;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let mut scene = Scene::new();
+    let id = scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)).fill(fern_tokens::Color::RED),
+        Point::new(20.0, 20.0),
+    );
+    let count = Rc::new(Cell::new(0_u32));
+    let count_clone = count.clone();
+    let pt_seen = Rc::new(Cell::new(Point::ZERO));
+    let pt_seen_clone = pt_seen.clone();
+    scene.handlers_mut(id).unwrap().on_tap(move |pt, _ctx| {
+        count_clone.set(count_clone.get() + 1);
+        pt_seen_clone.set(pt);
+    });
+
+    let mut tree = WidgetTree::new();
+    tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: fern_canvas::Point::new(40.0, 40.0),
+        button: fern_core::event::PointerButton::Primary,
+        modifiers: fern_core::event::Modifiers::default(),
+    });
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: fern_canvas::Point::new(40.0, 40.0),
+        button: fern_core::event::PointerButton::Primary,
+        modifiers: fern_core::event::Modifiers::default(),
+    });
+
+    assert_eq!(count.get(), 1);
+    assert_eq!(pt_seen.get(), fern_canvas::Point::new(40.0, 40.0));
+}
+
+#[test]
+fn accept_tap_buttons_gates_middle_click() {
+    // Default: only PRIMARY counts as a tap. Middle-click is
+    // ignored. After opting in via accept_tap_buttons(PRIMARY |
+    // MIDDLE), middle-click fires on_tap with button == Middle.
+    use crate::items::RectItem;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let mut scene = Scene::new();
+    let id = scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)).fill(fern_tokens::Color::RED),
+        Point::new(20.0, 20.0),
+    );
+    let buttons: Rc<RefCell<Vec<fern_core::event::PointerButton>>> = Rc::new(RefCell::new(vec![]));
+    let buttons_clone = buttons.clone();
+    {
+        let h = scene.handlers_mut(id).unwrap();
+        h.on_tap_event(move |ev, _ctx| {
+            buttons_clone.borrow_mut().push(ev.button);
+        });
+        // Round 1 uses the default mask (PRIMARY only).
+    }
+
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let click = |tree: &mut WidgetTree, button: fern_core::event::PointerButton| {
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: fern_canvas::Point::new(40.0, 40.0),
+            button,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: fern_canvas::Point::new(40.0, 40.0),
+            button,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+    };
+
+    // PRIMARY hits.
+    click(&mut tree, fern_core::event::PointerButton::Primary);
+    // MIDDLE is gated out by the default mask.
+    click(&mut tree, fern_core::event::PointerButton::Middle);
+    assert_eq!(
+        buttons.borrow().clone(),
+        vec![fern_core::event::PointerButton::Primary]
+    );
+
+    // Now widen the mask: PRIMARY | MIDDLE.
+    {
+        let view = tree
+            .widget_as_any_mut(view_id)
+            .and_then(|a| a.downcast_mut::<SceneView>())
+            .expect("downcast");
+        view.scene_mut()
+            .handlers_mut(id)
+            .unwrap()
+            .accept_tap_buttons(
+                fern_core::event::ButtonMask::PRIMARY | fern_core::event::ButtonMask::MIDDLE,
+            );
+    }
+    // Re-layout (with a tiny size delta to force a fresh
+    // layout_response pass, which rebuilds the handler_snapshot
+    // and picks up the widened accept_tap_buttons mask).
+    tree.layout(SizeProposal::exact(401.0, 300.0));
+    click(&mut tree, fern_core::event::PointerButton::Middle);
+    assert_eq!(
+        buttons.borrow().clone(),
+        vec![
+            fern_core::event::PointerButton::Primary,
+            fern_core::event::PointerButton::Middle,
+        ]
+    );
+}
+
+#[test]
+fn on_context_menu_event_receives_modifiers() {
+    use crate::item_handlers::SceneTapEvent;
+    use crate::items::RectItem;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let mut scene = Scene::new();
+    let id = scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)).fill(fern_tokens::Color::RED),
+        Point::new(20.0, 20.0),
+    );
+    let captured: Rc<RefCell<Option<SceneTapEvent>>> = Rc::new(RefCell::new(None));
+    let captured_clone = captured.clone();
+    scene
+        .handlers_mut(id)
+        .unwrap()
+        .on_context_menu_event(move |ev, _ctx| {
+            *captured_clone.borrow_mut() = Some(*ev);
+        });
+
+    let mut tree = WidgetTree::new();
+    tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: fern_canvas::Point::new(35.0, 35.0),
+        button: fern_core::event::PointerButton::Secondary,
+        modifiers: fern_core::event::Modifiers::CTRL,
+    });
+
+    let ev = captured.borrow().expect("on_context_menu_event must fire");
+    assert_eq!(ev.button, fern_core::event::PointerButton::Secondary);
+    assert!(ev.modifiers.ctrl());
+}
+
+#[test]
+fn mismatched_down_up_buttons_do_not_fire_tap() {
+    // Press Primary, release Middle — should NOT fire on_tap
+    // because the recognizer requires matched buttons.
+    use crate::items::RectItem;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let mut scene = Scene::new();
+    let id = scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)).fill(fern_tokens::Color::RED),
+        Point::new(20.0, 20.0),
+    );
+    let count = Rc::new(Cell::new(0_u32));
+    let count_clone = count.clone();
+    scene
+        .handlers_mut(id)
+        .unwrap()
+        .on_tap(move |_pt, _ctx| count_clone.set(count_clone.get() + 1));
+
+    let mut tree = WidgetTree::new();
+    tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: fern_canvas::Point::new(40.0, 40.0),
+        button: fern_core::event::PointerButton::Primary,
+        modifiers: fern_core::event::Modifiers::default(),
+    });
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: fern_canvas::Point::new(40.0, 40.0),
+        button: fern_core::event::PointerButton::Middle,
+        modifiers: fern_core::event::Modifiers::default(),
+    });
+    assert_eq!(count.get(), 0, "mismatched buttons must not fire tap");
+}
+
 #[test]
 fn item_thumbnails_skips_invisible_and_logical_items() {
     use crate::flags::ItemFlags;

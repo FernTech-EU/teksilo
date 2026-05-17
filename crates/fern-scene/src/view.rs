@@ -351,7 +351,7 @@ pub struct SceneView {
     hovered_item: Rc<Cell<Option<crate::item::ItemId>>>,
     /// Last press recorded for tap detection: (scene_pt, item_id).
     /// Cleared on PointerUp / PointerLeave.
-    pending_tap: Rc<Cell<Option<(Point, crate::item::ItemId)>>>,
+    pending_tap: Rc<Cell<Option<(Point, crate::item::ItemId, fern_core::event::PointerButton)>>>,
     /// Latest viewport size observed during layout. Cached so
     /// imperative methods like [`SceneView::fit_to_content`] can
     /// reason about the visible rectangle without re-running layout.
@@ -1835,7 +1835,9 @@ impl Widget for SceneView {
                         ctx.set_cursor(cursor);
                     }
                     Ev::PointerDown {
-                        position, button, ..
+                        position,
+                        button,
+                        modifiers,
                     } => {
                         cursor_pos.set(Some(*position));
                         let scene_pt = to_scene(*position);
@@ -1846,26 +1848,46 @@ impl Widget for SceneView {
                                     && let Some(h) = entry.handlers.as_deref()
                                     && let Some(cb) = h.on_context_menu.as_ref()
                                 {
-                                    cb(scene_pt, ctx);
+                                    let ev = crate::item_handlers::SceneTapEvent::new(
+                                        scene_pt, *button, *modifiers,
+                                    );
+                                    cb(&ev, ctx);
                                     return EventResponse::Handled;
                                 }
                             }
-                            PointerButton::Primary => {
-                                // Record the press for tap detection.
+                            _ => {
+                                // Gate on the item's accept_tap_buttons
+                                // mask. PRIMARY is the default; items
+                                // wanting middle-click-as-tap opt in
+                                // via `accept_tap_buttons(...)`.
                                 if let Some(entry) = hit.as_ref() {
-                                    pending_tap.set(Some((scene_pt, entry.id)));
+                                    let accept = entry
+                                        .handlers
+                                        .as_deref()
+                                        .map(|h| h.accept_tap_buttons)
+                                        .unwrap_or(fern_core::event::ButtonMask::PRIMARY);
+                                    if accept.contains(*button) {
+                                        pending_tap.set(Some((scene_pt, entry.id, *button)));
+                                    } else {
+                                        pending_tap.set(None);
+                                    }
                                 } else {
                                     pending_tap.set(None);
                                 }
                             }
-                            _ => {}
                         }
                     }
                     Ev::PointerUp {
-                        position, button, ..
+                        position,
+                        button,
+                        modifiers,
                     } => {
-                        if matches!(button, PointerButton::Primary)
-                            && let Some((press_scene, item_id)) = pending_tap.take()
+                        // Tap dispatch only fires when the button that
+                        // came back up matches the one we recorded on
+                        // the press. Mixed-button down/up sequences
+                        // discard the pending tap.
+                        if let Some((press_scene, item_id, press_button)) = pending_tap.take()
+                            && press_button == *button
                         {
                             let scene_pt = to_scene(*position);
                             let dx = scene_pt.x - press_scene.x;
@@ -1879,7 +1901,10 @@ impl Widget for SceneView {
                                     && let Some(h) = entry.handlers.as_deref()
                                     && let Some(cb) = h.on_tap.as_ref()
                                 {
-                                    cb(scene_pt, ctx);
+                                    let ev = crate::item_handlers::SceneTapEvent::new(
+                                        scene_pt, *button, *modifiers,
+                                    );
+                                    cb(&ev, ctx);
                                     return EventResponse::Handled;
                                 }
                             }
