@@ -101,11 +101,11 @@ fn toolbar(next_id: Rc<Cell<usize>>, upload_handle: Rc<Cell<Option<ToastHandle>>
             .child(
                 Button::new_literal("Update upload").on_activate_fn(move |ctx| {
                     if uh_progress.take().is_some() {
-                        // Re-present with the same id — the archive
-                        // merges in-place; the live toast surface
-                        // doesn't (Phase 3+ refinement). For the
-                        // demo, the next show_toast with the same id
-                        // replaces the entry visually too.
+                        // Re-present with the same id. `Toast::id`
+                        // is the update-in-place key: the live toast
+                        // surface mutates in place AND the archive
+                        // entry merges (one row in the log with the
+                        // mutation recorded under `updates`).
                         let h = ctx.show_toast(
                             Toast::loading_literal("Uploading 4 of 7…").id("demo.upload"),
                         );

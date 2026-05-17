@@ -856,6 +856,122 @@ mod tests {
     }
 
     #[test]
+    fn registry_with_id_updates_live_entry_in_place_keeping_entry_id() {
+        let r = fresh_registry();
+        let (first, _) = r.enqueue(Toast::loading_literal("Uploading 1 of 7…").id("upload"));
+        assert_eq!(r.live_count(), 1);
+        let first_entry_id = first.entry_id();
+
+        let (second, _) = r.enqueue(Toast::loading_literal("Uploading 4 of 7…").id("upload"));
+        // Same entry, NOT a new one.
+        assert_eq!(r.live_count(), 1, "live entry count stays at 1");
+        assert_eq!(
+            second.entry_id(),
+            first_entry_id,
+            "update returns the same entry_id — the original handle stays valid"
+        );
+
+        // The first handle is still alive (still points at the same
+        // entry that's still live).
+        assert!(first.is_alive());
+        assert!(second.is_alive());
+    }
+
+    #[test]
+    fn registry_in_place_update_reflects_new_title_body() {
+        let r = fresh_registry();
+        let (h, _) = r.enqueue(Toast::info_literal("Saving").id("save"));
+        let _ = r.enqueue(
+            Toast::success_literal("Saved!")
+                .id("save")
+                .body_literal("Written 1.2 MB to disk."),
+        );
+        r.with_entry(h.entry_id(), |e| {
+            assert_eq!(e.title, "Saved!", "title updated in place");
+            assert_eq!(
+                e.body.as_deref(),
+                Some("Written 1.2 MB to disk."),
+                "body updated in place"
+            );
+            assert_eq!(e.severity, ToastSeverity::Success, "severity updated");
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn registry_in_place_update_resets_auto_dismiss_timer() {
+        let r = fresh_registry();
+        let (h, _) = r.enqueue(
+            Toast::info_literal("slow")
+                .id("ticker")
+                .auto_dismiss_after(Duration::from_millis(500)),
+        );
+        // Tick almost to expiry on the first entry.
+        r.tick_timers(Duration::from_millis(450), false);
+        // Update: resets time_left to a fresh 500 ms.
+        let _ = r.enqueue(
+            Toast::info_literal("slow #2")
+                .id("ticker")
+                .auto_dismiss_after(Duration::from_millis(500)),
+        );
+        // A 100 ms tick should NOT dismiss it (timer was reset).
+        let any_expired = r.tick_timers(Duration::from_millis(100), false);
+        assert!(
+            !any_expired,
+            "timer reset on update — entry must survive a tick that would have expired the original"
+        );
+        assert!(h.is_alive());
+    }
+
+    #[test]
+    fn registry_in_place_update_preserves_leading_when_not_provided() {
+        // The first call carries a Spinner via Toast::loading().
+        // The second call has no `.leading(...)` — the spinner must
+        // survive (so the demo's "Uploading 1 of 7" → "Uploading
+        // 4 of 7" pattern keeps showing a spinner).
+        let r = fresh_registry();
+        let (h, _) = r.enqueue(Toast::loading_literal("step 1").id("upload"));
+        // Probe: first build will take_leading; we test the registry's
+        // intent (no take here, just verify it's still Some before the
+        // update so we have a baseline).
+        let has_spinner_initially = r.with_entry(h.entry_id(), |e| e.leading.is_some()).unwrap();
+        assert!(has_spinner_initially, "loading toast carries a Spinner");
+
+        // Update with no leading set — preserves existing.
+        let _ = r.enqueue(Toast::info_literal("step 2").id("upload"));
+        let still_has_spinner = r.with_entry(h.entry_id(), |e| e.leading.is_some()).unwrap();
+        assert!(
+            still_has_spinner,
+            "in-place update with no .leading(...) preserves the existing leading widget"
+        );
+    }
+
+    #[test]
+    fn registry_in_place_update_without_id_appends_normally() {
+        let r = fresh_registry();
+        let _ = r.enqueue(Toast::info_literal("a"));
+        let _ = r.enqueue(Toast::info_literal("b"));
+        // No id on either — both appear as distinct entries.
+        assert_eq!(r.live_count(), 2);
+    }
+
+    #[test]
+    fn registry_in_place_update_distinct_ids_do_not_collide() {
+        let r = fresh_registry();
+        let _ = r.enqueue(Toast::info_literal("upload").id("upload"));
+        let _ = r.enqueue(Toast::info_literal("download").id("download"));
+        // Different ids → two live entries.
+        assert_eq!(r.live_count(), 2);
+        // Updates target each independently.
+        let _ = r.enqueue(Toast::success_literal("Uploaded!").id("upload"));
+        assert_eq!(
+            r.live_count(),
+            2,
+            "still two entries after upload-only update"
+        );
+    }
+
+    #[test]
     fn registry_with_id_merges_into_archive_in_place() {
         use crate::notification::NotificationArchiveModel;
         let archive = std::rc::Rc::new(NotificationArchiveModel::in_memory());

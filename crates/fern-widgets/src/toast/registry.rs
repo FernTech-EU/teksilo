@@ -95,12 +95,14 @@ pub(crate) struct LiveEntry {
     /// the surface is built. After the first build, subsequent
     /// rebuilds fall back to the default severity glyph.
     pub(crate) leading: Option<Box<dyn Widget>>,
-    /// Optional identifier for the update-in-place pattern. Captured
-    /// here for parity with the API; the actual mutation hooks land
-    /// with the archive layer (Phase 3+).
+    /// `Toast::id(...)` value. Consumed by `enqueue` for live
+    /// update-in-place merge (a subsequent enqueue with a matching
+    /// `id` mutates this entry rather than appending) and projected
+    /// into `NotificationEntry::dedup_id` for the archive-side merge.
     pub(crate) id: Option<String>,
-    /// `true` when the entry should be recorded in the persistent
-    /// archive (Phase 3+). Captured here for parity.
+    /// `Toast::archive(true|false)` value. `false` opts the entry
+    /// out of the persistent archive mirror (transient toasts like
+    /// quick "Copied!" feedback that shouldn't pollute the log).
     pub(crate) archive: bool,
 }
 
@@ -178,6 +180,61 @@ impl ToastRegistry {
         Option<(ToastDismissCause, ToastDismissCallback)>,
     ) {
         let mut inner = self.inner.borrow_mut();
+
+        // Update-in-place: a toast carrying a `Toast::id(...)` value
+        // that matches an existing live entry mutates that entry's
+        // fields instead of appending a new one. Reuses the existing
+        // entry_id so the original `ToastHandle` (returned by the
+        // first call) keeps working; resets the auto-dismiss timer.
+        // Bypasses slot-pool admission (an update doesn't add a new
+        // slot) and the on_dismiss-for-overflow path.
+        if let Some(ref dedup_id) = toast.id
+            && let Some(existing) = inner
+                .live_entries
+                .iter_mut()
+                .find(|e| e.id.as_deref() == Some(dedup_id.as_str()))
+        {
+            existing.severity = toast.severity;
+            existing.priority = toast.priority;
+            existing.title = toast.title;
+            existing.body = toast.body;
+            existing.announcement = toast.announcement;
+            existing.actions = Rc::new(toast.actions);
+            existing.show_close_button = toast.show_close_button;
+            existing.closable_on_escape = toast.closable_on_escape;
+            existing.on_click = toast.on_click;
+            // Replace the on_dismiss callback only if the update
+            // provided one — apps that just want to update title /
+            // body don't have to re-supply on_dismiss every time.
+            if toast.on_dismiss.is_some() {
+                existing.on_dismiss = toast.on_dismiss;
+            }
+            existing.style_override = toast.style_override;
+            existing.time_left = toast.auto_dismiss_after;
+            // Same for the leading widget: only replace when the
+            // update sets one. Otherwise the original leading
+            // (typically a Spinner from `Toast::loading`) survives.
+            if toast.leading.is_some() {
+                existing.leading = toast.leading;
+            }
+            existing.archive = toast.archive;
+            let entry_id = existing.entry_id;
+            // Snapshot for archive mirror — done before we drop the
+            // borrow so the snapshot is consistent with the mutation.
+            let archive_entry = existing.archive.then(|| Self::entry_to_archive(existing));
+            drop(inner);
+            if let (Some(archive), Some(entry)) = (self.archive.as_ref(), archive_entry) {
+                archive.push(entry);
+            }
+            self.bump_version();
+            let handle = ToastHandle::new(ToastHandleInner {
+                entry_id,
+                dismissed: std::cell::Cell::new(false),
+                registry: self.clone(),
+            });
+            return (handle, None);
+        }
+
         let entry_id = inner.next_entry_id;
         inner.next_entry_id += 1;
 

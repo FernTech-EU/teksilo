@@ -1,12 +1,15 @@
 //! `NotificationLog` — the persistent-archive UI.
 //!
-//! Composition: `VStack { toolbar, list_view, empty_state }` where
-//! - toolbar is a horizontal row with mark-all-read + clear buttons,
-//! - list_view is a [`ListView<NotificationEntry>`] bound to the
-//!   archive's entries (newest first, severity glyph as leading,
-//!   title + body as subtitle, action buttons trailing),
-//! - empty_state is a centered hint shown only when the archive is
-//!   empty.
+//! Composition: `VStack { toolbar, ScrollArea { day_bucket_sections },
+//! empty_state }` where
+//! - toolbar is a horizontal row with mark-all-read + clear buttons;
+//! - day-bucket sections are `[Today header, …rows, Yesterday
+//!   header, …rows, This week header, …rows, Earlier header,
+//!   …rows]` — entries grouped by their local-calendar bucket;
+//! - each row is a [`StandardListItem`] (severity glyph leading,
+//!   title + body subtitle, action buttons trailing). Unread rows
+//!   render the title in `BodyBold`; read rows in `Body`;
+//! - empty_state is shown only when the archive is empty.
 //!
 //! Apps embed the log directly (e.g. inside a sidebar panel), wrap
 //! it in [`NotificationCenterButton`](super::center_button::NotificationCenterButton)
@@ -18,6 +21,7 @@ use std::rc::Rc;
 
 use fern_canvas::{Canvas, Path, Point, Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::styles::BannerSeverity;
 use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
@@ -27,22 +31,24 @@ use fern_tokens::{TextRole, TextStyleRole};
 
 use crate::button::{Button, ButtonVariant};
 use crate::link::Link;
-use crate::list_view::ListView;
 use crate::notification::{
     ArchivedAction, ArchivedActionStyle, NotificationArchiveModel, NotificationEntry,
 };
 use crate::primitives::{HStack, Spacer, TextWidget, VStack};
+use crate::scroll_area::ScrollArea;
 use crate::standard_item::StandardListItem;
 
 /// Configurable archive log. Shipped chrome:
 /// - mark-all-read + clear buttons in a toolbar row;
 /// - empty-state hint when the archive is empty;
-/// - list of [`StandardListItem`] rows, one per [`NotificationEntry`].
+/// - day-bucket section headers (Today / Yesterday / This week /
+///   Earlier) above the rows for each bucket — computed against the
+///   user's local timezone, recomputed on every archive mutation;
+/// - [`StandardListItem`] rows with unread-as-bold differentiation.
 ///
-/// Phase 4 ships the core list + replay UX. Day-bucket section
-/// headers (Today / Yesterday / This week / Earlier) and a
-/// SearchField-driven filter (`rich-text` feature) are documented in
-/// the plan and will land in Phase 4 refinements.
+/// A `rich-text`-gated SearchField filter and a severity-chip filter
+/// are documented in the plan as future refinements and can be
+/// composed by apps using the existing widget toolkit.
 pub struct NotificationLog {
     archive: Rc<NotificationArchiveModel>,
     show_toolbar: bool,
@@ -187,6 +193,17 @@ impl Widget for NotificationLog {
         let on_entry = self.on_entry_invoked.clone();
         let on_action = self.on_action_invoked.clone();
 
+        // Rebuild the log whenever the archive mutates (push,
+        // in-place merge, mark_all_read, clear, remove). The
+        // day-bucket headers must re-compute when entries appear /
+        // disappear, and StandardListItem's read/unread title style
+        // needs to flip on mark_all_read.
+        archive.version_signal().bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Rebuild,
+        );
+
         let mut column = VStack::new().spacing(6.0);
 
         // Toolbar row.
@@ -213,7 +230,7 @@ impl Widget for NotificationLog {
             column = column.add_child(ctx.add(toolbar));
         }
 
-        // Empty state or list view.
+        // Empty state or bucketed sections.
         if archive.entries().is_empty() {
             let empty = match self.empty_state.take() {
                 Some(w) => ctx.add_boxed(w),
@@ -225,12 +242,42 @@ impl Widget for NotificationLog {
             };
             column = column.add_child(empty);
         } else {
-            let model = archive.entries().clone();
-            let list = ListView::new(model, move |_idx, entry, _selected| {
-                Self::build_row(entry, on_entry.as_ref(), on_action.as_ref())
-            })
-            .item_height(64.0);
-            column = column.add_child(ctx.add(list));
+            // Snapshot entries + compute buckets relative to the
+            // local "today". Bucket transitions across midnight are
+            // recomputed on the next archive mutation (the log's
+            // version-signal binding); a log that stays open across
+            // midnight without any push will keep stale labels
+            // until the user closes / reopens it — acceptable for a
+            // popover-shaped UI.
+            let model = archive.entries();
+            let entries: Vec<NotificationEntry> = (0..model.len())
+                .filter_map(|i| model.with_item(i, |e| e.clone()))
+                .collect();
+            let now = jiff::Zoned::now();
+            let today = now.date();
+            let zone = now.time_zone().clone();
+
+            let mut sections = VStack::new().spacing(8.0);
+            let mut current_bucket: Option<DayBucket> = None;
+            for entry in &entries {
+                let bucket = day_bucket_for(entry.timestamp, today, &zone);
+                if Some(bucket) != current_bucket {
+                    let header = TextWidget::new(bucket_label(bucket))
+                        .style(TextStyleRole::SmallBold)
+                        .bind_color(TextRole::Secondary);
+                    sections = sections.add_child(ctx.add(header));
+                    current_bucket = Some(bucket);
+                }
+                sections = sections.add_child(ctx.add_boxed(Self::build_row(
+                    entry,
+                    on_entry.as_ref(),
+                    on_action.as_ref(),
+                )));
+            }
+            // Wrap in ScrollArea so the dialog/popover scrolls when
+            // the archive grows past the visible height.
+            let scrollable = ScrollArea::new().child(sections);
+            column = column.add_child(ctx.add(scrollable));
         }
 
         let root = ctx.add(column);
@@ -332,6 +379,65 @@ fn build_actions_row(
         };
     }
     Box::new(row)
+}
+
+// ------------------------------------------------------------------
+// Day-bucket section headers
+// ------------------------------------------------------------------
+
+/// Coarse time bucket — drives the section header that appears
+/// above the first entry of each bucket in the log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DayBucket {
+    /// Same local-calendar date as `today`.
+    Today,
+    /// `today - 1` day.
+    Yesterday,
+    /// 2..=6 days ago (within the same calendar week conceptually).
+    ThisWeek,
+    /// 7 or more days ago.
+    Earlier,
+}
+
+/// Compute the bucket for an archive entry. Uses the user's local
+/// timezone to map the entry's UTC timestamp onto a calendar date,
+/// then compares against `today` (also in the local timezone).
+///
+/// Two entries that landed within the same local-calendar date both
+/// get `Today`, regardless of the UTC hours between them — that's
+/// the user-facing notion of "today".
+fn day_bucket_for(
+    timestamp: jiff::Timestamp,
+    today: jiff::civil::Date,
+    zone: &jiff::tz::TimeZone,
+) -> DayBucket {
+    let entry_date = timestamp.to_zoned(zone.clone()).date();
+    // Compare via day delta. `today - entry_date` returns a Span;
+    // we extract the day count. Future entries (clock skew, sync
+    // from a peer) bucket as Today so they don't slip into Earlier
+    // by accident.
+    let delta_days = today
+        .since(entry_date)
+        .map(|span| span.get_days())
+        .unwrap_or(0);
+    if delta_days <= 0 {
+        DayBucket::Today
+    } else if delta_days == 1 {
+        DayBucket::Yesterday
+    } else if delta_days <= 6 {
+        DayBucket::ThisWeek
+    } else {
+        DayBucket::Earlier
+    }
+}
+
+fn bucket_label(bucket: DayBucket) -> fern_i18n::LocalizedString {
+    match bucket {
+        DayBucket::Today => fern_i18n::tr_widget!(notifications_bucket_today()),
+        DayBucket::Yesterday => fern_i18n::tr_widget!(notifications_bucket_yesterday()),
+        DayBucket::ThisWeek => fern_i18n::tr_widget!(notifications_bucket_this_week()),
+        DayBucket::Earlier => fern_i18n::tr_widget!(notifications_bucket_earlier()),
+    }
 }
 
 // ------------------------------------------------------------------
@@ -472,6 +578,158 @@ mod tests {
             tree.find_by_label("Retry").is_none(),
             "without on_action_invoked, archive actions render as inert text tags with a \
              suffix — no exact-'Retry' label appears"
+        );
+    }
+
+    // ----- Day-bucket helper -----
+
+    fn ts(year: i16, month: i8, day: i8, hour: i8, minute: i8) -> jiff::Timestamp {
+        let utc_zone = jiff::tz::TimeZone::UTC;
+        jiff::civil::DateTime::new(year, month, day, hour, minute, 0, 0)
+            .unwrap()
+            .to_zoned(utc_zone)
+            .unwrap()
+            .timestamp()
+    }
+
+    #[test]
+    fn day_bucket_today_for_same_calendar_date() {
+        let today = jiff::civil::Date::new(2025, 5, 17).unwrap();
+        // Same date, different hour → Today.
+        let entry = ts(2025, 5, 17, 8, 30);
+        assert_eq!(
+            day_bucket_for(entry, today, &jiff::tz::TimeZone::UTC),
+            DayBucket::Today
+        );
+    }
+
+    #[test]
+    fn day_bucket_yesterday_for_t_minus_one() {
+        let today = jiff::civil::Date::new(2025, 5, 17).unwrap();
+        let entry = ts(2025, 5, 16, 23, 0);
+        assert_eq!(
+            day_bucket_for(entry, today, &jiff::tz::TimeZone::UTC),
+            DayBucket::Yesterday
+        );
+    }
+
+    #[test]
+    fn day_bucket_this_week_for_2_to_6_days_ago() {
+        let today = jiff::civil::Date::new(2025, 5, 17).unwrap();
+        for days_ago in 2..=6 {
+            let date = today
+                .checked_sub(jiff::ToSpan::days(days_ago as i64))
+                .unwrap();
+            let entry = ts(date.year(), date.month(), date.day(), 12, 0);
+            assert_eq!(
+                day_bucket_for(entry, today, &jiff::tz::TimeZone::UTC),
+                DayBucket::ThisWeek,
+                "{days_ago} days ago must bucket as ThisWeek"
+            );
+        }
+    }
+
+    #[test]
+    fn day_bucket_earlier_for_7_plus_days_ago() {
+        let today = jiff::civil::Date::new(2025, 5, 17).unwrap();
+        let week_ago_date = today.checked_sub(jiff::ToSpan::days(7)).unwrap();
+        let entry = ts(
+            week_ago_date.year(),
+            week_ago_date.month(),
+            week_ago_date.day(),
+            12,
+            0,
+        );
+        assert_eq!(
+            day_bucket_for(entry, today, &jiff::tz::TimeZone::UTC),
+            DayBucket::Earlier
+        );
+    }
+
+    #[test]
+    fn day_bucket_future_entries_count_as_today() {
+        // Clock skew or peer sync — an entry stamped in the future
+        // (delta_days < 0) should be considered Today, not Earlier.
+        let today = jiff::civil::Date::new(2025, 5, 17).unwrap();
+        let entry = ts(2025, 5, 18, 0, 0);
+        assert_eq!(
+            day_bucket_for(entry, today, &jiff::tz::TimeZone::UTC),
+            DayBucket::Today
+        );
+    }
+
+    #[test]
+    fn day_bucket_label_resolves_through_i18n() {
+        // Sanity-check that each variant maps to a non-empty
+        // localized string (the en-US source bundle is present in
+        // test runs).
+        for bucket in [
+            DayBucket::Today,
+            DayBucket::Yesterday,
+            DayBucket::ThisWeek,
+            DayBucket::Earlier,
+        ] {
+            let label = bucket_label(bucket).resolve_now();
+            assert!(!label.is_empty(), "{bucket:?} has an empty label");
+        }
+    }
+
+    #[test]
+    fn log_with_entries_across_buckets_renders_each_header() {
+        // Push entries with timestamps in different buckets and
+        // confirm each bucket header text appears in the AT tree.
+        let archive = fresh_archive();
+        let now = jiff::Zoned::now();
+        let today = now.date();
+        let zone = now.time_zone().clone();
+        let today_ts = today
+            .at(12, 0, 0, 0)
+            .to_zoned(zone.clone())
+            .unwrap()
+            .timestamp();
+        let yesterday_ts = today
+            .checked_sub(jiff::ToSpan::days(1))
+            .unwrap()
+            .at(12, 0, 0, 0)
+            .to_zoned(zone.clone())
+            .unwrap()
+            .timestamp();
+        let earlier_ts = today
+            .checked_sub(jiff::ToSpan::days(30))
+            .unwrap()
+            .at(12, 0, 0, 0)
+            .to_zoned(zone)
+            .unwrap()
+            .timestamp();
+
+        // Push oldest first so the newest (Today) ends up at index 0.
+        let mut earlier = entry("Very old notice", None, Vec::new());
+        earlier.timestamp = earlier_ts;
+        archive.push(earlier);
+        let mut yesterday = entry("Yesterday's notice", None, Vec::new());
+        yesterday.timestamp = yesterday_ts;
+        archive.push(yesterday);
+        let mut today_entry = entry("Today's notice", None, Vec::new());
+        today_entry.timestamp = today_ts;
+        archive.push(today_entry);
+
+        let tree = tree_with(NotificationLog::new(archive));
+
+        let today_label = fern_i18n::tr_widget!(notifications_bucket_today()).resolve_now();
+        let yesterday_label = fern_i18n::tr_widget!(notifications_bucket_yesterday()).resolve_now();
+        let earlier_label = fern_i18n::tr_widget!(notifications_bucket_earlier()).resolve_now();
+
+        assert!(
+            tree.find_by_label(&today_label).is_some(),
+            "Today header must appear"
+        );
+        assert!(
+            tree.find_by_label(&yesterday_label).is_some(),
+            "Yesterday header must appear"
+        );
+        assert!(
+            tree.find_by_label(&earlier_label).is_some(),
+            "Earlier header must appear"
         );
     }
 

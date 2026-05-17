@@ -142,6 +142,15 @@ pub struct NotificationArchiveModel {
     /// resets to zero on `mark_all_read`. Drives the bell-button
     /// badge.
     unread_count: Signal<usize>,
+    /// Monotonic version bumped on every mutation (push, in-place
+    /// update, mark_all_read, clear, remove). The
+    /// [`NotificationLog`](super::log::NotificationLog) binds to
+    /// this at `BindingLevel::Rebuild` so any archive change
+    /// triggers a fresh log rebuild — needed for the day-bucket
+    /// header re-computation. Same shape as
+    /// [`OverlayManager::version`](fern_core::overlay::OverlayManager::version)
+    /// and [`ToastRegistry::version_signal`](crate::toast::ToastRegistry::version_signal).
+    version: Signal<u64>,
 }
 
 impl NotificationArchiveModel {
@@ -182,6 +191,7 @@ impl NotificationArchiveModel {
             limit,
             next_id: Cell::new(next_id_seed),
             unread_count: Signal::new(initial_unread),
+            version: Signal::new(0),
         })
     }
 
@@ -195,6 +205,7 @@ impl NotificationArchiveModel {
             limit: DEFAULT_ARCHIVE_LIMIT,
             next_id: Cell::new(1),
             unread_count: Signal::new(0),
+            version: Signal::new(0),
         }
     }
 
@@ -209,8 +220,20 @@ impl NotificationArchiveModel {
         &self.unread_count
     }
 
+    /// Reactive handle on the archive's mutation version. Widgets
+    /// that render the archive (e.g. `NotificationLog`) bind to
+    /// this at `BindingLevel::Rebuild`.
+    pub fn version_signal(&self) -> &Signal<u64> {
+        &self.version
+    }
+
     pub fn limit(&self) -> usize {
         self.limit
+    }
+
+    fn bump_version(&self) {
+        let v = self.version.get();
+        self.version.set(v.wrapping_add(1));
     }
 
     /// Force the persistent backing file to disk synchronously.
@@ -232,6 +255,7 @@ impl NotificationArchiveModel {
     /// new row is inserted. Unread count increments either way (an
     /// in-place update IS new information for the user).
     pub fn push(&self, mut entry: NotificationEntry) {
+        self.bump_version();
         let model = self.backend.model();
 
         // Update-in-place merge: scan for a matching `dedup_id`.
@@ -312,21 +336,30 @@ impl NotificationArchiveModel {
     /// Called by `NotificationCenterButton` when its popover opens.
     pub fn mark_all_read(&self) {
         let model = self.backend.model();
+        let mut mutated = false;
         for i in 0..model.len() {
             if let Some(mut entry) = model.with_item(i, |e| e.clone()) {
                 if !entry.read {
                     entry.read = true;
                     model.set(i, entry);
+                    mutated = true;
                 }
             }
         }
         self.unread_count.set(0);
+        if mutated {
+            self.bump_version();
+        }
     }
 
     /// Clear the entire archive (resets `unread_count` to 0).
     pub fn clear(&self) {
+        let was_empty = self.backend.model().is_empty();
         self.backend.model().clear();
         self.unread_count.set(0);
+        if !was_empty {
+            self.bump_version();
+        }
     }
 
     /// Remove the entry at the given list index. Updates
@@ -343,6 +376,7 @@ impl NotificationArchiveModel {
             let n = self.unread_count.get();
             self.unread_count.set(n.saturating_sub(1));
         }
+        self.bump_version();
     }
 }
 
@@ -443,6 +477,7 @@ mod tests {
             limit: 3,
             next_id: Cell::new(1),
             unread_count: Signal::new(0),
+            version: Signal::new(0),
         };
         for i in 0..5 {
             m.push(entry(&format!("t{i}")));
@@ -592,6 +627,52 @@ mod tests {
             third_id > second_id,
             "ids continue increasing across restarts (third {third_id} > second {second_id})"
         );
+    }
+
+    #[test]
+    fn version_signal_bumps_on_push_mark_clear_remove() {
+        let m = NotificationArchiveModel::in_memory();
+        let v0 = m.version_signal().get();
+        m.push(entry("a"));
+        let v1 = m.version_signal().get();
+        assert_ne!(v0, v1, "push bumps version");
+
+        m.push(entry("b"));
+        m.mark_all_read();
+        let v2 = m.version_signal().get();
+        assert_ne!(v1, v2, "mark_all_read bumps version");
+
+        m.remove(0);
+        let v3 = m.version_signal().get();
+        assert_ne!(v2, v3, "remove bumps version");
+
+        m.clear();
+        let v4 = m.version_signal().get();
+        assert_ne!(v3, v4, "clear bumps version");
+    }
+
+    #[test]
+    fn version_signal_does_not_bump_for_noops() {
+        let m = NotificationArchiveModel::in_memory();
+        m.push(entry("a"));
+        let v_before = m.version_signal().get();
+        // mark_all_read on a fully-read archive — no mutation, no bump.
+        m.mark_all_read();
+        let v_after_mark1 = m.version_signal().get();
+        m.mark_all_read();
+        let v_after_mark2 = m.version_signal().get();
+        assert_eq!(
+            v_after_mark1, v_after_mark2,
+            "second mark_all_read with nothing to flip is a no-op (no version bump)"
+        );
+
+        // clear on already-empty archive — no bump.
+        m.clear();
+        let v_after_clear1 = m.version_signal().get();
+        m.clear();
+        let v_after_clear2 = m.version_signal().get();
+        assert_eq!(v_after_clear1, v_after_clear2, "clear on empty is a no-op");
+        let _ = v_before;
     }
 
     #[test]
