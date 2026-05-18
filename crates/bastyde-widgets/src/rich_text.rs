@@ -750,6 +750,24 @@ impl RichTextEditor {
         sync_cursor_signals(&self.state);
     }
 
+    /// Increase the nesting depth of the caret's current list item by
+    /// one. No-op when the caret is not inside a list. Equivalent to
+    /// pressing Tab while the caret is on a list item — same behaviour,
+    /// same `nest_current_list_item` codepath, exposed for toolbar
+    /// buttons that do not want to synthesise key events.
+    pub fn indent(&self) {
+        keyboard::indent_current_block(&mut self.state.borrow_mut());
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Decrease the nesting depth of the caret's current list item by
+    /// one. No-op at depth 0 (use `Backspace` at block-start to exit
+    /// the list entirely). Toolbar counterpart of Shift+Tab.
+    pub fn outdent(&self) {
+        keyboard::dedent_current_block(&mut self.state.borrow_mut());
+        sync_cursor_signals(&self.state);
+    }
+
     // --- Table commands ---------------------------------------------------
     //
     // Each table command drops through `sync_cursor_signals` because
@@ -889,6 +907,48 @@ impl RichTextEditor {
             .unwrap_or(Alignment::Left)
     }
 
+    // --- History ---------------------------------------------------------
+    //
+    // Programmatic Undo / Redo. Failures (e.g. empty undo stack) are
+    // silently discarded — toolbars gate the buttons on
+    // [`can_undo`](Self::can_undo) / [`can_redo`](Self::can_redo)
+    // signals so the error path is unreachable in normal use, and the
+    // keyboard handlers at `keyboard.rs:357-366` use the same
+    // `let _ =` discipline.
+
+    /// Undo the most recent edit. Mirrors Ctrl+Z. No-op when the undo
+    /// stack is empty.
+    pub fn undo(&self) {
+        let _ = self.state.borrow().document.undo();
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Redo the most recently undone edit. Mirrors Ctrl+Y /
+    /// Ctrl+Shift+Z. No-op when the redo stack is empty.
+    pub fn redo(&self) {
+        let _ = self.state.borrow().document.redo();
+        sync_cursor_signals(&self.state);
+    }
+
+    // --- External handle -------------------------------------------------
+
+    /// Cheap clone-able handle for external toolbars / palettes — see
+    /// [`EditorHandle`]. The handle shares the editor's internal
+    /// state (same `Rc<RefCell<…>>`), so mutations through the handle
+    /// are immediately observable through the editor's reactive
+    /// signals (and vice versa).
+    ///
+    /// Use this when the caller needs to invoke editor commands from
+    /// `on_activate_fn` / `ctx.effect` closures that outlive the
+    /// borrow of `&editor`: `RichTextEditor` itself is move-only
+    /// (the optional context-menu factory holds a `Box<dyn Fn>`,
+    /// which prevents `Clone`).
+    pub fn handle(&self) -> EditorHandle {
+        EditorHandle {
+            state: self.state.clone(),
+        }
+    }
+
     // --- Clipboard (programmatic) -----------------------------------------
     //
     // Direct programmatic counterparts of Ctrl+C / Ctrl+X / Ctrl+V /
@@ -1007,6 +1067,382 @@ impl RichTextEditor {
     ) -> Self {
         self.state.borrow_mut().on_image_activated = Some(std::rc::Rc::new(handler));
         self
+    }
+}
+
+// =============================================================================
+// EditorHandle — external toolbar / palette handle
+// =============================================================================
+
+/// A clone-able, `'static` handle to a [`RichTextEditor`]'s shared
+/// state.
+///
+/// Use this when a toolbar, palette, command panel, or other external
+/// widget needs to invoke editor commands from `on_activate_fn` /
+/// `ctx.effect` closures that outlive the borrow of `&editor`.
+/// [`RichTextEditor`] itself is move-only (the optional
+/// `custom_context_menu` factory holds a `Box<dyn Fn>`, which prevents
+/// `Clone`), so a closure cannot just capture `editor.clone()`.
+/// Obtain a handle via [`RichTextEditor::handle()`] and clone it into
+/// each closure that needs to issue commands.
+///
+/// `EditorHandle` mirrors the toolbar-relevant subset of the editor's
+/// public API:
+///
+/// * Inline character formatting — [`set_bold`](Self::set_bold) /
+///   [`toggle_bold`](Self::toggle_bold) / [`is_bold`](Self::is_bold)
+///   and the italic / underline / strikethrough variants.
+/// * Block-level formatting — [`set_alignment`](Self::set_alignment),
+///   [`set_heading_level`](Self::set_heading_level),
+///   [`apply_block_format`](Self::apply_block_format),
+///   [`insert_list`](Self::insert_list),
+///   [`indent`](Self::indent) / [`outdent`](Self::outdent).
+/// * Tables — [`insert_table`](Self::insert_table) and the per-row /
+///   per-column / remove operations, plus [`is_in_table`](Self::is_in_table)
+///   for contextual UI enable state.
+/// * History — [`undo`](Self::undo) / [`redo`](Self::redo).
+/// * Reactive signal accessors —
+///   [`format_version`](Self::format_version),
+///   [`cursor_position_signal`](Self::cursor_position_signal),
+///   [`cursor_anchor_signal`](Self::cursor_anchor_signal),
+///   [`has_selection`](Self::has_selection),
+///   [`can_undo`](Self::can_undo) / [`can_redo`](Self::can_redo) — so
+///   callers that hold only an `EditorHandle` can derive bound signals
+///   without keeping a separate `RichTextEditor` reference.
+///
+/// Cloning is cheap (an `Rc` clone). All clones share the same
+/// underlying state — mutations through any clone, through other
+/// clones, or through the originating `RichTextEditor` are all
+/// immediately observable through the same signals.
+#[derive(Clone)]
+pub struct EditorHandle {
+    state: SharedState,
+}
+
+impl std::fmt::Debug for EditorHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EditorHandle").finish_non_exhaustive()
+    }
+}
+
+impl EditorHandle {
+    // --- Character-format query / apply ------------------------------------
+
+    /// Read the current character format at the caret. When a selection
+    /// is active, reads from `selection_start()` rather than
+    /// `position()` so toolbar bistate stays stable across selection
+    /// extension (same rule as
+    /// [`RichTextEditor::caret_char_format`]).
+    pub fn caret_char_format(&self) -> TextFormat {
+        let st = self.state.borrow();
+        let probe_pos = if st.cursor.has_selection() {
+            st.cursor.selection_start()
+        } else {
+            st.cursor.position()
+        };
+        let probe = st.document.cursor();
+        probe.set_position(probe_pos, MoveMode::MoveAnchor);
+        probe.char_format().unwrap_or_default()
+    }
+
+    fn apply_char_format(&self, fmt: TextFormat) {
+        let st = self.state.borrow();
+        let _ = st.cursor.merge_char_format(&fmt);
+    }
+
+    /// Apply **bold** to the current selection.
+    pub fn set_bold(&self, enabled: bool) {
+        self.apply_char_format(TextFormat {
+            font_bold: Some(enabled),
+            ..Default::default()
+        });
+    }
+
+    /// Apply *italic* to the current selection.
+    pub fn set_italic(&self, enabled: bool) {
+        self.apply_char_format(TextFormat {
+            font_italic: Some(enabled),
+            ..Default::default()
+        });
+    }
+
+    /// Apply underline to the current selection.
+    pub fn set_underline(&self, enabled: bool) {
+        self.apply_char_format(TextFormat {
+            font_underline: Some(enabled),
+            ..Default::default()
+        });
+    }
+
+    /// Apply strikethrough to the current selection.
+    pub fn set_strikethrough(&self, enabled: bool) {
+        self.apply_char_format(TextFormat {
+            font_strikeout: Some(enabled),
+            ..Default::default()
+        });
+    }
+
+    /// Apply an arbitrary [`TextFormat`] (escape hatch for fields not
+    /// covered by the dedicated setters: `letter_spacing`,
+    /// `foreground_color`, …).
+    pub fn apply_text_format(&self, fmt: TextFormat) {
+        self.apply_char_format(fmt);
+    }
+
+    /// Toggle bold on the current selection.
+    pub fn toggle_bold(&self) {
+        let current = self.caret_char_format().font_bold.unwrap_or(false);
+        self.set_bold(!current);
+    }
+
+    /// Toggle italic on the current selection.
+    pub fn toggle_italic(&self) {
+        let current = self.caret_char_format().font_italic.unwrap_or(false);
+        self.set_italic(!current);
+    }
+
+    /// Toggle underline on the current selection.
+    pub fn toggle_underline(&self) {
+        let current = self.caret_char_format().font_underline.unwrap_or(false);
+        self.set_underline(!current);
+    }
+
+    /// Toggle strikethrough on the current selection.
+    pub fn toggle_strikethrough(&self) {
+        let current = self.caret_char_format().font_strikeout.unwrap_or(false);
+        self.set_strikethrough(!current);
+    }
+
+    /// Whether the selection / typing position is bold.
+    pub fn is_bold(&self) -> bool {
+        self.caret_char_format().font_bold.unwrap_or(false)
+    }
+
+    /// Whether italic.
+    pub fn is_italic(&self) -> bool {
+        self.caret_char_format().font_italic.unwrap_or(false)
+    }
+
+    /// Whether underline.
+    pub fn is_underline(&self) -> bool {
+        self.caret_char_format().font_underline.unwrap_or(false)
+    }
+
+    /// Whether strikethrough.
+    pub fn is_strikethrough(&self) -> bool {
+        self.caret_char_format().font_strikeout.unwrap_or(false)
+    }
+
+    // --- Block-format query / apply ----------------------------------------
+
+    /// Apply an arbitrary [`BlockFormat`] to the caret's block.
+    pub fn apply_block_format(&self, fmt: BlockFormat) {
+        let st = self.state.borrow();
+        let _ = st.cursor.set_block_format(&fmt);
+    }
+
+    /// Set paragraph alignment for the caret's block.
+    pub fn set_alignment(&self, alignment: Alignment) {
+        self.apply_block_format(BlockFormat {
+            alignment: Some(alignment),
+            ..Default::default()
+        });
+    }
+
+    /// Set heading level for the caret's block. `0` = plain paragraph,
+    /// `1..=6` follow the HTML `<h1>..<h6>` convention.
+    pub fn set_heading_level(&self, level: u8) {
+        self.apply_block_format(BlockFormat {
+            heading_level: Some(level),
+            ..Default::default()
+        });
+    }
+
+    /// Current block alignment.
+    pub fn get_alignment(&self) -> Alignment {
+        self.state
+            .borrow()
+            .cursor
+            .block_format()
+            .ok()
+            .and_then(|f| f.alignment)
+            .unwrap_or(Alignment::Left)
+    }
+
+    /// Current heading level (0 = plain paragraph).
+    pub fn get_heading_level(&self) -> u8 {
+        self.state
+            .borrow()
+            .cursor
+            .block_format()
+            .ok()
+            .and_then(|f| f.heading_level)
+            .unwrap_or(0)
+    }
+
+    // --- Lists -------------------------------------------------------------
+
+    /// Wrap the caret's block in a list. `ordered = true` uses decimal
+    /// numbering, `false` uses bullet discs.
+    pub fn insert_list(&self, ordered: bool) {
+        let style = if ordered {
+            ListStyle::Decimal
+        } else {
+            ListStyle::Disc
+        };
+        self.create_list(style);
+    }
+
+    /// Wrap the caret's block in a list with an explicit
+    /// [`ListStyle`].
+    pub fn create_list(&self, style: ListStyle) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.create_list(style);
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Indent the caret's current list item by one nesting level.
+    /// No-op when the caret is not inside a list. Equivalent to Tab.
+    pub fn indent(&self) {
+        keyboard::indent_current_block(&mut self.state.borrow_mut());
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Outdent the caret's current list item by one nesting level.
+    /// No-op at depth 0. Equivalent to Shift+Tab.
+    pub fn outdent(&self) {
+        keyboard::dedent_current_block(&mut self.state.borrow_mut());
+        sync_cursor_signals(&self.state);
+    }
+
+    // --- Tables ------------------------------------------------------------
+
+    /// Insert a fresh `rows × columns` table at the caret.
+    pub fn insert_table(&self, rows: usize, columns: usize) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.insert_table(rows, columns);
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Remove the table containing the caret. No-op outside a table.
+    pub fn remove_current_table(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.remove_current_table();
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Insert a row above the caret's current table row.
+    pub fn insert_row_above(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.insert_row_above();
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Insert a row below the caret's current table row.
+    pub fn insert_row_below(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.insert_row_below();
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Insert a column before the caret's current table column.
+    pub fn insert_column_before(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.insert_column_before();
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Insert a column after the caret's current table column.
+    pub fn insert_column_after(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.insert_column_after();
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Remove the caret's current table row.
+    pub fn remove_current_row(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.remove_current_row();
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Remove the caret's current table column.
+    pub fn remove_current_column(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.remove_current_column();
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Whether the caret is currently inside a table cell.
+    pub fn is_in_table(&self) -> bool {
+        self.state.borrow().cursor.current_table().is_some()
+    }
+
+    // --- History -----------------------------------------------------------
+
+    /// Undo the most recent edit. No-op when the undo stack is empty.
+    pub fn undo(&self) {
+        let _ = self.state.borrow().document.undo();
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Redo the most recently undone edit. No-op when the redo stack
+    /// is empty.
+    pub fn redo(&self) {
+        let _ = self.state.borrow().document.redo();
+        sync_cursor_signals(&self.state);
+    }
+
+    // --- Reactive signal accessors -----------------------------------------
+
+    /// Bumps on every format-only document event (bold / italic /
+    /// heading / alignment / list-style changes). See
+    /// [`RichTextEditor::format_version`].
+    pub fn format_version(&self) -> Signal<u64> {
+        self.state.borrow().format_version.clone()
+    }
+
+    /// Reactive caret position signal.
+    pub fn cursor_position_signal(&self) -> Signal<usize> {
+        self.state.borrow().cursor_position.clone()
+    }
+
+    /// Reactive selection anchor signal.
+    pub fn cursor_anchor_signal(&self) -> Signal<usize> {
+        self.state.borrow().cursor_anchor.clone()
+    }
+
+    /// Reactive selection-non-empty signal.
+    pub fn has_selection(&self) -> Signal<bool> {
+        self.state.borrow().has_selection.clone()
+    }
+
+    /// Reactive undo-availability signal (toolbar enable-state source).
+    pub fn can_undo(&self) -> Signal<bool> {
+        self.state.borrow().can_undo.clone()
+    }
+
+    /// Reactive redo-availability signal.
+    pub fn can_redo(&self) -> Signal<bool> {
+        self.state.borrow().can_redo.clone()
     }
 }
 

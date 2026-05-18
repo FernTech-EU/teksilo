@@ -870,7 +870,12 @@ fn nest_current_list_item(st: &mut EditorState, target_indent: u8) {
 /// Increase the current item's nesting depth by 1. Used by Tab
 /// inside a list item. See [`nest_current_list_item`] for the split
 /// rationale.
-fn indent_current_block(st: &mut EditorState) {
+///
+/// Exposed `pub(super)` so the parent `rich_text` module can wire it
+/// into `RichTextEditor::indent` / `EditorHandle::indent` — toolbar
+/// buttons need the same behaviour as Tab without going through key
+/// dispatch.
+pub(super) fn indent_current_block(st: &mut EditorState) {
     let Some(list) = st.cursor.current_list() else {
         return;
     };
@@ -885,7 +890,10 @@ fn indent_current_block(st: &mut EditorState) {
 /// Decrease the current item's nesting depth by 1. Used by Shift+Tab
 /// inside a list item. At depth 0 this is a no-op (the user can press
 /// Backspace at block-start to exit the list entirely).
-fn dedent_current_block(st: &mut EditorState) {
+///
+/// Exposed `pub(super)` for the same reason as
+/// [`indent_current_block`].
+pub(super) fn dedent_current_block(st: &mut EditorState) {
     let Some(list) = st.cursor.current_list() else {
         return;
     };
