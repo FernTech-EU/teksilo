@@ -35,9 +35,78 @@
 //! Run with: `cargo run -p rich-text-editor --features "rich-text clipboard"`
 
 use bastyde::prelude::*;
-use bastyde::text_document::TextDocument;
+use bastyde::text_document::{Alignment, BlockFormat, MoveMode, TextDocument};
 use bastyde::widgets::rich_text::{RichTextEditor, ScrollPolicy};
 use bastyde::widgets::{Button, Expand, HStack, Spacer, SplitView, Toolbar};
+
+/// Walk every block in `doc` and apply default vertical spacing per
+/// kind: roomier margins before / after headings (scaled by heading
+/// level), tighter margins between body paragraphs, a touch of breathing
+/// room above and below fenced code blocks. The markdown importer
+/// doesn't emit per-block margins itself, so without this pass every
+/// block is glued to its neighbour — readable, but visually busy.
+///
+/// Implemented as a per-block cursor + `set_block_format` so the call
+/// goes through the normal undo / event pipeline. Run BEFORE the
+/// document is bound to any RichTextEditor so the resulting layout is
+/// the first thing the user sees.
+fn apply_default_margins(doc: &TextDocument) {
+    for block in doc.blocks() {
+        let heading_level = block.block_format().heading_level;
+        let (top, bottom) = match heading_level {
+            Some(1) => (24, 12),
+            Some(2) => (20, 10),
+            Some(3) => (16, 8),
+            Some(4) => (12, 6),
+            Some(_) => (10, 4), // H5, H6
+            None => (4, 4),     // body paragraph / list item / code block
+        };
+        let cursor = doc.cursor_at(block.position());
+        cursor.set_position(block.position(), MoveMode::MoveAnchor);
+        let _ = cursor.set_block_format(&BlockFormat {
+            top_margin: Some(top),
+            bottom_margin: Some(bottom),
+            ..BlockFormat::default()
+        });
+    }
+}
+
+/// Demo the four `Alignment` variants and `text_indent` (first-line
+/// indent) — neither is reachable from markdown syntax, so they're
+/// applied programmatically after the import. Matches blocks by a
+/// sentinel prefix in the block's first line; cheap and obvious, fine
+/// for a fixed showcase doc.
+fn apply_alignment_demos(doc: &TextDocument) {
+    for block in doc.blocks() {
+        let text = block.text();
+        let trimmed = text.trim_start();
+        let (alignment, text_indent) = if trimmed.starts_with("[Center]") {
+            (Some(Alignment::Center), None)
+        } else if trimmed.starts_with("[Right]") {
+            (Some(Alignment::Right), None)
+        } else if trimmed.starts_with("[Justify]") {
+            (Some(Alignment::Justify), None)
+        } else if trimmed.starts_with("[Indent]") {
+            // text_indent shifts the FIRST line right by N pixels;
+            // subsequent wrapped lines stay flush with the block's
+            // left margin. Classic book / academic-style paragraph.
+            (None, Some(32))
+        } else {
+            continue;
+        };
+        let prior = block.block_format();
+        let cursor = doc.cursor_at(block.position());
+        cursor.set_position(block.position(), MoveMode::MoveAnchor);
+        let _ = cursor.set_block_format(&BlockFormat {
+            alignment,
+            text_indent,
+            // Preserve the per-kind margins applied earlier.
+            top_margin: prior.top_margin,
+            bottom_margin: prior.bottom_margin,
+            ..BlockFormat::default()
+        });
+    }
+}
 
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
@@ -199,6 +268,22 @@ at a cell boundary activates rectangular cell selection.
 - Explicit `column_widths`.
 - GFM column alignment (`|:---:|`) — parsed but currently discarded.
 
+## Alignment & first-line indent (API only)
+
+`BlockFormat::alignment` (Left / Right / Center / Justify) and
+`BlockFormat::text_indent` (first-line indent in pixels) have no
+markdown syntax — the four paragraphs below are reformatted at
+startup by `apply_alignment_demos(&doc)` based on a sentinel prefix
+on each one.
+
+[Center] Centered paragraph. Each line in this block is shifted right by half the slack so the text is centred against the block's content width. Useful for posters and dialog titles.
+
+[Right] Right-aligned paragraph — each line is shifted to butt against the right margin of the block. Common in numbers / RTL UIs.
+
+[Justify] Justified paragraph that needs enough text to wrap onto more than one line so the inter-word spacing stretches visibly. Words on every line except the last get pushed apart to make their line span the full content width. The last line is left-aligned per typographic convention.
+
+[Indent] Paragraph with a 32-px first-line indent. The first line starts after a horizontal gap; subsequent wrapped lines start flush with the block's left margin. This is the classic book / academic style for unspaced paragraphs — pad the text out so wrapping is visible: the indent only applies to the first wrapped line, every other line lands flush with the block's left edge.
+
 ## Markdown features NOT imported
 
 The pulldown-cmark parser sees these tokens, but the importer's event
@@ -251,7 +336,11 @@ Type anywhere below; watch the preview pane mirror every edit.
 fn main() {
     let doc = TextDocument::new();
     doc.set_markdown(SAMPLE)
-        .expect("embedded markdown should parse");
+        .expect("embedded markdown should parse")
+        .wait()
+        .expect("markdown import completes");
+    apply_default_margins(&doc);
+    apply_alignment_demos(&doc);
 
     BastydeAppBuilder::new()
         .install_inspector_in_debug()
