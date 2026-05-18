@@ -157,6 +157,10 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
         state.needs_full_layout = false;
         state.last_relayout_block_id = None;
         state.content_dirty = true;
+        // Tell paint() to use RenderChoice::Full this frame —
+        // `needs_full_layout` is cleared above so paint can no longer
+        // infer the full-layout-just-happened condition from it.
+        state.pending_full_render = true;
     } else if viewport_ready && let Some(pos) = single_pos {
         // Incremental path. Falls back to layout_full internally on
         // the first call (subtle-correctness item 25).
@@ -204,8 +208,19 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
 
     let max_y = (content_height * zoom - viewport_height).max(0.0);
     let max_x = (max_content_width * zoom - viewport_width).max(0.0);
-    state.max_scroll_y.set(max_y);
-    state.max_scroll_x.set(max_x);
+    // Guard each Signal::set with a change-check. Signal::set clones and
+    // invokes every observer callback unconditionally (no internal
+    // PartialEq skip), so setting an unchanged value still fans out to
+    // every subscriber — scrollbars, layout-listeners, etc. — and was
+    // visible as ~5% of CPU in `set<f32>` / `try_set<f32>` on the
+    // flamegraph. This matches the pattern already used for `scroll_y`
+    // below.
+    if (state.max_scroll_y.get() - max_y).abs() > f32::EPSILON {
+        state.max_scroll_y.set(max_y);
+    }
+    if (state.max_scroll_x.get() - max_x).abs() > f32::EPSILON {
+        state.max_scroll_x.set(max_x);
+    }
 
     let ratio_y = if content_height > 0.0 && viewport_height > 0.0 {
         (viewport_height / (content_height * zoom)).clamp(0.0, 1.0)
@@ -217,8 +232,12 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     } else {
         1.0
     };
-    state.viewport_ratio_y.set(ratio_y);
-    state.viewport_ratio_x.set(ratio_x);
+    if (state.viewport_ratio_y.get() - ratio_y).abs() > f32::EPSILON {
+        state.viewport_ratio_y.set(ratio_y);
+    }
+    if (state.viewport_ratio_x.get() - ratio_x).abs() > f32::EPSILON {
+        state.viewport_ratio_x.set(ratio_x);
+    }
 
     // Drag-select auto-scroll. While the user is dragging near the
     // top or bottom viewport edge, `mouse::handle_pointer_event`

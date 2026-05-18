@@ -1054,6 +1054,13 @@ impl Widget for RichTextEditorBody {
         // **this body** — its `accessibility()` is the one that emits
         // the editor's Role::MultilineTextInput / Role::Document and
         // walks the flow snapshot.
+        //
+        // ALSO bind at `RepaintOnly` so the widget's needs_paint flips
+        // on every text / format change. Without this, paint() only
+        // ran on caret-blink (the only other RepaintOnly binding), and
+        // the post-fix dispatch's `last_relayout_block_id.take()` was
+        // consumed on the wrong tick — leaving text edits invisible
+        // until a resize forced a full re-layout.
         {
             let st = self.state.borrow();
             let document_version = st.document_version.clone();
@@ -1063,6 +1070,54 @@ impl Widget for RichTextEditorBody {
                 self_id,
                 ctx.binding_registry(),
                 bastyde_core::binding::BindingLevel::AccessibilityOnly,
+            );
+            document_version.bind_to(
+                self_id,
+                ctx.binding_registry(),
+                bastyde_core::binding::BindingLevel::RepaintOnly,
+            );
+        }
+
+        // Bind `scroll_y`, `scroll_x`, `cursor_position`, `cursor_anchor`,
+        // and `has_selection` at RepaintOnly so the widget marks
+        // needs_paint immediately on scroll, cursor move, and selection
+        // change. Without these, paint() only ran on caret-blink and
+        // text-version bumps — so scroll/selection changes appeared
+        // delayed by up to 500ms (in sync with the next caret toggle).
+        //
+        // The cursor_only render path inside text-typeset falls back to
+        // a full render automatically when scroll/zoom drifted since
+        // the last full render, so this binding is correctness-safe.
+        {
+            let st = self.state.borrow();
+            let scroll_y = st.scroll_y.clone();
+            let scroll_x = st.scroll_x.clone();
+            let cursor_position = st.cursor_position.clone();
+            let cursor_anchor = st.cursor_anchor.clone();
+            let has_selection = st.has_selection.clone();
+            drop(st);
+            let self_id = ctx.self_id();
+            for signal in [&scroll_y, &scroll_x] {
+                signal.bind_to(
+                    self_id,
+                    ctx.binding_registry(),
+                    bastyde_core::binding::BindingLevel::RepaintOnly,
+                );
+            }
+            cursor_position.bind_to(
+                self_id,
+                ctx.binding_registry(),
+                bastyde_core::binding::BindingLevel::RepaintOnly,
+            );
+            cursor_anchor.bind_to(
+                self_id,
+                ctx.binding_registry(),
+                bastyde_core::binding::BindingLevel::RepaintOnly,
+            );
+            has_selection.bind_to(
+                self_id,
+                ctx.binding_registry(),
+                bastyde_core::binding::BindingLevel::RepaintOnly,
             );
         }
 
@@ -1166,7 +1221,15 @@ impl Widget for RichTextEditorBody {
         // or when the shared service's HiDPI scale factor has
         // changed since the last layout — there is no
         // cross-widget trampling left to guard against.
-        if st.needs_full_layout || !st.engine.has_full_layout() {
+        //
+        // `did_full_layout` is true on this paint iff we just ran
+        // `layout_full` above — which means the render frame must
+        // be rebuilt from scratch via `with_render_frame`. The
+        // incremental render paths (`with_render_block_only`,
+        // `with_render_cursor_only`) assume a valid prior full
+        // render exists.
+        let did_full_layout = st.needs_full_layout || !st.engine.has_full_layout();
+        if did_full_layout {
             let flow = st.document.snapshot_flow();
             st.engine.layout_full(&flow);
             st.needs_full_layout = false;
@@ -1201,6 +1264,46 @@ impl Widget for RichTextEditorBody {
         // Clip to bounds so overflowing glyphs don't bleed into siblings.
         canvas.set_clip(bounds);
 
+        // Choose the cheapest render path that produces a correct
+        // frame for this paint:
+        // - Full render: we just rebuilt the layout (no prior frame
+        //   to incrementally update), so emit everything from scratch.
+        // - Block-only: the frame_loop relayed out exactly one block
+        //   since the last paint (single-block edit). Reuse cached
+        //   glyphs for the other N-1 blocks.
+        // - Cursor-only: nothing structural changed since last
+        //   paint — only the cursor blink or selection updated.
+        //   Reuses every cached glyph and just refreshes cursor /
+        //   selection decorations. Falls back to full render
+        //   internally if scroll or zoom drifted.
+        //
+        // Pre-fix, paint() unconditionally called `with_render_frame`,
+        // which walked every block on every paint — visible as a
+        // ~17% chunk in `rasterize_glyph` / `render_run_glyphs` on
+        // the flamegraph because caret blinks and signal updates
+        // were forcing a full re-render at ~60 Hz.
+        let block_relayout = st.last_relayout_block_id.take();
+        let pending_full = std::mem::replace(&mut st.pending_full_render, false);
+        enum RenderChoice {
+            Full,
+            Block(usize),
+            CursorOnly,
+        }
+        // `pending_full` covers the case where `frame_loop::tick`
+        // already ran `layout_full` this frame (e.g. on FormatChanged
+        // or FlowElementsInserted events from a list-indent edit or
+        // Enter key) but cleared `needs_full_layout` before paint ran.
+        // Without it, paint would fall through to CursorOnly and the
+        // new layout wouldn't render until something else forced a
+        // Full pass (resize, scroll out and back into view).
+        let choice = if did_full_layout || pending_full {
+            RenderChoice::Full
+        } else if let Some(bid) = block_relayout {
+            RenderChoice::Block(bid)
+        } else {
+            RenderChoice::CursorOnly
+        };
+
         // Split-borrow the state fields so the paint walker can hold
         // `&engine.with_render_frame(...)`, `&document`, and
         // `&mut image_cache` simultaneously.
@@ -1211,7 +1314,7 @@ impl Widget for RichTextEditorBody {
             ref mut image_cache,
             ..
         } = *state_ref;
-        engine.with_render_frame(|frame| {
+        let paint_closure = |frame: &bastyde_text::RenderFrame| {
             paint_frame(
                 canvas,
                 PaintParams {
@@ -1222,7 +1325,12 @@ impl Widget for RichTextEditorBody {
                     draw_caret: caret_on_now,
                 },
             );
-        });
+        };
+        match choice {
+            RenderChoice::Full => engine.with_render_frame(paint_closure),
+            RenderChoice::Block(bid) => engine.with_render_block_only(bid, paint_closure),
+            RenderChoice::CursorOnly => engine.with_render_cursor_only(paint_closure),
+        };
 
         canvas.clear_clip();
     }
@@ -1421,7 +1529,14 @@ impl Widget for RichTextEditor {
             ctx.effect(&tick_signal, move |delta| {
                 let mut st = state.borrow_mut();
                 let more = frame_loop::tick(&mut st, *delta);
-                st.has_selection.set(st.cursor.has_selection());
+                // Signal::set is unconditional (clones+invokes every
+                // observer even when value unchanged), so only call it
+                // when the bool actually flipped. Avoids per-tick fanout
+                // to chrome widgets that watch the selection state.
+                let new_has_selection = st.cursor.has_selection();
+                if st.has_selection.get() != new_has_selection {
+                    st.has_selection.set(new_has_selection);
+                }
                 if more && let Some(handle) = &st.frame_request {
                     handle.set(true);
                 }

@@ -74,6 +74,12 @@ pub(crate) struct EditorState {
     pub needs_full_layout: bool,
     pub last_relayout_block_id: Option<usize>,
     pub content_dirty: bool,
+    /// True when the most recent layout pass (in `frame_loop::tick`)
+    /// ran `layout_full`. Consumed (cleared to false) by
+    /// `RichTextEditorBody::paint` to pick `RenderChoice::Full`.
+    /// Needed because tick clears `needs_full_layout` after running
+    /// the full layout, so paint can't infer it from that flag alone.
+    pub pending_full_render: bool,
 
     // Wrap mode as configured by the builder.
     pub wrap_mode: WrapMode,
@@ -352,6 +358,7 @@ impl EditorState {
             needs_full_layout: true,
             last_relayout_block_id: None,
             content_dirty: true,
+            pending_full_render: true,
             wrap_mode,
             text_color_user_set: false,
             has_focus: false,
