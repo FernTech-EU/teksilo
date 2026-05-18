@@ -31,13 +31,26 @@
 //!     paragraph. Both via cooperative double/triple tap recognizers.
 //!   * Drag from inside text to near the top or bottom edge → selection
 //!     extends, viewport auto-scrolls.
+//!   * Use the formatting toolbar between the dark-mode bar and the
+//!     editor: Bold / Italic / Underline / Strikethrough tint when the
+//!     caret sits in that format; alignment buttons reflect the
+//!     current block; the heading picker (Normal / H1–H6) tracks the
+//!     caret's block and applies on pick; Bullet / Numbered / Indent /
+//!     Outdent operate on lists; Insert Table drops a 3×3 table at
+//!     the caret; Undo / Redo enable from `can_undo` / `can_redo`.
+//!   * The second toolbar row is dedicated to table operations and
+//!     enables only when the caret is inside a table.
 //!
 //! Run with: `cargo run -p rich-text-editor --features "rich-text clipboard"`
+
+mod format_toolbar;
 
 use bastyde::prelude::*;
 use bastyde::text_document::{Alignment, BlockFormat, MoveMode, TextDocument};
 use bastyde::widgets::rich_text::{RichTextEditor, ScrollPolicy};
 use bastyde::widgets::{Button, Expand, HStack, Spacer, SplitView, Toolbar};
+
+use format_toolbar::FormatToolbar;
 
 /// Walk every block in `doc` and apply default vertical spacing per
 /// kind: roomier margins before / after headings (scaled by heading
@@ -350,16 +363,21 @@ fn main() {
                 .title("Bastyde — Rich Text Editor")
                 .size(1100, 640)
                 .root(move |tree, _state| {
-                    let doc_editor = doc.clone();
+                    // Build the editable view first so the formatting
+                    // toolbar can borrow it for signal / handle wiring,
+                    // then move the editor into the SplitView.
+                    let editor = RichTextEditor::editor(doc.clone());
+                    let toolbar = FormatToolbar::new(&editor);
                     let doc_preview = doc.clone();
                     let split = Signal::new(0.55);
                     tree.add(
                         bastyde::widgets::VStack::new()
                             .child(dark_mode_toolbar())
+                            .child(toolbar)
                             .child(
                                 Expand::new().child(
                                     SplitView::new(split)
-                                        .first(RichTextEditor::editor(doc_editor))
+                                        .first(editor)
                                         .second(
                                             RichTextEditor::read_only(doc_preview)
                                                 .v_scroll_policy(ScrollPolicy::Auto),
