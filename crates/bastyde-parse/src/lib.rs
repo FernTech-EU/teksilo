@@ -16,7 +16,7 @@
 //!   `is_widget_builder_method` / `is_category_b_widget` predicates
 //!   used by both lowering and pretty-printing.
 //!
-//! See `docs/bastyde-language-spec-v3.md` for the surface language.
+//! See `docs/bati-language-spec-v3.md` for the surface language.
 
 pub mod diag;
 pub mod ir;

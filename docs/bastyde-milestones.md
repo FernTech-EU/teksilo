@@ -1,6 +1,6 @@
 # Bastyde Milestones
 
-**Companion to:** bastyde-architecture.md, bastyde-code-examples.md  
+**Companion to:** architecture.md, bastyde-code-examples.md  
 **Date:** April 14, 2026  
 **Status:** Living document — reflects actual codebase state and remaining work
 

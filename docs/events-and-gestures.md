@@ -1,6 +1,6 @@
 # Events and Gestures
 
-**Companion to:** [bastyde-architecture.md](bastyde-architecture.md)
+**Companion to:** [architecture.md](architecture.md)
 **Scope:** How input becomes widget behavior in Bastyde — attached handlers, preview/bubble dispatch, gesture recognizers, and the `EventContext` deferred-operations pattern.
 
 ---
@@ -395,8 +395,8 @@ No Xvfb, no GPU, no display server required.
 
 - [animation.md](animation.md) — `Signal<f32>::animate_to` and the scheduler. Handlers that kick off motion (toggle thumb, accordion height, snackbar slide-in) call `animate_to` on animation-capable signals; the docs here and there are two halves of the "handler runs → something moves" path.
 - [shortcut-intent-action.md](shortcut-intent-action.md) — how intents travel source → root and fire `Action`s; rebindable keystrokes via `ShortcutRegistry`.
-- [bastyde-architecture.md §22 Window Management](bastyde-architecture.md) — modal-vs-modeless, window focus routing.
-- [bastyde-architecture.md §13 Overlay System](bastyde-architecture.md) — overlay stack, click-outside, Escape cascade, focus-restore on dismiss.
+- [architecture.md §22 Window Management](architecture.md) — modal-vs-modeless, window focus routing.
+- [architecture.md §13 Overlay System](architecture.md) — overlay stack, click-outside, Escape cascade, focus-restore on dismiss.
 - [crates/bastyde-core/src/event_handlers.rs](../crates/bastyde-core/src/event_handlers.rs) — `EventHandlers` struct.
 - [crates/bastyde-core/src/widget_builder.rs](../crates/bastyde-core/src/widget_builder.rs) — blanket-impl builder methods.
 - [crates/bastyde-core/src/gesture.rs](../crates/bastyde-core/src/gesture.rs) — recognizer state machines.

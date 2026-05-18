@@ -12,7 +12,7 @@ pub use bastyde_tokens as tokens;
 // directly.
 pub use bastyde_core::presets;
 
-/// The `bati!` DSL macro. See `docs/bastyde-language-spec-v3.md` for the
+/// The `bati!` DSL macro. See `docs/bati-language-spec-v3.md` for the
 /// surface language. Re-exported from `bastyde-macros` so consuming
 /// crates only need `bastyde` in `[dependencies]`.
 pub use bastyde_macros::bati;

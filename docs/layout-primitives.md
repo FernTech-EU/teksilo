@@ -1,6 +1,6 @@
 # Layout Primitives
 
-**Companion to:** [bastyde-architecture.md](bastyde-architecture.md) §2 (Layout Model)
+**Companion to:** [architecture.md](architecture.md) §2 (Layout Model)
 **Scope:** Reference for the layout primitives in [crates/bastyde-widgets/src/primitives/](../crates/bastyde-widgets/src/primitives/) — the containers and size wrappers every other widget composes against.
 
 This document is a working reference: each primitive comes with a one-line summary, the public surface as you'd actually call it, the rule the layout engine applies, and at least one runnable example. Where two primitives can express the same intent, the trade-off is called out explicitly.
@@ -569,7 +569,7 @@ For testing, [crates/bastyde-core/src/test_widgets.rs](../crates/bastyde-core/sr
 
 ## 10. References
 
-- Architecture: [bastyde-architecture.md §2 Layout Model](bastyde-architecture.md)
+- Architecture: [architecture.md §2 Layout Model](architecture.md)
 - Reactive layer: [reactive-theme.md](reactive-theme.md), `Signal<T>` / `Prop<T>` in [crates/bastyde-core/src/signal.rs](../crates/bastyde-core/src/signal.rs)
 - Animation tied to layout: [animation.md](animation.md)
 - Custom widget patterns: [`Widget` trait](../crates/bastyde-core/src/widget.rs), [BuildContext](../crates/bastyde-core/src/build_context.rs)

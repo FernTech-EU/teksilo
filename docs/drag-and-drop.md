@@ -1,6 +1,6 @@
 # Drag and Drop
 
-**Companion to:** [bastyde-architecture.md §14](bastyde-architecture.md), [events-and-gestures.md](events-and-gestures.md)
+**Companion to:** [architecture.md §14](architecture.md), [events-and-gestures.md](events-and-gestures.md)
 **Scope:** The full DnD lifecycle — source-side handlers, target-side handlers, preview overlay, coordinate conventions, auto-scroll / spring-loaded folders, keyboard equivalence, and how `ListView` / `TreeView` use it.
 
 ---
@@ -265,7 +265,7 @@ See [events-and-gestures.md §8](events-and-gestures.md) for the general testing
 
 ## See also
 
-- [bastyde-architecture.md §14 Drag and Drop](bastyde-architecture.md) — the design rationale and the three DnD scenarios.
+- [architecture.md §14 Drag and Drop](architecture.md) — the design rationale and the three DnD scenarios.
 - [events-and-gestures.md §4 Gesture recognizers](events-and-gestures.md) — how `DragRecognizer` fits into the gesture arena.
 - [data-models.md §8 Drag-and-drop integration](data-models.md) — how `ListModel::move_item` / `TreeModel::move_node` / `DataChange::ItemsMoved` / `TreeChange::NodeMoved` plug into the drop handlers.
 - [shortcut-intent-action.md](shortcut-intent-action.md) — when a drop should fire a typed `Intent` instead of mutating a model directly.

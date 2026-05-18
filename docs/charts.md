@@ -1,6 +1,6 @@
 # Charts
 
-**Companion to:** [bastyde-architecture.md](bastyde-architecture.md)
+**Companion to:** [architecture.md](architecture.md)
 **Scope:** The `bastyde-charts` crate — `BarChart`, `LineChart`, `PieChart`
 (pie + donut), the `ChartSeries<T>` / `ChartDatum<T>` data model, the
 shared axis / palette / legend infrastructure, and the rendering and

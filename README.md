@@ -77,7 +77,7 @@ Bastyde is a retained-tree framework inspired by Qt and the ShiftUI layouting.
 
 ## Status
 
-**Version 0.4, first public release.** Expect breaking changes between 0.x versions.
+Expect breaking changes between 0.x versions.
 
 The test suite is roughly 2,600 tests in bastyde and over 4,000 across the whole stack. Tests target behavior (event dispatch, layout output, accessibility-tree structure), not implementation snapshots. The same widget tree runs under tests without a window, a GPU, or winit, and a simulated clock makes time-dependent behavior deterministic.
 

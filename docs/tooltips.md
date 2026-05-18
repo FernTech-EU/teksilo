@@ -519,7 +519,7 @@ by the `attach_*` call.
 
 ## See also
 
-- [Overlays in bastyde-architecture.md](bastyde-architecture.md) — overlay
+- [Overlays in architecture.md](architecture.md) — overlay
   manager, `OverlayRequest`, dismiss behaviors.
 - [reactive-theme.md](reactive-theme.md) — `ColorProp`, role-driven colors,
   Signal-bound theme switching.

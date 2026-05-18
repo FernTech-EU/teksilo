@@ -7,7 +7,7 @@ virtual tree — the output is exactly the code you could have written by
 hand.
 
 This document is the user-facing reference. For the design rationale and
-full grammar, see [bastyde-language-spec-v3.md](bastyde-language-spec-v3.md).
+full grammar, see [bati-language-spec-v3.md](bati-language-spec-v3.md).
 
 ---
 
@@ -521,7 +521,7 @@ diagnostic under the user's token, thanks to span-preserving emission.
 
 ## Further reading
 
-- [bastyde-language-spec-v3.md](bastyde-language-spec-v3.md) — complete
+- [bati-language-spec-v3.md](bati-language-spec-v3.md) — complete
   grammar, design principles, and worked translations of the reference
   examples.
 - [crates/bastyde/tests/bastyde/pass/](../crates/bastyde/tests/bastyde/pass/)

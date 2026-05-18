@@ -1,6 +1,6 @@
 # Reactive Data Models
 
-**Companion to:** [bastyde-architecture.md](bastyde-architecture.md)
+**Companion to:** [architecture.md](architecture.md)
 **Scope:** The `bastyde-data` crate — `ListModel`, `TreeModel`, `TreeSlice`, `SelectionModel`, `CheckedModel`, `TreeCheckedModel`, `CheckState`, `ListDataSource`, and the change-notification enums that connect them to data-driven widgets (`ListView`, `TreeView`, `Repeater`).
 
 ---
@@ -255,7 +255,7 @@ Use `ListView` for **unbounded or large collections that scroll**:
 
 ## 9. Drag-and-drop integration
 
-`ListView` and `TreeView` are drag sources and drop targets out of the box. Intra-widget reorder routes through `ListModel::move_item(from, to)` / `TreeModel::move_node(node, new_parent, new_index)`; the widget produces visual feedback (insertion lines, depth-tinted highlight on tree drop targets) and emits typed reorder intents. Cross-widget and cross-app drag flows through `DragPayload` — see [bastyde-architecture.md §14 Drag and Drop](bastyde-architecture.md) for the full picture.
+`ListView` and `TreeView` are drag sources and drop targets out of the box. Intra-widget reorder routes through `ListModel::move_item(from, to)` / `TreeModel::move_node(node, new_parent, new_index)`; the widget produces visual feedback (insertion lines, depth-tinted highlight on tree drop targets) and emits typed reorder intents. Cross-widget and cross-app drag flows through `DragPayload` — see [architecture.md §14 Drag and Drop](architecture.md) for the full picture.
 
 The relevant bastyde-data hook is the `DataChange::ItemsMoved { from, to, count }` / `TreeChange::NodeMoved { node, old_parent, new_parent, new_index }` notifications. The source widget emits the mutation on the model; every observer of the model — including other `ListView`s sharing the data — receives the notification and updates consistently.
 
@@ -313,8 +313,8 @@ Widget-tree tests that want a representative model use `ListModel::from_vec(vec!
 
 ## See also
 
-- [bastyde-architecture.md §6 UI Construction Patterns](bastyde-architecture.md) — `Repeater` in context, static-vs-dynamic children.
-- [bastyde-architecture.md §14 Drag and Drop](bastyde-architecture.md) — `DragPayload`, cross-widget reorder.
+- [architecture.md §6 UI Construction Patterns](architecture.md) — `Repeater` in context, static-vs-dynamic children.
+- [architecture.md §14 Drag and Drop](architecture.md) — `DragPayload`, cross-widget reorder.
 - [shortcut-intent-action.md](shortcut-intent-action.md) — typed intents, ancestor `Action`s, how the MVVM command layer lands in Rust.
 - [crates/bastyde-data/src/list_model.rs](../crates/bastyde-data/src/list_model.rs), [tree_model.rs](../crates/bastyde-data/src/tree_model.rs), [tree_slice.rs](../crates/bastyde-data/src/tree_slice.rs), [selection_model.rs](../crates/bastyde-data/src/selection_model.rs), [list_data_source.rs](../crates/bastyde-data/src/list_data_source.rs).
 - [crates/bastyde-data/src/data_change.rs](../crates/bastyde-data/src/data_change.rs), [tree_change.rs](../crates/bastyde-data/src/tree_change.rs).

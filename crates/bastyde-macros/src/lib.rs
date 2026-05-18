@@ -1,6 +1,6 @@
 //! The `bati!` DSL proc-macro for Bastyde widget trees.
 //!
-//! See `docs/bastyde-language-spec-v3.md` for the surface language. This
+//! See `docs/bati-language-spec-v3.md` for the surface language. This
 //! crate implements a one-to-one syntactic transform from the DSL to
 //! Bastyde V2 builder calls. The macro's only job is to remove syntactic
 //! noise: every construct desugars to code the user could have written
@@ -73,7 +73,7 @@ pub(crate) fn bastyde_core_root() -> TokenStream2 {
 ///                                  // for passing to .child(...) etc.
 /// ```
 ///
-/// See `docs/bastyde-language-spec-v3.md` for the full surface language.
+/// See `docs/bati-language-spec-v3.md` for the full surface language.
 #[proc_macro]
 pub fn bati(input: TokenStream) -> TokenStream {
     match bastyde_parse::parse_root(input.into()) {

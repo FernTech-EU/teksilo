@@ -730,7 +730,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Accessibility (AccessKit integration at trait level + builder-level overrides: `.access_label`, `.access_description`, `.access_hidden`, `.access_role`, `.access_disabled`, `.access_controls`/`described_by`/`labelled_by`, `.access_live`, `.access_shortcut_id`/`access_shortcut_literal`, `.access_action`/`access_remove_action`/`access_custom_action`, `.access_exclude_subtree`/`access_merge_subtree`, `.access_customize` — see "Accessibility Overrides" above)
 - Animation system (`Signal<f32>::animate_to`, easing, per-frame scheduler)
 - Internationalization (bastyde-i18n + bastyde-i18n-macros: Fluent-rs, `tr!`/`tr_widget!`, locale resolution, file watcher, RTL direction signal). Locale-aware formatting via `NumberFormatter` / `BastydeDateTimeFormatter` (`Signal<T>` → `Signal<String>`) and `BastydeDateTime` (jiff wrapper for the `DATETIME()` Fluent function). The framework auto-installs a `set_formatter` callback + custom `DATETIME` function on every bundle, so `{ NUMBER(...) }` / `{ DATETIME(...) }` inside `.ftl` messages render correctly across locales. Reactive `tr_signal!` / `tr_signal_widget!` macros bind `Signal<T>` arguments inside translated sentences and re-render on any-arg / locale / hot-reload change. Backed by ICU4X (`icu_decimal` / `icu_datetime` / `icu_calendar`); see "Locale-aware Formatting" below.
-- `bati!` DSL (bastyde-macros: block-structured widget-tree syntax, desugars to V2 builder calls — see `docs/bastyde-macro-reference.md`)
+- `bati!` DSL (bastyde-macros: block-structured widget-tree syntax, desugars to V2 builder calls — see `docs/bati-macro-reference.md`)
 - Actions / Intents / Shortcuts (`Action`, `Intent`, `Shortcut`, `ShortcutRegistry`, `#[derive(IntentKind)]`, `ShortcutSettings` — rebindable keystrokes, typed-enum DTO bridge, source → root dispatch; see `docs/shortcut-intent-action.md`)
 - Ancestor key intercept (`.on_key_preview`) and subtree state signals (`.focus_within(Signal<bool>)` / `.hover_within(Signal<bool>)`) — strict-ancestors-only, see Event System above
 - Reactive data models (bastyde-data: `ListModel`, `TreeModel`, `TreeSlice`, `SelectionModel`, `SortFilterListModel<T>`, `SortFilterTreeModel<T>` with `TreeFilterMode` `HideNonMatching`/`KeepAncestors`/`KeepDescendants`, `CheckedModel` + `TreeCheckedModel<T>` for per-row checkbox state with optional descendant→ancestor tristate aggregation, `CheckState`)
@@ -787,7 +787,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - i18n locale-aware formatting: [crates/bastyde-i18n/src/format.rs](crates/bastyde-i18n/src/format.rs) (Memoizable types, ICU bridge, `BastydeDateTime` + `FluentType` impl, public `NumberFormatter` / `BastydeDateTimeFormatter`, bundle `set_formatter` callback, `DATETIME()` Fluent function). Bundle wiring: `configure_bundle` helper in [manager.rs](crates/bastyde-i18n/src/manager.rs). Tests: [crates/bastyde-i18n/tests/format_integration.rs](crates/bastyde-i18n/tests/format_integration.rs)
 - i18n macros: [crates/bastyde-i18n-macros/src/lib.rs](crates/bastyde-i18n-macros/src/lib.rs) (`tr!`, `tr_widget!`, `tr_signal!`, `tr_signal_widget!`)
 - bati! DSL macro: [crates/bastyde-macros/src/](crates/bastyde-macros/src/) (parse → IR → lower). Trybuild fixtures at [crates/bastyde/tests/bastyde/pass/](crates/bastyde/tests/bastyde/pass/)
-- bati! reference: [docs/bastyde-macro-reference.md](docs/bastyde-macro-reference.md) (user-facing), [docs/bastyde-language-spec-v3.md](docs/bastyde-language-spec-v3.md) (design spec)
+- bati! reference: [docs/bati-macro-reference.md](docs/bati-macro-reference.md) (user-facing), [docs/bati-language-spec-v3.md](docs/bati-language-spec-v3.md) (design spec)
 - Actions/Intents/Shortcuts: [crates/bastyde-core/src/action.rs](crates/bastyde-core/src/action.rs), [intent.rs](crates/bastyde-core/src/intent.rs), [shortcut.rs](crates/bastyde-core/src/shortcut.rs). `IntentKind` derive: [crates/bastyde-macros/src/intent_kind.rs](crates/bastyde-macros/src/intent_kind.rs). Settings widget: [crates/bastyde-widgets/src/shortcut_settings.rs](crates/bastyde-widgets/src/shortcut_settings.rs). Reference doc: [docs/shortcut-intent-action.md](docs/shortcut-intent-action.md)
 - Settings/persistence: [crates/bastyde-settings/src/](crates/bastyde-settings/src/) (`store.rs`, `file.rs`, `mru.rs`, `window_state.rs`, `bundle.rs`, `ext.rs`, `migration.rs`, `flush.rs`, `path.rs`). Auto window save/restore wiring: [crates/bastyde-app/src/window_persist.rs](crates/bastyde-app/src/window_persist.rs). Reference doc: [docs/settings.md](docs/settings.md). Demo: [examples/recent_projects/src/main.rs](examples/recent_projects/src/main.rs)
 - Canvas API: `crates/bastyde-canvas/src/canvas.rs`
@@ -906,9 +906,9 @@ the `#{ expr }` escape work as documented. Category B widgets (Card,
 Dialog, TabWidget, etc.) address content by named slots; a bare child
 there emits a targeted hint pointing at the right slot name.
 
-See [docs/bastyde-macro-reference.md](docs/bastyde-macro-reference.md) for
+See [docs/bati-macro-reference.md](docs/bati-macro-reference.md) for
 the full surface language, desugaring cheat sheet, and limitations;
-[docs/bastyde-language-spec-v3.md](docs/bastyde-language-spec-v3.md) for the
+[docs/bati-language-spec-v3.md](docs/bati-language-spec-v3.md) for the
 design spec with worked translations of the widget-catalog examples.
 Slash command `/bastyde-macro` loads the skill for read/write/explain/
 translate/debug workflows.
@@ -937,6 +937,6 @@ If the app uses persistence, chain `.app_paths(...)` (or `.application(qualifier
 
 ## Architecture Reference
 
-Framework-internals reference: [docs/bastyde-architecture.md](docs/bastyde-architecture.md) — scrolling, arena state, Canvas API, rendering pipeline, HiDPI, threading, testability, crate dependency graph, architectural comparisons, open questions. Subsystems with a dedicated reference doc (events, layout, animation, theming, i18n, shortcuts, accessibility, settings, multi-window, drag-and-drop, data models, …) are stubbed with one-paragraph pointers; section numbers are preserved so external `§N` refs still resolve. Doc index: [docs/SUMMARY.md](docs/SUMMARY.md).
+Framework-internals reference: [docs/architecture.md](docs/architecture.md) — scrolling, arena state, Canvas API, rendering pipeline, HiDPI, threading, testability, crate dependency graph, architectural comparisons, open questions. Subsystems with a dedicated reference doc (events, layout, animation, theming, i18n, shortcuts, accessibility, settings, multi-window, drag-and-drop, data models, …) are stubbed with one-paragraph pointers; section numbers are preserved so external `§N` refs still resolve. Doc index: [docs/SUMMARY.md](docs/SUMMARY.md).
 
 Additional documentation: [docs/widgets-overview.md](docs/widgets-overview.md), [docs/accessibility-overrides.md](docs/accessibility-overrides.md), [docs/settings.md](docs/settings.md), [docs/drag-and-drop.md](docs/drag-and-drop.md), [docs/title-bar.md](docs/title-bar.md), [docs/multi-window.md](docs/multi-window.md), [docs/idle-and-animation.md](docs/idle-and-animation.md), [docs/telemetry.md](docs/telemetry.md), [docs/table-view.md](docs/table-view.md), [docs/inspector.md](docs/inspector.md)

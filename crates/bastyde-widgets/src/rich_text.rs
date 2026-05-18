@@ -1,6 +1,6 @@
 //! Rich text editor widget. Feature-gated behind the `rich-text` feature.
 //!
-//! See [`§27.10` of the architecture doc](../../../../../docs/bastyde-architecture.md)
+//! See [`§27.10` of the architecture doc](../../../../../docs/architecture.md)
 //! for the design rationale. This crate ships `RichTextEditor` with two
 //! construction presets — M8a provides [`RichTextEditor::read_only`]
 //! (view documents, select/copy, click links). M8b will add

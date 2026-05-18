@@ -1,6 +1,6 @@
 # Animation
 
-**Companion to:** [bastyde-architecture.md](bastyde-architecture.md)
+**Companion to:** [architecture.md](architecture.md)
 **Scope:** Signal-driven animation in Bastyde — `Signal<f32>::animate_to`, the scheduler behind it, and the design rules for deciding when (and when not) to animate.
 
 ---
@@ -299,7 +299,7 @@ Headless tests that never call `render()` have `paint_epoch == 0`; the scheduler
 ## See also
 
 - [reactive-theme.md](reactive-theme.md) — reactive theming for the "it's not really animation, it's just reactive color" path (hover, press, focus).
-- [bastyde-architecture.md §20 Threading](bastyde-architecture.md) — where the per-frame tick fits in the event loop.
+- [architecture.md §20 Threading](architecture.md) — where the per-frame tick fits in the event loop.
 - [crates/bastyde-core/src/animation.rs](../crates/bastyde-core/src/animation.rs) — scheduler source.
 - [crates/bastyde-core/src/signal.rs](../crates/bastyde-core/src/signal.rs) (`Signal<f32>::animate_to` et al).
 - [crates/bastyde-tokens/src/motion.rs](../crates/bastyde-tokens/src/motion.rs) — `Easing` and `MotionTokens`.

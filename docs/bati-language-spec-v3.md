@@ -2,8 +2,8 @@
 
 **Status:** Design draft, revision 3
 **Date:** April 17, 2026
-**Companion to:** bastyde-architecture.md §28.9
-**Supersedes:** bastyde-language-spec-v2.md
+**Companion to:** architecture.md §28.9
+**Supersedes:** bati-language-spec-v2.md
 
 ---
 

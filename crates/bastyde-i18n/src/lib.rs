@@ -1,6 +1,6 @@
 //! Internationalization runtime for Bastyde.
 //!
-//! Implements §12 of `docs/bastyde-architecture.md`. This crate is the
+//! Implements §12 of `docs/architecture.md`. This crate is the
 //! runtime half of the i18n stack: `LocalizedString`, `I18nConfig`,
 //! `I18nManager`, locale resolution, and the thread-local that bridges
 //! macro-expanded code into the active translation bundles.

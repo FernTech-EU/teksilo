@@ -393,6 +393,6 @@ The Tier-3 styling system (see [styling-system.md](styling-system.md)) lets an a
 - [shortcut-intent-action.md](shortcut-intent-action.md) — the `Shortcut` / `Intent` / `Action` pipeline that `.access_shortcut_id` binds to.
 - [events-and-gestures.md](events-and-gestures.md) — `on_access_action` and `on_access_action_request` event handlers (what `.access_action` layers on top of).
 - [reactive-theme.md](reactive-theme.md) — how locale and theme changes propagate via composite rebuilds (the same mechanism keeps `.access_label(tr!(...))` translations current).
-- [bastyde-macro-reference.md](bastyde-macro-reference.md) — `bati!` DSL syntax for `name: value` body items, used by the catalog demo's `controls_bati` block.
+- [bati-macro-reference.md](bati-macro-reference.md) — `bati!` DSL syntax for `name: value` body items, used by the catalog demo's `controls_bati` block.
 - [crates/bastyde-core/src/widget_builder.rs](../crates/bastyde-core/src/widget_builder.rs) — `AccessibilityOverrides` struct, `AccessSubtreeMode` enum, every `access_*` method definition.
 - [crates/bastyde-core/src/widget_tree/accessibility_impl.rs](../crates/bastyde-core/src/widget_tree/accessibility_impl.rs) — walker integration, `merge_descendants_into` helper, the 36 unit tests.

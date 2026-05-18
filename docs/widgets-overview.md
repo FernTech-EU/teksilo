@@ -273,5 +273,5 @@ Pre-built UI for common app-level concerns.
 - Shortcuts / intents / actions: [shortcut-intent-action.md](shortcut-intent-action.md)
 - Multi-window orchestration: [multi-window.md](multi-window.md)
 - Inspector for runtime introspection: [inspector.md](inspector.md)
-- Framework internals (Canvas, rendering pipeline, threading, testability): [bastyde-architecture.md](bastyde-architecture.md)
+- Framework internals (Canvas, rendering pipeline, threading, testability): [architecture.md](architecture.md)
 - Full per-widget API extraction: `python3 tools/extract_widget_api.py <Widget…>` or `--all`

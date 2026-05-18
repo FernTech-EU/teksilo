@@ -8,7 +8,7 @@ file back in place. Source outside `bati!` blocks is byte-for-byte
 unchanged — `cargo fmt` still owns Rust formatting.
 
 For the surface language the formatter normalizes, see
-[bastyde-macro-reference.md](bastyde-macro-reference.md).
+[bati-macro-reference.md](bati-macro-reference.md).
 
 ---
 
@@ -299,9 +299,9 @@ printing happens in the library crates.
 
 ## Related
 
-- [bastyde-macro-reference.md](bastyde-macro-reference.md) — surface
+- [bati-macro-reference.md](bati-macro-reference.md) — surface
   language for the DSL the formatter operates on.
-- [bastyde-language-spec-v3.md](bastyde-language-spec-v3.md) — design spec
+- [bati-language-spec-v3.md](bati-language-spec-v3.md) — design spec
   with worked translations of widget-catalog examples.
 - [crates/bastyde/tests/bastyde/pass/](../crates/bastyde/tests/bastyde/pass/)
   — trybuild fixtures that double as canonical examples of well-

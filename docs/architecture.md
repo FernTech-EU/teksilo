@@ -35,7 +35,7 @@
 > - Multi-window: [`multi-window.md`](multi-window.md)
 > - Custom title bar: [`title-bar.md`](title-bar.md)
 > - Tooltips and overlays: [`tooltips.md`](tooltips.md)
-> - `bati!` DSL: [`bastyde-macro-reference.md`](bastyde-macro-reference.md), [`bastyde-language-spec-v3.md`](bastyde-language-spec-v3.md)
+> - `bati!` DSL: [`bati-macro-reference.md`](bati-macro-reference.md), [`bati-language-spec-v3.md`](bati-language-spec-v3.md)
 > - Inspector: [`inspector.md`](inspector.md)
 > - Widget catalog snapshot: [`bastyde-milestones.md`](bastyde-milestones.md), `tools/extract_widget_api.py --all`
 > - Per-widget reference docs: [`table-view.md`](table-view.md), [`tab-widget.md`](tab-widget.md), [`charts.md`](charts.md), [`bastyde-scene.md`](bastyde-scene.md)
@@ -202,7 +202,7 @@ TabWidget::new()
 
 The framework provides three child-addition methods on container builders — `add_child(WidgetId)` for pre-registered children, `child(impl IntoWidgetTree)` for inline insertion, and `children(iter)` / `child_opt(Option<_>)` for iterator and conditional shapes — plus the `Repeater` for dynamic non-virtualized collections driven by `ListModel<T>` change notifications. Composites use the static `child()` chain when content structure is fixed for the lifetime of the widget; `visible_when(Signal<bool>)` toggles individual subtrees between active and dormant without reconstruction; the `Repeater` handles small collections that change during interaction; `ListView` virtualizes large collections. The `bati!` DSL desugars to these same builder calls.
 
-References: CLAUDE.md "Widget Construction Patterns", [`bastyde-macro-reference.md`](bastyde-macro-reference.md), [`data-models.md`](data-models.md) (Repeater vs ListView).
+References: CLAUDE.md "Widget Construction Patterns", [`bati-macro-reference.md`](bati-macro-reference.md), [`data-models.md`](data-models.md) (Repeater vs ListView).
 
 ---
 
@@ -574,7 +574,7 @@ For a one-shot dump suitable for downstream tooling: `python3 tools/extract_widg
 
 The unified `Widget` trait, `Signal<T>` reactivity, attached handlers, `BuildContext::signal` / `effect` / `animated_signal` / `app_state` / `subscribe_event`, the four widget shapes (leaf / container / composing / hybrid), and the `take_widget` / `restore_widget` arena extraction pattern that makes `build(&mut self)` borrow-safe — all documented in CLAUDE.md "Unified Widget Trait" plus the focused docs ([`events-and-gestures.md`](events-and-gestures.md), [`reactive-theme.md`](reactive-theme.md), [`animation.md`](animation.md)). The V2 model is what the entire widget library is written against; reading [`crates/bastyde-widgets/src/button.rs`](../crates/bastyde-widgets/src/button.rs) is the fastest way to see all of it together in one ~200-line widget.
 
-The `bati!` DSL desugars to V2 builder calls one-to-one at macro-expansion time — no runtime, no virtual tree. References: [`bastyde-macro-reference.md`](bastyde-macro-reference.md) (user-facing) and [`bastyde-language-spec-v3.md`](bastyde-language-spec-v3.md) (grammar and desugaring spec).
+The `bati!` DSL desugars to V2 builder calls one-to-one at macro-expansion time — no runtime, no virtual tree. References: [`bati-macro-reference.md`](bati-macro-reference.md) (user-facing) and [`bati-language-spec-v3.md`](bati-language-spec-v3.md) (grammar and desugaring spec).
 
 ---
 
