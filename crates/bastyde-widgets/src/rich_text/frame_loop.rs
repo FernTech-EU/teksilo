@@ -106,32 +106,23 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
         }
     }
 
-    // Step 3: word-wrap viewport pre-adjustment.
+    // Step 3: forward the viewport to the typesetter.
     //
-    // If a vertical scrollbar is currently visible, reserve space for
-    // it so the word-wrap layout produces the right line breaks. The
-    // decision is one frame stale (it looks at last frame's max_scroll),
-    // which is exactly the converging behaviour described in §27.10.5.
+    // Overlay scrollbars (the editor's default) float on top of the
+    // content and reserve no gutter — the wrap width equals the full
+    // viewport width. Before overlay scrollbars were wired in, this
+    // step shaved off SCROLLBAR_THICKNESS whenever `max_scroll_y > 0`,
+    // which caused a one-frame-late re-wrap on the first edit (full
+    // width on the initial paint → reduced width on the next tick after
+    // max_scroll crossed zero → all blocks visibly shifted on the first
+    // keystroke as `relayout_block_snapshot` ran at the new width).
     let viewport_width = state.viewport_width;
     let viewport_height = state.viewport_height;
 
     if viewport_width > 0.0 && viewport_height > 0.0 {
-        let v_visible = state.max_scroll_y.get() > 0.0;
-        let h_visible = state.max_scroll_x.get() > 0.0;
-        let effective_w = if v_visible {
-            (viewport_width - SCROLLBAR_THICKNESS).max(0.0)
-        } else {
-            viewport_width
-        };
-        let effective_h = if h_visible {
-            (viewport_height - SCROLLBAR_THICKNESS).max(0.0)
-        } else {
-            viewport_height
-        };
-
         // set_viewport in text-typeset is cheap; call unconditionally
         // so zoom changes and resizes both propagate.
-        state.engine.set_viewport(effective_w, effective_h);
+        state.engine.set_viewport(viewport_width, viewport_height);
     }
 
     // Step 4: apply layout strategy. Gated on a non-zero viewport

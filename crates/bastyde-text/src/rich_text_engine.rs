@@ -168,6 +168,22 @@ impl RichTextEngine {
         self.flow.set_text_color(color);
     }
 
+    /// Set the background painted behind fenced code blocks when the
+    /// block carries no explicit `background_color`. Wired from the
+    /// active theme's `editor_code_block_bg` by the host widget so
+    /// dark / light swaps reach the cards.
+    pub fn set_code_block_background(&mut self, color: [f32; 4]) {
+        self.flow.set_code_block_background(color);
+    }
+
+    /// Set the foreground used for monospaced runs (inline `code`,
+    /// fenced code blocks) that carry no explicit `foreground_color`.
+    /// `None` falls back to the engine's `text_color`. Wired from
+    /// `editor_code_block_fg` alongside the background setter.
+    pub fn set_code_block_foreground(&mut self, color: Option<[f32; 4]>) {
+        self.flow.set_code_block_foreground(color);
+    }
+
     pub fn default_face(&self) -> Option<FontFaceId> {
         self.default_face
     }
@@ -241,7 +257,11 @@ impl RichTextEngine {
             .snapshot_block_at_position(block_position)
             .ok_or_else(|| "no block at position".to_string())?;
         let block_id = snap.block_id;
-        let params = text_typeset::bridge::convert_block(&snap);
+        let opts = text_typeset::bridge::BridgeOptions {
+            code_block_background: self.flow.code_block_background(),
+            code_block_foreground: self.flow.code_block_foreground(),
+        };
+        let params = text_typeset::bridge::convert_block_with(&snap, &opts);
         let bridge = self.shared.borrow();
         self.flow.relayout_block(bridge.service(), &params).expect(
             "relayout_block invariant violated: has_full_layout() should already \

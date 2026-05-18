@@ -92,6 +92,24 @@ pub(crate) struct EditorState {
     /// caller-side wiring.
     pub text_color_user_set: bool,
 
+    /// Last text color applied to the typesetter. Tracked so a theme
+    /// swap (light ↔ dark) can force a full re-render — without it
+    /// paint() would happily call `engine.with_render_cursor_only`,
+    /// which reuses the cached glyph quads with their old colors baked
+    /// in, leaving the visible text unchanged until the next typing /
+    /// scroll event triggered a Full or Block render.
+    pub last_text_color: Option<[f32; 4]>,
+
+    /// Last code-block background colour applied to the engine. A
+    /// change forces a full `layout_full` (not just a render) because
+    /// the converted `BlockLayoutParams.background_color` is baked in
+    /// at layout time, not at render time.
+    pub last_code_block_bg: Option<[f32; 4]>,
+    /// Last code-block foreground colour applied to the engine. Same
+    /// rationale as `last_code_block_bg` — fragment foregrounds are
+    /// baked into the layout's shaped runs.
+    pub last_code_block_fg: Option<[f32; 4]>,
+
     // Focus — mirrored from `on_focus` so paint can gate the caret.
     pub has_focus: bool,
 
@@ -361,6 +379,9 @@ impl EditorState {
             pending_full_render: true,
             wrap_mode,
             text_color_user_set: false,
+            last_text_color: None,
+            last_code_block_bg: None,
+            last_code_block_fg: None,
             has_focus: false,
             focus_signal: Signal::new(false),
             event_queue,

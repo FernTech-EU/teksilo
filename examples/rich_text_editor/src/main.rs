@@ -54,64 +54,198 @@ fn dark_mode_toolbar() -> impl Widget {
     ))
 }
 
-const SAMPLE: &str = r#"# Rich Text Editor — Preview Pane
+const SAMPLE: &str = r#"# RichTextEditor — Capability Showcase
 
-This window hosts two `RichTextEditor` widgets bound to the **same**
+This window hosts **two** `RichTextEditor` widgets bound to the *same*
 `TextDocument`. The left pane is the full editor; the right pane is a
-read-only viewer with a `SelectionType::Document` fallback. Because
-both subscribe to `doc.on_change()` independently, edits in the left
-pane propagate live to the right pane on the next frame tick — no
-manual state shuffling, no `poll_events()` starvation problem.
+read-only viewer. Edits on the left propagate live to the right on the
+next frame tick.
 
-## What works in M8b
+This document exercises every feature the markdown importer recognises.
+Capabilities listed under "API-only features" exist in the engine but
+have no markdown syntax — they are reachable through keyboard
+shortcuts (Ctrl+U, Ctrl+B, …) or `TextDocument`'s typed API.
 
-- Full text insertion: typing, Enter to split blocks, Backspace,
-  Delete, Ctrl+Backspace / Ctrl+Delete for word-level deletion.
-- Undo / redo (Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z).
-- Bold / italic / underline toggles (Ctrl+B / Ctrl+I / Ctrl+U).
-- Click to place caret (click 1), double-click to select word
-  (click 2), triple-click to select paragraph (click 3). The three
-  gestures are independent cooperative recognizers — click 3 escalates
-  over what click 2 installed.
-- Drag-select with near-edge auto-scroll. Pull the mouse past the
-  top or bottom of the viewport; the widget keeps scrolling while the
-  button is held.
-- Copy / cut / paste through the system clipboard. In-process paste
-  preserves rich formatting via a stored `DocumentFragment`;
-  inter-application paste round-trips through HTML on Linux
-  (`text/html`), macOS (`public.html`), and Windows (`CF_HTML`), so
-  copy from Firefox / Word / Google Docs keeps headings, bold,
-  italic, lists, tables — anything text-document's HTML importer
-  recognises.
-- Ctrl+Shift+V pastes as plain text (`EditCommandKind::PasteUnformatted`).
-- Tab: inside a table, moves to the next cell (auto-inserts a row at
-  the last cell); at the start of a list item, increases indent;
-  otherwise inserts a literal tab. Shift+Tab is the inverse.
-- Ctrl+Enter always inserts a block, bypassing the "Enter-in-table
-  navigates to the cell below" behaviour.
-- Backspace at the start of an indented list item dedents; at indent
-  zero it exits the list.
-- Shift+Arrow at a cell boundary activates rectangular cell selection;
-  further Shift+Arrows extend the rectangle.
-- Links and images are clickable — install callbacks via
-  `.on_link_activated(...)` / `.on_image_activated(...)` on the editor.
-- Right-click for Cut / Copy / Paste / Paste Unformatted / Select All.
-  Item availability (Cut/Copy require a selection, Select All requires
-  a non-empty document) refreshes on every open. Read-only preset ships
-  a trimmed Copy + Select All variant. Apps that want to override
-  pass their own factory via `RichTextEditor::context_menu(...)`.
-- Ctrl+A single-shot select-all (the 4-level ladder is inside a table
-  cell only — try this document's paragraphs and you'll see the
-  single-shot behaviour).
+## Heading scale
 
-## Not here yet
+The typesetter scales heading sizes against the body font:
+H1 = 2.0×, H2 = 1.5×, H3 = 1.25×, H4 = 1.1×, H5/H6 = 1.0×.
 
-- IME composition (M10).
-- RTF clipboard payload — the long-tail rich fallback for Pages /
-  TextEdit / older Windows apps that don't emit HTML. HTML covers
-  Firefox, Word, Google Docs, Apple Notes.
+### Third-level heading
 
-Type below, watch the preview update in real time.
+#### Fourth-level heading
+
+##### Fifth-level heading
+
+###### Sixth-level heading
+
+## Inline character formatting
+
+Markdown can express **bold**, *italic*, ***bold italic***, and
+~~strikethrough~~ inline. Inline `code` switches to the monospace
+family. Links like [the text-document repo](https://example.com/text-document)
+carry an `anchor_href` and are clickable via the editor's
+`.on_link_activated(...)` callback.
+
+You can mix runs freely: a paragraph with **bold *and italic together***,
+a [**bold link**](https://example.com), `code with ~~strike inside~~`,
+and a final ***`bold-italic code`*** run.
+
+### API-only character features (try the keyboard)
+
+- **Underline** — Ctrl+U. The engine supports five underline styles
+  (`Single`, `Dash`, `Dot`, `DashDot`, `DashDotDot`) plus a `Wave`
+  variant used by spell-checkers.
+- **Overline** — API only.
+- **Superscript / subscript** — `vertical_alignment` field on
+  `CharacterFormat`; rendered at 65% of the base font size.
+- **Foreground / background colour** — per-character.
+- **Letter / word spacing**, **font family / size / weight** override,
+  **tooltips**, **named anchors** — all API only.
+
+## Lists
+
+### Unordered (Disc) with nesting
+
+- First item at indent 0
+- Second item, mixing **bold** and *italic* in the same line
+  - Nested item at indent 1
+  - Another nested item with `inline code`
+    - Deeper nesting at indent 2
+    - One more at indent 2
+- Back to indent 0 with a [link](https://example.com)
+
+### Ordered (Decimal) with nesting
+
+1. First numbered item
+2. Second numbered item
+   1. Nested decimal at indent 1
+   2. Another nested decimal
+      1. Triple-nested decimal at indent 2
+3. Back to indent 0
+
+### API-only list styles
+
+`ListStyle` has eight variants total. The markdown importer only
+emits `Disc` and `Decimal`. The remaining six — `Circle`, `Square`,
+`LowerAlpha`, `UpperAlpha`, `LowerRoman`, `UpperRoman` — plus
+custom `prefix` / `suffix` strings, are reachable through
+`TextCursor::create_list(...)`.
+
+## Blockquotes
+
+> A single-level blockquote. Nestable to arbitrary depth and renders
+> with an indented left margin.
+>
+> > Nested blockquote at depth 2. Inline formatting works inside:
+> > **bold**, *italic*, ~~strike~~, `code`, [links](https://example.com).
+> >
+> > > A third-level nested blockquote, for good measure.
+
+## Code blocks
+
+Fenced code blocks remember the language tag for syntax-highlighter
+hooks. The block paints with a light-grey background, switches to the
+monospace family, and disables word-wrap.
+
+```rust
+fn fibonacci(n: u64) -> u64 {
+    match n {
+        0 | 1 => n,
+        _ => fibonacci(n - 1) + fibonacci(n - 2),
+    }
+}
+```
+
+```python
+def fib(n):
+    return n if n < 2 else fib(n - 1) + fib(n - 2)
+```
+
+```
+A fenced block with no language tag — same monospace + grey
+background treatment, but `code_language` stays `None`.
+```
+
+## Tables (GitHub-flavored)
+
+The markdown importer recognises GFM table syntax. Header and body
+cells go through the full inline-formatting pipeline, so any of the
+inline features above work per cell.
+
+| Feature           | Markdown      | API only |
+|-------------------|---------------|----------|
+| **Bold**          | `**text**`    | —        |
+| *Italic*          | `*text*`      | —        |
+| ~~Strikethrough~~ | `~~text~~`    | —        |
+| `inline code`     | `` `text` ``  | —        |
+| [Link](https://x) | `[t](url)`    | —        |
+| Underline         | —             | Ctrl+U   |
+| Super / subscript | —             | API      |
+| Text colour       | —             | API      |
+| Image inline      | —             | API      |
+
+Tables are fully editable — Tab moves to the next cell (auto-inserts
+a row at the last cell), Shift+Tab is the inverse, and Shift+Arrow
+at a cell boundary activates rectangular cell selection.
+
+### API-only table features
+
+- `column_span` / `row_span` on `TableCell` (markdown emits 1×1 only).
+- Per-cell `padding`, `border`, `vertical_alignment`,
+  `background_color`.
+- Table-level `border`, `cell_spacing`, `cell_padding`, `width`,
+  `alignment`.
+- Explicit `column_widths`.
+- GFM column alignment (`|:---:|`) — parsed but currently discarded.
+
+## Markdown features NOT imported
+
+The pulldown-cmark parser sees these tokens, but the importer's event
+loop drops them on the floor:
+
+- Horizontal rules (`---`, `***`, `___`) — silently ignored.
+- `![alt](url)` inline images — alt text may appear as literal text;
+  the image is not inserted. Use `TextCursor::insert_image(...)` to
+  embed an image via the API.
+- Task-list checkboxes (`- [ ]`, `- [x]`) — the `[ ]` text appears
+  inline; the block's `marker` field stays `NoMarker`.
+- Inline HTML blocks (`<div>`, `<img>`, …) — dropped.
+- Footnotes — dropped.
+
+## What to try
+
+- Type to insert text; bursts batch through `pending_chars` so a
+  typing storm fires one `text_changed` pulse per 150 ms.
+- Backspace / Delete / Ctrl+Backspace / Ctrl+Delete for character
+  and word deletion.
+- Enter splits a block; Ctrl+Enter always inserts a block even
+  inside a table cell.
+- Ctrl+B / Ctrl+I / Ctrl+U toggle bold / italic / underline on the
+  selection.
+- Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z for undo / redo. Snapshot-based
+  undo means even table-shape and list-indent changes round-trip
+  precisely.
+- Ctrl+A once for select-all (4-level escalation ladder activates
+  only inside table cells).
+- Ctrl+C / Ctrl+X / Ctrl+V / Ctrl+Shift+V for copy / cut / paste /
+  paste-as-plain-text. Cross-application paste round-trips through
+  HTML (Linux `text/html`, macOS `public.html`, Windows `CF_HTML`),
+  so copying from Firefox / Word / Google Docs preserves headings,
+  bold, italic, lists, tables.
+- Double-click selects a word, triple-click selects the paragraph.
+- Drag past the top or bottom edge to engage auto-scroll while
+  extending the selection.
+- Tab at the start of a list item increases the indent; Shift+Tab
+  decreases it. Backspace at the start of an indented list item
+  dedents; at indent 0 it exits the list.
+- Right-click for Cut / Copy / Paste / Paste Unformatted / Select
+  All — items grey out when not applicable (Cut/Copy without a
+  selection, Select All in an empty document).
+- Scroll with the mouse wheel — overlay scrollbars fade in on the
+  right/bottom edges.
+
+Type anywhere below; watch the preview pane mirror every edit.
 "#;
 
 fn main() {

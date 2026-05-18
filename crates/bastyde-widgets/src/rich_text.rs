@@ -72,6 +72,7 @@ use bastyde_tokens::Color;
 
 use self::paint::{PaintParams, paint_frame};
 use self::state::{EditorState, SharedState};
+use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVariant};
 use crate::styles::RecipeRichTextEditorStyle;
 
 /// Scrollbar visibility policy, applied independently per axis.
@@ -130,6 +131,13 @@ pub struct RichTextEditor {
     /// [`RichTextEditorStyle::make_body`]. Cached so layout queries
     /// route through the chrome without re-running the style call.
     root_child_id: Option<WidgetId>,
+    /// Vertical scrollbar child id. `None` when
+    /// `v_scroll_policy == ScrollPolicy::AlwaysOff` — in that case
+    /// the scrollbar isn't even instantiated.
+    v_scrollbar_id: Option<WidgetId>,
+    /// Horizontal scrollbar child id. `None` when
+    /// `h_scroll_policy == ScrollPolicy::AlwaysOff`.
+    h_scrollbar_id: Option<WidgetId>,
 }
 
 impl std::fmt::Debug for RichTextEditor {
@@ -179,6 +187,8 @@ impl RichTextEditor {
             max_lines: None,
             style_override: None,
             root_child_id: None,
+            v_scrollbar_id: None,
+            h_scrollbar_id: None,
         }
     }
 
@@ -1182,12 +1192,42 @@ impl Widget for RichTextEditorBody {
         // so dark / light mode swaps reach the rendered glyphs. The
         // engine reads `text_color` fresh on every `render()` and
         // does not bake it into a glyph cache, so a per-paint write
-        // is cheap and produces correct output on the next frame
-        // without forcing a relayout. Skipped when the app pinned a
-        // color via `RichTextEditor::text_color(...)`.
+        // is cheap. Skipped when the app pinned a color via
+        // `RichTextEditor::text_color(...)`.
+        //
+        // The render frame DOES cache colors baked into glyph quads,
+        // though — the cursor-only and block-only render paths reuse
+        // those cached quads. So when the theme colour actually
+        // changes, we must dispatch a full render this frame, or the
+        // visible glyphs keep painting in the old colour until the
+        // next typing / scroll event happens to bump up to a Full
+        // path on its own.
         if !st.text_color_user_set {
-            st.engine
-                .set_text_color(ctx.theme.colors.editor_fg.to_array());
+            let new_color = ctx.theme.colors.editor_fg.to_array();
+            st.engine.set_text_color(new_color);
+            if st.last_text_color != Some(new_color) {
+                st.last_text_color = Some(new_color);
+                st.pending_full_render = true;
+            }
+        }
+
+        // Code block surface colours come from the same theme path
+        // (`editor_code_block_bg` / `editor_code_block_fg`). Unlike
+        // `text_color`, these are baked into the converted
+        // `BlockLayoutParams` at `layout_full` / `relayout_block`
+        // time, so the typesetter does NOT pick them up on a render
+        // pass — we need a full re-layout when they change. Setting
+        // `needs_full_layout = true` schedules that for the same
+        // frame; `pending_full_render` covers the render side.
+        let new_code_bg = ctx.theme.colors.editor_code_block_bg.to_array();
+        let new_code_fg = Some(ctx.theme.colors.editor_code_block_fg.to_array());
+        st.engine.set_code_block_background(new_code_bg);
+        st.engine.set_code_block_foreground(new_code_fg);
+        if st.last_code_block_bg != Some(new_code_bg) || st.last_code_block_fg != new_code_fg {
+            st.last_code_block_bg = Some(new_code_bg);
+            st.last_code_block_fg = new_code_fg;
+            st.needs_full_layout = true;
+            st.pending_full_render = true;
         }
 
         // The engine reads the HiDPI display scale factor from the
@@ -1642,7 +1682,64 @@ impl Widget for RichTextEditor {
         };
         let root = style.make_body(&cfg, ctx);
         self.root_child_id = Some(root);
-        vec![root]
+
+        // Overlay scrollbars — floated on top of the chrome at the
+        // right / bottom edges. Driven by the same signals the frame
+        // loop publishes (`scroll_*`, `max_scroll_*`, `viewport_ratio_*`).
+        // ScrollPolicy::AlwaysOff suppresses the widget entirely so it
+        // doesn't sit in the children list as a zero-sized stub.
+        let (scroll_x, scroll_y, max_scroll_x, max_scroll_y, vr_x, vr_y) = {
+            let st = self.state.borrow();
+            (
+                st.scroll_x.clone(),
+                st.scroll_y.clone(),
+                st.max_scroll_x.clone(),
+                st.max_scroll_y.clone(),
+                st.viewport_ratio_x.clone(),
+                st.viewport_ratio_y.clone(),
+            )
+        };
+
+        let mut children = vec![root];
+        if self.v_scroll_policy != ScrollPolicy::AlwaysOff {
+            let v_sb = ScrollBar::new(
+                ScrollBarOrientation::Vertical,
+                scroll_y,
+                max_scroll_y.clone(),
+                vr_y,
+            )
+            .visual(ScrollBarVariant::Overlay);
+            let v_id = ctx.add(v_sb);
+            self.v_scrollbar_id = Some(v_id);
+            children.push(v_id);
+        }
+        if self.h_scroll_policy != ScrollPolicy::AlwaysOff {
+            let h_sb = ScrollBar::new(
+                ScrollBarOrientation::Horizontal,
+                scroll_x,
+                max_scroll_x.clone(),
+                vr_x,
+            )
+            .visual(ScrollBarVariant::Overlay);
+            let h_id = ctx.add(h_sb);
+            self.h_scrollbar_id = Some(h_id);
+            children.push(h_id);
+        }
+
+        // `place_children` reads `max_scroll_y` / `max_scroll_x`
+        // synchronously to decide whether to give the overlay
+        // scrollbars a non-zero rect under `ScrollPolicy::Auto`. The
+        // frame loop publishes those values from `Step 7` on every
+        // tick — without a Relayout binding the wrapper wouldn't
+        // re-place its children when the values cross zero, so the
+        // bars would stay sized 0×0 until something else (scroll
+        // wheel, resize) forced a layout pass.
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        max_scroll_y.bind_to(self_id, registry, bastyde_core::binding::BindingLevel::Relayout);
+        max_scroll_x.bind_to(self_id, registry, bastyde_core::binding::BindingLevel::Relayout);
+
+        children
     }
 
     fn layout_response(
@@ -1663,14 +1760,77 @@ impl Widget for RichTextEditor {
         children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
-        for child in children.iter_mut() {
-            child.origin = bastyde_canvas::Point::new(bounds.x, bounds.y);
-            child.size = Size::new(bounds.width, bounds.height);
+        // Chrome (first child) fills the entire bounds. Overlay
+        // scrollbars float on top at the right (vertical) and
+        // bottom (horizontal) edges — collapsed to zero when the
+        // axis policy is `Auto` and there's nothing to scroll.
+        let sb_thickness = self::frame_loop::SCROLLBAR_THICKNESS;
+        let st = self.state.borrow();
+        let max_y = st.max_scroll_y.get();
+        let max_x = st.max_scroll_x.get();
+        drop(st);
+        let show_v = match self.v_scroll_policy {
+            ScrollPolicy::AlwaysOn => true,
+            ScrollPolicy::Auto => max_y > 0.0,
+            ScrollPolicy::AlwaysOff => false,
+        };
+        let show_h = match self.h_scroll_policy {
+            ScrollPolicy::AlwaysOn => true,
+            ScrollPolicy::Auto => max_x > 0.0,
+            ScrollPolicy::AlwaysOff => false,
+        };
+        for (idx, child) in children.iter_mut().enumerate() {
+            if idx == 0 {
+                child.origin = bastyde_canvas::Point::new(bounds.x, bounds.y);
+                child.size = Size::new(bounds.width, bounds.height);
+            } else if Some(child.id) == self.v_scrollbar_id {
+                if show_v {
+                    let h = if show_h {
+                        (bounds.height - sb_thickness).max(0.0)
+                    } else {
+                        bounds.height
+                    };
+                    child.origin = bastyde_canvas::Point::new(
+                        bounds.x + bounds.width - sb_thickness,
+                        bounds.y,
+                    );
+                    child.size = Size::new(sb_thickness, h);
+                } else {
+                    child.origin = bastyde_canvas::Point::new(bounds.x, bounds.y);
+                    child.size = Size::ZERO;
+                }
+            } else if Some(child.id) == self.h_scrollbar_id {
+                if show_h {
+                    let w = if show_v {
+                        (bounds.width - sb_thickness).max(0.0)
+                    } else {
+                        bounds.width
+                    };
+                    child.origin = bastyde_canvas::Point::new(
+                        bounds.x,
+                        bounds.y + bounds.height - sb_thickness,
+                    );
+                    child.size = Size::new(w, sb_thickness);
+                } else {
+                    child.origin = bastyde_canvas::Point::new(bounds.x, bounds.y);
+                    child.size = Size::ZERO;
+                }
+            }
         }
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        self.root_child_id.into_iter().collect()
+        let mut ids = Vec::with_capacity(3);
+        if let Some(id) = self.root_child_id {
+            ids.push(id);
+        }
+        if let Some(id) = self.v_scrollbar_id {
+            ids.push(id);
+        }
+        if let Some(id) = self.h_scrollbar_id {
+            ids.push(id);
+        }
+        ids
     }
 
     fn clips_children(&self) -> bool {

@@ -99,6 +99,18 @@ pub struct ColorTokens {
     pub editor_current_line_bg: Color,
     pub editor_gutter_fg: Color,
     pub editor_selection_bg: Color,
+    /// Background painted behind fenced code blocks inside a rich-text
+    /// editor. Sits a hair above `editor_bg` in dark mode and a hair
+    /// below in light mode, so monospaced runs stay readable without
+    /// stealing focus from prose. Consumed by `RichTextEditor` via
+    /// `RichTextEngine::set_code_block_background`.
+    pub editor_code_block_bg: Color,
+    /// Foreground used for monospaced runs inside fenced code blocks
+    /// and `inline code` spans. Sits slightly off `editor_fg` so code
+    /// reads as its own register against prose — a touch darker in
+    /// light mode, a touch lighter in dark mode. Consumed by
+    /// `RichTextEditor` via `RichTextEngine::set_code_block_foreground`.
+    pub editor_code_block_fg: Color,
 
     // ── Misc ────────────────────────────────────────────────────────────────
     pub focus_ring: Color,
@@ -203,6 +215,13 @@ impl ColorTokens {
             editor_current_line_bg: Color::from_hex("#FFFEEB"),
             editor_gutter_fg: Color::from_hex("#C9CCD6"),
             editor_selection_bg: Color::from_hex("#A8E0E8"),
+            // Light editor: light-grey card behind code blocks, dipped
+            // from #FFFFFF by ~5% so monospaced runs read as a distinct
+            // surface without darkening the page. Code foreground is a
+            // touch darker than editor_fg so monospace prints as its
+            // own register against prose.
+            editor_code_block_bg: Color::from_hex("#F2F3F5"),
+            editor_code_block_fg: Color::from_hex("#1F2024"),
 
             // Misc
             focus_ring: Color::from_hex("#0FB5CC"),
@@ -313,6 +332,11 @@ impl ColorTokens {
             editor_current_line_bg: Color::from_hex("#26282E"),
             editor_gutter_fg: Color::from_hex("#4E5157"),
             editor_selection_bg: Color::from_hex("#1A4D5C"),
+            // Dark editor: code blocks lift off editor_bg #1E1F22 by a
+            // hair (#2B2D30), code foreground brightens above editor_fg
+            // so monospace stays legible inside the lifted card.
+            editor_code_block_bg: Color::from_hex("#2B2D30"),
+            editor_code_block_fg: Color::from_hex("#DFE1E5"),
 
             // Misc
             focus_ring: Color::from_hex("#19BDD4"),
@@ -407,6 +431,15 @@ impl ColorTokens {
             } else {
                 tokens.editor_bg.darken(0.03)
             };
+            // Code block bg: a slightly stronger lift than the
+            // current-line highlight so the card reads as a distinct
+            // surface; same direction (lighten in dark, darken in
+            // light) to stay coherent with the editor surface.
+            tokens.editor_code_block_bg = if is_dark {
+                tokens.editor_bg.lighten(0.08)
+            } else {
+                tokens.editor_bg.darken(0.05)
+            };
         }
 
         // Window foreground → text family (+ editor foreground / caret / gutter)
@@ -432,6 +465,10 @@ impl ColorTokens {
             } else {
                 fg.lighten(0.55)
             };
+            // Code-block foreground brightens past editor_fg in dark
+            // mode and darkens past it in light mode so monospace
+            // reads as its own register against prose.
+            tokens.editor_code_block_fg = if is_dark { fg } else { fg.darken(0.1) };
         }
 
         // Editor selection tracks the list/tree selection background when
