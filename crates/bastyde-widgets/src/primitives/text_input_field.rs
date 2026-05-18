@@ -890,7 +890,17 @@ impl Widget for TextInputField {
                         sync_cursor_signals(&state_for_focus);
                     }
                 } else {
-                    st.cursor.clear_selection();
+                    // Preserve `cursor`'s selection across focus loss
+                    // — clearing it here breaks the right-click
+                    // context menu path (the framework focuses the
+                    // newly-mounted menu, which dispatches `FocusLost`
+                    // here, and `Cut` / `Copy` invoked from the menu
+                    // afterwards find an empty selection). Native
+                    // macOS / Windows text fields keep the selection
+                    // on blur too — typically the visual is dimmed
+                    // but the selection state is preserved so the
+                    // next focus-gain or context-menu invocation
+                    // still operates on it.
                     st.scroll_x = 0.0;
                     st.caret_visible.set(false);
                     st.drag_state = state::DragState::Idle;

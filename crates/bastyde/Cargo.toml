@@ -21,6 +21,7 @@ default = [
     "inspector",
     "toast",
     "file-dialog",
+    "clipboard",
     "fonts-arabic",
     "fonts-hebrew",
 ]
@@ -44,10 +45,13 @@ inspector = ["dep:bastyde-inspector", "rich-text"]
 # by default — apps that don't show toasts pay only the lookup of the
 # `ToastRegistry` slot in `app_state` (one HashMap miss).
 toast = ["widgets"]
-# Forwards clipboard support through bastyde-app so `RichTextEditor::editor`
-# can copy/cut/paste via the system clipboard. Without this feature the
-# editor silently no-ops clipboard commands (they are filtered at the
-# command level; `arboard` is not pulled into the build).
+# Forwards clipboard support through bastyde-app so `TextInput`,
+# `RichTextEditor::editor`, and any other clipboard-aware widget can
+# copy/cut/paste via the system clipboard. On by default — text input
+# is essentially unusable without it. Disable via
+# `default-features = false` if the binary-size cost of `arboard` is
+# unacceptable; clipboard commands then silently no-op (they are
+# filtered at the `ctx.app_state::<ClipboardHandle>()` lookup).
 clipboard = ["bastyde-app/clipboard"]
 
 # Native file dialogs via `rfd`, with `RfdAsyncBackend` auto-installable

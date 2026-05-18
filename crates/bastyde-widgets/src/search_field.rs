@@ -86,8 +86,12 @@ fn search_glyph(glyph_size: f32, slot_width: f32) -> impl Widget + 'static {
     let icon = (BuiltInIcons::global().search)()
         .icon_size(glyph_size)
         .color(TextRole::Secondary);
+    // `bind_height` is load-bearing — without it, `Center`'s
+    // `proposal.resolve(0, 0)` collapses the unspecified-height side
+    // to zero and the slot disappears even though its width is set.
     FixedSize::new()
         .bind_width(slot_width)
+        .bind_height(glyph_size)
         .child(Center::new().child(icon))
 }
 
@@ -107,6 +111,18 @@ pub struct SearchField {
     /// Slot the SuggestionPanel writes its inner ListBox WidgetId into,
     /// so SearchField's `accessibility()` can publish `set_controls`.
     listbox_id_slot: Rc<Cell<Option<WidgetId>>>,
+    /// Slot the SuggestionPanel writes its current rows' WidgetIds
+    /// into (in display order). `accessibility()` uses it together
+    /// with `highlighted_slot` to publish `set_active_descendant` —
+    /// the ARIA pattern for an editable combobox so screen readers
+    /// announce arrow-key navigation through suggestions while focus
+    /// stays on the field. Rebuilt every time the suggestions list
+    /// changes, in lockstep with `listbox_id_slot`.
+    row_ids_slot: Rc<RefCell<Vec<WidgetId>>>,
+    /// Mirror of the `highlighted` signal, read by `accessibility()`
+    /// to look up the currently-active row id. Stored in a `RefCell`
+    /// because it's populated in `build()` and read from `&self`.
+    highlighted_slot: RefCell<Option<Signal<Option<usize>>>>,
     /// Pre-created suggestions panel content. Inserted as a dormant
     /// arena root in `build()` and shown as an overlay anchored to
     /// the field via `OverlayRequest`. Tracked across rebuilds so the
@@ -137,6 +153,8 @@ impl SearchField {
             on_submit: None,
             root_child_id: None,
             listbox_id_slot: Rc::new(Cell::new(None)),
+            row_ids_slot: Rc::new(RefCell::new(Vec::new())),
+            highlighted_slot: RefCell::new(None),
             panel_content_id: None,
             overlay_open: RefCell::new(None),
             style_override: None,
@@ -249,6 +267,11 @@ impl Widget for SearchField {
                             handler(&value, ctx);
                         }
                         dismissed_for_submit.set(true);
+                        // Close the popover after picking a
+                        // suggestion — without this, the panel
+                        // stays open showing just the picked item
+                        // until the user clicks outside.
+                        ctx.dismiss_all_except_hosts();
                         return;
                     }
                 }
@@ -256,6 +279,7 @@ impl Widget for SearchField {
                     handler(ctx);
                 }
                 dismissed_for_submit.set(true);
+                ctx.dismiss_all_except_hosts();
             });
         if let Some(label) = &self.label {
             input = input.label(label.clone());
@@ -305,11 +329,16 @@ impl Widget for SearchField {
             on_select: self.on_select.clone(),
             dismissed: dismissed.clone(),
             listbox_id_slot: self.listbox_id_slot.clone(),
+            row_ids_slot: self.row_ids_slot.clone(),
             root_child_id: None,
         };
         let panel_id = ctx.add(panel);
         ctx.set_dormant(panel_id);
         self.panel_content_id = Some(panel_id);
+        // Expose `highlighted` to `accessibility()` so it can publish
+        // `set_active_descendant` pointing at the currently-highlighted
+        // suggestion row.
+        *self.highlighted_slot.borrow_mut() = Some(highlighted.clone());
 
         // ── Open / dismiss state ────────────────────────────────────
         // `overlay_open` mirrors the live overlay state: set to true by
@@ -349,10 +378,38 @@ impl Widget for SearchField {
                     return;
                 }
                 overlay_open.set(true);
+                // Activate the dormant panel BEFORE queueing the
+                // overlay request — `ctx.activate` enqueues a
+                // `TreeMutation::Activate` which is applied by the
+                // dispatch path *before* `overlay_requests` is
+                // drained, so by the time layout walks the overlay
+                // stack the panel is active and gets laid out.
+                // Without this the panel stays dormant from `build()`
+                // (we `set_dormant` it there), `show_overlay` only
+                // pushes onto the stack, and `layout_impl`'s overlay
+                // loop skips dormant content — popup never paints.
+                // ComboBox does the same dance at combo_box.rs:545.
+                ctx.activate(panel_id);
                 ctx.show_overlay(OverlayRequest {
                     content_id: panel_id,
                     anchor: self_id,
-                    placement: OverlayPlacement::BelowPreferred,
+                    // `NearAnchor` (rather than `BelowPreferred`)
+                    // because the popover should size to the widest
+                    // suggestion, not to the field's width. `BelowPreferred`
+                    // exists for combo-box dropdowns that must be at
+                    // least as wide as their trigger — it does
+                    // `content_size.width.max(anchor.width)` in
+                    // overlay.rs's `position_overlays`. `NearAnchor`
+                    // keeps the same below/above flip behavior, the
+                    // same horizontal viewport clamp, but takes the
+                    // content's intrinsic width as-is. The
+                    // `SuggestionPanel` already reports max
+                    // (label_width + row_padding) + panel_padding as
+                    // its natural width, so the popover ends up
+                    // exactly the size of the widest item.
+                    placement: OverlayPlacement::NearAnchor {
+                        offset: bastyde_canvas::Vec2::ZERO,
+                    },
                     dismiss: DismissBehavior::EscapeOrClickOutside,
                     layer: OverlayLayer::InTree,
                     parent_overlay: None,
@@ -376,72 +433,160 @@ impl Widget for SearchField {
         self.root_child_id = Some(visible_root);
 
         // ── Handlers ───────────────────────────────────────────────
+        //
+        // Everything runs on the **preview** pass. The bubble pass is
+        // unreachable for character input: `TextInputField.on_key`
+        // returns `EventResponse::Handled`, which stops the bubble at
+        // the framework level (see event_dispatch_impl.rs's bubble
+        // loop). The preview pass walks strict ancestors of the focus
+        // target *before* the target itself, so this handler sees
+        // every KeyDown the user types into the inner field.
         let suggestions_for_keys = suggestions.clone();
         let highlighted_for_keys = highlighted.clone();
         let dismissed_for_keys = dismissed.clone();
+        let overlay_open_for_keys = overlay_open.clone();
         let open_for_arrows = open_overlay.clone();
         let open_for_typing = open_overlay.clone();
+        // Captures for the Space-to-select branch (a parallel of the
+        // TextInput `on_submit_fn` picker, fired from the preview pass
+        // when an item is highlighted so Space doesn't fall through to
+        // TextInputField and insert a literal space).
+        let suggestions_for_space = suggestions.clone();
+        let highlighted_for_space = highlighted.clone();
+        let dismissed_for_space = dismissed.clone();
+        let overlay_open_for_space = overlay_open.clone();
+        let text_for_space = self.text.clone();
+        let on_select_for_space = self.on_select.clone();
+        // Inline-provider fixup. The text signal isn't updated until
+        // the next frame (TextInputField defers via
+        // `deferred_text_update`), and even on subsequent keystrokes
+        // the preview pass fires *before* the target's key handler,
+        // so `self.text.get()` is always the pre-keystroke value here.
+        // We project the post-keystroke text by appending the event's
+        // `text` field and run the provider synchronously so the
+        // popup opens with the right list on the very first character.
+        let text_for_typing = self.text.clone();
+        let provider_for_typing = self.suggestion_provider.clone();
+        let min_chars_for_typing = self.min_chars;
+        let max_for_typing = self.max_suggestions;
 
-        let handlers = HandlerSet::new()
-            .on_key_preview(move |event, ctx| -> EventResponse {
-                match event {
-                    WidgetEvent::KeyDown {
-                        key: Key::ArrowDown,
-                        ..
-                    } => {
-                        let list_len = suggestions_for_keys.get().len();
-                        if list_len == 0 {
-                            return EventResponse::Ignored;
-                        }
-                        // Re-open if the user previously dismissed.
-                        dismissed_for_keys.set(false);
-                        let next = match highlighted_for_keys.get() {
-                            None => 0,
-                            Some(i) if i + 1 >= list_len => 0,
-                            Some(i) => i + 1,
-                        };
-                        highlighted_for_keys.set(Some(next));
-                        open_for_arrows(ctx);
-                        EventResponse::Handled
+        let handlers = HandlerSet::new().on_key_preview(move |event, ctx| -> EventResponse {
+            match event {
+                WidgetEvent::KeyDown {
+                    key: Key::ArrowDown,
+                    ..
+                } => {
+                    let list_len = suggestions_for_keys.get().len();
+                    if list_len == 0 {
+                        return EventResponse::Ignored;
                     }
-                    WidgetEvent::KeyDown {
-                        key: Key::ArrowUp, ..
-                    } => {
-                        let list_len = suggestions_for_keys.get().len();
-                        if list_len == 0 {
-                            return EventResponse::Ignored;
-                        }
-                        dismissed_for_keys.set(false);
-                        let prev = match highlighted_for_keys.get() {
-                            None => list_len - 1,
-                            Some(0) => list_len - 1,
-                            Some(i) => i - 1,
-                        };
-                        highlighted_for_keys.set(Some(prev));
-                        open_for_arrows(ctx);
-                        EventResponse::Handled
-                    }
-                    WidgetEvent::KeyDown { .. } => {
-                        // Any other key — character input, Backspace,
-                        // Delete, etc — clears the dismissed flag so
-                        // the popup can re-appear after the user
-                        // resumes typing. The actual `show_overlay`
-                        // call happens in `on_key` below, on the bubble
-                        // pass, by which time `text` has been updated
-                        // and the suggestions provider effect has
-                        // refreshed the list.
-                        dismissed_for_keys.set(false);
-                        EventResponse::Ignored
-                    }
-                    _ => EventResponse::Ignored,
+                    // Re-open if the user previously dismissed.
+                    dismissed_for_keys.set(false);
+                    let next = match highlighted_for_keys.get() {
+                        None => 0,
+                        Some(i) if i + 1 >= list_len => 0,
+                        Some(i) => i + 1,
+                    };
+                    highlighted_for_keys.set(Some(next));
+                    open_for_arrows(ctx);
+                    EventResponse::Handled
                 }
-            })
-            .on_key(move |event, ctx| -> EventResponse {
-                if matches!(event, WidgetEvent::KeyDown { .. }) {
-                    open_for_typing(ctx);
+                WidgetEvent::KeyDown {
+                    key: Key::Space, ..
+                } if overlay_open_for_space.get()
+                    && highlighted_for_space.get().is_some() =>
+                {
+                    // Space-to-select: only kicks in when the popover
+                    // is open AND a row is currently highlighted (i.e.
+                    // the user navigated with arrow keys). Otherwise
+                    // we return Ignored so Space falls through to
+                    // TextInputField and inserts a literal space in
+                    // the query — Space is a valid search character.
+                    let idx = highlighted_for_space.get().expect("guard above");
+                    let list = suggestions_for_space.get();
+                    if let Some(value) = list.get(idx).cloned() {
+                        text_for_space.set(value.clone());
+                        if let Some(handler) = &on_select_for_space {
+                            handler(&value, ctx);
+                        }
+                        dismissed_for_space.set(true);
+                        ctx.dismiss_all_except_hosts();
+                    }
+                    EventResponse::Handled
                 }
-                EventResponse::Ignored
-            });
+                WidgetEvent::KeyDown {
+                    key: Key::ArrowUp, ..
+                } => {
+                    let list_len = suggestions_for_keys.get().len();
+                    if list_len == 0 {
+                        return EventResponse::Ignored;
+                    }
+                    dismissed_for_keys.set(false);
+                    let prev = match highlighted_for_keys.get() {
+                        None => list_len - 1,
+                        Some(0) => list_len - 1,
+                        Some(i) => i - 1,
+                    };
+                    highlighted_for_keys.set(Some(prev));
+                    open_for_arrows(ctx);
+                    EventResponse::Handled
+                }
+                WidgetEvent::KeyDown { text, .. } => {
+                    // Any other key — character input, Backspace,
+                    // Delete, etc — clears the dismissed flag so the
+                    // popup can re-appear after the user resumes typing.
+                    dismissed_for_keys.set(false);
+                    // For character input, project the post-keystroke
+                    // text and run the provider synchronously, then
+                    // open. The framework continues the preview pass
+                    // (we return Ignored), so TextInputField still
+                    // gets the keystroke and inserts the character.
+                    //
+                    // Filter control characters out of the projected
+                    // text. Without this, Enter (`"\n"` / `"\r"`)
+                    // appends a newline to the prefix, the provider
+                    // returns no matches, and the empty-dismiss path
+                    // below fires `on_dismiss` synchronously between
+                    // this handler and TextInputField's submit
+                    // handler — which resets `highlighted` to None,
+                    // so submit can't pick the highlighted row. Same
+                    // for Tab, Escape, Backspace's "\u{8}", etc.
+                    let mut became_empty = false;
+                    if let (Some(ch), Some(provider)) = (text, &provider_for_typing) {
+                        let clean: String =
+                            ch.chars().filter(|c| !c.is_control()).collect();
+                        if !clean.is_empty() {
+                            let projected = format!("{}{}", text_for_typing.get(), clean);
+                            if projected.chars().count() >= min_chars_for_typing {
+                                let mut fresh = provider(&projected);
+                                if fresh.len() > max_for_typing {
+                                    fresh.truncate(max_for_typing);
+                                }
+                                became_empty = fresh.is_empty();
+                                suggestions_for_keys.set(fresh);
+                            } else {
+                                became_empty = true;
+                                suggestions_for_keys.set(Vec::new());
+                            }
+                        }
+                    }
+                    if became_empty && overlay_open_for_keys.get() {
+                        // No matches for the new text — close the
+                        // popover instead of leaving it stuck on the
+                        // pre-keystroke list. The framework's dismiss
+                        // path fires the on_dismiss callback we
+                        // registered, which resets `overlay_open` and
+                        // `dismissed` correctly. The next character
+                        // that yields a non-empty list will reopen.
+                        ctx.dismiss_all_except_hosts();
+                    } else {
+                        open_for_typing(ctx);
+                    }
+                    EventResponse::Ignored
+                }
+                _ => EventResponse::Ignored,
+            }
+        });
 
         ctx.apply_self_handlers(handlers);
 
@@ -492,13 +637,33 @@ impl Widget for SearchField {
         builder.set_role(bastyde_core::accesskit::Role::SearchInput);
         builder.set_has_popup(bastyde_core::accesskit::HasPopup::Listbox);
         builder.set_auto_complete(bastyde_core::accesskit::AutoComplete::List);
-        if let Some(sig) = self.overlay_open.borrow().as_ref()
-            && sig.get()
-        {
-            builder.set_expanded(true);
-        }
+        // `set_expanded` so AT clients know the popup is open. Set
+        // both true and false explicitly — without the false branch
+        // the field carries a stale `expanded=true` after dismiss.
+        let is_open = self
+            .overlay_open
+            .borrow()
+            .as_ref()
+            .is_some_and(|sig| sig.get());
+        builder.set_expanded(is_open);
         if let Some(listbox_id) = self.listbox_id_slot.get() {
             builder.push_controlled(widget_id_to_node_id(listbox_id));
+        }
+        // ARIA combobox pattern: focus stays on the search input
+        // while arrow keys navigate the listbox; screen readers
+        // follow `aria-activedescendant` to announce the currently-
+        // highlighted option. Without this, ArrowUp/ArrowDown in the
+        // popover are silent to AT users.
+        if is_open
+            && let Some(sig) = self.highlighted_slot.borrow().as_ref()
+            && let Some(idx) = sig.get()
+        {
+            let row_ids = self.row_ids_slot.borrow();
+            if let Some(&row_id) = row_ids.get(idx) {
+                builder
+                    .inner_mut()
+                    .set_active_descendant(widget_id_to_node_id(row_id));
+            }
         }
     }
 
@@ -523,6 +688,10 @@ struct SuggestionPanel {
     on_select: Option<OnSelect>,
     dismissed: Signal<bool>,
     listbox_id_slot: Rc<Cell<Option<WidgetId>>>,
+    /// SearchField-side slot we populate with the current row WidgetIds
+    /// in display order, so its `accessibility()` can map `highlighted`
+    /// back to the active row id for `set_active_descendant`.
+    row_ids_slot: Rc<RefCell<Vec<WidgetId>>>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -550,6 +719,7 @@ impl Widget for SuggestionPanel {
 
         let list = suggestions.get();
         let total = list.len();
+        let mut row_ids: Vec<WidgetId> = Vec::with_capacity(total);
         let mut column = VStack::new().alignment(HAlignment::Leading);
         for (idx, value) in list.into_iter().enumerate() {
             let bg_role = highlighted.map(move |h| match h {
@@ -592,6 +762,11 @@ impl Widget for SuggestionPanel {
                         handler(&value_for_tap, ctx);
                     }
                     dismissed_for_tap.set(true);
+                    // Close the popover after picking a suggestion.
+                    // The on_dismiss callback resets `overlay_open`
+                    // and re-sets `dismissed` (idempotent — we just
+                    // set it ourselves).
+                    ctx.dismiss_all_except_hosts();
                 })
                 .on_hover(move |entered, _| {
                     if entered {
@@ -600,8 +775,13 @@ impl Widget for SuggestionPanel {
                 })
                 .cursor(CursorIcon::Pointer),
             );
+            row_ids.push(row);
             column = column.add_child(row);
         }
+        // Publish the row ids for SearchField's `accessibility()` to
+        // resolve `highlighted -> active_descendant`. Repopulated on
+        // every rebuild so it tracks the live row WidgetIds.
+        *self.row_ids_slot.borrow_mut() = row_ids;
 
         // Listbox surface — routed through `PopoverStyle` (the
         // `Menu`-flavoured variant), so the panel background, border,

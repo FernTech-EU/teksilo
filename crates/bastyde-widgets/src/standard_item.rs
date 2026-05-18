@@ -461,7 +461,13 @@ impl Widget for StandardListItem {
             .and_then(|id| ctx.child_size(id, proposal))
             .unwrap_or_else(|| proposal.resolve(0.0, min_height));
         let height = raw.height.max(min_height);
-        let width = raw.width;
+        // Honor the proposed width when offered. The inner ZStack reports
+        // only the chrome's natural width (padding insets) under any
+        // proposal, so standalone rows in a VStack would collapse to ~16 px
+        // and the label would render in a zero-width box. Inside a
+        // ListView the row gets an exact-width proposal so this just
+        // reflects that.
+        let width = proposal.width.unwrap_or(raw.width);
         bastyde_canvas::Size::new(width, height).into()
     }
 

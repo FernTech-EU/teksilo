@@ -1,7 +1,7 @@
 //! Settings tab — ShortcutSettings (and PrivacySettings note).
 
 use bastyde::prelude::*;
-use bastyde::widgets::{Divider, FixedSize, ShortcutSettings, TextWidget, VStack};
+use bastyde::widgets::{Divider, Expand, Panel, ShortcutSettings, TextWidget, VStack};
 
 use crate::shared::{Signals, section, tab_header};
 
@@ -15,12 +15,25 @@ pub fn refs() -> LocalizedString {
 
 pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
+    // Wrap in a Panel for visual delineation, and an
+    // `Expand::horizontal()` so the widget claims the tab's full width
+    // (without it, ShortcutSettings reports its natural row-content
+    // width and hugs the leading edge). Height is unbounded — the
+    // catalog's TabContent already scrolls vertically.
     let shortcuts = section(
         ctx,
         "ShortcutSettings",
-        FixedSize::new()
-            .bind_height(280.0_f32)
-            .child(ShortcutSettings::new()),
+        Panel::new()
+            .background(SurfaceRole::Raised)
+            .border_color(BorderRole::Default)
+            .border_width(1.0)
+            .corner_radius(8.0)
+            .padding(16.0)
+            .child(
+                Expand::horizontal()
+                    .respect_intrinsic()
+                    .child(ShortcutSettings::new()),
+            ),
     );
     let privacy = section(
         ctx,
@@ -40,6 +53,14 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 }
 
 pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
+    // bati! cannot express the parameterless `Expand::respect_intrinsic()`
+    // builder method as a property — pre-build in Rust, drop the id in.
+    let shortcut_body_id = ctx.add(
+        Expand::horizontal()
+            .respect_intrinsic()
+            .child(ShortcutSettings::new()),
+    );
+
     bati!(ctx => VStack {
             spacing: 20.0
             VStack {
@@ -61,9 +82,13 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                FixedSize {
-                    bind_height: 280.0_f32
-                    ShortcutSettings
+                Panel {
+                    background: SurfaceRole::Raised
+                    border_color: BorderRole::Default
+                    border_width: 1.0
+                    corner_radius: 8.0
+                    padding: 16.0
+                    child_id: shortcut_body_id
                 }
             }
 

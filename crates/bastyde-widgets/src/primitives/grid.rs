@@ -126,15 +126,37 @@ impl Grid {
             }
         }
 
-        // Phase 2: distribute remaining space to Fractional tracks
-        let remaining = available
-            .map(|a| (a - total_gap - used).max(0.0))
-            .unwrap_or(0.0);
-
-        if total_fr > 0.0 {
+        // Phase 2: distribute remaining space to Fractional tracks.
+        //
+        // When the parent gives us an explicit `available` constraint
+        // we share the remainder by flex weight. When it's `None`
+        // (intrinsic-measurement pass — Switcher / ZStack / ScrollArea
+        // ask their children with an unspecified proposal), there *is*
+        // no remainder to share. We can't return zero for every
+        // Fractional track: any child that re-measures against that
+        // zero width will report a wildly inflated height (a TextWidget
+        // with `proposal.width = Some(0)` wraps one glyph per line),
+        // and that height bubbles up as the Grid's intrinsic height —
+        // which is what callers like ScrollArea use to size their
+        // scrollable content.
+        //
+        // Fall back to the child's natural width per track instead, so
+        // an unconstrained Fractional column behaves like Auto. The
+        // shared-remainder behavior still applies whenever a parent
+        // *does* offer a width.
+        if let Some(a) = available {
+            let remaining = (a - total_gap - used).max(0.0);
+            if total_fr > 0.0 {
+                for (i, track) in tracks.iter().enumerate() {
+                    if let TrackSize::Fractional(fr) = *track {
+                        resolved[i] = remaining * fr / total_fr;
+                    }
+                }
+            }
+        } else if total_fr > 0.0 {
             for (i, track) in tracks.iter().enumerate() {
-                if let TrackSize::Fractional(fr) = *track {
-                    resolved[i] = remaining * fr / total_fr;
+                if matches!(*track, TrackSize::Fractional(_)) {
+                    resolved[i] = child_sizes.get(i).copied().unwrap_or(0.0);
                 }
             }
         }
@@ -497,6 +519,70 @@ mod tests {
         assert!((gb.width - 110.0).abs() < 0.01);
         // Height: max(20, 30) = 30
         assert!((gb.height - 30.0).abs() < 0.01);
+    }
+
+    /// Regression: under an unspecified-width proposal (intrinsic
+    /// measurement — Switcher / ZStack / ScrollArea ask their children
+    /// like this), a Fractional column has no parent constraint to
+    /// share. Returning zero for those tracks would force a re-measure
+    /// of every child against `width = 0`, which makes wrap-aware
+    /// widgets like TextWidget report inflated heights (one glyph per
+    /// line). The Grid must fall back to the child's natural width
+    /// instead, so the measurement matches what the paint pass would
+    /// produce at a normal width.
+    #[test]
+    fn fractional_tracks_under_unspecified_use_intrinsic() {
+        let mut tree = WidgetTree::new();
+        // Two Fractional columns with one child each. With the bug,
+        // both columns would resolve to 0 width; with the fix, each
+        // resolves to its child's natural width (50).
+        let a = tree.add(FixedLeaf(50.0, 20.0));
+        let b = tree.add(FixedLeaf(50.0, 20.0));
+        let grid = tree.add(
+            Grid::new()
+                .columns(vec![TrackSize::Fractional(1.0), TrackSize::Fractional(1.0)])
+                .rows(vec![TrackSize::Auto])
+                .column_gap(8.0)
+                .add_child(a)
+                .add_child(b),
+        );
+        tree.layout(SizeProposal::unspecified());
+
+        let gb = tree.bounds(grid);
+        // Width: 50 + 8 + 50 = 108. With the bug this would be 8 (just the gap).
+        assert!(
+            (gb.width - 108.0).abs() < 0.01,
+            "expected 108, got {}",
+            gb.width,
+        );
+        // Height should be the natural row height, not inflated.
+        assert!(
+            (gb.height - 20.0).abs() < 0.01,
+            "expected 20, got {}",
+            gb.height,
+        );
+    }
+
+    /// Fractional tracks still distribute parent-offered slack when a
+    /// width *is* provided — the unspecified-fallback must not change
+    /// the constrained behavior.
+    #[test]
+    fn fractional_tracks_constrained_still_share_remainder() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FixedLeaf(10.0, 10.0));
+        let b = tree.add(FixedLeaf(10.0, 10.0));
+        let _grid = tree.add(
+            Grid::new()
+                .columns(vec![TrackSize::Fractional(1.0), TrackSize::Fractional(3.0)])
+                .rows(vec![TrackSize::Fixed(20.0)])
+                .add_child(a)
+                .add_child(b),
+        );
+        tree.layout(SizeProposal::exact(400.0, 100.0));
+
+        // 1:3 split of 400 → a=100, b=300.
+        assert!((tree.bounds(a).width - 100.0).abs() < 0.01);
+        assert!((tree.bounds(b).width - 300.0).abs() < 0.01);
     }
 
     #[test]

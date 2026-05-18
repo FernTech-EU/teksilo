@@ -16,6 +16,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use bastyde::core::PlatformTitleBarHost;
+use bastyde::core::event::{Key, Modifiers};
+use bastyde::core::shortcut::{KeyStroke, Shortcut};
 use bastyde::core::widget::WidgetPlacement;
 use bastyde::prelude::*;
 use bastyde::widgets::{
@@ -235,6 +237,13 @@ impl Widget for WidgetCatalog {
             self.install_cycle(ctx, period);
         }
 
+        // ── Demo shortcuts so the Settings tab's ShortcutSettings has
+        //    something to display. Not wired to Actions — these are
+        //    catalogued for the rebind UI, not for execution.
+        for shortcut in demo_shortcuts() {
+            ctx.register_shortcut_global(shortcut);
+        }
+
         // ── TabWidget ────────────────────────────────────────────────
         let mut tw = TabWidget::new(self.selected_tab.clone())
             .vertical()
@@ -395,4 +404,49 @@ impl Widget for TabContent {
     fn children(&self) -> Vec<WidgetId> {
         self.root_child_id.into_iter().collect()
     }
+}
+
+/// Sample shortcut catalog so `ShortcutSettings` on the Settings tab
+/// has rows to display. Mirrors the shape of the `shortcuts_demo`
+/// example — Save / Open / Find / Bold / Italic / Help — without
+/// wiring the corresponding Actions, since the catalog isn't trying
+/// to *invoke* these commands, only to *exhibit* the rebind UI.
+fn demo_shortcuts() -> Vec<Shortcut> {
+    vec![
+        Shortcut::new("app.save")
+            .name("Save")
+            .category("File")
+            .primary(KeyStroke::ctrl(Key::S))
+            .build(),
+        Shortcut::new("app.open")
+            .name("Open…")
+            .category("File")
+            .primary(KeyStroke::ctrl(Key::O))
+            .build(),
+        Shortcut::new("app.quit")
+            .name("Quit")
+            .category("File")
+            .primary(KeyStroke::ctrl(Key::Q))
+            .build(),
+        Shortcut::new("edit.find")
+            .name("Find…")
+            .category("Edit")
+            .primary(KeyStroke::ctrl(Key::F))
+            .build(),
+        Shortcut::new("edit.format.bold")
+            .name("Bold")
+            .category("Edit")
+            .primary(KeyStroke::ctrl(Key::B))
+            .build(),
+        Shortcut::new("edit.format.italic")
+            .name("Italic")
+            .category("Edit")
+            .primary(KeyStroke::ctrl(Key::I))
+            .build(),
+        Shortcut::new("help.show")
+            .name("Help")
+            .category("Help")
+            .primary(KeyStroke::new(Key::F1, Modifiers::NONE))
+            .build(),
+    ]
 }
