@@ -13,6 +13,7 @@
 
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::widget::EventContext;
+use bastyde_text::CursorAffinity;
 use bastyde_text::text_document::{
     BlockFormat, ListFormat, MoveMode, MoveOperation, SelectionType, TableCellRef, TextFormat,
 };
@@ -23,15 +24,29 @@ use super::state::{EditorState, SharedState};
 use super::sync_cursor_signals;
 
 /// Kind of key action taken by `handle_key`, used to decide whether to
-/// clear the sticky preferred-X afterwards.
+/// clear the sticky preferred-X afterwards and how to update the
+/// cursor's [`CursorAffinity`] at soft-wrap boundaries.
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub(super) enum KeyAction {
-    /// The key caused horizontal motion, a selection change, or
-    /// something else that invalidates the preferred column.
+    /// The key caused horizontal motion, a selection change, an edit,
+    /// or anything else where the resulting caret position is not on
+    /// a wrap boundary or, if it is, should render at the downstream
+    /// (end-of-previous-line) placement. Clears the sticky column AND
+    /// resets `cursor_affinity` to `Downstream`. Covers Left/Right,
+    /// Ctrl+Home/Ctrl+End, Backspace/Delete/Enter/typing, paste, etc.
     ClearPreferredX,
+    /// Visual-line edge motion that went through
+    /// [`move_cursor_to_line_edge`]. The helper already set
+    /// `cursor_affinity` from the typesetter's hit-test, so the
+    /// post-processing must NOT clobber it. Clears the sticky column.
+    /// Covers non-Ctrl Home/End.
+    LineEdgeMotion,
     /// Vertical motion (Up/Down/PageUp/PageDown): the sticky column
     /// must be preserved so repeated vertical presses land on the
-    /// same visual column.
+    /// same visual column. The helpers also set `cursor_affinity`
+    /// from hit-test, so post-processing must NOT clobber it. Ctrl+A
+    /// also lives here since it leaves the caret position unchanged
+    /// and any current affinity is still valid.
     KeepPreferredX,
     /// The key was not handled.
     Unhandled,
@@ -154,14 +169,20 @@ pub(super) fn handle_key(
             Key::Home if filter.accepts(EditCommandKind::MoveHome) => {
                 if ctrl {
                     st.cursor.move_position(MoveOperation::Start, mode, 1);
+                    KeyAction::ClearPreferredX
                 } else {
+                    // `move_cursor_to_line_edge` sets `cursor_affinity`
+                    // from the hit-test, so this path returns
+                    // `LineEdgeMotion` (skips the post-processing
+                    // affinity reset).
                     move_cursor_to_line_edge(&mut st, LineEdge::Start, mode);
+                    KeyAction::LineEdgeMotion
                 }
-                KeyAction::ClearPreferredX
             }
             Key::End if filter.accepts(EditCommandKind::MoveEnd) => {
                 if ctrl {
                     st.cursor.move_position(MoveOperation::End, mode, 1);
+                    KeyAction::ClearPreferredX
                 } else {
                     // Use the typesetter to find end-of-visual-line
                     // rather than text-document's EndOfBlock. Two
@@ -171,9 +192,11 @@ pub(super) fn handle_key(
                     // returns the *next* block when queried at a
                     // boundary; (b) wrapped blocks stop at the wrap
                     // point, which is the standard editor behaviour.
+                    // The helper sets `cursor_affinity` from
+                    // hit_test → returns `LineEdgeMotion`.
                     move_cursor_to_line_edge(&mut st, LineEdge::End, mode);
+                    KeyAction::LineEdgeMotion
                 }
-                KeyAction::ClearPreferredX
             }
             Key::A if ctrl && filter.accepts(EditCommandKind::SelectAll) => {
                 apply_select_all_ladder(&mut st);
@@ -406,6 +429,25 @@ pub(super) fn handle_key(
             {
                 let mut st = state.borrow_mut();
                 st.preferred_x = None;
+                // Horizontal motion / edit / Ctrl+Home / Ctrl+End:
+                // any sticky affinity from a previous click or
+                // vertical move is no longer meaningful. The caret
+                // moved logically; render at the default downstream
+                // placement.
+                st.cursor_affinity = CursorAffinity::Downstream;
+            }
+            ensure_caret_visible(state);
+            sync_cursor_signals(state);
+            ctx.request_frame();
+            EventResponse::Handled
+        }
+        KeyAction::LineEdgeMotion => {
+            // Home/End went through `move_cursor_to_line_edge`, which
+            // already set `cursor_affinity` from the typesetter's
+            // hit-test. Just clear the sticky column.
+            {
+                let mut st = state.borrow_mut();
+                st.preferred_x = None;
             }
             ensure_caret_visible(state);
             sync_cursor_signals(state);
@@ -413,6 +455,9 @@ pub(super) fn handle_key(
             EventResponse::Handled
         }
         KeyAction::KeepPreferredX => {
+            // Up/Down/PageUp/PageDown's helpers already set affinity
+            // from hit-test; Ctrl+A didn't move the caret. Preserve
+            // both `preferred_x` and `cursor_affinity` unchanged.
             ensure_caret_visible(state);
             sync_cursor_signals(state);
             ctx.request_frame();
@@ -587,6 +632,10 @@ fn handle_ime_composition(
         }
         st.cursor.end_edit_block();
         st.preferred_x = None;
+        // Editing always lands the caret at a logical position; any
+        // sticky upstream affinity from a previous click is invalid
+        // now. Render at the default downstream placement.
+        st.cursor_affinity = CursorAffinity::Downstream;
         st.pending_text_changed = true;
     }
     ctx.request_frame();
@@ -637,6 +686,9 @@ fn push_pending_chars(state: &SharedState, ctx: &mut EventContext, text: &str) -
         let mut st = state.borrow_mut();
         st.pending_chars.push_str(&clean);
         st.preferred_x = None;
+        // Typing always lands the caret at a logical position; any
+        // sticky upstream affinity from a previous click is invalid.
+        st.cursor_affinity = CursorAffinity::Downstream;
     }
     ctx.request_frame();
     EventResponse::Handled
@@ -692,7 +744,7 @@ fn ensure_caret_h_visible_locked(st: &mut EditorState) {
     }
 
     let pos = st.cursor.position();
-    let caret = st.engine.caret_rect(pos);
+    let caret = st.engine.caret_rect(pos, st.cursor_affinity);
     let caret_x = caret[0]; // engine returns screen-space x
     let current_x = st.scroll_x.get();
     // Margin: 20 px on each side, matching godot's
@@ -723,12 +775,19 @@ enum LineEdge {
 ///    `get_block_at_position(block_end_pos)` returns the next block.
 ///  * Wrapped blocks stop at the wrap point (the standard editor
 ///    Home/End semantics).
+///
+/// Affinity handling: read the current `st.cursor_affinity` so the
+/// `caret_rect` query sees the line the user is visually on (matters
+/// at soft-wrap boundaries), then overwrite `st.cursor_affinity` with
+/// the hit's affinity so the post-move caret renders on the matched
+/// line (Home from end-of-K → start-of-K = Upstream-of-K+1's-start;
+/// End from start-of-K+1 → end-of-K = Downstream-of-K's-end).
 fn move_cursor_to_line_edge(st: &mut EditorState, edge: LineEdge, mode: MoveMode) {
     if !st.engine.has_full_layout() {
         return;
     }
     let pos = st.cursor.position();
-    let caret = st.engine.caret_rect(pos);
+    let caret = st.engine.caret_rect(pos, st.cursor_affinity);
     let line_y = caret[1] + caret[3] * 0.5;
     // Probe far outside the viewport horizontally; the typesetter
     // clamps the hit to the actual line extent and returns a valid
@@ -737,10 +796,11 @@ fn move_cursor_to_line_edge(st: &mut EditorState, edge: LineEdge, mode: MoveMode
         LineEdge::Start => -1.0e6,
         LineEdge::End => 1.0e6,
     };
-    if let Some(hit) = st.engine.hit_test(probe_x, line_y)
-        && hit.position != pos
-    {
-        st.cursor.set_position(hit.position, mode);
+    if let Some(hit) = st.engine.hit_test(probe_x, line_y) {
+        if hit.position != pos {
+            st.cursor.set_position(hit.position, mode);
+        }
+        st.cursor_affinity = hit.affinity;
     }
 }
 
@@ -751,12 +811,18 @@ fn move_cursor_to_line_edge(st: &mut EditorState, edge: LineEdge, mode: MoveMode
 /// the same visual column even across short lines.
 ///
 /// Called from `handle_key` with `state.borrow_mut()` already held.
+///
+/// Affinity: source `caret_rect` is queried with the current affinity
+/// so vertical motion starts from the visually-correct line; the new
+/// position's affinity is read off the hit-test (which sets Upstream
+/// when the matched line's start coincides with the previous line's
+/// end).
 fn move_cursor_vertical(st: &mut EditorState, direction: i32, mode: MoveMode) {
     if !st.engine.has_full_layout() {
         return;
     }
     let pos = st.cursor.position();
-    let caret = st.engine.caret_rect(pos);
+    let caret = st.engine.caret_rect(pos, st.cursor_affinity);
     let line_height = caret[3].max(16.0);
     let center_y = caret[1] + caret[3] * 0.5;
 
@@ -770,10 +836,11 @@ fn move_cursor_vertical(st: &mut EditorState, direction: i32, mode: MoveMode) {
         return;
     }
 
-    if let Some(hit) = st.engine.hit_test(x, target_y)
-        && hit.position != pos
-    {
-        st.cursor.set_position(hit.position, mode);
+    if let Some(hit) = st.engine.hit_test(x, target_y) {
+        if hit.position != pos {
+            st.cursor.set_position(hit.position, mode);
+        }
+        st.cursor_affinity = hit.affinity;
     }
 }
 
@@ -789,7 +856,7 @@ fn move_cursor_page(st: &mut EditorState, direction: i32, mode: MoveMode) {
         return;
     }
     let pos = st.cursor.position();
-    let caret = st.engine.caret_rect(pos);
+    let caret = st.engine.caret_rect(pos, st.cursor_affinity);
     let line_height = caret[3].max(16.0);
     let center_y = caret[1] + caret[3] * 0.5;
 
@@ -804,10 +871,11 @@ fn move_cursor_page(st: &mut EditorState, direction: i32, mode: MoveMode) {
     let target_y =
         (center_y + (direction as f32) * page_step).clamp(0.0, st.engine.content_height());
 
-    if let Some(hit) = st.engine.hit_test(x, target_y)
-        && hit.position != pos
-    {
-        st.cursor.set_position(hit.position, mode);
+    if let Some(hit) = st.engine.hit_test(x, target_y) {
+        if hit.position != pos {
+            st.cursor.set_position(hit.position, mode);
+        }
+        st.cursor_affinity = hit.affinity;
     }
 
     // Scroll so the new caret position is visible. We do a simple

@@ -309,8 +309,16 @@ impl RichTextEngine {
         self.flow.hit_test(x, y)
     }
 
-    pub fn caret_rect(&self, position: usize) -> [f32; 4] {
-        self.flow.caret_rect(position)
+    /// Screen-space caret rectangle at a document position with the
+    /// given affinity. Affinity only changes the result at soft-wrap
+    /// boundaries; at every other position the two affinities return
+    /// the same rect. See [`text_typeset::CursorAffinity`].
+    pub fn caret_rect(
+        &self,
+        position: usize,
+        affinity: text_typeset::CursorAffinity,
+    ) -> [f32; 4] {
+        self.flow.caret_rect(position, affinity)
     }
 
     /// Per-character `(position, width)` for a character range

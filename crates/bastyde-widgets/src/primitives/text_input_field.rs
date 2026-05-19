@@ -68,7 +68,7 @@ use bastyde_core::widget::{
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_text::text_document::{SelectionType, TextDocument};
-use bastyde_text::{CursorDisplay, RichTextEngine, SharedTypesetter};
+use bastyde_text::{CursorAffinity, CursorDisplay, RichTextEngine, SharedTypesetter};
 use bastyde_tokens::TextStyle;
 
 use crate::button::InteractionState;
@@ -1001,9 +1001,12 @@ impl Widget for TextInputField {
         }
 
         let caret_on = st.caret_visible.get() && st.has_focus;
+        // Single-line input has no wrap → affinity is moot; the
+        // default Downstream matches pre-affinity behavior.
         let cursor_display = CursorDisplay {
             position: st.cursor.position(),
             anchor: st.cursor.anchor(),
+            affinity: CursorAffinity::Downstream,
             visible: caret_on,
             selected_cells: Vec::new(),
         };
@@ -1137,7 +1140,8 @@ fn ensure_caret_visible_h(st: &mut TextInputState, text_viewport_width: f32) {
         return;
     }
     let pos = st.cursor.position();
-    let caret = st.engine.caret_rect(pos);
+    // Single-line input: no wrap, affinity is a no-op.
+    let caret = st.engine.caret_rect(pos, CursorAffinity::Downstream);
     let caret_x = caret[0];
     let caret_w = caret[2].max(1.0);
     let vw = text_viewport_width;

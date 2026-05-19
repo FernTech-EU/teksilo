@@ -95,6 +95,12 @@ pub(super) fn handle_pointer_event(
                     MoveMode::MoveAnchor
                 };
                 st.cursor.set_position(hit.position, mode);
+                // Affinity: at a soft-wrap boundary the typesetter
+                // returned Upstream when the click landed on line
+                // K+1's left edge (the visual START of the wrapped
+                // line). At every other position the hit-test returns
+                // Downstream and there is nothing to change.
+                st.cursor_affinity = hit.affinity;
                 // A fresh press starts a drag-select session.
                 // Stored velocity is 0 until PointerMove detects an
                 // auto-scroll zone.
@@ -147,9 +153,11 @@ pub(super) fn handle_pointer_event(
                 hit_test::hit_test_at(&st.engine, clamped, 0.0, 0.0)
             };
             if let Some(hit) = hit {
-                let st = state.borrow();
-                st.cursor.set_position(hit.position, MoveMode::KeepAnchor);
-                drop(st);
+                {
+                    let mut st = state.borrow_mut();
+                    st.cursor.set_position(hit.position, MoveMode::KeepAnchor);
+                    st.cursor_affinity = hit.affinity;
+                }
                 sync_cursor_signals(state);
             }
             // Compute auto-scroll velocity for the frame loop. The

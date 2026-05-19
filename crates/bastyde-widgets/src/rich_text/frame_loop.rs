@@ -186,6 +186,7 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
         let cursor_display = bastyde_text::CursorDisplay {
             position: state.cursor.position(),
             anchor: state.cursor.anchor(),
+            affinity: state.cursor_affinity,
             visible: caret_on,
             selected_cells: Vec::new(),
         };

@@ -16,7 +16,7 @@ use bastyde_core::Signal;
 use bastyde_text::text_document::{
     DocumentEvent, DocumentFragment, Subscription, TextCursor, TextDocument,
 };
-use bastyde_text::{RichTextEngine, WrapMode};
+use bastyde_text::{CursorAffinity, RichTextEngine, WrapMode};
 
 use super::image_cache::ImageCache;
 use super::policy::{CaretPolicy, PolicyBundle};
@@ -126,6 +126,23 @@ pub(crate) struct EditorState {
     /// land on the same visual column even when crossing short
     /// lines. Cleared on any horizontal or edit action.
     pub preferred_x: Option<f32>,
+
+    /// Which side of a soft-wrap boundary the caret renders at. Only
+    /// has an effect when `cursor.position()` happens to be a wrap
+    /// boundary (the same character offset appears at the end of one
+    /// display line and the start of the next). Default is
+    /// `Downstream`, which matches the pre-affinity behavior:
+    /// end-of-previous-line placement. Mouse clicks set it from
+    /// `HitTestResult::affinity`; vertical navigation
+    /// (Up/Down/PageUp/PageDown/Home/End) re-derives it via the
+    /// typesetter's hit-test after the move; edits, Left/Right, and
+    /// programmatic cursor mutations reset to `Downstream`.
+    ///
+    /// Stored on `EditorState` rather than on `TextCursor` because
+    /// affinity is a display concern that requires the layout engine
+    /// to interpret — see `docs/architecture.md` / the design rationale
+    /// in the commit message that introduced this field.
+    pub cursor_affinity: CursorAffinity,
 
     /// Wall-clock instant of the last caret-visibility toggle, or
     /// `None` if the caret has never blinked (first focus / reset).
@@ -388,6 +405,7 @@ impl EditorState {
             _event_subscription: subscription,
             image_cache: ImageCache::new(),
             preferred_x: None,
+            cursor_affinity: CursorAffinity::default(),
             blink_last_toggle: None,
             frame_request: None,
             frame_wake_at: None,

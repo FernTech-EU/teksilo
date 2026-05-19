@@ -19,8 +19,9 @@ pub use rich_text_engine::{RichTextEngine, WrapMode};
 
 #[cfg(feature = "rich-text")]
 pub use text_typeset::{
-    CharacterGeometry, CursorDisplay, DecorationKind as TypesetterDecorationKind, DecorationRect,
-    FontFaceId, GlyphQuad as TypesetterGlyphQuad, HitRegion, HitTestResult, ImageQuad, RenderFrame,
+    CharacterGeometry, CursorAffinity, CursorDisplay, DecorationKind as TypesetterDecorationKind,
+    DecorationRect, FontFaceId, GlyphQuad as TypesetterGlyphQuad, HitRegion, HitTestResult,
+    ImageQuad, RenderFrame,
 };
 
 #[cfg(feature = "rich-text")]

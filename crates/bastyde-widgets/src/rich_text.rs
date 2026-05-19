@@ -577,11 +577,16 @@ impl RichTextEditor {
     }
 
     /// Move the caret to an absolute character position. Collapses any
-    /// existing selection (passes [`MoveMode::MoveAnchor`]).
+    /// existing selection (passes [`MoveMode::MoveAnchor`]). Resets
+    /// `CursorAffinity` to `Downstream` — programmatic placement
+    /// can't know whether the caller wanted the upstream side of a
+    /// wrap boundary, so we default to the same placement that
+    /// existed before affinity was introduced.
     pub fn set_caret_position(&self, position: usize) {
         {
-            let st = self.state.borrow();
+            let mut st = self.state.borrow_mut();
             st.cursor.set_position(position, MoveMode::MoveAnchor);
+            st.cursor_affinity = bastyde_text::CursorAffinity::Downstream;
         }
         sync_cursor_signals(&self.state);
     }
@@ -1722,6 +1727,7 @@ impl Widget for RichTextEditorBody {
         let cursor_display = bastyde_text::CursorDisplay {
             position: st.cursor.position(),
             anchor: st.cursor.anchor(),
+            affinity: st.cursor_affinity,
             visible: caret_on_now,
             selected_cells: Vec::new(),
         };
