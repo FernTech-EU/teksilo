@@ -103,7 +103,15 @@ pub struct IconButton {
     /// Optional composite tooltip body (CK3-style widget tree).
     /// Mutually exclusive with the other two tooltip slots.
     composite_tooltip_content: Option<Box<dyn bastyde_core::widget::Widget>>,
-    enabled: bool,
+    /// Initial enabled-state. Forwarded into the arena via
+    /// `ctx.enabled_when(self_id, false)` at build time when `false`;
+    /// not kept as a runtime snapshot. After `build()` the arena's
+    /// `enabled_state` is the single source of truth; the leaves
+    /// (icon, label) read it through `PaintContext::effective_enabled`
+    /// for color resolution, event dispatch reads it via
+    /// `arena.is_enabled()` for gating, the a11y walker reads it for
+    /// `set_disabled()`.
+    initial_enabled: bool,
     size: IconButtonSize,
     /// Embedded mode — Secondary-at-rest icon color, the JetBrains
     /// "built-in" look. Default `false` (stand-alone, full-weight icon).
@@ -167,7 +175,7 @@ impl IconButton {
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
-            enabled: true,
+            initial_enabled: true,
             size: IconButtonSize::Default,
             embedded: false,
             action: None,
@@ -304,9 +312,21 @@ impl IconButton {
         self
     }
 
-    /// Set the enabled state. Disabled buttons ignore input and show dimmed icons.
+    /// Set the initial enabled state. Disabled buttons ignore input
+    /// and dim their icon (handled by the framework's
+    /// `PaintContext::effective_enabled`). Forwarded into the arena
+    /// via `ctx.enabled_when(self_id, false)` at build time.
+    ///
+    /// For a reactive enabled state — e.g. a toolbar button that
+    /// enables only when the caret is inside a table — call
+    /// `ctx.enabled_when(button_id, my_signal)` from the composing
+    /// widget's `build()` instead of (or in addition to) this builder.
+    /// Both routes write to the same arena `enabled_state`; an
+    /// external `enabled_when` registered after this builder runs
+    /// wins (last-write semantics) and updates reactively from the
+    /// signal.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -467,7 +487,7 @@ impl IconButton {
 impl std::fmt::Debug for IconButton {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IconButton")
-            .field("enabled", &self.enabled)
+            .field("initial_enabled", &self.initial_enabled)
             .field("size", &self.size)
             .field("embedded", &self.embedded)
             .finish()
@@ -516,38 +536,38 @@ fn resolve_icon_size(size: IconButtonSize) -> f32 {
 
 impl bastyde_core::widget::Widget for IconButton {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let enabled = self.enabled;
         let embedded = self.embedded;
         let icon_size = resolve_icon_size(self.size);
         let size = self.size;
+        let self_id = ctx.self_id();
+
+        // Forward the initial-enabled hint into the arena. After this
+        // point the arena is the single source of truth — events,
+        // focus, a11y, and the leaves' role-resolution all consult
+        // `arena.is_enabled(self_id)` / `PaintContext::effective_enabled`.
+        // We never carry an `InteractionState::Disabled` in the
+        // interaction signal: that was the snapshot duality the
+        // architecture refactor removed.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
+
+        // Reactive view of "is this widget effectively enabled?",
+        // factoring this node and every ancestor's `enabled_state`.
+        // Used both to derive `is_disabled` for the style chrome and
+        // to flip the cursor between Pointer (enabled) / Default
+        // (disabled).
+        let effective_enabled = ctx.effective_enabled_signal(self_id);
 
         // Interaction signal — caller-supplied via `share_interaction`
         // when set (so a wrapping widget's chrome can mirror the icon's
-        // color), otherwise allocated locally.
+        // color), otherwise allocated locally. Seeded to Idle; the
+        // arena's enabled-state is consulted separately.
         let interaction = match self.shared_interaction.take() {
-            Some(shared) => {
-                // Honor the button's enabled state regardless of the
-                // signal's seeded value, so callers don't have to know
-                // whether the trigger ended up disabled.
-                if !enabled {
-                    shared.set(InteractionState::Disabled);
-                }
-                shared
-            }
-            None => ctx.signal(if enabled {
-                InteractionState::Idle
-            } else {
-                InteractionState::Disabled
-            }),
+            Some(shared) => shared,
+            None => ctx.signal(InteractionState::Idle),
         };
         self.interaction = interaction.clone();
-
-        // Propagate enabled state to the arena so the a11y tree and
-        // `is_enabled()` queries pick it up.
-        if !enabled {
-            let self_id = ctx.self_id();
-            ctx.enabled_when(self_id, false);
-        }
 
         // Register toggled signal for repaint + a11y refresh if present.
         // AccessibilityOnly pushes a fresh set_toggled() into the a11y
@@ -624,7 +644,11 @@ impl bastyde_core::widget::Widget for IconButton {
         let is_pressed = interaction.map(|s| matches!(s, InteractionState::Pressed));
         let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));
         let is_focused = interaction.map(|s| matches!(s, InteractionState::Focused));
-        let is_disabled = interaction.map(|s| matches!(s, InteractionState::Disabled));
+        // `is_disabled` derives from the arena's effective enabled
+        // state — NOT from the interaction signal (which never
+        // carries Disabled anymore). Style chrome uses this to pick
+        // its disabled-background role.
+        let is_disabled = effective_enabled.map(|on| !*on);
         let cfg = IconButtonStyleConfig {
             icon: icon_content_id,
             is_pressed,
@@ -681,10 +705,12 @@ impl bastyde_core::widget::Widget for IconButton {
         let handler_set = HandlerSet::new()
             .on_tap({
                 let interaction = int_tap;
+                // The framework gates pointer/key events on
+                // `arena.is_enabled(self_id)` before dispatch, so a
+                // disabled subtree never reaches this closure. No
+                // need for a redundant `if !enabled { return; }`
+                // guard — the snapshot it captured is gone.
                 move |_pos, ctx: &mut EventContext| {
-                    if !enabled {
-                        return;
-                    }
                     if let Some(ref toggled) = toggled_for_tap {
                         toggled.set(!toggled.get());
                     }
@@ -698,9 +724,6 @@ impl bastyde_core::widget::Widget for IconButton {
                 let int_enter = int_hover_enter;
                 let int_leave = int_hover_leave;
                 move |entered: bool, _ctx: &mut EventContext| {
-                    if !enabled {
-                        return;
-                    }
                     if entered {
                         int_enter.set(InteractionState::Hovered);
                     } else {
@@ -711,9 +734,6 @@ impl bastyde_core::widget::Widget for IconButton {
             .on_key({
                 let interaction = int_key;
                 move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
-                    if !enabled {
-                        return EventResponse::Ignored;
-                    }
                     match event {
                         WidgetEvent::KeyDown {
                             key: Key::Space | Key::Enter,
@@ -752,10 +772,12 @@ impl bastyde_core::widget::Widget for IconButton {
                 }
             })
             .on_access_action({
+                // Framework gates this on `arena.is_enabled()`; no
+                // need for an inline `&& enabled` check.
                 move |action: bastyde_core::accesskit::Action,
                       ctx: &mut EventContext|
                       -> EventResponse {
-                    if action == bastyde_core::accesskit::Action::Click && enabled {
+                    if action == bastyde_core::accesskit::Action::Click {
                         if let Some(ref toggled) = toggled_for_access {
                             toggled.set(!toggled.get());
                         }
@@ -768,7 +790,12 @@ impl bastyde_core::widget::Widget for IconButton {
                     }
                 }
             })
-            .focusable(self.focusable && enabled)
+            // The focus walker skips disabled subtrees on its own
+            // (see `find_focusable_at_or_above`), so we don't AND
+            // with enabled here. The static `self.focusable` flag
+            // is the caller's intent (e.g. close-button-inside-tab
+            // wants `false`).
+            .focusable(self.focusable)
             .cursor(CursorIcon::Pointer);
 
         ctx.apply_self_handlers(handler_set);
@@ -831,9 +858,11 @@ impl bastyde_core::widget::Widget for IconButton {
         } else {
             builder.set_name("Button");
         }
-        if !self.enabled {
-            builder.set_disabled();
-        }
+        // Note: `set_disabled()` is now driven by the framework's
+        // accessibility walker from `arena.is_enabled(self_id)`. The
+        // composite no longer needs to mirror it — the snapshot path
+        // was redundant with the arena and broke under reactive
+        // `enabled_when(id, signal)` flips.
         if let Some(ref toggled) = self.toggled {
             builder.set_toggled(toggled.get());
         }
@@ -970,3 +999,81 @@ fn default_eye_off_icon() -> IconWidget {
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bastyde_core::signal::Signal;
+    use bastyde_core::widget_tree::WidgetTree;
+
+    /// Reactive enabled-state via `ctx.enabled_when(btn_id, signal)`
+    /// must dim the IconButton's icon when the signal flips to false —
+    /// regression test for the FormatToolbar bug where the
+    /// table-operation buttons stayed full-color despite the framework
+    /// correctly gating their events. Until the enabled-state
+    /// architecture refactor (this commit and the framework commit
+    /// that preceded it) the icon's color was driven by an internal
+    /// `InteractionState::Disabled` seed captured at build time,
+    /// which never updated from a later `enabled_when` call.
+    #[test]
+    fn icon_button_enabled_when_signal_dims_icon_color() {
+        let theme = bastyde_core::presets::intui::light();
+        let mut tree = WidgetTree::new();
+        tree.set_theme(theme.clone());
+
+        let is_enabled = Signal::new(true);
+        let btn_id = tree.add(
+            IconButton::new(IconWidget::checkmark(24.0))
+                .tooltip_literal("test"),
+        );
+        tree.enabled_when(btn_id, is_enabled.clone());
+        tree.layout(bastyde_canvas::SizeProposal::exact(100.0, 40.0));
+
+        let primary = theme.colors.text_primary.to_array();
+        let disabled = theme.colors.text_disabled.to_array();
+        let frame = tree.render();
+        assert!(
+            frame.paths.iter().any(|p| p.color == primary),
+            "enabled IconButton must render its icon at text_primary; \
+             got path colors = {:?}",
+            frame.paths.iter().map(|p| p.color).collect::<Vec<_>>()
+        );
+
+        is_enabled.set(false);
+        tree.layout(bastyde_canvas::SizeProposal::exact(100.0, 40.0));
+        let frame = tree.render();
+        assert!(
+            frame.paths.iter().any(|p| p.color == disabled),
+            "after flipping enabled→false, IconButton's icon must \
+             render at text_disabled (the FormatToolbar bug as a unit \
+             test); got path colors = {:?}",
+            frame.paths.iter().map(|p| p.color).collect::<Vec<_>>()
+        );
+
+        is_enabled.set(true);
+        tree.layout(bastyde_canvas::SizeProposal::exact(100.0, 40.0));
+        let frame = tree.render();
+        assert!(
+            frame.paths.iter().any(|p| p.color == primary),
+            "flipping enabled→true must restore the primary color"
+        );
+    }
+
+    /// Static `.enabled(false)` builder must route through the arena —
+    /// after migration, the snapshot path is gone and the only correct
+    /// behavior is that `arena.is_enabled(btn_id)` returns false.
+    #[test]
+    fn icon_button_static_enabled_false_propagates_to_arena() {
+        let mut tree = WidgetTree::new();
+        let btn_id = tree.add(
+            IconButton::new(IconWidget::checkmark(24.0))
+                .tooltip_literal("test")
+                .enabled(false),
+        );
+        tree.layout(bastyde_canvas::SizeProposal::exact(100.0, 40.0));
+        assert!(
+            !tree.is_enabled(btn_id),
+            "IconButton::enabled(false) must propagate to the arena"
+        );
+    }
+}

@@ -91,7 +91,14 @@ pub struct Button {
     /// built-in [`crate::styles::RecipeButtonStyle`] default.
     style_override: Option<SharedButtonStyle>,
     action: Option<CommandFactory>,
-    enabled: bool,
+    /// Initial enabled-state. Forwarded into the arena via
+    /// `ctx.enabled_when(self_id, false)` at build time when `false`;
+    /// not kept as a runtime snapshot. After `build()` the arena's
+    /// `enabled_state` is the single source of truth — leaves resolve
+    /// colors via `PaintContext::effective_enabled`, events are gated
+    /// by `arena.is_enabled()`, the a11y walker reads it for
+    /// `set_disabled()`.
+    initial_enabled: bool,
     icon: Option<IconWidget>,
     icon_location: IconLocation,
     tooltip_text: Option<String>,
@@ -160,7 +167,7 @@ impl Button {
             variant: ButtonVariant::Plain,
             style_override: None,
             action: None,
-            enabled: true,
+            initial_enabled: true,
             icon: None,
             icon_location: IconLocation::None,
             tooltip_text: None,
@@ -310,8 +317,20 @@ impl Button {
         self
     }
 
+    /// Set the initial enabled state. Disabled buttons ignore input
+    /// and dim their content (the framework's
+    /// `PaintContext::effective_enabled` propagates through to the
+    /// label/icon leaves). Forwarded into the arena via
+    /// `ctx.enabled_when(self_id, false)` at build time.
+    ///
+    /// For a reactive enabled state, call
+    /// `ctx.enabled_when(button_id, my_signal)` from the composing
+    /// widget. Both routes write to the same arena `enabled_state`;
+    /// an external `enabled_when` registered after this builder runs
+    /// wins (last-write semantics) and updates reactively from the
+    /// signal.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -402,7 +421,7 @@ impl std::fmt::Debug for Button {
         f.debug_struct("Button")
             .field("label", &self.label.get())
             .field("variant", &self.variant)
-            .field("enabled", &self.enabled)
+            .field("initial_enabled", &self.initial_enabled)
             .finish()
     }
 }
@@ -417,10 +436,13 @@ impl std::fmt::Debug for Button {
 // `ButtonStyle` impls that paint a different background can request
 // the Button to use a specific text role via `Button::text_role(...)`.
 
-pub(crate) fn resolve_text_role(variant: ButtonVariant, state: InteractionState) -> TextRole {
-    if state == InteractionState::Disabled {
-        return TextRole::Disabled;
-    }
+pub(crate) fn resolve_text_role(variant: ButtonVariant, _state: InteractionState) -> TextRole {
+    // Disabled substitution happens at the leaf paint via
+    // `ColorProp::resolve(theme, ctx.effective_enabled)` — see
+    // `crates/bastyde-core/src/color_prop.rs`. The composite no
+    // longer carries `InteractionState::Disabled`; the framework's
+    // arena enabled-state drives the dim, and the leaves convert it
+    // into `TextRole::Disabled` at paint time.
     match variant {
         ButtonVariant::Filled | ButtonVariant::Destructive => TextRole::OnAccent,
         ButtonVariant::Tinted
@@ -439,23 +461,29 @@ impl bastyde_core::widget::Widget for Button {
         // `ButtonStyle` impl — see step 5 of the styling refactor.
         use crate::styles::recipe_button_style as btn;
         let variant = self.variant;
-        let enabled = self.enabled;
+        let self_id = ctx.self_id();
+
+        // Forward the initial-enabled hint into the arena. After this
+        // point the arena is the single source of truth — events,
+        // focus, a11y, and the leaves' role-resolution all consult
+        // `arena.is_enabled(self_id)` / `PaintContext::effective_enabled`.
+        // The interaction signal no longer carries Disabled: that was
+        // the snapshot duality the architecture refactor removed.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
+
+        // Reactive view of "is this widget effectively enabled?".
+        let effective_enabled = ctx.effective_enabled_signal(self_id);
 
         // Create interaction signal — caller-supplied via
         // `share_interaction` when set (so a wrapping widget's chrome
         // can mirror the label's color), otherwise allocated locally.
+        // Seeded to Idle; the arena's enabled-state is consulted
+        // separately via `effective_enabled`.
         let interaction = match self.shared_interaction.take() {
-            Some(shared) => {
-                if !enabled {
-                    shared.set(InteractionState::Disabled);
-                }
-                shared
-            }
-            None => ctx.signal(if enabled {
-                InteractionState::Idle
-            } else {
-                InteractionState::Disabled
-            }),
+            Some(shared) => shared,
+            None => ctx.signal(InteractionState::Idle),
         };
         self.interaction = interaction.clone();
 
@@ -621,7 +649,12 @@ impl bastyde_core::widget::Widget for Button {
         let is_pressed = interaction.map(|s| matches!(s, InteractionState::Pressed));
         let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));
         let is_focused = interaction.map(|s| matches!(s, InteractionState::Focused));
-        let is_disabled = interaction.map(|s| matches!(s, InteractionState::Disabled));
+        // `is_disabled` derives from the arena's effective enabled
+        // state — NOT from the interaction signal. The interaction
+        // signal never carries Disabled anymore (the snapshot-based
+        // duality was removed). Style chrome uses this to pick its
+        // disabled-background role.
+        let is_disabled = effective_enabled.map(|on| !*on);
         let cfg = ButtonStyleConfig {
             label: content_id,
             is_pressed,
@@ -675,10 +708,12 @@ impl bastyde_core::widget::Widget for Button {
         let handler_set = HandlerSet::new()
             .on_tap({
                 let interaction = int_tap;
+                // The framework gates pointer/key events on
+                // `arena.is_enabled(self_id)` before dispatch, so a
+                // disabled subtree never reaches this closure. No
+                // redundant `if !enabled { return; }` guard — that
+                // path captured a build-time snapshot which is gone.
                 move |_pos, ctx: &mut EventContext| {
-                    if !enabled {
-                        return;
-                    }
                     if let Some(ref action) = *action_for_tap {
                         action(ctx);
                     }
@@ -689,9 +724,6 @@ impl bastyde_core::widget::Widget for Button {
                 let int_enter = int_hover_enter;
                 let int_leave = int_hover_leave;
                 move |entered: bool, _ctx: &mut EventContext| {
-                    if !enabled {
-                        return;
-                    }
                     if entered {
                         int_enter.set(InteractionState::Hovered);
                     } else {
@@ -702,9 +734,6 @@ impl bastyde_core::widget::Widget for Button {
             .on_key({
                 let interaction = int_key;
                 move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
-                    if !enabled {
-                        return EventResponse::Ignored;
-                    }
                     match event {
                         WidgetEvent::KeyDown {
                             key: Key::Space | Key::Enter,
@@ -747,10 +776,12 @@ impl bastyde_core::widget::Widget for Button {
                 }
             })
             .on_access_action({
+                // Framework gates this on `arena.is_enabled()`; no
+                // need for an inline `&& enabled` check.
                 move |action: bastyde_core::accesskit::Action,
                       ctx: &mut EventContext|
                       -> EventResponse {
-                    if action == bastyde_core::accesskit::Action::Click && enabled {
+                    if action == bastyde_core::accesskit::Action::Click {
                         if let Some(ref act) = *action_for_access {
                             act(ctx);
                         }
@@ -760,7 +791,9 @@ impl bastyde_core::widget::Widget for Button {
                     }
                 }
             })
-            .focusable(enabled)
+            // The focus walker skips disabled subtrees on its own —
+            // no need to AND with enabled here.
+            .focusable(true)
             .cursor(CursorIcon::Pointer);
 
         ctx.apply_self_handlers(handler_set);
@@ -802,9 +835,11 @@ impl bastyde_core::widget::Widget for Button {
         // — Static returns the captured `String`; Bound returns the
         // signal's current value. Keeps AT in sync with `bind_label`.
         builder.set_name(self.label.get());
-        if !self.enabled {
-            builder.set_disabled();
-        }
+        // `set_disabled()` is now driven by the framework's
+        // accessibility walker from `arena.is_enabled(self_id)`. The
+        // composite no longer needs to mirror it — the snapshot path
+        // was redundant with the arena and broke under reactive
+        // `enabled_when(id, signal)` flips.
         // ARIA disclosure pattern: a button that opens a popup
         // should declare `has_popup` and, if the wrapper tracks
         // it, `expanded`. Both are opt-in — regular buttons with
