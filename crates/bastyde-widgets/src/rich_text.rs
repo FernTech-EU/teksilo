@@ -2299,17 +2299,33 @@ impl Widget for RichTextEditor {
 /// next signal propagation. Exported to `keyboard` and `mouse`
 /// because every event handler ends with a signal publish.
 pub(super) fn sync_cursor_signals(state: &SharedState) {
-    let st = state.borrow();
+    let mut st = state.borrow_mut();
     let pos = st.cursor.position();
     let anc = st.cursor.anchor();
     let has_sel = st.cursor.has_selection();
     let pos_sig = st.cursor_position.clone();
     let anc_sig = st.cursor_anchor.clone();
     let sel_sig = st.has_selection.clone();
+    let caret_vis_sig = st.caret_visible.clone();
+    // Reset the blink phase on every cursor mutation: a steady-visible
+    // caret while typing or holding an arrow key, blinking only
+    // resumes after the user stops moving. Mirrors focus-gain behavior
+    // (see the FocusChanged handler around rich_text.rs:2041). The
+    // frame loop reads `blink_last_toggle` each tick and toggles only
+    // after CARET_BLINK_INTERVAL elapses, so resetting it here delays
+    // the next toggle by a full interval.
+    let blink_reset =
+        st.has_focus && matches!(st.policy.caret_policy, CaretPolicy::Blinking);
+    if blink_reset {
+        st.blink_last_toggle = Some(std::time::Instant::now());
+    }
     drop(st);
     pos_sig.set(pos);
     anc_sig.set(anc);
     sel_sig.set(has_sel);
+    if blink_reset && !caret_vis_sig.get() {
+        caret_vis_sig.set(true);
+    }
 }
 
 /// Dispatch an AccessKit `ActionRequest` payload for the rich text
