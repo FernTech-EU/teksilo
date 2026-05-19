@@ -115,7 +115,8 @@ pub struct HexColorInput {
     uppercase: bool,
     label: Option<LocalizedString>,
     placeholder: Option<LocalizedString>,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     read_only: bool,
     width: Option<f32>,
     on_value_changed: Option<OnValueChanged>,
@@ -140,7 +141,7 @@ impl std::fmt::Debug for HexColorInput {
             .field("short_form_enabled", &self.short_form_enabled)
             .field("require_hash", &self.require_hash)
             .field("uppercase", &self.uppercase)
-            .field("enabled", &self.enabled)
+            .field("initial_enabled", &self.initial_enabled)
             .field("read_only", &self.read_only)
             .finish_non_exhaustive()
     }
@@ -177,7 +178,7 @@ impl HexColorInput {
             uppercase,
             label: None,
             placeholder: None,
-            enabled: true,
+            initial_enabled: true,
             read_only: false,
             width: None,
             on_value_changed: None,
@@ -229,8 +230,9 @@ impl HexColorInput {
         self
     }
 
+    /// Set the initial enabled state. Forwarded to the arena at build time.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -269,6 +271,11 @@ impl HexColorInput {
 
 impl Widget for HexColorInput {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let self_id = ctx.self_id();
+        // Forward initial-enabled into the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
         let alpha_enabled = self.alpha_enabled;
         let short_form_enabled = self.short_form_enabled;
         let require_hash = self.require_hash;
@@ -412,7 +419,7 @@ impl Widget for HexColorInput {
 
         let mut text_input = TextInput::new(self.text_signal.clone())
             .placeholder(placeholder)
-            .enabled(self.enabled)
+            .enabled(self.initial_enabled)
             .read_only(self.read_only)
             .input_mask(mask_string.to_string())
             .char_filter(|c: char| c.is_ascii_hexdigit() || c == '#')
@@ -506,9 +513,7 @@ impl Widget for HexColorInput {
                 builder.set_placeholder(placeholder);
             }
         }
-        if !self.enabled {
-            builder.set_disabled();
-        }
+        // Framework a11y walker sets `set_disabled` from arena state.
         if self.read_only {
             builder.set_read_only();
         }

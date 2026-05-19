@@ -137,7 +137,8 @@ pub struct DateEdit {
     first_day_of_week: Option<Weekday>,
     show_calendar_button: bool,
     calendar_popover_placement: OverlayPlacement,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     read_only: bool,
     /// How parse failures are surfaced. Default `AutoCorrect`.
     validation_behavior: ValidationBehavior,
@@ -173,7 +174,7 @@ impl std::fmt::Debug for DateEdit {
         f.debug_struct("DateEdit")
             .field("min", &self.min_date)
             .field("max", &self.max_date)
-            .field("enabled", &self.enabled)
+            .field("initial_enabled", &self.initial_enabled)
             .finish_non_exhaustive()
     }
 }
@@ -191,7 +192,7 @@ impl DateEdit {
             first_day_of_week: None,
             show_calendar_button: true,
             calendar_popover_placement: OverlayPlacement::BelowPreferred,
-            enabled: true,
+            initial_enabled: true,
             read_only: false,
             validation_behavior: ValidationBehavior::AutoCorrect,
             width_policy: WidthPolicy::Default,
@@ -262,8 +263,10 @@ impl DateEdit {
         self
     }
 
+    /// Set the initial enabled state. Forwarded to the arena at build
+    /// time. Use `ctx.enabled_when(id, signal)` for reactivity.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -352,7 +355,12 @@ impl Widget for DateEdit {
         let theme = ctx.theme_signal().get();
         use crate::styles::recipe_date_edit_style as de;
         let _ = &theme;
-        let enabled = self.enabled;
+        let self_id = ctx.self_id();
+        // Forward initial-enabled into the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
+        let enabled = self.initial_enabled;
         let read_only = self.read_only;
 
         // Resolve pattern: explicit override → locale default.
@@ -844,9 +852,7 @@ impl Widget for DateEdit {
                 }
             }
         }
-        if !self.enabled {
-            builder.set_disabled();
-        }
+        // Framework a11y walker sets `set_disabled` from arena state.
         if self.read_only {
             builder.set_read_only();
         }

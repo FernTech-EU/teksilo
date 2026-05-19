@@ -97,7 +97,8 @@ pub struct DateRangeEdit {
     placeholder_start: String,
     placeholder_end: String,
     first_day_of_week: Option<Weekday>,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     read_only: bool,
     label: Option<String>,
     validation_behavior: ValidationBehavior,
@@ -144,7 +145,7 @@ impl DateRangeEdit {
             placeholder_start: String::new(),
             placeholder_end: String::new(),
             first_day_of_week: None,
-            enabled: true,
+            initial_enabled: true,
             read_only: false,
             label: None,
             validation_behavior: ValidationBehavior::AutoCorrect,
@@ -194,8 +195,9 @@ impl DateRangeEdit {
         self
     }
 
+    /// Set the initial enabled state. Forwarded to the arena at build time.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -248,7 +250,12 @@ impl Widget for DateRangeEdit {
         use crate::styles::recipe_date_edit_style as de;
         use crate::styles::recipe_text_input_style as field_dims;
         let focus_ring_width = theme.shape.focus_ring_width;
-        let enabled = self.enabled;
+        let self_id = ctx.self_id();
+        // Forward initial-enabled into the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
+        let enabled = self.initial_enabled;
         let read_only = self.read_only;
 
         // Resolve pattern — locale default unless overridden.
@@ -579,9 +586,7 @@ impl Widget for DateRangeEdit {
                 builder.set_placeholder(resolve_message_widget("date-range-edit-placeholder", &[]));
             }
         }
-        if !self.enabled {
-            builder.set_disabled();
-        }
+        // Framework a11y walker sets `set_disabled` from arena state.
         if self.read_only {
             builder.set_read_only();
         }
@@ -690,7 +695,7 @@ impl DateRangeEdit {
 
         let pattern_for_filter = pattern_rc.clone();
         let mut field = TextInputField::new(text_signal.clone())
-            .enabled(self.enabled)
+            .enabled(self.initial_enabled)
             .read_only(self.read_only)
             .placeholder(placeholder)
             .text_height(text_area_height)
@@ -810,7 +815,7 @@ impl DateRangeEdit {
 
         // Attach key preview on a strict ancestor of the field — same
         // pattern DateEdit uses for its ±segment stepping.
-        let enabled = self.enabled;
+        let enabled = self.initial_enabled;
         let read_only = self.read_only;
         let step_for_key = segment_step.clone();
 

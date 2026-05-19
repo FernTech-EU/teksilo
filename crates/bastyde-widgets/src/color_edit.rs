@@ -87,7 +87,8 @@ pub struct ColorEdit {
 
     // Composite.
     label: Option<LocalizedString>,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     on_open: Option<OnVoid>,
     on_close: Option<OnVoid>,
 
@@ -100,7 +101,7 @@ impl std::fmt::Debug for ColorEdit {
         f.debug_struct("ColorEdit")
             .field("alpha_enabled", &self.alpha_enabled)
             .field("picker_layout", &self.picker_layout)
-            .field("enabled", &self.enabled)
+            .field("initial_enabled", &self.initial_enabled)
             .finish_non_exhaustive()
     }
 }
@@ -135,7 +136,7 @@ impl ColorEdit {
             placement: OverlayPlacement::BelowPreferred,
             dismiss_behavior: DismissBehavior::EscapeOrClickOutside,
             label: None,
-            enabled: true,
+            initial_enabled: true,
             on_open: None,
             on_close: None,
             root_child_id: None,
@@ -212,8 +213,9 @@ impl ColorEdit {
         self
     }
 
+    /// Set the initial enabled state. Forwarded to the arena at build time.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -241,6 +243,12 @@ impl ColorEdit {
 
 impl Widget for ColorEdit {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let self_id = ctx.self_id();
+        // Forward initial-enabled into the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
+
         // Bridge nullable binding ↔ proxy. The picker writes the
         // proxy; we mirror that to the source as Some(c). External
         // changes to source flow back into proxy. Empty (None) state
@@ -299,7 +307,7 @@ impl Widget for ColorEdit {
                     ctx_evt.dismiss_self_overlay_chain();
                 }
             })
-            .enabled(self.enabled);
+            .enabled(self.initial_enabled);
         if let Some(s) = self.swatches.clone() {
             picker = picker.swatches(s);
         }
@@ -356,7 +364,7 @@ impl Widget for ColorEdit {
         } else {
             Button::new_literal("").bind_label(label_signal)
         };
-        let mut trigger = trigger.enabled(self.enabled).leading(swatch);
+        let mut trigger = trigger.enabled(self.initial_enabled).leading(swatch);
         if self.show_chevron {
             trigger = trigger.trailing(IconWidget::chevron_down(12.0).access_hidden(true));
         }

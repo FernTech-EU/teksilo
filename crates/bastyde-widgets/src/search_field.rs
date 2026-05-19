@@ -100,7 +100,8 @@ pub struct SearchField {
     text: Signal<String>,
     placeholder: Option<String>,
     label: Option<String>,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     suggestion_provider: Option<SuggestionProvider>,
     max_suggestions: usize,
     min_chars: usize,
@@ -145,7 +146,7 @@ impl SearchField {
             text,
             placeholder: None,
             label: None,
-            enabled: true,
+            initial_enabled: true,
             suggestion_provider: None,
             max_suggestions: DEFAULT_MAX_SUGGESTIONS,
             min_chars: 1,
@@ -177,8 +178,9 @@ impl SearchField {
         self
     }
 
+    /// Set the initial enabled state. Forwarded to the arena at build time.
     pub fn enabled(mut self, on: bool) -> Self {
-        self.enabled = on;
+        self.initial_enabled = on;
         self
     }
 
@@ -224,6 +226,12 @@ impl std::fmt::Debug for SearchField {
 
 impl Widget for SearchField {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let self_id = ctx.self_id();
+        // Forward initial-enabled into the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
+
         // ── Reactive state ──────────────────────────────────────────
         // Suggestions list — recomputed on every text change.
         let suggestions: Signal<Vec<String>> = ctx.signal(Vec::new());
@@ -256,7 +264,7 @@ impl Widget for SearchField {
             .placeholder(placeholder)
             .show_clear_button(true)
             .leading_slot(search_glyph(sf::GLYPH_SIZE, sf::GLYPH_SLOT_WIDTH))
-            .enabled(self.enabled)
+            .enabled(self.initial_enabled)
             .on_submit_fn(move |ctx| {
                 let idx = highlighted_for_submit.get();
                 let list = suggestions_for_submit.get();

@@ -54,7 +54,8 @@ pub struct FilePickerField {
     on_pick: Option<Box<dyn Fn(&FileDialogResult, &mut EventContext)>>,
     placeholder: Option<String>,
     label: Option<String>,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     root_child_id: Option<WidgetId>,
 }
 
@@ -72,7 +73,7 @@ impl FilePickerField {
             on_pick: None,
             placeholder: None,
             label: None,
-            enabled: true,
+            initial_enabled: true,
             root_child_id: None,
         }
     }
@@ -134,8 +135,9 @@ impl FilePickerField {
     }
 
     /// Disable / re-enable the field (and the browse button).
+    /// Set the initial enabled state. Forwarded to the arena at build time.
     pub fn enabled(mut self, on: bool) -> Self {
-        self.enabled = on;
+        self.initial_enabled = on;
         self
     }
 }
@@ -179,6 +181,12 @@ fn build_request_owned(
 
 impl Widget for FilePickerField {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let self_id = ctx.self_id();
+        // Forward initial-enabled into the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
+
         // Snapshot dialog config + result writer for the Browse-button
         // closure (which can't borrow `self`).
         let kind = self.kind;
@@ -195,7 +203,7 @@ impl Widget for FilePickerField {
 
         let browse = IconButton::browse()
             .embedded()
-            .enabled(self.enabled)
+            .enabled(self.initial_enabled)
             .on_activate_fn(move |ctx| {
                 let request = build_request_owned(
                     kind,
@@ -223,7 +231,7 @@ impl Widget for FilePickerField {
         // no Option<TextInput> storage, no map_input plumbing, just
         // direct construction from the FilePickerField's own config.
         let mut input = TextInput::new(self.text.clone())
-            .enabled(self.enabled)
+            .enabled(self.initial_enabled)
             .trailing_slot(browse);
         if let Some(ph) = self.placeholder.clone() {
             input = input.placeholder(ph);

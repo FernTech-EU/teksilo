@@ -87,7 +87,8 @@ pub struct TimeEdit {
     max_time: Option<Time>,
     step_minutes: u32,
     placeholder: String,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     read_only: bool,
     validation_behavior: ValidationBehavior,
     width_policy: crate::date_edit::WidthPolicy,
@@ -121,7 +122,7 @@ impl TimeEdit {
             max_time: None,
             step_minutes: 1,
             placeholder: String::new(),
-            enabled: true,
+            initial_enabled: true,
             read_only: false,
             validation_behavior: ValidationBehavior::AutoCorrect,
             width_policy: crate::date_edit::WidthPolicy::Default,
@@ -187,8 +188,9 @@ impl TimeEdit {
         self
     }
 
+    /// Set the initial enabled state. Forwarded to the arena at build time.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -280,7 +282,12 @@ impl Widget for TimeEdit {
             }
         }
 
-        let enabled = self.enabled;
+        let self_id = ctx.self_id();
+        // Forward initial-enabled into the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
+        let enabled = self.initial_enabled;
         let read_only = self.read_only;
 
         // Resolve clock format: explicit override → locale default.
@@ -621,9 +628,7 @@ impl Widget for TimeEdit {
                 }
             }
         }
-        if !self.enabled {
-            builder.set_disabled();
-        }
+        // Framework a11y walker sets `set_disabled` from arena state.
         if self.read_only {
             builder.set_read_only();
         }
