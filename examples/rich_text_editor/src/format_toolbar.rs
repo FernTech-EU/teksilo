@@ -121,9 +121,6 @@ impl std::fmt::Debug for FormatToolbar {
 
 impl Widget for FormatToolbar {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let fv = self.handle.format_version();
-        let cp = self.handle.cursor_position_signal();
-
         // ── Inline format mirror signals (Bold / Italic / Underline / Strike) ──
         let is_bold = ctx.signal(self.handle.is_bold());
         let is_italic = ctx.signal(self.handle.is_italic());
@@ -145,14 +142,23 @@ impl Widget for FormatToolbar {
             HeadingLevel::from_u8(self.handle.get_heading_level()),
         ));
 
-        // ── Editor → toolbar re-sync. Both `format_version`
-        // (FormatChanged events, also fires on Ctrl+B without caret
-        // move) AND `cursor_position` (caret moves into pre-
-        // formatted regions) need to trigger the re-read. Bastyde's
-        // derived signals are read-only — `ctx.effect` only accepts
-        // mutable sources — so we attach the same closure to each
-        // upstream individually instead of zipping them.
-        let resync: std::rc::Rc<dyn Fn()> = {
+        // ── Editor → toolbar re-sync via per-frame poll with version
+        // diff. NOT direct `ctx.effect(&format_version, ...)` because
+        // `format_version` and `cursor_position` are written from
+        // *inside* `RichTextEditor`'s own `state.borrow_mut()` (the
+        // frame-tick path calls `drain_events` which then calls
+        // `format_version.set(...)`); observers fire synchronously
+        // there, and re-entering the state via `handle.is_bold()`
+        // would panic with `already mutably borrowed`. `frame_tick`
+        // fires *outside* any state borrow — by the time the toolbar
+        // sees the tick, the editor's tick closure has already
+        // released its borrow.
+        let fv_src = self.handle.format_version();
+        let cp_src = self.handle.cursor_position_signal();
+        let last_fv = std::rc::Rc::new(std::cell::Cell::new(fv_src.get()));
+        let last_cp = std::rc::Rc::new(std::cell::Cell::new(cp_src.get()));
+        let tick = ctx.frame_tick();
+        {
             let handle = self.handle.clone();
             let is_bold = is_bold.clone();
             let is_italic = is_italic.clone();
@@ -164,7 +170,16 @@ impl Widget for FormatToolbar {
             let is_justify = is_align_justify.clone();
             let heading = heading_selected.clone();
             let in_table = is_in_table.clone();
-            std::rc::Rc::new(move || {
+            let last_fv = last_fv.clone();
+            let last_cp = last_cp.clone();
+            ctx.effect(&tick, move |_| {
+                let fv_now = fv_src.get();
+                let cp_now = cp_src.get();
+                if fv_now == last_fv.get() && cp_now == last_cp.get() {
+                    return;
+                }
+                last_fv.set(fv_now);
+                last_cp.set(cp_now);
                 is_bold.set(handle.is_bold());
                 is_italic.set(handle.is_italic());
                 is_underline.set(handle.is_underline());
@@ -179,17 +194,8 @@ impl Widget for FormatToolbar {
                     heading.set(target);
                 }
                 in_table.set(handle.is_in_table());
-            })
-        };
-        {
-            let resync = resync.clone();
-            ctx.effect(&fv, move |_| resync());
+            });
         }
-        {
-            let resync = resync.clone();
-            ctx.effect(&cp, move |_| resync());
-        }
-        drop(resync);
 
         // ── Picker → editor effect. Guarded against re-entry because
         // Signal::set fires observers unconditionally (no equality
