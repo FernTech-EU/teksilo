@@ -2,8 +2,9 @@
 """
 Extract public API and inline documentation from bastyde-widgets source files.
 
-Walks `crates/bastyde-widgets/src/` (and `src/primitives/`), looks up the widget
-file for each requested name, and emits:
+Walks `crates/bastyde-widgets/src/` recursively (top-level files plus submodule
+directories like `notification/`, `tab_widget/`, `primitives/`, `animations/`),
+looks up the widget file for each requested name, and emits:
 
   - The file's `//!` module header doc
   - Every `pub struct` / `pub enum` / `pub type` / `pub const` with its `///` doc
@@ -12,6 +13,14 @@ file for each requested name, and emits:
 
 Trait impls like `impl Widget for Foo` are skipped — they are internal plumbing,
 not part of the widget's builder API.
+
+`--list` shows only the widget(s) per file, not every exported type. A genuine
+widget is a pub type that both `impl Widget` and is re-exported from the crate
+root (`lib.rs`). Config enums (e.g. `IconLocation`) and internal helpers (e.g.
+`HeaderCell`) are therefore filtered out of the listing — but every type remains
+addressable by name (`extract_widget_api.py IconLocation` still works). The
+flat, one-widget-per-file dirs (top-level, `primitives/`, `animations/`) keep a
+lenient fallback so no conventional module is ever hidden.
 
 Usage:
     python tools/extract_widget_api.py Button HStack
@@ -181,6 +190,11 @@ PUB_FN = re.compile(
     r"(?:\s+(?:async|const|unsafe|extern(?:\s+\"[^\"]*\")?))*"
     r"\s+fn\s+([A-Za-z_]\w*)"
 )
+# `impl ... Widget for X` — allows a path-qualified trait (`widget::Widget`),
+# leading generics (`impl<T> Widget for Foo<T>`), and captures the target type
+# name. `\bWidget\s+for` won't match `WidgetBuilder for` (no whitespace after
+# `Widget`).
+WIDGET_IMPL_RE = re.compile(r"impl\b[^{]*?\bWidget\s+for\s+([A-Za-z_]\w*)")
 
 
 def _doc_text(m: re.Match[str]) -> str:
@@ -813,7 +827,76 @@ class Registry:
     cfg_by_file: dict[Path, list[str]]
     type_to_file: dict[str, Path]  # lowercased type name -> file
     module_to_file: dict[str, Path]  # lowercased file stem -> file
-    type_display: dict[Path, list[str]]  # file -> original-cased type names
+    type_display: dict[Path, list[str]]  # file -> all exported type names
+    widget_display: dict[Path, list[str]]  # file -> just the widget type(s)
+
+
+def _stem_to_camel(stem: str) -> str:
+    """`date_edit` -> `DateEdit`, `button` -> `Button`."""
+    return "".join(part[:1].upper() + part[1:] for part in stem.split("_") if part)
+
+
+def _is_test_file(p: Path) -> bool:
+    return p.name == "tests.rs" or p.name.endswith("_tests.rs")
+
+
+_EXPORT_TOKEN_RE = re.compile(r"[A-Z][A-Za-z0-9_]*")
+
+
+def _parse_public_exports(lib_rs: Path) -> set[str]:
+    """Return every type-ish name re-exported via `pub use ...;` in lib.rs.
+
+    The crate root lists its public surface explicitly (no `::*` globs), so the
+    CamelCase / SCREAMING tokens inside each `pub use` statement are exactly the
+    publicly reachable type and const names. snake_case path segments are
+    lowercase and so excluded by the leading-uppercase requirement.
+    """
+    if not lib_rs.exists():
+        return set()
+    text = lib_rs.read_text(encoding="utf-8")
+    exported: set[str] = set()
+    for m in re.finditer(r"\bpub\s+use\b(.*?);", text, re.DOTALL):
+        exported.update(_EXPORT_TOKEN_RE.findall(m.group(1)))
+    return exported
+
+
+def _pick_widget_names(
+    stem: str,
+    pub_names: list[str],
+    widget_impls: set[str],
+    exported: set[str],
+    nested: bool,
+) -> list[str]:
+    """Choose which names to surface for a file in `--list`.
+
+    A genuine public widget is a pub type that both `impl Widget` and is
+    re-exported from the crate root. Among those, prefer the one matching the
+    file stem (so `dialog.rs` shows only `Dialog`, not its three helper structs).
+
+    For nested submodule files there is no fallback: a file that contributes no
+    re-exported widget is hidden entirely (this is what keeps internal helpers
+    like `HeaderCell` / `DayCell` / `TabBarChrome` out of the list). Top-level
+    files keep the original lenient fallback so no conventional one-widget-per-
+    file module ever disappears.
+    """
+    camel = _stem_to_camel(stem)
+    candidates = [n for n in pub_names if n in widget_impls and n in exported]
+    if camel in candidates:
+        return [camel]
+    if candidates:
+        return candidates
+    if nested:
+        return []
+
+    # Top-level fallback — preserve historical behaviour.
+    widget_pub = [n for n in pub_names if n in widget_impls]
+    if camel in widget_pub:
+        return [camel]
+    if widget_pub:
+        return widget_pub
+    if camel in pub_names:
+        return [camel]
+    return pub_names
 
 
 def _collect_cfgs_from_aggregator(aggregator: Path, base: Path) -> dict[Path, list[str]]:
@@ -849,21 +932,17 @@ def build_registry() -> Registry:
     if not WIDGETS_SRC.exists():
         raise SystemExit(f"bastyde-widgets src not found at {WIDGETS_SRC}")
 
-    files: list[Path] = []
-    for p in sorted(WIDGETS_SRC.glob("*.rs")):
-        if p.name in SKIP_FILES:
-            continue
-        files.append(p)
-    if PRIMITIVES_DIR.exists():
-        for p in sorted(PRIMITIVES_DIR.glob("*.rs")):
-            if p.name in SKIP_FILES:
-                continue
-            files.append(p)
-    if ANIMATIONS_DIR.exists():
-        for p in sorted(ANIMATIONS_DIR.glob("*.rs")):
-            if p.name in SKIP_FILES:
-                continue
-            files.append(p)
+    # Recursive discovery so widgets defined in submodule directories
+    # (notification/, tab_widget/, …) are found too. Shallow paths sort first so
+    # the conventional top-level file wins any name/module collision.
+    files = sorted(
+        (
+            p
+            for p in WIDGETS_SRC.rglob("*.rs")
+            if p.name not in SKIP_FILES and not _is_test_file(p)
+        ),
+        key=lambda p: (len(p.relative_to(WIDGETS_SRC).parts), str(p)),
+    )
 
     cfg_by_file: dict[Path, list[str]] = {}
     cfg_by_file.update(
@@ -880,16 +959,41 @@ def build_registry() -> Registry:
         )
     )
 
+    # Nested files inherit the cfg of their top-level ancestor module
+    # (e.g. color_picker/swatch.rs inherits color_picker.rs's rich-text gate).
+    for fp in files:
+        rel = fp.relative_to(WIDGETS_SRC)
+        if len(rel.parts) > 1 and fp.resolve() not in cfg_by_file:
+            ancestor = (WIDGETS_SRC / f"{rel.parts[0]}.rs").resolve()
+            inherited = cfg_by_file.get(ancestor)
+            if inherited:
+                cfg_by_file[fp.resolve()] = list(inherited)
+
+    exported = _parse_public_exports(WIDGETS_SRC / "lib.rs")
+
     type_to_file: dict[str, Path] = {}
     module_to_file: dict[str, Path] = {}
     type_display: dict[Path, list[str]] = {}
+    widget_display: dict[Path, list[str]] = {}
     type_re = re.compile(r"^\s*pub\s+(?:struct|enum|type)\s+([A-Za-z_]\w*)", re.MULTILINE)
 
     for fp in files:
-        module_to_file[fp.stem.lower()] = fp
+        module_to_file.setdefault(fp.stem.lower(), fp)
         text = fp.read_text(encoding="utf-8")
         names = [m.group(1) for m in type_re.finditer(text)]
         type_display[fp] = names
+        widget_impls = {m.group(1) for m in WIDGET_IMPL_RE.finditer(text)}
+        # `primitives/` and `animations/` are flat one-widget-per-file
+        # collections, like the top-level dir, so they keep the lenient
+        # fallback. Per-widget submodule dirs (notification/, table_view/, …)
+        # use strict re-export filtering to drop internal helpers.
+        rel_parts = fp.relative_to(WIDGETS_SRC).parts
+        lenient = len(rel_parts) == 1 or (
+            len(rel_parts) == 2 and rel_parts[0] in ("primitives", "animations")
+        )
+        widget_display[fp] = _pick_widget_names(
+            fp.stem, names, widget_impls, exported, nested=not lenient
+        )
         for name in names:
             type_to_file.setdefault(name.lower(), fp)
 
@@ -899,6 +1003,7 @@ def build_registry() -> Registry:
         type_to_file=type_to_file,
         module_to_file=module_to_file,
         type_display=type_display,
+        widget_display=widget_display,
     )
 
 
@@ -1111,7 +1216,7 @@ def format_json(pfs: list[ParsedFile]) -> str:
 def cmd_list(reg: Registry) -> int:
     # Show exported type names grouped by file.
     rows: list[tuple[str, str]] = []
-    for fp, names in sorted(reg.type_display.items(), key=lambda kv: kv[0].name):
+    for fp, names in sorted(reg.widget_display.items(), key=lambda kv: kv[0].name):
         if not names:
             continue
         rel = fp.relative_to(REPO_ROOT) if REPO_ROOT in fp.parents else fp
