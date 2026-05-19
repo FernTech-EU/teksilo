@@ -61,7 +61,8 @@ pub struct MenuItem {
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn bastyde_core::widget::Widget>>,
     action: Option<CommandFactory>,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     submenu_factory: Option<Box<dyn Fn() -> Box<dyn Widget>>>,
     submenu_open_delay: Duration,
     // Build state
@@ -98,7 +99,7 @@ impl MenuItem {
             rich_tooltip_source: None,
             composite_tooltip_content: None,
             action: None,
-            enabled: true,
+            initial_enabled: true,
             submenu_factory: None,
             submenu_open_delay: DEFAULT_SUBMENU_OPEN_DELAY,
             interaction: Signal::new(MenuItemState::Idle),
@@ -170,8 +171,11 @@ impl MenuItem {
         self
     }
 
+    /// Set the initial enabled state. Forwarded to the arena at build
+    /// time. For reactive enable/disable, call
+    /// `ctx.enabled_when(menu_item_id, signal)` on the composing widget.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -246,7 +250,7 @@ impl MenuItem {
             rich_tooltip_source: None,
             composite_tooltip_content: None,
             action: None,
-            enabled: true,
+            initial_enabled: true,
             submenu_factory: Some(Box::new(factory)),
             submenu_open_delay: DEFAULT_SUBMENU_OPEN_DELAY,
             interaction: Signal::new(MenuItemState::Idle),
@@ -283,7 +287,7 @@ impl std::fmt::Debug for MenuItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MenuItem")
             .field("label", &self.label)
-            .field("enabled", &self.enabled)
+            .field("initial_enabled", &self.initial_enabled)
             .field("is_submenu", &self.submenu_factory.is_some())
             .finish()
     }
@@ -306,16 +310,27 @@ fn resolve_shortcut_role(state: MenuItemState) -> TextRole {
 impl Widget for MenuItem {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         use crate::styles::recipe_menu_item_style as menu;
-        let enabled = self.enabled;
+        let self_id = ctx.self_id();
+        // Forward initial-enabled into the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
+        let effective_enabled = ctx.effective_enabled_signal(self_id);
 
-        let interaction = ctx.signal(if enabled {
-            MenuItemState::Idle
-        } else {
-            MenuItemState::Disabled
-        });
+        // Interaction seeds to Idle; the framework's effective_enabled
+        // drives the Disabled visual via the recipe and through the
+        // leaves' role substitution.
+        let interaction = ctx.signal(MenuItemState::Idle);
         self.interaction = interaction.clone();
 
-        let text_role = interaction.map(|s| resolve_text_role(*s));
+        // Combine interaction + effective_enabled so `text_role`
+        // resolves to Disabled when disabled. Keeps the icon and label
+        // muted on hover-while-disabled too (defense in depth — the
+        // leaves' `ColorProp::resolve(theme, ctx.effective_enabled)`
+        // would substitute Disabled anyway).
+        let text_role = interaction
+            .zip(&effective_enabled)
+            .map(|(s, on)| if !*on { TextRole::Disabled } else { resolve_text_role(*s) });
 
         // Build the three slots fed to the active `MenuItemStyle`.
         // The style decides the row layout (and chrome); the widget
@@ -505,12 +520,10 @@ impl Widget for MenuItem {
             let dismiss_for_tap = submenu_dismiss_callback.clone();
             let open_for_hover = submenu_open_signal.clone();
             let dismiss_for_hover = submenu_dismiss_callback.clone();
+            // Framework gates events on `arena.is_enabled(self_id)`.
             handler_set = handler_set
                 .on_tap({
                     move |_pos, ctx: &mut EventContext| {
-                        if !enabled {
-                            return;
-                        }
                         // Click on submenu trigger opens it immediately
                         ctx.dismiss_child_overlays_except(sub_id);
                         ctx.activate(sub_id);
@@ -533,9 +546,6 @@ impl Widget for MenuItem {
                 .on_hover({
                     let int_hover = int_hover.clone();
                     move |entered: bool, ctx: &mut EventContext| {
-                        if !enabled {
-                            return;
-                        }
                         if entered {
                             int_hover.set(MenuItemState::Hovered);
                             ctx.dismiss_child_overlays_except(sub_id);
@@ -579,9 +589,6 @@ impl Widget for MenuItem {
             handler_set = handler_set
                 .on_tap({
                     move |_pos, ctx: &mut EventContext| {
-                        if !enabled {
-                            return;
-                        }
                         int_tap.set(MenuItemState::Pressed);
                         if let Some(ref action) = *action_for_tap {
                             action(ctx);
@@ -600,9 +607,6 @@ impl Widget for MenuItem {
                 })
                 .on_hover({
                     move |entered: bool, ctx: &mut EventContext| {
-                        if !enabled {
-                            return;
-                        }
                         if entered {
                             ctx.dismiss_child_overlays();
                             int_hover.set(MenuItemState::Hovered);
@@ -620,9 +624,6 @@ impl Widget for MenuItem {
             let open_for_key = submenu_open_signal.clone();
             let dismiss_for_key = submenu_dismiss_callback.clone();
             move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
-                if !enabled {
-                    return EventResponse::Ignored;
-                }
                 match event {
                     WidgetEvent::KeyDown {
                         key: Key::Enter | Key::Space,
@@ -684,7 +685,11 @@ impl Widget for MenuItem {
             }
         });
 
-        handler_set = handler_set.cursor(if enabled {
+        // Cursor: NotAllowed when effectively disabled (the original
+        // intent), Pointer otherwise. Sourced from the arena via the
+        // reactive effective_enabled signal so it reacts to
+        // `enabled_when` flips.
+        handler_set = handler_set.cursor(if effective_enabled.get() {
             CursorIcon::Pointer
         } else {
             CursorIcon::NotAllowed
@@ -749,11 +754,8 @@ impl Widget for MenuItem {
             builder.set_has_popup(bastyde_core::accesskit::HasPopup::Menu);
             builder.set_expanded(self.submenu_open.get());
         }
-        if !self.enabled {
-            builder.set_disabled();
-        } else {
-            builder.add_action(bastyde_core::accesskit::Action::Click);
-        }
+        // Framework a11y walker sets `set_disabled` from arena state.
+        builder.add_action(bastyde_core::accesskit::Action::Click);
         if let Some(ref shortcut) = self.resolved_shortcut {
             builder.set_keyboard_shortcut(shortcut.clone());
         }

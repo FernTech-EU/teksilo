@@ -68,7 +68,8 @@ pub const SPLIT_BUTTON_CHEVRON_ICON_SIZE: f32 = 12.0;
 pub struct SplitButton {
     rows: Vec<Row>,
     variant: ButtonVariant,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     initial_selected: usize,
     /// Whether picking an item from the dropdown promotes it to the new
     /// session default (IntelliJ's "remember last used"). `true` for
@@ -112,7 +113,7 @@ impl SplitButton {
         Self {
             rows: Vec::new(),
             variant: ButtonVariant::Plain,
-            enabled: true,
+            initial_enabled: true,
             initial_selected: 0,
             promote_on_select: true,
             tooltip_text: None,
@@ -166,8 +167,10 @@ impl SplitButton {
         self
     }
 
+    /// Set the initial enabled state. Forwarded to the arena at build
+    /// time. Use `ctx.enabled_when(button_id, signal)` for reactivity.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -281,7 +284,7 @@ impl std::fmt::Debug for SplitButton {
         f.debug_struct("SplitButton")
             .field("rows", &self.rows.len())
             .field("style", &self.variant)
-            .field("enabled", &self.enabled)
+            .field("initial_enabled", &self.initial_enabled)
             .finish()
     }
 }
@@ -378,7 +381,16 @@ impl Widget for SplitButton {
         let normal_bw = SPLIT_BUTTON_BORDER_WIDTH;
         let focus_bw = ctx.theme().shape.focus_ring_width;
         let style = self.variant;
-        let enabled = self.enabled;
+        let self_id = ctx.self_id();
+        // Forward initial-enabled into the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
+        // `effective_enabled` available if the chrome ever needs it
+        // for reactive `is_disabled` derivation. Today the leaves
+        // handle disabled-color substitution via their own paint
+        // (`PaintContext::effective_enabled`).
+        let _effective_enabled = ctx.effective_enabled_signal(self_id);
 
         // ---- Extract label / action for each MenuItem and wrap each item's
         // activation so selecting it from the menu also promotes its index
@@ -460,11 +472,11 @@ impl Widget for SplitButton {
         );
 
         // ---- Interaction state signal ----
-        let interaction = ctx.signal(if enabled {
-            InteractionState::Idle
-        } else {
-            InteractionState::Disabled
-        });
+        // Seeded to Idle; never carries Disabled. The framework gates
+        // event dispatch on `arena.is_enabled(self_id)`, so disabled
+        // SplitButtons simply don't receive events. Style chrome
+        // reads `is_disabled` from `effective_enabled` if needed.
+        let interaction = ctx.signal(InteractionState::Idle);
         self.interaction = interaction.clone();
 
         // Subtree hover signal — the framework writes `true` whenever the
@@ -476,10 +488,7 @@ impl Widget for SplitButton {
         ctx.effect(&hovered_signal, {
             let interaction = interaction.clone();
             move |entered| {
-                if !enabled {
-                    return;
-                }
-                // Pressed / Focused / Disabled are owned by on_tap, on_key,
+                // Pressed / Focused are owned by on_tap, on_key,
                 // and on_focus; only flip the ambient Idle <-> Hovered pair.
                 match interaction.get() {
                     InteractionState::Pressed
@@ -549,9 +558,6 @@ impl Widget for SplitButton {
             MinSize::new(SPLIT_BUTTON_MIN_WIDTH, SPLIT_BUTTON_HEIGHT)
                 .child_id(main_content_id)
                 .on_tap(move |_pos, ctx: &mut EventContext| {
-                    if !enabled {
-                        return;
-                    }
                     let idx = selected_for_tap.get();
                     if let Some(Some(action)) = actions_for_tap.get(idx) {
                         action(ctx);
@@ -612,9 +618,6 @@ impl Widget for SplitButton {
                 .on_tap({
                     let menu_open = self.menu_open.clone();
                     move |_pos, ctx: &mut EventContext| {
-                        if !enabled {
-                            return;
-                        }
                         int_for_tap.set(InteractionState::Pressed);
                         ctx.activate(menu_id);
                         menu_open.set(true);
@@ -720,9 +723,6 @@ impl Widget for SplitButton {
         let handler_set = HandlerSet::new()
             .on_key(
                 move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
-                    if !enabled {
-                        return EventResponse::Ignored;
-                    }
                     match event {
                         WidgetEvent::KeyDown {
                             key: Key::Space | Key::Enter,
@@ -777,7 +777,7 @@ impl Widget for SplitButton {
                     int_for_focus.set(InteractionState::Idle);
                 }
             })
-            .focusable(enabled);
+            .focusable(true);
 
         ctx.apply_self_handlers(handler_set);
 
@@ -817,9 +817,7 @@ impl Widget for SplitButton {
             let idx = self.selected.get().min(self.labels.len() - 1);
             builder.set_name(self.labels[idx].as_str());
         }
-        if !self.enabled {
-            builder.set_disabled();
-        }
+        // Framework a11y walker sets `set_disabled` from arena state.
         builder.set_has_popup(bastyde_core::accesskit::HasPopup::Menu);
         builder.set_expanded(self.menu_open.get());
         builder.add_action(bastyde_core::accesskit::Action::Click);

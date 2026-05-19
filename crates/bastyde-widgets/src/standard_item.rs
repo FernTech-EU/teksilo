@@ -443,6 +443,15 @@ impl StandardListItem {
 
 impl Widget for StandardListItem {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let self_id = ctx.self_id();
+        // Bridge the widget's owned `self.enabled` signal into the
+        // arena's enabled_state. Now event-gating, focus traversal,
+        // a11y disabled, and the leaves' role-substitution all
+        // observe the same source. Previously `self.enabled` was
+        // widget-internal — events still routed to disabled items,
+        // and external `ctx.enabled_when(item_id, …)` would not
+        // override the local Signal.
+        ctx.enabled_when(self_id, self.enabled.clone());
         let content_id = self.build_content(ctx);
         let root_id = self.build_with_background(ctx, content_id);
         self.root_child_id = Some(root_id);
@@ -502,9 +511,7 @@ impl Widget for StandardListItem {
         // Mirror enabled state. AccessKit's `set_disabled` is a flag
         // (no boolean clear); the framework's accessibility-override
         // layer can clear it via `access_disabled(false)` if needed.
-        if !self.enabled.get() {
-            builder.set_disabled();
-        }
+        // Framework a11y walker calls `set_disabled` from arena state.
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -722,6 +729,12 @@ impl std::fmt::Debug for StandardTreeItem {
 impl Widget for StandardTreeItem {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         use crate::styles::recipe_standard_item_style as si;
+
+        // Bridge `self.inner.enabled` into the arena — same pattern
+        // as StandardListItem. The chevron + indent siblings inherit
+        // disabled via the ancestor walk.
+        let self_id = ctx.self_id();
+        ctx.enabled_when(self_id, self.inner.enabled.clone());
 
         // 1. Build the StandardListItem's inner row (no bg yet).
         let inner_content_id = self.inner.build_content(ctx);

@@ -46,7 +46,8 @@ pub struct CommandLinkButton {
     title: String,
     description: Option<String>,
     icon: Option<IconWidget>,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     action: Option<Box<dyn Fn(&mut EventContext)>>,
     interaction: Signal<InteractionState>,
     root_child_id: Option<WidgetId>,
@@ -59,7 +60,7 @@ impl CommandLinkButton {
             title: ls.resolve_now(),
             description: None,
             icon: None,
-            enabled: true,
+            initial_enabled: true,
             action: None,
             interaction: Signal::new(InteractionState::Idle),
             root_child_id: None,
@@ -93,8 +94,10 @@ impl CommandLinkButton {
         self
     }
 
+    /// Set the initial enabled state. Forwarded to the arena at build
+    /// time. Use `ctx.enabled_when(button_id, signal)` for reactivity.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -111,7 +114,7 @@ impl std::fmt::Debug for CommandLinkButton {
         f.debug_struct("CommandLinkButton")
             .field("title", &self.title)
             .field("description", &self.description)
-            .field("enabled", &self.enabled)
+            .field("initial_enabled", &self.initial_enabled)
             .finish()
     }
 }
@@ -133,24 +136,23 @@ fn resolve_border_role(state: InteractionState) -> BorderRole {
 
 impl Widget for CommandLinkButton {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let enabled = self.enabled;
-        let interaction = ctx.signal(if enabled {
-            InteractionState::Idle
-        } else {
-            InteractionState::Disabled
-        });
+        let self_id = ctx.self_id();
+        // Forward initial-enabled to the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
+
+        let interaction = ctx.signal(InteractionState::Idle);
         self.interaction = interaction.clone();
 
+        // The leaves' `ColorProp::resolve(theme, ctx.effective_enabled)`
+        // substitutes `TextRole::Disabled` automatically when the arena
+        // says we're disabled; we no longer need to fold the Disabled
+        // state into these role-derivations.
         let bg_role = interaction.map(|s| resolve_bg_role(*s));
         let border_role = interaction.map(|s| resolve_border_role(*s));
-        let title_role = interaction.map(|s| match s {
-            InteractionState::Disabled => TextRole::Disabled,
-            _ => TextRole::Primary,
-        });
-        let desc_role = interaction.map(|s| match s {
-            InteractionState::Disabled => TextRole::Disabled,
-            _ => TextRole::Secondary,
-        });
+        let title_role = interaction.map(|_s| TextRole::Primary);
+        let desc_role = interaction.map(|_s| TextRole::Secondary);
         let icon_role = title_role.clone();
 
         let normal_bw = crate::styles::recipe_button_style::BUTTON_BORDER_WIDTH;
@@ -236,26 +238,18 @@ impl Widget for CommandLinkButton {
         let int_key = interaction.clone();
         let int_focus = interaction.clone();
 
+        // Framework gates events on `arena.is_enabled`; focus walker
+        // skips disabled subtrees.
         let handlers = HandlerSet::new()
-            .focusable(enabled)
-            .cursor(if enabled {
-                CursorIcon::Pointer
-            } else {
-                CursorIcon::Default
-            })
+            .focusable(true)
+            .cursor(CursorIcon::Pointer)
             .on_tap(move |_ev: &bastyde_core::TapEvent, ctx: &mut EventContext| {
-                if !enabled {
-                    return;
-                }
                 if let Some(ref a) = *action_for_tap {
                     a(ctx);
                 }
                 int_tap.set(InteractionState::Hovered);
             })
             .on_hover(move |entered: bool, _ctx: &mut EventContext| {
-                if !enabled {
-                    return;
-                }
                 if entered {
                     int_hover_enter.set(InteractionState::Hovered);
                 } else {
@@ -264,9 +258,6 @@ impl Widget for CommandLinkButton {
             })
             .on_key(
                 move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
-                    if !enabled {
-                        return EventResponse::Ignored;
-                    }
                     match event {
                         WidgetEvent::KeyDown {
                             key: Key::Space | Key::Enter,
@@ -305,7 +296,7 @@ impl Widget for CommandLinkButton {
                 move |action: bastyde_core::accesskit::Action,
                       ctx: &mut EventContext|
                       -> EventResponse {
-                    if action == bastyde_core::accesskit::Action::Click && enabled {
+                    if action == bastyde_core::accesskit::Action::Click {
                         if let Some(ref a) = *action_for_access {
                             a(ctx);
                         }
