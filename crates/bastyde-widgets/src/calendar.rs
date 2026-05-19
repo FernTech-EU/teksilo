@@ -205,7 +205,8 @@ pub struct Calendar {
     max_date: Option<Date>,
     disabled_date_filter: Option<DisabledDateFilter>,
     label: Option<String>,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     on_selection_changed: Option<OnSelectionChanged>,
     on_range_changed: Option<OnRangeChanged>,
     on_month_changed: Option<OnMonthChanged>,
@@ -225,7 +226,7 @@ pub struct Calendar {
 impl std::fmt::Debug for Calendar {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Calendar")
-            .field("enabled", &self.enabled)
+            .field("initial_enabled", &self.initial_enabled)
             .finish_non_exhaustive()
     }
 }
@@ -260,7 +261,7 @@ impl Calendar {
             max_date: None,
             disabled_date_filter: None,
             label: None,
-            enabled: true,
+            initial_enabled: true,
             on_selection_changed: None,
             on_range_changed: None,
             on_month_changed: None,
@@ -322,8 +323,10 @@ impl Calendar {
         self
     }
 
+    /// Set the initial enabled state. Forwarded to the arena at build
+    /// time. Use `ctx.enabled_when(calendar_id, signal)` for reactivity.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -387,7 +390,15 @@ impl Calendar {
 impl Widget for Calendar {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme_signal().get();
-        let enabled = self.enabled;
+        let self_id = ctx.self_id();
+        // Forward initial-enabled into the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
+        // Inner cell/grid helpers still take an `enabled: bool`
+        // snapshot which is fine for build-time decisions (they pass
+        // it to the inner widgets which now consult the arena).
+        let enabled = self.initial_enabled;
         let week_numbers = self.week_numbers;
         let week_number_col_width = match week_numbers {
             WeekNumberDisplay::None => 0.0,
@@ -698,9 +709,7 @@ impl Widget for Calendar {
         };
         builder.set_value(value_text);
 
-        if !self.enabled {
-            builder.set_disabled();
-        }
+        // Framework a11y walker sets `set_disabled` from arena state.
         builder.add_action(Action::Focus);
     }
 }

@@ -221,7 +221,8 @@ pub struct SpinBox<T: SpinValue> {
     width_policy: WidthPolicy,
     label: Option<String>,
     placeholder: String,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     read_only: bool,
     text_from_value: Option<TextFromValue<T>>,
     value_from_text: Option<ValueFromText<T>>,
@@ -293,7 +294,7 @@ impl<T: SpinValue> SpinBox<T> {
             width_policy: WidthPolicy::Pixels(DEFAULT_PREFERRED_WIDTH),
             label: None,
             placeholder: String::new(),
-            enabled: true,
+            initial_enabled: true,
             read_only: false,
             text_from_value: None,
             value_from_text: None,
@@ -445,8 +446,10 @@ impl<T: SpinValue> SpinBox<T> {
         self
     }
 
+    /// Set the initial enabled state. Forwarded to the arena at build
+    /// time. Use `ctx.enabled_when(spinbox_id, signal)` for reactivity.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -530,7 +533,18 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             .page_step
             .unwrap_or_else(|| single_step.saturating_mul_u32(10));
         let on_value_changed = self.on_value_changed.clone();
-        let enabled = self.enabled;
+        let self_id = ctx.self_id();
+        // Forward initial-enabled into the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
+        // Snapshot the build-time enabled state into a local for
+        // closures that capture it for read-only-style guards on
+        // wheel events / step buttons. The framework's event gate
+        // already refuses to dispatch to disabled subtrees, so the
+        // value here only matters for the few build-time decisions
+        // (e.g. seeding the inner TextInputField's read_only mode).
+        let enabled = self.initial_enabled;
         let read_only = self.read_only;
         let wheel_mode = self.wheel_mode;
 
@@ -1180,9 +1194,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         };
         builder.set_value(full);
 
-        if !self.enabled {
-            builder.set_disabled();
-        }
+        // Framework a11y walker sets `set_disabled` from arena state.
         if self.read_only {
             builder.set_read_only();
         }
