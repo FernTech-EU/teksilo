@@ -173,6 +173,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let theme = ctx.theme;
+        let enabled = ctx.effective_enabled;
         use crate::style as cs;
 
         let series_vec = self.series.get();
@@ -299,6 +300,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
                 y_lo,
                 y_hi,
                 &palette,
+                enabled,
             ),
             BarGrouping::Grouped => self.paint_grouped(
                 canvas,
@@ -309,6 +311,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
                 y_lo,
                 y_hi,
                 &palette,
+                enabled,
             ),
         }
 
@@ -335,6 +338,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
                 &palette,
                 legend_orientation,
                 theme,
+                enabled,
             );
         }
 
@@ -409,6 +413,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
         y_lo: f32,
         y_hi: f32,
         palette: &ChartPalette,
+        enabled: bool,
     ) {
         use crate::style as cs;
         let n = categories.len();
@@ -426,7 +431,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
                     let color = series
                         .color
                         .as_ref()
-                        .map(|c| c.resolve(theme))
+                        .map(|c| c.resolve(theme, enabled))
                         .unwrap_or_else(|| palette.color_for(0, theme));
                     let x = plot.x + self.min_bar_gap + i as f32 * (bar_w + self.min_bar_gap);
                     let value_y = y_to_pixel(datum.value, y_lo, y_hi, plot);
@@ -457,7 +462,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
                     let color = series
                         .color
                         .as_ref()
-                        .map(|c| c.resolve(theme))
+                        .map(|c| c.resolve(theme, enabled))
                         .unwrap_or_else(|| palette.color_for(0, theme));
                     let y = plot.y + self.min_bar_gap + i as f32 * (bar_h + self.min_bar_gap);
                     let value_x = value_to_pixel_h(datum.value, y_lo, y_hi, plot);
@@ -492,6 +497,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
         y_lo: f32,
         y_hi: f32,
         palette: &ChartPalette,
+        enabled: bool,
     ) {
         use crate::style as cs;
         let n = categories.len();
@@ -515,7 +521,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
                         let color = series
                             .color
                             .as_ref()
-                            .map(|c| c.resolve(theme))
+                            .map(|c| c.resolve(theme, enabled))
                             .unwrap_or_else(|| palette.color_for(si, theme));
                         let x = group_x + si as f32 * (bar_w + self.min_bar_gap);
                         let value_y = y_to_pixel(datum.value, y_lo, y_hi, plot);
@@ -552,7 +558,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
                         let color = series
                             .color
                             .as_ref()
-                            .map(|c| c.resolve(theme))
+                            .map(|c| c.resolve(theme, enabled))
                             .unwrap_or_else(|| palette.color_for(si, theme));
                         let y = group_y + si as f32 * (bar_h + self.min_bar_gap);
                         let value_x = value_to_pixel_h(datum.value, y_lo, y_hi, plot);

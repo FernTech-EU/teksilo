@@ -174,7 +174,8 @@ impl Widget for ShortcutSettings {
                 column = column.child(category_header(row.category));
                 last_category = Some(row.category);
             }
-            column = column.child(self.build_row(&row, capturing));
+            let row_id = self.build_row(ctx, &row, capturing);
+            column = column.add_child(row_id);
         }
 
         let root = ctx.add(column);
@@ -310,29 +311,23 @@ fn category_header(category: Option<&'static str>) -> impl Widget + 'static {
 impl ShortcutSettings {
     fn build_row(
         &self,
+        ctx: &mut BuildContext,
         row: &ShortcutRowData,
         capturing: Option<CaptureTarget>,
-    ) -> impl Widget + 'static {
+    ) -> WidgetId {
         let id = row.id;
-        let label_role = if row.enabled {
-            TextRole::Primary
-        } else {
-            TextRole::Disabled
-        };
-
+        // The label and keystroke text use `TextRole::Primary`
+        // unconditionally; the leaves consult
+        // `PaintContext::effective_enabled` and substitute
+        // `TextRole::Disabled` on their own when the arena says the
+        // row is disabled (either via the registry-driven flag below
+        // or via an ancestor's `enabled_when`).
         let name_widget = TextWidget::new_literal(&row.name)
-            .color(label_role)
+            .color(TextRole::Primary)
             .single_line();
 
-        let primary_slot =
-            self.slot_widget(id, SlotKind::Primary, row.primary, capturing, label_role);
-        let secondary_slot = self.slot_widget(
-            id,
-            SlotKind::Secondary,
-            row.secondary,
-            capturing,
-            label_role,
-        );
+        let primary_slot = self.slot_widget(id, SlotKind::Primary, row.primary, capturing);
+        let secondary_slot = self.slot_widget(id, SlotKind::Secondary, row.secondary, capturing);
 
         let reset_button = Button::new_literal("Reset")
             .enabled(row.has_override)
@@ -340,13 +335,25 @@ impl ShortcutSettings {
                 ctx.clear_shortcut_override(id);
             });
 
-        HStack::new()
+        let row_widget = HStack::new()
             .spacing(8.0)
             .child(name_widget)
             .child(Spacer::new())
             .child(primary_slot)
             .child(secondary_slot)
-            .child(reset_button)
+            .child(reset_button);
+        let row_id = ctx.add(row_widget);
+        // Bridge the registry-driven per-shortcut enabled flag into
+        // the arena. The arena is then the single source of truth:
+        // descendants AND with this node, the leaves auto-substitute
+        // `TextRole::Disabled`, the Reset Button's tap handler is
+        // gated, and the framework a11y walker emits `set_disabled`
+        // on every descendant. An ancestor's `enabled_when` (e.g. a
+        // disabled settings dialog) cascades correctly.
+        if !row.enabled {
+            ctx.enabled_when(row_id, false);
+        }
+        row_id
     }
 
     fn slot_widget(
@@ -355,7 +362,6 @@ impl ShortcutSettings {
         slot: SlotKind,
         keystroke: Option<KeyStroke>,
         capturing: Option<CaptureTarget>,
-        label_role: TextRole,
     ) -> impl Widget + 'static {
         let is_capturing_here = capturing == Some(CaptureTarget { id, slot });
         let keystroke_text = if is_capturing_here {
@@ -394,13 +400,19 @@ impl ShortcutSettings {
         // "Press any key…" the moment the user hits Rebind. Static
         // bindings stay as plain labels — their content is announced
         // on focus, not as a live change.
+        //
+        // The keystroke label uses `TextRole::Primary`
+        // unconditionally; the surrounding row's `enabled_when`
+        // forwarding bridges the registry-driven enabled flag into
+        // the arena, and the leaf substitutes `TextRole::Disabled`
+        // via `PaintContext::effective_enabled` when the row is off.
         let row = HStack::new().spacing(4.0);
         let row = if is_capturing_here {
             row.child(LiveStatusText::new(keystroke_text, TextRole::Accent))
         } else {
             row.child(
                 TextWidget::new_literal(&keystroke_text)
-                    .color(label_role)
+                    .color(TextRole::Primary)
                     .single_line(),
             )
         };

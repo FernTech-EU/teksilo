@@ -130,6 +130,7 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let theme = ctx.theme;
+        let enabled = ctx.effective_enabled;
         use crate::style as cs;
         let series_vec = self.series.get();
         if series_vec.is_empty() {
@@ -149,7 +150,7 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
                     let color = series
                         .color
                         .as_ref()
-                        .map(|c| c.resolve(theme))
+                        .map(|c| c.resolve(theme, enabled))
                         .unwrap_or_else(|| palette.color_for(i, theme));
                     let final_color = if visible {
                         color
@@ -194,7 +195,7 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
                     let color = series
                         .color
                         .as_ref()
-                        .map(|c| c.resolve(theme))
+                        .map(|c| c.resolve(theme, enabled))
                         .unwrap_or_else(|| palette.color_for(i, theme));
                     let final_color = if visible {
                         color
@@ -299,6 +300,7 @@ pub(crate) fn paint_embedded_legend<T: Clone + 'static>(
     palette: &ChartPalette,
     orientation: LegendOrientation,
     theme: &bastyde_core::Theme,
+    enabled: bool,
 ) {
     if series_vec.is_empty() || band.width <= 0.0 || band.height <= 0.0 {
         return;
@@ -330,7 +332,7 @@ pub(crate) fn paint_embedded_legend<T: Clone + 'static>(
                 let color = series
                     .color
                     .as_ref()
-                    .map(|c| c.resolve(theme))
+                    .map(|c| c.resolve(theme, enabled))
                     .unwrap_or_else(|| palette.color_for(i, theme));
                 let final_color = if visible {
                     color
@@ -375,7 +377,7 @@ pub(crate) fn paint_embedded_legend<T: Clone + 'static>(
                 let color = series
                     .color
                     .as_ref()
-                    .map(|c| c.resolve(theme))
+                    .map(|c| c.resolve(theme, enabled))
                     .unwrap_or_else(|| palette.color_for(i, theme));
                 let final_color = if visible {
                     color

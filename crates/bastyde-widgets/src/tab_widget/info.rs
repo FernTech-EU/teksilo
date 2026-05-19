@@ -53,7 +53,12 @@ pub struct TabInfo {
     pub(crate) composite_tooltip: Option<CompositeTooltipFactory>,
     pub(crate) closable: bool,
     pub(crate) pinned: bool,
-    pub(crate) enabled: bool,
+    /// Initial-enabled hint. Forwarded into the arena at build time
+    /// via `ctx.enabled_when(header_id, false)` when `false`; the
+    /// arena is then the single source of truth and ANDs with
+    /// ancestors. A disabled `TabBar` ancestor disables every tab
+    /// regardless of this flag.
+    pub(crate) initial_enabled: bool,
     /// Mark the tab's content pane as focusable so keyboard users can
     /// reach it. ARIA: a `tabpanel` with no focusable content must
     /// itself be focusable (`tabindex="0"`). Opt-in because the
@@ -72,7 +77,7 @@ impl std::fmt::Debug for TabInfo {
             .field("has_composite_tooltip", &self.composite_tooltip.is_some())
             .field("closable", &self.closable)
             .field("pinned", &self.pinned)
-            .field("enabled", &self.enabled)
+            .field("initial_enabled", &self.initial_enabled)
             .field("focusable_panel", &self.focusable_panel)
             .finish()
     }
@@ -90,7 +95,7 @@ impl TabInfo {
             composite_tooltip: None,
             closable: false,
             pinned: false,
-            enabled: true,
+            initial_enabled: true,
             focusable_panel: false,
         }
     }
@@ -178,8 +183,12 @@ impl TabInfo {
     /// Whether the tab can be activated. Disabled tabs render but
     /// are skipped by keyboard navigation, can't be clicked, and
     /// don't get the close button. Default: `true`.
+    ///
+    /// Forwarded to the arena via `ctx.enabled_when(header_id, false)`
+    /// at build time when `false`. Ancestor-driven disable (e.g. a
+    /// disabled `TabBar`) ANDs with this flag automatically.
     pub fn enabled(mut self, b: bool) -> Self {
-        self.enabled = b;
+        self.initial_enabled = b;
         self
     }
 

@@ -245,6 +245,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let theme = ctx.theme;
+        let enabled = ctx.effective_enabled;
         use crate::style as cs;
 
         let series_vec = self.series.get();
@@ -354,7 +355,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
             let color = series
                 .color
                 .as_ref()
-                .map(|c| c.resolve(theme))
+                .map(|c| c.resolve(theme, enabled))
                 .unwrap_or_else(|| palette.color_for(si, theme));
             let count = series.data.len().min(n);
             if count == 0 {
@@ -417,6 +418,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
                 &palette,
                 legend_orientation,
                 theme,
+                enabled,
             );
         }
 
@@ -447,7 +449,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
                 .iter()
                 .find(|h| h.series_idx == hp.series_idx && h.datum_idx == hp.datum_idx)
             {
-                self.draw_hover(canvas, theme, plot, hit, &label_style);
+                self.draw_hover(canvas, theme, plot, hit, &label_style, enabled);
             }
         }
     }
@@ -593,6 +595,7 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
         plot: Rect,
         hit: &PointHit,
         label_style: &bastyde_tokens::TextStyle,
+        enabled: bool,
     ) {
         use crate::style as cs;
         let palette = self.palette.get();
@@ -602,7 +605,7 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
             .get()
             .get(hit.series_idx)
             .and_then(|s| s.color.clone())
-            .map(|c| c.resolve(theme))
+            .map(|c| c.resolve(theme, enabled))
             .unwrap_or_else(|| palette.color_for(hit.series_idx, theme));
         // Outer ring: lighter, then inner dot in the series color.
         canvas.stroke_circle(hit.screen, 6.0, marker_color, 2.0);

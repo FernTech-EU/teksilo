@@ -864,7 +864,7 @@ impl<T: 'static> Widget for TabBar<T> {
                         None
                     },
                     index: i,
-                    enabled,
+                    initial_enabled: enabled,
                     selected: selected.clone(),
                     shared: shared_for_header.clone(),
                     min_width: min_w,

@@ -124,7 +124,6 @@ impl Widget for SwatchGrid {
         let count = swatches.len();
         let columns_for_keys = self.columns;
         let focused_index = self.focused_index.clone();
-        let enabled = self.initial_enabled;
         let on_select_keys = self.on_select.clone();
         let swatches_for_keys = self.swatches.clone();
         let handlers =

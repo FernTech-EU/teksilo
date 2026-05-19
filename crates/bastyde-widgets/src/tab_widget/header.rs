@@ -109,7 +109,14 @@ pub(crate) struct TabHeader {
     drag_source_bar_id: Option<WidgetId>,
 
     index: usize,
-    enabled: bool,
+    /// Structural per-tab enabled flag. Forwarded into the arena at
+    /// build time; the arena is then the single source of truth
+    /// (events, focus, a11y `set_disabled`, leaf role-substitution all
+    /// consult `arena.is_enabled(self_id)` / `PaintContext::effective_enabled`).
+    /// Kept on the struct so `accessibility()` can decide whether to
+    /// advertise the `Click` and reorder custom actions for the
+    /// structural-disabled case.
+    initial_enabled: bool,
     selected: Signal<usize>,
     shared: Rc<HeaderShared>,
 
@@ -154,7 +161,7 @@ impl std::fmt::Debug for TabHeader {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TabHeader")
             .field("index", &self.index)
-            .field("enabled", &self.enabled)
+            .field("initial_enabled", &self.initial_enabled)
             .field("label", &self.label.clone().resolve_now())
             .field("has_icon", &self.icon.is_some())
             .field("has_leading_slot", &self.leading_slot.is_some())
@@ -178,7 +185,7 @@ pub(crate) struct TabHeaderConfig {
     pub on_reorder_to: Option<Rc<dyn Fn(usize, &mut EventContext)>>,
     pub drag_source_bar_id: Option<WidgetId>,
     pub index: usize,
-    pub enabled: bool,
+    pub initial_enabled: bool,
     pub selected: Signal<usize>,
     pub shared: Rc<HeaderShared>,
     pub min_width: f32,
@@ -207,7 +214,7 @@ impl TabHeader {
             on_reorder_to: cfg.on_reorder_to,
             drag_source_bar_id: cfg.drag_source_bar_id,
             index: cfg.index,
-            enabled: cfg.enabled,
+            initial_enabled: cfg.initial_enabled,
             selected: cfg.selected,
             shared: cfg.shared,
             interaction: Signal::new(TabHeaderInteraction::Idle),
@@ -277,6 +284,14 @@ impl TabHeader {
 impl Widget for TabHeader {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
+        // Forward the structural per-tab enabled hint into the arena.
+        // After this point the arena is the single source of truth;
+        // events are gated, focus walker skips the subtree, the a11y
+        // walker auto-emits `set_disabled()`, and the leaves substitute
+        // `TextRole::Disabled` via `PaintContext::effective_enabled`.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
         let interaction = ctx.signal(TabHeaderInteraction::Idle);
         let focus_origin: Signal<Option<FocusOrigin>> = ctx.signal(None);
         let registry = ctx.binding_registry();
@@ -327,20 +342,16 @@ impl Widget for TabHeader {
         let mut row = HStack::new().spacing(INNER_GAP);
 
         // Per-state text role: Int UI editor-tab convention puts
-        // selected at `Primary`, idle at `Secondary`, disabled at
-        // `Disabled` — the label-color shift on click is one of the
-        // strongest "this tab is active" cues besides the accent
-        // indicator. The selected and idle roles are overridable via
-        // `TabBar::selected_text_role` / `idle_text_role`; disabled
-        // always reads as `TextRole::Disabled`.
-        let enabled = self.enabled;
+        // selected at `Primary`, idle at `Secondary`. The leaves
+        // (TextWidget for the label, IconWidget for the icon) consult
+        // `PaintContext::effective_enabled` and substitute
+        // `TextRole::Disabled` themselves when the arena says this
+        // tab is disabled — no `enabled` branch needed here.
         let index_for_role = self.index;
         let selected_role = self.selected_text_role;
         let idle_role = self.idle_text_role;
         let role_signal = self.selected.map(move |sel| {
-            if !enabled {
-                TextRole::Disabled
-            } else if *sel == index_for_role {
+            if *sel == index_for_role {
                 selected_role
             } else {
                 idle_role
@@ -454,7 +465,11 @@ impl Widget for TabHeader {
         let is_active = self.selected.map(move |sel| *sel == index_for_cfg);
         let is_hovered = interaction.map(|s| matches!(*s, TabHeaderInteraction::Hovered));
         let is_focused = focus_origin.map(|o| matches!(o, Some(FocusOrigin::Keyboard)));
-        let is_disabled = Signal::new(!self.enabled);
+        // Reactive disabled view from the arena (ancestor-AND). The
+        // style chrome picks the disabled-surface role from this; the
+        // signal flips automatically when a parent's `enabled_when`
+        // signal flips.
+        let is_disabled = ctx.effective_enabled_signal(self_id).map(|on| !*on);
         let orientation_for_cfg = match self.orientation {
             super::delegate::TabBarOrientation::Horizontal => {
                 bastyde_core::styles::TabBarOrientation::Horizontal
@@ -499,8 +514,9 @@ impl Widget for TabHeader {
         self.inner_root_id = Some(root_id);
 
         // Attach handlers: tap selects, hover updates state, focus
-        // tracks origin, key handles arrow-nav + Enter/Space.
-        let enabled = self.enabled;
+        // tracks origin, key handles arrow-nav + Enter/Space. The
+        // framework gates events on `arena.is_enabled(self_id)`, so
+        // no `if !enabled` guards inside handlers.
         let index = self.index;
         let selected = self.selected.clone();
         let header_ids = self.shared.header_ids.clone();
@@ -511,15 +527,9 @@ impl Widget for TabHeader {
 
         let mut handler_set = HandlerSet::new()
             .on_tap(move |_event, _ctx: &mut EventContext| {
-                if enabled {
-                    selected.set(index);
-                }
+                selected.set(index);
             })
             .on_hover(move |entered: bool, _ctx: &mut EventContext| {
-                if !enabled {
-                    interaction_for_hover.set(TabHeaderInteraction::Idle);
-                    return;
-                }
                 interaction_for_hover.set(if entered {
                     TabHeaderInteraction::Hovered
                 } else {
@@ -530,7 +540,7 @@ impl Widget for TabHeader {
                 let focus_origin = focus_origin_for_handler.clone();
                 let interaction = interaction_for_focus.clone();
                 move |gained: bool, _ctx: &mut EventContext| {
-                    if !enabled || !gained {
+                    if !gained {
                         focus_origin.set(None);
                         return;
                     }
@@ -548,9 +558,6 @@ impl Widget for TabHeader {
                 let enabled_tabs = enabled_tabs.clone();
                 let on_close = self.on_close.clone();
                 move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
-                    if !enabled {
-                        return EventResponse::Ignored;
-                    }
                     let headers = header_ids.borrow();
                     if headers.is_empty() {
                         return EventResponse::Ignored;
@@ -626,9 +633,6 @@ impl Widget for TabHeader {
                 let on_reorder_to = self.on_reorder_to.clone();
                 let header_count_signal = self.shared.header_ids.clone();
                 move |action, _node, data, ctx: &mut EventContext| -> EventResponse {
-                    if !enabled {
-                        return EventResponse::Ignored;
-                    }
                     use bastyde_core::accesskit::{Action, ActionData};
                     match action {
                         Action::Click => {
@@ -662,12 +666,13 @@ impl Widget for TabHeader {
                     }
                 }
             })
-            .focusable(enabled)
-            .cursor(if enabled {
-                CursorIcon::Pointer
-            } else {
-                CursorIcon::Default
-            });
+            // The focus walker skips disabled subtrees on its own
+            // (see `find_focusable_at_or_above`), so we set
+            // `focusable(true)` unconditionally — the static intent
+            // is "this header takes keyboard focus" and the arena
+            // gates whether it actually does.
+            .focusable(true)
+            .cursor(CursorIcon::Pointer);
 
         // Drag source: emit a `TabBarDragData` payload when the
         // user starts dragging this header. The bar's `on_drop`
@@ -710,7 +715,7 @@ impl Widget for TabHeader {
                 WidgetEvent::PointerUp {
                     button: PointerButton::Middle,
                     ..
-                } if enabled => {
+                } => {
                     (close_fn)(ctx);
                     EventResponse::Handled
                 }
@@ -797,9 +802,11 @@ impl Widget for TabHeader {
             .map(|s| s.get())
             .unwrap_or_else(|| self.label.clone().resolve_now());
         builder.set_name(&resolved);
-        if !self.enabled {
-            builder.set_disabled();
-        } else {
+        // Framework a11y walker auto-emits `set_disabled()` when
+        // `arena.is_enabled(self_id) == false`. We base advertised
+        // actions on the structural per-tab flag so a disabled tab
+        // exposes no `Click` action to AT.
+        if self.initial_enabled {
             builder.add_action(bastyde_core::accesskit::Action::Click);
         }
         builder.add_action(bastyde_core::accesskit::Action::Focus);
@@ -826,7 +833,7 @@ impl Widget for TabHeader {
         // from `ActionData::CustomAction(idx)` and routes accordingly.
         // Suppressed for pinned tabs (whose order is conceptually fixed
         // by the pinned-strip layout — Firefox convention).
-        if self.on_reorder_to.is_some() && self.enabled && !self.pinned {
+        if self.on_reorder_to.is_some() && self.initial_enabled && !self.pinned {
             let total = self.shared.header_ids.borrow().len();
             // Orientation-aware labels: a vertical bar's "Move Left"
             // would mislead a screen reader user. `LocalizedString`

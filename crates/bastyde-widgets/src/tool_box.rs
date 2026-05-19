@@ -81,14 +81,19 @@ pub struct ToolBoxItem {
     trailing: Option<Box<dyn Widget>>,
     tooltip: Option<RichTooltipSource>,
     content: PendingChild,
-    enabled: bool,
+    /// Initial-enabled hint. Forwarded into the arena via
+    /// `ctx.enabled_when(header_id, false)` at build time when `false`.
+    /// After build the arena is the single source of truth and ANDs
+    /// with ancestors — so a disabled `ToolBox` ancestor disables every
+    /// item header regardless of its own `initial_enabled`.
+    initial_enabled: bool,
 }
 
 impl std::fmt::Debug for ToolBoxItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ToolBoxItem")
             .field("label", &self.label)
-            .field("enabled", &self.enabled)
+            .field("initial_enabled", &self.initial_enabled)
             .finish()
     }
 }
@@ -104,7 +109,7 @@ impl ToolBoxItem {
             trailing: None,
             tooltip: None,
             content: PendingChild::Deferred(Box::new(content)),
-            enabled: true,
+            initial_enabled: true,
         }
     }
 
@@ -117,7 +122,7 @@ impl ToolBoxItem {
             trailing: None,
             tooltip: None,
             content: PendingChild::Id(content_id),
-            enabled: true,
+            initial_enabled: true,
         }
     }
 
@@ -168,8 +173,13 @@ impl ToolBoxItem {
     /// Disable the item: its header renders in the disabled text role,
     /// click and keyboard activation are ignored, and arrow navigation
     /// skips it.
+    ///
+    /// Forwarded to the arena via `ctx.enabled_when(header_id, false)`
+    /// at build time; the arena is then the single source of truth and
+    /// ANDs with ancestors — disabling the surrounding `ToolBox` (or
+    /// any ancestor) disables every item regardless of this flag.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 }
@@ -295,7 +305,14 @@ fn last_enabled_index(enabled: &[bool]) -> Option<usize> {
 struct ToolBoxHeader {
     label: String,
     index: usize,
-    enabled: bool,
+    /// Structural per-item enabled flag. Forwarded into the arena at
+    /// build time; the arena is then the single source of truth (events,
+    /// focus, a11y `set_disabled`, leaf role-substitution all consult
+    /// `arena.is_enabled(self_id)` / `PaintContext::effective_enabled`).
+    /// Kept on the struct only so `accessibility()` can decide whether
+    /// to advertise the `Click` / `Expand` / `Collapse` actions for the
+    /// structural-disabled case.
+    initial_enabled: bool,
     selected: Signal<usize>,
     /// Shared ordered list of header widget ids. Populated by
     /// [`ToolBox::build`] as each header is registered. Headers read this to
@@ -304,9 +321,11 @@ struct ToolBoxHeader {
     /// Shared ordered list of panel widget ids, used to publish the
     /// ARIA `controls` relation in [`ToolBoxHeader::accessibility`].
     panel_ids: Rc<RefCell<Vec<WidgetId>>>,
-    /// One entry per item — `true` if that header can be activated /
-    /// focused. Never mutated after construction; wrapped in `Rc` only to
-    /// share the buffer between siblings.
+    /// One entry per item — `true` if that header is structurally
+    /// enabled (per its own `initial_enabled`). Used by arrow / Home /
+    /// End navigation to skip structurally-disabled siblings. Ancestor-
+    /// driven disable cascades through the arena and the focus walker,
+    /// so it doesn't need to be re-evaluated here.
     enabled_flags: Rc<Vec<bool>>,
     pending_leading: Option<Box<dyn Widget>>,
     pending_trailing: Option<Box<dyn Widget>>,
@@ -319,7 +338,7 @@ impl ToolBoxHeader {
     fn new(
         label: String,
         index: usize,
-        enabled: bool,
+        initial_enabled: bool,
         selected: Signal<usize>,
         header_ids: Rc<RefCell<Vec<WidgetId>>>,
         panel_ids: Rc<RefCell<Vec<WidgetId>>>,
@@ -331,7 +350,7 @@ impl ToolBoxHeader {
         Self {
             label,
             index,
-            enabled,
+            initial_enabled,
             selected,
             header_ids,
             panel_ids,
@@ -351,7 +370,16 @@ impl Widget for ToolBoxHeader {
         let focus_ring_width = theme.shape.focus_ring_width;
 
         let idx = self.index;
-        let enabled = self.enabled;
+        // Forward the structural per-item enabled hint into the arena.
+        // After this point the arena is the single source of truth:
+        // events are gated by `arena.is_enabled(self_id)`, the focus
+        // walker skips disabled subtrees, the a11y walker auto-emits
+        // `set_disabled()`, and the leaf widgets (TextWidget /
+        // IconWidget for label + chevron) substitute `TextRole::Disabled`
+        // at paint time via `PaintContext::effective_enabled`.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
 
         // Derived read-only signal: am I the active section?
         let is_selected = self.selected.map(move |s| *s == idx);
@@ -374,11 +402,14 @@ impl Widget for ToolBoxHeader {
         focus_origin.bind_to(self_id, registry, BindingLevel::RepaintOnly);
 
         // Derived roles — Signal<SurfaceRole> / Signal<TextRole> (see
-        // CLAUDE.md "Theming"). `enabled` is Copy, captured by value.
+        // CLAUDE.md "Theming"). No `enabled` branch: the leaves
+        // (TextWidget for the label, IconWidget for the chevron)
+        // consult `PaintContext::effective_enabled` and substitute
+        // `TextRole::Disabled` themselves. `SurfaceRole` has no
+        // `Disabled` token by design — a disabled header simply
+        // renders with its idle background (Transparent / Hover /
+        // Selected per interaction).
         let bg_role = interaction.zip(&is_selected).map(move |(state, sel)| {
-            if !enabled {
-                return SurfaceRole::Transparent;
-            }
             if *state == HeaderInteraction::Pressed {
                 return SurfaceRole::Pressed;
             }
@@ -391,9 +422,6 @@ impl Widget for ToolBoxHeader {
             SurfaceRole::Transparent
         });
         let text_role = interaction.zip(&is_selected).map(move |(state, sel)| {
-            if !enabled {
-                return TextRole::Disabled;
-            }
             if *sel || *state == HeaderInteraction::Hovered {
                 return TextRole::Primary;
             }
@@ -534,17 +562,10 @@ impl Widget for ToolBoxHeader {
 
         let handler_set = HandlerSet::new()
             .on_tap(move |_pos, _ctx| {
-                if !enabled {
-                    return;
-                }
                 selected_tap.set(idx);
                 interaction_for_tap.set(HeaderInteraction::Hovered);
             })
             .on_hover(move |entered, _ctx| {
-                if !enabled {
-                    interaction_for_hover.set(HeaderInteraction::Idle);
-                    return;
-                }
                 interaction_for_hover.set(if entered {
                     HeaderInteraction::Hovered
                 } else {
@@ -552,7 +573,7 @@ impl Widget for ToolBoxHeader {
                 });
             })
             .on_focus(move |gained, _ctx| {
-                if !enabled || !gained {
+                if !gained {
                     focus_origin_for_focus.set(None);
                     return;
                 }
@@ -568,9 +589,6 @@ impl Widget for ToolBoxHeader {
                 focus_origin_for_focus.set(Some(origin));
             })
             .on_key(move |event: &WidgetEvent, ctx: &mut EventContext| {
-                if !enabled {
-                    return EventResponse::Ignored;
-                }
                 match event {
                     WidgetEvent::KeyDown {
                         key: Key::Space | Key::Enter,
@@ -640,12 +658,8 @@ impl Widget for ToolBoxHeader {
             .on_access_action(move |action, _ctx| {
                 match action {
                     bastyde_core::accesskit::Action::Click | bastyde_core::accesskit::Action::Expand => {
-                        if enabled {
-                            selected_access.set(idx);
-                            EventResponse::Handled
-                        } else {
-                            EventResponse::Ignored
-                        }
+                        selected_access.set(idx);
+                        EventResponse::Handled
                     }
                     // Exclusive disclosure: collapsing the active section
                     // without picking a replacement would violate the
@@ -654,12 +668,12 @@ impl Widget for ToolBoxHeader {
                     _ => EventResponse::Ignored,
                 }
             })
-            .focusable(enabled)
-            .cursor(if enabled {
-                CursorIcon::Pointer
-            } else {
-                CursorIcon::Default
-            });
+            // The focus walker skips disabled subtrees on its own, so
+            // we set `focusable(true)` unconditionally — the static
+            // intent is "this header takes keyboard focus" and the
+            // arena gates whether it actually does.
+            .focusable(true)
+            .cursor(CursorIcon::Pointer);
 
         ctx.apply_self_handlers(handler_set);
 
@@ -702,9 +716,12 @@ impl Widget for ToolBoxHeader {
         builder.set_name(&self.label);
         let is_active = self.selected.get() == self.index;
         builder.set_expanded(is_active);
-        if !self.enabled {
-            builder.set_disabled();
-        } else {
+        // Framework a11y walker auto-emits `set_disabled()` when
+        // `arena.is_enabled(self_id) == false`, so we don't call it
+        // here. The action set still reflects the structural
+        // per-item enabled flag — a disabled header advertises no
+        // Click / Expand / Collapse actions to AT.
+        if self.initial_enabled {
             builder.add_action(Action::Click);
             builder.add_action(Action::Expand);
             builder.add_action(Action::Collapse);
@@ -829,7 +846,8 @@ impl Widget for ToolBoxPanel {
 impl Widget for ToolBox {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let items = std::mem::take(&mut self.items);
-        let enabled_flags: Rc<Vec<bool>> = Rc::new(items.iter().map(|i| i.enabled).collect());
+        let enabled_flags: Rc<Vec<bool>> =
+            Rc::new(items.iter().map(|i| i.initial_enabled).collect());
         let header_ids: Rc<RefCell<Vec<WidgetId>>> =
             Rc::new(RefCell::new(Vec::with_capacity(items.len())));
         let panel_ids: Rc<RefCell<Vec<WidgetId>>> =
@@ -844,7 +862,7 @@ impl Widget for ToolBox {
             let header_id = ctx.add(ToolBoxHeader::new(
                 item.label.clone(),
                 index,
-                item.enabled,
+                item.initial_enabled,
                 self.selected.clone(),
                 header_ids.clone(),
                 panel_ids.clone(),

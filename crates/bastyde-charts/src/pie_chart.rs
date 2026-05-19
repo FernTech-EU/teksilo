@@ -334,6 +334,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let theme = ctx.theme;
+        let enabled = ctx.effective_enabled;
 
         let data = self.data.get();
         if data.is_empty() {
@@ -381,7 +382,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
                 .explicit_colors
                 .get(i)
                 .and_then(|c| c.clone())
-                .map(|c| c.resolve(theme))
+                .map(|c| c.resolve(theme, enabled))
                 .unwrap_or_else(|| palette.color_for(i, theme));
 
             // Build the wedge / ring-segment path. Angles are in
@@ -438,6 +439,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
                 &palette,
                 legend_orientation,
                 theme,
+                enabled,
             );
         }
 

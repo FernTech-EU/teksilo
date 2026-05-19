@@ -700,7 +700,7 @@ impl Widget for TabWidget {
         .icon(|_, h: &TabHandle| h.info.icon.as_ref().map(|f| f()))
         .closable(|_, h: &TabHandle| h.info.closable)
         .pinned(|_, h: &TabHandle| h.info.pinned)
-        .enabled(|_, h: &TabHandle| h.info.enabled)
+        .enabled(|_, h: &TabHandle| h.info.initial_enabled)
         .tooltip(|_, h: &TabHandle| {
             // Pinned tabs render icon-only; promote `title` to the
             // tooltip if the caller didn't set one explicitly so
