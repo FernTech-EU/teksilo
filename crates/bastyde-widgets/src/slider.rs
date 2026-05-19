@@ -38,7 +38,8 @@ pub struct Slider {
     max: f32,
     step: Option<f32>,
     orientation: Orientation,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     /// Accessible name, announced by screen readers as the control's label.
     label: Option<String>,
     variant: SliderVariant,
@@ -59,7 +60,7 @@ impl Slider {
             max,
             step: None,
             orientation: Orientation::Horizontal,
-            enabled: true,
+            initial_enabled: true,
             label: None,
             variant: SliderVariant::default(),
             tick_count: None,
@@ -82,8 +83,10 @@ impl Slider {
         self
     }
 
+    /// Set the initial enabled state. Forwarded to the arena at build
+    /// time. Use `ctx.enabled_when(slider_id, signal)` for reactivity.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -135,7 +138,7 @@ impl std::fmt::Debug for Slider {
         f.debug_struct("Slider")
             .field("min", &self.min)
             .field("max", &self.max)
-            .field("enabled", &self.enabled)
+            .field("initial_enabled", &self.initial_enabled)
             .field("variant", &self.variant)
             .finish()
     }
@@ -146,6 +149,13 @@ impl Widget for Slider {
         &mut self,
         ctx: &mut bastyde_core::build_context::BuildContext,
     ) -> Vec<bastyde_core::widget_id::WidgetId> {
+        let self_id = ctx.self_id();
+        // Forward initial-enabled into the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
+        let effective_enabled = ctx.effective_enabled_signal(self_id);
+
         // Resolve the active style: per-call override > theme slot >
         // built-in `RecipeSliderStyle` default.
         let style: SharedSliderStyle = self
@@ -176,7 +186,7 @@ impl Widget for Slider {
             value_normalized,
             is_hovered: self.hovered.clone(),
             is_dragging: self.dragging.clone(),
-            is_disabled: Signal::new(!self.enabled),
+            is_disabled: effective_enabled.map(|on| !*on),
             focus_origin: self.focus_origin.clone(),
             orientation,
             tick_count: self.tick_count,
@@ -195,7 +205,6 @@ impl Widget for Slider {
 
         let value = self.value.clone();
         let step = self.step;
-        let enabled = self.enabled;
         let orientation = self.orientation;
         let hovered = self.hovered.clone();
         let dragging = self.dragging.clone();
@@ -243,8 +252,10 @@ impl Widget for Slider {
             }
         };
 
+        // Framework gates events on `arena.is_enabled(self_id)`, so
+        // no per-handler enabled snapshot guards anymore.
         let mut handlers = HandlerSet::new()
-            .focusable(enabled)
+            .focusable(true)
             .cursor(CursorIcon::Pointer);
 
         // Thumb drag — routed through the typed gesture API.
@@ -252,9 +263,6 @@ impl Widget for Slider {
             let dragging = dragging.clone();
             let set_value = set_value_from_position.clone();
             handlers = handlers.on_drag(move |phase, _ctx| {
-                if !enabled {
-                    return;
-                }
                 match phase {
                     DragPhase::Started {
                         position,
@@ -278,9 +286,6 @@ impl Widget for Slider {
         {
             let set_value = set_value_from_position.clone();
             handlers = handlers.on_tap(move |event, _ctx| {
-                if !enabled {
-                    return;
-                }
                 set_value(event.position.x, event.position.y);
             });
         }
@@ -298,9 +303,6 @@ impl Widget for Slider {
             let adjust = adjust_by_step.clone();
             let value = value.clone();
             handlers = handlers.on_key(move |event, _ctx| {
-                if !enabled {
-                    return EventResponse::Ignored;
-                }
                 match event {
                     WidgetEvent::KeyDown { key, .. } => match key {
                         Key::ArrowRight | Key::ArrowUp => {
@@ -410,9 +412,7 @@ impl Widget for Slider {
             Orientation::Vertical => bastyde_core::accesskit::Orientation::Vertical,
         };
         builder.set_orientation(orientation);
-        if !self.enabled {
-            builder.set_disabled();
-        }
+        // Framework a11y walker sets `set_disabled` from arena state.
         builder.add_action(bastyde_core::accesskit::Action::Increment);
         builder.add_action(bastyde_core::accesskit::Action::Decrement);
         builder.add_action(bastyde_core::accesskit::Action::Focus);

@@ -26,7 +26,8 @@ pub struct RadioButton {
     caption: Option<String>,
     value: usize,
     selected: Signal<usize>,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     tooltip_text: Option<String>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn bastyde_core::widget::Widget>>,
@@ -49,7 +50,7 @@ impl RadioButton {
             caption: None,
             value,
             selected,
-            enabled: true,
+            initial_enabled: true,
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
@@ -97,8 +98,11 @@ impl RadioButton {
         self
     }
 
+    /// Set the initial enabled state. Forwarded to the arena via
+    /// `ctx.enabled_when(self_id, false)` at build time. Reactive
+    /// enable/disable is supported via `ctx.enabled_when(id, signal)`.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -191,20 +195,23 @@ impl Widget for RadioButton {
         use crate::styles::recipe_radio_style as radio_dims;
         let selected = self.selected.clone();
         let value = self.value;
-        let enabled = self.enabled;
         let variant = self.variant;
+        let self_id = ctx.self_id();
 
-        let interaction = ctx.signal(if enabled {
-            InteractionState::Idle
-        } else {
-            InteractionState::Disabled
-        });
+        // Forward initial-enabled into the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
+        let effective_enabled = ctx.effective_enabled_signal(self_id);
+
+        let interaction = ctx.signal(InteractionState::Idle);
 
         let is_selected = selected.map(move |s| *s == value);
         let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));
         let is_pressed = interaction.map(|s| matches!(s, InteractionState::Pressed));
         let is_focused = interaction.map(|s| matches!(s, InteractionState::Focused));
-        let is_disabled = interaction.map(|s| matches!(s, InteractionState::Disabled));
+        // is_disabled derives from the arena.
+        let is_disabled = effective_enabled.map(|on| !*on);
 
         let style: SharedRadioStyle = self
             .style_override
@@ -291,21 +298,17 @@ impl Widget for RadioButton {
         let int_key = interaction.clone();
         let int_focus = interaction.clone();
 
+        // Framework gates events on arena.is_enabled; no per-handler
+        // snapshot guards anymore.
         let handler_set = HandlerSet::new()
             .on_tap({
                 move |_pos, _ctx: &mut EventContext| {
-                    if !enabled {
-                        return;
-                    }
                     sel_tap.set(value);
                     int_tap.set(InteractionState::Hovered);
                 }
             })
             .on_hover({
                 move |entered: bool, _ctx: &mut EventContext| {
-                    if !enabled {
-                        return;
-                    }
                     if entered {
                         int_hover.set(InteractionState::Hovered);
                     } else {
@@ -315,9 +318,6 @@ impl Widget for RadioButton {
             })
             .on_key({
                 move |event: &WidgetEvent, _ctx: &mut EventContext| -> EventResponse {
-                    if !enabled {
-                        return EventResponse::Ignored;
-                    }
                     match event {
                         WidgetEvent::KeyDown {
                             key: Key::Space, ..
@@ -351,7 +351,7 @@ impl Widget for RadioButton {
                 move |action: bastyde_core::accesskit::Action,
                       _ctx: &mut EventContext|
                       -> EventResponse {
-                    if action == bastyde_core::accesskit::Action::Click && enabled {
+                    if action == bastyde_core::accesskit::Action::Click {
                         sel_access.set(value);
                         EventResponse::Handled
                     } else {
@@ -359,7 +359,7 @@ impl Widget for RadioButton {
                     }
                 }
             })
-            .focusable(enabled)
+            .focusable(true)
             .cursor(CursorIcon::Pointer);
 
         ctx.apply_self_handlers(handler_set);
@@ -412,9 +412,7 @@ impl Widget for RadioButton {
                 builder.push_to_radio_group(bastyde_core::accessibility::widget_id_to_node_id(id));
             }
         }
-        if !self.enabled {
-            builder.set_disabled();
-        }
+        // Framework a11y walker sets `set_disabled` from arena state.
         builder.add_action(bastyde_core::accesskit::Action::Click);
         builder.add_action(bastyde_core::accesskit::Action::Focus);
     }

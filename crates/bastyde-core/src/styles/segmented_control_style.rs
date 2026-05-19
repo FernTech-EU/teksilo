@@ -29,8 +29,11 @@ pub struct SegmentedControlStyleConfig {
     /// triggers the accent-tinted selected-segment appearance; only
     /// keyboard focus paints the outer focus ring envelope.
     pub focus_origin: Signal<Option<FocusOrigin>>,
-    /// Disabled state (static).
-    pub is_enabled: bool,
+    /// Reactive — re-emits when arena `enabled_state` flips for this
+    /// widget (or any ancestor). Chrome implementations should
+    /// subscribe at `BindingLevel::RepaintOnly` so they re-paint on
+    /// flip.
+    pub is_enabled: Signal<bool>,
 }
 
 pub trait SegmentedControlStyle: 'static {

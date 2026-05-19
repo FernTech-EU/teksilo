@@ -32,7 +32,8 @@ pub use bastyde_core::styles::ToggleVariant;
 pub struct Toggle {
     on: Signal<bool>,
     label: Option<String>,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     variant: ToggleVariant,
     style: Option<SharedToggleStyle>,
     hovered: Signal<bool>,
@@ -46,7 +47,7 @@ impl Toggle {
         Self {
             on,
             label: None,
-            enabled: true,
+            initial_enabled: true,
             variant: ToggleVariant::default(),
             style: None,
             hovered: Signal::new(false),
@@ -69,8 +70,11 @@ impl Toggle {
         self
     }
 
+    /// Set the initial enabled state. Forwarded to the arena via
+    /// `ctx.enabled_when(self_id, false)` at build time. Reactive
+    /// enable/disable is supported via `ctx.enabled_when(id, signal)`.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -96,7 +100,7 @@ impl Toggle {
 impl std::fmt::Debug for Toggle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Toggle")
-            .field("enabled", &self.enabled)
+            .field("initial_enabled", &self.initial_enabled)
             .field("variant", &self.variant)
             .finish()
     }
@@ -104,6 +108,12 @@ impl std::fmt::Debug for Toggle {
 
 impl Widget for Toggle {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let self_id = ctx.self_id();
+        // Forward initial-enabled into the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
+        let effective_enabled = ctx.effective_enabled_signal(self_id);
         // Resolve the active style: per-call override > theme slot >
         // built-in `RecipeToggleStyle` default.
         let style: SharedToggleStyle = self
@@ -118,7 +128,9 @@ impl Widget for Toggle {
             is_on: self.on.clone(),
             is_hovered: self.hovered.clone(),
             is_focused: self.focused.clone(),
-            is_disabled: Signal::new(!self.enabled),
+            // is_disabled tracks the arena's effective enabled-state
+            // reactively (see `BuildContext::effective_enabled_signal`).
+            is_disabled: effective_enabled.map(|on| !*on),
             variant: self.variant,
         };
         let body_id = style.make_body(&cfg, ctx);
@@ -149,7 +161,6 @@ impl Widget for Toggle {
         let hovered = self.hovered.clone();
         let focused = self.focused.clone();
         let focus_origin = self.focus_origin.clone();
-        let enabled = self.enabled;
 
         let toggle = {
             let on = on.clone();
@@ -158,16 +169,17 @@ impl Widget for Toggle {
             }
         };
 
+        // Framework gates events on `arena.is_enabled(self_id)`; the
+        // focus walker skips disabled subtrees. No need to AND with
+        // a per-handler `enabled` snapshot anymore.
         let mut handlers = HandlerSet::new()
-            .focusable(enabled)
+            .focusable(true)
             .cursor(CursorIcon::Pointer);
 
         {
             let toggle = toggle.clone();
             handlers = handlers.on_tap(move |_pos, _ctx| {
-                if enabled {
-                    toggle();
-                }
+                toggle();
             });
         }
         {
@@ -179,9 +191,6 @@ impl Widget for Toggle {
         {
             let toggle = toggle.clone();
             handlers = handlers.on_key(move |event, _ctx| {
-                if !enabled {
-                    return EventResponse::Ignored;
-                }
                 match event {
                     WidgetEvent::KeyDown {
                         key: Key::Space, ..
@@ -216,7 +225,7 @@ impl Widget for Toggle {
         {
             let toggle = toggle.clone();
             handlers = handlers.on_access_action(move |action, _ctx| {
-                if action == bastyde_core::accesskit::Action::Click && enabled {
+                if action == bastyde_core::accesskit::Action::Click {
                     toggle();
                     EventResponse::Handled
                 } else {
@@ -272,9 +281,7 @@ impl Widget for Toggle {
             builder.set_name(label);
         }
         builder.set_toggled(self.on.get());
-        if !self.enabled {
-            builder.set_disabled();
-        }
+        // Framework a11y walker sets `set_disabled` from arena state.
         builder.add_action(bastyde_core::accesskit::Action::Click);
         builder.add_action(bastyde_core::accesskit::Action::Focus);
     }

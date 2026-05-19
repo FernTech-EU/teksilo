@@ -43,38 +43,30 @@ struct SegmentButton {
     label: String,
     index: usize,
     selected: Signal<usize>,
-    enabled: bool,
     hovered_segment: Signal<Option<usize>>,
 }
 
 impl Widget for SegmentButton {
     fn build(&mut self, ctx: &mut bastyde_core::build_context::BuildContext) -> Vec<WidgetId> {
-        let enabled = self.enabled;
         let index = self.index;
         let selected = self.selected.clone();
         let hovered = self.hovered_segment.clone();
 
         let on_tap_selected = selected.clone();
+        // Framework gates events on `arena.is_enabled` — the parent
+        // SegmentedControl propagates its enabled-state through the
+        // arena to every child SegmentButton automatically.
         let handlers = HandlerSet::new()
             .cursor(CursorIcon::Pointer)
             // Focus stays on the parent SegmentedControl (single tab
             // stop), matching the standard ARIA RadioGroup model.
             .focusable(false)
             .on_tap(move |_pos, _ctx| {
-                if !enabled {
-                    return;
-                }
                 on_tap_selected.set(index);
             })
             .on_hover({
                 let hovered = hovered.clone();
                 move |entered, _ctx| {
-                    if !enabled {
-                        if !entered && hovered.get() == Some(index) {
-                            hovered.set(None);
-                        }
-                        return;
-                    }
                     if entered {
                         hovered.set(Some(index));
                     } else if hovered.get() == Some(index) {
@@ -101,11 +93,9 @@ impl Widget for SegmentButton {
         builder.set_role(bastyde_core::accesskit::Role::RadioButton);
         builder.set_name(&self.label);
         builder.set_selected(self.selected.get() == self.index);
-        if !self.enabled {
-            builder.set_disabled();
-        } else {
-            builder.add_action(bastyde_core::accesskit::Action::Click);
-        }
+        // Framework a11y walker sets `set_disabled` from arena state
+        // — inherited from the parent SegmentedControl.
+        builder.add_action(bastyde_core::accesskit::Action::Click);
     }
 }
 
@@ -113,7 +103,8 @@ impl Widget for SegmentButton {
 pub struct SegmentedControl {
     labels: Vec<String>,
     selected: Signal<usize>,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     hovered_segment: Signal<Option<usize>>,
     focus_origin: Signal<Option<FocusOrigin>>,
     /// Per-call override for the chrome.
@@ -132,7 +123,7 @@ impl SegmentedControl {
         Self {
             labels,
             selected,
-            enabled: true,
+            initial_enabled: true,
             hovered_segment: Signal::new(None),
             focus_origin: Signal::new(None),
             style_override: None,
@@ -141,8 +132,11 @@ impl SegmentedControl {
         }
     }
 
+    /// Set the initial enabled state. Forwarded to the arena at build
+    /// time. For reactive enable/disable use
+    /// `ctx.enabled_when(segmented_control_id, signal)`.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -185,7 +179,7 @@ impl std::fmt::Debug for SegmentedControl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SegmentedControl")
             .field("labels", &self.labels)
-            .field("enabled", &self.enabled)
+            .field("initial_enabled", &self.initial_enabled)
             .finish()
     }
 }
@@ -196,6 +190,12 @@ impl Widget for SegmentedControl {
         ctx: &mut bastyde_core::build_context::BuildContext,
     ) -> Vec<bastyde_core::widget_id::WidgetId> {
         let self_id = ctx.self_id();
+        // Forward initial-enabled to the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
+        let effective_enabled = ctx.effective_enabled_signal(self_id);
+
         let registry = ctx.binding_registry();
         self.selected.bind_to(
             self_id,
@@ -204,7 +204,6 @@ impl Widget for SegmentedControl {
         );
 
         let selected = self.selected.clone();
-        let enabled = self.enabled;
         let n = self.labels.len();
         let hovered_segment = self.hovered_segment.clone();
         let focus_origin = self.focus_origin.clone();
@@ -222,13 +221,15 @@ impl Widget for SegmentedControl {
                 selected: selected.clone(),
                 hovered_segment: hovered_segment.clone(),
                 focus_origin: focus_origin.clone(),
-                is_enabled: enabled,
+                is_enabled: effective_enabled.clone(),
             },
             ctx,
         );
 
         // Build one SegmentButton per label — invisible a11y +
         // click/hover stubs sitting at the segment grid positions.
+        // Each SegmentButton inherits the parent's enabled state via
+        // the arena (no per-child enabled bool plumbing needed).
         self.children.clear();
         self.children.push(chrome_id);
         for (index, label) in self.labels.iter().enumerate() {
@@ -236,16 +237,16 @@ impl Widget for SegmentedControl {
                 label: label.clone(),
                 index,
                 selected: selected.clone(),
-                enabled,
                 hovered_segment: hovered_segment.clone(),
             });
             self.children.push(id);
         }
         self.segment_count = n;
 
-        // Parent handlers — arrow keys, focus tracking, access actions.
+        // Framework gates events on `arena.is_enabled`; focus walker
+        // skips disabled subtrees.
         let mut handlers = HandlerSet::new()
-            .focusable(enabled)
+            .focusable(true)
             .cursor(CursorIcon::Pointer);
 
         // Hover-out on the parent clears the segment highlight when
@@ -263,7 +264,7 @@ impl Widget for SegmentedControl {
         {
             let selected = selected.clone();
             handlers = handlers.on_key(move |event, _ctx| {
-                if !enabled || n == 0 {
+                if n == 0 {
                     return EventResponse::Ignored;
                 }
                 match event {
@@ -391,9 +392,7 @@ impl Widget for SegmentedControl {
         if let Some(label) = self.labels.get(selected_index) {
             builder.set_value(label);
         }
-        if !self.enabled {
-            builder.set_disabled();
-        }
+        // Framework a11y walker sets `set_disabled` from arena state.
         builder.add_action(bastyde_core::accesskit::Action::Focus);
         builder.add_action(bastyde_core::accesskit::Action::Increment);
         builder.add_action(bastyde_core::accesskit::Action::Decrement);

@@ -51,17 +51,25 @@ pub struct RecipeLinkStyle;
 
 impl LinkStyle for RecipeLinkStyle {
     fn make_body(&self, cfg: &LinkStyleConfig, ctx: &mut BuildContext) -> WidgetId {
-        let disabled = cfg.is_disabled;
-
         // Derived `Signal<TextRole>` combining the four state signals
-        // plus the static `disabled` hint. The text widget and the
+        // plus the reactive disabled signal. The text widget and the
         // underline both bind to this role, so the underline tracks
         // the text colour through every state transition.
+        //
+        // Note: `is_disabled` is now reactive (a `Signal<bool>` sourced
+        // from the arena's `effective_enabled` chain). At
+        // wide-enough wrap widths, the leaves' `ColorProp::resolve`
+        // would already substitute `TextRole::Disabled` when
+        // `effective_enabled = false` — but the link style explicitly
+        // returns a `Disabled` role here too so the underline path
+        // and any test/snapshot consuming `LinkStyleConfig.is_disabled`
+        // stay coherent.
         let text_role: Signal<TextRole> = cfg
             .is_hovered
             .zip3(&cfg.is_pressed, &cfg.is_focused)
             .zip(&cfg.is_visited)
-            .map(move |((h, p, f), v)| link_text_role(*h, *p, *f, *v, disabled));
+            .zip(&cfg.is_disabled)
+            .map(move |(((h, p, f), v), d)| link_text_role(*h, *p, *f, *v, *d));
 
         let text_id = ctx.add(
             TextWidget::new_literal(&cfg.text)

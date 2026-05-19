@@ -34,7 +34,8 @@ pub struct Link {
     /// Default is a permanently-`false` signal so links that don't
     /// represent URLs render as unvisited.
     visited: Option<Signal<bool>>,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     /// Per-call override for the link chrome.
     style_override: Option<SharedLinkStyle>,
     root_child_id: Option<WidgetId>,
@@ -52,7 +53,7 @@ impl Link {
             composite_tooltip_content: None,
             interaction: None,
             visited: None,
-            enabled: true,
+            initial_enabled: true,
             style_override: None,
             root_child_id: None,
         }
@@ -139,8 +140,10 @@ impl Link {
         self.url.as_deref()
     }
 
+    /// Set the initial enabled state. Forwarded to the arena at build
+    /// time. For reactive enable/disable use `ctx.enabled_when(id, signal)`.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 }
@@ -153,15 +156,24 @@ impl std::fmt::Debug for Link {
 
 impl Widget for Link {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let self_id = ctx.self_id();
+        // Forward initial-enabled into the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
+        let effective_enabled = ctx.effective_enabled_signal(self_id);
+
         let interaction = ctx.signal(InteractionState::Idle);
         self.interaction = Some(interaction.clone());
 
         // Derive the four state bools `LinkStyle` expects from the
-        // single `InteractionState` signal. Disabled is static.
+        // single `InteractionState` signal. `is_disabled` derives
+        // from the arena (reactive) instead of a build-time snapshot.
         let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));
         let is_pressed = interaction.map(|s| matches!(s, InteractionState::Pressed));
         let is_focused = interaction.map(|s| matches!(s, InteractionState::Focused));
         let is_visited = self.visited.clone().unwrap_or_else(|| Signal::new(false));
+        let is_disabled = effective_enabled.map(|on| !*on);
 
         let style: SharedLinkStyle = self
             .style_override
@@ -175,7 +187,7 @@ impl Widget for Link {
                 is_pressed,
                 is_focused,
                 is_visited,
-                is_disabled: !self.enabled,
+                is_disabled,
             },
             ctx,
         );
@@ -280,12 +292,11 @@ impl Widget for Link {
                     }
                 }
             })
-            .focusable(self.enabled)
-            .cursor(if self.enabled {
-                CursorIcon::Pointer
-            } else {
-                CursorIcon::Default
-            });
+            // Focus walker skips disabled subtrees; cursor stays
+            // Pointer here and the framework can choose to override
+            // for disabled subtrees in a future change.
+            .focusable(true)
+            .cursor(CursorIcon::Pointer);
 
         ctx.apply_self_handlers(handler_set);
 
@@ -324,12 +335,11 @@ impl Widget for Link {
         if let Some(ref url) = self.url {
             builder.set_url(url.clone());
         }
-        if self.enabled {
-            builder.add_action(bastyde_core::accesskit::Action::Click);
-            builder.add_action(bastyde_core::accesskit::Action::Focus);
-        } else {
-            builder.set_disabled();
-        }
+        // Framework a11y walker sets `set_disabled` from arena state.
+        // Actions are always advertised — when disabled the framework
+        // gates them at dispatch via `arena.is_enabled`.
+        builder.add_action(bastyde_core::accesskit::Action::Click);
+        builder.add_action(bastyde_core::accesskit::Action::Focus);
     }
 
     fn children(&self) -> Vec<WidgetId> {

@@ -40,7 +40,7 @@ impl SegmentedControlStyle for RecipeSegmentedControlStyle {
             selected: cfg.selected.clone(),
             hovered_segment: cfg.hovered_segment.clone(),
             focus_origin: cfg.focus_origin.clone(),
-            is_enabled: cfg.is_enabled,
+            is_enabled: cfg.is_enabled.clone(),
         })
     }
 }
@@ -54,7 +54,8 @@ struct SegmentedControlChrome {
     selected: Signal<usize>,
     hovered_segment: Signal<Option<usize>>,
     focus_origin: Signal<Option<FocusOrigin>>,
-    is_enabled: bool,
+    /// Reactive — re-paints on arena `enabled_state` flip.
+    is_enabled: Signal<bool>,
 }
 
 impl std::fmt::Debug for SegmentedControlChrome {
@@ -104,6 +105,11 @@ impl Widget for SegmentedControlChrome {
             .bind_to(id, registry, BindingLevel::RepaintOnly);
         self.focus_origin
             .bind_to(id, registry, BindingLevel::RepaintOnly);
+        // Also subscribe to is_enabled so a reactive enable/disable
+        // flip via `enabled_when` re-paints the chrome with the
+        // dimmed palette.
+        self.is_enabled
+            .bind_to(id, registry, BindingLevel::RepaintOnly);
         vec![]
     }
 
@@ -133,9 +139,13 @@ impl Widget for SegmentedControlChrome {
         let focused = focus_origin.is_some();
         let keyboard_focused = focus_origin == Some(FocusOrigin::Keyboard);
         let frame_cr = CornerRadius::uniform(SEGMENTED_CONTROL_CORNER_RADIUS);
+        // Snapshot the reactive enabled-state once per paint. The
+        // chrome subscribed to this signal in build() so a flip
+        // re-paints with the new palette.
+        let is_enabled = self.is_enabled.get();
 
         // 1. Outer frame.
-        let frame_border = if !self.is_enabled {
+        let frame_border = if !is_enabled {
             colors.border
         } else {
             colors.border_strong
@@ -148,10 +158,10 @@ impl Widget for SegmentedControlChrome {
                 continue;
             }
             let rect = Self::segment_rect(i, inner, n);
-            if self.is_enabled && hovered == Some(i) {
+            if is_enabled && hovered == Some(i) {
                 canvas.fill_rounded_rect(rect, frame_cr, colors.surface_hover);
             }
-            let text_color = if !self.is_enabled {
+            let text_color = if !is_enabled {
                 colors.text_disabled
             } else {
                 colors.text_primary
@@ -181,7 +191,7 @@ impl Widget for SegmentedControlChrome {
                 sel_base.width + bw * 2.0,
                 sel_base.height + bw * 2.0,
             );
-            let (sel_bg, sel_border, sel_text) = if !self.is_enabled {
+            let (sel_bg, sel_border, sel_text) = if !is_enabled {
                 (
                     colors.surface_selected_inactive,
                     colors.border,

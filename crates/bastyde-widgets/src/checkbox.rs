@@ -99,7 +99,10 @@ pub struct Checkbox {
     label: Option<String>,
     caption: Option<String>,
     kind: CheckKind,
-    enabled: bool,
+    /// Initial enabled-state; forwarded into the arena at build time.
+    /// After build the arena is the single source of truth — see
+    /// `IconButton::initial_enabled` for the architectural rationale.
+    initial_enabled: bool,
     /// When true, the checkbox renders only the box (no visual label /
     /// caption next to it) AND its `accessibility(builder)` skips the
     /// missing-label `debug_assert` — the parent composite is responsible
@@ -122,7 +125,7 @@ impl Checkbox {
             label: None,
             caption: None,
             kind: CheckKind::TwoState(checked),
-            enabled: true,
+            initial_enabled: true,
             labels_hidden: false,
             tooltip_text: None,
             rich_tooltip_source: None,
@@ -145,7 +148,7 @@ impl Checkbox {
             label: None,
             caption: None,
             kind: CheckKind::TriState(state),
-            enabled: true,
+            initial_enabled: true,
             labels_hidden: false,
             tooltip_text: None,
             rich_tooltip_source: None,
@@ -206,8 +209,13 @@ impl Checkbox {
         self
     }
 
+    /// Set the initial enabled state. Forwarded to the arena via
+    /// `ctx.enabled_when(self_id, false)` at build time. For
+    /// reactive enable/disable, call
+    /// `ctx.enabled_when(checkbox_id, signal)` from the composing
+    /// widget.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -282,7 +290,7 @@ impl std::fmt::Debug for Checkbox {
             .field("label", &self.label)
             .field("caption", &self.caption)
             .field("kind", &self.kind)
-            .field("enabled", &self.enabled)
+            .field("initial_enabled", &self.initial_enabled)
             .finish()
     }
 }
@@ -307,14 +315,21 @@ impl Widget for Checkbox {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         use crate::styles::recipe_checkbox_style as cb_dims;
         let kind = self.kind.clone();
-        let enabled = self.enabled;
         let variant = self.variant;
+        let self_id = ctx.self_id();
 
-        let interaction = ctx.signal(if enabled {
-            InteractionState::Idle
-        } else {
-            InteractionState::Disabled
-        });
+        // Forward initial-enabled into the arena. After this point
+        // the arena is the single source of truth (same architecture
+        // as IconButton — leaves consume `effective_enabled` at paint
+        // time, events are gated on `is_enabled`, a11y walker reads it).
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
+        let effective_enabled = ctx.effective_enabled_signal(self_id);
+
+        // Interaction signal seeded to Idle — the arena's enabled-state
+        // is consulted separately via `effective_enabled`.
+        let interaction = ctx.signal(InteractionState::Idle);
 
         // Bridge the widget-side `CheckState` (bastyde-data) to the style-
         // protocol-side `CheckboxState` (bastyde-core). The mapping is 1-to-1;
@@ -329,7 +344,8 @@ impl Widget for Checkbox {
         let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));
         let is_pressed = interaction.map(|s| matches!(s, InteractionState::Pressed));
         let is_focused = interaction.map(|s| matches!(s, InteractionState::Focused));
-        let is_disabled = interaction.map(|s| matches!(s, InteractionState::Disabled));
+        // is_disabled derives from the arena (not from interaction).
+        let is_disabled = effective_enabled.map(|on| !*on);
 
         let style: SharedCheckboxStyle = self
             .style_override
@@ -422,21 +438,19 @@ impl Widget for Checkbox {
         let int_key = interaction.clone();
         let int_focus = interaction.clone();
 
+        // Framework gates events on `arena.is_enabled(self_id)`, so
+        // these closures only run when the widget is effectively
+        // enabled. The old `if !enabled { return; }` snapshot guards
+        // are gone.
         let handler_set = HandlerSet::new()
             .on_tap({
                 move |_pos, _ctx: &mut EventContext| {
-                    if !enabled {
-                        return;
-                    }
                     kind_tap.toggle();
                     int_tap.set(InteractionState::Hovered);
                 }
             })
             .on_hover({
                 move |entered: bool, _ctx: &mut EventContext| {
-                    if !enabled {
-                        return;
-                    }
                     if entered {
                         int_hover.set(InteractionState::Hovered);
                     } else {
@@ -446,9 +460,6 @@ impl Widget for Checkbox {
             })
             .on_key({
                 move |event: &WidgetEvent, _ctx: &mut EventContext| -> EventResponse {
-                    if !enabled {
-                        return EventResponse::Ignored;
-                    }
                     match event {
                         WidgetEvent::KeyDown {
                             key: Key::Space, ..
@@ -482,7 +493,7 @@ impl Widget for Checkbox {
                 move |action: bastyde_core::accesskit::Action,
                       _ctx: &mut EventContext|
                       -> EventResponse {
-                    if action == bastyde_core::accesskit::Action::Click && enabled {
+                    if action == bastyde_core::accesskit::Action::Click {
                         kind_access.toggle();
                         EventResponse::Handled
                     } else {
@@ -490,7 +501,8 @@ impl Widget for Checkbox {
                     }
                 }
             })
-            .focusable(enabled)
+            // Focus walker skips disabled subtrees on its own.
+            .focusable(true)
             .cursor(CursorIcon::Pointer);
 
         ctx.apply_self_handlers(handler_set);
@@ -550,9 +562,8 @@ impl Widget for Checkbox {
                     .set_toggled(bastyde_core::accesskit::Toggled::Mixed);
             }
         }
-        if !self.enabled {
-            builder.set_disabled();
-        }
+        // Framework's accessibility walker calls `set_disabled` based
+        // on `arena.is_enabled(self_id)` — no need to mirror here.
         builder.add_action(bastyde_core::accesskit::Action::Click);
         builder.add_action(bastyde_core::accesskit::Action::Focus);
     }

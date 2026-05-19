@@ -84,7 +84,8 @@ pub struct ComboBox<T: Clone + PartialEq + 'static> {
     /// Accessible label — independent of placeholder and current selection.
     /// Screen readers announce this as the name of the control.
     label: Option<String>,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     max_visible_items: usize,
     /// When `true`, the dropdown panel includes a search field at the top
     /// and the list is filtered live against the query. Only exposed under
@@ -161,7 +162,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
             render_item: None,
             placeholder: String::new(),
             label: None,
-            enabled: true,
+            initial_enabled: true,
             max_visible_items: DEFAULT_MAX_VISIBLE_ITEMS,
             #[cfg(feature = "rich-text")]
             searchable: false,
@@ -281,8 +282,10 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
         self
     }
 
+    /// Set the initial enabled state. Forwarded to the arena at build
+    /// time. For reactive enable/disable use `ctx.enabled_when(id, signal)`.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -357,23 +360,43 @@ impl<T: Clone + PartialEq + 'static> std::fmt::Debug for ComboBox<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ComboBox")
             .field("items", &self.source.len())
-            .field("enabled", &self.enabled)
+            .field("initial_enabled", &self.initial_enabled)
             .finish()
     }
 }
 
 impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let enabled = self.enabled;
+        let self_id = ctx.self_id();
+        // Forward initial-enabled to the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
+        let effective_enabled = ctx.effective_enabled_signal(self_id);
 
-        // Refresh the four interaction signals every build. `is_disabled`
-        // is determined by the immutable `enabled` builder option; the
-        // other three start in their resting state and flip as the user
-        // interacts.
+        // Refresh the four interaction signals every build. The three
+        // non-disabled ones start in their resting state; `is_disabled`
+        // now mirrors the arena's effective enabled-state reactively
+        // (replaced the build-time snapshot — see IconButton). We
+        // wire `effective_enabled.not()` into `self.is_disabled` so
+        // existing observers keep working without rewiring.
         self.is_open.set(false);
         self.is_hovered.set(false);
         self.is_focused.set(false);
-        self.is_disabled.set(!enabled);
+        // Drive `self.is_disabled` from the arena's effective_enabled.
+        // Replace with a derived signal — but `self.is_disabled` is
+        // owned by the widget and may have observers, so push the
+        // current value and register an effect to keep it in sync.
+        self.is_disabled.set(!effective_enabled.get());
+        {
+            let is_disabled = self.is_disabled.clone();
+            ctx.effect(&effective_enabled, move |on| {
+                let want = !*on;
+                if is_disabled.get() != want {
+                    is_disabled.set(want);
+                }
+            });
+        }
 
         // Observe model changes so the dropdown panel rebuilds when the
         // backing data mutates, and so selection is cleared when the
@@ -562,13 +585,12 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             })
         };
 
+        // Framework gates events on `arena.is_enabled` — no per-
+        // handler enabled snapshot guards anymore.
         let handler_set = HandlerSet::new()
             .on_tap({
                 let open_overlay = open_overlay.clone();
                 move |_pos, ctx: &mut EventContext| {
-                    if !enabled {
-                        return;
-                    }
                     open_overlay(ctx);
                 }
             })
@@ -576,9 +598,6 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                 let is_open = is_open_h.clone();
                 let is_hovered = is_hovered_h.clone();
                 move |entered: bool, _ctx: &mut EventContext| {
-                    if !enabled {
-                        return;
-                    }
                     // Don't churn the hovered signal while the dropdown
                     // is open — the bg stays in its open colour until
                     // the overlay dismisses.
@@ -615,9 +634,6 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                     })
                 };
                 move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
-                    if !enabled {
-                        return EventResponse::Ignored;
-                    }
                     match event {
                         WidgetEvent::KeyDown {
                             key: Key::Enter | Key::Space,
@@ -801,7 +817,8 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             .on_focus(move |gained: bool, _ctx: &mut EventContext| {
                 is_focused_h.set(gained);
             })
-            .focusable(enabled)
+            // Focus walker skips disabled subtrees on its own.
+            .focusable(true)
             .cursor(CursorIcon::Pointer);
 
         ctx.apply_self_handlers(handler_set);
@@ -901,17 +918,11 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             builder.set_auto_complete(bastyde_core::accesskit::AutoComplete::List);
         }
 
-        if self.enabled {
-            // Expose the standard combobox activation surface to AT —
-            // without these, screen-reader "press" and "focus" commands
-            // probing `actions()` on the node see an empty list even
-            // though the attached `on_access_action` handler can route
-            // Click internally.
-            builder.add_action(bastyde_core::accesskit::Action::Click);
-            builder.add_action(bastyde_core::accesskit::Action::Focus);
-        } else {
-            builder.set_disabled();
-        }
+        // Always advertise actions — framework gates them at dispatch
+        // via `arena.is_enabled`, and the a11y walker handles
+        // `set_disabled` from the same arena state.
+        builder.add_action(bastyde_core::accesskit::Action::Click);
+        builder.add_action(bastyde_core::accesskit::Action::Focus);
     }
 
     fn children(&self) -> Vec<WidgetId> {

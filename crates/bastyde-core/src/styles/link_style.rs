@@ -28,8 +28,10 @@ pub struct LinkStyleConfig {
     /// app owns visited-tracking; default `Signal::new(false)` is
     /// fine for links that don't represent URLs.
     pub is_visited: Signal<bool>,
-    /// Disabled state (static).
-    pub is_disabled: bool,
+    /// `true` when the widget is effectively disabled (this node or
+    /// any ancestor has its arena `enabled_state` resolved to false).
+    /// Reactive: re-emits when `enabled_when(..., signal)` flips.
+    pub is_disabled: Signal<bool>,
 }
 
 pub trait LinkStyle: 'static {
