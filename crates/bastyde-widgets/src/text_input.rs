@@ -73,7 +73,8 @@ pub struct TextInput {
     // ── Configuration forwarded to the inner TextInputField ─────────
     text: Signal<String>,
     placeholder: String,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     read_only: bool,
     max_length: Option<usize>,
     on_submit: Option<Box<dyn Fn(&mut EventContext)>>,
@@ -141,7 +142,7 @@ impl std::fmt::Debug for TextInput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TextInput")
             .field("placeholder", &self.placeholder)
-            .field("enabled", &self.enabled)
+            .field("initial_enabled", &self.initial_enabled)
             .finish_non_exhaustive()
     }
 }
@@ -152,7 +153,7 @@ impl TextInput {
         Self {
             text,
             placeholder: String::new(),
-            enabled: true,
+            initial_enabled: true,
             read_only: false,
             max_length: None,
             on_submit: None,
@@ -220,8 +221,10 @@ impl TextInput {
         self
     }
 
+    /// Set the initial enabled state. Forwarded to the arena at build
+    /// time. Use `ctx.enabled_when(input_id, signal)` for reactivity.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -418,6 +421,11 @@ impl Widget for TextInput {
         // paint-time role resolver without riding through a zip here.
         let _theme = ctx.theme();
         use crate::styles::recipe_text_input_style as field_dims;
+        let self_id = ctx.self_id();
+        // Forward initial-enabled into the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
         let interaction = self.interaction.clone();
         let validation = self.validation.clone();
 
@@ -432,7 +440,7 @@ impl Widget for TextInput {
             (inner_height - 2.0 * field_dims::TEXT_FIELD_PADDING_VERTICAL).max(0.0);
 
         let mut field = TextInputField::new(self.text.clone())
-            .enabled(self.enabled)
+            .enabled(self.initial_enabled)
             .read_only(self.read_only)
             .placeholder(self.placeholder.clone())
             .text_height(text_area_height)
@@ -590,7 +598,9 @@ impl Widget for TextInput {
         // the trait's flat `TextInputValidationLevel` enum.
         let is_focused = interaction.map(|s| *s == InteractionState::Focused);
         let is_hovered = interaction.map(|s| *s == InteractionState::Hovered);
-        let is_disabled = interaction.map(|s| *s == InteractionState::Disabled);
+        // `is_disabled` derives from the arena (not from interaction).
+        let effective_enabled = ctx.effective_enabled_signal(self_id);
+        let is_disabled = effective_enabled.map(|on| !*on);
         let validation_level = validation.map(|v| match v {
             ValidationState::None => TextInputValidationLevel::None,
             ValidationState::Error(_) => TextInputValidationLevel::Error,
@@ -671,9 +681,10 @@ impl Widget for TextInput {
             ctx.attach_tooltip(root_id, tooltip_id, delay);
         }
 
-        if !self.enabled {
-            self.interaction.set(InteractionState::Disabled);
-        }
+        // The interaction signal no longer carries Disabled — the
+        // framework's arena enabled-state is the single source of
+        // truth. Style chrome that needs `is_disabled` derives it
+        // from `effective_enabled_signal(self_id)`.
 
         // Bridge `bind_validation_feedback` source → composite state.
         // No dedupe — each commit changes the feedback identity even
@@ -762,9 +773,7 @@ impl Widget for TextInput {
         if let Some(ref label) = self.label {
             builder.set_name(label);
         }
-        if !self.enabled {
-            builder.set_disabled();
-        }
+        // Framework a11y walker sets `set_disabled` from arena state.
     }
 }
 

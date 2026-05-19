@@ -106,7 +106,8 @@ const DEFAULT_TEXT_HEIGHT: f32 = 20.0;
 pub struct TextInputField {
     // ── Configuration (builder methods, consumed in build) ───────────
     text: Signal<String>,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     read_only: bool,
     max_length: Option<usize>,
     placeholder: String,
@@ -177,7 +178,7 @@ impl std::fmt::Debug for TextInputField {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TextInputField")
             .field("placeholder", &self.placeholder)
-            .field("enabled", &self.enabled)
+            .field("initial_enabled", &self.initial_enabled)
             .field("read_only", &self.read_only)
             .finish_non_exhaustive()
     }
@@ -188,7 +189,7 @@ impl TextInputField {
     pub fn new(text: Signal<String>) -> Self {
         Self {
             text,
-            enabled: true,
+            initial_enabled: true,
             read_only: false,
             max_length: None,
             placeholder: String::new(),
@@ -222,8 +223,10 @@ impl TextInputField {
     }
 
     /// Disable input and AccessKit interaction.
+    /// Set the initial enabled state. Forwarded to the arena at build
+    /// time. Use `ctx.enabled_when(field_id, signal)` for reactivity.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -537,7 +540,14 @@ impl Widget for TextInputField {
         }
 
         let initial_text = self.text.get();
-        let read_only_effective = self.read_only || !self.enabled;
+        // `read_only_effective` snapshots the build-time state so the
+        // shared TextInputState's read-only mode is set once. Disabled
+        // is now arena-driven and propagates per-paint via
+        // `effective_enabled`; the field's interaction handlers also
+        // check `ctx.is_enabled(self_id)` for keystroke gating. The
+        // shared state's read_only stays a separate, document-level
+        // concept (allows selection / no edits).
+        let read_only_effective = self.read_only || !self.initial_enabled;
 
         let initial_suffix = self.suffix.get();
         let shared_state = TextInputState::new(TextInputConfig {
@@ -839,9 +849,13 @@ impl Widget for TextInputField {
             });
         }
 
-        // Apply initial disabled state once the state is ready.
-        if !self.enabled {
-            self.interaction.set(InteractionState::Disabled);
+        // Forward initial-enabled into the arena. Disabled state no
+        // longer seeded into the interaction signal — the framework's
+        // arena enabled-state is the single source of truth (events
+        // gated, leaves resolve Disabled role).
+        let self_id = ctx.self_id();
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
         }
 
         // Attach handlers. Focus-origin inference mirrors the
@@ -851,7 +865,6 @@ impl Widget for TextInputField {
         let hovered = std::rc::Rc::new(std::cell::Cell::new(false));
         let hovered_for_focus = hovered.clone();
         let hovered_for_hover = hovered.clone();
-        let enabled = self.enabled;
 
         let state_for_focus = self.state().clone();
         let interaction_for_focus = self.interaction.clone();
@@ -863,7 +876,7 @@ impl Widget for TextInputField {
         let state_for_menu = self.state().clone();
 
         let handlers = HandlerSet::new()
-            .focusable(enabled)
+            .focusable(true)
             .cursor(CursorIcon::Text)
             .on_hover(move |entered, _ctx| {
                 hovered_for_hover.set(entered);
@@ -932,9 +945,10 @@ impl Widget for TextInputField {
             // handles overlay placement, focus restoration, and dismissal.
             .context_menu(move |position, ctx| {
                 let _ = ctx;
-                if !enabled {
-                    return None;
-                }
+                // Framework gates pointer events on `arena.is_enabled`
+                // before reaching this closure — a disabled field
+                // never receives the right-click that would open the
+                // context menu.
                 // Reposition the caret to the click position when the
                 // click lands outside the existing selection — the
                 // platform convention for "right-click then Cut /
