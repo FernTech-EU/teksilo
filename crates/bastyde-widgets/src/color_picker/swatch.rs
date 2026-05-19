@@ -39,7 +39,8 @@ pub struct ColorSwatch {
     label: Option<LocalizedString>,
     size: Option<f32>,
     corner_radius: Option<f32>,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     on_activate: Option<ActivateFn>,
     focus_origin: Rc<Cell<Option<FocusOrigin>>>,
 }
@@ -52,7 +53,7 @@ impl ColorSwatch {
             label: None,
             size: None,
             corner_radius: None,
-            enabled: true,
+            initial_enabled: true,
             on_activate: None,
             focus_origin: Rc::new(Cell::new(None)),
         }
@@ -78,8 +79,9 @@ impl ColorSwatch {
         self
     }
 
+    /// Set the initial enabled state. Forwarded to the arena at build time.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -94,32 +96,32 @@ impl std::fmt::Debug for ColorSwatch {
         f.debug_struct("ColorSwatch")
             .field("color", &self.color.get())
             .field("selected", &self.selected)
-            .field("enabled", &self.enabled)
+            .field("initial_enabled", &self.initial_enabled)
             .finish_non_exhaustive()
     }
 }
 
 impl Widget for ColorSwatch {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let enabled = self.enabled;
+        let self_id = ctx.self_id();
+        // Forward initial-enabled into the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
         let on_activate = self.on_activate.clone();
+        // Framework gates events on `arena.is_enabled` and the focus
+        // walker skips disabled subtrees.
         let mut handlers = HandlerSet::new()
-            .focusable(enabled)
+            .focusable(true)
             .cursor(CursorIcon::Pointer);
 
         if let Some(cb) = on_activate.clone() {
             handlers = handlers.on_tap(move |_pos, ctx_evt| {
-                if !enabled {
-                    return;
-                }
                 cb(ctx_evt);
             });
         }
         if let Some(cb) = on_activate.clone() {
             handlers = handlers.on_key(move |event, ctx_evt| {
-                if !enabled {
-                    return EventResponse::Ignored;
-                }
                 let WidgetEvent::KeyDown { key, .. } = event else {
                     return EventResponse::Ignored;
                 };
@@ -256,9 +258,7 @@ impl Widget for ColorSwatch {
         if self.selected {
             builder.set_selected(true);
         }
-        if !self.enabled {
-            builder.set_disabled();
-        }
+        // Framework a11y walker sets `set_disabled` from arena state.
         builder.add_action(Action::Click);
         builder.add_action(Action::Focus);
     }

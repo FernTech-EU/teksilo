@@ -40,7 +40,8 @@ pub(crate) struct AlphaStrip {
     cached_bounds: Rc<Cell<Rect>>,
     focus_origin: Rc<Cell<Option<FocusOrigin>>>,
     orientation: Orientation,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     label: String,
 }
 
@@ -59,7 +60,7 @@ impl AlphaStrip {
             cached_bounds: Rc::new(Cell::new(Rect::ZERO)),
             focus_origin: Rc::new(Cell::new(None)),
             orientation: Orientation::Vertical,
-            enabled: true,
+            initial_enabled: true,
             label: String::new(),
         }
     }
@@ -69,8 +70,9 @@ impl AlphaStrip {
         self
     }
 
+    /// Set the initial enabled state. Forwarded to the arena at build time.
     pub(crate) fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -89,6 +91,10 @@ impl std::fmt::Debug for AlphaStrip {
 impl Widget for AlphaStrip {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
+        // Forward initial-enabled into the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
         let registry = ctx.binding_registry();
         // Color drives the gradient colour; alpha drives the thumb position.
         self.current_color.bind_to(
@@ -102,7 +108,8 @@ impl Widget for AlphaStrip {
             bastyde_core::binding::BindingLevel::RepaintOnly,
         );
 
-        let enabled = self.enabled;
+        // Framework gates events on `arena.is_enabled(self_id)` — the
+        // pre-arena `enabled` snapshot is gone.
         let cached_bounds = self.cached_bounds.clone();
         let dragging = self.dragging.clone();
         let set_alpha = self.set_alpha.clone();
@@ -132,16 +139,13 @@ impl Widget for AlphaStrip {
         };
 
         let mut handlers = HandlerSet::new()
-            .focusable(enabled)
+            .focusable(true)
             .cursor(CursorIcon::Pointer);
 
         {
             let dragging = dragging.clone();
             let apply = apply.clone();
             handlers = handlers.on_drag(move |phase, _ctx| {
-                if !enabled {
-                    return;
-                }
                 match phase {
                     DragPhase::Started {
                         position,
@@ -163,9 +167,6 @@ impl Widget for AlphaStrip {
         {
             let apply = apply.clone();
             handlers = handlers.on_tap(move |event, _ctx| {
-                if !enabled {
-                    return;
-                }
                 apply(event.position.x, event.position.y);
             });
         }
@@ -175,9 +176,6 @@ impl Widget for AlphaStrip {
             let set_alpha = set_alpha.clone();
             let alpha = self.alpha.clone();
             handlers = handlers.on_key(move |event, _ctx| {
-                if !enabled {
-                    return EventResponse::Ignored;
-                }
                 let WidgetEvent::KeyDown { key, .. } = event else {
                     return EventResponse::Ignored;
                 };
@@ -353,9 +351,7 @@ impl Widget for AlphaStrip {
             Orientation::Horizontal => bastyde_core::accesskit::Orientation::Horizontal,
         };
         builder.set_orientation(orientation);
-        if !self.enabled {
-            builder.set_disabled();
-        }
+        // Framework a11y walker sets `set_disabled` from arena state.
         builder.add_action(Action::Increment);
         builder.add_action(Action::Decrement);
         builder.add_action(Action::Focus);

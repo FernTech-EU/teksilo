@@ -34,7 +34,8 @@ pub(crate) struct SwatchGrid {
     /// roving-focus pattern (only one cell takes focus; arrow keys
     /// move between cells).
     focused_index: Signal<usize>,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     root_child_id: Option<WidgetId>,
 }
 
@@ -51,13 +52,14 @@ impl SwatchGrid {
             columns: columns.max(1),
             on_select,
             focused_index: Signal::new(0),
-            enabled: true,
+            initial_enabled: true,
             root_child_id: None,
         }
     }
 
+    /// Set the initial enabled state. Forwarded to the arena at build time.
     pub(crate) fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 }
@@ -73,6 +75,10 @@ impl std::fmt::Debug for SwatchGrid {
 impl Widget for SwatchGrid {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
+        // Forward initial-enabled into the arena; see IconButton.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
         let registry = ctx.binding_registry();
         // Re-layout when the swatches list changes; repaint when
         // selection moves (children re-render with the new ring).
@@ -104,7 +110,7 @@ impl Widget for SwatchGrid {
             let is_selected = selected.get() == color;
             let cell = ColorSwatch::new(color)
                 .selected(is_selected)
-                .enabled(self.enabled)
+                .enabled(self.initial_enabled)
                 .on_activate_fn(move |ctx_evt| {
                     (on_select)(color, ctx_evt);
                 });
@@ -118,14 +124,17 @@ impl Widget for SwatchGrid {
         let count = swatches.len();
         let columns_for_keys = self.columns;
         let focused_index = self.focused_index.clone();
-        let enabled = self.enabled;
+        let enabled = self.initial_enabled;
         let on_select_keys = self.on_select.clone();
         let swatches_for_keys = self.swatches.clone();
         let handlers =
             HandlerSet::new()
-                .focusable(enabled && count > 0)
+                // Framework gates events on `arena.is_enabled` and
+                // the focus walker skips disabled subtrees; we still
+                // refuse to focus an empty grid.
+                .focusable(count > 0)
                 .on_key(move |event, ctx_evt| {
-                    if !enabled || count == 0 {
+                    if count == 0 {
                         return EventResponse::Ignored;
                     }
                     let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
@@ -209,8 +218,6 @@ impl Widget for SwatchGrid {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(Role::Grid);
         builder.set_name(resolve_message_widget("color-picker-swatches-name", &[]));
-        if !self.enabled {
-            builder.set_disabled();
-        }
+        // Framework a11y walker sets `set_disabled` from arena state.
     }
 }

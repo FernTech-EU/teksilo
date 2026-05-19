@@ -125,7 +125,8 @@ pub struct ColorPicker {
     swatch_columns: usize,
     layout: ColorPickerLayout,
     label: Option<LocalizedString>,
-    enabled: bool,
+    /// Initial enabled-state; forwarded to the arena at build time.
+    initial_enabled: bool,
     /// Cache of the most recent color formatted as a hex string. The
     /// live-region effect updates this whenever the bound color changes;
     /// `accessibility()` reads it (via `binding.value().get()` then
@@ -179,7 +180,7 @@ impl ColorPicker {
             swatch_columns: 6,
             layout: ColorPickerLayout::Standard,
             label: None,
-            enabled: true,
+            initial_enabled: true,
             last_announced_hex: Rc::new(RefCell::new(None)),
             style_override: None,
             root_child_id: None,
@@ -297,8 +298,9 @@ impl ColorPicker {
         self
     }
 
+    /// Set the initial enabled state. Forwarded to the arena at build time.
     pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+        self.initial_enabled = enabled;
         self
     }
 
@@ -315,7 +317,7 @@ impl std::fmt::Debug for ColorPicker {
         f.debug_struct("ColorPicker")
             .field("alpha_enabled", &self.alpha_enabled)
             .field("layout", &self.layout)
-            .field("enabled", &self.enabled)
+            .field("initial_enabled", &self.initial_enabled)
             .finish_non_exhaustive()
     }
 }
@@ -371,11 +373,22 @@ impl Widget for ColorPicker {
             });
         }
 
+        let self_id = ctx.self_id();
+        // Forward initial-enabled into the arena; see IconButton. Inner
+        // sub-widgets (HsvCanvas, HueStrip, AlphaStrip, SwatchGrid)
+        // inherit disabled via the ancestor walk — their per-widget
+        // `initial_enabled` is only consulted at build time and then
+        // they too forward into the arena, so the AND semantics fall
+        // out for free.
+        if !self.initial_enabled {
+            ctx.enabled_when(self_id, false);
+        }
+
         // ── Resolve flags ──
         let alpha_enabled = self.alpha_enabled;
         let show_alpha_strip = self.show_alpha_strip.unwrap_or(alpha_enabled);
         let layout = self.layout;
-        let enabled = self.enabled;
+        let enabled = self.initial_enabled;
         use crate::styles::recipe_color_picker_style as cp;
 
         // ── Build subcomponents ──
@@ -681,9 +694,7 @@ impl Widget for ColorPicker {
             "color-picker-changed-announcement",
             &[("hex", hex.into())],
         ));
-        if !self.enabled {
-            builder.set_disabled();
-        }
+        // Framework a11y walker sets `set_disabled` from arena state.
         builder.add_action(Action::Focus);
     }
 }
