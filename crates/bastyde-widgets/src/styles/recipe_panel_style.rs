@@ -152,7 +152,7 @@ impl Widget for PanelFrame {
         let colors = &ctx.theme.colors;
 
         let bg = if let Some(p) = &self.background {
-            p.resolve(ctx.theme)
+            p.resolve(ctx.theme, ctx.effective_enabled)
         } else {
             match self.variant {
                 PanelVariant::Plain => colors.surface_main,
@@ -168,7 +168,7 @@ impl Widget for PanelFrame {
 
         if border_w > 0.0 {
             let border = if let Some(p) = &self.border_color {
-                p.resolve(ctx.theme)
+                p.resolve(ctx.theme, ctx.effective_enabled)
             } else {
                 match self.variant {
                     PanelVariant::Plain => colors.border,

@@ -455,7 +455,7 @@ impl Widget for TextWidget {
         self.last_bounds.set(bounds);
 
         let text = self.text.get();
-        let color = self.color.resolve(ctx.theme);
+        let color = self.color.resolve(ctx.theme, ctx.effective_enabled);
         let style = self.style.resolve(&ctx.theme.typography);
 
         // Markup path: re-measure through the markup pipeline (the

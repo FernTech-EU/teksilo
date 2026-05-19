@@ -66,7 +66,12 @@ impl AvatarPresence {
             AvatarPresence::Offline => theme.colors.text_disabled,
             AvatarPresence::Away => theme.colors.status_warning_fg,
             AvatarPresence::Busy => theme.colors.status_error_fg,
-            AvatarPresence::Custom { color, .. } => color.resolve(theme),
+            // The Avatar widget calls this helper from its paint() but
+            // doesn't currently thread `effective_enabled` here. When
+            // the Avatar composite migrates (commit 4 of the
+            // enabled-state refactor) this signature widens to take
+            // `enabled: bool` and the Custom presence respects it.
+            AvatarPresence::Custom { color, .. } => color.resolve(theme, true),
         }
     }
 

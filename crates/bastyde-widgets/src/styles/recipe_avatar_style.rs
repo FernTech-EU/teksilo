@@ -291,7 +291,7 @@ impl Widget for AvatarChromeFrame {
         // Background fill — shape-aware. Default is hash-picked from
         // the chart palette using `seed`.
         let bg = match &self.background {
-            Some(prop) => prop.resolve(theme),
+            Some(prop) => prop.resolve(theme, ctx.effective_enabled),
             None => hash_pick_palette_color(&self.seed, theme),
         };
         match self.shape {
@@ -318,7 +318,7 @@ impl Widget for AvatarChromeFrame {
             && width > 0.0
         {
             let color = match &self.border_color {
-                Some(prop) => prop.resolve(theme),
+                Some(prop) => prop.resolve(theme, ctx.effective_enabled),
                 None => theme.colors.surface_main,
             };
             paint_border(

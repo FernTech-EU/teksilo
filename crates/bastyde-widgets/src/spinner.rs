@@ -168,7 +168,7 @@ impl Widget for Spinner {
             // Reduced-motion fallback: draw a static three-quarter
             // arc, leading edge at the top. Communicates "busy"
             // without rotating.
-            let color = self.color.resolve(ctx.theme);
+            let color = self.color.resolve(ctx.theme, ctx.effective_enabled);
             let extent = bounds.width.min(bounds.height);
             let stroke_w = extent * self.stroke_fraction;
             // Inscribe inside the bounds, leaving room for the stroke

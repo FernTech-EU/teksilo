@@ -93,7 +93,7 @@ impl Widget for Divider {
         let color = self
             .color
             .as_ref()
-            .map(|c| c.resolve(ctx.theme))
+            .map(|c| c.resolve(ctx.theme, ctx.effective_enabled))
             .unwrap_or(ctx.theme.colors.divider);
         let thickness = self.resolved_thickness(ctx.theme);
         let (from, to) = match self.orientation {

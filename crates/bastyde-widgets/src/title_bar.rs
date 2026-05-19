@@ -340,12 +340,12 @@ impl Widget for TitleBar {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let bg = self.background.resolve(ctx.theme);
+        let bg = self.background.resolve(ctx.theme, ctx.effective_enabled);
         if bg.a() > 0.0 {
             canvas.fill_rounded_rect(bounds, CornerRadius::ZERO, bg);
         }
         if self.border_width > 0.0 {
-            let border = self.border_color.resolve(ctx.theme);
+            let border = self.border_color.resolve(ctx.theme, ctx.effective_enabled);
             if border.a() > 0.0 {
                 canvas.draw_border_bottom(bounds, border, self.border_width);
             }

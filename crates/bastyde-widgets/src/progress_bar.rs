@@ -359,7 +359,7 @@ impl Widget for IndeterminateSweepLeaf {
             } => {
                 let radius = CornerRadius::uniform(PROGRESS_BAR_CORNER_RADIUS);
                 let value = pos.get().clamp(0.0, 1.0);
-                let fill_color = fill.resolve(ctx.theme);
+                let fill_color = fill.resolve(ctx.theme, ctx.effective_enabled);
                 let fill_rect = match orientation {
                     Orientation::Horizontal => {
                         let sweep_w = bounds.width * INDETERMINATE_SWEEP_RATIO;

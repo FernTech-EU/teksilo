@@ -468,8 +468,18 @@ fn compute_params(entry: &AnimatedQuadEntry, now: Instant, theme: &Theme) -> Ani
                 kind: 0,
                 phase,
                 sweep_ratio: *sweep_ratio,
-                color0: color_to_rgba(&track_color.resolve(theme)),
-                color1: color_to_rgba(&fill_color.resolve(theme)),
+                // Animated quads are driven by the global animation
+                // scheduler, not per-widget paint — they don't know
+                // their owning widget's `effective_enabled`. Pass
+                // `true` so role-derived tints render at the normal
+                // theme color regardless of whether the owning widget
+                // is in a disabled subtree. Animated icons inside a
+                // disabled subtree therefore won't auto-dim — flagged
+                // as a follow-up gap; the workaround is to provide an
+                // explicit muted color when constructing the animated
+                // quad in a disabled context.
+                color0: color_to_rgba(&track_color.resolve(theme, true)),
+                color1: color_to_rgba(&fill_color.resolve(theme, true)),
                 ..AnimParams::default()
             }
         }
@@ -485,9 +495,11 @@ fn compute_params(entry: &AnimatedQuadEntry, now: Instant, theme: &Theme) -> Ani
             let frame_index = (t * *frame_count as f32)
                 .floor()
                 .min((*frame_count - 1) as f32);
+            // See note above on the IndeterminateSweep arm: animated
+            // quads have no per-widget `effective_enabled` available.
             let tint_rgba = tint
                 .as_ref()
-                .map(|c| color_to_rgba(&c.resolve(theme)))
+                .map(|c| color_to_rgba(&c.resolve(theme, true)))
                 .unwrap_or([0.0; 4]);
             AnimParams {
                 kind: 1,
@@ -516,7 +528,8 @@ fn compute_params(entry: &AnimatedQuadEntry, now: Instant, theme: &Theme) -> Ani
                 // Reuse `_pad0` as a generic per-kind parameter slot
                 // for stroke thickness (0..0.5 of the smaller extent).
                 _pad0: stroke_fraction.clamp(0.0, 0.5),
-                color1: color_to_rgba(&color.resolve(theme)),
+                // See note above on the IndeterminateSweep arm.
+                color1: color_to_rgba(&color.resolve(theme, true)),
                 ..AnimParams::default()
             }
         }

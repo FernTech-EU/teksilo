@@ -20,6 +20,15 @@ pub enum BindingLevel {
     /// Visual-only change (color, opacity). Marks the widget for repaint;
     /// layout is skipped.
     RepaintOnly,
+    /// Visual-only change that propagates through the entire subtree.
+    /// Used by `enabled_when` so that flipping a single node's
+    /// `enabled_state` marks the whole disabled subtree for repaint —
+    /// leaves like `IconWidget` resolve their role color from
+    /// [`crate::widget::PaintContext::effective_enabled`], which the
+    /// paint walker computes by AND-ing ancestor enabled-states.
+    /// Without this propagation, only the bound node would repaint and
+    /// descendants would keep their stale enabled colors.
+    SubtreeRepaint,
     /// Size-affecting change (text content, constraint value). Marks the widget
     /// for relayout and propagates upward through ancestors.
     Relayout,
@@ -187,7 +196,10 @@ impl BindingRegistry {
                     BindingLevel::AccessibilityOnly => {
                         a11y_dirty = true;
                     }
-                    BindingLevel::RepaintOnly | BindingLevel::Relayout | BindingLevel::Rebuild => {
+                    BindingLevel::RepaintOnly
+                    | BindingLevel::SubtreeRepaint
+                    | BindingLevel::Relayout
+                    | BindingLevel::Rebuild => {
                         let entry = dirty_map.entry(wid).or_insert(level);
                         *entry = promote_level(*entry, level);
                     }
@@ -222,13 +234,19 @@ impl BindingRegistry {
 }
 
 /// Priority order for visual binding levels — `Rebuild` dominates
-/// `Relayout` dominates `RepaintOnly`. `AccessibilityOnly` lives in
-/// its own bucket and is never compared against visual levels.
+/// `Relayout` dominates `SubtreeRepaint` dominates `RepaintOnly`.
+/// `AccessibilityOnly` lives in its own bucket and is never compared
+/// against visual levels.
+///
+/// `SubtreeRepaint` is treated as strictly more work than
+/// `RepaintOnly` because it covers a wider area (one node vs. a whole
+/// subtree); when both happen on the same node `SubtreeRepaint` wins.
 fn promote_level(existing: BindingLevel, incoming: BindingLevel) -> BindingLevel {
     use BindingLevel::*;
     match (existing, incoming) {
         (Rebuild, _) | (_, Rebuild) => Rebuild,
         (Relayout, _) | (_, Relayout) => Relayout,
+        (SubtreeRepaint, _) | (_, SubtreeRepaint) => SubtreeRepaint,
         (RepaintOnly, _) | (_, RepaintOnly) => RepaintOnly,
         (AccessibilityOnly, AccessibilityOnly) => AccessibilityOnly,
     }

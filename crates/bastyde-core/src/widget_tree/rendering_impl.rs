@@ -119,6 +119,9 @@ impl WidgetTree {
                 paint_epoch,
                 &overlay_skip,
                 self.layout_direction,
+                // Root starts enabled; the walker ANDs in each node's
+                // own `enabled_state` as it descends.
+                true,
             );
         }
 
@@ -134,6 +137,11 @@ impl WidgetTree {
                 paint_epoch,
                 &overlay_skip,
                 self.layout_direction,
+                // Overlays detach from their anchor's enabled-state.
+                // A tooltip / popover stays enabled even if its
+                // anchor was disabled — overlays receive their own
+                // explicit enabled-state if they need one.
+                true,
             );
         }
 
@@ -183,6 +191,14 @@ impl WidgetTree {
 /// Only re-runs `paint()` for widgets with `needs_paint` set; clean widgets
 /// reuse their `cached_paint` output. The tree walk still runs for clip/child
 /// ordering, but skips the expensive `paint()` call for clean widgets.
+///
+/// `parent_effective_enabled` is the AND of every ancestor's `enabled_state`
+/// resolved value (start `true` at root). The walker ANDs this with the
+/// current node's `enabled_state` to produce `this_effective_enabled`, which
+/// it both injects into the node's `PaintContext` and forwards as the parent
+/// value to children. This is the single mechanism by which leaf widgets see
+/// the arena's enabled-state at paint time without needing to walk ancestors
+/// themselves (`PaintContext` carries no `WidgetId` or arena reference).
 #[allow(clippy::too_many_arguments)]
 fn paint_widget_cached(
     arena: &mut WidgetArena,
@@ -195,10 +211,21 @@ fn paint_widget_cached(
     paint_epoch: u64,
     overlay_skip: &std::collections::HashSet<WidgetId>,
     layout_direction: crate::environment::LayoutDirection,
+    parent_effective_enabled: bool,
 ) {
     if !arena.is_active(id) {
         return;
     }
+
+    // Compute this node's effective enabled-state once: AND the
+    // ancestor-derived value with our own `enabled_state` if set.
+    // Used both for our own paint context and for the recursion into
+    // children below.
+    let this_effective_enabled = parent_effective_enabled
+        && arena
+            .get(id)
+            .and_then(|n| n.enabled_state.as_ref())
+            .is_none_or(|p| p.get());
 
     let node = arena.get(id).expect("node id is active (guarded above)");
     let bounds = node.bounds;
@@ -295,6 +322,7 @@ fn paint_widget_cached(
             theme: &resolved_theme,
             scale_factor: 1.0,
             layout_direction,
+            effective_enabled: this_effective_enabled,
             prefers_high_contrast: a11y_prefs.high_contrast,
             prefers_reduced_motion: a11y_prefs.reduced_motion,
             prefers_large_text: a11y_prefs.large_text,
@@ -381,6 +409,7 @@ fn paint_widget_cached(
             paint_epoch,
             overlay_skip,
             layout_direction,
+            this_effective_enabled,
         );
     }
 
@@ -402,6 +431,7 @@ fn paint_widget_cached(
                 theme: &resolved_theme,
                 scale_factor: 1.0,
                 layout_direction,
+                effective_enabled: this_effective_enabled,
                 prefers_high_contrast: a11y_prefs.high_contrast,
                 prefers_reduced_motion: a11y_prefs.reduced_motion,
                 prefers_large_text: a11y_prefs.large_text,

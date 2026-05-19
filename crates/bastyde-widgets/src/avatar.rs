@@ -876,9 +876,9 @@ struct InitialsLeaf {
 impl InitialsLeaf {
     /// Recompute the bg colour the parent Avatar will paint. Must
     /// stay in lock-step with `Avatar::paint`'s bg branch.
-    fn resolve_bg(&self, theme: &bastyde_core::Theme) -> Color {
+    fn resolve_bg(&self, theme: &bastyde_core::Theme, enabled: bool) -> Color {
         match &self.background {
-            Some(prop) => prop.resolve(theme),
+            Some(prop) => prop.resolve(theme, enabled),
             None => hash_pick_palette_color(&self.seed, theme),
         }
     }
@@ -915,8 +915,8 @@ impl Widget for InitialsLeaf {
         // Foreground: explicit override wins. Otherwise auto-contrast
         // against the same bg the parent painted.
         let fg = match &self.foreground {
-            Some(prop) => prop.resolve(theme),
-            None => auto_contrast_text(self.resolve_bg(theme)),
+            Some(prop) => prop.resolve(theme, ctx.effective_enabled),
+            None => auto_contrast_text(self.resolve_bg(theme, ctx.effective_enabled)),
         };
 
         // Measure the text to centre it. Without a backend, we can't

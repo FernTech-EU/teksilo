@@ -55,16 +55,33 @@ pub enum ColorProp {
 
 impl ColorProp {
     /// Produce the color value for the supplied theme. Callers invoke this in
-    /// paint (where `ctx.theme` is in scope). Static and Bound variants
-    /// ignore the theme; role variants resolve against it.
-    pub fn resolve(&self, theme: &Theme) -> Color {
+    /// paint (where `ctx.theme` and `ctx.effective_enabled` are in scope).
+    /// Static and Bound variants ignore both the theme and `enabled`; role
+    /// variants resolve against the theme.
+    ///
+    /// When `enabled == false`, `TextRole` variants substitute
+    /// [`TextRole::Disabled`] before resolving. This is the single hook
+    /// that makes every role-derived text/icon color in a disabled subtree
+    /// dim automatically — leaves like `IconWidget` and `TextWidget` pass
+    /// `ctx.effective_enabled` through verbatim, and the substitution
+    /// happens here. `SurfaceRole` / `BorderRole` are NOT substituted today
+    /// (the bastyde-tokens preset has no generic `Disabled` surface/border
+    /// token, only `AccentDisabled`); when those tokens land, add two more
+    /// substitution arms here and every consumer auto-dims.
+    pub fn resolve(&self, theme: &Theme, enabled: bool) -> Color {
         match self {
             ColorProp::Static(c) => *c,
             ColorProp::Bound(s) => s.get(),
-            ColorProp::TextRole(role) => role.resolve(&theme.colors),
+            ColorProp::TextRole(role) => {
+                let role = if enabled { *role } else { TextRole::Disabled };
+                role.resolve(&theme.colors)
+            }
             ColorProp::SurfaceRole(role) => role.resolve(&theme.colors),
             ColorProp::BorderRole(role) => role.resolve(&theme.colors),
-            ColorProp::DynamicTextRole(s) => s.get().resolve(&theme.colors),
+            ColorProp::DynamicTextRole(s) => {
+                let role = if enabled { s.get() } else { TextRole::Disabled };
+                role.resolve(&theme.colors)
+            }
             ColorProp::DynamicSurfaceRole(s) => s.get().resolve(&theme.colors),
             ColorProp::DynamicBorderRole(s) => s.get().resolve(&theme.colors),
         }

@@ -2071,16 +2071,97 @@ impl WidgetTree {
     /// visible. Focus traversal skips disabled subtrees and AccessKit marks their
     /// nodes as disabled. Accepts `Signal<bool>`, `Prop<bool>`, compatibility state
     /// bindings, or plain `bool`.
+    ///
+    /// The bound signal registers at `BindingLevel::SubtreeRepaint`: when
+    /// it flips, the entire subtree rooted at `id` is marked for repaint
+    /// (not relayout — geometry doesn't change). Leaves like
+    /// [`crate::primitives::IconWidget`] then re-resolve their role color
+    /// using the new `PaintContext::effective_enabled` value, so a
+    /// disabled subtree's icons and text dim automatically.
     pub fn enabled_when(&mut self, id: WidgetId, state: impl Into<crate::signal::Prop<bool>>) {
         let prop = state.into();
+        // SubtreeRepaint propagates the visual dirty mark through the
+        // disabled subtree so leaves re-resolve their role colors.
         prop.register_if_bound(
             id,
             &self.binding_registry,
-            crate::binding::BindingLevel::Relayout,
+            crate::binding::BindingLevel::SubtreeRepaint,
+        );
+        // AccessibilityOnly is orthogonal — it flips `a11y_dirty` so
+        // AccessKit's `disabled` flag refreshes on the next a11y sync
+        // (the accessibility walker reads `arena.is_enabled(id)`,
+        // which is already correct via the prop, but the tree needs
+        // to be told to rebuild).
+        prop.register_if_bound(
+            id,
+            &self.binding_registry,
+            crate::binding::BindingLevel::AccessibilityOnly,
         );
         if let Some(node) = self.arena.get_mut(id) {
             node.enabled_state = Some(prop);
         }
+    }
+
+    /// Reactive view of "is this widget effectively enabled?" — the AND
+    /// of the widget's own `enabled_state` and every ancestor's.
+    /// [`Self::is_enabled`] is the non-reactive equivalent; this method
+    /// gives composite widgets a `Signal<bool>` for derived state.
+    ///
+    /// Leaves (`IconWidget`, `TextWidget`, `RectWidget`) do NOT need this
+    /// — they receive the resolved bool via
+    /// [`crate::widget::PaintContext::effective_enabled`] at paint time.
+    /// This method is for composites that want to derive cursor / custom
+    /// paint roles / etc. reactively.
+    ///
+    /// Returns `Signal::new(true)` for any node whose entire ancestor
+    /// chain (including itself) has no `enabled_state` bound. Captures
+    /// the ancestor chain at call time; re-parenting a widget afterwards
+    /// will not retroactively update the derived signal.
+    pub fn effective_enabled_signal(
+        &self,
+        id: WidgetId,
+    ) -> crate::signal::Signal<bool> {
+        use crate::signal::{Prop, Signal};
+        // Walk this node's ancestor chain, collecting every bound
+        // `enabled_state` signal. Static `Prop::Static(b)` and unbound
+        // nodes contribute `b` (or `true`) into `static_acc` so we
+        // don't allocate one `Signal::new(true)` per ancestor.
+        let mut signals: Vec<Signal<bool>> = Vec::new();
+        let mut static_acc: bool = true;
+        let mut current = Some(id);
+        while let Some(node_id) = current {
+            let Some(node) = self.arena.get(node_id) else {
+                break;
+            };
+            if let Some(prop) = node.enabled_state.as_ref() {
+                match prop {
+                    Prop::Static(b) => {
+                        static_acc &= *b;
+                    }
+                    Prop::Bound(s) => signals.push(s.clone()),
+                }
+            }
+            current = node.parent;
+        }
+        if signals.is_empty() {
+            // No bound signals; the result is a constant carrying the
+            // AND of all static contributors (or `true` if none).
+            return Signal::new(static_acc);
+        }
+        if !static_acc {
+            // A static `false` anywhere in the chain pins the result
+            // to `false` regardless of any bound signals — short-
+            // circuit without building the derived chain.
+            return Signal::new(false);
+        }
+        // One or more bound signals, all static contributors `true`:
+        // AND every bound signal together.
+        let mut iter = signals.into_iter();
+        let mut acc = iter.next().expect("non-empty (length-checked above)");
+        for sig in iter {
+            acc = acc.and(&sig);
+        }
+        acc
     }
 
     /// Whether a widget is effectively enabled. Returns `false` if the widget

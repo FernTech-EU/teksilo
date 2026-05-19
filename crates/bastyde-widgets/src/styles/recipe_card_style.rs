@@ -157,7 +157,7 @@ impl Widget for CardFrame {
 
         // Background — variant default with optional caller override.
         let bg = if let Some(p) = &self.background {
-            p.resolve(ctx.theme)
+            p.resolve(ctx.theme, ctx.effective_enabled)
         } else {
             match self.variant {
                 CardVariant::Plain | CardVariant::Outlined | CardVariant::Elevated => {

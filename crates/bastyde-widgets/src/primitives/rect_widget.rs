@@ -127,13 +127,13 @@ impl Widget for RectWidget {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let bg = self.background.resolve(ctx.theme);
+        let bg = self.background.resolve(ctx.theme, ctx.effective_enabled);
         let radius = self.corner_radius.get();
         if bg.a() > 0.0 {
             canvas.fill_rounded_rect(bounds, radius, bg);
         }
         let bw = self.border_width.get();
-        let bc = self.border_color.resolve(ctx.theme);
+        let bc = self.border_color.resolve(ctx.theme, ctx.effective_enabled);
         if bw > 0.0 && bc.a() > 0.0 {
             canvas.stroke_rounded_rect(bounds, radius, bc, bw);
         }

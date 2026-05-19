@@ -300,6 +300,31 @@ impl<'a> BuildContext<'a> {
         self.tree.enabled_when(id, state);
     }
 
+    /// Reactive view of "is this widget effectively enabled?" — the AND
+    /// of the widget's own `enabled_state` and every ancestor's. The
+    /// arena's [`crate::arena::WidgetArena::is_enabled`] is the
+    /// non-reactive equivalent; this method gives composite widgets a
+    /// `Signal<bool>` they can `.map(...)` / `.zip(...)` against to
+    /// derive other reactive UI state (cursor, custom paint, helper
+    /// signals).
+    ///
+    /// Leaves like `IconWidget` / `TextWidget` / `RectWidget` do NOT
+    /// need this — they get the bool directly via
+    /// [`crate::widget::PaintContext::effective_enabled`] at paint time.
+    /// This method is for composites that need the value at build time
+    /// or want to chain signals.
+    ///
+    /// Returns `Signal::new(true)` for any node whose entire ancestor
+    /// chain (including itself) has no `enabled_state` bound. Captures
+    /// the ancestor chain at call time — re-parenting a widget after
+    /// this returns will not retroactively update the derived signal.
+    /// In Bastyde's rebuild-on-change tree this is the expected
+    /// semantics; widgets that re-anchor across builds should call
+    /// `effective_enabled_signal` from inside their `build()`.
+    pub fn effective_enabled_signal(&self, id: WidgetId) -> Signal<bool> {
+        self.tree.effective_enabled_signal(id)
+    }
+
     /// Bind a widget's Tab-key participation to a boolean prop or
     /// compatibility state binding. When false, the widget is removed
     /// from Tab / Shift+Tab traversal but remains reachable via

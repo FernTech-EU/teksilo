@@ -106,13 +106,13 @@ impl Widget for ProgressBarFrame {
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let radius = CornerRadius::uniform(PROGRESS_BAR_CORNER_RADIUS);
-        let track_color = self.track.resolve(ctx.theme);
+        let track_color = self.track.resolve(ctx.theme, ctx.effective_enabled);
         canvas.fill_rounded_rect(bounds, radius, track_color);
 
         if let Some(value_prop) = &self.determinate_value {
             let value = value_prop.get().clamp(0.0, 1.0);
             if value > 0.0 {
-                let fill_color = self.fill.resolve(ctx.theme);
+                let fill_color = self.fill.resolve(ctx.theme, ctx.effective_enabled);
                 let fill_rect = match self.orientation {
                     Orientation::Horizontal => {
                         Rect::new(bounds.x, bounds.y, bounds.width * value, bounds.height)

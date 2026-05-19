@@ -17,6 +17,13 @@ impl WidgetTree {
                 crate::binding::BindingLevel::RepaintOnly => {
                     self.arena.mark_needs_paint(*id);
                 }
+                crate::binding::BindingLevel::SubtreeRepaint => {
+                    // Used by `enabled_when` so the leaves in the
+                    // disabled subtree re-resolve their role colors
+                    // via the paint walker's `effective_enabled`.
+                    // No layout work — geometry is unchanged.
+                    self.arena.mark_subtree_needs_paint(*id);
+                }
                 crate::binding::BindingLevel::Relayout => {
                     self.arena.mark_needs_layout(*id);
                     self.arena.mark_ancestors_need_layout(*id);

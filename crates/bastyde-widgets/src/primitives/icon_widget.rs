@@ -621,7 +621,7 @@ impl Widget for IconWidget {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let color = self.color.resolve(ctx.theme);
+        let color = self.color.resolve(ctx.theme, ctx.effective_enabled);
 
         match &self.source {
             IconSource::Path(_) | IconSource::Svg(_) => {
@@ -888,6 +888,125 @@ mod tests {
         assert!(
             frame.images[0].tint.is_none(),
             "full-color icon should not have tint"
+        );
+    }
+
+    // ── Enabled-state-aware role substitution ─────────────────────
+    //
+    // When the leaf paints with a role-based ColorProp and any
+    // ancestor's arena `enabled_state` resolves to false, the leaf
+    // must substitute `TextRole::Disabled` automatically — this is
+    // the lynchpin of the "composites stop owning enabled state"
+    // architecture and the fix for the format-toolbar bug where
+    // table-op IconButtons stayed full-color when `is_in_table` was
+    // false.
+
+    /// Color of the single rendered `path` for an `IconWidget` from
+    /// `from_path`. The path-icon code puts the resolved fill on
+    /// `PathEntry.color`, distinct from raster's `image.tint`.
+    fn path_icon_color(frame: &bastyde_canvas::RenderFrame) -> [f32; 4] {
+        frame
+            .paths
+            .first()
+            .map(|p| p.color)
+            .expect("path icon should render at least one path")
+    }
+
+    #[test]
+    fn role_based_icon_uses_text_disabled_when_self_disabled() {
+        // Direct case: bind `enabled_when` on the IconWidget itself.
+        // Default role is `TextRole::Primary`; when disabled the leaf
+        // must resolve to `theme.colors.text_disabled`.
+        let mut tree = WidgetTree::new();
+        let theme = bastyde_core::presets::intui::light();
+        tree.set_theme(theme.clone());
+
+        let icon = tree.add(IconWidget::checkmark(24.0));
+        tree.enabled_when(icon, false);
+        tree.layout(SizeProposal::exact(24.0, 24.0));
+        let frame = tree.render();
+        let color = path_icon_color(&frame);
+
+        let expected = theme.colors.text_disabled.to_array();
+        assert_eq!(
+            color, expected,
+            "default-role IconWidget under enabled_when(false) must paint at text_disabled, got {color:?}"
+        );
+    }
+
+    #[test]
+    fn role_based_icon_uses_text_primary_when_self_enabled() {
+        let mut tree = WidgetTree::new();
+        let theme = bastyde_core::presets::intui::light();
+        tree.set_theme(theme.clone());
+
+        tree.add(IconWidget::checkmark(24.0));
+        tree.layout(SizeProposal::exact(24.0, 24.0));
+        let frame = tree.render();
+        let color = path_icon_color(&frame);
+
+        let expected = theme.colors.text_primary.to_array();
+        assert_eq!(
+            color, expected,
+            "default-role IconWidget without enabled_state must paint at text_primary, got {color:?}"
+        );
+    }
+
+    #[test]
+    fn role_based_icon_flips_when_bound_signal_flips_without_rebuild() {
+        // The FormatToolbar bug as a unit test. Bind a Signal<bool>
+        // via `enabled_when`; flip it after layout+render; re-render;
+        // verify the leaf's color flipped from primary to disabled
+        // and back to primary, without any rebuild.
+        use bastyde_core::signal::Signal;
+
+        let mut tree = WidgetTree::new();
+        let theme = bastyde_core::presets::intui::light();
+        tree.set_theme(theme.clone());
+
+        let is_enabled = Signal::new(true);
+        let icon = tree.add(IconWidget::checkmark(24.0));
+        tree.enabled_when(icon, is_enabled.clone());
+
+        tree.layout(SizeProposal::exact(24.0, 24.0));
+        let primary = theme.colors.text_primary.to_array();
+        let disabled = theme.colors.text_disabled.to_array();
+        assert_eq!(path_icon_color(&tree.render()), primary, "starts primary");
+
+        is_enabled.set(false);
+        tree.layout(SizeProposal::exact(24.0, 24.0));
+        assert_eq!(
+            path_icon_color(&tree.render()),
+            disabled,
+            "after flipping signal to false the leaf must repaint at the disabled color"
+        );
+
+        is_enabled.set(true);
+        tree.layout(SizeProposal::exact(24.0, 24.0));
+        assert_eq!(
+            path_icon_color(&tree.render()),
+            primary,
+            "flipping back to true must re-resolve to primary"
+        );
+    }
+
+    #[test]
+    fn explicit_color_does_not_dim_when_disabled() {
+        // The static-opt-out contract: when the caller passed a
+        // literal `Color`, role substitution is bypassed entirely.
+        // A disabled subtree with an explicit-color icon keeps the
+        // caller's literal — same model as Static() everywhere else.
+        let mut tree = WidgetTree::new();
+        let red = Color::from_hex("#FF0000");
+        let icon = tree.add(IconWidget::checkmark(24.0).color(red));
+        tree.enabled_when(icon, false);
+        tree.layout(SizeProposal::exact(24.0, 24.0));
+        let frame = tree.render();
+        let color = path_icon_color(&frame);
+        assert_eq!(
+            color,
+            red.to_array(),
+            "explicit-color icons must NOT auto-dim when disabled — caller picked the literal, framework respects it"
         );
     }
 }

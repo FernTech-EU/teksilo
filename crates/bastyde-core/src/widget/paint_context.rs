@@ -12,6 +12,20 @@ pub struct PaintContext<'a> {
     /// time (e.g. attached-side shadow suppression on a popover that
     /// opened off the trailing edge of its anchor).
     pub layout_direction: crate::environment::LayoutDirection,
+    /// Whether the widget being painted is effectively enabled —
+    /// `false` iff this node or any ancestor has its arena-level
+    /// `enabled_state` resolved to `false`. Computed once per node by
+    /// the paint walker (start `true` at root, AND with each node's
+    /// `enabled_state` value as the walker descends).
+    ///
+    /// Leaf widgets that paint role-derived colors
+    /// ([`crate::color_prop::ColorProp::TextRole`] and the dynamic
+    /// variants) consult this to substitute `TextRole::Disabled`
+    /// automatically — the single hook that makes any descendant of a
+    /// disabled subtree dim without the composite parent doing
+    /// per-color bookkeeping. Static and bound color props are not
+    /// substituted (caller's literal wins).
+    pub effective_enabled: bool,
     // TODO: Wire from platform accessibility settings (winit doesn't expose these yet)
     pub prefers_high_contrast: bool,
     pub prefers_reduced_motion: bool,
