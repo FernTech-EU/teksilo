@@ -50,6 +50,9 @@ use bastyde_core::ExternalDropData;
 use bastyde_core::raw_handle::ParentHandle;
 use bastyde_core::window::BastydeWindowId;
 
+#[cfg(target_os = "macos")]
+mod macos;
+
 // ============================================================
 // ExternalDragEvent
 // ============================================================
@@ -332,9 +335,16 @@ impl ExternalDndBackend for MemoryExternalDndBackend {
 /// other target get [`NoopExternalDndBackend`]. `BastydeAppBuilder::install_external_dnd`
 /// uses this.
 pub fn default_backend() -> Box<dyn ExternalDndBackend> {
-    // Phase 3 swaps in the per-platform raw backends behind cfg gates. Until
-    // then (and always on X11 / unsupported targets) this is the no-op.
-    Box::new(NoopExternalDndBackend::new())
+    #[cfg(target_os = "macos")]
+    {
+        Box::new(macos::MacOsExternalDndBackend::new())
+    }
+    // Windows and Wayland raw backends plug in here behind their cfg gates;
+    // X11 and every other target fall through to the no-op.
+    #[cfg(not(target_os = "macos"))]
+    {
+        Box::new(NoopExternalDndBackend::new())
+    }
 }
 
 // ============================================================

@@ -57,8 +57,19 @@ objc2-app-kit = { version = "0.3", features = [
     "NSGraphics",
     "NSButton",
     "NSControl",
+    # External drag-and-drop destination: NSDraggingInfo / NSDraggingDestination /
+    # NSDragOperation, and NSPasteboard + NSPasteboardType constants.
+    "NSDragging",
+    "NSPasteboard",
 ] }
-objc2-foundation = "0.3"
+objc2-foundation = { version = "0.3", features = [
+    "NSArray",
+    "NSString",
+    "NSURL",
+    "NSDictionary",
+    "NSGeometry",
+    "NSEnumerator",
+] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.61", features = [
