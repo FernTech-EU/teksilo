@@ -1229,7 +1229,8 @@ impl WidgetTree {
             };
             self.active_drag = Some(crate::drag_state::DragSession {
                 payload,
-                source_widget,
+                source_widget: Some(source_widget),
+                is_external: false,
                 current_position: bastyde_canvas::Point::ZERO,
                 current_target: None,
                 feedback: crate::drag_state::DropFeedback::NoFeedback,

@@ -28,6 +28,85 @@ impl WidgetTree {
         }
     }
 
+    // --- External (OS) drag-and-drop -----------------------------------
+    //
+    // OS drops (files / text / URLs dragged from another application or the
+    // file manager) reuse the *entire* internal drag pipeline. Rather than a
+    // parallel set of handlers, an external drag synthesises a `DragSession`
+    // carrying a `DragPayload::external(...)` and then drives the same
+    // `handle_drag_move` / `handle_drag_drop` / `cancel_active_drag` paths, so
+    // any widget with `on_drag_hover` / `on_drag_leave` / `on_drop` works for
+    // both internal and external drags. Widgets distinguish the source via
+    // `payload.is_external()` / `payload.files()` etc.
+    //
+    // Differences from internal drags: there is no in-app source widget
+    // (`source_widget = None`), no pointer capture (the OS owns the pointer
+    // during its drag loop), and no in-tree preview overlay (the OS renders
+    // its own drag image).
+
+    /// Begin an external drag session at `position` carrying OS-delivered
+    /// `data`. Establishes the initial hover target and feedback immediately.
+    pub fn begin_external_drag(
+        &mut self,
+        position: bastyde_canvas::Point,
+        data: crate::drag_payload::ExternalDropData,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        // Defensively clear any stale session (e.g. a re-entered drag that
+        // never delivered a matching leave). cancel_active_drag fires
+        // on_drag_leave on the previous target first.
+        if self.active_drag.is_some() {
+            self.cancel_active_drag(&mut *ops);
+        }
+        self.active_drag = Some(crate::drag_state::DragSession {
+            payload: crate::drag_payload::DragPayload::external(data),
+            source_widget: None,
+            is_external: true,
+            current_position: position,
+            current_target: None,
+            feedback: crate::drag_state::DropFeedback::NoFeedback,
+            preview_content_id: None,
+            preview_overlay_id: None,
+        });
+        // No pointer capture, no Grabbing cursor — the OS owns the drag image
+        // and cursor during an external drag.
+        self.handle_drag_move(position, &mut *ops);
+    }
+
+    /// Update an in-flight external drag as the OS reports pointer motion.
+    /// No-op unless an external session is active.
+    pub fn update_external_drag(
+        &mut self,
+        position: bastyde_canvas::Point,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        if self.active_drag.as_ref().is_some_and(|d| d.is_external) {
+            self.handle_drag_move(position, &mut *ops);
+        }
+    }
+
+    /// Complete an external drag with a drop at `position`, firing `on_drop`
+    /// on the target with the OS payload. No-op unless an external session is
+    /// active.
+    pub fn end_external_drag(
+        &mut self,
+        position: bastyde_canvas::Point,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        if self.active_drag.as_ref().is_some_and(|d| d.is_external) {
+            self.handle_drag_drop(position, &mut *ops);
+        }
+    }
+
+    /// Cancel an in-flight external drag (the pointer left the window or the
+    /// OS aborted the operation) without dropping. No-op unless an external
+    /// session is active.
+    pub fn cancel_external_drag(&mut self, ops: &mut dyn crate::window::WindowOps) {
+        if self.active_drag.as_ref().is_some_and(|d| d.is_external) {
+            self.cancel_active_drag(&mut *ops);
+        }
+    }
+
     /// Fire `on_drag_tick` on the current drop target (if any). Runs once
     /// per layout pass while a drag session is active. The handler
     /// receives the pointer position in the target's local coordinates.
@@ -330,7 +409,8 @@ mod tests {
 
         assert!(tree.active_drag.is_some());
         let drag = tree.active_drag.as_ref().unwrap();
-        assert_eq!(drag.source_widget, source);
+        assert_eq!(drag.source_widget, Some(source));
+        assert!(!drag.is_external);
         assert!(drag.payload.has_typed::<u32>());
     }
 
@@ -1306,5 +1386,154 @@ mod tests {
             1,
             "Scroll during drag must route to the current drop target"
         );
+    }
+
+    // --- External (OS) drag-and-drop -----------------------------------
+
+    #[test]
+    fn external_drop_delivers_files_and_marks_external() {
+        use crate::drag_payload::ExternalDropData;
+        use std::cell::RefCell;
+        use std::path::PathBuf;
+        use std::rc::Rc;
+
+        let dropped_files: Rc<RefCell<Vec<PathBuf>>> = Rc::new(RefCell::new(Vec::new()));
+        let was_external = Rc::new(std::cell::Cell::new(false));
+        let df = dropped_files.clone();
+        let we = was_external.clone();
+
+        let mut tree = WidgetTree::new();
+        let _target = tree.add(
+            FillWidget::new()
+                .on_drag_hover(|payload, _pos, _ctx| {
+                    // External file drags are accepted with a highlight.
+                    if payload.is_external() && !payload.files().is_empty() {
+                        crate::drag_state::DropFeedback::HighlightRect {
+                            rect: bastyde_canvas::Rect::new(0.0, 0.0, 10.0, 10.0),
+                            color: bastyde_tokens::Color::WHITE,
+                        }
+                    } else {
+                        crate::drag_state::DropFeedback::NoFeedback
+                    }
+                })
+                .on_drop(move |payload, _pos, _ctx| {
+                    we.set(payload.is_external());
+                    *df.borrow_mut() = payload.files().to_vec();
+                    true
+                }),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut noop = crate::window::NoopWindowOps;
+        let data = ExternalDropData {
+            files: vec![PathBuf::from("/tmp/a.png"), PathBuf::from("/tmp/b.png")],
+            ..Default::default()
+        };
+        tree.begin_external_drag(Point::new(100.0, 50.0), data, &mut noop);
+        assert!(tree.active_drag.is_some());
+        assert!(tree.active_drag.as_ref().unwrap().is_external);
+
+        tree.update_external_drag(Point::new(110.0, 55.0), &mut noop);
+        tree.end_external_drag(Point::new(110.0, 55.0), &mut noop);
+
+        assert!(tree.active_drag.is_none(), "external drag must clear on drop");
+        assert!(was_external.get(), "payload should report external origin");
+        assert_eq!(
+            *dropped_files.borrow(),
+            vec![PathBuf::from("/tmp/a.png"), PathBuf::from("/tmp/b.png")],
+        );
+    }
+
+    #[test]
+    fn external_drop_passes_local_coordinates() {
+        use crate::drag_payload::ExternalDropData;
+        use crate::test_widgets::InsetWidget;
+        use std::cell::Cell;
+        use std::path::PathBuf;
+        use std::rc::Rc;
+
+        let drop_local = Rc::new(Cell::new(Point::new(-1.0, -1.0)));
+        let d = drop_local.clone();
+
+        let mut tree = WidgetTree::new();
+        // Inset 40 → target origin at (40, 40).
+        let target = tree.add(
+            FillWidget::new()
+                .on_drag_hover(|_p, _pos, _ctx| crate::drag_state::DropFeedback::HighlightRect {
+                    rect: bastyde_canvas::Rect::new(0.0, 0.0, 10.0, 10.0),
+                    color: bastyde_tokens::Color::WHITE,
+                })
+                .on_drop(move |_payload, pos, _ctx| {
+                    d.set(pos);
+                    true
+                }),
+        );
+        let _wrapper = tree.add(InsetWidget::new(40.0).set_child(target));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut noop = crate::window::NoopWindowOps;
+        let data = ExternalDropData {
+            files: vec![PathBuf::from("/tmp/x")],
+            ..Default::default()
+        };
+        // Drop at tree (110, 55) → target-local (70, 15).
+        tree.begin_external_drag(Point::new(110.0, 55.0), data, &mut noop);
+        tree.end_external_drag(Point::new(110.0, 55.0), &mut noop);
+
+        let drp = drop_local.get();
+        assert!(
+            (drp.x - 70.0).abs() < 0.01 && (drp.y - 15.0).abs() < 0.01,
+            "external on_drop should receive local coords, got {:?}",
+            drp,
+        );
+    }
+
+    #[test]
+    fn cancel_external_drag_clears_session_and_fires_leave() {
+        use crate::drag_payload::ExternalDropData;
+        use std::cell::Cell;
+        use std::path::PathBuf;
+        use std::rc::Rc;
+
+        let left = Rc::new(Cell::new(0_u32));
+        let l = left.clone();
+
+        let mut tree = WidgetTree::new();
+        let _target = tree.add(
+            FillWidget::new()
+                .on_drag_hover(|_p, _pos, _ctx| crate::drag_state::DropFeedback::HighlightRect {
+                    rect: bastyde_canvas::Rect::new(0.0, 0.0, 10.0, 10.0),
+                    color: bastyde_tokens::Color::WHITE,
+                })
+                .on_drag_leave(move |_ctx| l.set(l.get() + 1))
+                .on_drop(|_, _, _| true),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut noop = crate::window::NoopWindowOps;
+        let data = ExternalDropData {
+            files: vec![PathBuf::from("/tmp/x")],
+            ..Default::default()
+        };
+        tree.begin_external_drag(Point::new(100.0, 50.0), data, &mut noop);
+        assert!(tree.active_drag.is_some());
+
+        tree.cancel_external_drag(&mut noop);
+        assert!(tree.active_drag.is_none(), "cancel must clear the session");
+        assert_eq!(left.get(), 1, "cancel must fire on_drag_leave on the target");
+    }
+
+    #[test]
+    fn external_drag_helpers_noop_without_session() {
+        // update/end/cancel are no-ops when no external session is active.
+        let mut tree = WidgetTree::new();
+        let _t = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        let mut noop = crate::window::NoopWindowOps;
+        tree.update_external_drag(Point::new(10.0, 10.0), &mut noop);
+        tree.end_external_drag(Point::new(10.0, 10.0), &mut noop);
+        tree.cancel_external_drag(&mut noop);
+        assert!(tree.active_drag.is_none());
     }
 }

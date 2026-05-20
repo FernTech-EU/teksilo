@@ -25,8 +25,11 @@ pub enum DropFeedback {
 pub(crate) struct DragSession {
     /// The data being dragged.
     pub payload: DragPayload,
-    /// The widget that initiated the drag.
-    pub source_widget: WidgetId,
+    /// The widget that initiated the drag. `None` for external (OS) drags,
+    /// which have no in-app source widget.
+    pub source_widget: Option<WidgetId>,
+    /// Whether this session was started by an external (OS) drag.
+    pub is_external: bool,
     /// Current pointer position during drag.
     pub current_position: Point,
     /// The widget currently under the pointer that accepts this payload, if any.
@@ -43,6 +46,7 @@ impl std::fmt::Debug for DragSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DragSession")
             .field("source_widget", &self.source_widget)
+            .field("is_external", &self.is_external)
             .field("current_position", &self.current_position)
             .field("current_target", &self.current_target)
             .field("feedback", &self.feedback)

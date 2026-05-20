@@ -381,9 +381,11 @@ impl WidgetTree {
         &self,
         ops: &'ops mut dyn crate::window::WindowOps,
     ) -> crate::widget::EventContext<'ops> {
+        let drag_is_external = self.active_drag.as_ref().is_some_and(|d| d.is_external);
         crate::widget::EventContext::new()
             .with_app_context(self.app_context.clone())
             .with_window_context(ops, self.window_state.clone())
+            .with_drag_external(drag_is_external)
     }
 
     /// Run a closure with a fresh [`EventContext`] anchored at this
@@ -1155,10 +1157,13 @@ impl WidgetTree {
         {
             self.pointer_captured_by = None;
         }
+        // External (OS) drags have no in-app source widget, so they are never
+        // torn down by source destruction — only internal drags are salvaged.
         let source_gone = self
             .active_drag
             .as_ref()
-            .is_some_and(|s| !self.arena.is_active(s.source_widget));
+            .and_then(|s| s.source_widget)
+            .is_some_and(|sw| !self.arena.is_active(sw));
         if source_gone {
             // `cancel_active_drag` fires on_drag_leave on the current
             // target before cleanup — the same contract as Escape.

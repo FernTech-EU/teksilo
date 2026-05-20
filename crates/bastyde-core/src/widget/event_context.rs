@@ -72,6 +72,10 @@ pub struct EventContext<'ops> {
     )>,
     /// Cancel any active drag session.
     pub(crate) cancel_drag: bool,
+    /// Whether the drag session active while this context is live was
+    /// started by an external (OS) drag. Read via `drag_is_external()`.
+    /// `false` for hand-constructed contexts and when no drag is active.
+    pub(crate) drag_is_external: bool,
     /// Replace the tree-level theme. Drained after dispatch; triggers a
     /// composite-widget rebuild and full repaint.
     pub(crate) theme_request: Option<crate::styles::Theme>,
@@ -174,6 +178,7 @@ impl<'ops> EventContext<'ops> {
             focus_requests: Vec::new(),
             drag_start_request: None,
             cancel_drag: false,
+            drag_is_external: false,
             theme_request: None,
             locale_request: None,
             frame_requested: false,
@@ -212,6 +217,22 @@ impl<'ops> EventContext<'ops> {
     ) -> Self {
         self.app_context = Some(ctx);
         self
+    }
+
+    /// Record whether the drag session active while this context is live
+    /// originated from an external (OS) drag. Set by `make_event_context`.
+    pub(crate) fn with_drag_external(mut self, is_external: bool) -> Self {
+        self.drag_is_external = is_external;
+        self
+    }
+
+    /// Whether a drag is currently in flight that was started by an external
+    /// (OS) drag-and-drop (files / text / URLs from another application),
+    /// rather than by an in-app `start_drag`. Useful in `on_drag_leave` /
+    /// `on_drag_tick` handlers, which don't receive the payload directly;
+    /// in `on_drag_hover` / `on_drop` prefer `payload.is_external()`.
+    pub fn drag_is_external(&self) -> bool {
+        self.drag_is_external
     }
 
     /// Look up an application-scoped value by type. Mirrors
