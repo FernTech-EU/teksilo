@@ -381,6 +381,15 @@ struct BastydeAppHandler {
     /// Created in `BastydeAppBuilder::run` when the `I18nConfig` registers
     /// any `runtime_override`s; otherwise `None`.
     _i18n_watcher: Option<bastyde_i18n::FtlFileWatcher>,
+    /// Optional per-loop-turn closure (e.g. an async executor poll) installed
+    /// via [`BastydeAppBuilder::on_loop_tick`]. Runs at the top of
+    /// `about_to_wait`; returning `true` means tasks advanced and a repaint is
+    /// needed. Async-agnostic — the loop only ever sees `FnMut`.
+    loop_tick: Option<Box<dyn FnMut() -> bool>>,
+    /// Shared flag a `loop_tick` owner sets while it wants continuous polling.
+    /// Read in `update_control_flow` to force `ControlFlow::Poll`; when clear,
+    /// the loop sleeps until the next event (off-thread wakes via the proxy).
+    loop_tick_poll: Option<std::rc::Rc<std::cell::Cell<bool>>>,
 }
 
 impl BastydeAppHandler {
@@ -417,6 +426,8 @@ impl BastydeAppHandler {
             #[cfg(feature = "text")]
             typesetter,
             _i18n_watcher: i18n_watcher,
+            loop_tick: None,
+            loop_tick_poll: None,
         }
     }
 
@@ -548,6 +559,14 @@ impl BastydeAppHandler {
             if managed.tree.frame_requested() {
                 any_frame_requested = true;
             }
+        }
+
+        // An installed loop-tick owner (e.g. the `bastyde-async` executor)
+        // can request continuous polling while it still has runnable work.
+        if let Some(poll) = &self.loop_tick_poll
+            && poll.get()
+        {
+            any_frame_requested = true;
         }
 
         if any_frame_requested {
@@ -780,6 +799,80 @@ impl BastydeAppHandler {
         {
             Err(payload)
         }
+    }
+
+    /// Try to route an `AppEvent::External` payload as an
+    /// [`AsyncCompletionPayload`](bastyde_core::AsyncCompletionPayload) posted
+    /// by the `bastyde-async` executor when a `spawn_local_with` future
+    /// resolves. Returns `Ok(())` if matched and delivered, `Err(payload)` to
+    /// hand the box back for fallthrough.
+    ///
+    /// Uses only bastyde-core types ([`AsyncCompletionHandle`](bastyde_core::AsyncCompletionHandle)),
+    /// so `bastyde-async` (which depends on `bastyde-app`) never has to be a
+    /// dependency here — the same take/run-with-context/reinsert pattern as
+    /// the file-dialog path. On any miss (window gone, runtime not installed,
+    /// already-purged completion) the result is dropped silently.
+    fn try_route_async_completion_payload(
+        &mut self,
+        payload: Box<dyn std::any::Any + Send>,
+        event_loop: &ActiveEventLoop,
+    ) -> Result<(), Box<dyn std::any::Any + Send>> {
+        use bastyde_core::{AsyncCompletionHandle, AsyncCompletionPayload};
+
+        let payload = match payload.downcast::<AsyncCompletionPayload>() {
+            Ok(boxed) => *boxed,
+            Err(other) => return Err(other),
+        };
+
+        let target_winit = self
+            .wm
+            .bastyde_to_winit_map()
+            .get(&payload.window_id)
+            .copied();
+        let Some(winit_id) = target_winit else {
+            // Window already torn down — drop silently.
+            return Ok(());
+        };
+
+        let handle = self
+            .wm
+            .app_context_template()
+            .and_then(|t| t.app_state::<AsyncCompletionHandle>().cloned());
+        let Some(handle) = handle else {
+            // No async runtime installed — drop silently.
+            return Ok(());
+        };
+
+        let Some(mut current) = self.wm.take_managed(winit_id) else {
+            return Ok(());
+        };
+        let current_id = current.bastyde_id;
+
+        #[cfg(not(target_os = "macos"))]
+        let current_handle = current
+            .platform_window
+            .window()
+            .window_handle()
+            .ok()
+            .map(|h| h.as_raw());
+        let current_arc = Some(current.platform_window.window_arc());
+
+        {
+            let mut ops = crate::window_manager::WindowOpsImpl::new(
+                &mut self.wm,
+                event_loop,
+                current_id,
+                #[cfg(not(target_os = "macos"))]
+                current_handle,
+                current_arc,
+            );
+            current.tree.run_with_event_context(&mut ops, |ctx| {
+                handle.deliver(payload.id, payload.window_id, ctx)
+            });
+        }
+
+        self.wm.reinsert_managed(winit_id, current);
+        Ok(())
     }
 
     /// Try to interpret an `AppEvent::External` payload as an
@@ -1456,6 +1549,10 @@ impl ApplicationHandler<AppEvent> for BastydeAppHandler {
                         Err(payload) => Some(payload),
                     },
                 };
+                let payload = match payload {
+                    None => None,
+                    Some(payload) => self.try_route_async_completion_payload(payload, event_loop).err(),
+                };
                 if let Some(payload) = payload {
                     {
                         if let Some(req) = payload.downcast_ref::<CloseWindowRequest>() {
@@ -1521,6 +1618,16 @@ impl ApplicationHandler<AppEvent> for BastydeAppHandler {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Drive any registered per-turn closure (the async executor poll when
+        // `bastyde-async` is installed) before computing the next control
+        // flow. A `true` return means tasks advanced and may have mutated
+        // reactive state, so repaint the open windows — mirroring the
+        // subscription-delivery redraw in `user_event`.
+        if let Some(tick) = &mut self.loop_tick
+            && tick()
+        {
+            self.wm.request_redraw_all();
+        }
         self.process_pending(event_loop);
         self.maybe_exit(event_loop);
         self.update_control_flow(event_loop);
@@ -1610,24 +1717,24 @@ impl AppEventProxy {
     }
 }
 
-/// Bridges bastyde-core's `AppEventPoster` trait to the winit-backed
-/// `AppEventProxy`. bastyde-core cannot import winit, so this trait
-/// implementation lives in bastyde-app.
-struct WinitAppEventPoster {
-    proxy: AppEventProxy,
-}
-
-impl AppEventPoster for WinitAppEventPoster {
+/// `AppEventProxy` implements [`AppEventPoster`] directly so it can be both the
+/// `Arc<dyn AppEventPoster>` every widget tree holds AND handed to background
+/// integrations (e.g. the `bastyde-async` executor's cross-thread waker, wired
+/// via [`BastydeAppBuilder::on_ready`]). bastyde-core cannot import winit, so
+/// this trait implementation lives here.
+impl AppEventPoster for AppEventProxy {
     fn post_subscription_event(
         &self,
         sub_id: SubscriptionId,
         event: Box<dyn std::any::Any + Send>,
     ) {
-        self.proxy.post_subscription_event(sub_id, event);
+        let _ = self
+            .inner
+            .send_event(AppEvent::SubscriptionEvent { sub_id, event });
     }
 
     fn post_external(&self, payload: Box<dyn std::any::Any + Send>) {
-        let _ = self.proxy.inner.send_event(AppEvent::External(payload));
+        let _ = self.inner.send_event(AppEvent::External(payload));
     }
 }
 
@@ -1638,7 +1745,7 @@ pub struct BastydeAppBuilder {
     #[cfg(feature = "text")]
     typesetter: Option<SharedTypesetter>,
     app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
-    on_ready: Option<Box<dyn FnOnce(AppEventProxy)>>,
+    on_ready: Vec<Box<dyn FnOnce(AppEventProxy)>>,
     initial_window: Option<WindowConfig>,
     /// Type-erased adapter for the application's backend event source
     /// (architecture §9.4). Installed via `event_source<S>(source)`.
@@ -1674,6 +1781,11 @@ pub struct BastydeAppBuilder {
     /// emit `intent.dispatched` events.
     #[cfg(feature = "telemetry")]
     telemetry_bundle: Option<bastyde_telemetry::TelemetryBundle>,
+    /// Per-loop-turn closure + poll flag installed via
+    /// [`on_loop_tick`](Self::on_loop_tick). Async-agnostic; moved into the
+    /// handler at `run`.
+    loop_tick: Option<Box<dyn FnMut() -> bool>>,
+    loop_tick_poll: Option<std::rc::Rc<std::cell::Cell<bool>>>,
 }
 
 impl BastydeAppBuilder {
@@ -1684,7 +1796,7 @@ impl BastydeAppBuilder {
             #[cfg(feature = "text")]
             typesetter: None,
             app_event_handler: None,
-            on_ready: None,
+            on_ready: Vec::new(),
             initial_window: None,
             event_source: None,
             app_state_registry: HashMap::new(),
@@ -1694,6 +1806,8 @@ impl BastydeAppBuilder {
             settings_bundle: None,
             #[cfg(feature = "telemetry")]
             telemetry_bundle: None,
+            loop_tick: None,
+            loop_tick_poll: None,
         }
     }
 
@@ -1916,8 +2030,31 @@ impl BastydeAppBuilder {
 
     /// Register a callback that receives an `AppEventProxy` once the event loop is ready.
     /// Use this to hand the proxy to background threads that need to post commands.
+    /// May be called more than once; all registered callbacks fire in order
+    /// (e.g. `install_async` registers one to wire the executor's waker).
     pub fn on_ready(mut self, handler: impl FnOnce(AppEventProxy) + 'static) -> Self {
-        self.on_ready = Some(Box::new(handler));
+        self.on_ready.push(Box::new(handler));
+        self
+    }
+
+    /// Register a closure run once per event-loop turn (at the top of
+    /// `about_to_wait`) plus a shared poll flag. Returning `true` from the
+    /// closure means it advanced work that may have mutated UI state, which
+    /// triggers a repaint of all windows. While `poll_source` is set the loop
+    /// stays in [`ControlFlow::Poll`] so the closure keeps running; when it
+    /// clears, the loop sleeps until the next event (off-thread wakes arrive
+    /// via [`AppEventProxy`]).
+    ///
+    /// General-purpose and async-agnostic — `bastyde-app` only ever sees
+    /// `FnMut`. The optional `bastyde-async` crate uses this to drive a
+    /// main-thread executor; nothing in the core loop depends on a runtime.
+    pub fn on_loop_tick(
+        mut self,
+        poll_source: std::rc::Rc<std::cell::Cell<bool>>,
+        tick: impl FnMut() -> bool + 'static,
+    ) -> Self {
+        self.loop_tick = Some(Box::new(tick));
+        self.loop_tick_poll = Some(poll_source);
         self
     }
 
@@ -2244,9 +2381,7 @@ impl BastydeAppBuilder {
         // an event-source registration. Apps without an event source,
         // app-state registry, or background-work feature simply pay an
         // unused Arc<AppEventPoster> per tree.
-        let poster: std::sync::Arc<dyn AppEventPoster> = std::sync::Arc::new(WinitAppEventPoster {
-            proxy: proxy.clone(),
-        });
+        let poster: std::sync::Arc<dyn AppEventPoster> = std::sync::Arc::new(proxy.clone());
         let base = match self.event_source {
             Some(adapter) => TreeAppContext::with_source_and_poster(adapter, poster.clone()),
             None => TreeAppContext::empty(),
@@ -2256,7 +2391,7 @@ impl BastydeAppBuilder {
                 .with_poster(poster),
         ));
 
-        if let Some(on_ready) = self.on_ready {
+        for on_ready in self.on_ready {
             on_ready(proxy.clone());
         }
 
@@ -2275,6 +2410,10 @@ impl BastydeAppBuilder {
             i18n_watcher,
             proxy.clone(),
         );
+        // Hand over any registered loop-tick hook (e.g. the `bastyde-async`
+        // executor poll). Async-agnostic: just a closure + a poll flag.
+        app.loop_tick = self.loop_tick;
+        app.loop_tick_poll = self.loop_tick_poll;
 
         event_loop
             .run_app(&mut app)

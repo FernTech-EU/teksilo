@@ -305,6 +305,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-demo"
+version = "0.2.0"
+dependencies = [
+ "bastyde",
+]
+
+[[package]]
 name = "async-executor"
 version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -534,6 +541,8 @@ name = "bastyde"
 version = "0.2.0"
 dependencies = [
  "bastyde-app",
+ "bastyde-async",
+ "bastyde-async-std",
  "bastyde-canvas",
  "bastyde-core",
  "bastyde-data",
@@ -549,6 +558,7 @@ dependencies = [
  "bastyde-theme-macos",
  "bastyde-theme-material3",
  "bastyde-tokens",
+ "bastyde-tokio",
  "bastyde-widgets",
  "tempfile",
  "trybuild",
@@ -599,6 +609,26 @@ dependencies = [
  "tempfile",
  "uuid",
  "winit",
+]
+
+[[package]]
+name = "bastyde-async"
+version = "0.2.0"
+dependencies = [
+ "async-channel 2.5.0",
+ "bastyde-app",
+ "bastyde-core",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "bastyde-async-std"
+version = "0.2.0"
+dependencies = [
+ "async-std",
+ "bastyde-app",
+ "bastyde-async",
+ "bastyde-core",
 ]
 
 [[package]]
@@ -903,6 +933,16 @@ version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "bastyde-tokio"
+version = "0.2.0"
+dependencies = [
+ "bastyde-app",
+ "bastyde-async",
+ "bastyde-core",
+ "tokio",
 ]
 
 [[package]]
@@ -4466,6 +4506,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "socket2"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "spin"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4971,6 +5021,19 @@ name = "toast-demo"
 version = "0.2.0"
 dependencies = [
  "bastyde",
+]
+
+[[package]]
+name = "tokio"
+version = "1.52.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fc7f01b389ac15039e4dc9531aa973a135d7a4135281b12d7c1bc79fd57fffe"
+dependencies = [
+ "libc",
+ "mio",
+ "pin-project-lite",
+ "socket2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

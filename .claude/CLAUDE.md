@@ -39,6 +39,7 @@ cargo run -p scene_showcase                     # Scene viewport: pan/zoom + hea
 cargo run -p scene_corkboard                    # Scene-based story corkboard (worked-example use case)
 cargo run -p chart-demo                         # BarChart / LineChart / PieChart (+ donut + center slot)
 cargo run -p toast-demo                         # Toast notifications + persistent NotificationLog + bell button + dialog
+cargo run -p async-demo                         # bastyde-async: spawn_local + spawn_blocking + spawn_local_with (opt-in async executor)
 ```
 
 ## Tools
@@ -158,7 +159,22 @@ bastyde-render          wgpu renderer: rect/SDF/quad pipelines, atlas upload, pa
 bastyde-platform        winit + AccessKit adapter, event translation, clipboard, OS theme,
                      native file dialogs (FileDialogBackend trait + RfdAsyncBackend),
                      external (OS) drag-and-drop (ExternalDndBackend trait + per-OS backends)
-bastyde-app             BastydeAppBuilder, WindowManager, event loop
+bastyde-app             BastydeAppBuilder, WindowManager, event loop. Exposes an async-agnostic
+                     `on_loop_tick(poll_source, FnMut() -> bool)` hook + routes `AsyncCompletionPayload`
+                     (a bastyde-core type) to a window's tree — the only core touch-points the
+                     optional async executor needs.
+bastyde-async           Optional main-thread async executor (opt-in, OFF by default). `spawn_local` /
+                     `spawn_local_with` / `spawn_blocking`, driven by bastyde-app's `on_loop_tick`
+                     hook; runtime-free core (no tokio/async-std). `!Send` futures capture `Signal`s
+                     and mutate them on resume (the owned-handles model); `spawn_local_with` delivers
+                     a result with a fresh `EventContext`. The completion router
+                     (`AsyncCompletionHandle` + `AsyncCompletionPayload`) lives in bastyde-core so
+                     delivery routes through bastyde-app without a dependency cycle. See docs/async.md.
+bastyde-tokio           Thin reactor adapter: `install_async_tokio()` + `TokioHandle`. Wraps each
+                     executor tick in a Tokio runtime context so native Tokio futures
+                     (timers/sockets/reqwest) can be `.await`-ed inside `spawn_local` bodies.
+bastyde-async-std       Thin reactor adapter: `install_async_async_std()`; async-std's global reactor
+                     needs no per-tick guard.
 bastyde              Umbrella crate with re-exports and feature flags
 bastyde-resources       Resource handling and embedding infrastructure
 bastyde-preview         Storybook-equivalent infrastructure for desktop Rust widgets. `WidgetCatalog`
@@ -175,7 +191,7 @@ bastyde-widgets-previewer Bundle binary that combines bastyde-widgets + bastyde-
                      targeted (preview one widget).
 ```
 
-Dependency flow: `tokens → canvas → core → data → widgets`, `canvas → text`, `core + data → settings`, `canvas → render → platform → app → ui`, `settings → app`, `i18n-macros → i18n`, `ui-macros → ui`, `core → preview`, `preview-ui → preview + widgets`, `widgets-previewer → (preview + preview-ui + widgets)`, `widgets → scene` (scene sits at the bastyde-widgets tier and reuses the full widget catalog as its heavyweight content)
+Dependency flow: `tokens → canvas → core → data → widgets`, `canvas → text`, `core + data → settings`, `canvas → render → platform → app → ui`, `settings → app`, `i18n-macros → i18n`, `ui-macros → ui`, `core → preview`, `preview-ui → preview + widgets`, `widgets-previewer → (preview + preview-ui + widgets)`, `widgets → scene` (scene sits at the bastyde-widgets tier and reuses the full widget catalog as its heavyweight content), `(app + core) → async → {tokio, async-std}` (optional executor; the `on_loop_tick` hook in app and the `AsyncCompletionHandle` types in core stay async-runtime-free, so bastyde-app never depends on bastyde-async)
 
 External path dependency: `text-typeset` lives at `../text-typeset` (outside workspace).
 

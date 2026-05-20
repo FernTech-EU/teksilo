@@ -93,6 +93,9 @@ bastyde-text = { path = "crates/bastyde-text", version = "0.2.0" }
 bastyde-render = { path = "crates/bastyde-render", version = "0.2.0" }
 bastyde-platform = { path = "crates/bastyde-platform", version = "0.2.0" }
 bastyde-app = { path = "crates/bastyde-app", version = "0.2.0" }
+bastyde-async = { path = "crates/bastyde-async", version = "0.2.0" }
+bastyde-tokio = { path = "crates/bastyde-tokio", version = "0.2.0" }
+bastyde-async-std = { path = "crates/bastyde-async-std", version = "0.2.0" }
 bastyde-inspector = { path = "crates/bastyde-inspector", version = "0.2.0" }
 bastyde-resources = { path = "crates/bastyde-resources", version = "0.2.0" }
 bastyde = { path = "crates/bastyde", version = "0.2.0" }

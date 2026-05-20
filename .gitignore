@@ -180,5 +180,6 @@ temp_manifest.yaml
 tested_project
 
 .claude/settings.local.json
+.claude/worktrees/
 
 docs/plans

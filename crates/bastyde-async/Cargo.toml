@@ -1,0 +1,19 @@
+[package]
+name = "bastyde-async"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Optional main-thread async executor for Bastyde — spawn_local / spawn_blocking driven by the app event loop."
+
+[dependencies]
+bastyde-core = { workspace = true }
+bastyde-app = { workspace = true }
+thiserror = { workspace = true }
+# Lightweight MPSC used as the one-shot result channel for `spawn_blocking`.
+# Kept local — no other bastyde crate uses it, and the runtime/transport
+# choice should not leak to consumers (same policy as tokio in
+# `bastyde-analytics-bastyde` and async-std in `bastyde-platform`).
+async-channel = "2"
