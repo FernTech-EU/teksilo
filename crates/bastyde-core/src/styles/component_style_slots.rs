@@ -27,7 +27,8 @@
 use crate::styles::{
     SharedAvatarStyle, SharedBadgeStyle, SharedBannerStyle, SharedButtonStyle, SharedCalendarStyle,
     SharedCardStyle, SharedCheckboxStyle, SharedColorPickerStyle, SharedComboBoxStyle,
-    SharedDateEditStyle, SharedDialogStyle, SharedIconButtonStyle, SharedLinkStyle,
+    SharedDateEditStyle, SharedDialogStyle, SharedDropZoneStyle, SharedIconButtonStyle,
+    SharedLinkStyle,
     SharedListContainerStyle, SharedMenuItemStyle, SharedPanelStyle, SharedPopoverStyle,
     SharedProgressBarStyle, SharedRadioStyle, SharedRichTextEditorStyle, SharedScrollBarStyle,
     SharedSearchFieldStyle, SharedSegmentedControlStyle, SharedSliderStyle, SharedSnackbarStyle,
@@ -73,6 +74,7 @@ pub struct ComponentStyleSlots {
     pub rich_text_editor: Option<SharedRichTextEditorStyle>,
     pub table: Option<SharedTableStyle>,
     pub list_container: Option<SharedListContainerStyle>,
+    pub drop_zone: Option<SharedDropZoneStyle>,
 }
 
 impl std::fmt::Debug for ComponentStyleSlots {
@@ -114,6 +116,7 @@ impl std::fmt::Debug for ComponentStyleSlots {
             .field("rich_text_editor", &self.rich_text_editor.is_some())
             .field("table", &self.table.is_some())
             .field("list_container", &self.list_container.is_some())
+            .field("drop_zone", &self.drop_zone.is_some())
             .finish()
     }
 }
@@ -163,5 +166,6 @@ impl PartialEq for ComponentStyleSlots {
             && rc_eq(&self.rich_text_editor, &other.rich_text_editor)
             && rc_eq(&self.table, &other.table)
             && rc_eq(&self.list_container, &other.list_container)
+            && rc_eq(&self.drop_zone, &other.drop_zone)
     }
 }

@@ -8,6 +8,7 @@ pub mod avatar_style;
 pub mod badge_style;
 pub mod banner_style;
 pub mod button_style;
+pub mod drop_zone_style;
 pub mod calendar_style;
 pub mod card_style;
 pub mod checkbox_style;
@@ -49,6 +50,9 @@ pub use avatar_style::{
 };
 pub use badge_style::{BadgeStyle, BadgeStyleConfig, SharedBadgeStyle};
 pub use banner_style::{BannerSeverity, BannerStyle, BannerStyleConfig, SharedBannerStyle};
+pub use drop_zone_style::{
+    DropZoneStyle, DropZoneStyleConfig, DropZoneVisualState, SharedDropZoneStyle,
+};
 pub use button_style::{
     ButtonRecipe, ButtonStyle, ButtonStyleConfig, ButtonVariant, SharedButtonStyle,
 };

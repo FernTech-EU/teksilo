@@ -8,8 +8,8 @@
 //! dialog) as the WCAG 2.1.1 equivalent.
 //!
 //! ```ignore
-//! DropZone::new("Drop images here")
-//!     .subtitle("PNG or JPEG")
+//! DropZone::new(tr!("drop_images_here"))
+//!     .subtitle(tr!("png_or_jpeg"))
 //!     .accept_extensions(["png", "jpg", "jpeg"])
 //!     .allow_multiple(true)
 //!     .on_files_dropped(|paths, _ctx| { /* import paths */ });
@@ -20,6 +20,13 @@
 //! [`install_external_dnd`](https://docs.rs/bastyde-app) is wired and a backend
 //! is available; on platforms with no backend (e.g. X11) the Browse button
 //! keeps the zone fully usable.
+//!
+//! # Styling
+//!
+//! The bordered, tinted chrome is a Tier-3 [`DropZoneStyle`]; the default
+//! [`RecipeDropZoneStyle`](crate::styles::RecipeDropZoneStyle) tracks the
+//! interaction state. Override per-call with [`DropZone::style`] or theme-wide
+//! via `theme.style_slots.drop_zone`.
 //!
 //! # Accessibility
 //!
@@ -37,44 +44,18 @@ use bastyde_canvas::{Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::accesskit::{Live, Role};
 use bastyde_core::build_context::BuildContext;
+use bastyde_core::styles::{
+    DropZoneStyle, DropZoneStyleConfig, DropZoneVisualState, SharedDropZoneStyle,
+};
 use bastyde_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
-use bastyde_core::widget_builder::WidgetBuilder;
+use bastyde_core::widget_builder::{HandlerSet, WidgetBuilder};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_core::{DragPayload, DropFeedback};
 use bastyde_platform::file_dialog::{EventContextFileDialogExt, FileDialogRequest, FileDialogResult};
-use bastyde_tokens::{BorderRole, HAlignment, SurfaceRole, TextRole};
+use bastyde_tokens::{HAlignment, TextRole};
 
 use crate::button::Button;
-use crate::primitives::{Center, Padding, RectWidget, TextWidget, VStack};
-
-/// Visual state of the zone, driving its background / border / text colors.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DropZoneState {
-    /// At rest — no drag over the zone.
-    Idle,
-    /// A drag is over the zone carrying acceptable data.
-    HoverAccept,
-    /// A drag is over the zone but its data is rejected (wrong type / count).
-    HoverReject,
-}
-
-impl DropZoneState {
-    fn surface_role(self) -> SurfaceRole {
-        match self {
-            DropZoneState::Idle => SurfaceRole::Sunken,
-            DropZoneState::HoverAccept => SurfaceRole::AccentSubtle,
-            DropZoneState::HoverReject => SurfaceRole::StatusError,
-        }
-    }
-
-    fn border_role(self) -> BorderRole {
-        match self {
-            DropZoneState::Idle => BorderRole::Strong,
-            DropZoneState::HoverAccept => BorderRole::Accent,
-            DropZoneState::HoverReject => BorderRole::Error,
-        }
-    }
-}
+use crate::primitives::{TextWidget, VStack};
 
 type FilesCallback = Box<dyn FnMut(Vec<PathBuf>, &mut EventContext)>;
 type TextCallback = Box<dyn FnMut(String, &mut EventContext)>;
@@ -92,6 +73,7 @@ pub struct DropZone {
     on_files: Option<FilesCallback>,
     on_text: Option<TextCallback>,
     on_urls: Option<UrlsCallback>,
+    style_override: Option<SharedDropZoneStyle>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -114,6 +96,7 @@ impl DropZone {
             on_files: None,
             on_text: None,
             on_urls: None,
+            style_override: None,
             root_child_id: None,
         }
     }
@@ -185,6 +168,12 @@ impl DropZone {
     /// [`IconWidget`](crate::primitives::IconWidget)).
     pub fn icon(mut self, icon: impl Widget + 'static) -> Self {
         self.icon = Some(Box::new(icon));
+        self
+    }
+
+    /// Override the Tier-3 [`DropZoneStyle`] for this instance only.
+    pub fn style(mut self, style: impl DropZoneStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
         self
     }
 
@@ -286,12 +275,8 @@ fn describe(payload: &DragPayload) -> String {
 
 impl Widget for DropZone {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let state = ctx.signal(DropZoneState::Idle);
+        let state = ctx.signal(DropZoneVisualState::Idle);
         let announce = ctx.signal(String::new());
-
-        // State-driven, theme-reactive colors.
-        let bg = state.map(|s| s.surface_role());
-        let border = state.map(|s| s.border_role());
 
         // Snapshots for the closures.
         let extensions = self.extensions.clone();
@@ -338,7 +323,7 @@ impl Widget for DropZone {
                     if !browse_extensions.is_empty() {
                         let exts: Vec<&str> =
                             browse_extensions.iter().map(String::as_str).collect();
-                        request = FileDialogRequest::pick_file().add_filter("Allowed", &exts);
+                        request = request.add_filter("Allowed", &exts);
                     }
                     let on_files_cb = on_files_browse.clone();
                     let announce_cb = announce_browse.clone();
@@ -358,7 +343,7 @@ impl Widget for DropZone {
                         announce_cb.set(format!("{count} added"));
                     };
                     // Multi vs single picker per policy. Errors (no dialog
-                    // installed) are ignored — the field stays usable.
+                    // installed) are ignored — the zone stays usable.
                     let _ = if allow_multiple_browse {
                         ctx.pick_files(request, result_cb)
                     } else {
@@ -369,19 +354,23 @@ impl Widget for DropZone {
             content = content.child(browse);
         }
 
-        // --- Background + border, content centered on top ---
-        let bg_rect = RectWidget::new()
-            .background(bg)
-            .border_color(border)
-            .border_width(2.0)
-            .corner_radius(bastyde_tokens::CornerRadius::uniform(12.0));
+        let content_id = ctx.add(content);
 
-        let zstack = crate::primitives::ZStack::new()
-            .child(bg_rect)
-            .child(Center::new().child(Padding::uniform(20.0).child(content)));
+        // --- Tier-3 chrome: resolve style (per-call > theme slot > default) ---
+        let style = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.drop_zone.clone())
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeDropZoneStyle));
+        let body = style.make_body(
+            &DropZoneStyleConfig {
+                state: state.clone(),
+                content: content_id,
+            },
+            ctx,
+        );
 
-        // Drag handlers + accessibility on the container, which becomes the
-        // drop target (the framework walks up from the hit widget to it).
+        // --- Drag behaviour on the composite node (the drop target) ---
         let hover_state = state.clone();
         let hover_announce = announce.clone();
         let hover_exts = extensions.clone();
@@ -389,67 +378,64 @@ impl Widget for DropZone {
         let leave_announce = announce.clone();
         let drop_exts = extensions;
 
-        let root = ctx.add(
-            zstack
-                .on_drag_hover(move |payload, _pos, _ctx| {
-                    let ok = payload_accepted(
-                        payload,
-                        &hover_exts,
-                        allow_multiple,
-                        has_files_cb,
-                        has_text_cb,
-                        has_urls_cb,
-                    );
-                    if ok {
-                        hover_state.set(DropZoneState::HoverAccept);
-                        hover_announce.set(format!("Drop to add {}", describe(payload)));
-                    } else {
-                        hover_state.set(DropZoneState::HoverReject);
-                        hover_announce.set("This item can't be dropped here".to_string());
+        let handlers = HandlerSet::new()
+            .on_drag_hover(move |payload, _pos, _ctx| {
+                let ok = payload_accepted(
+                    payload,
+                    &hover_exts,
+                    allow_multiple,
+                    has_files_cb,
+                    has_text_cb,
+                    has_urls_cb,
+                );
+                if ok {
+                    hover_state.set(DropZoneVisualState::HoverAccept);
+                    hover_announce.set(format!("Drop to add {}", describe(payload)));
+                } else {
+                    hover_state.set(DropZoneVisualState::HoverReject);
+                    hover_announce.set("This item can't be dropped here".to_string());
+                }
+                // Visuals are state-driven; no framework-drawn feedback.
+                DropFeedback::NoFeedback
+            })
+            .on_drag_leave(move |_ctx| {
+                leave_state.set(DropZoneVisualState::Idle);
+                leave_announce.set(String::new());
+            })
+            .on_drop(move |payload, _pos, ctx| {
+                let ok = payload_accepted(
+                    &payload,
+                    &drop_exts,
+                    allow_multiple,
+                    has_files_cb,
+                    has_text_cb,
+                    has_urls_cb,
+                );
+                state.set(DropZoneVisualState::Idle);
+                if !ok {
+                    announce.set("Item not accepted".to_string());
+                    return false;
+                }
+                let summary = describe(&payload);
+                if !payload.files().is_empty() {
+                    if let Some(cb) = &on_files {
+                        (cb.borrow_mut())(payload.files().to_vec(), ctx);
                     }
-                    // Visuals are state-driven; no framework-drawn feedback.
-                    DropFeedback::NoFeedback
-                })
-                .on_drag_leave(move |_ctx| {
-                    leave_state.set(DropZoneState::Idle);
-                    leave_announce.set(String::new());
-                })
-                .on_drop(move |payload, _pos, ctx| {
-                    let ok = payload_accepted(
-                        &payload,
-                        &drop_exts,
-                        allow_multiple,
-                        has_files_cb,
-                        has_text_cb,
-                        has_urls_cb,
-                    );
-                    state.set(DropZoneState::Idle);
-                    if !ok {
-                        announce.set("Item not accepted".to_string());
-                        return false;
+                } else if let Some(text) = payload.text() {
+                    if let Some(cb) = &on_text {
+                        (cb.borrow_mut())(text.to_string(), ctx);
                     }
-                    let summary = describe(&payload);
-                    if !payload.files().is_empty() {
-                        if let Some(cb) = &on_files {
-                            (cb.borrow_mut())(payload.files().to_vec(), ctx);
-                        }
-                    } else if let Some(text) = payload.text() {
-                        if let Some(cb) = &on_text {
-                            (cb.borrow_mut())(text.to_string(), ctx);
-                        }
-                    } else if !payload.uris().is_empty() {
-                        if let Some(cb) = &on_urls {
-                            (cb.borrow_mut())(payload.uris().to_vec(), ctx);
-                        }
+                } else if !payload.uris().is_empty() {
+                    if let Some(cb) = &on_urls {
+                        (cb.borrow_mut())(payload.uris().to_vec(), ctx);
                     }
-                    announce.set(format!("Added {summary}"));
-                    true
-                })
-                .access_role(Role::Group)
-                .access_label(self.label.clone()),
-        );
+                }
+                announce.set(format!("Added {summary}"));
+                true
+            });
+        ctx.apply_self_handlers(handlers);
 
-        self.root_child_id = Some(root);
+        self.root_child_id = Some(body);
         self.children()
     }
 
@@ -474,9 +460,10 @@ impl Widget for DropZone {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        // The container child carries the Group role + label via the
-        // access_* overrides; this composite shell is presentational.
-        builder.set_role(Role::GenericContainer);
+        // The composite node is the drop target and the labelled group; the
+        // Live status line lives inside the content column.
+        builder.set_role(Role::Group);
+        builder.set_name(self.label.clone());
     }
 
     fn children(&self) -> Vec<WidgetId> {
