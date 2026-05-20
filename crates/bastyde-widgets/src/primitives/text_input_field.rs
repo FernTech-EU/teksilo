@@ -706,18 +706,24 @@ impl Widget for TextInputField {
             );
         }
 
-        // Secure fields: revealing/masking swaps the AT role and value
-        // (PasswordInput ↔ TextInput under SwapRole), so bind the reveal
-        // signal at AccessibilityOnly to dirty this node's AT cache when
-        // it flips — otherwise a screen reader keeps the stale role.
+        // Secure fields: flipping the reveal toggle must repaint AND
+        // refresh AT. `RepaintOnly` dirties this node for the render
+        // walker so `paint()` runs and re-lays-out the masked/unmasked
+        // glyphs via the `needs_full_layout` flag the effect below sets
+        // — without it the flag is set but nothing calls `paint()`, so
+        // the visual only updates on the next unrelated repaint
+        // (hover / focus). This mirrors how `text_signal` is bound for
+        // edits. The parallel `AccessibilityOnly` bind swaps the AT
+        // role/value (PasswordInput ↔ TextInput under SwapRole); it lives
+        // in its own bucket and does not imply repaint, so both are
+        // required.
         if self.secure
             && let Some(revealed) = self.revealed.clone()
         {
-            revealed.bind_to(
-                ctx.self_id(),
-                ctx.binding_registry(),
-                bastyde_core::binding::BindingLevel::AccessibilityOnly,
-            );
+            let id = ctx.self_id();
+            let reg = ctx.binding_registry();
+            revealed.bind_to(id, reg, bastyde_core::binding::BindingLevel::RepaintOnly);
+            revealed.bind_to(id, reg, bastyde_core::binding::BindingLevel::AccessibilityOnly);
         }
 
         let text_signal = shared_state.borrow().text_signal.clone();
