@@ -35,7 +35,7 @@ use wayland_backend::client::ObjectId;
 use wayland_backend::sys::client::Backend;
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
 use wayland_client::protocol::wl_data_device::{Event as DataDeviceEvent, WlDataDevice};
-use wayland_client::protocol::wl_data_device_manager::WlDataDeviceManager;
+use wayland_client::protocol::wl_data_device_manager::{DndAction, WlDataDeviceManager};
 use wayland_client::protocol::wl_data_offer::{Event as DataOfferEvent, WlDataOffer};
 use wayland_client::protocol::wl_registry::WlRegistry;
 use wayland_client::protocol::wl_seat::WlSeat;
@@ -160,10 +160,15 @@ impl Dispatch<WlDataDevice, ()> for DndState {
                     return;
                 }
                 state.position = Point::new(x as f32, y as f32);
-                // Accept a MIME we can read so the compositor allows the drop.
+                // Accept a MIME we can read AND negotiate a drag action — both
+                // are required or the compositor shows the "forbidden" cursor
+                // and blocks the drop. `set_actions` is a v3+ request.
                 if let Some(offer) = &id {
                     if let Some(mime) = pick_mime(&state.offer_mimes) {
                         offer.accept(serial, Some(mime));
+                    }
+                    if offer.version() >= 3 {
+                        offer.set_actions(DndAction::Copy, DndAction::Copy);
                     }
                 }
                 // Bytes aren't available until drop; advertise the offered MIME
