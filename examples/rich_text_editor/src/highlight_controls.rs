@@ -14,7 +14,10 @@
 //! (`Rc`-based) `Signal`; it lives in an `Arc<RwLock<String>>` shared between
 //! this widget and the [`SearchHighlighter`].
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 
 use bastyde::core::widget::WidgetPlacement;
 use bastyde::prelude::*;
@@ -28,6 +31,27 @@ const MODE_OFF: usize = 0;
 const MODE_SEARCH: usize = 1;
 const MODE_SYNTAX: usize = 2;
 const MODE_SPELL: usize = 3;
+
+/// Quiet period after the last search keystroke before the (full-document)
+/// rehighlight + relayout runs. Collapses a typing burst into one pass.
+const SEARCH_DEBOUNCE: Duration = Duration::from_millis(120);
+
+/// Debounce check: `true` (and disarms) once `now` reaches the pending
+/// deadline. The deadline is a *latest-wins* instant — each keystroke
+/// overwrites it with `now + SEARCH_DEBOUNCE`, so the timer keeps sliding
+/// forward while typing continues and only elapses after a real pause. (An
+/// earlier version armed the shared `wake_at` cell, which merges keeping the
+/// *earliest* deadline; that can't slide forward, so it fired like a throttle
+/// — every ~debounce window mid-burst — instead of debouncing.)
+fn debounce_elapsed(due: &Cell<Option<Instant>>, now: Instant) -> bool {
+    match due.get() {
+        Some(deadline) if now >= deadline => {
+            due.set(None);
+            true
+        }
+        _ => false,
+    }
+}
 
 /// Highlighter toolbar row, bound to a shared [`TextDocument`].
 pub struct HighlightControls {
@@ -62,6 +86,9 @@ impl Widget for HighlightControls {
         // Sync` and can't touch the non-`Send` frame-request handle, so the
         // wake has to come from here: pump one frame after each change.
         let frame_req = ctx.frame_request_handle();
+        // Set to `now + SEARCH_DEBOUNCE` on each search keystroke; the
+        // frame-tick effect fires the deferred rehighlight once it elapses.
+        let search_due: Rc<Cell<Option<Instant>>> = Rc::new(Cell::new(None));
 
         // ── mode → install / clear the highlighter on the document ──
         {
@@ -69,7 +96,11 @@ impl Widget for HighlightControls {
             let query = query.clone();
             let shared_query = shared_query.clone();
             let frame_req = frame_req.clone();
+            let search_due = search_due.clone();
             ctx.effect(&mode, move |m| {
+                // A mode switch cancels any pending search debounce — the
+                // installed highlighter below already rehighlights.
+                search_due.set(None);
                 match *m {
                     MODE_SEARCH => {
                         *shared_query.write().unwrap() = query.get();
@@ -85,18 +116,48 @@ impl Widget for HighlightControls {
             });
         }
 
-        // ── query → push into shared cell + re-highlight (Search mode only) ──
+        // ── query → update shared cell immediately, debounce the rehighlight ──
+        // `rehighlight()` re-scans every block and forces a full relayout in
+        // both panes, so doing it per keystroke is wasteful on large docs.
+        // Record the latest query now (cheap) and arm a deadline; the tick
+        // effect runs the one expensive pass once typing pauses.
         {
-            let doc = self.doc.clone();
             let mode = mode.clone();
             let shared_query = shared_query.clone();
+            let search_due = search_due.clone();
             let frame_req = frame_req.clone();
             ctx.effect(&query, move |q| {
-                if mode.get() == MODE_SEARCH {
-                    *shared_query.write().unwrap() = q.clone();
-                    doc.rehighlight();
-                    frame_req.set(true);
+                if mode.get() != MODE_SEARCH {
+                    return;
                 }
+                *shared_query.write().unwrap() = q.clone();
+                // Latest-wins: slide the deadline forward on every keystroke.
+                search_due.set(Some(Instant::now() + SEARCH_DEBOUNCE));
+                frame_req.set(true); // start/continue the poll loop below
+            });
+        }
+
+        // ── frame tick → flush the debounced search rehighlight when due ──
+        // While a change is pending we re-arm a frame each tick so the timer
+        // keeps polling even after typing stops; once it elapses we run the one
+        // expensive rehighlight. The loop self-terminates the tick after typing
+        // pauses (search_due cleared -> no re-arm).
+        {
+            let doc = self.doc.clone();
+            let search_due = search_due.clone();
+            let frame_req = frame_req.clone();
+            let tick = ctx.frame_tick();
+            ctx.effect(&tick, move |_delta| {
+                if search_due.get().is_none() {
+                    return;
+                }
+                if debounce_elapsed(&search_due, Instant::now()) {
+                    doc.rehighlight();
+                }
+                // Re-arm regardless: either to drain+repaint after the
+                // rehighlight just queued, or to keep polling until the
+                // deadline elapses.
+                frame_req.set(true);
             });
         }
 
@@ -236,6 +297,28 @@ mod tests {
             requested_frame,
             "switching highlighter must request a frame so editors repaint immediately"
         );
+    }
+
+    #[test]
+    fn debounce_slides_forward_not_throttle() {
+        let t0 = Instant::now();
+        let due = Cell::new(None);
+        let ms = |n| t0 + Duration::from_millis(n);
+
+        // Keystroke 1 at t0 arms the deadline (t0 + 120ms).
+        due.set(Some(ms(0) + SEARCH_DEBOUNCE));
+        // 60ms in: inside the window, must not fire.
+        assert!(!debounce_elapsed(&due, ms(60)));
+        // Keystroke 2 at 60ms slides the deadline forward to 180ms.
+        due.set(Some(ms(60) + SEARCH_DEBOUNCE));
+        // At 130ms a 120ms *throttle* would have fired (120ms since KS1); a
+        // debounce must still be waiting (last keystroke was only 70ms ago).
+        assert!(!debounce_elapsed(&due, ms(130)));
+        // 120ms after the *last* keystroke (>=180ms): fire and disarm.
+        assert!(debounce_elapsed(&due, ms(181)));
+        assert!(due.get().is_none());
+        // Disarmed — no repeat fire.
+        assert!(!debounce_elapsed(&due, ms(500)));
     }
 
     #[test]
