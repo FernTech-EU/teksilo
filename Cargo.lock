@@ -4666,7 +4666,7 @@ dependencies = [
 
 [[package]]
 name = "text-document"
-version = "1.5.0"
+version = "1.5.4"
 dependencies = [
  "anyhow",
  "base64",
@@ -4680,7 +4680,7 @@ dependencies = [
 
 [[package]]
 name = "text-document-common"
-version = "1.5.0"
+version = "1.5.4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4699,7 +4699,7 @@ dependencies = [
 
 [[package]]
 name = "text-document-direct-access"
-version = "1.5.0"
+version = "1.5.4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4712,7 +4712,7 @@ dependencies = [
 
 [[package]]
 name = "text-document-editing"
-version = "1.5.0"
+version = "1.5.4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4725,7 +4725,7 @@ dependencies = [
 
 [[package]]
 name = "text-document-formatting"
-version = "1.5.0"
+version = "1.5.4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4738,7 +4738,7 @@ dependencies = [
 
 [[package]]
 name = "text-document-frontend"
-version = "1.5.0"
+version = "1.5.4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4755,7 +4755,7 @@ dependencies = [
 
 [[package]]
 name = "text-document-inspection"
-version = "1.5.0"
+version = "1.5.4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4768,7 +4768,7 @@ dependencies = [
 
 [[package]]
 name = "text-document-io"
-version = "1.5.0"
+version = "1.5.4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4783,7 +4783,7 @@ dependencies = [
 
 [[package]]
 name = "text-document-macros"
-version = "1.5.0"
+version = "1.5.4"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -4793,7 +4793,7 @@ dependencies = [
 
 [[package]]
 name = "text-document-search"
-version = "1.5.0"
+version = "1.5.4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4808,7 +4808,7 @@ dependencies = [
 
 [[package]]
 name = "text-typeset"
-version = "1.4.0"
+version = "1.4.4"
 dependencies = [
  "anyhow",
  "etagere",
@@ -4987,9 +4987,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "1.1.1+spec-1.1.0"
+version = "1.1.2+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "994b95d9e7bae62b34bab0e2a4510b801fa466066a6a8b2b57361fa1eba068ee"
+checksum = "81f3d15e84cbcd896376e6730314d59fb5a87f31e4b038454184435cd57defee"
 dependencies = [
  "indexmap",
  "serde_core",
@@ -5046,9 +5046,9 @@ dependencies = [
 
 [[package]]
 name = "toml_parser"
-version = "1.1.1+spec-1.1.0"
+version = "1.1.2+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39ca317ebc49f06bd748bfba29533eac9485569dc9bf80b849024b025e814fb9"
+checksum = "a2abe9b86193656635d2411dc43050282ca48aa31c2451210f4202550afb7526"
 dependencies = [
  "winnow 1.0.1",
 ]
@@ -5140,7 +5140,7 @@ dependencies = [
  "serde_json",
  "target-triple",
  "termcolor",
- "toml 1.1.1+spec-1.1.0",
+ "toml 1.1.2+spec-1.1.0",
 ]
 
 [[package]]
@@ -5644,9 +5644,9 @@ checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 
 [[package]]
 name = "wgpu"
-version = "29.0.1"
+version = "29.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72c239a9a747bbd379590985bac952c2e53cb19873f7072b3370c6a6a8e06837"
+checksum = "bb3feacc458f7bee8bc1737149b42b6c731aa461039a4264a67bb6681646b250"
 dependencies = [
  "arrayvec",
  "bitflags 2.11.0",

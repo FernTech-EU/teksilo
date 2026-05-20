@@ -1,0 +1,16 @@
+name: 'Install Linux system dependencies'
+description: 'Install the X11 / Wayland / keyboard libraries that winit, wgpu and arboard need to build on Linux'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install apt packages
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          pkg-config \
+          libxkbcommon-dev \
+          libwayland-dev \
+          libxcb1-dev \
+          libx11-dev

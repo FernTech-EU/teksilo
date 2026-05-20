@@ -18,7 +18,7 @@ Please be respectful and constructive in all interactions. We aim to maintain a 
 ### Suggesting Features
 
 - Open an issue describing the feature and its use case
-- Explain why this would be valuable for Qleany users
+- Explain why this would be valuable for Bastyde users
 - Be open to discussion about alternative approaches
 
 ### Submitting Code

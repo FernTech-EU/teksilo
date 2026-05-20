@@ -1,3 +1,7 @@
+![CI](https://img.shields.io/github/actions/workflow/status/jacquetc/fern-ui/ci.yml?branch=main&style=flat-square&label=CI)
+![audit](https://img.shields.io/github/actions/workflow/status/jacquetc/fern-ui/audit.yml?branch=main&style=flat-square&label=audit)
+[![license](https://img.shields.io/badge/license-MPL--2.0-blue?style=flat-square)](#license)
+
 # Bastyde
 
 A pure-Rust, batteries-included GUI framework for desktop applications. Accessibility, internationalization, rich text, themes, persistent settings, drag-and-drop, charts, and a scene canvas all ship as first-class citizens.

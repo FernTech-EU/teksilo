@@ -1,0 +1,11 @@
+files.extend-exclude = [
+  "CHANGELOG.md",
+  "Cargo.lock",
+  "tests",
+]
+[default.extend-words]
+# Project / domain vocabulary
+bati = "bati"
+Bati = "Bati"
+bastyde = "bastyde"
+Bastyde = "Bastyde"

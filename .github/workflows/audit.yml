@@ -1,0 +1,21 @@
+name: Security Audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+  schedule:
+    - cron: "0 0 * * *" # Daily
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Strip path dependencies
+        uses: ./.github/actions/strip-path-deps
+      - uses: taiki-e/install-action@cargo-audit
+      - run: cargo audit
