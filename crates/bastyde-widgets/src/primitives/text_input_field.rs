@@ -99,6 +99,38 @@ const SCROLL_MARGIN: f32 = 4.0;
 /// added to a tree without its composite still looks right.
 const DEFAULT_TEXT_HEIGHT: f32 = 20.0;
 
+/// How a secure ([`TextInputField::secure`]) field echoes typed
+/// characters. Mirrors Qt's `QLineEdit::EchoMode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EchoMode {
+    /// Replace every character with the echo glyph (default `'•'`).
+    /// The plaintext stays in the bound `Signal<String>` but never
+    /// reaches the text engine while masked.
+    #[default]
+    Masked,
+    /// Show nothing at all — not even the length. The caret stays at
+    /// the start. Qt's `NoEcho`.
+    NoEcho,
+    /// Show plaintext while the field is focused (being edited) and
+    /// re-mask on blur. Qt's `PasswordEchoOnEdit`.
+    RevealWhileTyping,
+}
+
+/// How a *revealed* secure field reports to assistive technology.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AtRevealPolicy {
+    /// When revealed, expose the field as a normal `Role::TextInput`
+    /// carrying the plaintext value — matching what is visibly on
+    /// screen and the web `type=password ↔ type=text` swap. When
+    /// masked, it reverts to `Role::PasswordInput`. (Default.)
+    #[default]
+    SwapRole,
+    /// Always report `Role::PasswordInput` and never expose plaintext
+    /// to assistive tech, even while visually revealed. Higher
+    /// confidentiality at the cost of consistency with the screen.
+    AlwaysProtected,
+}
+
 /// Editable single-line text surface primitive.
 ///
 /// See the [module docs](self) for the full feature list and a
@@ -141,6 +173,14 @@ pub struct TextInputField {
     /// Published feedback signal. Composites bind to this to render
     /// the inline validation strip below the field.
     feedback: Signal<ValidationFeedback>,
+
+    // ── Secure / password masking (set via `secure`) ────────────────
+    secure: bool,
+    echo_mode: EchoMode,
+    echo_char: char,
+    revealed: Option<Signal<bool>>,
+    at_reveal_policy: AtRevealPolicy,
+    allow_copy: bool,
 
     // ── Internal (set during build) ─────────────────────────────────
     state: Option<SharedState>,
@@ -203,6 +243,12 @@ impl TextInputField {
             mask_placeholder_override: None,
             validator: None,
             feedback: Signal::new(ValidationFeedback::Pristine),
+            secure: false,
+            echo_mode: EchoMode::Masked,
+            echo_char: '\u{2022}',
+            revealed: None,
+            at_reveal_policy: AtRevealPolicy::SwapRole,
+            allow_copy: true,
             state: None,
             interaction: Signal::new(InteractionState::Idle),
             caret_position: Signal::new(0),
@@ -360,6 +406,53 @@ impl TextInputField {
     /// produces caret-jump bugs and is explicitly out of scope.
     pub fn validator(mut self, f: impl Fn(&str) -> ValidationOutcome + 'static) -> Self {
         self.validator = Some(Rc::new(f));
+        self
+    }
+
+    /// Turn this into a secure (password) field with the given
+    /// [`EchoMode`]. Masking happens at the text-engine layer (one echo
+    /// glyph per source `char`), so the plaintext never reaches the
+    /// shaper or glyph atlas while masked, and caret / selection /
+    /// hit-test stay correct. Also defaults `allow_copy` to `false` and
+    /// opts the focused node out of OS IME composition. Pair with
+    /// [`bind_revealed`](Self::bind_revealed) for a reveal toggle.
+    pub fn secure(mut self, echo_mode: EchoMode) -> Self {
+        self.secure = true;
+        self.echo_mode = echo_mode;
+        self.allow_copy = false;
+        self
+    }
+
+    /// Override the masking glyph (default `'•'`, U+2022). Any
+    /// uniform-width character works; the engine emits exactly one per
+    /// source `char`.
+    pub fn echo_char(mut self, c: char) -> Self {
+        self.echo_char = c;
+        self
+    }
+
+    /// Bind the reveal toggle. When the signal is `true` the field
+    /// shows plaintext regardless of [`EchoMode`]; when `false` it
+    /// masks. Shared with the eye [`IconButton::visibility_toggle`].
+    ///
+    /// [`IconButton::visibility_toggle`]: crate::IconButton::visibility_toggle
+    pub fn bind_revealed(mut self, revealed: Signal<bool>) -> Self {
+        self.revealed = Some(revealed);
+        self
+    }
+
+    /// How a *revealed* secure field reports to assistive tech. Default
+    /// [`AtRevealPolicy::SwapRole`].
+    pub fn at_reveal_policy(mut self, policy: AtRevealPolicy) -> Self {
+        self.at_reveal_policy = policy;
+        self
+    }
+
+    /// Permit (or forbid) copy / cut. Plain fields default `true`;
+    /// [`secure`](Self::secure) flips the default to `false`. Even when
+    /// `false`, copy is allowed while the field is revealed.
+    pub fn allow_copy(mut self, allow: bool) -> Self {
+        self.allow_copy = allow;
         self
     }
 
@@ -559,6 +652,12 @@ impl Widget for TextInputField {
             char_filter: self.char_filter.take(),
             placeholder: self.placeholder.clone(),
             suffix: initial_suffix,
+            secure: self.secure,
+            echo_mode: self.echo_mode,
+            echo_char: self.echo_char,
+            revealed: self.revealed.clone(),
+            at_reveal_policy: self.at_reveal_policy,
+            allow_copy: self.allow_copy,
         });
         self.state = Some(shared_state.clone());
         // Late-populate the slot so `caret_setter()` closures captured
@@ -607,6 +706,20 @@ impl Widget for TextInputField {
             );
         }
 
+        // Secure fields: revealing/masking swaps the AT role and value
+        // (PasswordInput ↔ TextInput under SwapRole), so bind the reveal
+        // signal at AccessibilityOnly to dirty this node's AT cache when
+        // it flips — otherwise a screen reader keeps the stale role.
+        if self.secure
+            && let Some(revealed) = self.revealed.clone()
+        {
+            revealed.bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                bastyde_core::binding::BindingLevel::AccessibilityOnly,
+            );
+        }
+
         let text_signal = shared_state.borrow().text_signal.clone();
 
         // Sync external text signal → internal state. A programmatic
@@ -649,6 +762,22 @@ impl Widget for TextInputField {
             ctx.effect(&text_signal, move |new_text| {
                 if ext.get() != *new_text {
                     ext.set(new_text.clone());
+                }
+            });
+        }
+
+        // Secure reveal toggle: flipping the bound `revealed` signal
+        // swaps the laid-out glyphs wholesale (bullets ↔ plaintext), so
+        // mark the layout dirty and ping the frame loop to re-lay-out.
+        if self.secure
+            && let Some(revealed) = self.revealed.clone()
+        {
+            let state_for_reveal = shared_state.clone();
+            ctx.effect(&revealed, move |_| {
+                let mut st = state_for_reveal.borrow_mut();
+                st.needs_full_layout = true;
+                if let Some(handle) = &st.frame_request {
+                    handle.set(true);
                 }
             });
         }
@@ -878,6 +1007,11 @@ impl Widget for TextInputField {
         let handlers = HandlerSet::new()
             .focusable(true)
             .cursor(CursorIcon::Text)
+            // Secure fields opt the focused node out of OS IME
+            // composition so the preedit / candidate window can't
+            // surface plaintext. Read by the platform IME layer at
+            // focus-change time (default `true` for plain fields).
+            .ime_allowed(!self.secure)
             .on_hover(move |entered, _ctx| {
                 hovered_for_hover.set(entered);
             })
@@ -890,6 +1024,11 @@ impl Widget for TextInputField {
 
                 let mut st = state_for_focus.borrow_mut();
                 st.has_focus = gained;
+                // RevealWhileTyping shows plaintext while focused and
+                // re-masks on blur — both transitions need a relayout.
+                if st.secure && st.echo_mode == EchoMode::RevealWhileTyping {
+                    st.needs_full_layout = true;
+                }
                 let mut blur_callback: Option<Rc<CommandFactory>> = None;
                 if gained {
                     st.blink_last_toggle = Some(std::time::Instant::now());
@@ -1008,18 +1147,27 @@ impl Widget for TextInputField {
         st.engine.set_viewport(10_000.0, bounds.height);
 
         if st.needs_full_layout || !st.engine.has_full_layout() {
-            let flow = st.document.snapshot_flow();
-            st.engine.layout_full(&flow);
+            st.layout_full_masked();
             st.needs_full_layout = false;
             st.content_dirty = true;
         }
 
         let caret_on = st.caret_visible.get() && st.has_focus;
+        // `NoEcho` while masked lays out an *empty* source, so the real
+        // document cursor (which may sit past 0) must not be handed to
+        // the engine — pin the displayed caret/selection to the start.
+        // The real `cursor` still tracks the true position for editing.
+        let hide_all = st.echo_mode == EchoMode::NoEcho && st.should_mask();
+        let (disp_pos, disp_anchor) = if hide_all {
+            (0, 0)
+        } else {
+            (st.cursor.position(), st.cursor.anchor())
+        };
         // Single-line input has no wrap → affinity is moot; the
         // default Downstream matches pre-affinity behavior.
         let cursor_display = CursorDisplay {
-            position: st.cursor.position(),
-            anchor: st.cursor.anchor(),
+            position: disp_pos,
+            anchor: disp_anchor,
             affinity: CursorAffinity::Downstream,
             visible: caret_on,
             selected_cells: Vec::new(),
@@ -1084,11 +1232,55 @@ impl Widget for TextInputField {
         };
         let st = state.borrow();
 
-        builder.set_role(Role::TextInput);
-
         let text = st.document.to_plain_text().unwrap_or_default();
-        if !text.is_empty() {
-            builder.set_value(&text);
+
+        // AT-protection tracks the *explicit* reveal toggle only — not
+        // the visual `RevealWhileTyping` focus-reveal (a sighted-only
+        // convenience that a screen reader shouldn't surface as
+        // plaintext, and that has no AT-dirty trigger on focus). The
+        // reveal signal is bound at AccessibilityOnly in `build`, so the
+        // role/value swap reaches AT when it flips. `Role::PasswordInput`
+        // is the sole mechanism telling AT not to speak the value —
+        // accesskit has no separate `protected` flag.
+        let explicitly_revealed = st.revealed.as_ref().is_some_and(|s| s.get());
+        let protected = st.secure
+            && match st.at_reveal_policy {
+                AtRevealPolicy::AlwaysProtected => true,
+                AtRevealPolicy::SwapRole => !explicitly_revealed,
+            };
+
+        if protected {
+            builder.set_role(Role::PasswordInput);
+            // Expose a bullet string of the right length (NoEcho hides
+            // even that) so AT can announce the character count, never
+            // the secret. Deliberately omit character lengths, word
+            // starts, and the text selection: the caret model stays
+            // opaque so no structure about the secret leaks.
+            if st.echo_mode != EchoMode::NoEcho {
+                let count = text.chars().count();
+                if count > 0 {
+                    builder.set_value(st.echo_char.to_string().repeat(count));
+                }
+            }
+        } else {
+            // Plain field, or a revealed field under `SwapRole`: report
+            // as a normal text input exposing the real value, mirroring
+            // the web `type=password ↔ type=text` swap.
+            builder.set_role(Role::TextInput);
+            if !text.is_empty() {
+                builder.set_value(&text);
+            }
+            let pos = st.cursor.position();
+            let anchor = st.cursor.anchor();
+            builder.set_text_selection_on_self(anchor, pos);
+
+            let char_lengths: Vec<u8> = text.chars().map(|c| c.len_utf8() as u8).collect();
+            builder.inner_mut().set_character_lengths(char_lengths);
+
+            let word_starts = compute_word_starts(&text);
+            if !word_starts.is_empty() {
+                builder.inner_mut().set_word_starts(word_starts);
+            }
         }
 
         if !st.placeholder.is_empty() {
@@ -1099,24 +1291,15 @@ impl Widget for TextInputField {
             builder.set_read_only();
         }
 
-        let pos = st.cursor.position();
-        let anchor = st.cursor.anchor();
-        builder.set_text_selection_on_self(anchor, pos);
-
-        let char_lengths: Vec<u8> = text.chars().map(|c| c.len_utf8() as u8).collect();
-        builder.inner_mut().set_character_lengths(char_lengths);
-
-        let word_starts = compute_word_starts(&text);
-        if !word_starts.is_empty() {
-            builder.inner_mut().set_word_starts(word_starts);
-        }
-
         builder.add_action(Action::Focus);
         if !st.read_only {
             builder.add_action(Action::SetValue);
             builder.add_action(Action::ReplaceSelectedText);
         }
-        builder.add_action(Action::SetTextSelection);
+        // Only meaningful when the caret model is exposed to AT.
+        if !protected {
+            builder.add_action(Action::SetTextSelection);
+        }
 
         // Validation feedback → accesskit `aria-invalid`. Surface
         // `Invalid` as `Invalid::True`; `Corrected` doesn't carry an
@@ -1257,8 +1440,7 @@ fn tick(state: &mut TextInputState, delta: f32) -> bool {
     }
 
     if state.needs_full_layout && state.viewport_width > 0.0 {
-        let flow = state.document.snapshot_flow();
-        state.engine.layout_full(&flow);
+        state.layout_full_masked();
         state.needs_full_layout = false;
         state.content_dirty = true;
     }
@@ -1360,6 +1542,9 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
     let st = state.borrow();
     let has_selection = st.cursor.has_selection();
     let doc_non_empty = !st.document.to_plain_text().unwrap_or_default().is_empty();
+    // Secure fields suppress Cut / Copy while masked (still allowed when
+    // revealed or when the developer opted in via `allow_copy`).
+    let copy_allowed = st.copy_allowed();
     drop(st);
 
     let state_cut = state.clone();
@@ -1372,7 +1557,7 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
             .item(
                 MenuItem::new_literal("Cut")
                     .shortcut_label("Ctrl+X")
-                    .enabled(has_selection)
+                    .enabled(has_selection && copy_allowed)
                     .on_activate_fn(move |ctx| {
                         {
                             let mut st = state_cut.borrow_mut();
@@ -1385,7 +1570,7 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
             .item(
                 MenuItem::new_literal("Copy")
                     .shortcut_label("Ctrl+C")
-                    .enabled(has_selection)
+                    .enabled(has_selection && copy_allowed)
                     .on_activate_fn(move |ctx| {
                         let mut st = state_copy.borrow_mut();
                         keyboard::clipboard_copy(&mut st, ctx);

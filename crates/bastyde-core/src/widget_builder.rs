@@ -284,6 +284,12 @@ pub struct HandlerSet {
     pub(crate) tab_index: Option<i32>,
     pub(crate) cursor: Option<CursorIcon>,
     pub(crate) clips_children: Option<bool>,
+    /// When `Some(false)`, the widget opts out of OS input-method (IME)
+    /// composition while focused — used by secure / password fields so
+    /// the OS preedit / candidate window can't surface plaintext. The
+    /// platform IME wiring reads the focused node's `ime_allowed` flag
+    /// at focus-change time. `None` inherits the default (`true`).
+    pub(crate) ime_allowed: Option<bool>,
     /// When `Some(true)`, the widget node is invisible to pointer
     /// hit-testing — events fall through to whatever sits behind it.
     /// Used by the debug inspector's overlay widgets.
@@ -319,6 +325,7 @@ impl HandlerSet {
             tab_index: None,
             cursor: None,
             clips_children: None,
+            ime_allowed: None,
             event_pass_through: None,
             context_menu_factory: None,
             focus_within: None,
@@ -529,6 +536,16 @@ impl HandlerSet {
     /// Set the clips_children flag.
     pub fn clips_children(mut self, clips: bool) -> Self {
         self.clips_children = Some(clips);
+        self
+    }
+
+    /// Opt this node in or out of OS input-method (IME) composition
+    /// while it is focused. Defaults to `true` (IME allowed). Secure /
+    /// password fields set `false` so the OS preedit / candidate window
+    /// cannot surface plaintext. The platform IME layer reads the
+    /// focused node's flag at focus-change time.
+    pub fn ime_allowed(mut self, allowed: bool) -> Self {
+        self.ime_allowed = Some(allowed);
         self
     }
 
@@ -831,6 +848,13 @@ impl<W: Widget> WidgetWithHandlers<W> {
 
     pub fn clips_children(mut self, clips: bool) -> Self {
         self.handler_set.clips_children = Some(clips);
+        self
+    }
+
+    /// Opt this node in or out of OS IME composition while focused. See
+    /// [`HandlerSet::ime_allowed`].
+    pub fn ime_allowed(mut self, allowed: bool) -> Self {
+        self.handler_set.ime_allowed = Some(allowed);
         self
     }
 
@@ -1396,6 +1420,12 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
 
     fn clips_children_on(self, clips: bool) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).clips_children(clips)
+    }
+
+    /// Opt this node in or out of OS IME composition while focused. See
+    /// [`HandlerSet::ime_allowed`].
+    fn ime_allowed(self, allowed: bool) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).ime_allowed(allowed)
     }
 
     /// Make the widget invisible to pointer hit-testing. See

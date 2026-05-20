@@ -89,6 +89,12 @@ pub struct WidgetNode {
     /// When true, the paint pass clips child rendering to this widget's bounds.
     /// Set by scroll areas and overflow-hidden containers.
     pub clips_children: bool,
+    /// When `false`, this node opts out of OS input-method (IME)
+    /// composition while focused — secure / password fields set this so
+    /// the OS preedit / candidate window can't surface plaintext. The
+    /// platform IME wiring reads the focused node's flag at focus-change
+    /// time. Defaults to `true` (IME allowed).
+    pub ime_allowed: bool,
     /// When true, hit-testing skips this node — pointer events fall
     /// through to whatever sits behind it. Descendants are still
     /// hit-tested normally (the recursion walks into children before
@@ -270,6 +276,7 @@ impl WidgetArena {
             hover_within_signal: None,
             alignment_override: None,
             clips_children: false,
+            ime_allowed: true,
             event_pass_through: false,
             opacity_prop: None,
             transform_prop: None,
@@ -328,6 +335,7 @@ impl WidgetArena {
             hover_within_signal: None,
             alignment_override: None,
             clips_children: false,
+            ime_allowed: true,
             event_pass_through: false,
             opacity_prop: None,
             transform_prop: None,
@@ -769,6 +777,23 @@ impl WidgetArena {
         }
     }
 
+    /// Whether the widget at `id` permits OS IME composition while
+    /// focused. Defaults to `true` for unknown ids. The platform IME
+    /// layer queries this for the focused widget to decide whether to
+    /// enable the OS input method — secure / password fields return
+    /// `false`.
+    pub fn ime_allowed(&self, id: WidgetId) -> bool {
+        self.get(id).map(|n| n.ime_allowed).unwrap_or(true)
+    }
+
+    /// Set whether the widget at `id` permits OS IME composition while
+    /// focused.
+    pub fn set_ime_allowed(&mut self, id: WidgetId, allowed: bool) {
+        if let Some(node) = self.get_mut(id) {
+            node.ime_allowed = allowed;
+        }
+    }
+
     /// Apply a `HandlerSet` to an existing node, merging handlers and
     /// transferring node-level metadata (focusable, cursor, clips,
     /// context menu). The `scope` argument controls whether the
@@ -798,6 +823,9 @@ impl WidgetArena {
             }
             if let Some(clips) = handler_set.clips_children {
                 node.clips_children = clips;
+            }
+            if let Some(allowed) = handler_set.ime_allowed {
+                node.ime_allowed = allowed;
             }
             if let Some(pass_through) = handler_set.event_pass_through {
                 node.event_pass_through = pass_through;

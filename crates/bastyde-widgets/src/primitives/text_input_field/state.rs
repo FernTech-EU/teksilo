@@ -17,6 +17,7 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_text::text_document::{DocumentEvent, Subscription, TextCursor, TextDocument};
 use bastyde_text::{RichTextEngine, WrapMode};
 
+use super::{AtRevealPolicy, EchoMode};
 use crate::rich_text::image_cache::ImageCache;
 
 /// Type-erased action closure, identical to the one in `button.rs`.
@@ -122,6 +123,31 @@ pub(crate) struct TextInputState {
     /// suffix paint origin.
     pub suffix_width: f32,
 
+    // ── Secure / password masking ───────────────────────────────────
+    /// When `true`, this is a secure (password) field: glyphs are
+    /// masked per `echo_mode` unless currently revealed.
+    pub secure: bool,
+    /// How a secure field echoes characters. Ignored when `secure` is
+    /// `false`.
+    pub echo_mode: EchoMode,
+    /// Replacement glyph for `Masked` / `RevealWhileTyping` modes
+    /// (default `'•'`). Applied at the engine layer so plaintext never
+    /// reaches the shaper or glyph atlas while masked.
+    pub echo_char: char,
+    /// External reveal toggle, shared with the eye button. `Some(true)`
+    /// shows plaintext regardless of `echo_mode`; `None` is a secure
+    /// field with no reveal affordance.
+    pub revealed: Option<Signal<bool>>,
+    /// How a revealed secure field reports to assistive technology.
+    pub at_reveal_policy: AtRevealPolicy,
+    /// Whether copy / cut are permitted. Plain fields default `true`;
+    /// secure fields default `false` (still copyable when revealed).
+    pub allow_copy: bool,
+    /// Empty document used as the layout source for `NoEcho` masking so
+    /// nothing — not even length — is shown. The real `document` stays
+    /// the source of truth for editing.
+    pub empty_doc: TextDocument,
+
     /// The field widget's own id, used as anchor for overlays (e.g.
     /// the autocomplete popup) and for downstream tests that snapshot
     /// AT trees keyed by widget id.
@@ -142,6 +168,12 @@ pub(crate) struct TextInputConfig {
     pub char_filter: Option<CharFilter>,
     pub placeholder: String,
     pub suffix: String,
+    pub secure: bool,
+    pub echo_mode: EchoMode,
+    pub echo_char: char,
+    pub revealed: Option<Signal<bool>>,
+    pub at_reveal_policy: AtRevealPolicy,
+    pub allow_copy: bool,
 }
 
 impl TextInputState {
@@ -155,6 +187,12 @@ impl TextInputState {
             char_filter,
             placeholder,
             suffix,
+            secure,
+            echo_mode,
+            echo_char,
+            revealed,
+            at_reveal_policy,
+            allow_copy,
         } = config;
         let document = TextDocument::new();
         if !initial_text.is_empty() {
@@ -214,6 +252,13 @@ impl TextInputState {
             char_filter,
             placeholder,
             suffix,
+            secure,
+            echo_mode,
+            echo_char,
+            revealed,
+            at_reveal_policy,
+            allow_copy,
+            empty_doc: TextDocument::new(),
             suffix_engine: None,
             suffix_width: 0.0,
             field_widget_id: None,
@@ -225,6 +270,57 @@ impl TextInputState {
     /// can write `if !st.char_filter_admits(c) { skip }`.
     pub fn char_filter_admits(&self, c: char) -> bool {
         self.char_filter.as_ref().is_none_or(|f| f(c))
+    }
+
+    // ── Secure-field masking ────────────────────────────────────────
+
+    /// Whether plaintext is currently shown despite `secure` — the
+    /// reveal toggle is on, or `RevealWhileTyping` is active and the
+    /// field is focused. Always `true` for non-secure fields.
+    pub fn reveal_active(&self) -> bool {
+        if !self.secure {
+            return true;
+        }
+        let toggled = self.revealed.as_ref().is_some_and(|s| s.get());
+        toggled || (self.echo_mode == EchoMode::RevealWhileTyping && self.has_focus)
+    }
+
+    /// Whether the displayed glyphs should be masked right now.
+    pub fn should_mask(&self) -> bool {
+        self.secure && !self.reveal_active()
+    }
+
+    /// Whether copy / cut of the field's text is currently permitted.
+    /// Plain fields always allow it; secure fields allow it only when
+    /// the developer opted in (`allow_copy`) or the text is currently
+    /// revealed.
+    pub fn copy_allowed(&self) -> bool {
+        !self.secure || self.allow_copy || self.reveal_active()
+    }
+
+    /// Run a full layout, applying secure masking. Installs the echo
+    /// char on the engine (or clears it), and for `NoEcho` while masked
+    /// lays out an empty source so nothing — not even length — is
+    /// shown. The real `document` is never mutated: masking is
+    /// display-only, so caret / selection / hit-test (all char-indexed)
+    /// stay aligned because one echo char is emitted per source char.
+    pub fn layout_full_masked(&mut self) {
+        let masked = self.should_mask();
+        let echo = if masked && self.echo_mode != EchoMode::NoEcho {
+            Some(self.echo_char)
+        } else {
+            None
+        };
+        if self.engine.echo_char() != echo {
+            self.engine.set_echo_char(echo);
+        }
+        if masked && self.echo_mode == EchoMode::NoEcho {
+            let flow = self.empty_doc.snapshot_flow();
+            self.engine.layout_full(&flow);
+        } else {
+            let flow = self.document.snapshot_flow();
+            self.engine.layout_full(&flow);
+        }
     }
 
     /// Drain the local event queue. Returns `true` if any events
@@ -289,4 +385,78 @@ pub(crate) fn sync_cursor_signals(state: &SharedState) {
     let mut st = state.borrow_mut();
     st.blink_last_toggle = Some(std::time::Instant::now());
     st.caret_visible.set(true);
+}
+
+#[cfg(test)]
+mod secure_tests {
+    use super::*;
+
+    fn cfg(
+        secure: bool,
+        echo_mode: EchoMode,
+        revealed: Option<Signal<bool>>,
+        allow_copy: bool,
+    ) -> TextInputConfig {
+        TextInputConfig {
+            initial_text: "abc".to_string(),
+            max_length: None,
+            read_only: false,
+            on_submit: None,
+            on_blur: None,
+            char_filter: None,
+            placeholder: String::new(),
+            suffix: String::new(),
+            secure,
+            echo_mode,
+            echo_char: '\u{2022}',
+            revealed,
+            at_reveal_policy: AtRevealPolicy::SwapRole,
+            allow_copy,
+        }
+    }
+
+    #[test]
+    fn plain_field_never_masks_and_allows_copy() {
+        let st = TextInputState::new(cfg(false, EchoMode::Masked, None, true));
+        let st = st.borrow();
+        assert!(!st.should_mask());
+        assert!(st.reveal_active());
+        assert!(st.copy_allowed());
+    }
+
+    #[test]
+    fn masked_secure_field_masks_and_blocks_copy() {
+        let st = TextInputState::new(cfg(true, EchoMode::Masked, None, false));
+        let st = st.borrow();
+        assert!(st.should_mask());
+        assert!(!st.reveal_active());
+        assert!(!st.copy_allowed(), "masked secure field must block copy");
+    }
+
+    #[test]
+    fn revealed_secure_field_unmasks_and_allows_copy() {
+        let revealed = Signal::new(true);
+        let st = TextInputState::new(cfg(true, EchoMode::Masked, Some(revealed), false));
+        let st = st.borrow();
+        assert!(!st.should_mask());
+        assert!(st.copy_allowed(), "copy allowed once revealed");
+    }
+
+    #[test]
+    fn allow_copy_opt_in_permits_copy_while_masked() {
+        let st = TextInputState::new(cfg(true, EchoMode::Masked, None, true));
+        let st = st.borrow();
+        assert!(st.should_mask(), "still visually masked");
+        assert!(st.copy_allowed(), "developer opted into copy");
+    }
+
+    #[test]
+    fn reveal_while_typing_unmasks_only_when_focused() {
+        let st = TextInputState::new(cfg(true, EchoMode::RevealWhileTyping, None, false));
+        assert!(st.borrow().should_mask(), "masked when unfocused");
+        st.borrow_mut().has_focus = true;
+        let s = st.borrow();
+        assert!(!s.should_mask(), "revealed while focused");
+        assert!(s.copy_allowed(), "copy allowed while revealed by typing");
+    }
 }

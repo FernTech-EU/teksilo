@@ -59,6 +59,13 @@ pub(crate) struct ManagedWindow {
     /// to decide whether the widget tree's animation scheduler should
     /// run: `active = focused && !occluded`.
     pub occluded: bool,
+    /// Caps Lock active state, toggled on each `Key::CapsLock` press
+    /// (winit 0.30 delivers Caps Lock as a discrete key, not via
+    /// `ModifiersState`). Pushed to `state.caps_lock` so password fields
+    /// can warn. Starts `false`; the OS lock state at launch is not
+    /// observable on winit 0.30, so it can desync if Caps Lock was
+    /// already on before the app gained focus.
+    pub caps_lock_active: bool,
     /// RAII handles for the auto-save observers wired to
     /// `state.{size, position, placement}` when a
     /// `WindowStateService` is registered. Dropped when the window
@@ -603,6 +610,7 @@ impl WindowManager {
             title_bar_host,
             focused: true,
             occluded: false,
+            caps_lock_active: false,
             _persist_handles: persist_handles,
         };
 

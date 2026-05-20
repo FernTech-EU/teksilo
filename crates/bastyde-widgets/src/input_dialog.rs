@@ -86,7 +86,14 @@ impl InputDialog {
     }
 
     /// Placeholder shown when the field is empty.
-    pub fn placeholder(mut self, text: impl Into<String>) -> Self {
+    pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+        let ls: bastyde_i18n::LocalizedString = text.into();
+        self.placeholder = Some(ls.resolve_now());
+        self
+    }
+
+    /// Untranslated [`placeholder`](Self::placeholder).
+    pub fn placeholder_literal(mut self, text: impl Into<String>) -> Self {
         self.placeholder = Some(text.into());
         self
     }

@@ -150,6 +150,7 @@ All gated behind the `rich-text` feature; on by default in `bastyde`.
 - [RichTextEditor](../crates/bastyde-widgets/src/rich_text.rs) — full editing surface with IME, formatting commands, undo/redo, intrinsic-mode sizing (`min_lines` / `max_lines`); also runs read-only as the rich-text viewer (`ScrollPolicy`).
 - [SpinBox](../crates/bastyde-widgets/src/spin_box.rs) — numeric input with `WrapMode`, `StepType`, `ButtonLayout`, `WheelMode`, `WidthPolicy`.
 - [SearchField](../crates/bastyde-widgets/src/search_field.rs) — TextInput preset with leading magnifier glyph and clear-X; `Role::SearchInput`.
+- [PasswordField](../crates/bastyde-widgets/src/password_field.rs) — secure entry with an embedded reveal toggle, character masking, Caps Lock warning, and clipboard protection. `EchoMode` (Masked / NoEcho / RevealWhileTyping), `RevealMode` (Toggle / Hold / None), `AtRevealPolicy` (SwapRole / AlwaysProtected). Masks at the text-engine layer (`Role::PasswordInput`; plaintext never reaches the shaper, glyph atlas, or AT value while masked). Demo: `cargo run -p password-field`.
 - [FilePickerField](../crates/bastyde-widgets/src/file_picker_field.rs) — TextInput + Browse button wired to the native file dialog; `FilePickerKind::OpenFile / PickFolder / SaveFile`.
 - [InputDialog](../crates/bastyde-widgets/src/input_dialog.rs) — single-field input modal: title + prompt + TextInput + Cancel/OK; `on_result` delivers `Some(value)` / `None`.
 

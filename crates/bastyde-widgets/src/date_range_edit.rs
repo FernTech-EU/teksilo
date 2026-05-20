@@ -206,8 +206,15 @@ impl DateRangeEdit {
         self
     }
 
-    pub fn label(mut self, text: impl Into<String>) -> Self {
-        self.label = Some(text.into());
+    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+        let ls: bastyde_i18n::LocalizedString = label.into();
+        self.label = Some(ls.resolve_now());
+        self
+    }
+
+    /// Untranslated [`label`](Self::label).
+    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
         self
     }
 

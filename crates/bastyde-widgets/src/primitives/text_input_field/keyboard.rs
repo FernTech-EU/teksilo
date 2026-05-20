@@ -282,6 +282,11 @@ fn push_pending_chars(state: &SharedState, ctx: &mut EventContext, text: &str) -
 // ── Plain-text clipboard helpers ────────────────────────────────────
 
 pub(crate) fn clipboard_copy(state: &mut TextInputState, ctx: &EventContext) {
+    // Secure fields suppress copy while masked — the plaintext must not
+    // reach the system clipboard. Allowed when revealed or opted in.
+    if !state.copy_allowed() {
+        return;
+    }
     if !state.cursor.has_selection() {
         return;
     }
@@ -292,6 +297,11 @@ pub(crate) fn clipboard_copy(state: &mut TextInputState, ctx: &EventContext) {
 }
 
 pub(crate) fn clipboard_cut(state: &mut TextInputState, ctx: &EventContext) {
+    // Block the whole cut (not just the copy half) on a masked secure
+    // field, so the delete doesn't happen without the clipboard write.
+    if !state.copy_allowed() {
+        return;
+    }
     if !state.cursor.has_selection() {
         return;
     }

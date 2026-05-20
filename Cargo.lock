@@ -3442,6 +3442,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "password-field"
+version = "0.2.0"
+dependencies = [
+ "bastyde",
+]
+
+[[package]]
 name = "pathdiff"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

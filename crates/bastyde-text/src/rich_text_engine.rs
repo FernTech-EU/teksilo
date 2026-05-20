@@ -184,6 +184,27 @@ impl RichTextEngine {
         self.flow.set_code_block_foreground(color);
     }
 
+    /// Set the echo / masking character for secure (password) fields.
+    ///
+    /// When `Some(c)`, every character is replaced with `c` before
+    /// shaping on the next `layout_full` / `relayout_block_snapshot` —
+    /// the real text never reaches the shaper or the glyph atlas, only
+    /// the echo character does. `None` (default) renders verbatim. One
+    /// echo char is emitted per source `char`, so caret / selection /
+    /// hit-test (all char-indexed) stay aligned with the host document.
+    ///
+    /// After flipping the masking state the caller should force a full
+    /// relayout (the engine reports `has_full_layout()` independently of
+    /// the echo char), since the laid-out glyphs change wholesale.
+    pub fn set_echo_char(&mut self, echo: Option<char>) {
+        self.flow.set_echo_char(echo);
+    }
+
+    /// Current echo / masking character, if any.
+    pub fn echo_char(&self) -> Option<char> {
+        self.flow.echo_char()
+    }
+
     pub fn default_face(&self) -> Option<FontFaceId> {
         self.default_face
     }
@@ -260,6 +281,7 @@ impl RichTextEngine {
         let opts = text_typeset::bridge::BridgeOptions {
             code_block_background: self.flow.code_block_background(),
             code_block_foreground: self.flow.code_block_foreground(),
+            echo_char: self.flow.echo_char(),
         };
         let params = text_typeset::bridge::convert_block_with(&snap, &opts);
         let bridge = self.shared.borrow();
@@ -487,6 +509,92 @@ mod tests {
             "post-relayout render must produce glyphs (got {})",
             glyph_count
         );
+    }
+
+    /// Secure-field masking: with an echo char set, every source
+    /// character lays out as one uniform-width bullet glyph, and the
+    /// real text never influences the geometry. This is the property
+    /// the password field relies on for correct caret / selection /
+    /// hit-test over masked content.
+    #[test]
+    fn echo_char_renders_uniform_width_bullets() {
+        use text_typeset::CursorAffinity::Downstream;
+
+        let mut engine = RichTextEngine::private_default();
+        engine.set_viewport(400.0, 300.0);
+        engine.set_wrap_mode(WrapMode::None);
+
+        let doc = TextDocument::new();
+        // 'W' is wide, 'i'/'l' are narrow — non-uniform unmasked.
+        doc.set_plain_text("Wil").unwrap();
+
+        // Unmasked sanity: 'W' is wider than 'i'.
+        engine.layout_full(&doc.snapshot_flow());
+        engine.with_render_frame(|_| {});
+        let p1 = engine.caret_rect(1, Downstream)[0];
+        let p2 = engine.caret_rect(2, Downstream)[0];
+        let w_advance = p1;
+        let i_advance = p2 - p1;
+        assert!(
+            (w_advance - i_advance).abs() > 0.5,
+            "sanity: 'W' ({w_advance}) should be wider than 'i' ({i_advance}) unmasked"
+        );
+
+        // Masked: three bullets, all the same advance.
+        engine.set_echo_char(Some('•'));
+        engine.layout_full(&doc.snapshot_flow());
+        let masked_glyphs = engine.with_render_frame(|f| f.glyphs.len());
+        assert_eq!(
+            masked_glyphs, 3,
+            "exactly one bullet glyph per source char (got {masked_glyphs})"
+        );
+        let m1 = engine.caret_rect(1, Downstream)[0];
+        let m2 = engine.caret_rect(2, Downstream)[0];
+        let m3 = engine.caret_rect(3, Downstream)[0];
+        assert!(m1 > 0.0, "first bullet must advance from origin");
+        assert!(
+            ((m2 - m1) - m1).abs() < 0.5 && ((m3 - m2) - m1).abs() < 0.5,
+            "bullets must be uniform width: advances {m1}, {}, {}",
+            m2 - m1,
+            m3 - m2
+        );
+
+        // Clearing the echo char restores verbatim layout.
+        engine.set_echo_char(None);
+        engine.layout_full(&doc.snapshot_flow());
+        let restored = engine.caret_rect(1, Downstream)[0];
+        assert!(
+            (restored - w_advance).abs() < 0.5,
+            "clearing echo char must restore the original 'W' advance"
+        );
+    }
+
+    /// Multi-byte source characters (here, an accented `é` = 2 UTF-8
+    /// bytes) must still map one-bullet-per-char. This guards the
+    /// byte→char cluster conversion: the masked block text is uniform
+    /// 3-byte bullets, so the caret index `char_count` stays valid.
+    #[test]
+    fn echo_char_handles_multibyte_source_chars() {
+        use text_typeset::CursorAffinity::Downstream;
+
+        let mut engine = RichTextEngine::private_default();
+        engine.set_viewport(400.0, 300.0);
+        engine.set_wrap_mode(WrapMode::None);
+
+        let doc = TextDocument::new();
+        doc.set_plain_text("café").unwrap(); // 4 chars, 5 bytes
+        let char_count = "café".chars().count();
+        assert_eq!(char_count, 4);
+
+        engine.set_echo_char(Some('•'));
+        engine.layout_full(&doc.snapshot_flow());
+        let masked_glyphs = engine.with_render_frame(|f| f.glyphs.len());
+        assert_eq!(masked_glyphs, char_count, "one bullet per char incl. 'é'");
+
+        // Caret at the last char index is valid and to the right of 0.
+        let end = engine.caret_rect(char_count, Downstream)[0];
+        let start = engine.caret_rect(0, Downstream)[0];
+        assert!(end > start, "end caret ({end}) must be right of start ({start})");
     }
 
     /// Companion to the test above — verifies the `relayout_block`

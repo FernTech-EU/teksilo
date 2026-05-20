@@ -2051,3 +2051,85 @@ mod color_family {
     }
     register_widget_catalog_at!("crates/bastyde-widgets/src/color_edit.rs", ColorEdit);
 }
+
+// =========================================================================
+// Secure input family (PasswordField)
+// =========================================================================
+// Gated behind `rich-text` because the editing primitive is.
+
+#[cfg(feature = "rich-text")]
+mod secure_input_family {
+    use super::*;
+    use crate::{EchoMode, PasswordField, RevealMode};
+
+    impl WidgetCatalog for PasswordField {
+        fn id() -> &'static str {
+            "password-field"
+        }
+        fn group() -> &'static str {
+            "Inputs"
+        }
+        fn display_name() -> &'static str {
+            "PasswordField"
+        }
+        fn knobs() -> KnobSpec {
+            KnobSpec::new()
+                .text("placeholder", "Placeholder", "Enter your password")
+                .text("text", "Initial text", "hunter2")
+                .choice(
+                    "echo_mode",
+                    "Echo mode",
+                    &["Masked", "NoEcho", "RevealWhileTyping"],
+                    0,
+                )
+                .choice("reveal_mode", "Reveal button", &["Toggle", "Hold", "None"], 0)
+                .bool_("enabled", "Enabled", true)
+                .bool_("caps_warning", "Caps Lock warning", true)
+        }
+        fn variants() -> Vec<PreviewVariant> {
+            vec![
+                PreviewVariant::defaults("default"),
+                PreviewVariant::knobs(
+                    "reveal-while-typing",
+                    KnobOverrides::new().choice("echo_mode", 2),
+                ),
+                PreviewVariant::knobs("hold-to-reveal", KnobOverrides::new().choice("reveal_mode", 1)),
+                PreviewVariant::knobs("no-echo", KnobOverrides::new().choice("echo_mode", 1)),
+                PreviewVariant::knobs(
+                    "no-reveal-button",
+                    KnobOverrides::new().choice("reveal_mode", 2),
+                ),
+                PreviewVariant::knobs("disabled", KnobOverrides::new().bool_("enabled", false)),
+            ]
+        }
+        fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
+            let placeholder = knobs.text("placeholder").get();
+            let initial = knobs.text("text").get();
+            let echo = match knobs.choice("echo_mode").get() {
+                1 => EchoMode::NoEcho,
+                2 => EchoMode::RevealWhileTyping,
+                _ => EchoMode::Masked,
+            };
+            let reveal = match knobs.choice("reveal_mode").get() {
+                1 => RevealMode::Hold,
+                2 => RevealMode::None,
+                _ => RevealMode::Toggle,
+            };
+            let enabled = knobs.bool_("enabled").get();
+            let caps = knobs.bool_("caps_warning").get();
+            Box::new(
+                PasswordField::new(Signal::new(initial))
+                    .label("Password")
+                    .placeholder(placeholder)
+                    .echo_mode(echo)
+                    .reveal_mode(reveal)
+                    .enabled(enabled)
+                    .caps_lock_warning(caps),
+            )
+        }
+    }
+    register_widget_catalog_at!(
+        "crates/bastyde-widgets/src/password_field.rs",
+        PasswordField
+    );
+}

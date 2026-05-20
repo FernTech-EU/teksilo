@@ -95,6 +95,11 @@ pub(crate) struct WindowStateInner {
     focused: Signal<bool>,
     resizable: Signal<bool>,
     always_on_top: Signal<bool>,
+    /// Caps Lock active state, OS-driven only — no observer and no
+    /// app→OS command (the app never sets the keyboard lock). Toggled by
+    /// the window manager on each `Key::CapsLock` press; read by password
+    /// fields to show a Caps Lock warning.
+    caps_lock: Signal<bool>,
 
     /// Commands queued by observers on app-side signal writes. Drained
     /// by the app-level window manager once per tick.
@@ -130,6 +135,7 @@ impl WindowState {
             focused: Signal::new(init.focused),
             resizable: Signal::new(init.resizable),
             always_on_top: Signal::new(init.always_on_top),
+            caps_lock: Signal::new(false),
             pending_os_commands: RefCell::new(Vec::new()),
             applying_from_os: Cell::new(false),
             _observer_handles: RefCell::new(Vec::new()),
@@ -232,6 +238,13 @@ impl WindowState {
         &self.inner.always_on_top
     }
 
+    /// Caps Lock active state. OS-driven only — the window manager
+    /// toggles it on each `Key::CapsLock` press. Read this (e.g. via
+    /// `ctx.window()`) to drive a Caps Lock warning on password fields.
+    pub fn caps_lock(&self) -> &Signal<bool> {
+        &self.inner.caps_lock
+    }
+
     /// Request user attention (bouncing dock icon on macOS, flashing
     /// taskbar on Windows). Queues a [`WindowCommand::RequestAttention`]
     /// command for the next drain.
@@ -319,6 +332,16 @@ impl WindowState {
     pub fn set_always_on_top_from_os(&self, on_top: bool) {
         self.inner
             .with_os_guard(|| self.inner.always_on_top.set(on_top));
+    }
+
+    /// Update Caps Lock state from the OS. No observer / command is
+    /// wired (the app never drives the keyboard lock), so this writes the
+    /// signal directly. Idempotent: skips the write when unchanged to
+    /// avoid spurious repaints on auto-repeat.
+    pub fn set_caps_lock_from_os(&self, active: bool) {
+        if self.inner.caps_lock.get() != active {
+            self.inner.caps_lock.set(active);
+        }
     }
 }
 

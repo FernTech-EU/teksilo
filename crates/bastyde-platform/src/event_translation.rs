@@ -177,6 +177,11 @@ fn translate_named_key(key: winit::keyboard::NamedKey) -> Option<Key> {
         NamedKey::F10 => Some(Key::F10),
         NamedKey::F11 => Some(Key::F11),
         NamedKey::F12 => Some(Key::F12),
+        // Caps Lock arrives as a discrete press/release. winit's
+        // `ModifiersState` carries no lock state, so the window manager
+        // tracks the active state itself on the key-down edge (drives
+        // `WindowState::caps_lock` for the password-field warning).
+        NamedKey::CapsLock => Some(Key::CapsLock),
         _ => None,
     }
 }

@@ -57,6 +57,8 @@ pub mod message_box;
 pub mod notification;
 pub(crate) mod overlay_trigger;
 pub mod panel;
+#[cfg(feature = "rich-text")]
+pub mod password_field;
 pub mod popover;
 pub mod popover_button;
 pub(crate) mod popover_caret;
@@ -159,6 +161,8 @@ pub use notification::{
     NotificationLog, NotificationLogDialog, NotificationUpdate,
 };
 pub use panel::Panel;
+#[cfg(feature = "rich-text")]
+pub use password_field::{AtRevealPolicy, EchoMode, PasswordField, RevealMode};
 pub use popover::Popover;
 pub use popover_button::PopoverButton;
 pub use popover_icon_button::PopoverIconButton;
@@ -203,6 +207,8 @@ pub use table_view::{
 };
 #[cfg(feature = "rich-text")]
 pub use text_input::{TextInput, ValidationState};
+#[cfg(feature = "rich-text")]
+pub use primitives::text_input_field::{ValidationFeedback, ValidationOutcome};
 #[cfg(feature = "rich-text")]
 pub use time_edit::{SecondsMode, TimeEdit, TimeFormat};
 pub use title_bar::{DragRegion, ResizeStrip, TitleBar, WindowControls, WindowFrame};

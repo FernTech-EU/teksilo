@@ -318,7 +318,14 @@ impl Calendar {
 
     /// Override the AT label. Default: "Calendar, May 2026" (localized,
     /// derived from the visible month).
-    pub fn label(mut self, label: impl Into<String>) -> Self {
+    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+        let ls: bastyde_i18n::LocalizedString = label.into();
+        self.label = Some(ls.resolve_now());
+        self
+    }
+
+    /// Untranslated [`label`](Self::label).
+    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
         self
     }

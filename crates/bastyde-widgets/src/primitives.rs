@@ -51,7 +51,7 @@ pub use rect_widget::RectWidget;
 pub use spacer::Spacer;
 pub use switcher::Switcher;
 #[cfg(feature = "rich-text")]
-pub use text_input_field::TextInputField;
+pub use text_input_field::{AtRevealPolicy, EchoMode, TextInputField};
 pub use text_widget::TextWidget;
 pub use twist_arrow::TwistArrow;
 #[cfg(feature = "rich-text")]

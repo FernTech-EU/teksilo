@@ -194,6 +194,11 @@ pub enum Key {
     F11,
     F12,
     // Other
+    /// Caps Lock. Delivered as a discrete key press/release (winit's
+    /// `ModifiersState` does not carry lock state), so consumers that
+    /// need the *active* lock state track it themselves on the
+    /// key-down edge. See `WindowState::caps_lock`.
+    CapsLock,
     Character(char),
 }
 
@@ -326,6 +331,7 @@ impl std::fmt::Display for Key {
             Key::F10 => f.write_str("F10"),
             Key::F11 => f.write_str("F11"),
             Key::F12 => f.write_str("F12"),
+            Key::CapsLock => f.write_str("CapsLock"),
             Key::Character(c) => write!(f, "{}", c.to_uppercase()),
         }
     }

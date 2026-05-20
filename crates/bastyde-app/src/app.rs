@@ -1103,6 +1103,22 @@ impl BastydeAppHandler {
             WindowEvent::KeyboardInput {
                 event: key_event, ..
             } => {
+                // Track Caps Lock from the discrete key press — winit's
+                // `ModifiersState` carries no lock state — toggling on
+                // each key-down edge and pushing the result to
+                // `WindowState::caps_lock` for the password-field warning.
+                if key_event.state == winit::event::ElementState::Pressed
+                    && matches!(
+                        event_translation::translate_key(&key_event.logical_key),
+                        Some(bastyde_core::event::Key::CapsLock)
+                    )
+                    && let Some(managed) = self.wm.get_by_winit_mut(window_id)
+                {
+                    managed.caps_lock_active = !managed.caps_lock_active;
+                    managed
+                        .state
+                        .set_caps_lock_from_os(managed.caps_lock_active);
+                }
                 let maybe_evt = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     event_translation::translate_key(&key_event.logical_key).map(|key| {
                         let modifiers =

@@ -1,9 +1,9 @@
-//! Text tab — TextInput, SpinBox, SearchField, FilePickerField, InputDialog.
+//! Text tab — TextInput, SpinBox, SearchField, PasswordField, FilePickerField, InputDialog.
 
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    Button, ButtonVariant, Divider, FilePickerField, FilePickerKind, InputDialog, SearchField,
-    SpinBox, TextInput, TextWidget, VStack,
+    Button, ButtonVariant, Divider, FilePickerField, FilePickerKind, InputDialog, PasswordField,
+    SearchField, SpinBox, TextInput, TextWidget, VStack,
 };
 
 use crate::shared::{Signals, section, tab_header};
@@ -103,6 +103,23 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
             .decimals(2),
     );
     let search = section(ctx, "SearchField", search_field(sigs.search_text.clone()));
+    let password_signal = ctx.signal(String::new());
+    let password = section(
+        ctx,
+        "PasswordField",
+        PasswordField::new(password_signal)
+            .label_literal("Password")
+            .placeholder_literal("Enter your password")
+            .validator(|s| {
+                if s.chars().count() >= 8 {
+                    bastyde::widgets::ValidationOutcome::Valid
+                } else {
+                    bastyde::widgets::ValidationOutcome::Invalid {
+                        message: "Use at least 8 characters".into(),
+                    }
+                }
+            }),
+    );
     let file_path_signal = ctx.signal(String::new());
     let file_picker = section(
         ctx,
@@ -135,6 +152,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
             .add_child(text_input)
             .add_child(spin_box)
             .add_child(search)
+            .add_child(password)
             .add_child(file_picker)
             .add_child(input_dialog),
     )
@@ -149,6 +167,21 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     // each take a non-trivial closure; the bati! property syntax handles
     // single-line closures fine but the suggestion closure is multi-line.
     let search_id = ctx.add(search_field(sigs.search_text.clone()));
+    let password_signal = ctx.signal(String::new());
+    let password_id = ctx.add(
+        PasswordField::new(password_signal)
+            .label_literal("Password")
+            .placeholder_literal("Enter your password")
+            .validator(|s| {
+                if s.chars().count() >= 8 {
+                    bastyde::widgets::ValidationOutcome::Valid
+                } else {
+                    bastyde::widgets::ValidationOutcome::Invalid {
+                        message: "Use at least 8 characters".into(),
+                    }
+                }
+            }),
+    );
 
     bati!(ctx => VStack {
             spacing: 20.0
@@ -203,6 +236,15 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 #{ search_id }
+            }
+
+            VStack {
+                spacing: 6.0
+                TextWidget::new_literal("PasswordField") {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
+                #{ password_id }
             }
 
             VStack {
