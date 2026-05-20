@@ -35,6 +35,7 @@ pub mod date_range_edit;
 pub mod date_time_edit;
 pub mod dialog;
 pub(crate) mod drag_preview;
+pub mod drop_zone;
 #[cfg(feature = "rich-text")]
 pub mod file_picker_field;
 pub mod group_box;
