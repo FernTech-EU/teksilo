@@ -168,6 +168,26 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
         }
     }
 
+    // Step 4b: paint-only highlight recolor. A `HighlightPaintChanged` event
+    // only changes colors, so re-derive the cached layout's colors WITHOUT
+    // reshaping/reflowing, then force a full re-render (re-bakes glyph &
+    // decoration colors from the cached layout — no shaping). If a full layout
+    // already ran this frame it re-baked from the fresh snapshot's paint spans,
+    // so the recolor would be redundant — just clear the flag.
+    if state.pending_recolor {
+        if !state.needs_full_layout
+            && !state.pending_full_render
+            && viewport_ready
+            && state.engine.has_full_layout()
+        {
+            let flow = state.document.snapshot_flow();
+            state.engine.apply_paint_highlights(&flow);
+            state.content_dirty = true;
+            state.pending_full_render = true;
+        }
+        state.pending_recolor = false;
+    }
+
     // Step 5: update cursor display on the typesetter — but only if
     // the engine already has a full layout. Calling `set_cursor`
     // before `layout_full` poisons the typesetter's render state

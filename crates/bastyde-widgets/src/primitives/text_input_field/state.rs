@@ -355,7 +355,11 @@ impl TextInputState {
                     self.pending_text_changed = true;
                     self.needs_full_layout = true;
                 }
-                DocumentEvent::FormatChanged { .. } => {
+                DocumentEvent::FormatChanged { .. }
+                // text_input_field never installs a SyntaxHighlighter, so this
+                // cannot arrive in practice; handle conservatively (full
+                // relayout) for exhaustiveness and shared-document safety.
+                | DocumentEvent::HighlightPaintChanged { .. } => {
                     self.needs_full_layout = true;
                 }
                 DocumentEvent::UndoRedoChanged { can_undo, can_redo } => {

@@ -80,6 +80,12 @@ pub(crate) struct EditorState {
     /// Needed because tick clears `needs_full_layout` after running
     /// the full layout, so paint can't infer it from that flag alone.
     pub pending_full_render: bool,
+    /// Set by a `DocumentEvent::HighlightPaintChanged` (paint-only highlight
+    /// change). `frame_loop::tick` consumes it: it recolors the cached layout
+    /// via `engine.apply_paint_highlights` and forces a re-render, WITHOUT a
+    /// reshape/reflow. Distinct from `needs_full_layout` — a paint-only change
+    /// never changes glyph metrics.
+    pub pending_recolor: bool,
 
     // Wrap mode as configured by the builder.
     pub wrap_mode: WrapMode,
@@ -394,6 +400,7 @@ impl EditorState {
             last_relayout_block_id: None,
             content_dirty: true,
             pending_full_render: true,
+            pending_recolor: false,
             wrap_mode,
             text_color_user_set: false,
             last_text_color: None,
@@ -483,6 +490,18 @@ impl EditorState {
                     a11y_snapshot_dirty = true;
                     self.needs_full_layout = true;
                     single_pos = None;
+                }
+                DocumentEvent::HighlightPaintChanged { .. } => {
+                    // Paint-only highlight change: the shaping input is
+                    // unchanged, so recolor the cached layout without a
+                    // reshape/reflow. `tick` consumes `pending_recolor`.
+                    self.pending_recolor = true;
+                    // Colors on TextRun nodes changed, so the AT snapshot is
+                    // stale — but node identity is unaffected, so keep the
+                    // synthetic→element id map (only invalidate the snapshot).
+                    a11y_snapshot_dirty = true;
+                    // Deliberately NOT setting needs_full_layout /
+                    // pending_format_changed / pending_text_changed.
                 }
                 DocumentEvent::DocumentReset
                 | DocumentEvent::FlowElementsInserted { .. }

@@ -3730,4 +3730,95 @@ mod affinity_tests {
             "non-boundary clicks must produce Downstream affinity"
         );
     }
+
+    #[test]
+    fn paint_only_highlight_recolors_without_full_layout() {
+        use bastyde_text::text_document::{Color, HighlightContext, HighlightFormat, SyntaxHighlighter};
+        use std::sync::Arc;
+
+        // Background-only = paint-only (no metric change).
+        struct BgHighlighter;
+        impl SyntaxHighlighter for BgHighlighter {
+            fn highlight_block(&self, text: &str, ctx: &mut HighlightContext) {
+                let n = text.chars().count();
+                if n > 0 {
+                    ctx.set_format(
+                        0,
+                        n,
+                        HighlightFormat {
+                            background_color: Some(Color::rgba(255, 214, 0, 150)),
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
+        }
+
+        let doc = TextDocument::new();
+        doc.set_plain_text("hello world").unwrap();
+        let editor = RichTextEditor::read_only(doc.clone());
+        let state = editor.state_handle();
+        // Drain construction events, then clear dirty flags.
+        state.borrow_mut().drain_events();
+        {
+            let mut st = state.borrow_mut();
+            st.needs_full_layout = false;
+            st.pending_recolor = false;
+        }
+
+        doc.set_syntax_highlighter(Some(Arc::new(BgHighlighter)));
+        let (had, single) = state.borrow_mut().drain_events();
+        assert!(had, "attaching a highlighter should produce an event");
+        let st = state.borrow();
+        assert!(st.pending_recolor, "paint-only change must request a recolor");
+        assert!(
+            !st.needs_full_layout,
+            "paint-only change must NOT trigger a full relayout"
+        );
+        assert!(single.is_none());
+    }
+
+    #[test]
+    fn metric_highlight_triggers_full_layout() {
+        use bastyde_text::text_document::{HighlightContext, HighlightFormat, SyntaxHighlighter};
+        use std::sync::Arc;
+
+        // Bold = metric-affecting -> must reshape (full layout).
+        struct BoldHighlighter;
+        impl SyntaxHighlighter for BoldHighlighter {
+            fn highlight_block(&self, text: &str, ctx: &mut HighlightContext) {
+                let n = text.chars().count();
+                if n > 0 {
+                    ctx.set_format(
+                        0,
+                        n,
+                        HighlightFormat {
+                            font_bold: Some(true),
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
+        }
+
+        let doc = TextDocument::new();
+        doc.set_plain_text("hello world").unwrap();
+        let editor = RichTextEditor::read_only(doc.clone());
+        let state = editor.state_handle();
+        state.borrow_mut().drain_events();
+        {
+            let mut st = state.borrow_mut();
+            st.needs_full_layout = false;
+            st.pending_recolor = false;
+        }
+
+        doc.set_syntax_highlighter(Some(Arc::new(BoldHighlighter)));
+        state.borrow_mut().drain_events();
+        let st = state.borrow();
+        assert!(
+            st.needs_full_layout,
+            "metric highlight must trigger a full relayout"
+        );
+        assert!(!st.pending_recolor, "metric highlight is not a recolor-only change");
+    }
 }

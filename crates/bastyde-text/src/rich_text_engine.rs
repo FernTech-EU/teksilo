@@ -248,8 +248,27 @@ impl RichTextEngine {
     // --- Layout ----------------------------------------------------------
 
     pub fn layout_full(&mut self, flow: &FlowSnapshot) {
-        let bridge = self.shared.borrow();
-        self.flow.layout_full(bridge.service(), flow);
+        {
+            let bridge = self.shared.borrow();
+            self.flow.layout_full(bridge.service(), flow);
+        }
+        // A paint-only highlighter ships its spans separately from the shaped
+        // `fragments`; apply them as a post-shape recolor (no extra reshape).
+        // A full layout produces base-colored blocks, so this is only needed
+        // when there ARE spans.
+        let spans = text_typeset::bridge::collect_paint_spans(flow);
+        if !spans.is_empty() {
+            self.flow.apply_paint_spans_for(spans);
+        }
+    }
+
+    /// Recolor the cached layout from the snapshot's paint-only highlight
+    /// overlay WITHOUT reshaping or reflowing. The editor's fast path for a
+    /// `HighlightPaintChanged` event. Call a render afterward to refresh the
+    /// frame. An empty overlay (highlighter removed) resets blocks to base.
+    pub fn apply_paint_highlights(&mut self, flow: &FlowSnapshot) {
+        let spans = text_typeset::bridge::collect_paint_spans(flow);
+        self.flow.apply_paint_spans_for(spans);
     }
 
     /// Incremental relayout of a single block. Falls back to
@@ -284,11 +303,17 @@ impl RichTextEngine {
             echo_char: self.flow.echo_char(),
         };
         let params = text_typeset::bridge::convert_block_with(&snap, &opts);
-        let bridge = self.shared.borrow();
-        self.flow.relayout_block(bridge.service(), &params).expect(
-            "relayout_block invariant violated: has_full_layout() should already \
+        {
+            let bridge = self.shared.borrow();
+            self.flow.relayout_block(bridge.service(), &params).expect(
+                "relayout_block invariant violated: has_full_layout() should already \
                  guarantee has_layout() && !layout_dirty_for_scale()",
-        );
+            );
+        }
+        // Re-apply the (possibly changed) paint overlay for just this block on
+        // top of its freshly-reshaped base. Empty spans clear any prior overlay.
+        let spans = text_typeset::bridge::convert_paint_spans(&snap);
+        self.flow.apply_block_paint_spans(block_id, &spans);
         Ok(block_id)
     }
 
