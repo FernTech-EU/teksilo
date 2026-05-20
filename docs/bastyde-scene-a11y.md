@@ -76,7 +76,7 @@ no hit-test, no paint.
 ```rust
 let act_one = scene.add_a11y_group(
     A11yGroup::builder()
-        .label(tr!("act_one"))
+        .label(tr!(act_one()))
         .role(accesskit::Role::Region),
 );
 scene.set_a11y_parent(A11yNode::Item(scene_card), Some(A11yNode::Group(act_one)));
@@ -182,7 +182,7 @@ Each `SceneItem` builder carries an
 
 ```rust
 RectItem::new(rect)
-    .label(tr!("card_idea_1"))
+    .label(tr!(card_idea_1()))
     .access_merge_subtree();    // card with rect + label + indicator dot reads as one
 ```
 
@@ -202,8 +202,8 @@ the widget tier:
 
 ```rust
 RectItem::new(rect)
-    .access_label(tr!("save"))
-    .access_description(tr!("save_explanation"))
+    .access_label(tr!(save()))
+    .access_description(tr!(save_explanation()))
     .access_role(accesskit::Role::Button)
     .access_subtree(AccessSubtreeMode::Merge);
 ```
@@ -249,7 +249,7 @@ automatically so the focus indicator stays on screen.
 
 ```rust
 SceneView::new(scene)
-    .a11y_label(tr!("graph_data_area"))
+    .a11y_label(tr!(graph_data_area()))
     .nested_a11y(true)              // emit Role::Region instead of Role::Pane
     .a11y_bounds_space(A11yBoundsSpace::Scene)
     // Screen (default, view-projected) | Scene (independent of pan / zoom)
@@ -274,8 +274,8 @@ heavyweight widgets. AT shape ignores visual layout entirely.
 
 ```rust
 let mut scene = Scene::new();
-let act1 = scene.add_a11y_group(A11yGroup::builder().label(tr!("act_1")));
-let act2 = scene.add_a11y_group(A11yGroup::builder().label(tr!("act_2")));
+let act1 = scene.add_a11y_group(A11yGroup::builder().label(tr!(act_1())));
+let act2 = scene.add_a11y_group(A11yGroup::builder().label(tr!(act_2())));
 
 let scene_card_1 = scene.add_widget(card_widget("Opening"), Rect::new(0.0, 0.0, 200.0, 120.0));
 let scene_card_2 = scene.add_widget(card_widget("Climax"),  Rect::new(220.0, 0.0, 200.0, 120.0));
@@ -335,8 +335,8 @@ are reported in **scene** coordinates so AT users can reason about
 
 ```rust
 let mut scene = Scene::new();
-let layer_drive = scene.add_a11y_group(A11yGroup::builder().label(tr!("drive_layer")));
-let layer_frame = scene.add_a11y_group(A11yGroup::builder().label(tr!("frame_layer")));
+let layer_drive = scene.add_a11y_group(A11yGroup::builder().label(tr!(drive_layer())));
+let layer_frame = scene.add_a11y_group(A11yGroup::builder().label(tr!(frame_layer())));
 
 let gear = scene.add_widget(gear_widget(), Rect::new(150.0, 200.0, 60.0, 60.0));
 scene.set_a11y_parent(A11yNode::Item(gear), Some(A11yNode::Group(layer_drive)));
@@ -348,7 +348,7 @@ let view = SceneView::new(scene)
     .a11y_mode(A11yMode::StrictlyParallel)
     .a11y_bounds_space(A11yBoundsSpace::Scene)
     .nested_a11y(true)
-    .a11y_label(tr!("design_canvas"));
+    .a11y_label(tr!(design_canvas()));
 ```
 
 ---

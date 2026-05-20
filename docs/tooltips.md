@@ -43,8 +43,8 @@ the other two.
 ```rust
 use bastyde::prelude::*;
 
-Button::new(tr!("save"))
-    .tooltip(tr!("save_hint"))                 // i18n
+Button::new(tr!(save()))
+    .tooltip(tr!(save_hint()))                 // i18n
     .on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save));
 ```
 
@@ -61,13 +61,13 @@ use bastyde_widgets::tooltip::TooltipContent;
 fn main() {
     BastydeAppBuilder::new()
         .register_tooltips(vec![
-            TooltipContent::new("save-as", tr!("save_as_tooltip"))
+            TooltipContent::new("save-as", tr!(save_as_tooltip()))
                 .for_shortcut("app.save_as"),
-            TooltipContent::new("autosave", tr!("autosave_tooltip"))
-                .with_more(tr!("autosave_tooltip_more")),
+            TooltipContent::new("autosave", tr!(autosave_tooltip()))
+                .with_more(tr!(autosave_tooltip_more())),
         ])
         .initial_window(WindowConfig::new().root(|tree, _| {
-            tree.add(Button::new(tr!("save_as")).rich_tooltip("save-as"))
+            tree.add(Button::new(tr!(save_as())).rich_tooltip("save-as"))
         }))
         .run();
 }
@@ -88,18 +88,18 @@ conditional rows, dynamic numeric values — use `.composite_tooltip(content)`:
 ```rust
 use bastyde::prelude::*;
 
-Button::new(tr!("province_info"))
+Button::new(tr!(province_info()))
     .composite_tooltip(
         VStack::new()
             .spacing(8.0)
-            .child(TextWidget::new(tr!("province_header")).style(TextStyleRole::BodyBold))
+            .child(TextWidget::new(tr!(province_header())).style(TextStyleRole::BodyBold))
             .child(ProgressBar::new(prosperity_signal))
             .child(
                 Grid::new()
                     .columns(vec![TrackSize::Auto, TrackSize::Auto])
-                    .child(TextWidget::new(tr!("food")))
+                    .child(TextWidget::new(tr!(food())))
                     .child(TextWidget::new_literal(food_value))
-                    .child(TextWidget::new(tr!("trade")))
+                    .child(TextWidget::new(tr!(trade())))
                     .child(TextWidget::new_literal(trade_value)),
             ),
     );
@@ -201,7 +201,7 @@ entries:
 ```rust
 TooltipContent::new(
     "autosave",
-    tr!("autosave_with_link"),    // "Bastyde autosaves. See [details](:autosave-details)…"
+    tr!(autosave_with_link()),    // "Bastyde autosaves. See [details](:autosave-details)…"
 )
 ```
 
@@ -233,7 +233,7 @@ the same machinery through `BuildContext`:
 
 ```rust
 // Plain tooltip — caller-managed delay.
-let tooltip_id = ctx.add(TooltipWidget::new(tr!("save_hint")));
+let tooltip_id = ctx.add(TooltipWidget::new(tr!(save_hint())));
 ctx.attach_tooltip(anchor_id, tooltip_id, Duration::from_millis(500));
 
 // Rich tooltip from the registry — recommended path.
@@ -248,7 +248,7 @@ crate::tooltip::attach_rich_tooltip(
 crate::tooltip::attach_rich_tooltip_content(
     ctx,
     anchor_id,
-    TooltipContent::new("inline", tr!("inline_body")),
+    TooltipContent::new("inline", tr!(inline_body())),
     crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
 );
 

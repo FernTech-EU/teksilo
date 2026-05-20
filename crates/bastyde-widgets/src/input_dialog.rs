@@ -9,8 +9,8 @@
 //! than a single field belong in a custom [`Dialog`](crate::dialog::Dialog).
 //!
 //! ```ignore
-//! InputDialog::new(tr!("rename_title"))
-//!     .prompt(tr!("rename_prompt"))
+//! InputDialog::new(tr!(rename_title()))
+//!     .prompt(tr!(rename_prompt()))
 //!     .default_text(current_name)
 //!     .placeholder("New name")
 //!     .on_result(|result, _ctx| {

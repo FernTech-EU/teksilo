@@ -36,7 +36,7 @@ pub type CompositeTooltipFactory = Rc<dyn Fn() -> Box<dyn Widget>>;
 ///
 /// ```ignore
 /// TabInfo::new()
-///     .title(tr!("welcome"))
+///     .title(tr!(welcome()))
 ///     .icon(|| IconWidget::checkmark(16.0))
 ///     .closable(true);
 /// ```

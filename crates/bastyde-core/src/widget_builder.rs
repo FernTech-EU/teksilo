@@ -57,7 +57,7 @@ pub enum AccessSubtreeMode {
 ///
 /// User-visible string fields store eagerly-resolved `String`. The
 /// translated path goes through `impl From<LocalizedString> for String`
-/// in `bastyde-i18n` — `.access_label(tr!("save"))` resolves the
+/// in `bastyde-i18n` — `.access_label(tr!(save()))` resolves the
 /// `LocalizedString` once at builder time and stores the result here.
 /// Locale changes rebuild the composite, which re-runs the builder
 /// chain and picks up new translations. The `_literal` builder
@@ -931,7 +931,7 @@ impl<W: Widget> WidgetWithHandlers<W> {
     // All string-accepting methods take `impl Into<String>`. With the
     // `i18n` feature enabled, `bastyde_i18n::LocalizedString` (the type
     // produced by `tr!(...)`) provides `From<LocalizedString> for String`,
-    // so `.access_label(tr!("save"))` works directly — the conversion
+    // so `.access_label(tr!(save()))` works directly — the conversion
     // resolves the translation at builder time. The `_literal` twins
     // are `#[doc(hidden)]` grep markers for explicitly untranslated
     // call sites — same convention as `Button::new_literal`.
@@ -942,7 +942,7 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// Accepts any `impl Into<String>`. With the `i18n` feature
     /// enabled, `bastyde_i18n::LocalizedString` (the type produced by
     /// `tr!(...)`) implements `From<LocalizedString> for String`, so
-    /// `.access_label(tr!("save"))` works directly. Translation is
+    /// `.access_label(tr!(save()))` works directly. Translation is
     /// resolved eagerly at builder time; the composite rebuild on
     /// locale change re-runs the chain to pick up new translations.
     pub fn access_label(mut self, label: impl Into<String>) -> Self {

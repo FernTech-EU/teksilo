@@ -5,9 +5,9 @@ Bastyde widgets declare their own a11y info via `Widget::accessibility(&self, bu
 The override layer is a one-method-per-concern surface (`.access_label`, `.access_role`, `.access_merge_subtree`, …) on `WidgetBuilder` and `WidgetWithHandlers`, analogous to SwiftUI's `.accessibility*` modifiers and Flutter's `Semantics(...)`. App authors annotate widgets from the outside without touching widget internals.
 
 ```rust
-Button::new(tr!("save_icon"))
+Button::new(tr!(save_icon()))
     .icon(IconWidget::from_svg_icon(save_icon), IconLocation::IconOnly)
-    .access_label(tr!("save"))                  // icon-only button needs a name for AT
+    .access_label(tr!(save()))                  // icon-only button needs a name for AT
     .access_shortcut_id("app.save")             // tracks user rebinds via ShortcutRegistry
     .access_action(Action::ShowContextMenu, |ctx| ctx.send_intent(AppIntent::Menu));
 ```
@@ -186,10 +186,10 @@ SwiftUI's `accessibilityAction(named:)` parity. The label is exposed verbatim by
 
 ```rust
 my_message
-    .access_custom_action(tr!("reply_now"), |ctx| {
+    .access_custom_action(tr!(reply_now()), |ctx| {
         ctx.send_intent(AppIntent::Reply);
     })
-    .access_custom_action(tr!("delete"), |ctx| {
+    .access_custom_action(tr!(delete()), |ctx| {
         ctx.send_intent(AppIntent::Delete);
     });
 ```
@@ -216,7 +216,7 @@ ctx.register_shortcut_global(
 ctx.register_action(Action::new("app.save").on_invoke(|_, ctx| save(ctx)));
 
 // On the Save button, bind the AT announcement to the same id.
-Button::new(tr!("save"))
+Button::new(tr!(save()))
     .on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save))
     .access_shortcut_id("app.save");
 ```
@@ -243,9 +243,9 @@ User-visible string methods (`access_label`, `access_description`, `access_hint`
 
 ```rust
 button
-    .access_label(tr!("save"))                       // Fluent-translated
-    .access_description(tr!("save_explanation"))
-    .access_custom_action(tr!("publish_now"), |ctx| ctx.send_intent(AppIntent::Publish));
+    .access_label(tr!(save()))                       // Fluent-translated
+    .access_description(tr!(save_explanation()))
+    .access_custom_action(tr!(publish_now()), |ctx| ctx.send_intent(AppIntent::Publish));
 ```
 
 flows through unchanged. Translation is resolved eagerly at builder time. Locale changes rebuild the composite, which re-runs the builder chain and stores the new translation. Same model as `Button::new(impl Into<LocalizedString>)`.

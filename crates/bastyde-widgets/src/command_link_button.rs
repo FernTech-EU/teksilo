@@ -8,8 +8,8 @@
 //! Int UI convention — with an interactive surface tint on hover).
 //!
 //! ```ignore
-//! CommandLinkButton::new(tr!("create_new_project"))
-//!     .description(tr!("create_new_project_subtitle"))
+//! CommandLinkButton::new(tr!(create_new_project()))
+//!     .description(tr!(create_new_project_subtitle()))
 //!     .icon(IconWidget::from_svg(NEW_PROJECT_ICON))
 //!     .on_activate_fn(|ctx| ctx.send_intent(AppIntent::NewProject))
 //! ```

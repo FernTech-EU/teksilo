@@ -24,10 +24,10 @@
 //!
 //! ```ignore
 //! ctx.show_toast(
-//!     Toast::warning(tr!("unsaved_changes"))
-//!         .body(tr!("close_anyway_question"))
-//!         .action(ToastAction::primary(tr!("save"), |c| c.send_intent(AppIntent::Save)))
-//!         .action(ToastAction::new(tr!("discard"), |c| c.send_intent(AppIntent::Discard)))
+//!     Toast::warning(tr!(unsaved_changes()))
+//!         .body(tr!(close_anyway_question()))
+//!         .action(ToastAction::primary(tr!(save()), |c| c.send_intent(AppIntent::Save)))
+//!         .action(ToastAction::new(tr!(discard()), |c| c.send_intent(AppIntent::Discard)))
 //! );
 //! ```
 

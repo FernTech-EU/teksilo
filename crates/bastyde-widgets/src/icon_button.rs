@@ -14,7 +14,7 @@
 //! // Stand-alone toolbar use — full-weight icon.
 //! IconButton::new(IconWidget::from_svg(MY_SVG))
 //!     .toolbar()
-//!     .tooltip(tr!("Save"))
+//!     .tooltip(tr!(save()))
 //!     .on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save))
 //!
 //! // Embedded inside a TextInput's trailing slot — dim until hover.

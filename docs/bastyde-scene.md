@@ -155,7 +155,7 @@ handlers
     .on_hover(|entered, ctx| { /* … */ })
     .on_context_menu(|pt, ctx| ctx.send_intent(MyIntent::Menu))
     .cursor(CursorIcon::Pointer)
-    .tooltip(tr!("card_tooltip"));   // accepts LocalizedString
+    .tooltip(tr!(card_tooltip()));   // accepts LocalizedString
 scene.set_item_handlers(item_id, handlers);
 ```
 
@@ -407,7 +407,7 @@ User-visible strings on `SceneItem` builders (`label`, `tooltip`,
 Pass the result of `tr!(...)` directly:
 
 ```rust
-RectItem::new(rect).access_label(tr!("save_card"))
+RectItem::new(rect).access_label(tr!(save_card()))
 ```
 
 Each translated method has an `_literal` `#[doc(hidden)]` twin (e.g.
@@ -458,7 +458,7 @@ let node = scene.add_item(
     Point::new(100.0, 100.0),
 );
 let label = scene.add_item(
-    TextItem::new(tr!("node_name"), Rect::new(8.0, 8.0, 100.0, 24.0)),
+    TextItem::new(tr!(node_name()), Rect::new(8.0, 8.0, 100.0, 24.0)),
     Point::ZERO,
 );
 scene.set_item_parent(label, Some(node));

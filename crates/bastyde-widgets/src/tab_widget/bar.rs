@@ -19,7 +19,7 @@
 //! reflecting whether it was built with [`TabBar::horizontal`] or
 //! [`TabBar::vertical`]. When a page hosts more than one tab list,
 //! give each one an accessible name via
-//! [`.access_label(tr!("..."))`](bastyde_core::widget_builder::WidgetBuilder::access_label)
+//! [`.access_label(tr!(tab_list_name()))`](bastyde_core::widget_builder::WidgetBuilder::access_label)
 //! so screen readers can distinguish them (ARIA APG recommendation).
 
 use std::cell::RefCell;

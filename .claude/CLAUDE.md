@@ -439,13 +439,13 @@ Builder-level `.access_*` methods on `WidgetBuilder` (and `WidgetWithHandlers`) 
 ```rust
 use accesskit::{Action, Role, Live, HasPopup};
 
-Button::new(tr!("save_icon"))
-    .access_label(tr!("save"))                  // replace widget label
-    .access_description(tr!("save_explanation")) // long-form context
+Button::new(tr!(save_icon()))
+    .access_label(tr!(save()))                  // replace widget label
+    .access_description(tr!(save_explanation())) // long-form context
     .access_role(Role::Button)
     .access_shortcut_id("app.save")             // tracks user rebinds via ShortcutRegistry
     .access_action(Action::ShowContextMenu, |ctx| ctx.send_intent(AppIntent::Menu))
-    .access_custom_action(tr!("publish_now"), |ctx| ctx.send_intent(AppIntent::Publish));
+    .access_custom_action(tr!(publish_now()), |ctx| ctx.send_intent(AppIntent::Publish));
 
 // Subtree control:
 my_card.access_merge_subtree();        // collapse card into one AT element
@@ -459,7 +459,7 @@ combo_button.access_controls(listbox_id);
 field.access_described_by(error_message_id);
 ```
 
-**Naming and i18n.** All user-visible-string methods (`access_label`, `access_description`, `access_hint`, `access_value`, `access_custom_action`) accept `impl Into<String>`. With the `i18n` feature, `bastyde_i18n::LocalizedString` (the type produced by `tr!`) implements `From<LocalizedString> for String`, so `.access_label(tr!("save"))` resolves and stores the translated literal. Each translated method has a `#[doc(hidden)]` `_literal` twin (`access_label_literal`, etc.) — the same grep marker as `Button::new_literal`/`tooltip_literal` for explicitly-untranslated call sites.
+**Naming and i18n.** All user-visible-string methods (`access_label`, `access_description`, `access_hint`, `access_value`, `access_custom_action`) accept `impl Into<String>`. With the `i18n` feature, `bastyde_i18n::LocalizedString` (the type produced by `tr!`) implements `From<LocalizedString> for String`, so `.access_label(tr!(save()))` resolves and stores the translated literal. Each translated method has a `#[doc(hidden)]` `_literal` twin (`access_label_literal`, etc.) — the same grep marker as `Button::new_literal`/`tooltip_literal` for explicitly-untranslated call sites.
 
 **Merge rules.** Scalars (`label`, `description`, `value`, `role`, `identifier`, `shortcut`, `live`, `aria_current`, `has_popup`, `orientation`, numeric range/step) replace if `Some`. Lists (`controls`, `described_by`, `labelled_by`, advertised actions, custom actions) append. `access_remove_action` suppresses an action the widget emitted before override-advertised actions are added. `access_customize(|b| ...)` runs **last** with full `&mut AccessNodeBuilder` access (including `inner_mut()`) — it's the supported escape hatch for synthetic-children surgery (rich-text paragraphs / text runs) and any AccessKit field the typed surface doesn't cover.
 
@@ -660,7 +660,7 @@ let theme = intui::light();   // or intui::dark()
 **Tier 1 — Variants** (per themable widget):
 
 ```rust
-Button::new(tr!("save")).variant(ButtonVariant::Filled)        // primary action
+Button::new(tr!(save())).variant(ButtonVariant::Filled)        // primary action
 Toggle::new(on).variant(ToggleVariant::Switch)                  // default
 ```
 

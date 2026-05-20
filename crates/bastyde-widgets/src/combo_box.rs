@@ -135,7 +135,7 @@ impl ComboBox<String> {
     /// Accepts any `impl Into<String>` — string literals (`&str`),
     /// owned `String`s, resolved `LocalizedString`s, etc. For
     /// translated items, resolve translations before passing in,
-    /// e.g. `vec![tr!("apple").resolve_now(), ...]`.
+    /// e.g. `vec![tr!(apple()).resolve_now(), ...]`.
     pub fn new(
         items: impl IntoIterator<Item = impl Into<String>>,
         selected: Signal<Option<String>>,

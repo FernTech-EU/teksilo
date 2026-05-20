@@ -381,12 +381,12 @@ A specialized two-column layout: label column auto-sizes to the widest label, fi
 FormLayout::new()
     .label_gap(12.0)
     .row_spacing(8.0)
-    .label(tr!("connection_settings"))           // emits Role::Form landmark
-    .line(TextWidget::new(tr!("host")), TextInput::new(host))
-    .line(TextWidget::new(tr!("port")), SpinBox::new(port, 0u16, 65535u16))
+    .label(tr!(connection_settings()))           // emits Role::Form landmark
+    .line(TextWidget::new(tr!(host())), TextInput::new(host))
+    .line(TextWidget::new(tr!(port())), SpinBox::new(port, 0u16, 65535u16))
     .full_width(Divider::new())
-    .full_width(GroupHeader::new(tr!("advanced")))
-    .line(TextWidget::new(tr!("timeout_ms")), TextInput::new(timeout))
+    .full_width(GroupHeader::new(tr!(advanced())))
+    .line(TextWidget::new(tr!(timeout_ms())), TextInput::new(timeout))
 ```
 
 - `.line(label, field)` adds a paired row.

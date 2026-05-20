@@ -245,7 +245,7 @@ impl Button {
     /// AT node's `set_name` reads the current value via `Prop::get`.
     ///
     /// Translation note: derive the signal with
-    /// `state.map(|s| tr!("key", s).resolve_now())` for translated
+    /// `state.map(|s| tr!(status_label(value = s)).resolve_now())` for translated
     /// reactive labels — Button only sees the resolved `String`.
     pub fn bind_label(mut self, label: impl Into<bastyde_core::signal::Prop<String>>) -> Self {
         self.label = label.into();

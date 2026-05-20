@@ -7,9 +7,9 @@
 //! [`MessageBox`](crate::message_box::MessageBox) (modal).
 //!
 //! ```ignore
-//! Banner::warning(tr!("unsaved_changes"))
-//!     .description(tr!("close_loses_changes"))
-//!     .action(Button::new(tr!("save_now"))
+//! Banner::warning(tr!(unsaved_changes()))
+//!     .description(tr!(close_loses_changes()))
+//!     .action(Button::new(tr!(save_now()))
 //!         .on_activate_fn(|ctx| ctx.send_intent(AppIntent::SaveNow)))
 //!     .on_dismiss(|ctx| ctx.send_intent(AppIntent::DismissBanner))
 //! ```

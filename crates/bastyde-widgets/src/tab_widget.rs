@@ -32,15 +32,15 @@
 //! pattern](https://www.w3.org/WAI/ARIA/apg/patterns/tabs/))
 //! recommends providing an accessible name for the tab list
 //! whenever a page hosts more than one — call
-//! [`.access_label(tr!("editor_tabs"))`](bastyde_core::widget_builder::WidgetBuilder::access_label)
+//! [`.access_label(tr!(editor_tabs()))`](bastyde_core::widget_builder::WidgetBuilder::access_label)
 //! on the widget so screen readers can distinguish "editor tabs"
 //! from "tool tabs":
 //!
 //! ```ignore
 //! TabWidget::new(selected)
-//!     .static_tab(TabInfo::new().title(tr!("welcome")), welcome_panel)
+//!     .static_tab(TabInfo::new().title(tr!(welcome())), welcome_panel)
 //!     // ...
-//!     .access_label(tr!("editor_tabs"))
+//!     .access_label(tr!(editor_tabs()))
 //! ```
 //!
 //! Panels with no focusable descendants (a static text-only "About"

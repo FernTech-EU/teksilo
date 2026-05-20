@@ -48,8 +48,8 @@ Anywhere inside a handler:
 fn save_handler(ctx: &mut EventContext) {
     save_to_disk();
     ctx.show_toast(
-        Toast::success(tr!("saved"))
-            .body(tr!("save_details", path = path.display()))
+        Toast::success(tr!(saved()))
+            .body(tr!(save_details(path = path.display())))
     );
 }
 ```
@@ -58,22 +58,22 @@ For errors with replayable actions:
 
 ```rust
 ctx.show_toast(
-    Toast::error(tr!("build_failed"))
-        .body(tr!("build_error_count", n = 3))
-        .action(ToastAction::primary(tr!("retry"), |c| c.send_intent(AppIntent::BuildRetry)))
-        .action(ToastAction::new(tr!("show_log"), |c| c.send_intent(AppIntent::ShowLog)))
+    Toast::error(tr!(build_failed()))
+        .body(tr!(build_error_count(n = 3)))
+        .action(ToastAction::primary(tr!(retry()), |c| c.send_intent(AppIntent::BuildRetry)))
+        .action(ToastAction::new(tr!(show_log()), |c| c.send_intent(AppIntent::ShowLog)))
 );
 ```
 
 For long-running operations that update in place:
 
 ```rust
-let h = ctx.show_toast(Toast::loading(tr!("uploading_start")).id("upload"));
+let h = ctx.show_toast(Toast::loading(tr!(uploading_start())).id("upload"));
 // later, with the same id:
-ctx.show_toast(Toast::loading(tr!("uploading_progress", n = 4)).id("upload"));
+ctx.show_toast(Toast::loading(tr!(uploading_progress(n = 4))).id("upload"));
 // completion replaces the same entry:
 ctx.show_toast(
-    Toast::success(tr!("upload_complete"))
+    Toast::success(tr!(upload_complete()))
         .id("upload")
         .auto_dismiss_after(Duration::from_secs(5))
 );
@@ -169,11 +169,11 @@ keeps "find me before localizing" findable.
 ### Builder methods
 
 ```rust
-Toast::warning(tr!("unsaved"))
-    .body(tr!("close_anyway"))                          // optional second line
+Toast::warning(tr!(unsaved()))
+    .body(tr!(close_anyway()))                          // optional second line
     .leading(MyAppIcon::new())                          // override severity glyph
-    .action(ToastAction::primary(tr!("save"), on_save)) // 0..N actions
-    .primary_action(tr!("retry"), on_retry)             // shorthand for ToastAction::primary
+    .action(ToastAction::primary(tr!(save()), on_save)) // 0..N actions
+    .primary_action(tr!(retry()), on_retry)             // shorthand for ToastAction::primary
     .auto_dismiss_after(Duration::from_secs(5))         // override the 10s default
     .persistent()                                       // disable auto-dismiss
     .priority(ToastPriority::High)                      // Normal | High | Urgent
@@ -182,7 +182,7 @@ Toast::warning(tr!("unsaved"))
     .on_dismiss(|cause, ctx| log_dismiss(cause))        // fires once
     .show_close_button(false)                           // default: true
     .closable_on_escape(false)                          // default: true
-    .announcement(tr!("custom_at_text"))                // override AT name
+    .announcement(tr!(custom_at_text()))                // override AT name
     .archive(false)                                     // opt out of archive mirror
     .style(MyToastStyle)                                // per-call style override
 ```
@@ -197,7 +197,7 @@ ToastAction::new(label, on_invoke)
     .style(ToastActionStyle::Button { variant: ButtonVariant::Plain })
     .closes_toast(false)                        // default: true (IntelliJ "expiring")
     .shortcut_id("app.save")                    // for archive replay
-    .tooltip(tr!("save_explainer"))
+    .tooltip(tr!(save_explainer()))
 ```
 
 Link actions render inline in the body row; Button actions go in a
