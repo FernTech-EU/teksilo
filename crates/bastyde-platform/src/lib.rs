@@ -1,6 +1,7 @@
 pub mod accessibility_prefs;
 pub mod clipboard;
 pub mod event_translation;
+pub mod external_dnd;
 #[cfg(feature = "file-dialog")]
 pub mod file_dialog;
 #[cfg(target_os = "linux")]
