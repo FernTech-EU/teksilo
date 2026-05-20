@@ -1619,6 +1619,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "file-drop"
+version = "0.2.0"
+dependencies = [
+ "bastyde",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

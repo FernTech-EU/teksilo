@@ -1,0 +1,14 @@
+[package]
+name = "file-drop"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+authors.workspace = true
+publish = false
+
+[[bin]]
+name = "file-drop"
+path = "src/main.rs"
+
+[dependencies]
+bastyde = { workspace = true, features = ["file-dialog"] }
