@@ -65,6 +65,21 @@ file-dialog = ["bastyde-app/rfd-backend"]
 # backend.
 file-dialog-trait = ["bastyde-app/file-dialog"]
 
+# Optional main-thread async executor (`bastyde-async`): adds
+# `BastydeAppBuilder::install_async()` plus `ctx.spawn_local(...)` /
+# `spawn_blocking` for imperative async-in-UI flows. Off by default — apps
+# that don't need an executor pay nothing, and bastyde-core / bastyde-app gain
+# no async dependency. `bastyde-tokio` / `bastyde-async-std` build on this to
+# add native-ecosystem reactor support.
+async = ["dep:bastyde-async"]
+# Tokio reactor for the async executor (`bastyde-tokio`). Implies `async`.
+# Lets handlers `.await` native Tokio futures (timers / sockets / reqwest)
+# directly inside `ctx.spawn_local(...)`, and adds `install_async_tokio()`.
+tokio = ["async", "dep:bastyde-tokio"]
+# async-std reactor for the async executor (`bastyde-async-std`). Implies
+# `async`; adds `install_async_async_std()`.
+async-std = ["async", "dep:bastyde-async-std"]
+
 # Telemetry support. Forwards to the `telemetry` features on
 # `bastyde-app` (gates `.telemetry(bundle)` + the install wiring) and on
 # `bastyde-widgets` (gates the `PrivacySettings` widget). Off by default
@@ -126,6 +141,9 @@ bastyde-data = { workspace = true }
 bastyde-render = { workspace = true }
 bastyde-platform = { workspace = true }
 bastyde-app = { workspace = true }
+bastyde-async = { workspace = true, optional = true }
+bastyde-tokio = { workspace = true, optional = true }
+bastyde-async-std = { workspace = true, optional = true }
 bastyde-settings = { workspace = true }
 bastyde-widgets = { workspace = true, optional = true }
 # Declared directly (not via `workspace = true`) so we can set

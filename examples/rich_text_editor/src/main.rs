@@ -40,10 +40,30 @@
 //!     the caret; Undo / Redo enable from `can_undo` / `can_redo`.
 //!   * The second toolbar row is dedicated to table operations and
 //!     enables only when the caret is inside a table.
+//!   * The third toolbar row showcases the document-level
+//!     `SyntaxHighlighter`. Pick Off / Search / Syntax / Spell:
+//!       - **Search** highlights every match of the live query (yellow
+//!         background) — type in the field and watch the *editor* pane.
+//!       - **Syntax** colors Rust-ish keywords, numbers and string
+//!         literals across the document.
+//!       - **Spell** underlines a seeded set of misspelled words with a
+//!         red wavy spell-check underline.
+//!     The highlighter lives on the `TextDocument`, but whether to *show*
+//!     it is a per-view choice: the editable pane displays the highlights
+//!     while the read-only preview stays **bare** — search / spell / syntax
+//!     are authoring affordances, not part of the rendered document. The
+//!     `read_only` preset defaults to `show_highlights(false)`; a read-only
+//!     *syntax* viewer would opt back in with `.show_highlights(true)`. The
+//!     bare view also pulls a clean snapshot and ignores paint-only highlight
+//!     events, so it does zero work as you type in the search field. Either
+//!     way the shadow formatting never touches stored content (invisible to
+//!     undo / copy / export). See `highlighters.rs` and `highlight_controls.rs`.
 //!
 //! Run with: `cargo run -p rich-text-editor --features "rich-text clipboard"`
 
 mod format_toolbar;
+mod highlight_controls;
+mod highlighters;
 
 use bastyde::prelude::*;
 use bastyde::text_document::{Alignment, BlockFormat, MoveMode, TextDocument};
@@ -51,6 +71,7 @@ use bastyde::widgets::rich_text::{RichTextEditor, ScrollPolicy};
 use bastyde::widgets::{Button, Expand, HStack, Spacer, SplitView, Toolbar};
 
 use format_toolbar::FormatToolbar;
+use highlight_controls::HighlightControls;
 
 /// Walk every block in `doc` and apply default vertical spacing per
 /// kind: roomier margins before / after headings (scaled by heading
@@ -147,6 +168,10 @@ This document exercises every feature the markdown importer recognises.
 Capabilities listed under "API-only features" exist in the engine but
 have no markdown syntax — they are reachable through keyboard
 shortcuts (Ctrl+U, Ctrl+B, …) or `TextDocument`'s typed API.
+
+The **Spell** highlighter underlines deliberately misspelled words so the
+spell-check squiggle is visible: you will definately recieve teh seperate
+squiggles wich occured here — alot of them, untill you pick another mode.
 
 ## Heading scale
 
@@ -368,17 +393,24 @@ fn main() {
                     // then move the editor into the SplitView.
                     let editor = RichTextEditor::editor(doc.clone());
                     let toolbar = FormatToolbar::new(&editor);
+                    let highlight_controls = HighlightControls::new(&doc);
                     let doc_preview = doc.clone();
                     let split = Signal::new(0.55);
                     tree.add(
                         bastyde::widgets::VStack::new()
                             .child(dark_mode_toolbar())
                             .child(toolbar)
+                            .child(highlight_controls)
                             .child(
                                 Expand::new().child(
                                     SplitView::new(split)
                                         .first(editor)
                                         .second(
+                                            // The preview stays bare of highlights:
+                                            // `read_only` defaults to
+                                            // `show_highlights(false)`. A read-only
+                                            // *syntax* viewer would opt back in with
+                                            // `.show_highlights(true)`.
                                             RichTextEditor::read_only(doc_preview)
                                                 .v_scroll_policy(ScrollPolicy::Auto),
                                         ),

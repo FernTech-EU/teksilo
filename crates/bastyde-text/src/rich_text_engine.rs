@@ -248,8 +248,27 @@ impl RichTextEngine {
     // --- Layout ----------------------------------------------------------
 
     pub fn layout_full(&mut self, flow: &FlowSnapshot) {
-        let bridge = self.shared.borrow();
-        self.flow.layout_full(bridge.service(), flow);
+        {
+            let bridge = self.shared.borrow();
+            self.flow.layout_full(bridge.service(), flow);
+        }
+        // A paint-only highlighter ships its spans separately from the shaped
+        // `fragments`; apply them as a post-shape recolor (no extra reshape).
+        // A full layout produces base-colored blocks, so this is only needed
+        // when there ARE spans.
+        let spans = text_typeset::bridge::collect_paint_spans(flow);
+        if !spans.is_empty() {
+            self.flow.apply_paint_spans_for(spans);
+        }
+    }
+
+    /// Recolor the cached layout from the snapshot's paint-only highlight
+    /// overlay WITHOUT reshaping or reflowing. The editor's fast path for a
+    /// `HighlightPaintChanged` event. Call a render afterward to refresh the
+    /// frame. An empty overlay (highlighter removed) resets blocks to base.
+    pub fn apply_paint_highlights(&mut self, flow: &FlowSnapshot) {
+        let spans = text_typeset::bridge::collect_paint_spans(flow);
+        self.flow.apply_paint_spans_for(spans);
     }
 
     /// Incremental relayout of a single block. Falls back to
@@ -264,19 +283,32 @@ impl RichTextEngine {
     /// there would mean the two `DocumentFlow` invariant checks
     /// and `RichTextEngine::has_full_layout` disagree, which is
     /// a bug in one of them.
+    ///
+    /// `show_highlights` selects the snapshot flavor: `false` pulls a clean
+    /// snapshot (no highlights) and skips the paint overlay, so a view that
+    /// has opted out of highlights relayouts a single block without ever
+    /// acquiring the document's syntax/search/spell formatting.
     pub fn relayout_block_snapshot(
         &mut self,
         doc: &TextDocument,
         block_position: usize,
+        show_highlights: bool,
     ) -> Result<usize, String> {
         if !self.has_full_layout() {
-            let flow = doc.snapshot_flow();
+            let flow = if show_highlights {
+                doc.snapshot_flow()
+            } else {
+                doc.snapshot_flow_without_highlights()
+            };
             self.layout_full(&flow);
             return Ok(0);
         }
-        let snap = doc
-            .snapshot_block_at_position(block_position)
-            .ok_or_else(|| "no block at position".to_string())?;
+        let snap = if show_highlights {
+            doc.snapshot_block_at_position(block_position)
+        } else {
+            doc.snapshot_block_at_position_without_highlights(block_position)
+        }
+        .ok_or_else(|| "no block at position".to_string())?;
         let block_id = snap.block_id;
         let opts = text_typeset::bridge::BridgeOptions {
             code_block_background: self.flow.code_block_background(),
@@ -284,11 +316,21 @@ impl RichTextEngine {
             echo_char: self.flow.echo_char(),
         };
         let params = text_typeset::bridge::convert_block_with(&snap, &opts);
-        let bridge = self.shared.borrow();
-        self.flow.relayout_block(bridge.service(), &params).expect(
-            "relayout_block invariant violated: has_full_layout() should already \
+        {
+            let bridge = self.shared.borrow();
+            self.flow.relayout_block(bridge.service(), &params).expect(
+                "relayout_block invariant violated: has_full_layout() should already \
                  guarantee has_layout() && !layout_dirty_for_scale()",
-        );
+            );
+        }
+        // Re-apply the (possibly changed) paint overlay for just this block on
+        // top of its freshly-reshaped base. Empty spans clear any prior overlay.
+        // A highlights-off view skips this — the clean snapshot above carries no
+        // spans, and the freshly-reshaped base is already the desired bare look.
+        if show_highlights {
+            let spans = text_typeset::bridge::convert_paint_spans(&snap);
+            self.flow.apply_block_paint_spans(block_id, &spans);
+        }
         Ok(block_id)
     }
 
@@ -404,7 +446,7 @@ mod tests {
         let doc = TextDocument::new();
         doc.set_plain_text("Hello").unwrap();
 
-        let result = engine.relayout_block_snapshot(&doc, 0);
+        let result = engine.relayout_block_snapshot(&doc, 0, true);
         assert!(result.is_ok());
         assert!(engine.has_full_layout());
     }
@@ -620,7 +662,7 @@ mod tests {
         // falls back to `layout_full` — no panic, no partial
         // update, no error. After the call the engine is back to
         // a consistent state.
-        let result = engine.relayout_block_snapshot(&doc, 0);
+        let result = engine.relayout_block_snapshot(&doc, 0, true);
         assert!(
             result.is_ok(),
             "relayout_block_snapshot must fall back to layout_full on scale dirty"

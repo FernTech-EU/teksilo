@@ -44,9 +44,9 @@
 
 ## 1. Vision and Positioning
 
-Bastyde is a pure-Rust GUI framework for serious desktop applications — the kind of software where a user sits down for hours at a time and reaches for the keyboard first. A writing tool for novelists, an IDE, a dispatch console, a course manager for a taxi company's driver training. Bastyde is not a general-purpose widget toolkit competing with egui or iced for weekend prototypes; it is infrastructure for professional desktop software that needs native look and feel, full keyboard and screen-reader accessibility, and a rich text surface built from the ground up.
+Bastyde is a pure-Rust GUI framework for serious desktop applications — the kind of software where a user sits down for hours at a time and reaches for the keyboard first. A writing tool for novelists, an IDE, a dispatch console, a course manager for a taxi company's driver training. Bastyde is infrastructure for professional desktop software that needs native look and feel, full keyboard and screen-reader accessibility, and a rich text surface built from the ground up.
 
-Bastyde's thesis rests on three pillars. First, accessibility is a structural requirement, not an afterthought — AccessKit is integrated at the trait level, not bolted on. Second, rich text is a solved problem — the text-document and text-typeset crates provide a complete document model and typesetting engine that no other Rust GUI framework can match. Third, the framework is designed to be consumed by applications with structured architecture (Clean Architecture, MVVM), providing a typed Shortcut / Intent / Action pipeline and reactive data-model crate (`bastyde-data`) rather than leaving application structure as an exercise for the developer.
+Bastyde's thesis rests on three pillars. First, accessibility is a structural requirement, not an afterthought — AccessKit is integrated at the trait level, not bolted on. Second, rich text is a first-class concern — the text-document and text-typeset crates provide a complete document model and typesetting engine covering shaping, bidi, line-breaking, and atlas rasterization. Third, the framework is designed to be consumed by applications with structured architecture (Clean Architecture, MVVM), providing a typed Shortcut / Intent / Action pipeline and reactive data-model crate (`bastyde-data`) rather than leaving application structure as an exercise for the developer.
 
 ### 1.1 Relationship to structured application architectures
 
@@ -544,17 +544,17 @@ What Button exercises:
 
 ### 27.1 vs. QPalette → Design Tokens
 
-QPalette provides a fixed set of color roles across three interaction groups, with no support for spacing, typography, or shape. Bastyde's design token system covers the full visual vocabulary, uses typed Rust structs instead of role/group enums, and supports subtree overrides through environment propagation.
+QPalette covers color roles across three interaction groups. Bastyde's design token system extends that scope to spacing, typography, and shape, uses typed Rust structs, and supports subtree overrides through environment propagation.
 
 ### 27.2 vs. QAbstractItemModel → `ListModel<T>` and `TreeModel<T>`
 
-Qt's model uses type-erased `QVariant` with role-based data access and `void*` internal pointers. Bastyde's `ListModel<T>` and `TreeModel<T>` are concrete generic types with compile-time type safety. The delegate closure receives `&T` directly — no variant casting, no role integers. The `ListDataSource` trait provides an escape hatch for large/external datasets, also with an associated `Item` type.
+Qt's `QAbstractItemModel` uses a role-based, type-erased data access protocol (`QVariant`). Bastyde's `ListModel<T>` and `TreeModel<T>` are concrete generic types: the delegate closure receives `&T` directly, with compile-time type safety. The `ListDataSource` trait provides an escape hatch for large/external datasets, also with an associated `Item` type.
 
 ### 27.3 vs. Existing Rust GUI Frameworks
 
-Bastyde is architecturally ahead on accessibility (AccessKit at the trait level, tested by every test), text rendering (text-document + text-typeset), and widget extensibility (unified Widget trait with slots). It is comparable to Xilem/Masonry on layout and event design. It is weaker on rendering sophistication (quad-based vs. Vello's GPU compute renderer) and has zero maturity compared to established frameworks.
+Bastyde's focus areas are accessibility (AccessKit at the trait level, tested by every test), text rendering (text-document + text-typeset), and widget extensibility (unified Widget trait with slots). Its layout and event design are comparable to Xilem/Masonry. It is currently weaker on rendering sophistication (quad-based vs. Vello's GPU compute renderer) and much younger than established frameworks.
 
-The honest comparison is not against other Rust GUI frameworks but against Qt Widgets — the framework Bastyde is designed to replace for the specific use case of professional desktop applications.
+The primary reference point for Bastyde's feature scope is Qt Widgets — the framework most commonly used for the kind of professional desktop applications Bastyde targets.
 
 ---
 
@@ -582,15 +582,11 @@ The `bati!` DSL desugars to V2 builder calls one-to-one at macro-expansion time 
 
 The bulk of the original post-milestone question list has landed. The short list below is what remains actively open; see [`bastyde-milestones.md`](bastyde-milestones.md) for detailed status and the Next-candidates roadmap.
 
-**IME composition and CJK input.** The text input widget ships (Milestone 9), but IME composition window positioning, composition-text rendering, and dead-key / CJK input handling still need platform backends in `bastyde-platform`. The TextInput and RichTextEditor APIs don't change when this lands — the hooks are already in place.
-
 **External (OS) drag-and-drop.** Intra-app DnD works everywhere (Milestone 6). **Inbound** OS drops — files / text / URLs dragged from a file manager or another app into a Bastyde window — are implemented through the `ExternalDndBackend` trait in `bastyde-platform` (`install_external_dnd()`): macOS via a `NSDraggingDestination` overlay view (verified), Windows via OLE `RegisterDragDrop`/`IDropTarget`, Wayland via `wl_data_device`, X11 a documented no-op (the `DropZone` Browse button covers it). They reuse the in-app pipeline — an OS drop is a `DragPayload` with `origin() == External`. winit's own `DroppedFile`/`HoveredFile` are not used (no position, files-only, no Wayland). **Outbound** drags (Bastyde window → another app, e.g. `NSDraggingSource`) are still pending; the payload type and handler API are stable.
 
 **Native menu bar on macOS.** The widget-based `MenuBar` (Milestone 4) is correct for Windows and Linux where menu bars live inside the window chrome. On macOS the OS expects menus to live in the global `NSMenu`. The remaining work is a platform abstraction that routes a single declarative menu description through either path.
 
 **Virtualized dropdowns.** `ComboBox` now virtualizes via `ListView` under `max_visible_items`: lists beyond the cap materialize only the visible rows (plus `ListView`'s small buffer) instead of building every `DropdownItem` eagerly. The searchable (`rich-text`) filtered path shares the same virtualized renderer. `MenuList` grew a `max_visible_items` builder that caps panel height and wraps the item column in a `ScrollArea`, but does **not** virtualize — its API still takes arbitrary `impl Widget` children, so true virtualization would require a model-driven MenuList rewrite (tracked as follow-up). The eager build is cheap enough that capped 100+ item menus are fine in practice.
-
-**Widget-level vs. application-level undo.** Text input undo (last few typed characters coalesced into one undo step) and application undo (the domain's use-case undo stack) coexist in the rich text editor. The current design keeps them separate and lets the application decide when to promote widget-local undo records into the domain log. The generalization to other widgets — undo for a slider drag, undo for a selection change — has not been designed and may or may not prove necessary.
 
 ---
 

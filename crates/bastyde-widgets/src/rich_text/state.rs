@@ -80,9 +80,25 @@ pub(crate) struct EditorState {
     /// Needed because tick clears `needs_full_layout` after running
     /// the full layout, so paint can't infer it from that flag alone.
     pub pending_full_render: bool,
+    /// Set by a `DocumentEvent::HighlightPaintChanged` (paint-only highlight
+    /// change). `frame_loop::tick` consumes it: it recolors the cached layout
+    /// via `engine.apply_paint_highlights` and forces a re-render, WITHOUT a
+    /// reshape/reflow. Distinct from `needs_full_layout` — a paint-only change
+    /// never changes glyph metrics.
+    pub pending_recolor: bool,
 
     // Wrap mode as configured by the builder.
     pub wrap_mode: WrapMode,
+
+    /// Whether this view applies the document's syntax/search/spell
+    /// highlights. When `false` the view pulls a *clean* snapshot
+    /// (no highlights at all) and ignores `HighlightPaintChanged`, so a
+    /// read-only preview can mirror the same shared `TextDocument` while
+    /// staying bare of authoring-time highlighting. The single source of
+    /// truth — `frame_loop`/`drain_events` read it and pass it to the
+    /// engine's per-block relayout. Default `true`; `read_only` defaults
+    /// it to `false` (override either way via `RichTextEditor::show_highlights`).
+    pub show_highlights: bool,
 
     /// `true` once the app explicitly set a text color via
     /// [`RichTextEditor::text_color`](super::RichTextEditor::text_color).
@@ -394,7 +410,9 @@ impl EditorState {
             last_relayout_block_id: None,
             content_dirty: true,
             pending_full_render: true,
+            pending_recolor: false,
             wrap_mode,
+            show_highlights: true,
             text_color_user_set: false,
             last_text_color: None,
             last_code_block_bg: None,
@@ -431,6 +449,18 @@ impl EditorState {
             accessibility_flow_snapshot: RefCell::new(None),
             synthetic_to_element: RefCell::new(std::collections::HashMap::new()),
         }))
+    }
+
+    /// Snapshot the document's flow in this view's highlight flavor: the full
+    /// snapshot when `show_highlights`, otherwise a clean snapshot carrying no
+    /// highlights at all. Every full-layout / a11y snapshot pull routes through
+    /// here so a bare view never observes the document's highlighting.
+    pub fn flow_snapshot(&self) -> bastyde_text::text_document::FlowSnapshot {
+        if self.show_highlights {
+            self.document.snapshot_flow()
+        } else {
+            self.document.snapshot_flow_without_highlights()
+        }
     }
 
     /// Drain the local event queue, classifying events for the layout
@@ -483,6 +513,25 @@ impl EditorState {
                     a11y_snapshot_dirty = true;
                     self.needs_full_layout = true;
                     single_pos = None;
+                }
+                DocumentEvent::HighlightPaintChanged { .. } => {
+                    // A view with highlights off never shows paint highlights,
+                    // so this event is a pure no-op for it: don't recolor, don't
+                    // even dirty the AT snapshot (its clean snapshot is
+                    // unaffected). This is the "zero work on a search keystroke"
+                    // win for the bare preview pane.
+                    if self.show_highlights {
+                        // Paint-only highlight change: the shaping input is
+                        // unchanged, so recolor the cached layout without a
+                        // reshape/reflow. `tick` consumes `pending_recolor`.
+                        self.pending_recolor = true;
+                        // Colors on TextRun nodes changed, so the AT snapshot is
+                        // stale — but node identity is unaffected, so keep the
+                        // synthetic→element id map (only invalidate the snapshot).
+                        a11y_snapshot_dirty = true;
+                        // Deliberately NOT setting needs_full_layout /
+                        // pending_format_changed / pending_text_changed.
+                    }
                 }
                 DocumentEvent::DocumentReset
                 | DocumentEvent::FlowElementsInserted { .. }

@@ -143,7 +143,7 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     // widget's metrics and compute a wrong `max_scroll_y`.
     let layout_stale = viewport_ready && !state.engine.has_full_layout();
     if viewport_ready && (state.needs_full_layout || layout_stale) {
-        let flow = state.document.snapshot_flow();
+        let flow = state.flow_snapshot();
         state.engine.layout_full(&flow);
         state.needs_full_layout = false;
         state.last_relayout_block_id = None;
@@ -155,7 +155,10 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     } else if viewport_ready && let Some(pos) = single_pos {
         // Incremental path. Falls back to layout_full internally on
         // the first call (subtle-correctness item 25).
-        match state.engine.relayout_block_snapshot(&state.document, pos) {
+        match state
+            .engine
+            .relayout_block_snapshot(&state.document, pos, state.show_highlights)
+        {
             Ok(block_id) => {
                 state.last_relayout_block_id = Some(block_id);
                 state.content_dirty = true;
@@ -166,6 +169,26 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
                 state.needs_full_layout = true;
             }
         }
+    }
+
+    // Step 4b: paint-only highlight recolor. A `HighlightPaintChanged` event
+    // only changes colors, so re-derive the cached layout's colors WITHOUT
+    // reshaping/reflowing, then force a full re-render (re-bakes glyph &
+    // decoration colors from the cached layout — no shaping). If a full layout
+    // already ran this frame it re-baked from the fresh snapshot's paint spans,
+    // so the recolor would be redundant — just clear the flag.
+    if state.pending_recolor {
+        if !state.needs_full_layout
+            && !state.pending_full_render
+            && viewport_ready
+            && state.engine.has_full_layout()
+        {
+            let flow = state.flow_snapshot();
+            state.engine.apply_paint_highlights(&flow);
+            state.content_dirty = true;
+            state.pending_full_render = true;
+        }
+        state.pending_recolor = false;
     }
 
     // Step 5: update cursor display on the typesetter — but only if

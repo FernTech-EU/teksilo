@@ -679,6 +679,17 @@ impl WindowManager {
                 handle.purge_window(bastyde_id);
             }
         }
+        // Purge any pending async completions owned by the closing window so a
+        // late-arriving `spawn_local_with` result never touches a torn-down
+        // tree (mirrors the file-dialog purge above; bastyde-core type, so no
+        // feature gate).
+        if let Some(handle) = self
+            .app_context_template
+            .as_ref()
+            .and_then(|t| t.app_state::<bastyde_core::AsyncCompletionHandle>())
+        {
+            handle.purge_window(bastyde_id);
+        }
         // Revoke the window's OS drop-target registration (drops the platform
         // guard — RevokeDragDrop / removeFromSuperview / data-device teardown).
         if let Some(handle) = self

@@ -45,6 +45,12 @@ pub use bastyde_text::text_document;
 #[cfg(feature = "i18n")]
 pub use bastyde_i18n as i18n;
 
+/// Optional main-thread async executor. Off by default — enable the `async`
+/// feature. Re-exported as `bastyde::async_rt` (the bare name `async` is a
+/// reserved keyword). The spawn extension traits are also in the [`prelude`].
+#[cfg(feature = "async")]
+pub use bastyde_async as async_rt;
+
 /// Debug-only in-app inspector. Apps wire it in with one line:
 ///
 /// ```ignore
@@ -187,4 +193,18 @@ pub mod prelude {
     pub use bastyde_platform::file_dialog::{
         EventContextFileDialogExt, FileDialogHandle, FileDialogRequest, FileDialogResult,
     };
+
+    // Optional async executor: the install hook, the `ctx.spawn_local(...)`
+    // extension trait, and the `spawn_blocking` offload helper.
+    #[cfg(feature = "async")]
+    pub use bastyde_async::{
+        AsyncRuntimeHandle, BastydeAppBuilderAsyncExt, BlockingError, EventContextAsyncExt,
+        TaskHandle, spawn_blocking,
+    };
+
+    // Reactor adapters — install hooks for awaiting native runtime futures.
+    #[cfg(feature = "tokio")]
+    pub use bastyde_tokio::{BastydeAppBuilderTokioExt, TokioHandle};
+    #[cfg(feature = "async-std")]
+    pub use bastyde_async_std::BastydeAppBuilderAsyncStdExt;
 }

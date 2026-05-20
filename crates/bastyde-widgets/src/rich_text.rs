@@ -153,7 +153,12 @@ impl RichTextEditor {
     /// another part of the UI — both widgets receive document events
     /// independently via `on_change` subscriptions.
     pub fn read_only(document: TextDocument) -> Self {
-        Self::construct(document, READ_ONLY_PRESET)
+        // A viewer defaults to *bare*: it can mirror the same shared document
+        // as an editor pane, but stays free of the document's search / spell /
+        // syntax highlighting (those are authoring affordances). Opt back in
+        // with `.show_highlights(true)` — e.g. a read-only code viewer that
+        // *wants* syntax coloring.
+        Self::construct(document, READ_ONLY_PRESET).show_highlights(false)
     }
 
     /// Construct an editable rich text editor bound to `document`.
@@ -208,6 +213,24 @@ impl RichTextEditor {
             st.wrap_mode = mode;
             st.engine.set_wrap_mode(mode);
             st.needs_full_layout = true;
+        }
+        self
+    }
+
+    /// Whether this view applies the document's syntax / search / spell
+    /// highlighting. `editor` defaults to `true`; `read_only` defaults to
+    /// `false` (a bare preview). A highlights-off view pulls a *clean*
+    /// snapshot (no highlights at all, even metric ones like keyword bold) and
+    /// ignores paint-only highlight events entirely, so it does zero work when
+    /// the shared document's search/spell highlights change.
+    pub fn show_highlights(self, show: bool) -> Self {
+        {
+            let mut st = self.state.borrow_mut();
+            if st.show_highlights != show {
+                st.show_highlights = show;
+                // Re-pull the snapshot in the new flavor on the next tick.
+                st.needs_full_layout = true;
+            }
         }
         self
     }
@@ -1710,7 +1733,7 @@ impl Widget for RichTextEditorBody {
         // render exists.
         let did_full_layout = st.needs_full_layout || !st.engine.has_full_layout();
         if did_full_layout {
-            let flow = st.document.snapshot_flow();
+            let flow = st.flow_snapshot();
             st.engine.layout_full(&flow);
             st.needs_full_layout = false;
             st.content_dirty = true;
@@ -1902,7 +1925,10 @@ impl Widget for RichTextEditorBody {
         let snap = {
             let mut cache = st.accessibility_flow_snapshot.borrow_mut();
             if cache.is_none() {
-                *cache = Some(st.document.snapshot_flow());
+                // A bare view (show_highlights=false) builds its AT tree from a
+                // clean snapshot too, so screen readers never hear highlight-
+                // driven formatting that no sighted user sees.
+                *cache = Some(st.flow_snapshot());
             }
             cache.as_ref().cloned()
         };

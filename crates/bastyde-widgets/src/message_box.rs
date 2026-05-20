@@ -123,10 +123,9 @@ pub enum MessageBoxSeverity {
 
 /// Semantic role of a message-box button. Used for fallback escape
 /// resolution (`Reject` wins when no explicit escape button is set).
-/// Unlike some toolkits, Bastyde deliberately does **not** render
-/// `Destructive` buttons with a red fill — the dialog's severity icon
-/// and wording carry that signal. See [`crate::button`] for the
-/// framework-level rationale.
+/// Bastyde deliberately does **not** render `Destructive` buttons with
+/// a red fill — the dialog's severity icon and wording carry that
+/// signal. See [`crate::button`] for the framework-level rationale.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ButtonRole {
     /// Confirms / proceeds. Ok, Yes, Save, Open, Apply, Retry.

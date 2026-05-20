@@ -94,6 +94,15 @@ directory.
   bastyde-collector / Plausible / OTLP adapters, the `events.yaml` schema
   pipeline.
 
+## Async & concurrency
+
+- [async.md](async.md) — the optional main-thread async executor
+  (`bastyde-async`): `install_async()`, `ctx.spawn_local(...)` /
+  `spawn_local_with`, `spawn_blocking`, the async-agnostic `on_loop_tick`
+  hook, and the `bastyde-tokio` / `bastyde-async-std` reactor adapters for
+  awaiting native runtime futures. Off by default; complements the reactive
+  `subscribe_event` data path.
+
 ## Specialized widgets
 
 - [table-view.md](table-view.md) — virtualized `TableView` and `TreeTable`

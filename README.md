@@ -115,6 +115,8 @@ This is one developer's project. Architecture, design reviews, code review and f
 
 **Input.** Keyboard shortcuts, menus, and accessibility actions flow through one rebindable pipeline; a user remap updates every surface that mentions the binding. External-source events (databases, file watchers) bypass it; widgets subscribe directly.
 
+**Async.** Optional main-thread executor for imperative `async`/`.await` inside handlers: `spawn_local` for UI futures, `spawn_blocking` to offload work, and `spawn_local_with` to deliver a result with a fresh context. Off by default — the core stays synchronous and pays nothing; `bastyde-tokio` / `bastyde-async-std` add reactors for awaiting native runtime futures (timers, sockets, `reqwest`). For "data arrives, UI reacts," the reactive subscription path above stays simpler. See [`docs/async.md`](docs/async.md).
+
 **Tooltips.** Three tiers from one system: plain text, rich (inline markup + shortcut hint + expandable detail), and composite (arbitrary widget body). Rich and composite tooltips become focusable on dwell.
 
 **Animations.** Composable wrappers for the common cases (collapse, fade, slide, crossfade, blur, shake, pulse). Each respects the system "reduce motion" setting.
@@ -189,7 +191,7 @@ Bastyde is part of a small stack:
 
 - [text-document](https://github.com/jacquetc/text-document), the document model. **Required dependency.**
 - [text-typeset](https://github.com/jacquetc/text-typeset), the typesetting engine. **Required dependency.**
-- [Qleany](https://github.com/jacquetc/qleany), an architecture materializer that generates Clean Architecture in Rust or C++/Qt from a YAML manifest. Independent and optional; pairs naturally with Bastyde for application backends.
+- [Qleany](https://github.com/jacquetc/qleany), an architecture materializer that generates Clean Architecture (Verticval Slice variant) in Rust or C++/Qt from a YAML manifest. Independent and optional; pairs naturally with Bastyde for application backends.
 
 ## Contributing
 
