@@ -3756,7 +3756,8 @@ mod affinity_tests {
 
         let doc = TextDocument::new();
         doc.set_plain_text("hello world").unwrap();
-        let editor = RichTextEditor::read_only(doc.clone());
+        // This view shows highlights, so the paint-only fast path applies.
+        let editor = RichTextEditor::read_only(doc.clone()).show_highlights(true);
         let state = editor.state_handle();
         // Drain construction events, then clear dirty flags.
         state.borrow_mut().drain_events();
@@ -3803,7 +3804,8 @@ mod affinity_tests {
 
         let doc = TextDocument::new();
         doc.set_plain_text("hello world").unwrap();
-        let editor = RichTextEditor::read_only(doc.clone());
+        // This view shows highlights, so a metric change must reshape.
+        let editor = RichTextEditor::read_only(doc.clone()).show_highlights(true);
         let state = editor.state_handle();
         state.borrow_mut().drain_events();
         {
@@ -3820,5 +3822,104 @@ mod affinity_tests {
             "metric highlight must trigger a full relayout"
         );
         assert!(!st.pending_recolor, "metric highlight is not a recolor-only change");
+    }
+
+    #[test]
+    fn bare_view_ignores_paint_only_highlight() {
+        use bastyde_text::text_document::{
+            Color, HighlightContext, HighlightFormat, SyntaxHighlighter,
+        };
+        use std::sync::Arc;
+
+        struct BgHighlighter;
+        impl SyntaxHighlighter for BgHighlighter {
+            fn highlight_block(&self, text: &str, ctx: &mut HighlightContext) {
+                let n = text.chars().count();
+                if n > 0 {
+                    ctx.set_format(
+                        0,
+                        n,
+                        HighlightFormat {
+                            background_color: Some(Color::rgba(255, 214, 0, 150)),
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
+        }
+
+        let doc = TextDocument::new();
+        doc.set_plain_text("hello world").unwrap();
+        // read_only defaults to show_highlights = false (a bare preview).
+        let viewer = RichTextEditor::read_only(doc.clone());
+        let state = viewer.state_handle();
+        state.borrow_mut().drain_events();
+        {
+            let mut st = state.borrow_mut();
+            st.needs_full_layout = false;
+            st.pending_recolor = false;
+        }
+
+        doc.set_syntax_highlighter(Some(Arc::new(BgHighlighter)));
+        state.borrow_mut().drain_events();
+        let st = state.borrow();
+        // The bare view does zero work on a paint-only highlight change.
+        assert!(
+            !st.pending_recolor,
+            "bare view must ignore HighlightPaintChanged"
+        );
+        assert!(!st.needs_full_layout);
+    }
+
+    #[test]
+    fn bare_view_flow_snapshot_has_no_highlights() {
+        use bastyde_text::text_document::{
+            FlowElementSnapshot, FlowSnapshot, FragmentContent, HighlightContext, HighlightFormat,
+            SyntaxHighlighter,
+        };
+        use std::sync::Arc;
+
+        struct BoldHighlighter;
+        impl SyntaxHighlighter for BoldHighlighter {
+            fn highlight_block(&self, text: &str, ctx: &mut HighlightContext) {
+                let n = text.chars().count();
+                if n > 0 {
+                    ctx.set_format(
+                        0,
+                        n,
+                        HighlightFormat {
+                            font_bold: Some(true),
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
+        }
+        fn has_bold(flow: &FlowSnapshot) -> bool {
+            flow.elements.iter().any(|e| match e {
+                FlowElementSnapshot::Block(bs) => bs.fragments.iter().any(|f| {
+                    matches!(f, FragmentContent::Text { format, .. } if format.font_bold == Some(true))
+                }),
+                _ => false,
+            })
+        }
+
+        let doc = TextDocument::new();
+        doc.set_plain_text("hello world").unwrap();
+        doc.set_syntax_highlighter(Some(Arc::new(BoldHighlighter)));
+
+        // Editor shows highlights -> its snapshot carries the (metric) bold.
+        let editor = RichTextEditor::editor(doc.clone());
+        assert!(
+            has_bold(&editor.state_handle().borrow().flow_snapshot()),
+            "editor view should keep the metric highlight"
+        );
+
+        // Bare viewer -> clean snapshot, base fragments, no bold.
+        let viewer = RichTextEditor::read_only(doc.clone());
+        assert!(
+            !has_bold(&viewer.state_handle().borrow().flow_snapshot()),
+            "bare viewer must drop the highlight even for a metric highlighter"
+        );
     }
 }
