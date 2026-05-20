@@ -247,6 +247,27 @@ fn payload_accepted(
     if !payload.uris().is_empty() {
         return has_urls_cb;
     }
+    // No concrete data yet — on Wayland the bytes only arrive at drop, so the
+    // hover decision is made from the advertised formats. Optimistic: accept if
+    // the zone handles a kind the source offers; the real extension check runs
+    // at drop once `files()` is populated.
+    if payload.is_external() {
+        let formats = payload.formats();
+        let offers = |needles: &[&str]| {
+            formats
+                .iter()
+                .any(|f| needles.iter().any(|n| f == n || f.starts_with(n)))
+        };
+        if has_files_cb && offers(&["text/uri-list"]) {
+            return true;
+        }
+        if has_text_cb && offers(&["text/plain", "UTF8_STRING", "STRING", "TEXT"]) {
+            return true;
+        }
+        if has_urls_cb && offers(&["text/x-moz-url", "text/uri-list", "_NETSCAPE_URL"]) {
+            return true;
+        }
+    }
     false
 }
 
@@ -585,5 +606,45 @@ mod tests {
         tree.end_external_drag(p, data, &mut noop);
 
         assert_eq!(got.borrow().as_deref(), Some("hello"));
+    }
+
+    // --- Hover-time acceptance from advertised formats (Wayland) -------
+    // On Wayland the dropped bytes only arrive at drop, so hover accept/reject
+    // is decided from the advertised MIME formats alone.
+
+    #[test]
+    fn formats_only_hover_accepts_matching_kind() {
+        // A file drag advertises text/uri-list (+ text/plain for the path).
+        let file_drag = DragPayload::external(ExternalDropData {
+            formats: vec!["text/uri-list".into(), "text/plain".into()],
+            ..Default::default()
+        });
+        // Image-style zone: files handler, png filter — accept on hover even
+        // though the extension can't be checked until drop.
+        assert!(payload_accepted(
+            &file_drag,
+            &["png".into()],
+            true,
+            true,
+            false,
+            false
+        ));
+
+        // A pure text drag (no uri-list) onto a files-only zone → reject.
+        let text_drag = DragPayload::external(ExternalDropData {
+            formats: vec!["text/plain".into()],
+            ..Default::default()
+        });
+        assert!(!payload_accepted(&text_drag, &[], true, true, false, false));
+        // …but a text-handling zone accepts it.
+        assert!(payload_accepted(&text_drag, &[], true, false, true, false));
+    }
+
+    #[test]
+    fn formats_only_internal_drag_is_not_accepted() {
+        // A non-external payload with no concrete data must not be accepted via
+        // the formats path.
+        let internal = DragPayload::typed(7_u32);
+        assert!(!payload_accepted(&internal, &[], true, true, true, true));
     }
 }

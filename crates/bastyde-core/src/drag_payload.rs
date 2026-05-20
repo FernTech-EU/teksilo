@@ -37,6 +37,14 @@ pub struct ExternalDropData {
     pub uris: Vec<String>,
     /// Additional raw MIME representations, keyed by MIME type.
     pub mime: HashMap<String, Vec<u8>>,
+    /// Advertised data formats (platform MIME types / type identifiers),
+    /// available at drag-*enter* time even before the bytes are transferred.
+    /// On Wayland the actual `files` / `text` / `uris` are only filled at drop
+    /// (received over a pipe), so a drop target validates on hover from these
+    /// format strings (e.g. `"text/uri-list"` ⇒ a file drag). macOS / Windows
+    /// read the full payload at enter, so they fill the data directly and may
+    /// leave this empty.
+    pub formats: Vec<String>,
 }
 
 impl ExternalDropData {
@@ -66,6 +74,7 @@ impl ExternalDropData {
             text: None,
             uris,
             mime,
+            formats: vec!["text/uri-list".to_string()],
         }
     }
 
@@ -234,6 +243,15 @@ impl DragPayload {
         self.external.as_ref().map_or(&[], |e| &e.uris)
     }
 
+    /// Advertised data formats (platform MIME types / type identifiers) for an
+    /// external drag. Available at drag-enter even before the bytes transfer —
+    /// the basis for hover-time accept/reject when `files()` / `text()` /
+    /// `uris()` aren't populated yet (Wayland). See
+    /// [`ExternalDropData::formats`].
+    pub fn formats(&self) -> &[String] {
+        self.external.as_ref().map_or(&[], |e| &e.formats)
+    }
+
     /// Add a MIME-typed byte representation.
     pub fn with_mime(mut self, mime_type: &str, data: Vec<u8>) -> Self {
         self.mime_data.insert(mime_type.to_string(), data);
@@ -390,6 +408,7 @@ mod tests {
             text: Some("hello".into()),
             uris: vec!["https://example.com".into()],
             mime: HashMap::new(),
+            formats: Vec::new(),
         };
         let payload = DragPayload::external(data);
 

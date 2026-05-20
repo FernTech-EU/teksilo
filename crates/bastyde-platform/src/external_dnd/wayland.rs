@@ -166,8 +166,13 @@ impl Dispatch<WlDataDevice, ()> for DndState {
                         offer.accept(serial, Some(mime));
                     }
                 }
+                // Bytes aren't available until drop; advertise the offered MIME
+                // types so the drop target can decide accept/reject on hover.
                 state.post(ExternalDragEvent::Entered {
-                    data: ExternalDropData::default(),
+                    data: ExternalDropData {
+                        formats: state.offer_mimes.clone(),
+                        ..Default::default()
+                    },
                     position: state.position,
                 });
             }
