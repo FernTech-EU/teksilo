@@ -5,7 +5,7 @@
 //! Apps retheme buttons by constructing a fresh map of recipes (e.g.
 //! a Material-3 ButtonRecipe set with rounded-edge filled buttons)
 //! and installing it per-call (`Button::style(MyStyle)`) or
-//! theme-wide (step 8's `ComponentStyles.button = Rc::new(MyStyle)`).
+//! theme-wide (`theme.style_slots.button = Some(Rc::new(MyStyle))`).
 //! The Button widget never sees the recipe; it only knows about the
 //! trait.
 
@@ -25,12 +25,11 @@ use bastyde_tokens::{BorderRole, Color, CornerRadius, SurfaceRole};
 
 use crate::primitives::{MinSize, Padding, RectWidget, ZStack};
 
-// IntUI design tokens for Button. Moved here in Step 7 of the
-// styling refactor — the recipe / its consumers own these constants
-// instead of reading from `theme.components.button`. Most button
-// dimensions live inside per-variant `ButtonRecipe`s (padding, min
-// size, etc.); the constants below cover globals (icon size, the
-// icon ↔ label gap) that aren't variant-specific.
+// IntUI design tokens for Button. The recipe and its consumers own
+// these constants. Most button dimensions live inside per-variant
+// `ButtonRecipe`s (padding, min size, etc.); the constants below
+// cover globals (icon size, the icon ↔ label gap) that aren't
+// variant-specific.
 pub const BUTTON_HEIGHT: f32 = 24.0;
 pub const BUTTON_MIN_WIDTH: f32 = 72.0;
 pub const BUTTON_PADDING_HORIZONTAL: f32 = 14.0;

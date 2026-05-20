@@ -21,8 +21,7 @@ use bastyde_tokens::{CornerRadius, SurfaceRole};
 use crate::primitives::{Expand, Padding, RectWidget, ZStack};
 
 // IntUI design tokens for StandardListItem / StandardTreeItem.
-// Moved here in Step 7 of the styling refactor — the recipe owns its
-// own dimensions instead of reading from `theme.components.standard_item`.
+// The recipe owns its own dimensions.
 pub const STANDARD_ITEM_ICON_SIZE: f32 = 16.0;
 pub const STANDARD_ITEM_SUBTITLE_ICON_SIZE: f32 = 12.0;
 pub const STANDARD_ITEM_SLOT_GAP: f32 = 8.0;

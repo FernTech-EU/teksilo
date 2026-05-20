@@ -21,14 +21,12 @@ use bastyde_tokens::{CornerRadius, SurfaceRole};
 
 use crate::primitives::{FixedSize, HStack, Padding, RectWidget, Spacer, ZStack};
 
-// IntUI design tokens for MenuItem / MenuList rows.
-// Moved here in Step 7 of the styling refactor — the recipe owns
-// its own dimensions instead of reading from `theme.components.menu`.
-// The MenuList / MenuBar / ComboBox panel widgets import these
-// constants when they need menu-related row dimensions (item height,
-// separator height). The menu *panel* surface (corner radius, border,
-// shadow density) is owned by `PopoverStyle` (the `Menu` variant) as
-// of Stage A of the group-5 styling migration.
+// IntUI design tokens for MenuItem / MenuList rows. The recipe owns
+// its own dimensions. The MenuList / MenuBar / ComboBox panel widgets
+// import these constants when they need menu-related row dimensions
+// (item height, separator height). The menu *panel* surface (corner
+// radius, border, shadow density) is owned by `PopoverStyle` (the
+// `Menu` variant).
 pub const MENU_ITEM_HEIGHT: f32 = 24.0;
 pub const MENU_ITEM_PADDING_HORIZONTAL: f32 = 12.0;
 pub const MENU_ICON_COLUMN_WIDTH: f32 = 16.0;

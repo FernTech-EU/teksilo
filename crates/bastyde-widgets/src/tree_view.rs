@@ -38,16 +38,6 @@ struct TreeViewDragData {
     source_tree_id: usize,
 }
 
-/// A virtualized hierarchical tree widget backed by a `TreeModel<T>`.
-///
-/// ```ignore
-/// TreeView::new(tree_model, |item, entry, selected| {
-///     Box::new(HStack::new()
-///         .child(Padding::left(entry.depth as f32 * 20.0))
-///         .child(TextWidget::new_literal(&item.title)))
-/// })
-/// .item_height(28.0)
-/// ```
 /// Per-row context passed to a 4-arg TreeView delegate. Carries a
 /// reference to the slice handle and the row's `NodeId` so the
 /// delegate can wire chevron toggles and other tree-aware behavior
@@ -85,6 +75,17 @@ impl<'a, T: 'static> TreeRowContext<'a, T> {
 /// `new_with_context` produce a closure of this shape.
 type TreeDelegate<T> = dyn Fn(&T, &FlatEntry, bool, &TreeRowContext<'_, T>) -> Box<dyn Widget>;
 
+/// A virtualized hierarchical tree widget backed by a `TreeModel<T>`.
+///
+/// ```ignore
+/// TreeView::new(tree_model, |item, entry, selected| {
+///     let indent = entry.depth as f32 * 20.0;
+///     Box::new(HStack::new()
+///         .child(Padding::new(0.0, 0.0, 0.0, indent))
+///         .child(TextWidget::new_literal(&item.title)))
+/// })
+/// .item_height(28.0)
+/// ```
 pub struct TreeView<T: 'static> {
     tree_slice: TreeSlice<T>,
     delegate: Rc<TreeDelegate<T>>,

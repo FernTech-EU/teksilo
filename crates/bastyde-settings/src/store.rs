@@ -23,9 +23,9 @@
 //! The cell each key owns includes an [`ObserverHandle`] returned by
 //! `signal.observe(|new_val| …)`. The observer's closure captures a
 //! `Weak<RefCell<StoreInner>>` — never a strong `Rc` — and bails when
-//! the store has already been dropped. This is the cycle the plan
-//! review flagged: a strong capture would trap the entire store inside
-//! its own observer, leaking for the life of the process.
+//! the store has already been dropped. This avoids a reference cycle: a
+//! strong capture would trap the entire store inside its own observer,
+//! leaking for the life of the process.
 
 use std::any::{Any, TypeId};
 use std::cell::RefCell;

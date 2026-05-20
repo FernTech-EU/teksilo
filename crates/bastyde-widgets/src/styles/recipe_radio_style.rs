@@ -4,8 +4,8 @@
 //! want a different design language (Material 3 radio with growing
 //! ripple, brutalist square, custom mark) write their own
 //! `impl RadioStyle` block and install it per-call
-//! (`RadioButton::style(...)`) or theme-wide (step 8's
-//! `ComponentStyles.radio = Rc::new(MyRadio)`).
+//! (`RadioButton::style(...)`) or theme-wide
+//! (`theme.style_slots.radio = Some(Rc::new(MyRadio))`).
 //!
 //! The body is a small leaf widget ([`RadioBody`]) that paints the
 //! outer ring + inner dot directly to canvas — same trade-off as
@@ -22,9 +22,7 @@ use bastyde_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, 
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{Color, CornerRadius};
 
-// IntUI design tokens for RadioButton. Moved here in Step 7 of the
-// styling refactor — the recipe owns its own dimensions instead of
-// reading from `theme.components.radio`.
+// IntUI design tokens for RadioButton. The recipe owns its own dimensions.
 pub const RADIO_VISUAL_SIZE: f32 = 19.0;
 pub const RADIO_HIT_AREA: f32 = 24.0;
 pub const RADIO_LABEL_GAP: f32 = 6.0;

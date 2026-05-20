@@ -35,8 +35,8 @@ use bastyde_i18n::LocalizedString;
 /// keyboard shortcut hint.
 ///
 /// The shortcut is currently a literal label override. Registry-backed
-/// auto-lookup against the new [`ShortcutRegistry`] lands in step 3
-/// via a shortcut-id field.
+/// auto-lookup against the new [`ShortcutRegistry`] lands via a
+/// shortcut-id field once registry-backed lookup is wired.
 ///
 /// [`MenuItem`]: crate::menu_item::MenuItem
 pub struct TooltipContent {
@@ -305,5 +305,5 @@ mod tests {
 
     // NOTE: `with_command_stores_type_erased_ref` test removed along
     // with the `command` field; registry-backed shortcut resolution
-    // returns in step 3 via shortcut-id binding.
+    // returns once registry-backed shortcut lookup is wired.
 }

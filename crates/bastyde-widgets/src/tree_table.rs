@@ -17,8 +17,7 @@
 //!   `set_level` + `set_expanded`).
 //! - ArrowLeft / ArrowRight on the tree column collapse / expand.
 //! - Row drag-drop is NOT shipped here: insertion-vs-reparent UX
-//!   requires its own design pass and is documented as out-of-scope
-//!   (plan §3.2 / §8.3).
+//!   requires its own design pass and is out-of-scope.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;

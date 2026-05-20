@@ -30,10 +30,8 @@ use crate::button::InteractionState;
 use crate::primitives::icon_widget::IconWidget;
 use crate::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
 
-/// CommandLinkButton design tokens — relocated from
-/// `theme.components.command_link_button` in Stage G of the styling
-/// migration. The widget is a group-4 composite with no dedicated
-/// recipe module.
+/// CommandLinkButton design tokens. The widget is a group-4 composite
+/// with no dedicated recipe module.
 pub const COMMAND_LINK_BUTTON_ICON_SIZE: f32 = 28.0;
 pub const COMMAND_LINK_BUTTON_ICON_TEXT_GAP: f32 = 14.0;
 pub const COMMAND_LINK_BUTTON_TITLE_DESCRIPTION_GAP: f32 = 4.0;

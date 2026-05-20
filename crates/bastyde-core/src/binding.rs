@@ -51,10 +51,10 @@ pub enum BindingLevel {
 /// Carries the source-signal closures so the registry can construct a
 /// [`BindingGroup`] on first registration. After that, all bindings
 /// sharing one `source_id` collapse into a single group entry — the
-/// closures are stored once on the group and never duplicated. Phase 4
-/// of the perf plan: pre-refactor the registry walked all bindings
-/// every frame and called `is_dirty()` per binding, even though many
-/// shared the same underlying dirty flag.
+/// closures are stored once on the group and never duplicated.
+/// Pre-optimization the registry walked all bindings every frame and
+/// called `is_dirty()` per binding, even though many shared the same
+/// underlying dirty flag.
 #[derive(Clone)]
 pub(crate) struct Binding {
     /// Widget to mark dirty when the source signal changes.
@@ -150,7 +150,7 @@ impl BindingRegistry {
     /// Number of live bindings. Exposed for tests that verify
     /// cleanup does not accumulate entries across rebuilds. Equals
     /// the total count of `(widget_id, level)` entries across all
-    /// source groups — matches the pre-Phase-4 semantics.
+    /// source groups.
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.by_source
@@ -174,9 +174,9 @@ impl BindingRegistry {
     /// `false` and the AT cache would never refresh. Walking both
     /// buckets before any clearing fixes that.
     ///
-    /// Phase 4: cost is O(S) `is_dirty` calls (S = unique sources)
-    /// plus O(D) widget-level promotions (D = bindings on dirty
-    /// sources). Pre-refactor it was O(N) `is_dirty` calls (N = all
+    /// Cost is O(S) `is_dirty` calls (S = unique sources) plus O(D)
+    /// widget-level promotions (D = bindings on dirty sources).
+    /// Pre-optimization it was O(N) `is_dirty` calls (N = all
     /// bindings); on the catalog scene S≈30-40, N≈100-300.
     pub(crate) fn flush_all_dirty(&self) -> (Vec<(WidgetId, BindingLevel)>, bool) {
         let by_source = self.by_source.borrow();
@@ -413,8 +413,7 @@ mod tests {
 
     #[test]
     fn flush_all_dirty_drains_visual_and_a11y_in_one_pass() {
-        // Regression for the latent "shared dirty flag" bug fixed in
-        // Phase 1: a Signal bound at both RepaintOnly and
+        // Regression: a Signal bound at both RepaintOnly and
         // AccessibilityOnly shares one underlying dirty flag. A single
         // `flush_all_dirty` call must surface both sides.
         let reg = BindingRegistry::new();
@@ -458,7 +457,7 @@ mod tests {
         assert!(!reg.flush_accessibility_dirty());
     }
 
-    // ─── Phase 4: source-indexed registry semantics ──────────────────
+    // ─── Source-indexed registry semantics ───────────────────────────
 
     #[test]
     fn phase4_register_dedup_same_source_same_widget() {
@@ -527,8 +526,8 @@ mod tests {
     #[test]
     fn phase4_level_promotion_preserved() {
         // Re-registering at a higher level promotes; lower or equal
-        // is a no-op. Phase 4 must preserve the pre-refactor
-        // priority order (Rebuild > Relayout > RepaintOnly).
+        // is a no-op. The priority order must be preserved
+        // (Rebuild > Relayout > RepaintOnly).
         use crate::signal::Signal;
         let reg = BindingRegistry::new();
         let sig = Signal::new(0_i32);

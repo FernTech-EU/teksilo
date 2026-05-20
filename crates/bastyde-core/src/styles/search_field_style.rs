@@ -4,8 +4,7 @@
 //! bordered surface chrome via `TextInputStyle`) with a leading
 //! magnifier glyph dropped into the field's leading slot and a
 //! trailing clear-button toggled by `show_clear_button(true)`. The
-//! suggestions popup surface was already routed through
-//! `PopoverStyle::Menu` in Stage A4 of the migration.
+//! suggestions popup surface is routed through `PopoverStyle::Menu`.
 //!
 //! What remains is a thin chrome hook for apps that want to wrap or
 //! replace the field — same pattern as `DateEditStyle`. Default is a

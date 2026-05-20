@@ -64,19 +64,24 @@ let tw = TabWidget::new(selected.clone())
     .tab_sizing(TabSizing::Shared);
 ```
 
-Stand-alone `TabBar<T>` looks the same minus the content-side machinery:
+Stand-alone `TabBar<T>` looks the same minus the content-side machinery.
+`TabBar` is generic over any item type `T`; supply a `TabDelegate<T>` that
+extracts presentation from your items and an `id_of` closure that produces
+the stable `TabId` for each item:
 
 ```rust
 use bastyde::widgets::{TabBar, TabDelegate};
 
+// Example with a custom item type.
+struct DocItem { id: TabId, title: String, closable: bool, pinned: bool }
+
 let bar = TabBar::horizontal(
-    model,
-    TabDelegate::new(|_, h: &TabHandle| h.info_title_or_empty())
-        .closable(|_, h| h.info.closable)
-        .pinned(|_, h| h.info.pinned)
-        .icon(|_, h| h.info.icon.as_ref().map(|f| f())),
+    model,   // ListModel<DocItem>
+    TabDelegate::new(|_, item: &DocItem| LocalizedString::literal(item.title.clone()))
+        .closable(|_, item| item.closable)
+        .pinned(|_, item| item.pinned),
     selected,
-    |_, h: &TabHandle| h.id,
+    |_, item: &DocItem| item.id,
 )
 .tab_sizing(TabSizing::Shared)
 .reorderable(true);
@@ -336,8 +341,8 @@ The two orientations apply Shared sizing differently:
   wheel remap, dropdown engage normally).
 
 - **Vertical does NOT divide the viewport.** Sidebar pills stay at
-  the intrinsic per-tab height (`theme.components.tab.editor_tab_height`,
-  default 50 dp) regardless of how tall the bar is. A 800 dp bar with
+  the intrinsic per-tab height (`TAB_EDITOR_HEIGHT`, default 50 dp)
+  regardless of how tall the bar is. A 800 dp bar with
   4 tabs gives 4 pills of 50 dp at the top, not 4 × 200 dp bands.
   This matches VS Code, IntelliJ tool-window tabs, and the user
   expectation of sidebar tabs being short pills. The `min_tab_width`
@@ -586,7 +591,7 @@ publish for their own browser tabs.
 | label text — selected       | `selected_text_role` (settable)         |
 | label text — idle           | `idle_text_role` (settable)             |
 | label text — disabled       | `TextRole::Disabled` (always)           |
-| accent indicator (selected) | `theme.components.tab.underline_active` |
+| accent indicator (selected) | `theme.colors.accent`                   |
 | bar bottom separator        | `BorderRole::DividerStrong`             |
 | close button hover          | `SurfaceRole::Hover`                    |
 | drop indicator line         | `TextRole::Accent`                      |
@@ -607,13 +612,14 @@ editor-strip convention); `idle_text_role` defaults to
 the default cascade reads with insufficient contrast. Disabled tabs
 always render at `TextRole::Disabled`.
 
-Static numbers come from `theme.components.tab`
-([`TabStyle`](../crates/bastyde-tokens/src/components.rs)):
+Static numbers are `pub const`s in
+[`recipe_tab_style`](../crates/bastyde-widgets/src/styles/recipe_tab_style.rs):
 
-- `editor_tab_height` (default 50 dp) — height of horizontal bar tabs.
-- `tool_window_tab_height` (default 28 dp) — reserved for future
+- `TAB_EDITOR_HEIGHT` (default 50 dp) — height of horizontal bar tabs.
+- `TAB_TOOL_WINDOW_HEIGHT` (default 28 dp) — reserved for future
   tool-window tab variant; not currently consumed by vertical bars.
-- `underline_active` — accent color for the selection indicator.
+- `TAB_UNDERLINE_ACTIVE` (default 3 dp) — thickness of the selection
+  indicator. The indicator's color comes from `theme.colors.accent`.
 
 The accent indicator paints at the **top edge** in horizontal bars and
 the **leading edge** in vertical bars. Tabs use a uniform surface

@@ -13,11 +13,10 @@
 //!   fill), next, next-double, with a small inter-button gap.
 //!
 //! Calendar-specific layout numbers (cell size / gap, header height,
-//! ring widths, etc.) live as `pub const`s on this module — relocated
-//! from `theme.components.calendar` in Stage D1 of the group-5 styling
-//! migration. `calendar.rs` reads them directly when it needs sizing
-//! data outside the cell chrome (weekday row, week-number column,
-//! outer padding, mode-switcher footprint).
+//! ring widths, etc.) live as `pub const`s on this module. `calendar.rs`
+//! reads them directly when it needs sizing data outside the cell chrome
+//! (weekday row, week-number column, outer padding, mode-switcher
+//! footprint).
 
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::color_prop::ColorProp;
@@ -31,10 +30,9 @@ use bastyde_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole, TextStyleR
 use crate::primitives::{Center, Expand, FixedSize, HStack, RectWidget, TextWidget, ZStack};
 
 // ─── IntUI design tokens for Calendar ──────────────────────────────
-// Relocated from `theme.components.calendar` in Stage D1 of the group-5
-// styling migration. `calendar.rs` reads these directly for sizing
-// outside the per-cell chrome (weekday row, outer padding, footer
-// divider, mode-switcher footprint).
+// `calendar.rs` reads these directly for sizing outside the per-cell
+// chrome (weekday row, outer padding, footer divider, mode-switcher
+// footprint).
 
 /// Outer padding inside the calendar's framed surface.
 pub const CALENDAR_OUTER_PADDING: f32 = 8.0;

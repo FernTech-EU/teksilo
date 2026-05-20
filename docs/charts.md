@@ -43,10 +43,9 @@ plot-area carving.
 
 ## 2. The widget catalog
 
-Three widgets, deliberately kept that small. The
-[charts plan](plans/charts-plan.md) §1 spells out the
-"focused two-chart catalog avoids the tiny matplotlib trap" reasoning;
-pie/donut joined late because it's the one chart users routinely
+Three widgets, deliberately kept that small — a focused two-chart
+catalog avoids the tiny-matplotlib trap.
+Pie/donut joined late because it's the one chart users routinely
 expect from a desktop GUI toolkit and the implementation reuses 90% of
 the bar/line infrastructure.
 
@@ -139,9 +138,9 @@ PieChart::new(data)
 ```
 
 The center slot follows the existing `Option<PendingChild>` pattern
-used by [`Card`](../crates/bastyde-widgets/src/card.rs:13),
-[`DialogContent`](../crates/bastyde-widgets/src/dialog.rs:206), and
-[`GroupBox`](../crates/bastyde-widgets/src/group_box.rs:23): two builders
+used by [`Card`](../crates/bastyde-widgets/src/card.rs:31),
+[`DialogContent`](../crates/bastyde-widgets/src/dialog.rs:351), and
+[`GroupBox`](../crates/bastyde-widgets/src/group_box.rs:29): two builders
 (`.center(impl Widget)` and `.center_id(WidgetId)`), resolved in
 `build()` via `ctx.add_boxed`.
 
@@ -385,7 +384,8 @@ deliberately different from
 
 The implementation is straightforward:
 
-1. The chart owns a `Signal<Option<HoveredState>>` (point or slice)
+1. The chart owns a private hover signal — `Signal<Option<HoveredPoint>>`
+   for `LineChart`, `Signal<Option<HoveredSlice>>` for `PieChart` —
    bound at `BindingLevel::RepaintOnly`.
 2. An `on_pointer_event` handler attached via `HandlerSet` reads the
    pointer position, finds the nearest hit in a `Vec<…Hit>` snapshot
@@ -415,14 +415,15 @@ Disable with `.hover_tooltip(false)` if you'd rather the chart not
 react to hover at all (e.g. embedded in a tooltip itself, or behind
 a busy overlay).
 
-## 10. Theming — the `ChartStyle` token
+## 10. Theming — chart style constants
 
-[`ChartStyle`](../crates/bastyde-tokens/src/components.rs) carries
-chart-specific dimensions: padding, tick lengths, label gaps,
-gridline width, default line / point sizes, legend swatch and item
-gaps, tooltip padding, and the four pie-related fields
-(`pie_padding`, `pie_label_gap`, `pie_leader_length`,
-`pie_min_slice_label_degrees`, `donut_default_inner_ratio`).
+[`crates/bastyde-charts/src/style.rs`](../crates/bastyde-charts/src/style.rs)
+carries chart-specific dimension constants: padding (`PLOT_PADDING_TOP`,
+`PLOT_PADDING_RIGHT`, `PLOT_PADDING_BOTTOM`, `PLOT_PADDING_LEADING`),
+tick lengths, label gaps, gridline width, default line / point sizes,
+legend swatch and item gaps, tooltip padding, and the four pie-related
+constants (`PIE_PADDING`, `PIE_LABEL_GAP`, `PIE_LEADER_LENGTH`,
+`PIE_MIN_SLICE_LABEL_DEGREES`, `DONUT_DEFAULT_INNER_RATIO`).
 
 Charts pull their colors from existing roles, not new fields:
 
@@ -436,8 +437,8 @@ Charts pull their colors from existing roles, not new fields:
 
 The only chart-specific color is the `chart_palette` (§5). A theme
 overriding the palette doesn't need to touch any other chart token;
-a theme tightening density can change `ChartStyle::plot_padding_*`
-without touching colors.
+a theme tightening density can change the `PLOT_PADDING_*` constants
+in `bastyde-charts/src/style.rs` without touching colors.
 
 ## 11. Accessibility
 
@@ -445,9 +446,9 @@ Each chart declares `Role::GraphicsDocument` with a name that
 describes the shape (`"Bar chart: 3 series, 4 categories"`,
 `"Line chart: 2 series, 12 points"`, `"Pie chart: 5 slices"`).
 
-The plan called for per-series `GraphicsObject` children with
-descriptive metadata; that's a follow-up. Today the chart node is a
-single accessible label without per-series drill-down. Apps that need
+Per-series `GraphicsObject` children with descriptive metadata are a
+follow-up. Today the chart node is a single accessible label without
+per-series drill-down. Apps that need
 data-table semantics for screen readers should mirror the chart with
 a `TreeView` or a custom data table next to it — the same pattern
 matplotlib / d3 users follow.

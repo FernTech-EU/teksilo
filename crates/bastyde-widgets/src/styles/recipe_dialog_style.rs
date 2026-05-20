@@ -24,9 +24,7 @@ use bastyde_tokens::{CornerRadius, SurfaceRole};
 
 use crate::primitives::RectWidget;
 
-// IntUI design tokens for Dialog. Relocated from
-// `theme.components.dialog` in Stage B of the group-5 styling
-// migration — the recipe owns its own dimensions.
+// IntUI design tokens for Dialog. The recipe owns its own dimensions.
 pub const DIALOG_CONTENT_PADDING: f32 = 24.0;
 pub const DIALOG_MIN_WIDTH: f32 = 280.0;
 pub const DIALOG_CORNER_RADIUS: f32 = 8.0;

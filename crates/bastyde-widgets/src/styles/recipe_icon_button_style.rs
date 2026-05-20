@@ -8,8 +8,8 @@
 //! Apps that want a different treatment (Material 3 elevated icon
 //! button, glassmorphism, brutalist square frame) write their own
 //! `impl IconButtonStyle` block and install it per-call
-//! (`IconButton::style(...)`) or theme-wide (step 8's
-//! `ComponentStyles.icon_button = Rc::new(MyIconButton)`).
+//! (`IconButton::style(...)`) or theme-wide
+//! (`theme.style_slots.icon_button = Some(Rc::new(MyIconButton))`).
 
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::color_prop::ColorProp;
@@ -21,10 +21,9 @@ use bastyde_tokens::{BorderRole, SurfaceRole};
 
 use crate::primitives::{Center, FixedSize, RectWidget, ZStack};
 
-// IntUI design tokens for IconButton. Moved here in Step 7 of the
-// styling refactor — the recipe owns its own dimensions instead of
-// reading from `theme.components.icon_button`. Sizes follow the
-// IntelliJ IntUI scale (Compact < Default < Toolbar < Large < Hero).
+// IntUI design tokens for IconButton. The recipe owns its own dimensions.
+// Sizes follow the IntelliJ IntUI scale (Compact < Default < Toolbar
+// < Large < Hero).
 pub const ICON_BUTTON_SIZE_COMPACT: f32 = 22.0;
 pub const ICON_BUTTON_SIZE_DEFAULT: f32 = 24.0;
 pub const ICON_BUTTON_SIZE_TOOLBAR: f32 = 30.0;

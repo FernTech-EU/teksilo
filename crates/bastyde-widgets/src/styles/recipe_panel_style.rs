@@ -28,9 +28,7 @@ use bastyde_core::widget::{
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::CornerRadius;
 
-// IntUI design tokens for Panel. Moved here in Step 7 of the styling
-// refactor — the recipe owns its own dimensions instead of reading
-// from `theme.components.panel`.
+// IntUI design tokens for Panel. The recipe owns its own dimensions.
 pub const PANEL_PADDING: f32 = 12.0;
 pub const PANEL_CORNER_RADIUS: f32 = 8.0;
 pub const PANEL_BORDER_WIDTH: f32 = 1.0;

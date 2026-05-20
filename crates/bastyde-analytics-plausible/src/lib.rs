@@ -1,7 +1,7 @@
 //! `bastyde-analytics-plausible` — Plausible adapter for bastyde-telemetry.
 //!
-//! Privacy posture: **anonymous-by-design** (Path A in the telemetry
-//! plan). The adapter transmits no client-side identifier, no UUID,
+//! Privacy posture: **anonymous-by-design**. The adapter transmits no
+//! client-side identifier, no UUID,
 //! no fingerprint. Plausible derives a per-day session hash
 //! server-side from `X-Forwarded-For` + `User-Agent` + a daily-
 //! rotating server-held salt; this scheme is on the CNIL

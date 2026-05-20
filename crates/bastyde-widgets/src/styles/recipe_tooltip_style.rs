@@ -19,10 +19,8 @@ use bastyde_core::widget::{
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::CornerRadius;
 
-// IntUI design tokens for plain Tooltip + CompositeTooltip. Moved here
-// in Step 7 of the styling refactor — the recipe + tooltip widget own
-// these constants instead of reading from `theme.components.tooltip` /
-// `composite_tooltip`.
+// IntUI design tokens for plain Tooltip + CompositeTooltip. The recipe
+// and tooltip widget own these constants.
 pub const TOOLTIP_PADDING_HORIZONTAL: f32 = 10.0;
 pub const TOOLTIP_PADDING_VERTICAL: f32 = 6.0;
 pub const TOOLTIP_CORNER_RADIUS: f32 = 8.0;
@@ -55,8 +53,8 @@ impl TooltipStyle for RecipeTooltipStyle {
 
 /// Internal container that paints the tooltip chrome (shadow + dark
 /// background + corner radius) and lays out the content with the
-/// tooltip padding inset. Sizing reads `theme.components.tooltip` at
-/// layout time so theme changes refresh on the next pass.
+/// tooltip padding inset. Sizing reads `TOOLTIP_PADDING_*` constants
+/// defined in this module.
 struct TooltipFrame {
     child_id: Option<WidgetId>,
     pending_child: Option<PendingChild>,

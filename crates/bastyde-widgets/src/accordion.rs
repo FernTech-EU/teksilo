@@ -77,8 +77,7 @@ impl Widget for AccordionRegion {
 // Accordion widget
 // ---------------------------------------------------------------------------
 
-/// Accordion design tokens — relocated from `theme.components.accordion`
-/// as part of the Stage G teardown. Accordion is a group-4 composite
+/// Accordion design tokens. Accordion is a group-4 composite
 /// with no dedicated `Recipe*Style`, so its layout numbers live
 /// alongside the widget that reads them.
 pub const ACCORDION_HEADER_HEIGHT: f32 = 28.0;

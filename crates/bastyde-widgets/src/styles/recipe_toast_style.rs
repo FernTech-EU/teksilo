@@ -5,11 +5,11 @@
 //! `StatusWarning` / `StatusError`) with rounded corners, padding,
 //! a leading severity glyph, and an optional trailing close `IconButton`.
 //!
-//! Tokens are co-located here (Stage B styling-migration convention).
+//! Tokens are co-located here.
 //! Apps that want a different look (full-bleed strip, frosted glass,
 //! icon-free) write their own `impl ToastStyle` block. The widget
 //! always builds the functional pieces (severity glyph, close button,
-//! body content) — the recipe is pure chrome (principle 6).
+//! body content) — the recipe is pure chrome.
 
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::color_prop::ColorProp;

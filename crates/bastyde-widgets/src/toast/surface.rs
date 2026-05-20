@@ -146,7 +146,7 @@ impl ToastSurface {
         }
     }
 
-    /// AT role per the severity × priority matrix (see plan §"Accessibility").
+    /// AT role per the severity × priority matrix.
     fn at_role(&self) -> bastyde_core::accesskit::Role {
         use bastyde_core::styles::ToastPriority;
         let elevated_priority = matches!(

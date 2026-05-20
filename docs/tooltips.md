@@ -32,7 +32,7 @@ the other two.
 | Attach helpers | [`attach_rich_tooltip*`](../crates/bastyde-widgets/src/tooltip/attach.rs) / [`attach_composite_tooltip*`](../crates/bastyde-widgets/src/tooltip/attach.rs) | `bastyde-widgets` | Wire a tooltip onto an anchor inside `build()` |
 | Tree machinery | [`WidgetTree::attach_tooltip*`](../crates/bastyde-core/src/widget_tree/overlay_impl.rs) | `bastyde-core` | Hover/focus tracking, dwell promotion, overlay lifetime |
 | Visual progress | [`DwellIndicator`](../crates/bastyde-widgets/src/tooltip/dwell_indicator.rs) | `bastyde-widgets` | Pie-wedge / pin glyph for sticky-on-dwell |
-| Tokens | [`TooltipStyle`](../crates/bastyde-tokens/src/components.rs) / [`CompositeTooltipStyle`](../crates/bastyde-tokens/src/components.rs) | `bastyde-tokens` | `padding_*`, `corner_radius`, `max_width`, `max_height` (composite only), `shadow_density` |
+| Tokens | [`TooltipStyle`](../crates/bastyde-core/src/styles/tooltip_style.rs) (trait) / constants in [`recipe_tooltip_style.rs`](../crates/bastyde-widgets/src/styles/recipe_tooltip_style.rs) | `bastyde-core` / `bastyde-widgets` | `TOOLTIP_PADDING_HORIZONTAL`, `TOOLTIP_PADDING_VERTICAL`, `TOOLTIP_CORNER_RADIUS`, `TOOLTIP_MAX_WIDTH`; composite variants prefixed `COMPOSITE_TOOLTIP_*` |
 
 ---
 
@@ -113,9 +113,10 @@ button, an internal `TabWidget`) work cleanly post-promotion.
 The default delay is `DEFAULT_COMPOSITE_TOOLTIP_DELAY` (400 ms — slower than
 the 200 ms rich-tooltip delay because composite surfaces are heavier and
 shouldn't pop on transient hover). Default `max_width` × `max_height` are
-both 480 dp, configurable per-instance with `.max_width(f32)` /
-`.max_height(f32)` on `CompositeTooltipWidget`, or globally via
-`Theme::components.composite_tooltip`.
+both 480 dp (`COMPOSITE_TOOLTIP_MAX_WIDTH` / `COMPOSITE_TOOLTIP_MAX_HEIGHT`
+constants in `bastyde-widgets/src/styles/recipe_tooltip_style.rs`),
+configurable per-instance with `.max_width(f32)` / `.max_height(f32)` on
+`CompositeTooltipWidget`.
 
 **No registry, no `:key` cascade target.** Composite tooltips are widget
 trees, not data — they don't fit the `TooltipRegistry`'s
@@ -425,16 +426,28 @@ bound at `BindingLevel::Rebuild`).
 
 ## Theming knobs
 
-`Theme::components.tooltip` is a [`TooltipStyle`](../crates/bastyde-tokens/src/components.rs):
+Tooltip layout constants are defined in
+[`bastyde-widgets/src/styles/recipe_tooltip_style.rs`](../crates/bastyde-widgets/src/styles/recipe_tooltip_style.rs):
 
 ```rust
-pub struct TooltipStyle {
-    pub padding_horizontal: f32,    // default 10.0
-    pub padding_vertical: f32,      // default 6.0
-    pub corner_radius: f32,         // default 8.0
-    pub max_width: f32,             // default 320.0
-}
+pub const TOOLTIP_PADDING_HORIZONTAL: f32 = 10.0;
+pub const TOOLTIP_PADDING_VERTICAL: f32   = 6.0;
+pub const TOOLTIP_CORNER_RADIUS: f32      = 8.0;
+pub const TOOLTIP_MAX_WIDTH: f32          = 320.0;
+pub const TOOLTIP_SHADOW_DENSITY: f32     = 1.0;
+
+// Composite variant:
+pub const COMPOSITE_TOOLTIP_PADDING_HORIZONTAL: f32 = 12.0;
+pub const COMPOSITE_TOOLTIP_PADDING_VERTICAL: f32   = 12.0;
+pub const COMPOSITE_TOOLTIP_CORNER_RADIUS: f32      = 8.0;
+pub const COMPOSITE_TOOLTIP_MAX_WIDTH: f32          = 480.0;
+pub const COMPOSITE_TOOLTIP_MAX_HEIGHT: f32         = 480.0;
+pub const COMPOSITE_TOOLTIP_SHADOW_DENSITY: f32     = 0.7;
 ```
+
+Per-instance overrides on `CompositeTooltipWidget`: `.max_width(f32)` /
+`.max_height(f32)`. Apps that need different global defaults can install a
+custom `impl TooltipStyle` via `theme.style_slots.tooltip`.
 
 Color tokens (`Theme::colors`):
 
@@ -456,7 +469,7 @@ Motion knobs come from `MotionTokens`:
 |-------|---------|----------|
 | `duration_fast` | 120 ms | Tooltip fade-in (and matching fade-out for sticky dismiss) |
 
-The `RichTooltipWidget` clamps its proposal width to `tooltip.max_width` in
+The `RichTooltipWidget` clamps its proposal width to `TOOLTIP_MAX_WIDTH` in
 `layout_response` so long bodies wrap rather than stretching the surface
 horizontally. Layout uses a `Grid` (Fractional + Auto columns) so the body
 text receives a width proposal that excludes the trailing shortcut chip and

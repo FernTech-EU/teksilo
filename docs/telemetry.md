@@ -195,6 +195,7 @@ pub struct ConsentScope {
     pub anonymous_metrics: bool,
     pub crash_reports: bool,
     pub feature_flags: bool,
+    pub session_recording: bool,    // reserved — not implemented yet (PII risk)
 }
 ```
 
@@ -578,7 +579,7 @@ widget re-asks. RGPD Art. 13 transparency.
 
 The framework provides the SDK plumbing; the **app developer is the
 data controller** and remains responsible for the legal artifacts
-listed in [`telemetry-plan.md` §10](plans/telemetry-plan.md#10-controller-responsibilities-what-bastyde-does-not-do).
+(Art. 13 controller notice, privacy policy, DPA with processors, etc.).
 What Bastyde *does* automate:
 
 | Article | What Bastyde does |
@@ -606,7 +607,7 @@ buttons hide automatically — there's nothing to fetch or erase.
 | [`crates/bastyde-telemetry/src/consent.rs`](../crates/bastyde-telemetry/src/consent.rs) | `ConsentStore`, `ConsentFile`, settings-mirror integration |
 | [`crates/bastyde-telemetry/src/install_id.rs`](../crates/bastyde-telemetry/src/install_id.rs) | `InstallId` with 13-month rotation |
 | [`crates/bastyde-telemetry/src/dynamic_reporter.rs`](../crates/bastyde-telemetry/src/dynamic_reporter.rs) | `DynamicReporter`, recent-log tee, revision signal |
-| [`crates/bastyde-telemetry/src/queue/`](../crates/bastyde-telemetry/src/queue/) | `EventQueue` trait, `InMemoryEventQueue`, `PersistentEventQueue` |
+| [`crates/bastyde-telemetry/src/queue.rs`](../crates/bastyde-telemetry/src/queue.rs) + [`queue/`](../crates/bastyde-telemetry/src/queue/) | `EventQueue` trait (`queue.rs`), `InMemoryEventQueue` (`queue/mem.rs`), `PersistentEventQueue` (`queue/persistent.rs`) |
 | [`crates/bastyde-telemetry/src/scopes.rs`](../crates/bastyde-telemetry/src/scopes.rs) | `SettingsKey<bool>` constants for per-scope mirror, `TELEMETRY_ENDPOINT_OVERRIDE`, `TELEMETRY_REGION_OVERRIDE` |
 | [`crates/bastyde-telemetry/src/ext.rs`](../crates/bastyde-telemetry/src/ext.rs) | `TelemetryExt` accessors on `BuildContext` / `EventContext` |
 | [`crates/bastyde-widgets/src/privacy_settings.rs`](../crates/bastyde-widgets/src/privacy_settings.rs) | The widget |

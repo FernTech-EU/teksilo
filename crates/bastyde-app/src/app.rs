@@ -1783,7 +1783,7 @@ impl BastydeAppBuilder {
     /// markup as `[label](:key)`) to a translatable body, an optional
     /// long-form "more" body revealed by the Accordion disclosure
     /// inside a sticky rich tooltip, and an optional keyboard shortcut
-    /// (literal label — registry-backed auto-lookup returns in step 3).
+    /// (literal label — registry-backed auto-lookup is a follow-up).
     ///
     /// This is a **single-call registration**: the list is the
     /// application's complete tooltip catalog. Call once at app boot,

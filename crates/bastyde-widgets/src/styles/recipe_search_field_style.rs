@@ -1,19 +1,17 @@
 //! Default `SearchFieldStyle` impl + design tokens.
 //!
-//! Relocates `theme.components.search_field` constants to `pub const`s
-//! on this module — Stage E3 of the group-5 styling migration.
+//! Design tokens for `SearchField` live as `pub const`s on this module.
 //! `SearchField` and `SuggestionPanel` read them directly when
 //! building the magnifier glyph, the suggestion-list row chrome, and
-//! the popup padding. The suggestion popup *surface* was already
-//! routed through `PopoverStyle::Menu` in Stage A4; only the row
-//! chrome + panel padding remain SearchField-specific.
+//! the popup padding. The suggestion popup *surface* is routed through
+//! `PopoverStyle::Menu`; only the row chrome + panel padding remain
+//! SearchField-specific.
 
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::styles::{SearchFieldStyle, SearchFieldStyleConfig, SharedSearchFieldStyle};
 use bastyde_core::widget_id::WidgetId;
 
 // ─── IntUI design tokens for SearchField ───────────────────────────
-// Relocated from `theme.components.search_field` in Stage E3.
 
 /// Visual size of the magnifier glyph drawn inside the leading slot.
 pub const GLYPH_SIZE: f32 = 14.0;

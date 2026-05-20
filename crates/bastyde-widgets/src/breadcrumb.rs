@@ -33,8 +33,7 @@ impl std::fmt::Debug for BreadcrumbEntry {
     }
 }
 
-/// Breadcrumb design tokens — relocated from
-/// `theme.components.breadcrumb` in Stage G of the styling migration.
+/// Breadcrumb design tokens.
 pub const BREADCRUMB_ITEM_HEIGHT: f32 = 20.0;
 pub const BREADCRUMB_ITEM_PADDING_HORIZONTAL: f32 = 6.0;
 pub const BREADCRUMB_SEPARATOR_GAP: f32 = 4.0;

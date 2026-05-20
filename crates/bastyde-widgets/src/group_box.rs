@@ -20,8 +20,7 @@ use crate::Checkbox;
 use crate::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
 use bastyde_tokens::{TextRole, TextStyleRole};
 
-/// GroupBox design tokens — relocated from `theme.components.group_box`
-/// in Stage G of the styling migration.
+/// GroupBox design tokens.
 pub const GROUP_BOX_CONTENT_INDENT: f32 = 24.0;
 pub const GROUP_BOX_TITLE_CONTENT_SPACING: f32 = 8.0;
 pub const GROUP_BOX_CHECKBOX_GAP: f32 = 6.0;

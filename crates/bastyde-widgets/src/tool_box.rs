@@ -184,8 +184,7 @@ impl ToolBoxItem {
     }
 }
 
-/// ToolBox design tokens — relocated from `theme.components.tool_box`
-/// in Stage G of the styling migration.
+/// ToolBox design tokens.
 pub const TOOL_BOX_HEADER_MIN_HEIGHT: f32 = 28.0;
 pub const TOOL_BOX_HEADER_PADDING_HORIZONTAL: f32 = 12.0;
 pub const TOOL_BOX_ICON_TEXT_SPACING: f32 = 8.0;

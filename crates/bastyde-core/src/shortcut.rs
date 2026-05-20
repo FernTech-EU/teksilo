@@ -94,7 +94,7 @@ pub type ShortcutOnActivate = Box<dyn FnMut(KeyStroke, &mut EventContext) -> Int
 
 /// Closure signature for a key-capture callback.
 ///
-/// Runs when the next [`KeyDown`] bypasses shortcut resolution.
+/// Runs when the next `KeyDown` event bypasses shortcut resolution.
 /// Receives the captured keystroke, mutable access to the registry
 /// (for rebinds), and a mutable [`EventContext`] (so the handler can
 /// emit commands, send intents, dismiss overlays, etc.).

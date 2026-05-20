@@ -87,10 +87,10 @@ impl Default for Shadow {
 /// Shadows are paired: each `shadow_*` (the wide soft outer halo) has a
 /// matching `shadow_inner_*` (a sharp short-blur rim) so elevated
 /// surfaces can layer the two via [`bastyde_widgets::shadow::paint_layered_shadow`].
-/// Per-component `shadow_density` (in `ComponentStyles::*::shadow_density`)
-/// scales the inner rim's effective alpha at paint time, so themes can
-/// dial individual surfaces (tooltip vs card vs dialog) up or down
-/// without touching shape tokens.
+/// A `density` scalar (e.g. `DENSITY_TOOLTIP`, `DENSITY_SURFACE`,
+/// `DENSITY_DIALOG` in `bastyde-widgets/src/shadow.rs`) is passed by each
+/// call site to scale the inner rim's effective alpha, so individual
+/// surfaces can dial intensity up or down without touching shape tokens.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShapeTokens {
     /// 4 dp — buttons, fields, combo boxes, checkbox visual, menu items.
@@ -114,7 +114,7 @@ pub struct ShapeTokens {
     /// Modal dialogs — outer soft halo.
     pub shadow_lg: Shadow,
     /// Tooltips — sharp inner rim. Alpha encodes the "max" intensity
-    /// (density = 1.0); per-component `shadow_density` scales it down.
+    /// (density = 1.0); the `density` argument to `paint_layered_shadow` scales it down.
     pub shadow_inner_xs: Shadow,
     /// Menus, dropdowns — sharp inner rim.
     pub shadow_inner_sm: Shadow,

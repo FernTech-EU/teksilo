@@ -20,9 +20,8 @@ use bastyde_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::CornerRadius;
 
-// IntUI design tokens for SegmentedControl. Relocated from
-// `theme.components.segmented_control` in Stage C of the group-5
-// styling migration — the recipe owns its own dimensions.
+// IntUI design tokens for SegmentedControl. The recipe owns its own
+// dimensions.
 pub const SEGMENTED_CONTROL_HEIGHT: f32 = 24.0;
 pub const SEGMENTED_CONTROL_PADDING_HORIZONTAL: f32 = 12.0;
 pub const SEGMENTED_CONTROL_PADDING_VERTICAL: f32 = 6.0;

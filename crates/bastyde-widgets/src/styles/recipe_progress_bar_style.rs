@@ -25,9 +25,7 @@ use bastyde_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{CornerRadius, Orientation, SurfaceRole};
 
-// IntUI design tokens for ProgressBar. Relocated from
-// `theme.components.progress_bar` in Stage C of the group-5 styling
-// migration — the recipe owns its own dimensions.
+// IntUI design tokens for ProgressBar. The recipe owns its own dimensions.
 pub const PROGRESS_BAR_CORNER_RADIUS: f32 = 2.0;
 
 /// Default `ProgressBarStyle` shipped with Bastyde. Track is

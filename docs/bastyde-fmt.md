@@ -303,6 +303,6 @@ printing happens in the library crates.
   language for the DSL the formatter operates on.
 - [bati-language-spec-v3.md](bati-language-spec-v3.md) — design spec
   with worked translations of widget-catalog examples.
-- [crates/bastyde/tests/bastyde/pass/](../crates/bastyde/tests/bastyde/pass/)
+- [crates/bastyde/tests/bati/pass/](../crates/bastyde/tests/bati/pass/)
   — trybuild fixtures that double as canonical examples of well-
   formatted `bati!` blocks.

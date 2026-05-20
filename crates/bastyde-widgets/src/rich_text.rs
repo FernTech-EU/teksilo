@@ -7,11 +7,10 @@
 //! [`RichTextEditor::editor`] (full editing).
 //!
 //! The widget owns its own `bastyde_text::RichTextEngine` (per-widget
-//! typesetter — see gap 5 of the plan), subscribes to document events
-//! via `on_change` so multiple editors can share a `TextDocument` like
-//! QTextEdit views, and drives its own scroll bars outside of
-//! `ScrollArea` to break the wrap/scrollbar circular dependency of
-//! §27.10.5.
+//! typesetter), subscribes to document events via `on_change` so
+//! multiple editors can share a `TextDocument` like QTextEdit views,
+//! and drives its own scroll bars outside of `ScrollArea` to break the
+//! wrap/scrollbar circular dependency of §27.10.5.
 //!
 //! Constructors: [`RichTextEditor::read_only`] (hidden caret, filter
 //! rejects mutations, accessibility role `Document`) and
@@ -19,7 +18,7 @@
 //! role `MultilineTextInput`, `SetValue` action declared). Both
 //! widgets subscribe to `TextDocument::on_change` independently so
 //! any number of editors / viewers can share a document and observe
-//! each other's edits — see gap 10 of the plan.
+//! each other's edits independently.
 //!
 //! This file owns the struct, its builder methods and signal
 //! accessors, `Widget` trait impl (`build` / `size_that_fits` /

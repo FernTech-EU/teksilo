@@ -374,7 +374,7 @@ tree.dispatch_event(WidgetEvent::PointerUp {
 });
 ```
 
-For gesture-level assertions the `test_api` module on `WidgetTree` exposes helpers like `dispatch_synthetic_click(id)` that run the preview-bubble walk with a fabricated event. Timing-sensitive recognizers (double-tap, long-press) use the tree's simulated clock — `advance_time(Duration)` in tests.
+For gesture-level assertions the `test_api` module on `WidgetTree` exposes helpers like `synthesise_tap(id)` that run the preview-bubble walk with a fabricated event. Timing-sensitive recognizers (double-tap, long-press) use the tree's simulated clock — `advance_time(Duration)` in tests.
 
 No Xvfb, no GPU, no display server required.
 

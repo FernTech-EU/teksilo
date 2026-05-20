@@ -6,9 +6,9 @@
 //! closures, no `Rc`-wrapped reactive state). That gives them three
 //! properties the rest of the styling system relies on:
 //!
-//! - **`Send + Sync + 'static`** so the default `Recipe*Style` impls
-//!   stored as `Arc<dyn FooStyle>` on `Theme.components` satisfy the
-//!   `Send + Sync + 'static` trait bound.
+//! - **`Send + Sync + 'static`** so recipes can be held in
+//!   `Arc`-based serialization contexts (Inspector JSON Export,
+//!   future `ImageTheme` TOML manifest).
 //! - **`Serialize` / `Deserialize`** so themes can round-trip through
 //!   the inspector's JSON Export/Import and through the future
 //!   `ImageTheme` TOML manifest.
@@ -408,8 +408,9 @@ mod tests {
 
     #[test]
     fn recipes_are_send_sync() {
-        // Compile-time check: the `Arc<dyn FooStyle: Send + Sync>` slot
-        // bag relies on every recipe being storable inside one.
+        // Compile-time check: recipes must be Send + Sync to satisfy
+        // serialization contexts (inspector JSON export, future TOML
+        // manifest) and to stay storable in Arc-based caches.
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<ShapeRecipe>();
         assert_send_sync::<FillRecipe>();

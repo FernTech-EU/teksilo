@@ -7,9 +7,9 @@
 //! strip below the field is the widget's responsibility — the trait
 //! recipe is just the bordered frame.
 //!
-//! Per the plan: "The recipe describes border / fill / corner radius
-//! only; the rest stays on the widget." Caret blinking, IME composition,
-//! placeholder layering, leading / trailing slots, clear button, the
+//! The recipe describes border / fill / corner radius only; the rest
+//! stays on the widget. Caret blinking, IME composition, placeholder
+//! layering, leading / trailing slots, clear button, the
 //! ValidationStrip below — all stay on the public `TextInput` widget.
 //!
 //! Variants:
@@ -37,9 +37,8 @@ use crate::primitives::{MinSize, Padding, RectWidget, ZStack};
 
 // IntUI design tokens for TextInput / TextInputField (also used by
 // SpinBox, DateEdit, DateRangeEdit, DateTimeEdit since they share the
-// same form-field baseline). Moved here in Step 7 of the styling
-// refactor — the recipe and form-field composers own these constants
-// instead of reading from `theme.components.text_field`.
+// same form-field baseline). The recipe and form-field composers own
+// these constants.
 pub const TEXT_FIELD_HEIGHT: f32 = 28.0;
 pub const TEXT_FIELD_PADDING_HORIZONTAL: f32 = 4.0;
 pub const TEXT_FIELD_PADDING_VERTICAL: f32 = 4.0;

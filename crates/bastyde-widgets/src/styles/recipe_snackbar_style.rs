@@ -19,9 +19,7 @@ use bastyde_core::widget::{
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::CornerRadius;
 
-// IntUI design tokens for Snackbar. Relocated from
-// `theme.components.notification` in Stage B of the group-5 styling
-// migration — the recipe owns its own dimensions.
+// IntUI design tokens for Snackbar. The recipe owns its own dimensions.
 pub const SNACKBAR_PADDING_HORIZONTAL: f32 = 12.0;
 pub const SNACKBAR_PADDING_VERTICAL: f32 = 10.0;
 pub const SNACKBAR_CORNER_RADIUS: f32 = 8.0;

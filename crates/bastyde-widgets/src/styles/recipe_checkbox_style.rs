@@ -4,7 +4,7 @@
 //! want a different design language (Material 3 round checkbox, glyph
 //! badge, custom check shape) write their own `impl CheckboxStyle` block
 //! and install it per-call (`Checkbox::style(...)`) or theme-wide
-//! (step 8's `ComponentStyles.checkbox = Rc::new(MyCheckbox)`).
+//! (`theme.style_slots.checkbox = Some(Rc::new(MyCheckbox))`).
 //!
 //! The visual body is a small leaf widget ([`CheckboxBody`]) that paints
 //! the box + check / dash glyph directly onto the canvas. Same trade-off
@@ -23,9 +23,7 @@ use bastyde_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, 
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{Color, CornerRadius};
 
-// IntUI design tokens for Checkbox. Moved here in Step 7 of the
-// styling refactor — the recipe owns its own dimensions instead of
-// reading from `theme.components.checkbox`.
+// IntUI design tokens for Checkbox. The recipe owns its own dimensions.
 pub const CHECKBOX_BOX_VISUAL_SIZE: f32 = 19.0;
 pub const CHECKBOX_BOX_HIT_AREA: f32 = 24.0;
 pub const CHECKBOX_LABEL_GAP: f32 = 6.0;

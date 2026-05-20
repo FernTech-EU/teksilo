@@ -252,8 +252,6 @@ impl AccessibilityOverrides {
 // HandlerSet — temporary storage before arena insertion
 // ---------------------------------------------------------------------------
 
-/// Temporary storage for handlers and metadata accumulated via builder
-/// methods. Transferred to the `WidgetNode` during arena insertion.
 /// Type alias for a context-menu content factory.
 ///
 /// The factory is invoked on every right-click that lands on a widget
@@ -278,6 +276,8 @@ impl AccessibilityOverrides {
 ///   without uninstalling the factory.
 pub type ContextMenuFactory = Box<dyn Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>>>;
 
+/// Temporary storage for handlers and metadata accumulated via builder
+/// methods. Transferred to the `WidgetNode` during arena insertion.
 pub struct HandlerSet {
     pub(crate) handlers: EventHandlers,
     pub(crate) focusable: Option<bool>,
@@ -443,8 +443,8 @@ impl HandlerSet {
     }
 
     /// Set the on_drag handler (gesture-based drag). The closure receives
-    /// a [`DragPhase`] per architecture §28.3 — `Started`, then zero or
-    /// more `Moved`, then `Ended`.
+    /// a [`DragPhase`] — `Started`, then zero or more `Moved`, then
+    /// `Ended`.
     pub fn on_drag(mut self, f: impl FnMut(DragPhase, &mut EventContext) + 'static) -> Self {
         self.handlers.on_drag = Some(Box::new(f));
         self
@@ -951,8 +951,7 @@ impl<W: Widget> WidgetWithHandlers<W> {
     }
 
     /// `#[doc(hidden)]` grep marker for explicitly-untranslated label
-    /// strings — the same convention as
-    /// [`Button::new_literal`](crate::widget_builder::WidgetWithHandlers).
+    /// strings — the same convention as `Button::new_literal`.
     /// Functionally identical to [`access_label`]; the distinct name
     /// makes untranslated call sites greppable as a one-pass audit.
     #[doc(hidden)]

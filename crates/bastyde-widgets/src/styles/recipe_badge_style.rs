@@ -18,9 +18,7 @@ use bastyde_tokens::{CornerRadius, SurfaceRole};
 
 use crate::primitives::{Padding, RectWidget, ZStack};
 
-// IntUI design tokens for Badge. Relocated from
-// `theme.components.badge` in Stage C of the group-5 styling
-// migration — the recipe owns its own dimensions.
+// IntUI design tokens for Badge. The recipe owns its own dimensions.
 pub const BADGE_PADDING_HORIZONTAL: f32 = 6.0;
 pub const BADGE_PADDING_VERTICAL: f32 = 1.0;
 /// Fully-rounded pill — a large radius the renderer clamps to half the

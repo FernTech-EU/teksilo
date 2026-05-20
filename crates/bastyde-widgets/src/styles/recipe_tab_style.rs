@@ -35,9 +35,8 @@ use bastyde_tokens::CornerRadius;
 
 use crate::primitives::{HStack, RectWidget, ZStack};
 
-// IntUI design tokens for Tab. Moved here in Step 7 of the styling
-// refactor — the recipe + parent TabHeader own their own dimensions
-// instead of reading from `theme.components.tab`.
+// IntUI design tokens for Tab. The recipe and parent TabHeader own
+// their own dimensions.
 pub const TAB_EDITOR_HEIGHT: f32 = 50.0;
 pub const TAB_TOOL_WINDOW_HEIGHT: f32 = 28.0;
 pub const TAB_PADDING_HORIZONTAL: f32 = 12.0;

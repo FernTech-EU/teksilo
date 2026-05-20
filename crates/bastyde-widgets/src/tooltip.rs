@@ -103,7 +103,7 @@ pub(crate) fn paint_composite_tooltip_shadows(
 /// padding) to the active `TooltipStyle` (default
 /// [`crate::styles::RecipeTooltipStyle`]). Apps install per-call
 /// (`TooltipWidget::new(...).style(impl TooltipStyle)`) or theme-wide
-/// (step 8's `ComponentStyles.tooltip = Rc::new(MyTooltip)`).
+/// via `theme.style_slots.tooltip = Some(Rc::new(MyTooltip))`.
 pub struct TooltipWidget {
     text: String,
     style_override: Option<SharedTooltipStyle>,

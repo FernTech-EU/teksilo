@@ -34,7 +34,7 @@ pub struct FlatEntry {
 /// nodes. Observes `TreeChange` from the underlying model and re-flattens
 /// as needed.
 ///
-/// Created via `TreeModel::create_slice()` or `TreeSlice::new()`.
+/// Created via `TreeSlice::new()`.
 pub struct TreeSlice<T: 'static> {
     tree: TreeModel<T>,
     expanded: Rc<RefCell<HashSet<NodeId>>>,

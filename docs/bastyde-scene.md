@@ -156,7 +156,7 @@ handlers
     .on_context_menu(|pt, ctx| ctx.send_intent(MyIntent::Menu))
     .cursor(CursorIcon::Pointer)
     .tooltip(tr!(card_tooltip()));   // accepts LocalizedString
-scene.set_item_handlers(item_id, handlers);
+scene.set_item_handlers(item_id, Some(handlers));
 ```
 
 The view's pointer-dispatch path projects the screen-space pointer to

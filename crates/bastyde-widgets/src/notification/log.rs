@@ -47,8 +47,7 @@ use crate::standard_item::StandardListItem;
 /// - [`StandardListItem`] rows with unread-as-bold differentiation.
 ///
 /// A `rich-text`-gated SearchField filter and a severity-chip filter
-/// are documented in the plan as future refinements and can be
-/// composed by apps using the existing widget toolkit.
+/// can be composed by apps using the existing widget toolkit.
 pub struct NotificationLog {
     archive: Rc<NotificationArchiveModel>,
     show_toolbar: bool,

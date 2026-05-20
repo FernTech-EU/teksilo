@@ -319,7 +319,7 @@ trait — `FlatNavigator` for `TableView`, `TreeNavigator` for
 ### Column resize
 
 Each header cell exposes a small hit zone on its trailing edge
-(`TableStyle::resize_handle_width`, default 4 px). Cursor switches to
+(`RESIZE_HANDLE_WIDTH`, default 4 px). Cursor switches to
 `CursorIcon::ColResize` on hover; PointerDown captures the pointer and
 PointerMove updates `column_widths_signal`. Two policies:
 
@@ -399,9 +399,9 @@ PgDn handler uses.
 | filter glyph (active)         | `TextRole::Accent`                  |
 | TreeTable connector lines     | `BorderRole::Divider`               |
 
-Static numbers (`row_height`, `header_height`, `resize_handle_width`,
-`grid_line_thickness`, `tree_indent_per_level`, …) come from
-`theme.components.table` ([`TableStyle`](../crates/bastyde-tokens/src/components.rs)).
+Static numbers (`ROW_HEIGHT`, `HEADER_HEIGHT`, `RESIZE_HANDLE_WIDTH`,
+`GRID_LINE_THICKNESS`, `TREE_INDENT_PER_LEVEL`, …) are `pub const`s in
+[`recipe_table_style`](../crates/bastyde-widgets/src/styles/recipe_table_style.rs)
 They are snapshot at build time, like every other widget.
 
 ---
@@ -418,7 +418,7 @@ on `TableView`, tree expand/collapse via twist + `ArrowLeft/Right`,
 tree filter modes, `Role::Table` / `TreeGrid` accessibility with row
 indices and sort direction.
 
-**Intentionally not shipped (covered in §17 of the plan):**
+**Intentionally not shipped:**
 
 - spreadsheet-style cell merging at the layout level (cells expose
   AccessKit `row_span`/`column_span` for screen readers; the layout
@@ -428,16 +428,16 @@ indices and sort direction.
 - footer / summary rows (compose a `StatusBar` below the table),
 - in-table filter chip bar,
 - TreeTable row drag-drop (insertion-vs-reparent UX needs its own
-  plan).
+  design).
 
-**Plan deltas you may notice:** `Column::header_override` is stored on
+**Deltas you may notice:** `Column::header_override` is stored on
 the column but the default header rendering ignores it for now;
 `Column::alignment` and `Column::truncation` are likewise persisted on
 the descriptor but the user's cell delegate handles its own alignment
 and truncation; `row_header_column`, `cell_label`, `row_label`, and
 `auto_truncation_tooltip` builders are not yet wired (their
-accessibility slots exist on `CellA11y` and `RowA11y`). These are gaps
-versus the plan, not bugs.
+accessibility slots exist on `CellA11y` and `RowA11y`). These are gaps,
+not bugs.
 
 ---
 

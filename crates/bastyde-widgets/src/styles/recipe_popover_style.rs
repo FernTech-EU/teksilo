@@ -20,9 +20,8 @@ use bastyde_tokens::SurfaceRole;
 
 use crate::popover::PopoverSurface;
 
-// IntUI design tokens for Popover. Moved here in Step 7 of the styling
-// refactor — the recipe / surface own their own dimensions instead of
-// reading from `theme.components.popover`.
+// IntUI design tokens for Popover. The recipe and surface own their
+// own dimensions.
 //
 // `POPOVER_PADDING` is the content inset for Default/Tooltip-flavoured
 // popovers. The `Menu` variant uses zero content padding so menu rows

@@ -623,11 +623,11 @@ standard `I18nConfig::framework_locales(bastyde_widgets::framework_locales())`.
 
 | Concern | File |
 |---|---|
-| `Toast` request + `ToastAction` + `ToastDismissCause` + `ToastHandle` + `ToastInstallOptions` | [crates/bastyde-widgets/src/toast.rs](../crates/bastyde-widgets/src/toast.rs) |
+| `Toast` request + `ToastAction` + `ToastDismissCause` + `ToastHandle` | [crates/bastyde-widgets/src/toast.rs](../crates/bastyde-widgets/src/toast.rs) |
 | `ToastRegistry` (queue + archive bridge + in-place merge) | [crates/bastyde-widgets/src/toast/registry.rs](../crates/bastyde-widgets/src/toast/registry.rs) |
 | `EventContextToastExt` (`ctx.show_toast` / `ctx.dismiss_toast`) | [crates/bastyde-widgets/src/toast/ext.rs](../crates/bastyde-widgets/src/toast/ext.rs) |
 | `ToastSurface` (chrome + a11y + custom actions) | [crates/bastyde-widgets/src/toast/surface.rs](../crates/bastyde-widgets/src/toast/surface.rs) |
-| `ToastHost` (queue display + timer + hover-pause) | [crates/bastyde-widgets/src/toast/host.rs](../crates/bastyde-widgets/src/toast/host.rs) |
+| `ToastHost` (queue display + timer + hover-pause) + `ToastInstallOptions` | [crates/bastyde-widgets/src/toast/host.rs](../crates/bastyde-widgets/src/toast/host.rs) |
 | `RecipeToastStyle` (default chrome) | [crates/bastyde-widgets/src/styles/recipe_toast_style.rs](../crates/bastyde-widgets/src/styles/recipe_toast_style.rs) |
 | `ToastStyle` trait + `ToastPriority` + `ToastStyleConfig` | [crates/bastyde-core/src/styles/toast_style.rs](../crates/bastyde-core/src/styles/toast_style.rs) |
 | `NotificationEntry` + `ArchivedAction` + `NotificationUpdate` | [crates/bastyde-widgets/src/notification.rs](../crates/bastyde-widgets/src/notification.rs) |

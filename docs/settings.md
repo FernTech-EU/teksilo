@@ -210,9 +210,9 @@ Invariants enforced at registration:
 
 **Cycle-free observer.** The closure each key installs to write
 mutations back into the in-memory `toml::Value` captures
-`Weak<RefCell<StoreInner>>`, never a strong `Rc`. The plan-review
-caught this: a strong capture would trap the entire store inside its
-own observer and leak it for the life of the process. The
+`Weak<RefCell<StoreInner>>`, never a strong `Rc`: a strong capture
+would trap the entire store inside its own observer and leak it for
+the life of the process. The
 `weak.upgrade().is_none()` early-return also gives correct teardown
 semantics — in-flight signal sets after a store drop bail silently.
 

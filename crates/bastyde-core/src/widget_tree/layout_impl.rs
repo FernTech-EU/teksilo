@@ -67,9 +67,9 @@ impl WidgetTree {
         // and must dirty the cached snapshot. Other Relayout-causing
         // signal flips (e.g. a Switcher visibility binding that doesn't
         // straddle activation, an opacity change, a text-width change)
-        // do not change the AT tree — Phase 1 of the perf plan removed
-        // the unconditional `a11y_dirty = true` from `layout()` and
-        // delegated to the events that actually change the tree.
+        // do not change the AT tree — the unconditional `a11y_dirty = true`
+        // was removed from `layout()` and is now set only by events that
+        // actually change the AT tree shape.
         if !to_dormant.is_empty() || !to_activate.is_empty() {
             self.a11y_dirty = true;
         }

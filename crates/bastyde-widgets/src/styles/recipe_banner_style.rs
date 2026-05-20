@@ -20,12 +20,10 @@ use bastyde_tokens::{CornerRadius, VAlignment};
 
 use crate::primitives::{Expand, HStack, Padding, RectWidget, ZStack};
 
-// IntUI design tokens for Banner. Relocated from
-// `theme.components.banner` in Stage B of the group-5 styling
-// migration — the recipe owns its own dimensions. `BANNER_GLYPH_SIZE`
-// and `BANNER_TITLE_DESCRIPTION_GAP` are consumed by the `Banner`
-// widget (it builds the glyph + text column); the rest are consumed
-// here.
+// IntUI design tokens for Banner. The recipe owns its own dimensions.
+// `BANNER_GLYPH_SIZE` and `BANNER_TITLE_DESCRIPTION_GAP` are consumed
+// by the `Banner` widget (it builds the glyph + text column); the rest
+// are consumed here.
 pub const BANNER_PADDING_HORIZONTAL: f32 = 12.0;
 pub const BANNER_PADDING_VERTICAL: f32 = 10.0;
 pub const BANNER_CORNER_RADIUS: f32 = 8.0;

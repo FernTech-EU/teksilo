@@ -10,8 +10,7 @@ use crate::Panel;
 use crate::primitives::HStack;
 use bastyde_tokens::SurfaceRole;
 
-/// StatusBar design tokens — relocated from
-/// `theme.components.status_bar` in Stage G of the styling migration.
+/// StatusBar design tokens.
 pub const STATUS_BAR_HEIGHT: f32 = 22.0;
 pub const STATUS_BAR_PADDING_HORIZONTAL: f32 = 8.0;
 pub const STATUS_BAR_ITEM_GAP: f32 = 2.0;

@@ -534,8 +534,7 @@ impl Widget for SplitHandle {
     }
 }
 
-/// SplitView design tokens — relocated from
-/// `theme.components.split_view` in Stage G of the styling migration.
+/// SplitView design tokens.
 pub const SPLIT_VIEW_GUTTER_THICKNESS: f32 = 6.0;
 pub const SPLIT_VIEW_DIVIDER_LINE_THICKNESS: f32 = 1.0;
 pub const SPLIT_VIEW_MIN_PANE_SIZE: f32 = 96.0;

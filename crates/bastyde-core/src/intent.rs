@@ -139,9 +139,10 @@ impl std::fmt::Debug for Intent {
 ///     #[name = "app.add_item"]    AddItem { id: i64, dto: CreateItemDto },
 /// }
 ///
-/// // Send (typo-safe at the enum variant):
-/// ctx.send_intent(AppIntent::Save.into_intent());
-/// ctx.send_intent(AppIntent::Open(path).into_intent());
+/// // Send (typo-safe at the enum variant — blanket From<K> for Intent
+/// // means no explicit .into_intent() call is needed):
+/// ctx.send_intent(AppIntent::Save);
+/// ctx.send_intent(AppIntent::Open(path));
 ///
 /// // Handle (exhaustive match, recovers the full variant):
 /// Action::new("app.open").on_invoke(|intent, ctx| {
@@ -152,14 +153,13 @@ impl std::fmt::Debug for Intent {
 /// ```
 ///
 /// The variant itself — including any fields — is stored as the
-/// intent's payload, so any `Clone + 'static` variant works. Struct
+/// intent's payload, so any `'static` variant works. Struct
 /// variants (`AddItem { .. }`), tuple variants (`Open(PathBuf)`),
 /// and unit variants (`Save`) are all supported without restriction.
 ///
 /// `from_intent` returns a reference (`Option<&Self>`), so recovery
-/// does not require `Self: Clone`. Call `.cloned()` on the result if
-/// an owned variant is needed (the implicit `Clone` bound only
-/// applies to the payload's contents, not the enum type itself).
+/// does not require `Self: Clone`. If an owned variant is needed and
+/// the enum derives `Clone`, call `.cloned()` on the result.
 pub trait IntentKind: Sized + 'static {
     /// Consume the variant and build the runtime [`Intent`] it
     /// corresponds to. The variant — and any data it carries — is

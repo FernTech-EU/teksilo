@@ -1,11 +1,11 @@
 # Bastyde Documentation Index
 
 Reference and design documents for Bastyde. All paths are relative to this
-directory; in-progress design work lives separately under [plans/](plans/).
+directory.
 
 ## Architecture & roadmap
 
-- [barchitecture.md](architecture.md) — framework-internals
+- [architecture.md](architecture.md) — framework-internals
   reference: scrolling, arena, Canvas API, rendering pipeline, HiDPI,
   threading, testability, crate dependency graph, design comparisons,
   open questions. Per-subsystem APIs live in the focused docs below.
@@ -119,9 +119,3 @@ directory; in-progress design work lives separately under [plans/](plans/).
 - [inspector.md](inspector.md) — `bastyde-inspector`, the in-app debug
   surface (Tree / Properties / Accessibility / Theme / Models tabs;
   picker + bounds overlay; debug-only).
-
-## In-progress design notes
-
-Design and progress logs for unfinished work live in [plans/](plans/) —
-they are intentionally not indexed here because their lifetime ends at
-landing.

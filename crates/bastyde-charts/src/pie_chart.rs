@@ -38,7 +38,7 @@ pub enum PieLabelMode {
     #[default]
     None,
     /// Inside each slice along the bisector. Slices below
-    /// `pie_min_slice_label_degrees` are skipped.
+    /// `PIE_MIN_SLICE_LABEL_DEGREES` are skipped.
     Inside,
     /// Outside each slice with a leader line.
     Outside,

@@ -179,9 +179,9 @@ pub struct WidgetTree {
     /// paths that mutate per-widget state inside the loop
     /// (`tick_gestures_with_ops`, post-render dirty-bit clear,
     /// post-layout `needs_layout` clear). Cleared and refilled on
-    /// every use via `WidgetArena::fill_active_ids`. Pre-Phase 2
-    /// these sites called the allocating `arena.active_ids()` per
-    /// frame, which `perf record` ranked at ~13 % of CPU on the
+    /// every use via `WidgetArena::fill_active_ids`. Previously these
+    /// sites called the allocating `arena.active_ids()` per frame,
+    /// which `perf record` ranked at ~13 % of CPU on the
     /// `widget_catalog --tab animations` scene.
     active_ids_scratch: Vec<WidgetId>,
     /// Widgets currently carrying a non-`None` `EventHandlers::gesture_arena`.
@@ -1028,10 +1028,10 @@ impl WidgetTree {
         now: std::time::Instant,
         ops: &mut dyn crate::window::WindowOps,
     ) {
-        // Snapshot the gesture-owners set into the reusable scratch
-        // (Phase 3 of the perf plan). Pre-Phase 3 this iterated every
-        // active widget; in practice only a tiny fraction carry a
-        // gesture arena, so visiting the rest was pure overhead.
+        // Snapshot the gesture-owners set into the reusable scratch.
+        // Previously this iterated every active widget; in practice
+        // only a tiny fraction carry a gesture arena, so visiting the
+        // rest was pure overhead.
         // `mem::take` lets the loop borrow `&mut self` for
         // `make_event_context` etc. without conflicting with the
         // scratch buffer; we put the storage back at the end.
@@ -1068,9 +1068,9 @@ impl WidgetTree {
     /// needs [`WidgetTree::tick_gestures`] called — typically a pending
     /// long-press timeout. Returns `None` when no recognizer is waiting.
     pub fn next_gesture_deadline(&self) -> Option<std::time::Instant> {
-        // Iterate just the widgets that actually carry a gesture arena
-        // (Phase 3). `filter` for `is_active` skips dormant entries
-        // that may still be in the set after a hide-without-detach.
+        // Iterate just the widgets that actually carry a gesture arena.
+        // `filter` for `is_active` skips dormant entries that may still
+        // be in the set after a hide-without-detach.
         self.gesture_owners
             .iter()
             .copied()
@@ -1232,14 +1232,14 @@ impl WidgetTree {
         } else {
             Vec::new()
         };
-        // Phase 3: rebuild wiped the OWN handler bucket above (the
-        // gesture arena lived there), so the widget no longer owns any
-        // recognizers. The next pointer hit re-runs
-        // `ensure_gesture_arena` and re-inserts if the new build still
-        // wires gesture handlers. External handlers (set via the
-        // builder chain at creation time) persist, but `external_handlers`
-        // never carries a gesture arena directly — it's always built
-        // by `ensure_gesture_arena` into the OWN bucket.
+        // Rebuild wiped the OWN handler bucket above (the gesture arena
+        // lived there), so the widget no longer owns any recognizers.
+        // The next pointer hit re-runs `ensure_gesture_arena` and
+        // re-inserts if the new build still wires gesture handlers.
+        // External handlers (set via the builder chain at creation time)
+        // persist, but `external_handlers` never carries a gesture arena
+        // directly — it's always built by `ensure_gesture_arena` into
+        // the OWN bucket.
         self.gesture_owners.remove(&widget_id);
         // Shortcuts the widget declared are torn down too — they will
         // be re-registered during the upcoming `build()` call. User
@@ -1349,9 +1349,9 @@ impl WidgetTree {
         // up so the registry doesn't leak dead entries for the
         // lifetime of the app.
         self.binding_registry.unregister_for_widget(widget_id);
-        // Phase 3: keep `gesture_owners` honest — destroying the
-        // widget tears down its handlers, so the per-frame gesture
-        // pass must stop visiting it.
+        // Keep `gesture_owners` honest — destroying the widget tears
+        // down its handlers, so the per-frame gesture pass must stop
+        // visiting it.
         self.gesture_owners.remove(&widget_id);
         // If focus pointed at the widget about to disappear, drop it
         // so later dispatch doesn't anchor intent walks at a dead id
@@ -1576,9 +1576,9 @@ impl WidgetTree {
     }
 
     /// Histogram of widget concrete-type names across the active
-    /// arena. Used by the `widget.census` telemetry emitter
-    /// (Phase 5.3) to surface "which widgets does this app actually
-    /// use" data back to the framework. Keyed by
+    /// arena. Used by the `widget.census` telemetry emitter to surface
+    /// "which widgets does this app actually use" data back to the
+    /// framework. Keyed by
     /// `std::any::type_name::<T>()` of the concrete widget — a
     /// dotted, fully-qualified path like
     /// `bastyde_widgets::button::Button`.

@@ -185,7 +185,7 @@ impl WidgetTree {
                 for &child_id in children {
                     if self.arena.is_active(child_id) {
                         let child_nid = widget_id_to_node_id(child_id);
-                        // AT-redirect hook (Phase 5b auto-graft):
+                        // AT-redirect hook (scene logical-tree auto-graft):
                         // walk up the arena from `id` asking every
                         // opted-in ancestor whether it claims this
                         // descendant. First `Some(_)` wins, scanned
@@ -751,12 +751,12 @@ mod tests {
         assert_a11y_tree_valid(&update);
     }
 
-    /// Regression for Phase 1 of the perf plan: a Relayout-only signal
-    /// flip (no activation change, no role/label/value change, no
-    /// focus change, no overlay activation) must NOT dirty the
-    /// AccessKit cache. Previously `layout()` set `a11y_dirty = true`
-    /// unconditionally on every layout pass, which fired ~60 Hz on
-    /// any scene with a Pulse / Cycle animation.
+    /// Regression test: a Relayout-only signal flip (no activation
+    /// change, no role/label/value change, no focus change, no overlay
+    /// activation) must NOT dirty the AccessKit cache. Previously
+    /// `layout()` set `a11y_dirty = true` unconditionally on every
+    /// layout pass, which fired ~60 Hz on any scene with a Pulse /
+    /// Cycle animation.
     #[test]
     fn relayout_without_activation_change_does_not_dirty_a11y() {
         let mut tree = WidgetTree::new();

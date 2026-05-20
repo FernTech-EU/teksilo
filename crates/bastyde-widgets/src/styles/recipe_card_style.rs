@@ -25,9 +25,7 @@ use bastyde_core::widget::{
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{CornerRadius, Shadow};
 
-// IntUI design tokens for Card. Moved here in Step 7 of the styling
-// refactor — the recipe owns its own dimensions instead of reading
-// from `theme.components.card`.
+// IntUI design tokens for Card. The recipe owns its own dimensions.
 pub const CARD_PADDING: f32 = 16.0;
 pub const CARD_CORNER_RADIUS: f32 = 8.0;
 pub const CARD_BORDER_WIDTH: f32 = 1.0;

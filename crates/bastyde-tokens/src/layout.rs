@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 /// Layout tokens — the entire generic spacing surface in Int UI.
 ///
-/// Per-component spacing lives on per-component style structs in
-/// [`crate::components::ComponentStyles`], not here. Only values that are
+/// Per-component spacing lives in per-widget recipe style structs in
+/// `bastyde-widgets/src/styles/`, not here. Only values that are
 /// genuinely cross-cutting belong on this struct.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct LayoutTokens {

@@ -87,7 +87,7 @@ pub struct Button {
     /// The active [`ButtonStyle`] decides what to do with it.
     variant: ButtonVariant,
     /// Optional per-call override for the active [`ButtonStyle`]. When
-    /// `None`, falls through to the theme slot (step 8) or the
+    /// `None`, falls through to the theme slot or the
     /// built-in [`crate::styles::RecipeButtonStyle`] default.
     style_override: Option<SharedButtonStyle>,
     action: Option<CommandFactory>,
@@ -458,7 +458,7 @@ impl bastyde_core::widget::Widget for Button {
         // Layout constants for the inner content (icon size,
         // icon-label gap) come from the button recipe. The chrome
         // (padding, corner radius, fill, border) lives on the active
-        // `ButtonStyle` impl — see step 5 of the styling refactor.
+        // `ButtonStyle` impl.
         use crate::styles::recipe_button_style as btn;
         let variant = self.variant;
         let self_id = ctx.self_id();

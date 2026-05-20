@@ -730,7 +730,7 @@ mod tests {
     }
 
     /// Arabic text renders with visible glyphs — regression test for
-    /// the default-font gap that the font-coverage plan fixes. Before
+    /// the default-font gap that a future font-coverage fix addresses. Before
     /// the fix, `register_default_font` loaded only Inter, which has
     /// no Arabic glyph coverage, so every shaped codepoint produced a
     /// `.notdef` with a zero-size atlas rect. After the fix,

@@ -7,8 +7,8 @@
 //! (background, corner_radius, padding, shadow). Apps that want a
 //! different chrome (frosted-glass card, brutalist box, neumorphic
 //! raised surface) plug their own `impl CardStyle` per-call
-//! (`.style(...)`) or theme-wide (step 8's
-//! `ComponentStyles.card = Rc::new(MyCard)`).
+//! (`.style(...)`) or theme-wide via
+//! `theme.style_slots.card = Some(Rc::new(MyCard))`.
 
 use std::rc::Rc;
 

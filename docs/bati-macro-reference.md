@@ -524,7 +524,7 @@ diagnostic under the user's token, thanks to span-preserving emission.
 - [bati-language-spec-v3.md](bati-language-spec-v3.md) — complete
   grammar, design principles, and worked translations of the reference
   examples.
-- [crates/bastyde/tests/bastyde/pass/](../crates/bastyde/tests/bastyde/pass/)
+- [crates/bastyde/tests/bati/pass/](../crates/bastyde/tests/bati/pass/)
   — trybuild fixtures exercising every supported form.
 - [crates/bastyde-macros/src/](../crates/bastyde-macros/src/) — the
   implementation (parse → IR → lower).

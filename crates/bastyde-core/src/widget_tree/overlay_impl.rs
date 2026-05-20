@@ -789,10 +789,10 @@ impl WidgetTree {
         // The overlay's content subtree just entered the active set;
         // the AT tree shape changed and the cached snapshot must be
         // rebuilt. The dismiss path already flips this; we must mirror
-        // it here, otherwise (post Phase 1) a popup show + read AT
-        // sequence returns the pre-popup snapshot. Phase 1 of the perf
-        // plan removed the unconditional `a11y_dirty = true` from
-        // `layout()` which previously masked this gap.
+        // it here, otherwise a popup show + read AT sequence returns
+        // the pre-popup snapshot. The unconditional `a11y_dirty = true`
+        // in `layout()` previously masked this gap; now this explicit
+        // set is required.
         self.a11y_dirty = true;
         if let Some(duration) = fade_duration {
             self.attach_overlay_fade(id, content_id, duration);

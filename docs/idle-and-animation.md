@@ -105,7 +105,7 @@ scheduler that consults the same helpers.
    resumes phase-continuous.
 
    **Signal-path one-shots are *not* gated by visibility.** A
-   widget like [`Collapse`](../crates/bastyde-widgets/src/collapse.rs)
+   widget like [`Collapse`](../crates/bastyde-widgets/src/animations/collapse.rs)
    drives a one-shot 0..1 progress signal that determines its own
    height — so when collapsed, its bounds are zero, it never paints,
    never re-stamps `last_painted_epoch`, and a visibility gate
@@ -293,7 +293,7 @@ discriminator branch in `shaders/anim_procedural.wgsl` (or
 ## Framework-level cost at 60 Hz
 
 The shader-driven scenes ([`examples/animations`](../examples/animations/src/main.rs),
-[`examples/animations-kit`](../examples/animations-kit/src/main.rs))
+[`examples/animations-kit`](../examples/animations_kit/src/main.rs))
 measure ~5 % CPU per process. The per-frame-effect scenes
 (`Pulse` / `Cycle` chains in `widget_catalog --tab animations`)
 measured **~50 % CPU** at first 60 Hz profile — roughly 10× the
@@ -301,10 +301,8 @@ shader path. The cost was not in the renderer; it was in the widget
 tree's per-frame infrastructure that runs around it.
 
 Profiling at 60 Hz (`perf record -F 999 -g --call-graph fp` on a
-release+debug build) found the framework-level hotspots and the
-optimisation plan
-[plan-for-persistent-mapped-buzzing-shell.md](../.claude/plans/plan-for-persistent-mapped-buzzing-shell.md)
-brought the catalog scene from ~50 % CPU to ~28 % CPU through:
+release+debug build) found the framework-level hotspots; the
+optimisation work brought the catalog scene from ~50 % CPU to ~28 % CPU through:
 
 | Phase | What it fixed | Recovery on catalog scene |
 | --- | --- | --- |
@@ -315,7 +313,7 @@ brought the catalog scene from ~50 % CPU to ~28 % CPU through:
 
 Total: catalog scene from ~50 % CPU to ~28 % CPU sustained at 60 Hz.
 
-Verification: [bench/perf_post_phase4_summary.md](../bench/perf_post_phase4_summary.md).
+Verification: bench/perf_post_phase4_summary.md (bench directory).
 
 ## Damage rects — measured, deferred
 
@@ -334,11 +332,11 @@ skips recompositing the rest of the window. Wayland has
    `queue.write_buffer(anim_uniforms, 8 KiB)` and command encoding.
    None of it was rasterisation time.
 
-2. *Second round* (60 Hz, full plan-of-record measurement on the
+2. *Second round* (60 Hz, full measurement on the
    catalog `--tab animations` scene): the framework-level path
    dominated at 50.7 % CPU, with `queue.write_buffer` not in the
    top 22 hotspots — wgpu's per-queue staging belt amortises it
-   completely. The plan above (Phases 1-4) addressed the actual
+   completely. The work above (Phases 1-4) addressed the actual
    bottlenecks. Damage rects would still target a small slice
    (renderer at 1.5-5 % depending on scene) and remain deferred.
 
@@ -355,7 +353,7 @@ skips recompositing the rest of the window. Wayland has
 
 **Cheaper follow-up that would actually help today**: the
 `AnimatedQuadRegistry` already tracks dirty slot ranges via
-`take_dirty_ranges` (Phase 0 of the plan). A future renderer
+`take_dirty_ranges` (Phase 0). A future renderer
 revision can use that to upload only the changed slots instead of
 the full `scratch_slice` — single-call-site change in
 `bastyde-render`, useful when many quads idle (e.g. paused indicators).

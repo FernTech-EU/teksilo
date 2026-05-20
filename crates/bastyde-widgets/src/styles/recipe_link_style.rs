@@ -13,9 +13,7 @@ use bastyde_tokens::{BorderRole, CornerRadius, TextRole, TextStyleRole};
 
 use crate::primitives::{FixedSize, RectWidget, TextWidget, VStack, ZStack};
 
-// IntUI design tokens for Link. Relocated from
-// `theme.components.link` in Stage C of the group-5 styling
-// migration — the recipe owns its own dimensions.
+// IntUI design tokens for Link. The recipe owns its own dimensions.
 pub const LINK_CORNER_RADIUS: f32 = 4.0;
 pub const LINK_UNDERLINE_THICKNESS: f32 = 1.0;
 

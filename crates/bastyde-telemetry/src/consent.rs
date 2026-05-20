@@ -46,7 +46,7 @@ pub struct ConsentFile {
     /// The endpoint the consent was given against. If the user
     /// changes the endpoint override later, this differs from the
     /// reporter's current endpoint and the store re-prompts (the
-    /// "recipient changed" rule from §11.4 of the plan).
+    /// recipient-changed rule: consent is tied to the data recipient).
     #[serde(default)]
     pub endpoint_at_consent_time: String,
 }

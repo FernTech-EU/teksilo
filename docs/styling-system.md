@@ -57,7 +57,6 @@ pub struct Theme {
     pub typography: TypographyTokens,
     pub shape: ShapeTokens,
     pub motion: MotionTokens,
-    pub components: ComponentStyles,         // dim structs for the non-themable widgets only
     pub style_slots: ComponentStyleSlots,    // typed Rc<dyn FooStyle> slots
     pub extensions: ThemeExtensions,
 }
@@ -71,8 +70,7 @@ let theme = intui::light();   // or intui::dark()
 ```
 
 Other presets ship as opt-in Cargo features (Material 3, macOS,
-Fluent) once Step 11 of the styling refactor lands; until then only
-IntUI is bundled.
+Fluent); until then only IntUI is bundled.
 
 **Reactive.** `Theme` lives behind a `Signal<Theme>` on
 `WidgetTree` — `set_theme(...)` dirty-marks every widget for repaint
@@ -151,36 +149,35 @@ Primitive recipe types:
 
 ```rust
 pub enum ShapeRecipe {
-    Rect { corner_radius: Prop<CornerRadius> },
+    Rect { corner_radius: CornerRadius },
     Pill,                          // corner = min(w,h)/2
     Circle,
-    CustomPath(Arc<dyn Fn(Rect) -> Path + Send + Sync>),
 }
 
 pub enum FillRecipe {
     Solid(RecipeColor),
-    LinearGradient { stops: Vec<(f32, RecipeColor)>, angle_deg: f32 },
-    RadialGradient { stops: Vec<(f32, RecipeColor)>, center: (f32, f32), radius: f32 },
+    LinearGradient { stops: Vec<GradientStop>, angle_deg: f32 },
+    RadialGradient { stops: Vec<GradientStop>, center: (f32, f32), radius: f32 },
     None,
 }
 
 pub struct BorderRecipe {
-    pub width: Prop<f32>,
+    pub width: f32,
     pub color: RecipeColor,
     pub style: BorderStyle,         // Solid | Dashed { dash, gap } | Dotted
     pub position: BorderPosition,   // Inside | Center | Outside
 }
 
 pub struct ShadowRecipe {
-    pub offset: Prop<Vec2>,
-    pub blur: Prop<f32>,
-    pub spread: Prop<f32>,
+    pub offset: Vec2,
+    pub blur: f32,
+    pub spread: f32,
     pub color: RecipeColor,
 }
 ```
 
 **Per-state cascades.** Most widgets need different recipes for hover
-/ pressed / focused / disabled. The plan's answer is
+/ pressed / focused / disabled. The answer is
 `PerStateRecipe<T>` with an explicit fallback chain — Bastyde's
 take on Flutter's `WidgetStateProperty<T>`:
 
@@ -206,7 +203,7 @@ and TOML image-theme manifests).
 As of this branch every themable widget holds its recipe-equivalent
 data inside its `Recipe*Style` default. The IntUI dimension constants
 that used to live in `bastyde-tokens::components` per-widget structs were
-deleted (Step 7) and folded directly into the matching
+deleted and folded directly into the matching
 `bastyde-widgets/src/styles/recipe_*_style.rs` module as `pub const`
 blocks — the recipe *is* the dimension data now, with no parallel
 store. `ButtonRecipe` is the one standalone Tier-2 struct surfaced so
@@ -242,7 +239,7 @@ The trait is `'static` only (not `Send + Sync`) because all Bastyde
 trees are single-threaded by construction; `Rc<dyn FooStyle>` is the
 public alias (`SharedButtonStyle` and friends).
 
-**Same shape across widgets.** All 32 style traits live in
+**Same shape across widgets.** All 34 style traits live in
 [`bastyde-core/src/styles/`](../crates/bastyde-core/src/styles/), all
 return `WidgetId` from their `make_*` methods, all take a
 `*StyleConfig` describing the inputs that vary by widget. The trait
@@ -284,8 +281,7 @@ impl ButtonStyle for MaterialFilledButton {
         );
 
         let padded_label = ctx.add(
-            Padding::new()
-                .symmetric(10.0, 24.0)         // M3 spec: 10×24
+            Padding::symmetric(10.0, 24.0)     // M3 spec: 10×24
                 .child_id(cfg.label),
         );
 
@@ -318,10 +314,10 @@ under `theme_slot_supplies_button_style_when_no_override` /
 | Preset | Where | Status |
 | --- | --- | --- |
 | `intui::light` / `intui::dark` | `bastyde_core::presets::intui` | shipped — the default look |
-| `material3::light` / `material3::dark` | `bastyde-theme-material3` crate | stub (Step 11) |
-| `macos::light` / `macos::dark` | `bastyde-theme-macos` crate | stub (Step 11) |
-| `fluent::light` / `fluent::dark` | `bastyde-theme-fluent` crate | stub (Step 11) |
-| Image-backed themes | `bastyde-image-theme` crate | not yet shipped (Step 10) |
+| `material3::light` / `material3::dark` | `bastyde-theme-material3` crate | stub |
+| `macos::light` / `macos::dark` | `bastyde-theme-macos` crate | stub |
+| `fluent::light` / `fluent::dark` | `bastyde-theme-fluent` crate | stub |
+| Image-backed themes | `bastyde-image-theme` crate | not yet shipped |
 
 Each preset is just a function returning `Theme`. Apps can write their
 own without depending on any sibling crate:
@@ -340,7 +336,7 @@ pub fn brutalist_light() -> Theme {
 ## Migration status (as of this branch)
 
 Every themable widget is on the Tier-3 trait + recipe-default +
-slot lookup. No themable widget self-paints anymore. **33 widgets**
+slot lookup. No themable widget self-paints anymore. **34 widgets**
 across six families:
 
 **Controls**
@@ -391,6 +387,7 @@ across six families:
 | `Popover` | `PopoverStyle` | `RecipePopoverStyle` | `style_slots.popover` |
 | `Dialog` (in-tree modal) | `DialogStyle` ¹ | `RecipeDialogStyle` | `style_slots.dialog` |
 | `Snackbar` | `SnackbarStyle` | `RecipeSnackbarStyle` | `style_slots.snackbar` |
+| `Toast` | `ToastStyle` | `RecipeToastStyle` | `style_slots.toast` |
 | `Banner` | `BannerStyle` | `RecipeBannerStyle` | `style_slots.banner` |
 
 **Rows / Items**
@@ -409,19 +406,19 @@ across six families:
 ¹ Multi-method trait — see [Multi-method styles](#multi-method-styles)
 below.
 
-Step 7 (delete legacy per-widget dimension structs) is done: the 17
+The legacy per-widget dimension structs are gone: the 17
 old `bastyde-tokens::components::*Style` structs were deleted and their
 IntUI constants folded into the matching
 `bastyde-widgets/src/styles/recipe_*_style.rs` modules.
-`theme.components` (`ComponentStyles`) still exists but now carries
-dimension data only for the *non-themable* widgets (toolbar, status
-bar, accordion, …) — anything that isn't yet on a style trait.
+The `ComponentStyles` struct has been fully removed from `Theme`.
 Migrated widgets read entirely from `theme.style_slots.*` plus their
-`Recipe*Style` defaults.
+`Recipe*Style` defaults. Dimension data for any remaining non-themable
+widgets (toolbar, status bar, accordion, …) lives directly in their
+`Recipe*Style` modules as `pub const` blocks.
 
-Still ahead on the styling roadmap: image-backed styles (Step 9), the
-`ImageTheme` TOML manifest loader (Step 10), and the sibling preset
-crates `bastyde-theme-material3` / `-macos` / `-fluent` (Step 11).
+Still ahead on the styling roadmap: image-backed styles, the
+`ImageTheme` TOML manifest loader, and the sibling preset
+crates `bastyde-theme-material3` / `-macos` / `-fluent`.
 
 ### Multi-method styles
 
@@ -481,7 +478,7 @@ widgets get reskinned across an app.
   color signals, theme swaps without rebuild.
 - [docs/image-themes.md](image-themes.md) — designer-workflow deep
   reference (Figma / Penpot / Canva → 9-slice manifest → theme).
-  (Not yet shipped; design pending Step 10.)
+  (Not yet shipped; design pending.)
 - [docs/widgets-overview.md](widgets-overview.md) — per-widget
   variant + style trait references.
 - [docs/accessibility-overrides.md](accessibility-overrides.md) —

@@ -28,7 +28,7 @@ The override surface piggy-backs on the existing handler-extraction plumbing —
 
 1. **Builder chain** — `Widget::new(...).access_label(...).access_role(...)` each return a `WidgetWithHandlers<W>` whose `HandlerSet` carries an `Option<Box<AccessibilityOverrides>>`. The first `access_*` call lazily allocates the box; subsequent calls extend it.
 2. **Insertion** — `WidgetTree::add(...)` calls `take_handler_set()` on the wrapper and `apply_handler_set` ([crates/bastyde-core/src/arena.rs](../crates/bastyde-core/src/arena.rs)) mirrors the box onto the persistent `WidgetNode::access_overrides` field. After this point, the wrapper has no override state — the source of truth is on the node.
-3. **AT tree build** — when the framework calls `WidgetTree::sync_accessibility()`, the walker at [crates/bastyde-core/src/widget_tree/accessibility_impl.rs:139](../crates/bastyde-core/src/widget_tree/accessibility_impl.rs) runs `node.widget.accessibility(builder)` first (so the inner widget emits its defaults), then calls `node.access_overrides.apply(builder)` to layer the overrides on top.
+3. **AT tree build** — when the framework calls `WidgetTree::sync_accessibility()`, the walker at [crates/bastyde-core/src/widget_tree/accessibility_impl.rs:137](../crates/bastyde-core/src/widget_tree/accessibility_impl.rs) runs `node.widget.accessibility(builder)` first (so the inner widget emits its defaults), then calls `node.access_overrides.apply(builder)` to layer the overrides on top.
 
 Subsequent `sync_accessibility()` calls re-run the walker if the AT cache is dirty — which now also dirties on `ShortcutRegistry::version()` bumps so `access_shortcut_id` tracks rebinds (see [Shortcuts](#shortcuts) below).
 
@@ -365,7 +365,7 @@ let node = find_node(&tree.sync_accessibility(), id).unwrap();
 assert_eq!(node.keyboard_shortcut(), Some("Ctrl+Q"));
 ```
 
-The 36 in-crate tests at [`crates/bastyde-core/src/widget_tree/accessibility_impl.rs`](../crates/bastyde-core/src/widget_tree/accessibility_impl.rs) cover every method in this reference, including all subtree-mode edge cases (nested Exclude-in-Merge, Merge-in-Merge), action-callback layering with `on_access_action`, custom-action dispatch by index, state-clearing for both hidden and disabled, and the `i18n` `Into<String>` conversion path.
+The 54 in-crate tests at [`crates/bastyde-core/src/widget_tree/accessibility_impl.rs`](../crates/bastyde-core/src/widget_tree/accessibility_impl.rs) cover every method in this reference, including all subtree-mode edge cases (nested Exclude-in-Merge, Merge-in-Merge), action-callback layering with `on_access_action`, custom-action dispatch by index, state-clearing for both hidden and disabled, and the `i18n` `Into<String>` conversion path.
 
 ---
 

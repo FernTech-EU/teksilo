@@ -39,9 +39,8 @@ type ColorAccess = (
     fn(&mut ColorTokens, Color),
 );
 
-/// f32 token getter / setter pair, used for both shape-shadow alphas
-/// (read against `ShapeTokens`) and component-level `shadow_density`
-/// (read against `ComponentStyles`).
+/// f32 token getter / setter pair, used for shape-shadow alphas
+/// (read against `ShapeTokens`).
 type F32Access<Owner> = (&'static str, fn(&Owner) -> f32, fn(&mut Owner, f32));
 
 const SHOWN_SHADOW_ALPHAS: &[F32Access<ShapeTokens>] = &[
@@ -87,13 +86,12 @@ const SHOWN_SHADOW_ALPHAS: &[F32Access<ShapeTokens>] = &[
     ),
 ];
 
-// Stage G of the styling refactor deleted `ComponentStyles` entirely;
-// every dimension is now either a `pub const` on a `recipe_*_style.rs`
-// module (themable widgets) or on the owning widget module (group-4
-// composites). Density sliders that mutated `theme.components.X` at
-// runtime no longer have a mutable target — re-exposing them needs a
-// different mechanism (per-recipe-instance overrides on the active
-// style trait object).
+// `ComponentStyles` was removed; every dimension is now either a
+// `pub const` on a `recipe_*_style.rs` module (themable widgets) or
+// on the owning widget module (group-4 composites). Per-component
+// density rows no longer exist; re-exposing runtime density overrides
+// would require per-recipe-instance overrides on the active style
+// trait object.
 
 const SHOWN_COLORS: &[ColorAccess] = &[
     ("accent", |t| t.accent, |t, c| t.accent = c),
@@ -367,8 +365,8 @@ impl Widget for ThemeTab {
             rows = rows.child(slider_row(name, sig.clone()));
         }
 
-        // Per-component density rows removed in Stage G — see the
-        // teardown note on `SHOWN_DENSITIES` earlier in this file.
+        // Per-component density rows are not shown — `ComponentStyles`
+        // was removed; see the note above `SHOWN_COLORS`.
 
         let root = ctx.add(
             VStack::new()

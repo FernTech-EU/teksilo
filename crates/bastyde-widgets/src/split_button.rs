@@ -53,8 +53,7 @@ enum Row {
     Separator,
 }
 
-/// SplitButton design tokens — relocated from
-/// `theme.components.split_button` in Stage G of the styling migration.
+/// SplitButton design tokens.
 pub const SPLIT_BUTTON_HEIGHT: f32 = 24.0;
 pub const SPLIT_BUTTON_MIN_WIDTH: f32 = 72.0;
 pub const SPLIT_BUTTON_PADDING_HORIZONTAL: f32 = 14.0;
@@ -296,10 +295,10 @@ impl std::fmt::Debug for SplitButton {
 // color tables ever diverge from these, update both sides.
 
 // SplitButton has not yet migrated to the trait-driven `ButtonStyle`
-// surface (that's step 6). For now it normalises the new 7-value
-// `ButtonVariant` down to the three buckets it knows how to paint:
-// `Filled` family (Filled / Destructive), `Plain` family (Plain /
-// Tinted / Outlined), `Ghost` family (Ghost / Link).
+// surface. For now it normalises the 7-value `ButtonVariant` down to
+// the three buckets it knows how to paint: `Filled` family
+// (Filled / Destructive), `Plain` family (Plain / Tinted / Outlined),
+// `Ghost` family (Ghost / Link).
 #[derive(Copy, Clone, Eq, PartialEq)]
 #[allow(clippy::enum_variant_names)]
 enum SplitButtonFamily {

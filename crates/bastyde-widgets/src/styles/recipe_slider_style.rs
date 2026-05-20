@@ -26,9 +26,7 @@ use bastyde_tokens::CornerRadius;
 /// accommodate the thumb plus the focus-ring envelope.
 const MIN_CROSS_SIZE: f32 = 24.0;
 
-// IntUI design tokens for Slider. Moved here in Step 7 of the
-// styling refactor — the recipe owns its own dimensions instead of
-// reading from `theme.components.slider`.
+// IntUI design tokens for Slider. The recipe owns its own dimensions.
 pub const SLIDER_TRACK_HEIGHT: f32 = 4.0;
 pub const SLIDER_THUMB_DIAMETER: f32 = 14.0;
 pub const SLIDER_TICK_SIZE: f32 = 2.0;

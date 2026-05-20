@@ -556,9 +556,9 @@ ctx.register_action(Action::new("app.preferences").on_invoke(|_i, ctx| {
 
 ```rust
 ctx.open_modal(ModalRequest::deferred(|tree| tree.add(ConfirmQuit::new()))
-    .with_presentation(ModalPresentation::NativeWindow)
-    .with_title("Confirm quit")
-    .with_size(420, 180));
+    .presentation(ModalPresentation::NativeWindow)
+    .title("Confirm quit")
+    .size(420, 180));
 ```
 
 ### Custom chrome on the initial window

@@ -4,8 +4,8 @@
 //! all painting and chrome composition to a [`ToggleStyle`] impl. The
 //! IntUI default ([`crate::styles::RecipeToggleStyle`]) ships out of
 //! the box; apps install a different look per-call via
-//! `Toggle::style(...)` or theme-wide via the `ComponentStyles.toggle`
-//! slot (step 8 of the styling refactor).
+//! `Toggle::style(...)` or theme-wide via
+//! `theme.style_slots.toggle = Some(Rc::new(...))`.
 //!
 //! No `paint()` method on this widget — the only canvas work happens
 //! inside the active `ToggleStyle::make_body` subtree.

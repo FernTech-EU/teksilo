@@ -1065,7 +1065,7 @@ mod tests {
         let content = present_and_lay_out(&mut tree, mb);
         // `content` is the `ModalContainer`; its child is now the
         // `DialogStyle` panel frame, and the `MessageBox` sits one
-        // level below that (Stage B of the group-5 styling migration).
+        // level below that.
         let panel = tree.children(content).first().copied().unwrap();
         let mb_id = tree.children(panel).first().copied().unwrap();
         let info = tree.accessibility_node(mb_id);

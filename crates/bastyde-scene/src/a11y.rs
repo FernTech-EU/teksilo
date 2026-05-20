@@ -267,7 +267,7 @@ pub enum A11yBoundsSpace {
 /// viewport-grown-rect)`. That keeps the tree close to "what the
 /// user can interact with right now" while letting screen-reader
 /// users discover items just outside the visible region by jumping
-/// to the next/prev — at which point `SceneView::focus_item` auto-
+/// to the next/prev — at which point `SceneView::ensure_visible`
 /// pans the view to bring the focused item into view.
 #[derive(Debug, Clone, Copy)]
 pub enum A11yOffScreenMode {
@@ -280,7 +280,7 @@ pub enum A11yOffScreenMode {
     /// margin around it. `n = 0` collapses to "viewport only" with
     /// the same allocation pattern as `ViewportOnly`. `n = 1` is
     /// the default — gives screen-reader users a one-screen
-    /// "lookahead" to navigate without `focus_item` round-tripping
+    /// "lookahead" to navigate without `ensure_visible` round-tripping
     /// through pan animation.
     ViewportPlusN { n: u32 },
 

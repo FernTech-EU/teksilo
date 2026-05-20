@@ -1,9 +1,8 @@
 //! Default `TableStyle` impl + table-family design tokens.
 //!
-//! Relocates all `theme.components.table` constants to `pub const`s
-//! on this module — Stage F1 of the group-5 styling migration. Shared
-//! by `TableView` and `TreeTable` (TreeTable adds tree-only indent /
-//! twist sizing on top of the standard table dims).
+//! Design tokens for the table family live as `pub const`s on this
+//! module, shared by `TableView` and `TreeTable` (TreeTable adds
+//! tree-only indent / twist sizing on top of the standard table dims).
 //!
 //! ## Wiring status
 //!
@@ -28,7 +27,6 @@ use bastyde_tokens::{CornerRadius, SurfaceRole};
 use crate::primitives::{RectWidget, ZStack};
 
 // ─── IntUI design tokens for TableView / TreeTable ─────────────────
-// Relocated from `theme.components.table` in Stage F1.
 
 /// Body row height. Headers use `HEADER_HEIGHT`.
 pub const ROW_HEIGHT: f32 = 28.0;

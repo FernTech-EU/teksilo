@@ -534,7 +534,7 @@ The button serves as the reference implementation exercising most architectural 
 What Button exercises:
 
 - **Composition.** A `RectWidget` (background, border, corner radius) wrapping an internal `HStack` or `VStack` (by `IconPosition`) containing an optional `IconWidget` and a `TextWidget` label. Leading/Trailing positions respect locale `LayoutDirection`.
-- **Visual states.** Five (idle, hovered, pressed, focused, disabled) × four styles (Filled, Outlined, Flat, Tonal) → (background role, border role, text role) resolved at paint time via `Signal<InteractionState>` mapped to `Signal<Role>`.
+- **Visual states.** Five (idle, hovered, pressed, focused, disabled) × seven variants (`Filled`, `Tinted`, `Outlined`, `Plain`, `Ghost`, `Link`, `Destructive`) → (background role, border role, text role) resolved at paint time via `Signal<InteractionState>` mapped to `Signal<Role>`.
 - **Behavior.** Pointer enter/leave/down/up drives interaction state; keyboard Space/Enter triggers activation; cursor is `Pointer` on hover; `TapRecognizer` commits the click.
 - **Accessibility.** `Role::Button`, name from label (resolved via `tr!` / `tr_widget!`), disabled state, actions (`Click`, `Focus`). Focus ring painted only on keyboard focus (origin-aware).
 

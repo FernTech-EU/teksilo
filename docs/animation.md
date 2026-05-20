@@ -102,7 +102,7 @@ For animations that should run until explicitly cancelled — spinners, marquee 
 self.indeterminate_pos = ctx.animated_signal(0.0);
 self.indeterminate_pos.animate_looping(
     1.0,
-    INDETERMINATE_SWEEP_DURATION,
+    ctx.theme().motion.duration_indeterminate_sweep,
     Easing::Linear,
     Some(INDETERMINATE_FRAME_INTERVAL),
 );
@@ -158,7 +158,7 @@ fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
 
 ### 5.2 Accordion / Collapse — animating a layout dimension
 
-[Accordion](../crates/bastyde-widgets/src/accordion.rs) wraps its content in a [`Collapse`](../crates/bastyde-widgets/src/collapse.rs) widget — the reusable primitive for the "animate child between hidden and natural height" pattern. `Collapse` drives an internal `Signal<f32>` from 0..1 with `ctx.animate().collapse().standard().to_or_snap(...)`, and its `layout_response` reports `natural * progress` while `place_children` always lays the child out at its full natural size. The framework's clip pass crops the overflow during the tween. Effect: the visible height interpolates over the full duration without the child being squashed (which would re-wrap text and produce flicker).
+[Accordion](../crates/bastyde-widgets/src/accordion.rs) wraps its content in a [`Collapse`](../crates/bastyde-widgets/src/animations/collapse.rs) widget — the reusable primitive for the "animate child between hidden and natural height" pattern. `Collapse` drives an internal `Signal<f32>` from 0..1 with `ctx.animate().collapse().standard().to_or_snap(...)`, and its `layout_response` reports `natural * progress` while `place_children` always lays the child out at its full natural size. The framework's clip pass crops the overflow during the tween. Effect: the visible height interpolates over the full duration without the child being squashed (which would re-wrap text and produce flicker).
 
 Animating a layout-participating dimension is more expensive than animating a paint-only value — the binding level is `Relayout`, not `RepaintOnly`, so the tree dirtys the accordion's ancestor's layout on each tick. Use sparingly. Paint-only targets (offsets, scales, opacities — see §5.6) are cheaper.
 
@@ -168,7 +168,7 @@ Animating a layout-participating dimension is more expensive than animating a pa
 
 ### 5.4 Smooth programmatic scroll
 
-When ScrollArea receives a `ScrollIntoView` request (for example after tab-focusing a child that is offscreen), it calls `scroll_y.animate_to(target_offset, ...)` instead of `scroll_y.set(target_offset)`. The user sees the viewport slide to the new position rather than jumping. See [scroll_area.rs:376](../crates/bastyde-widgets/src/scroll_area.rs).
+When ScrollArea receives a `ScrollIntoView` request (for example after tab-focusing a child that is offscreen), it calls `scroll_y.animate_to(target_offset, ...)` instead of `scroll_y.set(target_offset)`. The user sees the viewport slide to the new position rather than jumping. See [scroll_area.rs](../crates/bastyde-widgets/src/scroll_area.rs).
 
 ### 5.5 Icon widget — sprite-sheet frame animation
 
@@ -183,7 +183,7 @@ Animation wrappers live under [`crates/bastyde-widgets/src/animations/`](../crat
 - **[`Scale`](../crates/bastyde-widgets/src/animations/scale.rs)** wraps a child and animates a uniform 2D scale on its entire subtree, driven by a `Prop<bool>`. Built on `BuildContext::set_transform` (see §5.7) — the renderer composes the scale matrix onto its transform stack so the wrapped subtree's text and shapes visually shrink together. Two modes: **visual-only** (default, `reflow=false`) — the slot stays at the child's natural size, only the visual content scales around the chosen origin (use for overlay enter/exit, "boop" feedback); **reflow** (`.reflow(true)`) — the wrapper's reported size shrinks with progress so siblings reflow as the wrapped content disappears (use for "card removal", pair with `ScaleOrigin::TopLeading` so the visual stays anchored at the slot's top-left as it collapses). Distinct from `Collapse`: `Collapse` shrinks one axis and "wipes" content via clipping (text inside stays full-size); `Scale` shrinks uniformly and text/icons visually get smaller.
 - **[`Rotate`](../crates/bastyde-widgets/src/animations/rotate.rs)** wraps a child and applies a 2D rotation (radians) to its subtree via `set_transform`. Layout-stable. No internal animation — the caller owns the angle signal and pairs it with `Signal::animate_to` for animated rotations. Use for animated chevrons (replacing the old "flip-two-static-icons" trick), spinning loaders not covered by `Spinner`, dial controls.
 - **[`Blur`](../crates/bastyde-widgets/src/animations/blur.rs)** wraps a child and applies a Gaussian-equivalent blur to the entire subtree, driven by a `Prop<f32>` radius (logical pixels). Built on `BuildContext::set_blur` (see §5.7) — the renderer redirects the subtree's draws into an intermediate texture, runs a dual-Kawase chain at the requested radius, and composites the blurred result back at the widget's bounds. Layout-transparent: the child reports its full natural size at all radii. Sub-perceptual radii (`< 0.5`) are short-circuited at the walker — no offscreen pass, no allocation. Use for modal backdrops, click-to-reveal sensitive content (numerics / characters obscured by the blur), out-of-focus emphasis, animated frosted glass on modal show. Pair with an `animated_signal` and `animate_to` for animated enable/disable. See §5.8 for the offscreen-pass cost model.
-- **[`Spinner`](../crates/bastyde-widgets/src/spinner.rs)** — circular-arc loading indicator backed by `AnimatedQuadKind::SpinnerArc`, the shader-driven path (see [idle-and-animation.md §"Two animation paths — signal vs shader"](idle-and-animation.md#two-animation-paths-signal-vs-shader)). One `queue.write_buffer` of `AnimParams` + one `draw_indexed` per frame; `paint()` does not run while spinning. Edges are anti-aliased via `fwidth` smoothstep ramps in the fragment shader. Honours `prefers-reduced-motion` with a static three-quarter arc fallback.
+- **[`Spinner`](../crates/bastyde-widgets/src/spinner.rs)** — circular-arc loading indicator backed by `AnimatedQuadKind::SpinnerArc`, the shader-driven path (see [idle-and-animation.md §"Three animation paths — signal vs shader vs per-frame-effect"](idle-and-animation.md#three-animation-paths--signal-vs-shader-vs-per-frame-effect)). One `queue.write_buffer` of `AnimParams` + one `draw_indexed` per frame; `paint()` does not run while spinning. Edges are anti-aliased via `fwidth` smoothstep ramps in the fragment shader. Honours `prefers-reduced-motion` with a static three-quarter arc fallback.
 
 **[`Pulse`](../crates/bastyde-widgets/src/animations/pulse.rs)** and **[`Cycle`](../crates/bastyde-widgets/src/animations/cycle.rs)** drive their continuous motion through the **per-frame-effect path** rather than `AnimationScheduler` (which only knows linear tweens) or `AnimatedQuadRegistry` (which is paint-time GPU plumbing). They register a closure on `ctx.frame_tick()` for the tick action and a `ctx.subscribe_frame_tick()` RAII guard for visibility-aware chain management — the framework re-arms the frame chain after every render iff at least one subscriber's owner widget was painted in that frame, so a `Pulse` parked inside a non-selected `Switcher` branch contributes zero idle frames and resumes phase-continuous on the next show. The chain bootstrap (request_frame on subscription) and resume (post-render arm after the visible_when-driven repaint) are both handled by the framework. Widget code in the new shape:
 
@@ -270,7 +270,7 @@ let toggle_id = tree.add(Toggle::new(Signal::new(false)));
 tree.layout(SizeProposal::exact(200.0, 100.0));
 
 // Trigger the toggle's tap handler:
-tree.dispatch_synthetic_click(toggle_id);
+tree.click(toggle_id);
 
 // Advance past the 150 ms animation:
 tree.advance_time(Duration::from_millis(150));

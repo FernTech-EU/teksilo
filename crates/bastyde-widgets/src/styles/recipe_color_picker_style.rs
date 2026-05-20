@@ -1,10 +1,9 @@
 //! Default `ColorPickerStyle` impl + the picker's design tokens.
 //!
-//! All `theme.components.color_picker` constants relocate here as
-//! `pub const`s — Stage D2 of the group-5 styling migration. The four
-//! functional renderers (`HsvCanvas`, `HueStrip`, `AlphaStrip`,
+//! Design tokens for `ColorPicker` live as `pub const`s on this module.
+//! The four functional renderers (`HsvCanvas`, `HueStrip`, `AlphaStrip`,
 //! `ColorSwatch`) read these directly when they need dimensions for
-//! their colour-space rendering; they stay `pub(crate)` per principle 6.
+//! their colour-space rendering.
 //!
 //! `RecipeColorPickerStyle::make_body` ports the IntUI layout exactly:
 //! one of three column / row arrangements per `ColorPickerLayout`,
@@ -20,7 +19,6 @@ use crate::panel::Panel;
 use crate::primitives::{HStack, VStack};
 
 // ─── IntUI design tokens for ColorPicker ───────────────────────────
-// Relocated from `theme.components.color_picker` in Stage D2.
 
 // HSV (saturation × value) canvas dimensions.
 pub const CANVAS_WIDTH: f32 = 224.0;

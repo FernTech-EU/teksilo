@@ -74,10 +74,10 @@ fn read_only_widget_places_into_tree_and_lays_out() {
 
 #[test]
 fn shared_document_between_two_editors_delivers_events_independently() {
-    // Gap 10 of the plan: two editors on one document both receive
-    // `on_change` callbacks and update independently. This is the
-    // critical test that justifies the `on_change`-based routing
-    // instead of `poll_events`.
+    // Two editors on one document both receive `on_change` callbacks
+    // and update independently. This is the critical test that
+    // justifies the `on_change`-based routing instead of
+    // `poll_events`.
     let doc = TextDocument::new();
     doc.set_plain_text("initial").unwrap();
 
@@ -836,8 +836,7 @@ fn editor_preset_still_has_visible_blinking_caret() {
 #[test]
 fn context_target_variants_compile_out_of_the_box() {
     // Purely a compile-time test — make sure the public enum covers
-    // the variants the plan promises so applications can pattern-match
-    // exhaustively.
+    // all variants so applications can pattern-match exhaustively.
     let target = ContextTarget::Plain;
     match target {
         ContextTarget::Plain
@@ -2415,8 +2414,8 @@ fn accessibility_text_run_carries_character_positions() {
 
 #[test]
 fn accessibility_signal_driven_rebuild_on_text_edit() {
-    // Before Phase 2 of the accessibility overhaul, text edits
-    // didn't mark `a11y_dirty`. Now the document_version signal
+    // Previously, text edits didn't mark `a11y_dirty`.
+    // Now the document_version signal
     // is bound at `BindingLevel::AccessibilityOnly` and every
     // edit flips `a11y_dirty` through `process_state_changes`.
     // This test types a character, ticks past debounce, and

@@ -35,9 +35,7 @@ use bastyde_tokens::{BorderRole, CornerRadius, SurfaceRole};
 
 use crate::primitives::{FixedSize, HStack, IconWidget, Padding, RectWidget, Spacer, ZStack};
 
-// IntUI design tokens for ComboBox. Moved here in Step 7 of the
-// styling refactor — the recipe owns its own dimensions instead of
-// reading from `theme.components.combo_box`.
+// IntUI design tokens for ComboBox. The recipe owns its own dimensions.
 pub const COMBO_BOX_HEIGHT: f32 = 28.0;
 pub const COMBO_BOX_PADDING_HORIZONTAL: f32 = 9.0;
 pub const COMBO_BOX_ARROW_COLUMN_WIDTH: f32 = 23.0;

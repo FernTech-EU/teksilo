@@ -13,9 +13,9 @@
 //! The trait + `style_slots.list_container` slot are in place; the
 //! `ListInsertionRecipe` carries the role + thickness data consumed
 //! by `ListView::paint` / `TreeView::paint`. Replacing the inline
-//! paint with a composed `RectWidget` leaf (the Stage A `TabBar`
-//! drop-indicator pattern) is deferred. The slot's data is
-//! already read by both widgets' paint passes (no more hard-coded
+//! paint with a composed `RectWidget` leaf (analogous to the `TabBar`
+//! drop-indicator pattern) is deferred. The slot's data is already
+//! read by both widgets' paint passes (no more hard-coded
 //! `Color::from_rgba(0.2, 0.4, 0.9, 0.8)`).
 
 use std::rc::Rc;

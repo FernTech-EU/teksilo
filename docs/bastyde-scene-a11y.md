@@ -37,15 +37,17 @@ The AT machinery has two cooperating layers:
 
 ```rust
 SceneView::new(scene)
-    .off_screen_a11y_mode(A11yOffScreenMode::OnlyVisible)
-    // OnlyVisible (default) | All | RegionMargin(units)
+    .a11y_off_screen_mode(A11yOffScreenMode::ViewportOnly)
+    // ViewportPlusN { n } (default, n=1) | AllItems | ViewportOnly
 ```
 
 Decides which items the AT walker emits when the user pans / zooms.
-`OnlyVisible` keeps the AT tree in lockstep with the viewport;
-`All` always emits everything (good for tiny scenes); `RegionMargin`
-emits items within `margin` of the visible region (good for "user
-can Tab to the next off-screen item" patterns).
+`ViewportPlusN { n: 1 }` (the default) emits items in the viewport
+plus one viewport-width margin — giving screen-reader users a
+one-screen "lookahead" for navigation. `AllItems` always emits
+everything (good for small scenes, < ~500 items). `ViewportOnly`
+strictly limits emission to the current viewport (large scenes where
+off-screen enumeration would overwhelm AT clients).
 
 ---
 
@@ -163,8 +165,8 @@ Apps coin their own category names — `"node"`, `"connector"`,
 `"comment"` — and bucket items into them:
 
 ```rust
-scene.add_a11y_category(A11yNode::Item(node), A11yCategory::new("node"));
-scene.add_a11y_category(A11yNode::Item(edge), A11yCategory::new("connector"));
+scene.set_a11y_categories(A11yNode::Item(node), &[A11yCategory::new("node")]);
+scene.set_a11y_categories(A11yNode::Item(edge), &[A11yCategory::new("connector")]);
 ```
 
 ---
@@ -309,9 +311,9 @@ let edge = scene.add_item(
     PathItem::new(connector_path(), edge_aabb()).stroke(Color::BLACK, 2.0),
     Point::ZERO,
 );
-scene.add_a11y_category(A11yNode::Item(edge), A11yCategory::new("connector"));
-scene.add_a11y_category(A11yNode::Item(node_a), A11yCategory::new("node"));
-scene.add_a11y_category(A11yNode::Item(node_b), A11yCategory::new("node"));
+scene.set_a11y_categories(A11yNode::Item(edge),  &[A11yCategory::new("connector")]);
+scene.set_a11y_categories(A11yNode::Item(node_a), &[A11yCategory::new("node")]);
+scene.set_a11y_categories(A11yNode::Item(node_b), &[A11yCategory::new("node")]);
 
 // Logical flow: data flows A → B.
 scene.add_a11y_relation(

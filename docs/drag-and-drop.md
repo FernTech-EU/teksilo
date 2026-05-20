@@ -72,7 +72,7 @@ Three cursor / capture invariants the framework guarantees for the source:
 
 ## 4. Dropping — target side
 
-A widget becomes a drop target by attaching at least `on_drag_hover` or `on_drop`. Target hit-testing uses [`find_drop_target_at_or_above`](../crates/bastyde-core/src/widget_tree/event_dispatch_impl.rs): hit-test the pointer position, walk up until a node with either handler is found.
+A widget becomes a drop target by attaching at least `on_drag_hover` or `on_drop`. Target hit-testing uses [`find_drop_target_at_or_above`](../crates/bastyde-core/src/widget_tree/drag_drop_impl.rs): hit-test the pointer position, walk up until a node with either handler is found.
 
 Target-side handlers fire in this strict order, each at most once per role per drag:
 
@@ -95,7 +95,7 @@ handlers = handlers.on_drag_hover(move |payload, pos, _ctx| {
 });
 ```
 
-**Coordinates are target-local** — origin at the target widget's top-left, in logical pixels. Same coordinate system as the target's own `bounds` / `paint`, so drop-index math doesn't have to know where the widget sits in the window. (Before we fixed this the indicator was offset by the header height; see the regression test `on_drag_hover_and_on_drop_receive_widget_local_coordinates` in [event_dispatch_impl.rs](../crates/bastyde-core/src/widget_tree/event_dispatch_impl.rs).)
+**Coordinates are target-local** — origin at the target widget's top-left, in logical pixels. Same coordinate system as the target's own `bounds` / `paint`, so drop-index math doesn't have to know where the widget sits in the window. (Before we fixed this the indicator was offset by the header height; see the regression test `on_drag_hover_and_on_drop_receive_widget_local_coordinates` in [drag_drop_impl.rs](../crates/bastyde-core/src/widget_tree/drag_drop_impl.rs).)
 
 ### 4.2 `on_drag_tick(local_pos, ctx)`
 
@@ -158,7 +158,7 @@ When a drag starts with `start_drag_with_preview`, the framework:
 2. Creates an overlay with `OverlayLayer::InTree` + `OverlayPlacement::AtPointer(Point::ZERO)`.
 3. Marks the preview content `needs_layout` so the next layout pass runs `position_overlays` and actually positions the overlay at the pointer rather than leaving it at `(0, 0)`.
 
-On every `PointerMove` during drag, [`handle_drag_move`](../crates/bastyde-core/src/widget_tree/event_dispatch_impl.rs) calls `overlay_manager.update_placement(AtPointer(position))` **and** marks the preview content `needs_layout` again — without the dirty mark, `layout()` short-circuits (`any_needs_layout()` is false) and the overlay stays pinned at its previous position.
+On every `PointerMove` during drag, [`handle_drag_move`](../crates/bastyde-core/src/widget_tree/drag_drop_impl.rs) calls `overlay_manager.update_placement(AtPointer(position))` **and** marks the preview content `needs_layout` again — without the dirty mark, `layout()` short-circuits (`any_needs_layout()` is false) and the overlay stays pinned at its previous position.
 
 Cleanup: `cleanup_drag_preview()` dismisses the overlay and destroys its content subtree. It runs on drop, Escape cancel, and explicit `cancel_drag`.
 
@@ -250,7 +250,7 @@ Everything is headless. The key harness helpers (on `WidgetTree`):
 
 Common patterns from the existing suite:
 
-- **Core-level lifecycle tests** ([event_dispatch_impl.rs tests module](../crates/bastyde-core/src/widget_tree/event_dispatch_impl.rs)) — use `FillWidget` / `InsetWidget` / `StackWidget` with handlers attached directly, drive events with `tree.dispatch_event(...)`, assert via `Rc<Cell<u32>>` counters and `tree.active_drag`. The `on_drag_leave_*` tests are the canonical examples.
+- **Core-level lifecycle tests** ([drag_drop_impl.rs tests module](../crates/bastyde-core/src/widget_tree/drag_drop_impl.rs)) — use `FillWidget` / `InsetWidget` / `StackWidget` with handlers attached directly, drive events with `tree.dispatch_event(...)`, assert via `Rc<Cell<u32>>` counters and `tree.active_drag`. The `on_drag_leave_*` tests are the canonical examples.
 - **Widget-level integration tests** ([list_view.rs](../crates/bastyde-widgets/src/list_view.rs), [tree_view.rs](../crates/bastyde-widgets/src/tree_view.rs) tests modules) — build a real `ListView`/`TreeView` with a `ListModel` / `TreeModel`, run the full gesture chain via a `drag_item` helper, assert the model's observable state (`with_item`, `root_count`) and the feedback signal via the `widget_as_any` downcast.
 - **Drag across a rebuild** — `drag_survives_rebuild_triggered_by_selection` in `list_view.rs` pins the scenario where clicking a row triggers a selection-driven rebuild between `PointerDown` and the first `PointerMove`. The drag must still complete.
 - **External handlers survive rebuild** — `external_handlers_survive_rebuild` in [widget_builder.rs](../crates/bastyde-core/src/widget_builder.rs) pins the handler-bucket invariant: closures attached via `SomeWidget::new().on_tap(...)` must keep firing after the widget rebuilds in place.

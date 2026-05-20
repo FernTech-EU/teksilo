@@ -1292,8 +1292,8 @@ impl SceneView {
     /// fits inside the current visible scene region. If the
     /// expanded target rect already fits, this is a no-op.
     ///
-    /// Pairs with `focus_item(id)` when an off-viewport item gains
-    /// focus; the SceneView's default focus traversal calls this
+    /// Pairs with focus traversal: when an off-viewport item gains
+    /// focus, the SceneView's default focus traversal calls this
     /// automatically. Apps wanting to scroll a specific area into
     /// view (e.g. on search-result selection) call it directly.
     ///

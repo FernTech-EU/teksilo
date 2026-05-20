@@ -1,11 +1,10 @@
 //! The complete theme aggregator.
 //!
 //! `Theme` lives in `bastyde-core` (not `bastyde-tokens`) so the per-widget
-//! style trait protocols and the typed `Arc<dyn FooStyle>` slots that
-//! will eventually replace [`bastyde_tokens::ComponentStyles`] can sit on
-//! the same struct without forcing a dependency cycle. See the
-//! `docs/styling-system.md` reference for the four-tier ladder this
-//! type anchors.
+//! style trait protocols and the typed `Rc<dyn FooStyle>` slots in
+//! [`ComponentStyleSlots`] can sit on the same struct without forcing a
+//! dependency cycle. See the `docs/styling-system.md` reference for the
+//! four-tier ladder this type anchors.
 //!
 //! Construct via a preset — there is no `Theme::default()` /
 //! `Theme::*_default()`. Apps explicitly pick one:

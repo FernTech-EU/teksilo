@@ -29,9 +29,7 @@ use bastyde_tokens::CornerRadius;
 
 use crate::primitives::ZStack;
 
-// IntUI design tokens for ScrollBar. Moved here in Step 7 of the
-// styling refactor — the recipe owns its own dimensions instead of
-// reading from `theme.components.scrollbar`.
+// IntUI design tokens for ScrollBar. The recipe owns its own dimensions.
 pub const SCROLLBAR_THICKNESS_IDLE: f32 = 4.0;
 pub const SCROLLBAR_THICKNESS_HOVER: f32 = 8.0;
 pub const SCROLLBAR_MIN_THUMB_LENGTH: f32 = 24.0;

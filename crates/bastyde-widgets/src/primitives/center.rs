@@ -4,7 +4,7 @@ use bastyde_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, Wi
 use bastyde_core::widget_id::WidgetId;
 
 /// Convenience layout widget that centers a single child within the
-/// available space. Equivalent to `Expand::new().content_alignment(Alignment::CENTER)`.
+/// available space. Equivalent to `Expand::new().align_child(Alignment::CENTER)`.
 #[derive(Debug)]
 pub struct Center {
     child_id: Option<WidgetId>,

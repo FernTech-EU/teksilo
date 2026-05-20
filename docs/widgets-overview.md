@@ -15,7 +15,7 @@ shortcuts/intents/actions), see [SUMMARY.md](SUMMARY.md).
 
 ## Styling status
 
-All 16 themable widgets are on the four-tier styling system
+All 33 themable widgets are on the four-tier styling system
 ([docs/styling-system.md](styling-system.md)): each ships a `*Style`
 trait in `bastyde-core::styles::*` plus a default `Recipe*Style` impl in
 `bastyde-widgets/src/styles/*`. The widget builds its parts, hands a
@@ -44,10 +44,11 @@ is per-call `.style(impl FooStyle)` → theme-wide
 | `TextInput` | `TextInputVariant` (Outlined/Filled/Underline/Bare) | `TextInputStyle` | `style_slots.text_input` |
 
 The 17 legacy per-widget dimension structs in `bastyde-tokens::components`
-were deleted (Step 7); their IntUI constants now live in the matching
-`bastyde-widgets/src/styles/recipe_*_style.rs` modules. `theme.components`
-still carries dimension data for the *non-themable* widgets (toolbar,
-status bar, dialog, accordion, badge, progress bar, table, …). Image-
+were deleted; their IntUI constants now live in the matching
+`bastyde-widgets/src/styles/recipe_*_style.rs` modules. The dimension
+data for non-themable widgets (toolbar, status bar, dialog, accordion,
+badge, progress bar, table, …) lives directly in those same
+`recipe_*_style.rs` modules as `pub const` blocks. Image-
 backed styles, the `ImageTheme` TOML loader, and the sibling preset
 crates are still pending.
 

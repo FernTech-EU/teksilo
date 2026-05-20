@@ -19,7 +19,7 @@ Cloning any bastyde-data handle produces a second handle to the same underlying 
 
 ## 2. `ListModel<T>` — the common case
 
-`ListModel<T>` is a concrete reactive list: a `Vec<T>` plus an observer list, behind an `Rc<RefCell<…>>`. Every mutation method (`push`, `insert`, `remove`, `set`, `swap`, `clear`, `move_item`, `extend`, `sort_by`) drops the mutable borrow *before* notifying observers, so a callback that reads `len()` or `with_item(...)` during the notification does not deadlock the cell.
+`ListModel<T>` is a concrete reactive list: a `Vec<T>` plus an observer list, behind an `Rc<RefCell<…>>`. Every mutation method (`push`, `insert`, `remove`, `set`, `move_item`, `replace_all`, `clear`) drops the mutable borrow *before* notifying observers, so a callback that reads `len()` or `with_item(...)` during the notification does not deadlock the cell.
 
 ```rust
 use bastyde_data::{ListModel, DataChange};
@@ -55,7 +55,7 @@ pub trait ListDataSource: 'static {
 }
 ```
 
-`ListDataSource` is *not* related to `ListModel<T>` by inheritance — they are two separate input paths. `ListView` provides both `ListView::from_model(model)` and `ListView::from_source(source)` constructors to consume either.
+`ListDataSource` is *not* related to `ListModel<T>` by inheritance — they are two separate input paths. `ListView` provides both `ListView::new(model, delegate)` and `ListView::from_source(source, delegate)` constructors to consume either.
 
 The trait is not object-safe (associated type + generic methods), which is deliberate: widgets consume it generically. Implementors are free to keep internal locks, LRU caches, or network state across calls; `with_item` passing the item by callback rather than reference means the implementor controls the borrow lifetime.
 
@@ -71,9 +71,9 @@ The tree equivalent of `ListModel<T>`. Nodes are stored in a `SlotMap<DefaultKey
 use bastyde_data::{TreeModel, NodeId};
 
 let fs: TreeModel<FsEntry> = TreeModel::new();
-let docs: NodeId = fs.insert_root(FsEntry::dir("docs"));
-let readme: NodeId = fs.insert_child(docs, FsEntry::file("README.md"));
-let inner: NodeId = fs.insert_child(docs, FsEntry::dir("inner"));
+let docs: NodeId = fs.insert_root(0, FsEntry::dir("docs"));
+let readme: NodeId = fs.insert_child(docs, 0, FsEntry::file("README.md"));
+let inner: NodeId = fs.insert_child(docs, 1, FsEntry::dir("inner"));
 ```
 
 Mutations emit `TreeChange::{NodeInserted, NodeRemoved, NodeMoved, NodeUpdated, Reset}`. `NodeRemoved` removes the entire subtree; observers see a single event but the subtree is gone.
@@ -102,7 +102,7 @@ Consumers access entries via `slice.with_entry(index, |data, entry| …)` and ge
 
 ### 4.3 `TreeSliceHandle` — the consumer API
 
-`TreeView` doesn't re-implement expand/collapse; it holds a `TreeSliceHandle` and calls `toggle_expand(node_id)`, `expand(node_id)`, `collapse(node_id)`, `expand_all()`. The handle is `Clone` — widgets can share access to the same slice without ambient state.
+`TreeView` doesn't re-implement expand/collapse; it holds a `TreeSliceHandle` and calls `toggle_expand(node_id)`, `expand(node_id)`, `collapse(node_id)`. The handle is `Clone` — widgets can share access to the same slice without ambient state. (`expand_all()` and `collapse_all()` are available on the owning `TreeSlice` itself.)
 
 ## 5. `SelectionModel` — one rule set, two widgets
 

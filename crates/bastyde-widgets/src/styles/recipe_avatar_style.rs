@@ -29,10 +29,9 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{Color, CornerRadius};
 
 // ─── IntUI design tokens for Avatar ────────────────────────────────
-// Relocated from `theme.components.avatar` in Stage C of the group-5
-// styling migration — the recipe owns its own dimensions. `Avatar` (and
-// its `InitialsLeaf` sub-widget) reads the public `pub const`s below
-// directly when it needs sizing data outside the chrome frame.
+// The recipe owns its own dimensions. `Avatar` (and its `InitialsLeaf`
+// sub-widget) reads the public `pub const`s below directly when it
+// needs sizing data outside the chrome frame.
 
 pub const AVATAR_SIZE_SMALL: f32 = 24.0;
 pub const AVATAR_SIZE_MEDIUM: f32 = 32.0;

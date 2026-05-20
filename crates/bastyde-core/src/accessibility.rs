@@ -58,8 +58,8 @@ pub enum SyntheticKind {
     /// emits one synthetic child per visible item using
     /// [`push_scene_item_child`](AccessNodeBuilder::push_scene_item_child).
     SceneItem = 5,
-    /// A logical grouping declared via `Scene::add_a11y_group` (Phase
-    /// 5b). Pure AT structure — no visual counterpart. The parent's
+    /// A logical grouping declared via `Scene::add_a11y_group`.
+    /// Pure AT structure — no visual counterpart. The parent's
     /// children list orders mixed `SceneItem` and `SceneGroup`
     /// synthetic NodeIds however the app declared the logical tree.
     SceneGroup = 6,
@@ -455,18 +455,18 @@ impl AccessNodeBuilder {
     }
 
     /// The widget id this builder was constructed for, if any. Set
-    /// by [`AccessNodeBuilder::for_widget`]; used by the Phase 5b
-    /// scene-tree walker to derive synthetic `NodeId`s for items /
-    /// groups outside the closure form (`push_scene_child*`).
+    /// by [`AccessNodeBuilder::for_widget`]; used by the scene-tree
+    /// walker to derive synthetic `NodeId`s for items / groups outside
+    /// the closure form (`push_scene_child*`).
     pub fn owner_id(&self) -> Option<crate::widget_id::WidgetId> {
         self.owner
     }
 
     /// Run a mutator over a synthetic child node previously pushed
     /// via [`push_scene_child`] (or its `_under` variant). Used by
-    /// the Phase 5b scene walker to apply cross-tree decorations
-    /// (relations / live regions / landmarks) after the initial
-    /// hierarchy emit. Returns `true` if the node was found.
+    /// the scene walker to apply cross-tree decorations (relations /
+    /// live regions / landmarks) after the initial hierarchy emit.
+    /// Returns `true` if the node was found.
     ///
     /// Cannot be used to mutate widget-derived NodeIds — those live
     /// in the global TreeUpdate and are owned by other widgets.
@@ -608,9 +608,8 @@ impl AccessNodeBuilder {
     /// [`SyntheticKind::SceneGroup`]; passing any other variant
     /// panics in debug.
     ///
-    /// Any further synthetic children the closure pushes (a future
-    /// `SceneGroup` containing `SceneItem`s, for the Phase 5b
-    /// logical-tree walker) are forwarded into the parent's
+    /// Any further synthetic children the closure pushes (a
+    /// `SceneGroup` containing nested `SceneItem`s) are forwarded into the parent's
     /// `children_collected` and re-parented under the
     /// just-pushed node via the closure's own `inner.push_child`
     /// calls — same convention as `push_paragraph_child` →
@@ -659,9 +658,9 @@ impl AccessNodeBuilder {
 
     /// Append an existing synthetic node id as a child of a
     /// previously-pushed `SceneGroup` (or `SceneItem`) child. Used by
-    /// the Phase 5b logical-tree walker to re-parent items under
-    /// their declared logical group rather than as direct children
-    /// of the SceneView.
+    /// the scene logical-tree walker to re-parent items under their
+    /// declared logical group rather than as direct children of the
+    /// SceneView.
     ///
     /// Returns `true` if the parent was found (and the child was
     /// attached), `false` if the parent isn't in
@@ -680,8 +679,8 @@ impl AccessNodeBuilder {
     /// parent. `parent = None` attaches to the widget's own node
     /// (same behavior as `push_scene_child`); `parent = Some(...)`
     /// attaches to the previously-pushed scene-child with that id.
-    /// The Phase 5b logical-tree walker uses this to nest scene
-    /// items under declared `A11yGroup` parents.
+    /// The scene logical-tree walker uses this to nest scene items
+    /// under declared `A11yGroup` parents.
     ///
     /// Returns the deterministic synthetic `NodeId` for the new
     /// child. If `parent` was `Some` but the parent wasn't found
@@ -990,9 +989,9 @@ mod tests {
     #[test]
     fn widget_derived_node_id_has_bit_63_clear() {
         // A freshly-minted slotmap key (version 1, index 0) encodes
-        // to a u64 with bit 63 clear. The plan's top-bit namespace
-        // split only works if widget-derived NodeIds stay below
-        // bit 63.
+        // to a u64 with bit 63 clear. The top-bit namespace split
+        // (synthetic NodeIds set bit 63, widget-derived NodeIds clear
+        // it) only works if widget-derived NodeIds stay below bit 63.
         let wid = fake_widget(1);
         let nid = widget_id_to_node_id(wid);
         assert_eq!(
@@ -1014,8 +1013,8 @@ mod tests {
     #[test]
     fn synthetic_node_id_stable_across_calls() {
         // Same (widget, element, kind) produces identical NodeIds —
-        // the plan relies on this for screen-reader focus stability
-        // across accessibility rebuilds.
+        // this stability is required for screen-reader focus to survive
+        // accessibility rebuilds.
         let wid = fake_widget(42);
         let a = synthetic_node_id(wid, 17, SyntheticKind::TextRun);
         let b = synthetic_node_id(wid, 17, SyntheticKind::TextRun);

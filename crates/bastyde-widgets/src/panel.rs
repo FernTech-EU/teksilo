@@ -9,7 +9,7 @@
 //! (background, border_color, border_width, corner_radius, padding).
 //! Apps that want a different chrome (frosted-glass panel, brutalist
 //! frame) plug their own `impl PanelStyle` per-call (`.style(...)`) or
-//! theme-wide (step 8's `ComponentStyles.panel = Rc::new(MyPanel)`).
+//! theme-wide via `theme.style_slots.panel = Some(Rc::new(MyPanel))`.
 
 use std::rc::Rc;
 

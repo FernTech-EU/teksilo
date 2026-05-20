@@ -1,7 +1,7 @@
 //! Default `Recipe*Style` impls — the IntUI look ships here. Apps that
 //! want a different design language write their own `impl FooStyle`
-//! blocks (per-call via `Foo::style(...)` or theme-wide via the
-//! `ComponentStyles` slot bag in step 8).
+//! blocks (per-call via `Foo::style(...)` or theme-wide via
+//! `theme.style_slots`).
 //!
 //! Each impl widget composes a small subtree (or for chrome-dense
 //! widgets like Toggle, a tiny private leaf widget that paints

@@ -57,10 +57,9 @@ impl Divider {
     }
 }
 
-/// Default visual thickness of a `Divider` stroke. Relocated here
-/// from `theme.components.divider.thickness` as part of the Stage G
-/// teardown — divider has no per-widget `Recipe*Style` module to host
-/// it, so the constant lives alongside the widget that reads it.
+/// Default visual thickness of a `Divider` stroke. Divider has no
+/// per-widget `Recipe*Style` module, so the constant lives alongside
+/// the widget that reads it.
 pub const DIVIDER_THICKNESS: f32 = 1.0;
 
 impl Default for Divider {

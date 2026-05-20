@@ -1,5 +1,5 @@
-//! Chart design tokens — relocated from `theme.components.chart` as
-//! part of Stage G of the styling migration. Charts pull their
+//! Chart design tokens — relocated from `theme.components.chart` into
+//! this standalone module. Charts pull their
 //! *colours* from theme roles + `ColorTokens::chart_palette`; this
 //! module only carries dimensions. Themes that want to nudge density
 //! either fork `bastyde-charts` or install a custom layout pass on top

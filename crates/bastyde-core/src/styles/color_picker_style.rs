@@ -4,8 +4,7 @@
 //! The four functional renderers — `HsvCanvas` (2-D saturation × value
 //! gradient), `HueStrip`, `AlphaStrip`, and `ColorSwatch` — are
 //! widget-internal `pub(crate)` types that paint the colour space
-//! itself; replacing them is a fork-worthy change, not a theming
-//! one (principle 6 in the migration plan).
+//! itself; replacing them is a fork-worthy change, not a theming one.
 //!
 //! Each row the picker can show (top row: canvas + hue + alpha;
 //! preview / hex; RGB spinners; HSV spinners; swatch grid; footer;

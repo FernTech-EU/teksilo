@@ -66,12 +66,11 @@ RectWidget::new().background(bg_role)
 pub fn set_theme(&mut self, theme: Theme)
 ```
 
-Declared at [`crates/bastyde-core/src/widget_tree.rs`](../crates/bastyde-core/src/widget_tree.rs) (around line 759). Sequence:
+Declared at [`crates/bastyde-core/src/widget_tree.rs`](../crates/bastyde-core/src/widget_tree.rs) (around line 1120). Sequence:
 
 1. `self.theme = theme.clone()` — the cached `&Theme` accessor still works.
 2. `self.theme_signal.set(theme)` — fires observers (derived `Signal<Theme>`s, role-carrying `ColorProp`s via their bindings).
-3. `self.tooltips.clear()` — drops tooltip attachments, which may reference stale anchor state.
-4. `self.arena.mark_all_dirty()` — every node needs layout and paint.
+3. `self.arena.mark_all_dirty()` — every node needs layout and paint.
 
 No `rebuild_built_widgets` call, no focus clearing. `set_locale` follows the same pattern on `locale_signal`.
 
@@ -105,7 +104,7 @@ Both are neutral Int UI baselines — not visually distinctive, designed to be c
 
 ### Programmatic customization via struct spread
 
-`Theme` (`bastyde-core::styles`) and the token structs `ColorTokens`, `TypographyTokens`, `ShapeTokens`, `LayoutTokens`, `MotionTokens`, `ComponentStyles` (`bastyde-tokens`) are plain structs. Override the fields you want and spread the rest from a preset base:
+`Theme` (`bastyde-core::styles`) and the token structs `ColorTokens`, `TypographyTokens`, `ShapeTokens`, `LayoutTokens`, `MotionTokens` (`bastyde-tokens`) are plain structs. Override the fields you want and spread the rest from a preset base:
 
 ```rust
 use bastyde_core::styles::Theme;
@@ -283,7 +282,7 @@ Three cases keep an explicit `theme_signal`:
 
 1. **Color transformations** (`token.with_alpha(0.2)` etc.) — no role represents "accent at 12 % alpha"; use `theme_signal.map(|t| t.colors.accent.with_alpha(0.12))` to get a `Signal<Color>`.
 2. **Effects on external state** — the rich-text engine's per-frame palette, for instance. See [`primitives/text_input_field.rs`](../crates/bastyde-widgets/src/primitives/text_input_field.rs) for the `ctx.effect(&theme_signal, move |theme| { ... })` pattern.
-3. **Layout snapshots** — `let style = ctx.theme_signal().get().components.button` at the top of `build()` captures corner radii, padding, min sizes. These rarely differ across themes; the snapshot is fine.
+3. **Layout snapshots** — `let shape = ctx.theme_signal().get().shape` at the top of `build()` captures corner radii; `let layout = ctx.theme_signal().get().layout` captures spacing values. These rarely differ across themes; the snapshot is fine.
 
 ---
 

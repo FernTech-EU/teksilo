@@ -242,9 +242,9 @@ impl<'a> BuildContext<'a> {
     }
 
     /// Retrieve an application-scoped value of type `T` registered via
-    /// `BastydeAppBuilder::app_state` (architecture §9.5). Returns `None` if
-    /// no value of that type was registered. The returned reference
-    /// borrows from the framework for the duration of the build pass.
+    /// `BastydeAppBuilder::app_state`. Returns `None` if no value of
+    /// that type was registered. The returned reference borrows from
+    /// the framework for the duration of the build pass.
     pub fn app_state<T: 'static>(&self) -> Option<&T> {
         self.tree.app_context().app_state::<T>()
     }
@@ -441,7 +441,7 @@ impl<'a> BuildContext<'a> {
         self.tree.first_focusable_descendant(root)
     }
 
-    // --- Actions & shortcuts (step 3) ---
+    // --- Actions & shortcuts ---
 
     /// Attach an [`Action`](crate::action::Action) to the widget being
     /// built. Actions are consulted during intent dispatch as the
@@ -565,9 +565,9 @@ impl<'a> BuildContext<'a> {
         self.tree.apply_external_handler_set(id, handler_set);
     }
 
-    /// Subscribe to events from the registered application event source
-    /// (architecture §9.4). The callback runs on the UI thread when the
-    /// source publishes an event with a matching origin.
+    /// Subscribe to events from the registered application event source.
+    /// The callback runs on the UI thread when the source publishes an
+    /// event with a matching origin.
     ///
     /// The subscription is scoped to the current widget's lifetime: when
     /// the widget is rebuilt or destroyed, the framework drops the source

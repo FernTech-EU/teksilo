@@ -1450,7 +1450,7 @@ mod tests {
 
     // NOTE: legacy `shortcut_intercepts_before_widget` test removed with
     // the ShortcutMap dispatch path. The new shortcut→intent interception
-    // lands in step 3 on top of `ShortcutRegistry` + `Action`.
+    // is built on top of `ShortcutRegistry` + `Action`.
 
     #[test]
     fn scroll_event_dispatched_to_hovered() {
@@ -1680,9 +1680,9 @@ mod tests {
 
     // NOTE: legacy `scoped_shortcut_fires_when_focused_in_subtree` test
     // removed along with the ShortcutMap dispatch path. Scope-aware
-    // dispatch returns in step 3 on the new ShortcutRegistry.
+    // dispatch is handled by the new ShortcutRegistry.
 
-    // --- Intent / Action dispatch (step 3) ------------------------------
+    // --- Intent / Action dispatch ------------------------------
 
     #[test]
     fn shortcut_fires_matching_action_on_source_widget() {

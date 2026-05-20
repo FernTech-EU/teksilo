@@ -51,8 +51,8 @@ pub struct ScrollBarStyleConfig {
     pub orientation: ScrollBarOrientation,
     pub variant: ScrollBarVariant,
     /// Minimum thumb length in logical pixels. Sourced from
-    /// `theme.components.scroll_bar.min_thumb_length` by default; apps
-    /// override per-instance via `ScrollBar::min_thumb_length(...)`.
+    /// `bastyde_widgets::styles::recipe_scroll_bar_style` constants by
+    /// default; apps override per-instance via `ScrollBar::min_thumb_length(...)`.
     pub min_thumb_length: f32,
 }
 

@@ -1,14 +1,13 @@
 //! Tier-3 style protocol for `TableView` and `TreeTable`. See
 //! `docs/styling-system.md`.
 //!
-//! Multi-method trait shared by both data-grid widgets. The plan
-//! splits chrome between *composed* widgets (one widget per header
-//! cell, sort indicator, and row band) and a *batched paint pass* for
-//! grid lines + frozen-column shadow. Grid lines genuinely need the
-//! batched path — composing one `RectWidget` per line on a 1000-row
-//! virtualized viewport would defeat the virtualization budget. The
-//! same "recipe describes, widget paints the batched case" split the
-//! original styling plan anticipated for specialty widgets.
+//! Multi-method trait shared by both data-grid widgets. Chrome is split
+//! between *composed* widgets (one widget per header cell, sort indicator,
+//! and row band) and a *batched paint pass* for grid lines + frozen-column
+//! shadow. Grid lines genuinely need the batched path — composing one
+//! `RectWidget` per line on a 1000-row virtualized viewport would defeat
+//! the virtualization budget. The "recipe describes, widget paints the
+//! batched case" split applies here for specialty widgets.
 //!
 //! ## Wiring status
 //!
@@ -16,9 +15,8 @@
 //! `style_slots.table` slot are in place. Wiring `TableView` /
 //! `TreeTable` through `make_*` is intentionally deferred. The
 //! widgets currently still own their cell / row / header / grid-line
-//! chrome directly; what they no longer read is `theme.components.table`
-//! — every dimension lives on `bastyde_widgets::styles::recipe_table_style`
-//! as `pub const`s (Stage F1).
+//! chrome directly; every dimension lives on
+//! `bastyde_widgets::styles::recipe_table_style` as `pub const`s.
 
 use std::rc::Rc;
 

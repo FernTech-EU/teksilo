@@ -551,8 +551,8 @@ fn okabe_ito_palette(dark: bool) -> Vec<Color> {
 }
 
 // `Theme` aggregator lives in `bastyde-core` (not here) so it can co-locate
-// with the per-widget style trait protocols and the typed `Arc<dyn …Style>`
-// `ComponentStyles` slot bag. bastyde-tokens stays a pure-data leaf crate.
+// with the per-widget style trait protocols and the typed `Rc<dyn …Style>`
+// `ComponentStyleSlots` slot bag. bastyde-tokens stays a pure-data leaf crate.
 
 #[cfg(test)]
 mod tests {

@@ -22,41 +22,46 @@ use bastyde::widgets::{Expand, RectWidget, TextWidget, TitleBar, VStack, ZStack}
 fn main() {
     BastydeAppBuilder::new()
         .theme(intui::dark())
-        .window_title("My App")
-        .window_size(900, 600)
-        .custom_chrome(true)                       // opt in
-        .root(|tree| {
-            let theme = tree.theme().clone();
+        .initial_window(
+            WindowConfig::new()
+                .title("My App")
+                .size(900, 600)
+                .decorations(DecorationsMode::CustomChrome)   // opt in
+                .root(|tree, _state| {
+                    let theme = tree.theme().clone();
 
-            let title_bar: Box<dyn Widget> = match tree.title_bar_host() {
-                Some(host) => Box::new(
-                    TitleBar::new(host)
-                        .height(40.0)
-                        .background(theme.colors.surface_pressed)
-                        .leading(TextWidget::new_literal("  My App"))
-                        .center(TextWidget::new_literal("drag · double-click to maximize")),
-                ),
-                // X11 (and some stubs) don't support custom chrome.
-                None => Box::new(TextWidget::new_literal(
-                    "(custom chrome unsupported — native decorations)",
-                )),
-            };
+                    let title_bar: Box<dyn Widget> = match tree.title_bar_host() {
+                        Some(host) => Box::new(
+                            TitleBar::new(host)
+                                .height(40.0)
+                                .background(theme.colors.surface_pressed)
+                                .leading(TextWidget::new_literal("  My App"))
+                                .center(TextWidget::new_literal("drag · double-click to maximize")),
+                        ),
+                        // X11 (and some stubs) don't support custom chrome.
+                        None => Box::new(TextWidget::new_literal(
+                            "(custom chrome unsupported — native decorations)",
+                        )),
+                    };
 
-            let body = Expand::new().fills_stack().child(
-                ZStack::new()
-                    .child(RectWidget::new().background(theme.colors.surface_main))
-                    .child(TextWidget::new_literal("body content")),
-            );
+                    let body = Expand::new().child(
+                        ZStack::new()
+                            .child(RectWidget::new().background(theme.colors.surface_main))
+                            .child(TextWidget::new_literal("body content")),
+                    );
 
-            tree.add(VStack::new().spacing(0.0).child(title_bar).child(body))
-        })
+                    let title_bar_id = tree.add_boxed(title_bar);
+                    let body_id = tree.add(body);
+                    tree.add(VStack::new().spacing(0.0).add_child(title_bar_id).add_child(body_id))
+                }),
+        )
         .run();
 }
 ```
 
 Two entry points matter:
 
-1. [`BastydeAppBuilder::custom_chrome(true)`](../crates/bastyde-app/src/app.rs) — opts the initial window into custom chrome. When using `initial_window(WindowConfig)`, set `WindowConfig::custom_chrome(true)` directly instead.
+1. [`WindowConfig::decorations(DecorationsMode::CustomChrome)`](../crates/bastyde-core/src/window/config.rs) — opts the window into custom chrome.
 2. [`WidgetTree::title_bar_host()`](../crates/bastyde-core/src/widget_tree.rs) — returns `Option<Rc<dyn PlatformTitleBarHost>>`. `None` means *either* the app didn't opt in *or* the platform has no backend (X11). Always handle both arms; a fallback view keeps the app usable on the unsupported path.
 
 Working demo: [`examples/title_bar_demo/src/main.rs`](../examples/title_bar_demo/src/main.rs) — `cargo run -p title-bar-demo`.
@@ -77,7 +82,7 @@ Working demo: [`examples/title_bar_demo/src/main.rs`](../examples/title_bar_demo
 
 - **Leading inset** — `host.reserved_leading_inset()`. Blank. Reserved so the OS can draw over it; on macOS this is where the traffic lights land. Windows/Wayland return `Size::ZERO`.
 - **Leading slot** — `.leading(widget)`. App icon, menu bar, title text.
-- **Drag region** — the center slot is wrapped in a flex `DragRegion`: unconsumed presses call `host.begin_drag()`, double-clicks call `host.toggle_maximize()`, right-clicks call `host.show_window_menu()`.
+- **Drag region** — the center slot is wrapped in a flex `DragRegion`: unconsumed presses call `host.begin_drag()`, double-clicks toggle maximize via `WindowState::placement`, right-clicks call `host.show_window_menu()`.
 - **Trailing slot** — `.trailing(widget)`. Search field, action buttons.
 - **Window controls** — min/max/close cluster. Rendered only when `host.renders_custom_controls()` is `true` (Windows + Wayland; never on macOS — the OS traffic lights already cover this).
 
@@ -283,7 +288,7 @@ Backends:
 - [crates/bastyde-platform/src/title_bar_host/x11.rs](../crates/bastyde-platform/src/title_bar_host/x11.rs)
 
 App integration:
-- [crates/bastyde-app/src/app.rs](../crates/bastyde-app/src/app.rs) — `BastydeAppBuilder::custom_chrome`, `CloseWindowRequest`
+- [crates/bastyde-app/src/app.rs](../crates/bastyde-app/src/app.rs) — `BastydeAppBuilder`, `CloseWindowRequest`
 - [crates/bastyde-app/src/window_manager.rs](../crates/bastyde-app/src/window_manager.rs) — host construction + `WindowEvent::Resized` hook
 - [crates/bastyde-core/src/widget_tree.rs](../crates/bastyde-core/src/widget_tree.rs) — `WidgetTree::title_bar_host`
 

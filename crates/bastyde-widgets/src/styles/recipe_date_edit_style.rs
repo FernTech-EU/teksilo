@@ -1,8 +1,7 @@
 //! Default `DateEditStyle` impl + date-edit family design tokens.
 //!
-//! Relocates `theme.components.date_edit` and `time_edit` constants
-//! to `pub const`s on this module — Stage E2 of the group-5 styling
-//! migration. The four widgets (`DateEdit`, `TimeEdit`, `DateRangeEdit`,
+//! Design tokens for the date-edit family live as `pub const`s on this
+//! module. The four widgets (`DateEdit`, `TimeEdit`, `DateRangeEdit`,
 //! `DateTimeEdit`) read them directly when building the calendar / clock
 //! trigger icon and the segmented-field separators.
 //!
@@ -16,8 +15,6 @@ use bastyde_core::styles::{DateEditStyle, DateEditStyleConfig, SharedDateEditSty
 use bastyde_core::widget_id::WidgetId;
 
 // ─── IntUI design tokens for the date-edit family ──────────────────
-// Relocated from `theme.components.date_edit` / `time_edit` in Stage
-// E2 of the group-5 styling migration.
 
 /// Width of the trailing calendar / clock trigger button slot.
 pub const CALENDAR_BUTTON_WIDTH: f32 = 24.0;

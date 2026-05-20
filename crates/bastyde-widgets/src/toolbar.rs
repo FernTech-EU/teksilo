@@ -9,8 +9,7 @@ use bastyde_core::widget_id::WidgetId;
 use crate::Panel;
 use crate::primitives::HStack;
 
-/// Toolbar design tokens — relocated from `theme.components.toolbar`
-/// in Stage G of the styling migration.
+/// Toolbar design tokens.
 pub const TOOLBAR_HEIGHT_COMPACT: f32 = 30.0;
 pub const TOOLBAR_HEIGHT_DEFAULT: f32 = 40.0;
 pub const TOOLBAR_BUTTON_SIZE_COMPACT: f32 = 22.0;

@@ -14,7 +14,7 @@
 //! Endpoint and region overrides also live here. They are read once,
 //! at `TelemetryBundle::open` time, and never observed mid-session
 //! (changing the recipient mid-session would violate the Art. 13
-//! notice the user consented to — see plan §11.4).
+//! notice the user consented to, so the endpoint is read once and held).
 
 use bastyde_settings::SettingsKey;
 

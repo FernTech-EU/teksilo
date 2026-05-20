@@ -57,12 +57,12 @@ let save = bastyde::res!("resources/icons/save.svg");
 // Leading icon — most common
 Button::new_literal("Save")
     .icon(IconWidget::from_svg_icon(save), IconLocation::Leading)
-    .style(ButtonVariant::Default)
+    .style(ButtonVariant::Plain)
 
 // Icon only — toolbars
 Button::new_literal("Save")
     .icon(IconWidget::from_svg_icon(save), IconLocation::IconOnly)
-    .style(ButtonVariant::Flat)
+    .style(ButtonVariant::Ghost)
 
 // Raster icon
 let star = bastyde::res!("resources/icons/star.png");
@@ -70,7 +70,7 @@ Button::new_literal("Favorite")
     .icon(IconWidget::from_raster(star, 24.0), IconLocation::Leading)
 ```
 
-The button controls the icon's display size via `theme.components.button.icon_size` (default 16dp). The icon's color is bound to the button's text color signal — it follows hover, pressed, disabled, and theme changes automatically.
+The button controls the icon's display size via the `BUTTON_ICON_SIZE` constant (default 16dp) in `bastyde-widgets`. The icon's color is bound to the button's text color signal — it follows hover, pressed, disabled, and theme changes automatically.
 
 ### Icon locations
 

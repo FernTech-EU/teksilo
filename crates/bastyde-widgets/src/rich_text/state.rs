@@ -164,10 +164,10 @@ pub(crate) struct EditorState {
     /// of keeping the frame loop pumping at the OS's max rate.
     pub frame_wake_at: Option<Rc<std::cell::Cell<Option<std::time::Instant>>>>,
 
-    // Shared-document event routing. See gap 10 of the plan: each
-    // editor subscribes via `on_change` and buffers events in its own
-    // queue. The `_event_subscription` field is kept alive by the
-    // state so dropping the state unregisters the callback.
+    // Shared-document event routing: each editor subscribes via
+    // `on_change` and buffers events in its own queue. The
+    // `_event_subscription` field is kept alive by the state so
+    // dropping the state unregisters the callback.
     pub event_queue: Arc<Mutex<VecDeque<DocumentEvent>>>,
     pub _event_subscription: Subscription,
 

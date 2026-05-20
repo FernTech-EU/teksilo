@@ -4,7 +4,7 @@
 //! want a different design language (Material 3 switch, neumorphic
 //! toggle, Cupertino) write their own `impl ToggleStyle` block and
 //! install it per-call (`Toggle::style(...)`) or theme-wide
-//! (step 8's `ComponentStyles.toggle = Rc::new(MyToggle)`).
+//! (`theme.style_slots.toggle = Some(Rc::new(MyToggle))`).
 //!
 //! The visual body is a tiny custom leaf widget ([`ToggleBody`]) that
 //! paints track + knob on the canvas. We could compose
@@ -26,18 +26,16 @@ use bastyde_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, 
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{Color, CornerRadius};
 
-// IntUI design tokens for the Toggle chrome. Used to live in
-// `theme.components.toggle`; moved here as part of Step 7 of the
-// styling refactor — "The recipe IS the new dimension data; no
-// parallel store." Custom design languages override these by
-// providing their own `impl ToggleStyle`.
+// IntUI design tokens for the Toggle chrome. The recipe owns its own
+// dimension data; no parallel store. Custom design languages override
+// these by providing their own `impl ToggleStyle`.
 pub const TOGGLE_TRACK_WIDTH: f32 = 28.0;
 pub const TOGGLE_TRACK_HEIGHT: f32 = 16.0;
 pub const TOGGLE_THUMB_DIAMETER: f32 = 12.0;
 pub const TOGGLE_THUMB_INSET: f32 = 2.0;
 
 /// Default `ToggleStyle` shipped with Bastyde. Reads its dimensions
-/// from `theme.components.toggle` and its colors from
+/// from the `TOGGLE_*` constants defined in this module and its colors from
 /// `theme.colors.{accent, surface_sunken, ...}`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RecipeToggleStyle;
