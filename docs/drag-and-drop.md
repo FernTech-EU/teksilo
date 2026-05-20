@@ -11,16 +11,16 @@ Three distinct user stories share the same mechanics in Bastyde:
 
 1. **Intra-widget reordering** — drag a row inside a list or a node inside a tree. No serialisation; the payload is a typed Rust value.
 2. **Inter-widget transfer** — drag a row from one list into another, or drop a file shortcut onto a bookmarks bar. Also a typed payload, possibly with a MIME-annotated byte representation for adapter layers.
-3. **Cross-application drop source / target** — drag something out of a Bastyde window into a file manager, or accept a file drop from another app. Built on the same primitives but also requires per-OS backends (`wl_data_device`, XDnD, OLE, `NSPasteboard`). **Not yet shipped.** Intra-/inter-widget flows work today.
+3. **External (OS) drops** — accept files / text / URLs dragged in from a file manager or another app. Built on the same primitives plus a per-OS `ExternalDndBackend`. **Inbound is shipped** (macOS verified; Windows OLE + Wayland `wl_data_device` cfg-gated; X11 no-op) — see [§11](#11-external-os-drag-and-drop--drops-from-outside-the-app) and the `DropZone` widget. **Dragging *out* of a Bastyde window (outbound) is not yet shipped.**
 
-All three reuse the same payload type, the same handler set, and the same gesture recognizer. Only the backend layer differs.
+All four flows reuse the same payload type, the same handler set, and the same gesture recognizer. Only the source of the events differs (in-app gesture vs. OS backend).
 
 ## 2. Payload — `DragPayload`
 
 Every drag carries a [`DragPayload`](../crates/bastyde-core/src/drag_payload.rs). It can hold:
 
 - **A typed Rust value** — stored via `DragPayload::typed(value)`, retrieved via `payload.get_typed::<T>()` / `take_typed::<T>()` or probed with `has_typed::<T>()`.
-- **Zero or more MIME-annotated byte representations** — added via `with_mime(mime_type, bytes)`, queried via `mime_types()` / `get_mime(mime)`. Used by (future) cross-app adapters.
+- **Zero or more MIME-annotated byte representations** — added via `with_mime(mime_type, bytes)`, queried via `mime_types()` / `get_mime(mime)`. Populated for external (OS) drops (e.g. `text/uri-list`, `text/plain`) alongside the typed `files()` / `text()` / `uris()` accessors; see [§11](#11-external-os-drag-and-drop--drops-from-outside-the-app).
 
 Typed payloads are fast-path: no serialisation, sender and receiver just agree on a Rust type. Drop targets check acceptance during hover without touching the bytes:
 
@@ -257,9 +257,80 @@ Common patterns from the existing suite:
 
 See [events-and-gestures.md §8](events-and-gestures.md) for the general testing patterns.
 
-## 11. Non-goals — what DnD does NOT do yet
+## 11. External (OS) drag-and-drop — drops from outside the app
 
-- **Cross-application transfer.** The `PlatformDragBackend` trait and its four OS-specific implementations (Wayland, X11, Windows, macOS) are not built. Intra-app DnD works on all four platforms because it doesn't depend on OS integration. Cross-app drag and OS file drops are tracked as bastyde-platform work for a later phase.
+Files dragged from the file manager, or text / URLs dragged from another
+application, enter through a **platform backend** and then reuse the *entire*
+in-app pipeline above. There is no separate handler surface: an OS drop is just
+a `DragPayload` with `origin() == DragOrigin::External`, dispatched through the
+same `on_drag_hover` / `on_drag_leave` / `on_drop`.
+
+### 11.1 What the payload carries
+
+For external drags, `DragPayload` exposes typed accessors instead of (or
+alongside) the `text/uri-list` etc. MIME bytes:
+
+```rust
+fn on_drop(payload: DragPayload, _pos, ctx) -> bool {
+    if payload.is_external() {
+        for path in payload.files() { import(path); }     // &[PathBuf]
+        if let Some(text) = payload.text() { paste(text); } // Option<&str>
+        for url in payload.uris() { open(url); }           // &[String] (non-file)
+    }
+    true
+}
+```
+
+`EventContext::drag_is_external()` is the same query for the `on_drag_leave` /
+`on_drag_tick` handlers, which don't receive the payload.
+
+### 11.2 The backend trait
+
+[`ExternalDndBackend`](../crates/bastyde-platform/src/external_dnd.rs) registers
+the app as the OS drop target for a window and, for each phase
+(`Entered { data, position }` / `Moved` / `Left` / `Dropped { data, position }`),
+posts an `ExternalDndEventPayload` through `AppEventPoster::post_external` — the
+same channel file dialogs use. `bastyde-app` routes it to the window's tree and
+drives `WidgetTree::{begin,update,end,cancel}_external_drag`, which construct a
+`DragSession` (with `source_widget = None`, `is_external = true`, no pointer
+capture, no preview overlay) and run the normal `handle_drag_move` /
+`handle_drag_drop` path.
+
+Apps opt in with `BastydeAppBuilder::install_external_dnd()`. Each window is
+registered on creation and revoked on close.
+
+### 11.3 Per-platform status
+
+| Platform | Backend | Notes |
+|---|---|---|
+| **macOS** | `NSDraggingDestination` on a transparent overlay `NSView` | Full position + files + text + URLs. Verified. |
+| **Windows** | OLE `IDropTarget` (`RevokeDragDrop` winit's, then `RegisterDragDrop` ours) | Full position + formats. |
+| **Wayland** | `wl_data_device` from the seat | No winit conflict (winit leaves Wayland DnD unimplemented). |
+| **X11** | No-op | Out of scope; the `DropZone` Browse button keeps it usable. |
+
+winit's own `DroppedFile` / `HoveredFile` events are *not* used: they carry no
+cursor position, files only, and nothing on Wayland — insufficient for a
+drop-zone widget that must hit-test position.
+
+### 11.4 The `DropZone` widget
+
+[`DropZone`](../crates/bastyde-widgets/src/drop_zone.rs) is the ready-made
+"drop files here" target: hover accept/reject highlight, `accept_extensions`
+filter, `allow_multiple` policy, `on_files_dropped` / `on_text_dropped` /
+`on_urls_dropped` callbacks, and a keyboard-operable **Browse…** button (the
+WCAG 2.1.1 equivalent, since an OS drag can't be keyboard-initiated). It is a
+Tier-3 themable widget (`DropZoneStyle`) and announces hover / success /
+rejection through a `Live::Polite` status line. Demo: `cargo run -p file-drop`.
+
+**Accessibility note.** AccessKit models no drag/drop `Action`, and ARIA's
+`aria-grabbed` / `aria-dropeffect` are deprecated. The supported pattern is
+therefore live-region announcements (the status line) plus the always-present
+keyboard fallback (Browse) — not a synthetic drag action.
+
+## 12. Non-goals — what DnD does NOT do yet
+
+- **Dragging *out* of the app (app → OS).** Only inbound OS drops are wired; exporting a drag to another application is not built.
+- **X11 inbound OS drops.** Out of scope for now (no-op backend); the `DropZone` Browse fallback covers it. Re-addable behind the same `ExternalDndBackend` trait.
 - **`Opacity` primitive for previews.** The current `DragPreview` uses a raised surface — no transparency. Opacity is a separate widget-primitive enhancement.
 - **Public `preview_builder(..)` on ListView / TreeView.** Today the preview is always a delegate-built `DragPreview`. Apps that need a differently-styled preview have to re-implement the full reorderable widget or wait for the builder API.
 
@@ -271,4 +342,5 @@ See [events-and-gestures.md §8](events-and-gestures.md) for the general testing
 - [shortcut-intent-action.md](shortcut-intent-action.md) — when a drop should fire a typed `Intent` instead of mutating a model directly.
 - [crates/bastyde-core/src/drag_payload.rs](../crates/bastyde-core/src/drag_payload.rs), [drag_state.rs](../crates/bastyde-core/src/drag_state.rs) — the framework types.
 - [crates/bastyde-widgets/src/list_view.rs](../crates/bastyde-widgets/src/list_view.rs), [tree_view.rs](../crates/bastyde-widgets/src/tree_view.rs), [drag_preview.rs](../crates/bastyde-widgets/src/drag_preview.rs) — the canonical widget integrations.
-- [examples/drag_and_drop](../examples/drag_and_drop/) — runnable end-to-end demo.
+- [crates/bastyde-platform/src/external_dnd.rs](../crates/bastyde-platform/src/external_dnd.rs) — the external (OS) drag backend trait, handle, and macOS / no-op / memory backends; [drop_zone.rs](../crates/bastyde-widgets/src/drop_zone.rs) — the `DropZone` widget.
+- [examples/drag_and_drop](../examples/drag_and_drop/) — runnable in-app DnD demo; [examples/file_drop](../examples/file_drop/) — external (OS) drop demo.

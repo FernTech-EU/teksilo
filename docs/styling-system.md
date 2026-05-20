@@ -340,7 +340,7 @@ pub fn brutalist_light() -> Theme {
 ## Migration status (as of this branch)
 
 Every themable widget is on the Tier-3 trait + recipe-default +
-slot lookup. No themable widget self-paints anymore. **32 widgets**
+slot lookup. No themable widget self-paints anymore. **33 widgets**
 across six families:
 
 **Controls**
@@ -381,6 +381,7 @@ across six families:
 | `TabBar` | `TabStyle` ¹ | `RecipeTabStyle` | `style_slots.tab` |
 | `ListView` / `TreeView` (container chrome) | `ListContainerStyle` | `RecipeListContainerStyle` | `style_slots.list_container` |
 | `TableView` / `TreeTable` (header + sort + row chrome) | `TableStyle` ¹ | `RecipeTableStyle` | `style_slots.table` |
+| `DropZone` | `DropZoneStyle` | `RecipeDropZoneStyle` | `style_slots.drop_zone` |
 
 **Overlays**
 

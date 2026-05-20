@@ -255,7 +255,7 @@ Use `ListView` for **unbounded or large collections that scroll**:
 
 ## 9. Drag-and-drop integration
 
-`ListView` and `TreeView` are drag sources and drop targets out of the box. Intra-widget reorder routes through `ListModel::move_item(from, to)` / `TreeModel::move_node(node, new_parent, new_index)`; the widget produces visual feedback (insertion lines, depth-tinted highlight on tree drop targets) and emits typed reorder intents. Cross-widget and cross-app drag flows through `DragPayload` — see [architecture.md §14 Drag and Drop](architecture.md) for the full picture.
+`ListView` and `TreeView` are drag sources and drop targets out of the box. Intra-widget reorder routes through `ListModel::move_item(from, to)` / `TreeModel::move_node(node, new_parent, new_index)`; the widget produces visual feedback (insertion lines, depth-tinted highlight on tree drop targets) and emits typed reorder intents. Cross-widget drag flows through `DragPayload`; external (OS) drops (files / text / URLs from another app) arrive as a `DragPayload` with `origin() == External` through the same handlers — see [architecture.md §14 Drag and Drop](architecture.md) and [drag-and-drop.md §11](drag-and-drop.md) for the full picture.
 
 The relevant bastyde-data hook is the `DataChange::ItemsMoved { from, to, count }` / `TreeChange::NodeMoved { node, old_parent, new_parent, new_index }` notifications. The source widget emits the mutation on the model; every observer of the model — including other `ListView`s sharing the data — receives the notification and updates consistently.
 

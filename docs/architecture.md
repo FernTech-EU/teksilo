@@ -274,7 +274,7 @@ Engine internals: `OverlayManager` per `WidgetTree`. Two rendering layers — `O
 
 ## 14. Drag and Drop
 
-Full reference: [`drag-and-drop.md`](drag-and-drop.md). Three scenarios (intra-widget reorder, inter-widget transfer, cross-application DnD) share one machinery: typed `DragPayload`, source/target traits, hit testing under the cursor, drop-zone preview overlay, edge auto-scroll during hover, spring-load on dwell, full keyboard equivalence (`Cut` / `Copy` / `Paste` actions on a focused list/tree). Cross-application DnD requires per-OS backends (still pending — see §30 Open Questions).
+Full reference: [`drag-and-drop.md`](drag-and-drop.md). Three scenarios (intra-widget reorder, inter-widget transfer, external/OS drops) share one machinery: typed `DragPayload`, source/target traits, hit testing under the cursor, drop-zone preview overlay, edge auto-scroll during hover, spring-load on dwell, full keyboard equivalence (`Cut` / `Copy` / `Paste` actions on a focused list/tree). **Inbound** external drops (files / text / URLs dragged from the OS into a window) are implemented via the `ExternalDndBackend` per-OS backends (macOS `NSDraggingDestination` verified; Windows OLE + Wayland `wl_data_device`; X11 no-op) and reuse the same machinery — see [`drag-and-drop.md` §11](drag-and-drop.md) and the `DropZone` widget. **Outbound** drags (Bastyde window → another app) are still pending — see §30 Open Questions.
 
 ---
 
@@ -584,7 +584,7 @@ The bulk of the original post-milestone question list has landed. The short list
 
 **IME composition and CJK input.** The text input widget ships (Milestone 9), but IME composition window positioning, composition-text rendering, and dead-key / CJK input handling still need platform backends in `bastyde-platform`. The TextInput and RichTextEditor APIs don't change when this lands — the hooks are already in place.
 
-**Cross-application drag-and-drop.** Intra-app DnD works everywhere (Milestone 6). Dragging between a Bastyde window and a file manager or other app requires per-OS backends: `WaylandDragBackend` (wl_data_device), `X11DragBackend` (XDnD), `WindowsDragBackend` (OLE IDataObject / IDropTarget), `MacOsDragBackend` (NSPasteboard / NSDraggingSource). The payload type (`DragPayload`) and the widget-side handler API are stable; what's pending is the platform integration surface.
+**External (OS) drag-and-drop.** Intra-app DnD works everywhere (Milestone 6). **Inbound** OS drops — files / text / URLs dragged from a file manager or another app into a Bastyde window — are implemented through the `ExternalDndBackend` trait in `bastyde-platform` (`install_external_dnd()`): macOS via a `NSDraggingDestination` overlay view (verified), Windows via OLE `RegisterDragDrop`/`IDropTarget`, Wayland via `wl_data_device`, X11 a documented no-op (the `DropZone` Browse button covers it). They reuse the in-app pipeline — an OS drop is a `DragPayload` with `origin() == External`. winit's own `DroppedFile`/`HoveredFile` are not used (no position, files-only, no Wayland). **Outbound** drags (Bastyde window → another app, e.g. `NSDraggingSource`) are still pending; the payload type and handler API are stable.
 
 **Native menu bar on macOS.** The widget-based `MenuBar` (Milestone 4) is correct for Windows and Linux where menu bars live inside the window chrome. On macOS the OS expects menus to live in the global `NSMenu`. The remaining work is a platform abstraction that routes a single declarative menu description through either path.
 

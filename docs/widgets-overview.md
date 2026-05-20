@@ -105,6 +105,7 @@ Themed framing, sectioning, and window-level structure.
 - [Toolbar](../crates/bastyde-widgets/src/toolbar.rs) — dense horizontal action strip on a `surface_secondary` panel.
 - [StatusBar](../crates/bastyde-widgets/src/status_bar.rs) — bottom-of-window status text strip with `Role::Status`.
 - [Banner](../crates/bastyde-widgets/src/banner.rs) — persistent inline info / success / warning / error strip (`BannerSeverity`); `Role::Status` + `Live::Polite`.
+- [DropZone](../crates/bastyde-widgets/src/drop_zone.rs) — "drop files here" target for external (OS) drag-and-drop; `accept_extensions` filter, `allow_multiple`, `on_files_dropped` / `on_text_dropped` / `on_urls_dropped`, keyboard Browse fallback; Tier-3 `DropZoneStyle`, `Role::Group` + `Live::Polite`. See [drag-and-drop.md §11](drag-and-drop.md).
 - [Accordion](../crates/bastyde-widgets/src/accordion.rs) — vertically stacked collapsible sections, multiple-open allowed.
 - [ToolBox](../crates/bastyde-widgets/src/tool_box.rs) — vertically stacked collapsible pages, exactly one expanded (Qt `QToolBox` analog).
 - [ScrollArea](../crates/bastyde-widgets/src/scroll_area.rs) — viewport with overlay or permanent scrollbars (`ScrollBarMode`, `ScrollBarPolicy`).
