@@ -434,6 +434,16 @@ impl<'ops> EventContext<'ops> {
         }
     }
 
+    /// Report the focused text widget's caret rectangle (window-logical
+    /// pixels) so the platform can position the OS IME candidate window at
+    /// the insertion point. Text-editing widgets call this whenever the
+    /// caret moves. No-op outside a dispatch / on a standalone tree.
+    pub fn set_ime_cursor_area(&mut self, area: bastyde_canvas::Rect) {
+        if let Some(ops) = self.window_ops.as_deref_mut() {
+            ops.set_ime_cursor_area(area);
+        }
+    }
+
     /// Resolve the platform parent handle of the window currently
     /// dispatching the event. Used by native-dialog integrations
     /// (`bastyde_platform::file_dialog`) to parent OS dialogs to the

@@ -2425,6 +2425,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ime-playground"
+version = "0.2.0"
+dependencies = [
+ "bastyde",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

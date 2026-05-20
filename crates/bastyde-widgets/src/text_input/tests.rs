@@ -274,3 +274,159 @@ fn suffix_layout_stays_single_line() {
         bounds.height
     );
 }
+
+// ── IME (input-method) composition ──────────────────────────────────
+
+use bastyde_core::event::WidgetEvent;
+use bastyde_core::ime::ImeContext;
+
+#[test]
+fn ime_composition_then_commit_inserts_finalised_text() {
+    let (mut tree, text, id) = setup("");
+    focus_field(&mut tree, id);
+
+    // Two intermediate compositions, then a commit.
+    tree.dispatch_event(WidgetEvent::ImeComposition {
+        text: "ni".to_string(),
+        cursor: Some(2..2),
+    });
+    tick(&mut tree);
+    tick(&mut tree);
+    assert_eq!(text.get(), "ni", "preedit shows tentatively in the value");
+
+    tree.dispatch_event(WidgetEvent::ImeComposition {
+        text: "nihao".to_string(),
+        cursor: Some(5..5),
+    });
+    tick(&mut tree);
+    tick(&mut tree);
+    assert_eq!(text.get(), "nihao");
+
+    // winit clears the preedit just before the commit.
+    tree.dispatch_event(WidgetEvent::ImeComposition {
+        text: String::new(),
+        cursor: None,
+    });
+    tree.dispatch_event(WidgetEvent::ImeCommit {
+        text: "你好".to_string(),
+    });
+    tick(&mut tree);
+    tick(&mut tree);
+    assert_eq!(text.get(), "你好", "commit replaces the preedit with the final text");
+}
+
+#[test]
+fn ime_composition_cancelled_leaves_field_clean() {
+    let (mut tree, text, id) = setup("");
+    focus_field(&mut tree, id);
+    tree.dispatch_event(WidgetEvent::ImeComposition {
+        text: "ni".to_string(),
+        cursor: Some(2..2),
+    });
+    tick(&mut tree);
+    tick(&mut tree);
+    assert_eq!(text.get(), "ni");
+
+    // Cancel: empty composition, no commit.
+    tree.dispatch_event(WidgetEvent::ImeComposition {
+        text: String::new(),
+        cursor: None,
+    });
+    tick(&mut tree);
+    tick(&mut tree);
+    assert_eq!(text.get(), "", "cancelled preedit is removed entirely");
+}
+
+#[test]
+fn ime_preedit_removed_on_focus_loss() {
+    let text = Signal::new(String::new());
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let id = tree.add(TextInput::new(text.clone()));
+    let sink = tree.add(crate::button::Button::new_literal("sink").on_activate_fn(|_| {}));
+    tree.layout(SizeProposal::exact(300.0, 40.0));
+    tick(&mut tree);
+    focus_field(&mut tree, id);
+
+    tree.dispatch_event(WidgetEvent::ImeComposition {
+        text: "ni".to_string(),
+        cursor: Some(2..2),
+    });
+    tick(&mut tree);
+    tick(&mut tree);
+    assert_eq!(text.get(), "ni");
+
+    // Move focus away — the tentative composition must be abandoned.
+    tree.focus(tree.first_focusable_descendant(sink).unwrap());
+    tick(&mut tree);
+    tick(&mut tree);
+    assert_eq!(text.get(), "", "blur abandons the in-progress composition");
+}
+
+#[test]
+fn ime_commit_respects_char_filter() {
+    let text = Signal::new(String::new());
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let id = tree.add(TextInput::new(text.clone()).char_filter(|c| c.is_ascii_digit()));
+    tree.layout(SizeProposal::exact(300.0, 40.0));
+    tick(&mut tree);
+    focus_field(&mut tree, id);
+
+    tree.dispatch_event(WidgetEvent::ImeCommit {
+        text: "4a2".to_string(),
+    });
+    tick(&mut tree);
+    tick(&mut tree);
+    assert_eq!(text.get(), "42", "commit goes through the char_filter like typed input");
+}
+
+#[test]
+fn focused_text_field_is_an_ime_text_surface() {
+    let (mut tree, _text, id) = setup("");
+    focus_field(&mut tree, id);
+    assert_eq!(
+        tree.ime_context_for_focused(),
+        Some(ImeContext::text()),
+        "a focused plain text field declares a Normal IME surface"
+    );
+}
+
+#[test]
+fn focused_button_is_not_an_ime_surface() {
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let btn = tree.add(crate::button::Button::new_literal("ok").on_activate_fn(|_| {}));
+    tree.layout(SizeProposal::exact(300.0, 40.0));
+    tick(&mut tree);
+    tree.focus(tree.first_focusable_descendant(btn).unwrap());
+    assert_eq!(
+        tree.ime_context_for_focused(),
+        None,
+        "a non-text widget must not enable the OS IME"
+    );
+}
+
+#[test]
+fn composing_field_exposes_the_composition_as_an_at_selection() {
+    let (mut tree, _text, id) = setup("");
+    focus_field(&mut tree, id);
+    tree.dispatch_event(WidgetEvent::ImeComposition {
+        text: "nihao".to_string(),
+        cursor: Some(5..5),
+    });
+    tick(&mut tree);
+    tick(&mut tree);
+
+    let update = tree.sync_accessibility();
+    let (_, node) = update
+        .nodes
+        .iter()
+        .find(|(_, n)| n.role() == bastyde_core::accesskit::Role::TextInput)
+        .expect("a text-input node is present");
+    assert_eq!(node.value(), Some("nihao"), "composing text is in the value");
+    let sel = node
+        .text_selection()
+        .expect("composing field exposes a text selection");
+    assert_ne!(
+        sel.anchor.character_index, sel.focus.character_index,
+        "the composition is exposed as a non-empty selection so AT tracks it"
+    );
+}

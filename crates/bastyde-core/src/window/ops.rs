@@ -59,6 +59,15 @@ pub trait WindowOps {
     fn current_parent_handle(&self) -> Option<ParentHandle> {
         None
     }
+
+    /// Report the focused text widget's caret rectangle (in window-logical
+    /// pixels) so the platform can position the OS IME candidate window
+    /// next to the insertion point. Called from text-editing widgets
+    /// whenever the caret moves. The app applies it to the in-flight
+    /// window's `set_ime_cursor_area`, deduped against the last value.
+    ///
+    /// No-op on the standalone / test sink.
+    fn set_ime_cursor_area(&mut self, _area: bastyde_canvas::Rect) {}
 }
 
 /// No-op implementation used by standalone `WidgetTree`s constructed

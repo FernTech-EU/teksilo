@@ -1017,7 +1017,11 @@ impl Widget for TextInputField {
             // composition so the preedit / candidate window can't
             // surface plaintext. Read by the platform IME layer at
             // focus-change time (default `true` for plain fields).
-            .ime_allowed(!self.secure)
+            .ime_input(if self.secure {
+                bastyde_core::ime::ImeContext::password()
+            } else {
+                bastyde_core::ime::ImeContext::text()
+            })
             .on_hover(move |entered, _ctx| {
                 hovered_for_hover.set(entered);
             })
@@ -1047,6 +1051,9 @@ impl Widget for TextInputField {
                         drop(st);
                         sync_cursor_signals(&state_for_focus);
                     }
+                    // Seed the OS IME candidate area at the caret so the
+                    // first composition appears in the right place.
+                    keyboard::report_ime_cursor_area(&state_for_focus, ctx);
                 } else {
                     // Preserve `cursor`'s selection across focus loss
                     // — clearing it here breaks the right-click
@@ -1064,6 +1071,9 @@ impl Widget for TextInputField {
                     st.drag_state = state::DragState::Idle;
                     blur_callback = st.on_blur.clone();
                     drop(st);
+                    // Abandon any in-progress composition on blur — remove
+                    // the tentative preedit text from the document.
+                    keyboard::clear_ime_preedit(&state_for_focus);
                     sync_cursor_signals(&state_for_focus);
                 }
                 if let Some(cb) = blur_callback {
@@ -1134,7 +1144,7 @@ impl Widget for TextInputField {
         }
     }
 
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
+    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let Some(state) = self.state.as_ref() else {
             return;
         };
@@ -1210,6 +1220,27 @@ impl Widget for TextInputField {
             });
         }
 
+        // IME preedit underline: a thin line under the composing range so
+        // the user sees the text is tentative. Single line → one segment;
+        // on a secure field it sits under the masked bullets. Drawn inside
+        // the text clip so it never spills past the viewport.
+        if let Some(range) = st.ime_preedit_range.clone()
+            && st.engine.has_full_layout()
+            && range.start < range.end
+        {
+            let start_c = st.engine.caret_rect(range.start, CursorAffinity::Downstream);
+            let end_c = st.engine.caret_rect(range.end, CursorAffinity::Downstream);
+            let x0 = bounds.x - scroll_x + start_c[0];
+            let x1 = bounds.x - scroll_x + end_c[0];
+            let y = bounds.y + start_c[1] + start_c[3] - 1.0;
+            canvas.draw_line(
+                Point::new(x0, y),
+                Point::new(x1, y),
+                ctx.theme.colors.text_primary,
+                bastyde_canvas::StrokeStyle::solid(1.0),
+            );
+        }
+
         canvas.clear_clip();
 
         if suffix_width > 0.0
@@ -1276,8 +1307,16 @@ impl Widget for TextInputField {
             if !text.is_empty() {
                 builder.set_value(&text);
             }
-            let pos = st.cursor.position();
-            let anchor = st.cursor.anchor();
+            // While composing (IME preedit active), expose the composition
+            // as a selection so screen readers / braille track the tentative
+            // text — the composing characters are already in `value`. Falls
+            // back to the live cursor/selection when not composing. (The
+            // secure branch above never reaches here, so a password preedit
+            // is never exposed.)
+            let (anchor, pos) = match st.ime_preedit_range.clone() {
+                Some(range) => (range.start, range.end),
+                None => (st.cursor.anchor(), st.cursor.position()),
+            };
             builder.set_text_selection_on_self(anchor, pos);
 
             let char_lengths: Vec<u8> = text.chars().map(|c| c.len_utf8() as u8).collect();

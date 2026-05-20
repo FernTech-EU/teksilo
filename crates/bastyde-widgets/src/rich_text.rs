@@ -1743,6 +1743,14 @@ impl Widget for RichTextEditorBody {
         let scroll_y_logical = st.scroll_y.get();
         st.engine.set_scroll_offset(scroll_y_logical);
 
+        // Captured before the split-borrow below (which holds `st` mutably
+        // for the rest of the method) so the preedit underline pass can
+        // still see them. `cursor_affinity` matches what `caret_rect`
+        // queries elsewhere.
+        let scroll_x_logical = st.scroll_x.get();
+        let ime_preedit_range = st.ime_preedit_range.clone();
+        let ime_affinity = st.cursor_affinity;
+
         // Clip to bounds so overflowing glyphs don't bleed into siblings.
         canvas.set_clip(bounds);
 
@@ -1814,6 +1822,54 @@ impl Widget for RichTextEditorBody {
             RenderChoice::CursorOnly => engine.with_render_cursor_only(paint_closure),
         };
 
+        // IME preedit underline. Walk the composing range char-by-char,
+        // emitting one underline segment per visual line so a wrapped
+        // composition underlines correctly. Engine coords are content-
+        // space; screen = bounds + content − scroll (matches the glyphs).
+        // On a read-only viewer there is never a preedit, so this is inert.
+        if let Some(range) = ime_preedit_range
+            && engine.has_full_layout()
+            && range.start < range.end
+        {
+            let color = ctx.theme.colors.text_primary;
+            let underline = |canvas: &mut Canvas, x0: f32, x1: f32, y: f32, h: f32| {
+                let uy = y + h - 1.0;
+                canvas.draw_line(
+                    Point::new(x0, uy),
+                    Point::new(x1, uy),
+                    color,
+                    bastyde_canvas::StrokeStyle::solid(1.0),
+                );
+            };
+            let mut seg_x0: Option<f32> = None;
+            let (mut seg_y, mut seg_h, mut last_x) = (0.0_f32, 0.0_f32, 0.0_f32);
+            for p in range.start..=range.end {
+                let c = engine.caret_rect(p, ime_affinity);
+                let x = bounds.x + c[0] - scroll_x_logical;
+                let y = bounds.y + c[1] - scroll_y_logical;
+                match seg_x0 {
+                    None => {
+                        seg_x0 = Some(x);
+                        seg_y = y;
+                        seg_h = c[3];
+                        last_x = x;
+                    }
+                    Some(x0) => {
+                        if (y - seg_y).abs() > 0.5 {
+                            underline(canvas, x0, last_x, seg_y, seg_h);
+                            seg_x0 = Some(x);
+                            seg_y = y;
+                            seg_h = c[3];
+                        }
+                        last_x = x;
+                    }
+                }
+            }
+            if let Some(x0) = seg_x0 {
+                underline(canvas, x0, last_x, seg_y, seg_h);
+            }
+        }
+
         canvas.clear_clip();
     }
 
@@ -1852,8 +1908,14 @@ impl Widget for RichTextEditorBody {
             cache.as_ref().cloned()
         };
 
-        let user_pos = st.cursor.position();
-        let user_anchor = st.cursor.anchor();
+        // While composing (IME preedit active), expose the composition as
+        // the AT selection so screen readers / braille track the tentative
+        // text — the composing characters are already in the runs / value.
+        // Falls back to the live cursor/selection otherwise.
+        let (user_anchor, user_pos) = match st.ime_preedit_range.clone() {
+            Some(range) => (range.start, range.end),
+            None => (st.cursor.anchor(), st.cursor.position()),
+        };
         let mut caret_pair: Option<(NodeId, usize)> = None;
         let mut anchor_pair: Option<(NodeId, usize)> = None;
         let mut syn_map: std::collections::HashMap<NodeId, SyntheticElementRef> =
@@ -2032,6 +2094,12 @@ impl Widget for RichTextEditor {
         // `RichTextEditorStyle::make_body` without losing focus
         // semantics.
         let mut handlers = HandlerSet::new();
+        // Editable editors are text-input surfaces — enable the OS IME
+        // while focused. Read-only viewers stay focusable for selection but
+        // accept no text input, so they leave the IME descriptor unset.
+        if !self.state.borrow().policy.is_read_only() {
+            handlers = handlers.ime_input(bastyde_core::ime::ImeContext::text());
+        }
         handlers = handlers
             .focusable(true)
             .cursor(CursorIcon::Text)
@@ -2049,6 +2117,13 @@ impl Widget for RichTextEditor {
                         st.caret_visible.set(true);
                     }
                     drop(st);
+                    if gained {
+                        // Seed the OS IME candidate area at the caret.
+                        self::keyboard::report_ime_cursor_area(&state, ctx);
+                    } else {
+                        // Abandon any in-progress composition on blur.
+                        self::keyboard::clear_ime_preedit(&state);
+                    }
                     ctx.request_frame();
                 }
             })

@@ -7,17 +7,45 @@
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::widget::EventContext;
 use bastyde_platform::clipboard::ClipboardHandle;
+use bastyde_text::CursorAffinity;
 use bastyde_text::text_document::{MoveMode, MoveOperation, SelectionType};
 
 use super::state::{SharedState, TextInputState, sync_cursor_signals};
+
+/// Report the caret's window-space rectangle to the platform so the OS IME
+/// candidate window tracks the insertion point. No-op when unfocused or the
+/// engine has not been laid out yet. Called whenever the caret moves.
+pub(crate) fn report_ime_cursor_area(state: &SharedState, ctx: &mut EventContext) {
+    let area = {
+        let st = state.borrow();
+        if !st.has_focus || !st.engine.has_full_layout() {
+            return;
+        }
+        let caret = st.engine.caret_rect(st.cursor.position(), CursorAffinity::Downstream);
+        bastyde_canvas::Rect::new(
+            st.viewport_origin.x + caret[0] - st.scroll_x,
+            st.viewport_origin.y + caret[1],
+            caret[2].max(1.0),
+            caret[3],
+        )
+    };
+    ctx.set_ime_cursor_area(area);
+}
 
 pub(crate) fn handle_key(
     state: &SharedState,
     event: &WidgetEvent,
     ctx: &mut EventContext,
 ) -> EventResponse {
-    // IME commit — finalized grapheme cluster, batched into pending_chars.
+    // IME composition (preedit) — tentative, replaceable text shown inline.
+    if let WidgetEvent::ImeComposition { text, .. } = event {
+        return handle_ime_composition(state, ctx, text);
+    }
+    // IME commit — finalized grapheme cluster. Drop any live preedit first
+    // (some backends skip the empty-preedit clear), then batch into
+    // pending_chars like ordinary typed input.
     if let WidgetEvent::ImeCommit { text } = event {
+        clear_ime_preedit(state);
         return push_pending_chars(state, ctx, text);
     }
 
@@ -219,11 +247,102 @@ pub(crate) fn handle_key(
 
     if handled {
         sync_cursor_signals(state);
+        report_ime_cursor_area(state, ctx);
         ctx.request_frame();
         EventResponse::Handled
     } else {
         EventResponse::Ignored
     }
+}
+
+/// Apply an `ImeComposition` event. Removes the previous preedit range (if
+/// any) from the document, inserts the new cleaned preedit text at the
+/// cursor, and records the resulting range so the next composition event can
+/// replace it. Single-line rules apply (newlines / control chars stripped,
+/// `char_filter` enforced, `max_length` respected); secure-field masking is
+/// handled at the engine layer so a password preedit renders as bullets. An
+/// empty composition cancels the preedit without inserting.
+fn handle_ime_composition(
+    state: &SharedState,
+    ctx: &mut EventContext,
+    text: &str,
+) -> EventResponse {
+    if state.borrow().read_only {
+        return EventResponse::Handled;
+    }
+    {
+        let mut st = state.borrow_mut();
+        // Group remove+reinsert as one undo step so an undo after
+        // composition pops the whole preedit, not each candidate.
+        st.cursor.begin_edit_block();
+        if let Some(range) = st.ime_preedit_range.take() {
+            let doc_end = st.document.character_count();
+            let start = range.start.min(doc_end);
+            let end = range.end.min(doc_end);
+            if start < end {
+                st.cursor.set_position(start, MoveMode::MoveAnchor);
+                st.cursor.set_position(end, MoveMode::KeepAnchor);
+                let _ = st.cursor.remove_selected_text();
+            }
+        }
+        // Single-line cleaning + per-character filter.
+        let clean: String = text
+            .chars()
+            .filter(|c| !c.is_control() && *c != '\n' && *c != '\r')
+            .filter(|c| st.char_filter_admits(*c))
+            .collect();
+        // Max-length: cap against remaining capacity (the old preedit has
+        // already been removed, so the doc length here excludes it).
+        let clean = if let Some(max) = st.max_length {
+            let current_len = st.document.character_count();
+            let sel_len = if st.cursor.has_selection() {
+                st.cursor
+                    .selected_text()
+                    .ok()
+                    .unwrap_or_default()
+                    .chars()
+                    .count()
+            } else {
+                0
+            };
+            let remaining = max.saturating_sub(current_len.saturating_sub(sel_len));
+            clean.chars().take(remaining).collect::<String>()
+        } else {
+            clean
+        };
+        if !clean.is_empty() {
+            let start = st.cursor.position();
+            let _ = st.cursor.insert_text(&clean);
+            let end = st.cursor.position();
+            st.ime_preedit = Some(clean);
+            st.ime_preedit_range = Some(start..end);
+        } else {
+            st.ime_preedit = None;
+        }
+        st.cursor.end_edit_block();
+        st.pending_text_changed = true;
+    }
+    sync_cursor_signals(state);
+    report_ime_cursor_area(state, ctx);
+    ctx.request_frame();
+    EventResponse::Handled
+}
+
+/// Drop any active preedit, removing its tentative text from the document.
+/// Called on commit (before the finalised insert) and on focus loss.
+pub(crate) fn clear_ime_preedit(state: &SharedState) {
+    let mut st = state.borrow_mut();
+    if let Some(range) = st.ime_preedit_range.take() {
+        let doc_end = st.document.character_count();
+        let start = range.start.min(doc_end);
+        let end = range.end.min(doc_end);
+        if start < end {
+            st.cursor.set_position(start, MoveMode::MoveAnchor);
+            st.cursor.set_position(end, MoveMode::KeepAnchor);
+            let _ = st.cursor.remove_selected_text();
+        }
+    }
+    st.ime_preedit = None;
 }
 
 /// Batch pending characters from an IME commit.
@@ -275,6 +394,7 @@ fn push_pending_chars(state: &SharedState, ctx: &mut EventContext, text: &str) -
         }
     }
     sync_cursor_signals(state);
+    report_ime_cursor_area(state, ctx);
     ctx.request_frame();
     EventResponse::Handled
 }

@@ -640,7 +640,50 @@ impl BastydeAppHandler {
             current.tree.dispatch_event_with_ops(event, &mut ops);
         }
 
+        Self::reconcile_ime(&mut current);
         self.wm.reinsert_managed(window_id, current);
+    }
+
+    /// Bring the winit window's OS-IME state in line with the focused
+    /// widget's descriptor. Enablement + purpose are declarative: a focused
+    /// text widget carries `Some(ImeContext { purpose })`, everything else
+    /// `None`. Applied only on change vs. the per-window cache — repeated
+    /// `set_ime_allowed(true)` can cancel an active composition. The caret
+    /// area is reported separately (and idempotently) by the focused widget
+    /// via `WindowOps::set_ime_cursor_area`.
+    fn reconcile_ime(managed: &mut crate::window_manager::ManagedWindow) {
+        match managed.tree.ime_context_for_focused() {
+            Some(ctx) => {
+                if managed.ime_purpose != Some(ctx.purpose) {
+                    managed
+                        .platform_window
+                        .window()
+                        .set_ime_purpose(Self::map_ime_purpose(ctx.purpose));
+                    managed.ime_purpose = Some(ctx.purpose);
+                }
+                if managed.ime_allowed != Some(true) {
+                    managed.platform_window.window().set_ime_allowed(true);
+                    managed.ime_allowed = Some(true);
+                }
+            }
+            None => {
+                if managed.ime_allowed != Some(false) {
+                    managed.platform_window.window().set_ime_allowed(false);
+                    managed.ime_allowed = Some(false);
+                    // Force the purpose to re-apply when IME is next enabled.
+                    managed.ime_purpose = None;
+                }
+            }
+        }
+    }
+
+    /// Map the core `ImePurpose` onto winit's enum at the platform boundary.
+    fn map_ime_purpose(purpose: bastyde_core::ImePurpose) -> winit::window::ImePurpose {
+        match purpose {
+            bastyde_core::ImePurpose::Normal => winit::window::ImePurpose::Normal,
+            bastyde_core::ImePurpose::Password => winit::window::ImePurpose::Password,
+            bastyde_core::ImePurpose::Terminal => winit::window::ImePurpose::Terminal,
+        }
     }
 
     /// Try to route an `AppEvent::External` payload as a
@@ -863,6 +906,12 @@ impl BastydeAppHandler {
 
         let a11y_update = current.tree.sync_accessibility();
         current.platform_window.update_accessibility(a11y_update);
+
+        // Catch-all IME reconcile: covers focus changes from any source
+        // (access actions, programmatic focus, rebuild) that didn't go
+        // through `dispatch_in_window`. Layout has settled, so the focused
+        // node's descriptor is current. Cheap + deduped, safe every frame.
+        Self::reconcile_ime(&mut current);
 
         let mut frame = {
             let mut ops = crate::window_manager::WindowOpsImpl::new(
@@ -1148,6 +1197,22 @@ impl BastydeAppHandler {
                     managed.platform_window.request_redraw();
                 }
             }
+            WindowEvent::Ime(ime) => {
+                let maybe_evt = if self.wm.get_by_winit_mut(window_id).is_some() {
+                    event_translation::translate_ime(ime)
+                } else {
+                    None
+                };
+                if let Some(evt) = maybe_evt {
+                    self.dispatch_in_window(window_id, evt, event_loop);
+                }
+                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                    if let Some(trace) = &mut self.idle_trace {
+                        trace.note_redraw_request("ime");
+                    }
+                    managed.platform_window.request_redraw();
+                }
+            }
             WindowEvent::RedrawRequested => {
                 self.handle_redraw_requested(window_id, event_loop);
             }
@@ -1329,6 +1394,24 @@ impl ApplicationHandler<AppEvent> for BastydeAppHandler {
                                 evt.target,
                                 evt.entered,
                             );
+                        } else if let Some(inject) = payload.downcast_ref::<SyntheticImeInject>() {
+                            // Test / demo hook: replay a scripted IME
+                            // sequence into the focused window's focused
+                            // widget through the real dispatch path — no OS
+                            // IME needed. Mirrors exactly what the
+                            // `WindowEvent::Ime` arm produces.
+                            let target = self
+                                .wm
+                                .windows_map()
+                                .iter()
+                                .find(|(_, m)| m.focused)
+                                .or_else(|| self.wm.windows_map().iter().next())
+                                .map(|(id, _)| *id);
+                            if let Some(winit_id) = target {
+                                for evt in inject.events.clone() {
+                                    self.dispatch_in_window(winit_id, evt, event_loop);
+                                }
+                            }
                         }
                     }
                 }
@@ -1367,6 +1450,19 @@ impl ApplicationHandler<AppEvent> for BastydeAppHandler {
 #[derive(Debug, Clone, Copy)]
 pub struct CloseWindowRequest {
     pub bastyde_id: BastydeWindowId,
+}
+
+/// Test / demo payload that replays a scripted IME sequence into the
+/// focused window's focused widget, through the same dispatch path the
+/// real `WindowEvent::Ime` arm uses — so the full preedit pipeline
+/// (document mutation, underline, caret-area reporting, AT selection) can
+/// be exercised without an OS input method installed.
+///
+/// Post it via [`AppEventPoster::post_external`](bastyde_core::AppEventPoster)
+/// (reachable from a handler with `ctx.poster()`).
+#[derive(Debug, Clone)]
+pub struct SyntheticImeInject {
+    pub events: Vec<bastyde_core::event::WidgetEvent>,
 }
 
 // `TitleBarSyntheticEvent` and `TitleBarHoverEvent` live in

@@ -66,6 +66,15 @@ pub(crate) struct ManagedWindow {
     /// observable on winit 0.30, so it can desync if Caps Lock was
     /// already on before the app gained focus.
     pub caps_lock_active: bool,
+    /// Last OS-IME enablement applied to the winit window (`None` = never
+    /// set, forces the first apply). The post-dispatch reconcile compares
+    /// the focused node's IME descriptor against this and calls
+    /// `set_ime_allowed` only on change — repeated `set_ime_allowed(true)`
+    /// can cancel an active composition on some platforms.
+    pub ime_allowed: Option<bool>,
+    /// Last OS-IME purpose applied to the winit window. Re-applied whenever
+    /// it changes while IME is enabled.
+    pub ime_purpose: Option<bastyde_core::ImePurpose>,
     /// RAII handles for the auto-save observers wired to
     /// `state.{size, position, placement}` when a
     /// `WindowStateService` is registered. Dropped when the window
@@ -611,6 +620,8 @@ impl WindowManager {
             focused: true,
             occluded: false,
             caps_lock_active: false,
+            ime_allowed: None,
+            ime_purpose: None,
             _persist_handles: persist_handles,
         };
 
@@ -1145,5 +1156,18 @@ impl bastyde_core::WindowOps for WindowOpsImpl<'_> {
         // during event delivery.
         let arc = self.current_window_arc.as_ref()?;
         bastyde_core::raw_handle::ParentHandle::from_window(arc.as_ref())
+    }
+
+    fn set_ime_cursor_area(&mut self, area: bastyde_canvas::Rect) {
+        // Applied directly to the in-flight window (out of `wm.windows_map()`
+        // during dispatch). Repositioning the candidate area is idempotent —
+        // unlike `set_ime_allowed`, it never cancels an active composition —
+        // so no dedup is needed; text widgets only report it on caret moves.
+        if let Some(arc) = self.current_window_arc.as_ref() {
+            arc.set_ime_cursor_area(
+                winit::dpi::LogicalPosition::new(area.x, area.y),
+                winit::dpi::LogicalSize::new(area.width.max(1.0), area.height.max(1.0)),
+            );
+        }
     }
 }

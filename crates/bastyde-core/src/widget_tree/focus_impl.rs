@@ -112,6 +112,15 @@ impl WidgetTree {
         self.focused
     }
 
+    /// The OS-IME descriptor of the currently focused widget, if it is a
+    /// text-input surface. `None` when nothing is focused or the focused
+    /// node is not text-editing. The platform layer reads this at
+    /// focus-change time to enable/disable the OS input method and pick its
+    /// purpose. See [`crate::ime`].
+    pub fn ime_context_for_focused(&self) -> Option<crate::ime::ImeContext> {
+        self.focused.and_then(|id| self.arena.ime_context(id))
+    }
+
     /// Find the first focusable widget in depth-first order within a subtree.
     pub fn first_focusable_descendant(&self, root: WidgetId) -> Option<WidgetId> {
         if !self.arena.is_active(root) {

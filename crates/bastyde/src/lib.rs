@@ -90,8 +90,9 @@ pub mod prelude {
     pub use bastyde_core::{
         AccessNodeBuilder, AccessSubtreeMode, AccessibilityOverrides, Action, AnimationSpec,
         BuildContext, ButtonMask, CursorIcon, EventContext, EventResponse, BatiBranch, BatiBranch3,
-        BatiBranch4, FocusPolicy, Intent, IntentKind, IntentResponse, IntoBatiChild,
-        IntoBatiCondition, Key, KeyStroke, LayoutContext, LayoutResponse, ModalCloseBehavior,
+        BatiBranch4, FocusPolicy, ImeContext, ImePurpose, Intent, IntentKind, IntentResponse,
+        IntoBatiChild, IntoBatiCondition, Key, KeyStroke, LayoutContext, LayoutResponse,
+        ModalCloseBehavior,
         ModalPresentation, Modifiers, PaintContext, PointerButton, Prop, Shortcut,
         ShortcutRegistry, ShortcutScope, Signal, TapEvent, Widget, WidgetBuilder, WidgetEvent,
         WidgetId,

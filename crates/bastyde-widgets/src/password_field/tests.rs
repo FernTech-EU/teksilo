@@ -173,3 +173,64 @@ fn revealed_signal_accessor_round_trips() {
     field.revealed_signal().set(true);
     assert!(revealed.get(), "revealed_signal() must reflect the bound signal");
 }
+
+// ── IME composition on a secure field ───────────────────────────────
+
+#[test]
+fn secure_field_composition_never_exposes_plaintext_to_at() {
+    use bastyde_core::event::WidgetEvent;
+
+    let pw = Signal::new(String::new());
+    let mut t = tree();
+    let id = t.add(PasswordField::new(pw.clone()).label("Password"));
+    t.layout(SizeProposal::exact(320.0, 60.0));
+    tick(&mut t);
+
+    // Focus the inner field and compose a CJK candidate.
+    let field = t
+        .first_focusable_descendant(id)
+        .expect("PasswordField exposes a focusable inner field");
+    t.focus(field);
+    t.dispatch_event(WidgetEvent::ImeComposition {
+        text: "ni".to_string(),
+        cursor: Some(2..2),
+    });
+    tick(&mut t);
+    tick(&mut t);
+
+    let update = t.sync_accessibility();
+    // The masked field stays a PasswordInput showing bullets, and the
+    // composing characters never reach any node's value.
+    assert!(
+        has_role(&update, Role::PasswordInput),
+        "secure field stays a password input while composing"
+    );
+    assert!(
+        update.nodes.iter().all(|(_, n)| n.value() != Some("ni")),
+        "in-progress composition must never leak to assistive tech"
+    );
+    let value = value_of_role(&update, Role::PasswordInput).unwrap_or_default();
+    assert!(
+        value.chars().all(|c| c == '\u{2022}'),
+        "the composing text is masked as bullets, got {value:?}"
+    );
+}
+
+#[test]
+fn focused_secure_field_is_a_password_ime_surface() {
+    use bastyde_core::ime::ImeContext;
+
+    let pw = Signal::new(String::new());
+    let mut t = tree();
+    let id = t.add(PasswordField::new(pw).label("Password"));
+    t.layout(SizeProposal::exact(320.0, 60.0));
+    tick(&mut t);
+    let field = t.first_focusable_descendant(id).unwrap();
+    t.focus(field);
+
+    assert_eq!(
+        t.ime_context_for_focused(),
+        Some(ImeContext::password()),
+        "a focused secure field declares a Password IME surface"
+    );
+}

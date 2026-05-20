@@ -89,12 +89,13 @@ pub struct WidgetNode {
     /// When true, the paint pass clips child rendering to this widget's bounds.
     /// Set by scroll areas and overflow-hidden containers.
     pub clips_children: bool,
-    /// When `false`, this node opts out of OS input-method (IME)
-    /// composition while focused — secure / password fields set this so
-    /// the OS preedit / candidate window can't surface plaintext. The
-    /// platform IME wiring reads the focused node's flag at focus-change
-    /// time. Defaults to `true` (IME allowed).
-    pub ime_allowed: bool,
+    /// Optional OS input-method (IME) descriptor. `Some(..)` declares this
+    /// node a text-input surface — the platform enables the OS IME (with the
+    /// descriptor's purpose) while the node is focused. `None` (the default)
+    /// means no OS IME: enabling IME changes how text arrives, so the safe
+    /// common-case default is off. The platform reads the focused node's
+    /// descriptor at focus-change time. See [`crate::ime`].
+    pub ime: Option<crate::ime::ImeContext>,
     /// When true, hit-testing skips this node — pointer events fall
     /// through to whatever sits behind it. Descendants are still
     /// hit-tested normally (the recursion walks into children before
@@ -276,7 +277,7 @@ impl WidgetArena {
             hover_within_signal: None,
             alignment_override: None,
             clips_children: false,
-            ime_allowed: true,
+            ime: None,
             event_pass_through: false,
             opacity_prop: None,
             transform_prop: None,
@@ -335,7 +336,7 @@ impl WidgetArena {
             hover_within_signal: None,
             alignment_override: None,
             clips_children: false,
-            ime_allowed: true,
+            ime: None,
             event_pass_through: false,
             opacity_prop: None,
             transform_prop: None,
@@ -777,20 +778,19 @@ impl WidgetArena {
         }
     }
 
-    /// Whether the widget at `id` permits OS IME composition while
-    /// focused. Defaults to `true` for unknown ids. The platform IME
-    /// layer queries this for the focused widget to decide whether to
-    /// enable the OS input method — secure / password fields return
-    /// `false`.
-    pub fn ime_allowed(&self, id: WidgetId) -> bool {
-        self.get(id).map(|n| n.ime_allowed).unwrap_or(true)
+    /// The OS-IME descriptor for the widget at `id`, or `None` if the node
+    /// is not a text-input surface (the default) or the id is unknown. The
+    /// platform IME layer queries this for the focused widget to decide
+    /// whether to enable the OS input method and with which purpose.
+    pub fn ime_context(&self, id: WidgetId) -> Option<crate::ime::ImeContext> {
+        self.get(id).and_then(|n| n.ime)
     }
 
-    /// Set whether the widget at `id` permits OS IME composition while
-    /// focused.
-    pub fn set_ime_allowed(&mut self, id: WidgetId, allowed: bool) {
+    /// Set (or clear, with `None`) the OS-IME descriptor for the widget at
+    /// `id`.
+    pub fn set_ime_context(&mut self, id: WidgetId, ime: Option<crate::ime::ImeContext>) {
         if let Some(node) = self.get_mut(id) {
-            node.ime_allowed = allowed;
+            node.ime = ime;
         }
     }
 
@@ -824,8 +824,8 @@ impl WidgetArena {
             if let Some(clips) = handler_set.clips_children {
                 node.clips_children = clips;
             }
-            if let Some(allowed) = handler_set.ime_allowed {
-                node.ime_allowed = allowed;
+            if let Some(ime) = handler_set.ime {
+                node.ime = Some(ime);
             }
             if let Some(pass_through) = handler_set.event_pass_through {
                 node.event_pass_through = pass_through;

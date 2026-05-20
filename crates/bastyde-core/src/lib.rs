@@ -20,6 +20,7 @@ pub mod focus;
 pub mod frame_tick_scheduler;
 pub mod gesture;
 pub mod idle;
+pub mod ime;
 pub mod intent;
 pub mod modal;
 pub mod motion_visibility;
@@ -69,6 +70,7 @@ pub use gesture::{
     TapRecognizer, TripleTapRecognizer,
 };
 pub use idle::IdleDeadline;
+pub use ime::{ImeContext, ImePurpose};
 pub use intent::{Intent, IntentKind, IntentResponse};
 pub use modal::{
     ModalBuilder, ModalCloseBehavior, ModalContent, ModalPresentation, ModalRequest,

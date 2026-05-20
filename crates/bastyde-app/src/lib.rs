@@ -6,7 +6,7 @@ pub mod window_config;
 pub mod window_manager;
 pub(crate) mod window_persist;
 
-pub use app::{AppEventProxy, BastydeAppBuilder, HeadlessApp, ThemeMode};
+pub use app::{AppEventProxy, BastydeAppBuilder, HeadlessApp, SyntheticImeInject, ThemeMode};
 pub use default_post_root::DefaultPostRoot;
 pub use window_config::{BastydeWindowId, ModalConfig, PostRootBuilder, RootBuilder, WindowConfig};
 pub use window_manager::WindowManager;

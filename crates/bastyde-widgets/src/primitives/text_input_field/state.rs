@@ -152,6 +152,16 @@ pub(crate) struct TextInputState {
     /// the autocomplete popup) and for downstream tests that snapshot
     /// AT trees keyed by widget id.
     pub field_widget_id: Option<WidgetId>,
+
+    // ── IME composition (preedit) ────────────────────────────────────
+    /// Active IME preedit (composition) string, or `None` when not
+    /// composing. The text is inserted into `document` tentatively and
+    /// tracked by `ime_preedit_range`; secure masking / echo applies to
+    /// it like any other content, so a password preedit shows as bullets.
+    pub ime_preedit: Option<String>,
+    /// Character range in `document` currently occupied by the live
+    /// preedit, so a follow-up composition event can remove and replace it.
+    pub ime_preedit_range: Option<std::ops::Range<usize>>,
 }
 
 /// Configuration bundle passed from `TextInput::build()` to
@@ -262,6 +272,8 @@ impl TextInputState {
             suffix_engine: None,
             suffix_width: 0.0,
             field_widget_id: None,
+            ime_preedit: None,
+            ime_preedit_range: None,
         }))
     }
 

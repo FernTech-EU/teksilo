@@ -438,6 +438,7 @@ pub(super) fn handle_key(
             }
             ensure_caret_visible(state);
             sync_cursor_signals(state);
+            report_ime_cursor_area(state, ctx);
             ctx.request_frame();
             EventResponse::Handled
         }
@@ -451,6 +452,7 @@ pub(super) fn handle_key(
             }
             ensure_caret_visible(state);
             sync_cursor_signals(state);
+            report_ime_cursor_area(state, ctx);
             ctx.request_frame();
             EventResponse::Handled
         }
@@ -460,10 +462,31 @@ pub(super) fn handle_key(
             // both `preferred_x` and `cursor_affinity` unchanged.
             ensure_caret_visible(state);
             sync_cursor_signals(state);
+            report_ime_cursor_area(state, ctx);
             ctx.request_frame();
             EventResponse::Handled
         }
     }
+}
+
+/// Report the caret's window-space rectangle to the platform so the OS IME
+/// candidate window tracks the insertion point. No-op when unfocused or the
+/// engine has not been laid out yet. Called whenever the caret moves.
+pub(super) fn report_ime_cursor_area(state: &SharedState, ctx: &mut EventContext) {
+    let area = {
+        let st = state.borrow();
+        if !st.has_focus || !st.engine.has_full_layout() {
+            return;
+        }
+        let caret = st.engine.caret_rect(st.cursor.position(), st.cursor_affinity);
+        bastyde_canvas::Rect::new(
+            st.viewport_origin.x + caret[0] - st.scroll_x.get(),
+            st.viewport_origin.y + caret[1] - st.scroll_y.get(),
+            caret[2].max(1.0),
+            caret[3],
+        )
+    };
+    ctx.set_ime_cursor_area(area);
 }
 
 /// Ctrl+A escalation ladder. Mirrors godot rich_text_edit.rs:690-727.
@@ -638,16 +661,14 @@ fn handle_ime_composition(
         st.cursor_affinity = CursorAffinity::Downstream;
         st.pending_text_changed = true;
     }
+    report_ime_cursor_area(state, ctx);
     ctx.request_frame();
     EventResponse::Handled
 }
 
-/// Drop any active preedit bookkeeping without mutating the document.
-/// Called on commit and on focus loss — the commit path then inserts
-/// the finalised text via the normal `pending_chars` route, and the
-/// document already contains the tentative preedit from the last
-/// composition event, so commit just leaves that text in place.
-fn clear_ime_preedit(state: &SharedState) {
+/// Drop any active preedit, removing its tentative text from the document.
+/// Called on commit (before the finalised insert) and on focus loss.
+pub(super) fn clear_ime_preedit(state: &SharedState) {
     let mut st = state.borrow_mut();
     // On commit, the input method typically sends one final
     // composition with empty text followed by a commit with the final
@@ -690,6 +711,7 @@ fn push_pending_chars(state: &SharedState, ctx: &mut EventContext, text: &str) -
         // sticky upstream affinity from a previous click is invalid.
         st.cursor_affinity = CursorAffinity::Downstream;
     }
+    report_ime_cursor_area(state, ctx);
     ctx.request_frame();
     EventResponse::Handled
 }

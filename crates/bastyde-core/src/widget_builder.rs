@@ -284,12 +284,11 @@ pub struct HandlerSet {
     pub(crate) tab_index: Option<i32>,
     pub(crate) cursor: Option<CursorIcon>,
     pub(crate) clips_children: Option<bool>,
-    /// When `Some(false)`, the widget opts out of OS input-method (IME)
-    /// composition while focused — used by secure / password fields so
-    /// the OS preedit / candidate window can't surface plaintext. The
-    /// platform IME wiring reads the focused node's `ime_allowed` flag
-    /// at focus-change time. `None` inherits the default (`true`).
-    pub(crate) ime_allowed: Option<bool>,
+    /// When `Some(..)`, declares the node a text-input surface and the OS
+    /// input method is enabled (with this purpose) while it is focused.
+    /// `None` leaves the node default (no OS IME). The platform reads the
+    /// focused node's descriptor at focus-change time. See [`crate::ime`].
+    pub(crate) ime: Option<crate::ime::ImeContext>,
     /// When `Some(true)`, the widget node is invisible to pointer
     /// hit-testing — events fall through to whatever sits behind it.
     /// Used by the debug inspector's overlay widgets.
@@ -325,7 +324,7 @@ impl HandlerSet {
             tab_index: None,
             cursor: None,
             clips_children: None,
-            ime_allowed: None,
+            ime: None,
             event_pass_through: None,
             context_menu_factory: None,
             focus_within: None,
@@ -539,13 +538,12 @@ impl HandlerSet {
         self
     }
 
-    /// Opt this node in or out of OS input-method (IME) composition
-    /// while it is focused. Defaults to `true` (IME allowed). Secure /
-    /// password fields set `false` so the OS preedit / candidate window
-    /// cannot surface plaintext. The platform IME layer reads the
-    /// focused node's flag at focus-change time.
-    pub fn ime_allowed(mut self, allowed: bool) -> Self {
-        self.ime_allowed = Some(allowed);
+    /// Declare this node a text-input surface, enabling the OS input method
+    /// (with `ctx`'s purpose) while it is focused. Leaving it unset (the
+    /// default) means no OS IME. The platform reads the focused node's
+    /// descriptor at focus-change time. See [`crate::ime`].
+    pub fn ime_input(mut self, ctx: crate::ime::ImeContext) -> Self {
+        self.ime = Some(ctx);
         self
     }
 
@@ -851,10 +849,10 @@ impl<W: Widget> WidgetWithHandlers<W> {
         self
     }
 
-    /// Opt this node in or out of OS IME composition while focused. See
-    /// [`HandlerSet::ime_allowed`].
-    pub fn ime_allowed(mut self, allowed: bool) -> Self {
-        self.handler_set.ime_allowed = Some(allowed);
+    /// Declare this node a text-input surface, enabling the OS input method
+    /// (with `ctx`'s purpose) while it is focused. See [`crate::ime`].
+    pub fn ime_input(mut self, ctx: crate::ime::ImeContext) -> Self {
+        self.handler_set.ime = Some(ctx);
         self
     }
 
@@ -1422,10 +1420,10 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         WidgetWithHandlers::new(self).clips_children(clips)
     }
 
-    /// Opt this node in or out of OS IME composition while focused. See
-    /// [`HandlerSet::ime_allowed`].
-    fn ime_allowed(self, allowed: bool) -> WidgetWithHandlers<Self> {
-        WidgetWithHandlers::new(self).ime_allowed(allowed)
+    /// Declare this node a text-input surface, enabling the OS input method
+    /// (with `ctx`'s purpose) while it is focused. See [`crate::ime`].
+    fn ime_input(self, ctx: crate::ime::ImeContext) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).ime_input(ctx)
     }
 
     /// Make the widget invisible to pointer hit-testing. See

@@ -54,6 +54,26 @@ pub fn translate_cursor_moved(
     Some(WidgetEvent::PointerMove { position })
 }
 
+/// Translate a winit `Ime` event into a bastyde-core `WidgetEvent`.
+///
+/// - `Preedit(text, cursor)` → `ImeComposition`. The `cursor` byte indices
+///   `(begin, end)` index into the preedit `text` and are preserved as a
+///   `Range`. `None` (hide-cursor) and empty `text` (winit's synthetic
+///   clear, emitted right before `Commit`) flow through faithfully.
+/// - `Commit(text)` → `ImeCommit`.
+/// - `Enabled` / `Disabled` are OS acknowledgements (enablement is driven
+///   by the focused node's descriptor) and produce no tree event.
+pub fn translate_ime(ime: winit::event::Ime) -> Option<WidgetEvent> {
+    match ime {
+        winit::event::Ime::Preedit(text, cursor) => Some(WidgetEvent::ImeComposition {
+            text,
+            cursor: cursor.map(|(begin, end)| begin..end),
+        }),
+        winit::event::Ime::Commit(text) => Some(WidgetEvent::ImeCommit { text }),
+        winit::event::Ime::Enabled | winit::event::Ime::Disabled => None,
+    }
+}
+
 /// Translate a winit mouse button to a bastyde-core PointerButton.
 pub fn translate_mouse_button(button: winit::event::MouseButton) -> Option<PointerButton> {
     match button {
@@ -425,5 +445,36 @@ mod tests {
         } else {
             panic!("Expected DoubleTap");
         }
+    }
+
+    #[test]
+    fn ime_preedit_to_composition_preserves_cursor_bytes() {
+        let evt = translate_ime(winit::event::Ime::Preedit("a".to_string(), Some((1, 1)))).unwrap();
+        assert!(matches!(
+            evt,
+            WidgetEvent::ImeComposition { ref text, cursor: Some(ref r) }
+                if text == "a" && *r == (1..1)
+        ));
+    }
+
+    #[test]
+    fn ime_preedit_hide_cursor_maps_to_none() {
+        let evt = translate_ime(winit::event::Ime::Preedit(String::new(), None)).unwrap();
+        assert!(matches!(
+            evt,
+            WidgetEvent::ImeComposition { ref text, cursor: None } if text.is_empty()
+        ));
+    }
+
+    #[test]
+    fn ime_commit_translates() {
+        let evt = translate_ime(winit::event::Ime::Commit("你".to_string())).unwrap();
+        assert!(matches!(evt, WidgetEvent::ImeCommit { ref text } if text == "你"));
+    }
+
+    #[test]
+    fn ime_enabled_disabled_produce_no_event() {
+        assert!(translate_ime(winit::event::Ime::Enabled).is_none());
+        assert!(translate_ime(winit::event::Ime::Disabled).is_none());
     }
 }
