@@ -86,16 +86,25 @@ impl WidgetTree {
     }
 
     /// Complete an external drag with a drop at `position`, firing `on_drop`
-    /// on the target with the OS payload. No-op unless an external session is
-    /// active.
+    /// on the target. `data` is the authoritative payload read at drop time;
+    /// if non-empty it replaces the session payload (some backends only have
+    /// the full data at drop, not at enter). No-op unless an external session
+    /// is active.
     pub fn end_external_drag(
         &mut self,
         position: bastyde_canvas::Point,
+        data: crate::drag_payload::ExternalDropData,
         ops: &mut dyn crate::window::WindowOps,
     ) {
-        if self.active_drag.as_ref().is_some_and(|d| d.is_external) {
-            self.handle_drag_drop(position, &mut *ops);
+        if !self.active_drag.as_ref().is_some_and(|d| d.is_external) {
+            return;
         }
+        if !data.is_empty()
+            && let Some(drag) = self.active_drag.as_mut()
+        {
+            drag.payload = crate::drag_payload::DragPayload::external(data);
+        }
+        self.handle_drag_drop(position, &mut *ops);
     }
 
     /// Cancel an in-flight external drag (the pointer left the window or the
@@ -1434,7 +1443,12 @@ mod tests {
         assert!(tree.active_drag.as_ref().unwrap().is_external);
 
         tree.update_external_drag(Point::new(110.0, 55.0), &mut noop);
-        tree.end_external_drag(Point::new(110.0, 55.0), &mut noop);
+        // Pass the same files again at drop — exercises the payload-refresh path.
+        let drop_data = ExternalDropData {
+            files: vec![PathBuf::from("/tmp/a.png"), PathBuf::from("/tmp/b.png")],
+            ..Default::default()
+        };
+        tree.end_external_drag(Point::new(110.0, 55.0), drop_data, &mut noop);
 
         assert!(tree.active_drag.is_none(), "external drag must clear on drop");
         assert!(was_external.get(), "payload should report external origin");
@@ -1478,7 +1492,7 @@ mod tests {
         };
         // Drop at tree (110, 55) → target-local (70, 15).
         tree.begin_external_drag(Point::new(110.0, 55.0), data, &mut noop);
-        tree.end_external_drag(Point::new(110.0, 55.0), &mut noop);
+        tree.end_external_drag(Point::new(110.0, 55.0), ExternalDropData::default(), &mut noop);
 
         let drp = drop_local.get();
         assert!(
@@ -1532,7 +1546,11 @@ mod tests {
 
         let mut noop = crate::window::NoopWindowOps;
         tree.update_external_drag(Point::new(10.0, 10.0), &mut noop);
-        tree.end_external_drag(Point::new(10.0, 10.0), &mut noop);
+        tree.end_external_drag(
+            Point::new(10.0, 10.0),
+            crate::drag_payload::ExternalDropData::default(),
+            &mut noop,
+        );
         tree.cancel_external_drag(&mut noop);
         assert!(tree.active_drag.is_none());
     }

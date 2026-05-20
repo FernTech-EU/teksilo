@@ -628,7 +628,37 @@ impl WindowManager {
         self.windows.insert(winit_id, managed);
         self.bastyde_to_winit.insert(bastyde_id, winit_id);
 
+        // Register the window as an OS drop target if external drag-and-drop
+        // was installed (no-op otherwise). Runs on the main thread, as macOS
+        // requires for view manipulation.
+        self.attach_external_dnd(bastyde_id, winit_id);
+
         bastyde_id
+    }
+
+    /// Register the just-created window as an OS drop target via the installed
+    /// [`ExternalDndHandle`](bastyde_platform::external_dnd::ExternalDndHandle).
+    /// No-op if the app did not call `install_external_dnd`, or if the window
+    /// or poster handle can't be resolved.
+    fn attach_external_dnd(&self, bastyde_id: BastydeWindowId, winit_id: winit::window::WindowId) {
+        use bastyde_platform::external_dnd::ExternalDndHandle;
+        let Some(template) = self.app_context_template.as_ref() else {
+            return;
+        };
+        let Some(handle) = template.app_state::<ExternalDndHandle>().cloned() else {
+            return;
+        };
+        let Some(poster) = template.poster().cloned() else {
+            return;
+        };
+        let Some(managed) = self.windows.get(&winit_id) else {
+            return;
+        };
+        if let Some(parent) = bastyde_core::raw_handle::ParentHandle::from_window(
+            managed.platform_window.window(),
+        ) {
+            handle.attach(bastyde_id, parent, poster);
+        }
     }
 
     /// Close a window by its BastydeWindowId.
@@ -648,6 +678,15 @@ impl WindowManager {
             {
                 handle.purge_window(bastyde_id);
             }
+        }
+        // Revoke the window's OS drop-target registration (drops the platform
+        // guard — RevokeDragDrop / removeFromSuperview / data-device teardown).
+        if let Some(handle) = self
+            .app_context_template
+            .as_ref()
+            .and_then(|t| t.app_state::<bastyde_platform::external_dnd::ExternalDndHandle>())
+        {
+            handle.detach(bastyde_id);
         }
         if let Some(winit_id) = self.bastyde_to_winit.remove(&bastyde_id)
             && let Some(managed) = self.windows.remove(&winit_id)

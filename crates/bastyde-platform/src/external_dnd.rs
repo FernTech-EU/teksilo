@@ -62,12 +62,13 @@ mod macos;
 /// from the platform's native coordinates.
 #[derive(Debug, Clone)]
 pub enum ExternalDragEvent {
-    /// The drag entered the window. `formats` lists the MIME types / type
-    /// identifiers the source advertises (best-effort, for early
-    /// accept/reject decisions); `position` is where it entered.
+    /// The drag entered the window. `data` is the best-effort payload the
+    /// source offers (fully populated where the platform exposes it during
+    /// hover — e.g. macOS; possibly empty until drop on backends that only
+    /// transfer bytes at drop time). Lets a drop target validate on hover.
     Entered {
-        /// Advertised data formats (platform-native identifiers or MIME types).
-        formats: Vec<String>,
+        /// Offered payload (files / text / URLs); may be empty until drop.
+        data: ExternalDropData,
         /// Entry position in window-logical coordinates.
         position: Point,
     },
@@ -137,6 +138,19 @@ pub trait ExternalDndBackend {
         window_id: BastydeWindowId,
         poster: Arc<dyn AppEventPoster>,
     ) -> Box<dyn ExternalDndGuard>;
+}
+
+/// Forward through a boxed backend, so `ExternalDndHandle::new(default_backend())`
+/// (which returns `Box<dyn ExternalDndBackend>`) type-checks.
+impl ExternalDndBackend for Box<dyn ExternalDndBackend> {
+    fn attach(
+        &mut self,
+        parent: ParentHandle,
+        window_id: BastydeWindowId,
+        poster: Arc<dyn AppEventPoster>,
+    ) -> Box<dyn ExternalDndGuard> {
+        (**self).attach(parent, window_id, poster)
+    }
 }
 
 // ============================================================

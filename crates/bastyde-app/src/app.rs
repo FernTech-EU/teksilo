@@ -782,6 +782,80 @@ impl BastydeAppHandler {
         }
     }
 
+    /// Try to interpret an `AppEvent::External` payload as an
+    /// [`ExternalDndEventPayload`](bastyde_platform::external_dnd::ExternalDndEventPayload)
+    /// posted by a platform drag backend and route it to the originating
+    /// window's tree, driving the matching `*_external_drag` method.
+    ///
+    /// Returns `Ok(())` if the payload was an external-drag event (consumed),
+    /// or `Err(payload)` to hand it back for other downcast attempts. Mirrors
+    /// [`Self::try_route_file_dialog_payload`]'s take/dispatch/reinsert dance.
+    fn try_route_external_dnd_payload(
+        &mut self,
+        payload: Box<dyn std::any::Any + Send>,
+        event_loop: &ActiveEventLoop,
+    ) -> Result<(), Box<dyn std::any::Any + Send>> {
+        use bastyde_platform::external_dnd::{ExternalDndEventPayload, ExternalDragEvent};
+
+        let payload = match payload.downcast::<ExternalDndEventPayload>() {
+            Ok(boxed) => *boxed,
+            Err(other) => return Err(other),
+        };
+
+        let Some(winit_id) = self
+            .wm
+            .bastyde_to_winit_map()
+            .get(&payload.window_id_owner)
+            .copied()
+        else {
+            // Window already torn down — drop silently.
+            return Ok(());
+        };
+        let Some(mut current) = self.wm.take_managed(winit_id) else {
+            return Ok(());
+        };
+        let current_id = current.bastyde_id;
+
+        #[cfg(not(target_os = "macos"))]
+        let current_handle = current
+            .platform_window
+            .window()
+            .window_handle()
+            .ok()
+            .map(|h| h.as_raw());
+        let current_arc = Some(current.platform_window.window_arc());
+
+        {
+            let mut ops = crate::window_manager::WindowOpsImpl::new(
+                &mut self.wm,
+                event_loop,
+                current_id,
+                #[cfg(not(target_os = "macos"))]
+                current_handle,
+                current_arc,
+            );
+            match payload.event {
+                ExternalDragEvent::Entered { data, position } => {
+                    current.tree.begin_external_drag(position, data, &mut ops);
+                }
+                ExternalDragEvent::Moved { position } => {
+                    current.tree.update_external_drag(position, &mut ops);
+                }
+                ExternalDragEvent::Left => {
+                    current.tree.cancel_external_drag(&mut ops);
+                }
+                ExternalDragEvent::Dropped { data, position } => {
+                    current.tree.end_external_drag(position, data, &mut ops);
+                }
+            }
+        }
+
+        // Repaint so hover feedback / drop results show promptly.
+        current.platform_window.request_redraw();
+        self.wm.reinsert_managed(winit_id, current);
+        Ok(())
+    }
+
     /// Tick gestures on every window with a real `WindowOps` sink so
     /// long-press / drag-tick handlers can open windows.
     fn tick_gestures_in_window(
@@ -1368,10 +1442,22 @@ impl ApplicationHandler<AppEvent> for BastydeAppHandler {
             // payloads are ignored — application-authored `send_external`
             // payloads can coexist with framework-internal ones.
             AppEvent::External(payload) => {
-                match self.try_route_file_dialog_payload(payload, event_loop) {
-                    // File-dialog payload was consumed.
-                    Ok(()) => {}
-                    Err(payload) => {
+                // Try each framework-internal payload type in turn; the first
+                // that consumes it wins. Unrecognized payloads fall through to
+                // the title-bar / close-request downcast chain.
+                let payload = match self.try_route_file_dialog_payload(payload, event_loop) {
+                    Ok(()) => None,
+                    Err(payload) => Some(payload),
+                };
+                let payload = match payload {
+                    None => None,
+                    Some(payload) => match self.try_route_external_dnd_payload(payload, event_loop) {
+                        Ok(()) => None,
+                        Err(payload) => Some(payload),
+                    },
+                };
+                if let Some(payload) = payload {
+                    {
                         if let Some(req) = payload.downcast_ref::<CloseWindowRequest>() {
                             self.wm.queue_close(req.bastyde_id);
                         } else if let Some(evt) = payload.downcast_ref::<TitleBarSyntheticEvent>() {
@@ -1763,6 +1849,29 @@ impl BastydeAppBuilder {
         let handle = FileDialogHandle::new(RfdAsyncBackend::new());
         self.app_state_registry
             .insert(TypeId::of::<FileDialogHandle>(), Box::new(handle));
+        self
+    }
+
+    /// Install the external (OS) drag-and-drop service. Registers an
+    /// [`ExternalDndHandle`](bastyde_platform::external_dnd::ExternalDndHandle)
+    /// wrapping the platform's default backend
+    /// ([`default_backend`](bastyde_platform::external_dnd::default_backend) —
+    /// raw `NSDraggingDestination` on macOS, OLE on Windows, `wl_data_device`
+    /// on Wayland, a no-op on X11) into the app-state registry.
+    ///
+    /// Once installed, every window is registered as an OS drop target on
+    /// creation (and detached on close) by the window manager. Drops surface
+    /// to widgets through the normal drag handlers (`on_drag_hover` /
+    /// `on_drag_leave` / `on_drop`) with `payload.is_external()` true — the
+    /// ready-made `DropZone` widget consumes them.
+    ///
+    /// Apps that ship a custom backend bypass this and call
+    /// `.app_state(ExternalDndHandle::new(my_backend))` directly.
+    pub fn install_external_dnd(mut self) -> Self {
+        use bastyde_platform::external_dnd::{ExternalDndHandle, default_backend};
+        let handle = ExternalDndHandle::new(default_backend());
+        self.app_state_registry
+            .insert(TypeId::of::<ExternalDndHandle>(), Box::new(handle));
         self
     }
 

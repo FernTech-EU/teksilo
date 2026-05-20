@@ -78,8 +78,10 @@ define_class!(
         #[unsafe(method(draggingEntered:))]
         fn dragging_entered(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
             let position = self.local_position(sender);
-            let formats = self.advertised_formats(sender);
-            self.post(ExternalDragEvent::Entered { formats, position });
+            // The dragging pasteboard is readable throughout the drag on
+            // macOS, so the drop target can validate files on hover.
+            let data = read_pasteboard(sender);
+            self.post(ExternalDragEvent::Entered { data, position });
             // Advertise Copy so the OS shows the "+" drop cursor; the widget
             // performs the real accept/reject. Returning None here would
             // suppress draggingUpdated/performDragOperation entirely.
@@ -129,15 +131,6 @@ impl DropView {
         // `None` source view = convert from the window's base coordinate space.
         let local = self.convertPoint_fromView(window_loc, None);
         Point::new(local.x as f32, local.y as f32)
-    }
-
-    /// Pasteboard type identifiers the drag advertises (best-effort).
-    fn advertised_formats(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> Vec<String> {
-        let pb = sender.draggingPasteboard();
-        match pb.types() {
-            Some(types) => types.iter().map(|t| t.to_string()).collect(),
-            None => Vec::new(),
-        }
     }
 
     fn post(&self, event: ExternalDragEvent) {
