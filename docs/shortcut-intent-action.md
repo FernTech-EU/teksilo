@@ -468,10 +468,10 @@ stored as the payload. The only requirement: the enum itself is
 `'static` (typically trivially true).
 
 Trade-off this codifies: Bastyde sits between Flutter's fully-typed
-Intents (no strings anywhere) and Qt's fully-string-keyed QAction
-(easy to typo). Names are the dispatch key; `IntentKind` layers
-compile-time checking on top when the app opts in. Third-party widgets
-can still declare intents without knowing the consuming app's enum.
+Intents (no strings anywhere) and Qt's string-keyed `QAction`.
+Names are the dispatch key; `IntentKind` layers compile-time checking
+on top when the app opts in. Third-party widgets can still declare
+intents without knowing the consuming app's enum.
 
 ---
 
