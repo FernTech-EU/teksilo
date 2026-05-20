@@ -22,7 +22,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.4.0"
 edition = "2024"
 license-file = "LICENSE"
 publish = false
@@ -71,39 +71,39 @@ text-document = { path = "../text-document/crates/public_api", version = "1.5.4"
 text-typeset = { path = "../text-typeset", version = "1.4.4" }
 
 # Internal crates
-bastyde-tokens = { path = "crates/bastyde-tokens", version = "0.2.0" }
-bastyde-canvas = { path = "crates/bastyde-canvas", version = "0.2.0" }
-bastyde-core = { path = "crates/bastyde-core", version = "0.2.0" }
-bastyde-data = { path = "crates/bastyde-data", version = "0.2.0" }
-bastyde-settings = { path = "crates/bastyde-settings", version = "0.2.0" }
-bastyde-telemetry = { path = "crates/bastyde-telemetry", version = "0.2.0" }
-bastyde-analytics-plausible = { path = "crates/bastyde-analytics-plausible", version = "0.2.0" }
-bastyde-analytics-otlp = { path = "crates/bastyde-analytics-otlp", version = "0.2.0" }
-bastyde-widgets = { path = "crates/bastyde-widgets", version = "0.2.0" }
-bastyde-charts = { path = "crates/bastyde-charts", version = "0.2.0" }
-bastyde-scene = { path = "crates/bastyde-scene", version = "0.2.0" }
-bastyde-i18n = { path = "crates/bastyde-i18n", version = "0.2.0" }
-bastyde-i18n-macros = { path = "crates/bastyde-i18n-macros", version = "0.2.0" }
-cargo-bastyde-fmt = { path = "crates/cargo-bastyde-fmt", version = "0.2.0" }
-bastyde-fmt = { path = "crates/bastyde-fmt", version = "0.2.0" }
-bastyde-fmt-lsp = { path = "crates/bastyde-fmt-lsp", version = "0.2.0" }
-bastyde-parse = { path = "crates/bastyde-parse", version = "0.2.0" }
-bastyde-macros = { path = "crates/bastyde-macros", version = "0.2.0" }
-bastyde-text = { path = "crates/bastyde-text", version = "0.2.0" }
-bastyde-render = { path = "crates/bastyde-render", version = "0.2.0" }
-bastyde-platform = { path = "crates/bastyde-platform", version = "0.2.0" }
-bastyde-app = { path = "crates/bastyde-app", version = "0.2.0" }
-bastyde-async = { path = "crates/bastyde-async", version = "0.2.0" }
-bastyde-tokio = { path = "crates/bastyde-tokio", version = "0.2.0" }
-bastyde-async-std = { path = "crates/bastyde-async-std", version = "0.2.0" }
-bastyde-inspector = { path = "crates/bastyde-inspector", version = "0.2.0" }
-bastyde-resources = { path = "crates/bastyde-resources", version = "0.2.0" }
-bastyde = { path = "crates/bastyde", version = "0.2.0" }
-bastyde-preview = { path = "crates/bastyde-preview", version = "0.2.0" }
-bastyde-preview-ui = { path = "crates/bastyde-preview-ui", version = "0.2.0" }
-bastyde-theme-material3 = { path = "crates/bastyde-theme-material3", version = "0.2.0" }
-bastyde-theme-macos = { path = "crates/bastyde-theme-macos", version = "0.2.0" }
-bastyde-theme-fluent = { path = "crates/bastyde-theme-fluent", version = "0.2.0" }
+bastyde-tokens = { path = "crates/bastyde-tokens", version = "0.4.0" }
+bastyde-canvas = { path = "crates/bastyde-canvas", version = "0.4.0" }
+bastyde-core = { path = "crates/bastyde-core", version = "0.4.0" }
+bastyde-data = { path = "crates/bastyde-data", version = "0.4.0" }
+bastyde-settings = { path = "crates/bastyde-settings", version = "0.4.0" }
+bastyde-telemetry = { path = "crates/bastyde-telemetry", version = "0.4.0" }
+bastyde-analytics-plausible = { path = "crates/bastyde-analytics-plausible", version = "0.4.0" }
+bastyde-analytics-otlp = { path = "crates/bastyde-analytics-otlp", version = "0.4.0" }
+bastyde-widgets = { path = "crates/bastyde-widgets", version = "0.4.0" }
+bastyde-charts = { path = "crates/bastyde-charts", version = "0.4.0" }
+bastyde-scene = { path = "crates/bastyde-scene", version = "0.4.0" }
+bastyde-i18n = { path = "crates/bastyde-i18n", version = "0.4.0" }
+bastyde-i18n-macros = { path = "crates/bastyde-i18n-macros", version = "0.4.0" }
+cargo-bastyde-fmt = { path = "crates/cargo-bastyde-fmt", version = "0.4.0" }
+bastyde-fmt = { path = "crates/bastyde-fmt", version = "0.4.0" }
+bastyde-fmt-lsp = { path = "crates/bastyde-fmt-lsp", version = "0.4.0" }
+bastyde-parse = { path = "crates/bastyde-parse", version = "0.4.0" }
+bastyde-macros = { path = "crates/bastyde-macros", version = "0.4.0" }
+bastyde-text = { path = "crates/bastyde-text", version = "0.4.0" }
+bastyde-render = { path = "crates/bastyde-render", version = "0.4.0" }
+bastyde-platform = { path = "crates/bastyde-platform", version = "0.4.0" }
+bastyde-app = { path = "crates/bastyde-app", version = "0.4.0" }
+bastyde-async = { path = "crates/bastyde-async", version = "0.4.0" }
+bastyde-tokio = { path = "crates/bastyde-tokio", version = "0.4.0" }
+bastyde-async-std = { path = "crates/bastyde-async-std", version = "0.4.0" }
+bastyde-inspector = { path = "crates/bastyde-inspector", version = "0.4.0" }
+bastyde-resources = { path = "crates/bastyde-resources", version = "0.4.0" }
+bastyde = { path = "crates/bastyde", version = "0.4.0" }
+bastyde-preview = { path = "crates/bastyde-preview", version = "0.4.0" }
+bastyde-preview-ui = { path = "crates/bastyde-preview-ui", version = "0.4.0" }
+bastyde-theme-material3 = { path = "crates/bastyde-theme-material3", version = "0.4.0" }
+bastyde-theme-macos = { path = "crates/bastyde-theme-macos", version = "0.4.0" }
+bastyde-theme-fluent = { path = "crates/bastyde-theme-fluent", version = "0.4.0" }
 
 # gRPC proto crate — lives in a sibling repo at `../bastyde-collector-proto`
 # so the wire-format spec has its own version stream (and the
@@ -114,7 +114,7 @@ bastyde-theme-fluent = { path = "crates/bastyde-theme-fluent", version = "0.2.0"
 # versions since no other framework crate uses them.
 bastyde-collector-proto = { path = "../bastyde-collector-proto", version = "0.1.0" }
 bastyde-analytics-bastyde = { path = "crates/bastyde-analytics-bastyde", version = "0.2.0" }
-bastyde-telemetry-codegen = { path = "crates/bastyde-telemetry-codegen", version = "0.2.0" }
+bastyde-telemetry-codegen = { path = "crates/bastyde-telemetry-codegen", version = "0.4.0" }
 
 
 [profile.release]
