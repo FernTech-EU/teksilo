@@ -332,9 +332,23 @@ impl ExternalDndBackend for WaylandExternalDndBackend {
         std::thread::Builder::new()
             .name(format!("bastyde-wayland-dnd-{}", window_id.raw()))
             .spawn(move || {
-                // Coexists with winit's loop: libwayland multiplexes events to
-                // our queue. Exits when the connection breaks (window/app gone).
-                while queue.blocking_dispatch(&mut state).is_ok() {}
+                // CRITICAL: never read the socket here. winit's event loop is
+                // the sole reader of this shared `wl_display`; a second reader
+                // (`blocking_dispatch` → `prepare_read`/`read_events`) aborts
+                // the process. libwayland's multi-queue model buffers events
+                // for our objects whenever *anyone* reads the socket, so we
+                // only drain our queue with `dispatch_pending` (no read) and
+                // poll on a short interval. Drag events arrive within one tick.
+                loop {
+                    match queue.dispatch_pending(&mut state) {
+                        Ok(_) => {}
+                        // Connection broken (app exiting) — stop the thread.
+                        Err(_) => break,
+                    }
+                    // Flush any requests we queued (accept / receive / finish).
+                    let _ = state.conn.flush();
+                    std::thread::sleep(std::time::Duration::from_millis(8));
+                }
             })
             .ok();
 
