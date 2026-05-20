@@ -214,6 +214,13 @@ impl Dispatch<WlDataDevice, ()> for DndState {
             _ => {}
         }
     }
+
+    // The `data_offer` event (opcode 0) creates a new `wl_data_offer` child
+    // object; tell wayland-client its interface + user-data so it can build the
+    // proxy. Without this it panics ("Missing event_created_child specialization").
+    wayland_client::event_created_child!(DndState, WlDataDevice, [
+        wayland_client::protocol::wl_data_device::EVT_DATA_OFFER_OPCODE => (WlDataOffer, ()),
+    ]);
 }
 
 /// Pick the best MIME type we can decode from the offered set.
