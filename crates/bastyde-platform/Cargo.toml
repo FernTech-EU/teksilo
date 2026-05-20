@@ -84,7 +84,21 @@ windows = { version = "0.61", features = [
     "Win32_Graphics_Gdi",
     "Win32_UI_HiDpi",
     "Win32_UI_Controls",                  # MARGINS
-    "Win32_UI_Shell",                     # SetWindowSubclass / DefSubclassProc / RemoveWindowSubclass
+    "Win32_UI_Shell",                     # SetWindowSubclass / DefSubclassProc / RemoveWindowSubclass / DragQueryFileW / HDROP
     "Win32_UI_Input_KeyboardAndMouse",    # TrackMouseEvent / TRACKMOUSEEVENT / TME_*
     "Win32_Foundation",
+    # External (OS) drag-and-drop: OLE drop target.
+    "Win32_System_Ole",                   # RegisterDragDrop / RevokeDragDrop / OleInitialize / IDropTarget / ReleaseStgMedium / CF_*
+    "Win32_System_Com",                   # IDataObject / FORMATETC / STGMEDIUM / TYMED / DVASPECT
+    "Win32_System_Memory",                # GlobalLock / GlobalUnlock
+    "Win32_System_SystemServices",        # CF_HDROP / CF_UNICODETEXT clipboard format constants
+    "Win32_System_DataExchange",          # RegisterClipboardFormatW (CFSTR_INETURL)
 ] }
+
+# External (OS) drag-and-drop on Linux: a `wl_data_device` listener bound to
+# winit's Wayland display via the system libwayland multi-queue model
+# (`from_foreign_display`). No-op under X11 (the backend self-detects).
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+wayland-client = "0.31"
+wayland-backend = { version = "0.3", features = ["client_system"] }
+libc = "0.2"

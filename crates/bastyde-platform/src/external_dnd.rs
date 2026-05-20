@@ -52,6 +52,10 @@ use bastyde_core::window::BastydeWindowId;
 
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "windows")]
+mod windows;
+#[cfg(all(unix, not(target_os = "macos")))]
+mod wayland;
 
 // ============================================================
 // ExternalDragEvent
@@ -353,9 +357,17 @@ pub fn default_backend() -> Box<dyn ExternalDndBackend> {
     {
         Box::new(macos::MacOsExternalDndBackend::new())
     }
-    // Windows and Wayland raw backends plug in here behind their cfg gates;
-    // X11 and every other target fall through to the no-op.
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        Box::new(windows::WindowsExternalDndBackend::new())
+    }
+    // Linux: the Wayland backend self-detects the surface type and is a no-op
+    // under X11 (it returns an inert guard when the display isn't Wayland).
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Box::new(wayland::WaylandExternalDndBackend::new())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", unix)))]
     {
         Box::new(NoopExternalDndBackend::new())
     }
