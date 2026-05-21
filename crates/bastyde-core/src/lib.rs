@@ -26,6 +26,7 @@ pub mod intent;
 pub mod modal;
 pub mod motion_visibility;
 pub mod overlay;
+pub mod overscroll;
 pub mod presets;
 pub mod raw_handle;
 pub mod shortcut;
@@ -84,6 +85,7 @@ pub use modal::{
 pub use overlay::{
     DismissBehavior, OverlayId, OverlayLayer, OverlayManager, OverlayPlacement, OverlayRequest,
 };
+pub use overscroll::OverscrollBehavior;
 pub use raw_handle::ParentHandle;
 pub use shortcut::{
     CaptureHandle, EffectiveShortcut, KeyCaptureCallback, KeyStroke, KeyStrokeOverride, Shortcut,

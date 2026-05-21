@@ -48,6 +48,7 @@ use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, ScrollDelta, WidgetEvent};
 use bastyde_core::gesture::PinchPhase;
+use bastyde_core::overscroll::OverscrollBehavior;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
@@ -389,6 +390,9 @@ pub struct SceneView {
     pan_anim_duration: Duration,
     zoom_anim_duration: Duration,
     line_height: f32,
+    /// Whether a wheel that the scene can't absorb (already clamped at its
+    /// `pan_bounds`) chains to an ancestor scrollable, or is contained.
+    overscroll_behavior: OverscrollBehavior,
 
     // --- A11y configuration — visual-default path ----------------------------------
     a11y_off_screen_mode: crate::a11y::A11yOffScreenMode,
@@ -617,6 +621,7 @@ impl SceneView {
             pan_anim_duration: DEFAULT_PAN_DURATION,
             zoom_anim_duration: DEFAULT_ZOOM_DURATION,
             line_height: DEFAULT_LINE_HEIGHT,
+            overscroll_behavior: OverscrollBehavior::Chain,
             a11y_off_screen_mode: crate::a11y::A11yOffScreenMode::default(),
             a11y_mode: crate::a11y::A11yMode::default(),
             self_widget_id: Cell::new(None),
@@ -1114,6 +1119,17 @@ impl SceneView {
     /// Defaults to 16 px (matches `ScrollArea`).
     pub fn line_height(mut self, px: f32) -> Self {
         self.line_height = px.max(0.0);
+        self
+    }
+
+    /// Whether a wheel the scene can't absorb (already clamped at its
+    /// `pan_bounds`) chains to an ancestor scrollable
+    /// ([`OverscrollBehavior::Chain`], the default — matches the widget
+    /// scrollables) or is contained ([`OverscrollBehavior::Contain`]). Use
+    /// `Contain` for a tightly-bounded scene embedded in a scroll view that
+    /// should never steal the scene's wheel.
+    pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self {
+        self.overscroll_behavior = behavior;
         self
     }
 
@@ -1673,6 +1689,7 @@ impl Widget for SceneView {
         let prefers_reduced = ctx.prefers_reduced_motion();
         let line_height = self.line_height;
         let pan_dur = self.pan_anim_duration;
+        let overscroll = self.overscroll_behavior;
 
         let mut handlers = HandlerSet::new();
 
@@ -2087,10 +2104,15 @@ impl Widget for SceneView {
                     // either axis (already clamped at a bound), decline so the
                     // event bubbles to an ancestor scrollable. Mirrors the
                     // ScrollArea / ListView / TreeView / TableView behavior.
+                    // `OverscrollBehavior::Contain` opts out — the scene keeps
+                    // the wheel even at its bound (no chaining).
                     let moved_x = (clamped.x - base_x).abs() > 1e-3_f32;
                     let moved_y = (clamped.y - base_y).abs() > 1e-3_f32;
                     if !moved_x && !moved_y {
-                        return EventResponse::Ignored;
+                        return match overscroll {
+                            OverscrollBehavior::Contain => EventResponse::Handled,
+                            OverscrollBehavior::Chain => EventResponse::Ignored,
+                        };
                     }
                     if prefers_reduced {
                         pan_x.set(clamped.x);
