@@ -327,13 +327,13 @@ impl Canvas {
 
     /// Stroke an arbitrary path outline with a solid color.
     /// The path will be CPU-rasterized (Tier 3) and cached in the shape atlas.
+    ///
+    /// A [`StrokeSpace::Device`] style renders a cosmetic (hairline) stroke:
+    /// the renderer rasterizes the path body at the current view zoom while
+    /// baking the stroke at a constant device-pixel width, so connectors stay
+    /// crisp and uniform at any scene zoom.
     pub fn stroke_path(&mut self, path: &Path, color: Color, style: impl Into<StrokeStyle>) {
         let style = style.into();
-        debug_assert!(
-            style.space == StrokeSpace::Logical,
-            "cosmetic stroke is not yet supported on stroke_path; \
-             falling back to a logical (zoom-scaled) width"
-        );
         let bounds = path.bounds().expand(style.width);
         let idx = self.frame.paths.len();
         self.frame.paths.push(PathEntry {
