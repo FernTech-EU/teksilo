@@ -307,6 +307,23 @@ fn paint_widget_cached(
     let node = arena.get(id).expect("node id is active (guarded above)");
     let transform = node.transform_prop.as_ref().map(|p| p.get());
     let push_transform = transform.filter(|t| *t != bastyde_canvas::Transform2D::IDENTITY);
+    let clips = node.clips_children;
+    let content_transform = node.content_transform;
+    let bounds = node.bounds;
+    // A *content* transform (a SceneView's pan/zoom) leaves the node's bounds a
+    // fixed parent-space viewport and only moves the content. Emit its clip
+    // BEFORE the transform so the renderer scissors to that fixed viewport
+    // (transformed by ancestors only — correct for nested scenes too) instead
+    // of the pan/zoom-shifted rect, and so the node's own paint (background
+    // grid / lightweight items) is clipped to the viewport as well. A *self*
+    // transform (Scale/Rotate) keeps its clip INSIDE the transform — there the
+    // clip is meant to be the scaled visual region.
+    let clip_outside_transform = clips && content_transform;
+    if clip_outside_transform {
+        frame
+            .draw_order
+            .push(bastyde_canvas::DrawCommand::SetClip(bounds));
+    }
     if let Some(t) = push_transform {
         frame
             .draw_order
@@ -365,9 +382,7 @@ fn paint_widget_cached(
     }
 
     let node = arena.get(id).expect("node id is active (guarded above)");
-    let clips = node.clips_children;
     let children: Vec<WidgetId> = node.children.clone();
-    let bounds = node.bounds;
     let next_clip = if clips {
         Some(match clip_bounds {
             Some(clip) => {
@@ -383,7 +398,10 @@ fn paint_widget_cached(
         clip_bounds
     };
 
-    if clips {
+    // Self-transform / plain clipping nodes emit their clip here — after the
+    // node's own paint, inside any transform scope. Content-transform nodes
+    // already emitted theirs above (in parent space).
+    if clips && !clip_outside_transform {
         frame
             .draw_order
             .push(bastyde_canvas::DrawCommand::SetClip(bounds));
@@ -440,7 +458,7 @@ fn paint_widget_cached(
         }
     }
 
-    if clips {
+    if clips && !clip_outside_transform {
         frame.draw_order.push(bastyde_canvas::DrawCommand::ClearClip);
     }
 
@@ -448,6 +466,12 @@ fn paint_widget_cached(
         frame
             .draw_order
             .push(bastyde_canvas::DrawCommand::PopTransform);
+    }
+
+    // A content-transform clip opened before the transform, so it closes after
+    // the transform pops (clip { transform { … } } nesting).
+    if clip_outside_transform {
+        frame.draw_order.push(bastyde_canvas::DrawCommand::ClearClip);
     }
 
     if opacity.is_some() {
@@ -745,6 +769,54 @@ mod tests {
         assert_eq!(push_count, 1, "draw_order = {:?}", frame.draw_order);
         assert_eq!(pop_count, 1);
         assert_eq!(push_value, Some(scale_2x));
+    }
+
+    #[test]
+    fn content_transform_clip_wraps_outside_the_transform() {
+        // A *content* transform (the SceneView pattern: clips_children + a
+        // content transform set via set_content_transform) must emit its clip
+        // OUTSIDE the transform — SetClip before PushTransform, ClearClip after
+        // PopTransform — so the renderer scissors to the fixed parent-space
+        // viewport instead of the pan/zoom-shifted rect. (A *self* transform
+        // like Scale keeps the clip inside the transform; see
+        // transform_prop_emits_push_and_pop_around_subtree.)
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
+        let parent = tree.add(StackWidget::new());
+        tree.add_child(parent, FillWidget::new().background(Color::RED));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        // Set after layout so no rebuild can clear the flags before render.
+        tree.set_clips_children(parent, true);
+        tree.set_content_transform(parent, bastyde_canvas::Transform2D::translate(50.0, 30.0));
+        let frame = tree.render();
+
+        let mut set_clip = None;
+        let mut push = None;
+        let mut pop = None;
+        let mut clear = None;
+        for (i, cmd) in frame.draw_order.iter().enumerate() {
+            match cmd {
+                bastyde_canvas::DrawCommand::SetClip(_) => set_clip = set_clip.or(Some(i)),
+                bastyde_canvas::DrawCommand::PushTransform(_) => push = push.or(Some(i)),
+                bastyde_canvas::DrawCommand::PopTransform => pop = Some(i),
+                bastyde_canvas::DrawCommand::ClearClip => clear = Some(i),
+                _ => {}
+            }
+        }
+        let (sc, pt, pop, cc) = (
+            set_clip.expect("SetClip emitted"),
+            push.expect("PushTransform emitted"),
+            pop.expect("PopTransform emitted"),
+            clear.expect("ClearClip emitted"),
+        );
+        assert!(
+            sc < pt,
+            "clip must open before the transform: SetClip@{sc}, PushTransform@{pt}; order={:?}",
+            frame.draw_order
+        );
+        assert!(
+            pop < cc,
+            "clip must close after the transform: PopTransform@{pop}, ClearClip@{cc}"
+        );
     }
 
     #[test]
