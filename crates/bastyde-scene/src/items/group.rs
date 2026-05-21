@@ -194,10 +194,10 @@ impl SceneItem for GroupItem {
     /// so clicks fall through to items beneath. Without this
     /// override the snapshot would AABB-hit and capture every event
     /// over the group's rect, blocking the items it contains.
-    fn clone_shape_test(&self) -> Box<dyn Fn(Point) -> bool + 'static> {
+    fn clone_shape_test(&self) -> Box<dyn Fn(Point, f32) -> bool + 'static> {
         let is_visual = self.is_visual();
         let bounds = self.local_bounds;
-        Box::new(move |p| is_visual && bounds.contains(p))
+        Box::new(move |p, _view_scale| is_visual && bounds.contains(p))
     }
 
     fn thumbnail_color(&self) -> Color {

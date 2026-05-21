@@ -4941,9 +4941,9 @@ fn rect_item_default_clone_shape_test_aabb_hits_as_before() {
     use crate::items::RectItem;
     let item = RectItem::new(Rect::new(10.0, 10.0, 30.0, 30.0));
     let test = item.clone_shape_test();
-    assert!(test(Point::new(20.0, 20.0)));
-    assert!(!test(Point::new(5.0, 5.0)));
-    assert!(!test(Point::new(45.0, 45.0)));
+    assert!(test(Point::new(20.0, 20.0), 1.0));
+    assert!(!test(Point::new(5.0, 5.0), 1.0));
+    assert!(!test(Point::new(45.0, 45.0), 1.0));
 }
 
 // -----------------------------------------------------------------

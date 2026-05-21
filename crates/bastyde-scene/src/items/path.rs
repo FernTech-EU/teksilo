@@ -5,7 +5,7 @@
 //! line workhorse).
 
 use accesskit::Role;
-use bastyde_canvas::{Canvas, Path, Point, Rect, StrokeStyle};
+use bastyde_canvas::{Canvas, Path, Point, Rect, StrokeSpace, StrokeStyle};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_tokens::Color;
 
@@ -124,7 +124,7 @@ impl SceneItem for PathItem {
         )
     }
 
-    fn clone_shape_test(&self) -> Box<dyn Fn(Point) -> bool + 'static> {
+    fn clone_shape_test(&self) -> Box<dyn Fn(Point, f32) -> bool + 'static> {
         // Capture the data needed for hit-test without holding a
         // borrow on `self`. The `SceneView` snapshot stores the
         // returned closure and consults it on every pointer event,
@@ -133,9 +133,24 @@ impl SceneItem for PathItem {
         let path = self.path.clone();
         let local_bounds = self.local_bounds;
         let has_fill = self.fill.is_some();
-        let stroke_width = self.stroke.as_ref().map(|(_, s)| s.width);
-        Box::new(move |local_pt| {
-            path_shape_contains(&path, local_bounds, has_fill, stroke_width, local_pt)
+        // (stroke width, is-cosmetic). A cosmetic stroke's width is in DEVICE
+        // pixels, so its visual half-width in scene coordinates shrinks as the
+        // view zooms in (and grows as it zooms out). Convert per-event using
+        // the live view scale so the clickable band tracks the rendered line
+        // at any zoom; a logical stroke's width is already in scene units.
+        let stroke = self
+            .stroke
+            .as_ref()
+            .map(|(_, s)| (s.width, s.space == StrokeSpace::Device));
+        Box::new(move |local_pt, view_scale| {
+            let scene_width = stroke.map(|(w, cosmetic)| {
+                if cosmetic && view_scale > 1e-3 {
+                    w / view_scale
+                } else {
+                    w
+                }
+            });
+            path_shape_contains(&path, local_bounds, has_fill, scene_width, local_pt)
         })
     }
 
@@ -294,5 +309,33 @@ mod tests {
             .quad_to(Point::new(50.0, 100.0), Point::new(100.0, 0.0));
         let item = PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 100.0)).stroke(Color::BLACK, 2.0);
         assert!(item.shape_contains(Point::new(50.0, 99.0)));
+    }
+
+    #[test]
+    fn cosmetic_path_hit_band_tracks_zoom() {
+        // A cosmetic stroke's width is in device px, so its scene-coord hit
+        // band must shrink as the view zooms in. A point 3 scene-units off a
+        // cosmetic 4px line is inside the band at 1× but outside at 4×.
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 0.0)).line_to(Point::new(100.0, 0.0));
+        let item =
+            PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 8.0)).stroke_cosmetic(Color::BLACK, 4.0);
+        let test = item.clone_shape_test();
+        let p = Point::new(50.0, 3.0);
+        assert!(test(p, 1.0), "cosmetic band at 1x: width 4 → tolerance 4 → hit");
+        assert!(
+            !test(p, 4.0),
+            "cosmetic band shrinks at 4x: width 1 → tolerance 2.5 → miss"
+        );
+
+        // A LOGICAL stroke's width is already in scene units, so its band is
+        // unaffected by the view scale (regression guard).
+        let mut path2 = Path::new();
+        path2.move_to(Point::new(0.0, 0.0)).line_to(Point::new(100.0, 0.0));
+        let logical =
+            PathItem::new(path2, Rect::new(0.0, 0.0, 100.0, 8.0)).stroke(Color::BLACK, 4.0);
+        let test_l = logical.clone_shape_test();
+        assert!(test_l(p, 1.0), "logical band hit at 1x");
+        assert!(test_l(p, 4.0), "logical band unchanged by zoom");
     }
 }

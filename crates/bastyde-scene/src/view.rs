@@ -217,8 +217,10 @@ struct HandlerSnapshotEntry {
     scene_transform: bastyde_canvas::Transform2D,
     /// Item-local hit-test predicate, cloned from the trait via a
     /// small wrapper. Returns `true` when a local point is inside
-    /// the item's exact shape.
-    shape_contains: Rc<dyn Fn(Point) -> bool>,
+    /// the item's exact shape; the second argument is the live view
+    /// scale (zoom) so cosmetic-stroke hit bands convert to scene
+    /// coordinates.
+    shape_contains: Rc<dyn Fn(Point, f32) -> bool>,
     /// z-order (used to pick topmost on overlap).
     z: f32,
     /// Item-level handler closures, cloned at snapshot time. `None`
@@ -1770,6 +1772,11 @@ impl Widget for SceneView {
                  -> Option<HandlerSnapshotEntry> {
                     let snap = handler_snapshot.borrow();
                     let view_xform = view_xform_signal.get();
+                    // Logical view zoom (uniform scale of the linear part) —
+                    // passed to each item's shape-test so a cosmetic
+                    // (device-pixel) stroke's clickable band is converted to
+                    // scene coordinates at the current zoom.
+                    let view_scale = view_xform.m[0].hypot(view_xform.m[1]);
                     for entry in snap.iter() {
                         if entry.ignores_xform {
                             let screen_anchor = view_xform.apply_point(entry.scene_anchor);
@@ -1786,7 +1793,9 @@ impl Widget for SceneView {
                                 screen_pt.x - screen_anchor.x,
                                 screen_pt.y - screen_anchor.y,
                             );
-                            if (entry.shape_contains)(local_pt) {
+                            // Screen-anchored items ignore the view transform,
+                            // so their hit-test runs at unit scale.
+                            if (entry.shape_contains)(local_pt, 1.0) {
                                 return Some(entry.clone());
                             }
                             continue;
@@ -1800,7 +1809,7 @@ impl Widget for SceneView {
                             .inverse()
                             .map(|inv| inv.apply_point(scene_pt))
                             .unwrap_or(Point::ZERO);
-                        if (entry.shape_contains)(local_pt) {
+                        if (entry.shape_contains)(local_pt, view_scale) {
                             return Some(entry.clone());
                         }
                     }
@@ -2652,7 +2661,8 @@ impl Widget for SceneView {
                 // GroupItem logical-only) override `clone_shape_test`
                 // to capture the data they need; default impl returns
                 // an AABB predicate over `local_bounds`.
-                let shape_contains: Rc<dyn Fn(Point) -> bool> = item.clone_shape_test().into();
+                let shape_contains: Rc<dyn Fn(Point, f32) -> bool> =
+                    item.clone_shape_test().into();
                 let local_bounds = self.scene.local_bounds(id).unwrap_or(Rect::ZERO);
                 let flags = self.scene.flags(id).unwrap_or_default();
                 let ignores_xform =
