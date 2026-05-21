@@ -1674,7 +1674,12 @@ impl Widget for SceneView {
         // parent offset still maps scene-coord (sx, sy) to screen
         // (bounds.x + zoom*sx + pan.x, bounds.y + zoom*sy + pan.y).
         let self_id = ctx.self_id();
-        ctx.set_transform(self_id, self.view_transform_signal.clone());
+        // A *content* transform: the SceneView's bounds are a fixed screen
+        // viewport and this pan/zoom only moves the scene content. Marking it
+        // as such keeps the whole viewport hit-testable at any pan (a *self*
+        // transform like Scale/Rotate would shift the hittable region with the
+        // content — see `WidgetNode::content_transform`).
+        ctx.set_content_transform(self_id, self.view_transform_signal.clone());
         // Capture for the AT-redirect auto-graft hook.
         // The hook is `&self`; without a stash here it has no way
         // to derive its own `WidgetId` to compute synthetic NodeIds.

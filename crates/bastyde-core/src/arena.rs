@@ -127,6 +127,20 @@ pub struct WidgetNode {
     /// widget). The `Scale` and `Rotate` widgets set this on their own
     /// node.
     pub(crate) transform_prop: Option<Prop<bastyde_canvas::Transform2D>>,
+    /// Whether [`transform_prop`](Self::transform_prop) transforms this node's
+    /// **content** within a fixed parent-space viewport (`true`), versus
+    /// transforming the **node itself** (`false`, the default).
+    ///
+    /// `Scale` / `Rotate` are *self* transforms: the node's own bounds move
+    /// with the transform, so hit-testing inverse-applies the transform before
+    /// the bounds test (a click lands where the scaled/rotated visual is).
+    ///
+    /// `SceneView` is a *content* transform: its bounds are a fixed screen
+    /// viewport and the pan/zoom only moves its content, so hit-testing must
+    /// test the bounds in parent space (keeping the whole visible viewport
+    /// interactive at any pan) and apply the transform only when descending
+    /// into children. Set via `BuildContext::set_content_transform`.
+    pub content_transform: bool,
     /// Optional Gaussian-equivalent blur radius applied to this widget's
     /// entire subtree during paint. The render walker emits
     /// `BeginBlurredSubtree { bounds, radius }` before walking the
@@ -281,6 +295,7 @@ impl WidgetArena {
             event_pass_through: false,
             opacity_prop: None,
             transform_prop: None,
+            content_transform: false,
             blur_prop: None,
             cached_paint: None,
             last_painted_epoch: 0,
@@ -340,6 +355,7 @@ impl WidgetArena {
             event_pass_through: false,
             opacity_prop: None,
             transform_prop: None,
+            content_transform: false,
             blur_prop: None,
             cached_paint: None,
             last_painted_epoch: 0,
@@ -514,20 +530,38 @@ impl WidgetArena {
         if !self.is_active(id) || Some(id) == exclude {
             return None;
         }
-        // If this node carries a `set_transform` scope, the render walker
-        // pushes that transform onto its stack around this node's own
-        // paint AND its subtree. Hit-testing must mirror that composition:
-        // the input point arrives in this node's parent-effective space;
-        // apply this node's transform inverse once, then both the node's
-        // own bounds test and the recursion into children operate in the
-        // new local space. Identity transforms (and missing transform_prop)
-        // are skipped so the hot path stays scalar.
-        let local_point = match self
+        // The input point arrives in this node's parent-effective space. A
+        // `set_transform` scope is composed by the render walker around this
+        // node's subtree, so hit-testing mirrors it by inverse-applying the
+        // transform once. *Which* rectangle the transform applies to depends
+        // on whether it's a **content** transform or a **self** transform
+        // (see `WidgetNode::content_transform`):
+        //
+        // * A **content** transform (`content_transform`, e.g. `SceneView`) is
+        //   a fixed viewport: its bounds are a rectangle in PARENT space and
+        //   the transform pans / zooms only its CONTENT. Test the bounds
+        //   against the parent-space point; inverse-transform only for
+        //   descending into children, so the whole visible viewport stays
+        //   interactive regardless of pan / zoom. (Without this, panning the
+        //   content shifts the hittable region off the viewport — clicks /
+        //   wheel over the visible scene fall through to whatever is behind.)
+        // * A **self** transform (`Scale` / `Rotate`, whose own bounds move
+        //   with the transform) inverse-transforms first, then tests its
+        //   bounds in the resulting local space (a click lands where the
+        //   scaled / rotated visual actually is).
+        //
+        // Identity / missing transforms collapse both paths to the scalar
+        // case, so the hot path stays cheap. `content_transform` is
+        // `SceneView`-only today, so this only changes SceneView hit-testing;
+        // `Scale` / `Rotate` (also `clips_children`) keep the self-transform
+        // path.
+        let transform = self
             .get(id)
             .and_then(|n| n.transform_prop.as_ref())
             .map(|p| p.get())
-            .filter(|t| !t.is_identity())
-        {
+            .filter(|t| !t.is_identity());
+        let content_transform = self.get(id).map(|n| n.content_transform).unwrap_or(false);
+        let child_point = match transform {
             Some(t) => match t.inverse() {
                 Some(inv) => inv.apply_point(point),
                 // A degenerate transform (collapsed axis) hides the
@@ -536,14 +570,18 @@ impl WidgetArena {
             },
             None => point,
         };
+        // Content-transform nodes test their (parent-space) viewport against
+        // the incoming point; everything else tests in the inverse-transformed
+        // local space.
+        let bounds_point = if content_transform { point } else { child_point };
         let bounds = self.bounds(id);
-        if !bounds.contains(local_point) {
+        if !bounds.contains(bounds_point) {
             return None;
         }
         let pass_through = self.get(id).map(|n| n.event_pass_through).unwrap_or(false);
         let children: Vec<WidgetId> = self.children(id).to_vec();
         for &child in children.iter().rev() {
-            if let Some(hit) = self.hit_test_recursive(child, local_point, exclude) {
+            if let Some(hit) = self.hit_test_recursive(child, child_point, exclude) {
                 return Some(hit);
             }
         }
@@ -963,5 +1001,58 @@ mod tests {
         let roots = arena.roots();
         assert_eq!(roots.len(), 1);
         assert_eq!(roots[0], root);
+    }
+
+    #[test]
+    fn content_transform_node_claims_viewport_in_parent_space() {
+        // A content-transform node (the SceneView pattern) is a fixed
+        // viewport: its bounds are tested in PARENT space and the transform
+        // only positions its content, so the whole visible viewport stays
+        // hittable regardless of the content pan/zoom. Before the fix, the
+        // bounds were tested in content space, so a content pan shifted the
+        // hittable region off the viewport.
+        use bastyde_canvas::{Point, Rect, Transform2D};
+        let mut arena = WidgetArena::new();
+        let id = arena.insert(Box::new(FillWidget::new()));
+        {
+            let node = arena.get_mut(id).unwrap();
+            node.bounds = Rect::new(0.0, 0.0, 200.0, 100.0);
+            node.clips_children = true;
+            node.content_transform = true;
+            // Content panned by (50, 30).
+            node.transform_prop = Some(Prop::Static(Transform2D::translate(50.0, 30.0)));
+        }
+        // Points across the whole parent-space viewport hit, regardless of the
+        // pan (these all missed before the fix).
+        assert_eq!(arena.hit_test_at(Point::new(10.0, 10.0), None), Some(id));
+        assert_eq!(arena.hit_test_at(Point::new(100.0, 50.0), None), Some(id));
+        assert_eq!(arena.hit_test_at(Point::new(199.0, 99.0), None), Some(id));
+        // Outside the viewport: miss.
+        assert_eq!(arena.hit_test_at(Point::new(250.0, 50.0), None), None);
+    }
+
+    #[test]
+    fn self_transform_node_tests_bounds_in_local_space() {
+        // Regression guard: a *self* transform wrapper (Scale / Rotate, NOT a
+        // content transform) keeps the original semantics — its own bounds
+        // move with the transform, so the point is inverse-transformed before
+        // the bounds test. `clips_children` is irrelevant here (Scale clips
+        // too); only `content_transform` selects the viewport path.
+        use bastyde_canvas::{Point, Rect, Transform2D};
+        let mut arena = WidgetArena::new();
+        let id = arena.insert(Box::new(FillWidget::new()));
+        {
+            let node = arena.get_mut(id).unwrap();
+            node.bounds = Rect::new(0.0, 0.0, 100.0, 100.0);
+            node.clips_children = true; // Scale clips, but is NOT content_transform.
+            node.content_transform = false;
+            // Visually scaled to 50x50 around the origin.
+            node.transform_prop = Some(Prop::Static(Transform2D::scale(0.5, 0.5)));
+        }
+        // Inside the scaled-down 50x50 visual → hit.
+        assert_eq!(arena.hit_test_at(Point::new(25.0, 25.0), None), Some(id));
+        // Past the scaled-down visual (but inside the un-scaled 100x100 bounds
+        // in parent space) → miss, because the bounds test is in local space.
+        assert_eq!(arena.hit_test_at(Point::new(75.0, 75.0), None), None);
     }
 }
