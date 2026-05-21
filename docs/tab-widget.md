@@ -794,25 +794,6 @@ TabWidget::new(selected)
 
 ---
 
-## Migration from the legacy `TabWidget::new(...).tab(...)` API
-
-The pre-rewrite `.tab(label, content)` chain is preserved as a thin
-shim — existing code keeps compiling. New work should prefer the
-data-source-driven shape:
-
-| Old                                     | New                                                    |
-|-----------------------------------------|--------------------------------------------------------|
-| `TabWidget::new(idx).tab(label, w)`     | `TabWidget::new(selected_id).static_tab(info, w)`      |
-| `TabWidget::new(idx).tab_id(label, id)` | `TabWidget::new(selected_id).static_tab_id(info, id)`  |
-| `selected: Signal<usize>`               | `selected: Signal<Option<TabId>>`                      |
-| `.trailing_slot(w)`                     | `.bar_trailing_slot(w)`                                |
-
-The new shape unlocks add/remove/reorder at runtime, locale-reactive
-labels, drag-drop, pinning, and the overflow dropdown — none of which
-the index-based shim could express.
-
----
-
 ## Demos
 
 - `cargo run -p tab-widget` — full showcase: static tabs (pinned,
@@ -821,5 +802,5 @@ the index-based shim could express.
   button, theme / orientation / sizing toggle buttons, drag-reorder,
   overflow dropdown, pinned-tab tooltip promotion, status bar showing
   the resolved selection.
-- `cargo run -p widget-catalog` — TabWidget appears in the catalog with
-  the legacy shim demo for visual regression checks.
+- `cargo run -p widget-catalog` — TabWidget appears in the catalog for
+  visual regression checks.

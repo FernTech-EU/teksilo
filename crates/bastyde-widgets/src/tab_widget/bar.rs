@@ -1,11 +1,13 @@
 //! `TabBar<T>` — header strip driven by a data source.
 //!
-//! Horizontal orientation only, with shared / independent sizing.
-//! Bar-leading and bar-trailing slots are wired. ScrollArea around
-//! the headers row provides overflow scroll on its own (no arrows /
-//! dropdown yet — not yet implemented). DnD reorder, close buttons,
-//! pinned tabs, vertical and multi-line orientations are not yet
-//! implemented.
+//! Horizontal and vertical orientations, with shared / independent
+//! sizing. Bar-leading and bar-trailing slots are wired. Overflow is
+//! handled by a `ScrollArea` around the headers row, plus optional
+//! scroll arrows and a "show all tabs" overflow dropdown (both on by
+//! default). Closable tabs (with middle-click close), drag-to-reorder
+//! with edge auto-scroll, and a leading icon-only pinned-tab strip are
+//! all supported. Multi-line (multi-row) wrapping is the one layout
+//! mode not yet implemented.
 //!
 //! The data source is consumed via the `pub(crate)` [`ListSource`]
 //! abstraction so callers can pass either a `ListModel<T>` (clonable,
