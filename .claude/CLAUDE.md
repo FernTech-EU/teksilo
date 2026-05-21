@@ -40,6 +40,7 @@ cargo run -p scene_corkboard                    # Scene-based story corkboard (w
 cargo run -p chart-demo                         # BarChart / LineChart / PieChart (+ donut + center slot)
 cargo run -p toast-demo                         # Toast notifications + persistent NotificationLog + bell button + dialog
 cargo run -p async-demo                         # bastyde-async: spawn_local + spawn_blocking + spawn_local_with (opt-in async executor)
+cargo run -p tab-migration                      # Cross-TabWidget tab drag-and-drop (migrate tabs between two groups)
 ```
 
 ## Tools

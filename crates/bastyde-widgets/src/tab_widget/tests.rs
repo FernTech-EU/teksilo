@@ -1572,6 +1572,340 @@ fn tab_bar_drains_selection_to_none_when_model_emptied() {
     assert_eq!(selected.get(), None, "empty model drains selection");
 }
 
+// ─── Cross-bar tab transfer (app-internal DnD between TabBars) ──────
+
+/// Build a dynamic `TabHandle` carrying an `Rc`-shared marker as its
+/// payload so a test can prove (via `Rc::ptr_eq`) that a migrated tab
+/// carries the *same* heavy state, not a rebuilt copy.
+fn doc_handle(title: &str, marker: std::rc::Rc<u32>) -> TabHandle {
+    let payload: std::rc::Rc<dyn std::any::Any> = marker;
+    TabHandle::dynamic_shared(
+        TabId::fresh(),
+        "doc",
+        TabInfo::new().title(label(title)).closable(true),
+        payload,
+    )
+}
+
+fn doc_delegate() -> TabDelegate<TabHandle> {
+    TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| label("")))
+}
+
+/// Remove the tab with `id` from a `ListModel<TabHandle>` (the model
+/// mutation an app does in `on_transfer_out`).
+fn remove_by_id(model: &ListModel<TabHandle>, id: TabId) {
+    if let Some(pos) = (0..model.len()).find(|&i| model.with_item(i, |h| h.id) == Some(id)) {
+        let _ = model.remove(pos);
+    }
+}
+
+/// Center of the `index`-th unpinned header in a stand-alone `TabBar`.
+fn header_center(tree: &WidgetTree, bar_id: WidgetId, index: usize) -> bastyde_canvas::Point {
+    let row = data_source_header_row(tree, bar_id);
+    let header = tree.child_widget(row, index);
+    tree.bounds(header).center()
+}
+
+#[test]
+fn cross_bar_transfer_moves_tab_and_preserves_state() {
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+
+    let marker = std::rc::Rc::new(42_u32);
+    let dragged = doc_handle("A1", marker.clone());
+    let dragged_id = dragged.id;
+    let dragged_payload = dragged.payload.clone();
+
+    let model_a = ListModel::from_vec(vec![dragged, doc_handle("A2", std::rc::Rc::new(2))]);
+    let model_b = ListModel::from_vec(vec![doc_handle("B1", std::rc::Rc::new(9))]);
+
+    let bar_a = TabBar::horizontal(
+        model_a.clone(),
+        doc_delegate(),
+        Signal::new(None),
+        |_, h: &TabHandle| h.id,
+    )
+    .show_scroll_arrows(false)
+    .show_overflow_dropdown(false)
+    .on_transfer_out({
+        let m = model_a.clone();
+        move |id, _ctx| remove_by_id(&m, id)
+    });
+
+    let bar_b = TabBar::horizontal(
+        model_b.clone(),
+        doc_delegate(),
+        Signal::new(None),
+        |_, h: &TabHandle| h.id,
+    )
+    .show_scroll_arrows(false)
+    .show_overflow_dropdown(false)
+    .on_tab_received({
+        let m = model_b.clone();
+        move |handle, idx, _ctx| m.insert(idx.min(m.len()), handle)
+    });
+
+    let a_id = tree.add(bar_a);
+    let b_id = tree.add(bar_b);
+    let expand_a = tree.add(crate::Expand::new().flex(1.0).child_id(a_id));
+    let expand_b = tree.add(crate::Expand::new().flex(1.0).child_id(b_id));
+    tree.add(
+        crate::HStack::new()
+            .add_child(expand_a)
+            .add_child(expand_b),
+    );
+    tree.layout(SizeProposal::exact(900.0, 80.0));
+
+    // Drag A's first tab onto B's header strip.
+    let from = header_center(&tree, a_id, 0);
+    let to = header_center(&tree, b_id, 0);
+    tree.drag(from, to);
+    tree.layout(SizeProposal::exact(900.0, 80.0));
+
+    // Moved out of A, into B.
+    assert_eq!(model_a.len(), 1, "source bar lost the dragged tab");
+    assert!(
+        (0..model_a.len()).all(|i| model_a.with_item(i, |h| h.id) != Some(dragged_id)),
+        "dragged tab no longer in source model"
+    );
+    assert_eq!(model_b.len(), 2, "target bar gained the dragged tab");
+    let landed = (0..model_b.len()).find(|&i| model_b.with_item(i, |h| h.id) == Some(dragged_id));
+    assert!(landed.is_some(), "dragged tab id present in target model");
+
+    // State preserved: the migrated handle carries the *same* Rc
+    // payload (proves a real move, not a reconstruction).
+    let same_state = model_b
+        .with_item(landed.unwrap(), |h| std::rc::Rc::ptr_eq(&h.payload, &dragged_payload))
+        .unwrap_or(false);
+    assert!(same_state, "migrated tab must carry the same Rc<dyn Any> state");
+    assert_eq!(*marker, 42, "shared marker still reachable");
+}
+
+#[test]
+fn cross_bar_rejected_when_target_not_opted_in() {
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+
+    let dragged = doc_handle("A1", std::rc::Rc::new(1));
+    let dragged_id = dragged.id;
+    let model_a = ListModel::from_vec(vec![dragged, doc_handle("A2", std::rc::Rc::new(2))]);
+    let model_b = ListModel::from_vec(vec![doc_handle("B1", std::rc::Rc::new(9))]);
+
+    // Source opts in; target does NOT accept external tabs.
+    let bar_a = TabBar::horizontal(
+        model_a.clone(),
+        doc_delegate(),
+        Signal::new(None),
+        |_, h: &TabHandle| h.id,
+    )
+    .show_scroll_arrows(false)
+    .show_overflow_dropdown(false)
+    .on_transfer_out({
+        let m = model_a.clone();
+        move |id, _ctx| remove_by_id(&m, id)
+    });
+
+    let bar_b = TabBar::horizontal(
+        model_b.clone(),
+        doc_delegate(),
+        Signal::new(None),
+        |_, h: &TabHandle| h.id,
+    )
+    .show_scroll_arrows(false)
+    .show_overflow_dropdown(false);
+
+    let a_id = tree.add(bar_a);
+    let b_id = tree.add(bar_b);
+    let expand_a = tree.add(crate::Expand::new().flex(1.0).child_id(a_id));
+    let expand_b = tree.add(crate::Expand::new().flex(1.0).child_id(b_id));
+    tree.add(crate::HStack::new().add_child(expand_a).add_child(expand_b));
+    tree.layout(SizeProposal::exact(900.0, 80.0));
+
+    let from = header_center(&tree, a_id, 0);
+    let to = header_center(&tree, b_id, 0);
+    tree.drag(from, to);
+    tree.layout(SizeProposal::exact(900.0, 80.0));
+
+    assert_eq!(model_a.len(), 2, "tab stays in source when target rejects");
+    assert!(
+        (0..model_a.len()).any(|i| model_a.with_item(i, |h| h.id) == Some(dragged_id)),
+        "dragged tab still in source model"
+    );
+    assert_eq!(model_b.len(), 1, "target model unchanged");
+}
+
+#[test]
+fn intra_bar_reorder_does_not_fire_transfer_out() {
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+
+    let model = ListModel::from_vec(vec![
+        doc_handle("T0", std::rc::Rc::new(0)),
+        doc_handle("T1", std::rc::Rc::new(1)),
+        doc_handle("T2", std::rc::Rc::new(2)),
+    ]);
+    let transfer_out_calls = std::rc::Rc::new(std::cell::Cell::new(0usize));
+
+    let bar = TabBar::horizontal(
+        model.clone(),
+        doc_delegate(),
+        Signal::new(None),
+        |_, h: &TabHandle| h.id,
+    )
+    .show_scroll_arrows(false)
+    .show_overflow_dropdown(false)
+    .reorderable(true)
+    .on_reorder({
+        let m = model.clone();
+        move |from, to, _ctx| m.move_item(from, to)
+    })
+    .on_transfer_out({
+        let calls = transfer_out_calls.clone();
+        move |_id, _ctx| calls.set(calls.get() + 1)
+    });
+
+    let bar_id = tree.add(bar);
+    let expand = tree.add(crate::Expand::new().flex(1.0).child_id(bar_id));
+    tree.add(crate::HStack::new().add_child(expand));
+    tree.layout(SizeProposal::exact(600.0, 80.0));
+
+    // Drag tab 0 onto tab 2's slot — an intra-bar reorder.
+    let from = header_center(&tree, bar_id, 0);
+    let to = header_center(&tree, bar_id, 2);
+    tree.drag(from, to);
+    tree.layout(SizeProposal::exact(600.0, 80.0));
+
+    assert_eq!(
+        transfer_out_calls.get(),
+        0,
+        "intra-bar reorder must NOT fire on_transfer_out (would drop the moved tab)"
+    );
+    assert_eq!(model.len(), 3, "reorder keeps every tab in the model");
+}
+
+/// A non-tab in-app drag payload (stands in for a file dragged from a
+/// tree / list).
+#[derive(Clone, Debug)]
+struct FileRef {
+    name: String,
+}
+
+/// A leaf widget that, on drag-start, publishes a `FileRef` payload —
+/// i.e. a drag that is *not* a `TabBarDragData`.
+#[derive(Debug)]
+struct FileDragSource {
+    name: String,
+}
+
+impl Widget for FileDragSource {
+    fn build(&mut self, ctx: &mut bastyde_core::build_context::BuildContext) -> Vec<WidgetId> {
+        let self_id = ctx.self_id();
+        let name = self.name.clone();
+        let hs = bastyde_core::widget_builder::HandlerSet::new().on_drag(move |phase, ctx| {
+            if let bastyde_core::gesture::DragPhase::Started { .. } = phase {
+                ctx.start_drag(
+                    self_id,
+                    bastyde_core::drag_payload::DragPayload::typed(FileRef { name: name.clone() }),
+                );
+            }
+        });
+        ctx.apply_self_handlers(hs);
+        Vec::new()
+    }
+
+    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        Size::new(120.0, 48.0).into()
+    }
+}
+
+#[test]
+fn on_external_drop_accepts_non_tab_payload() {
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+
+    let model = ListModel::from_vec(vec![doc_handle("T0", std::rc::Rc::new(0))]);
+    let dropped: std::rc::Rc<std::cell::RefCell<Vec<(String, usize)>>> =
+        std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+
+    let bar = TabBar::horizontal(
+        model.clone(),
+        doc_delegate(),
+        Signal::new(None),
+        |_, h: &TabHandle| h.id,
+    )
+    .show_scroll_arrows(false)
+    .show_overflow_dropdown(false)
+    .on_external_drop({
+        let dropped = dropped.clone();
+        move |payload, idx, _ctx| {
+            if let Some(file) = payload.get_typed::<FileRef>() {
+                dropped.borrow_mut().push((file.name.clone(), idx));
+                true
+            } else {
+                false
+            }
+        }
+    });
+
+    let bar_id = tree.add(bar);
+    let source_id = tree.add(FileDragSource {
+        name: "notes.txt".to_string(),
+    });
+    let expand_bar = tree.add(crate::Expand::new().flex(1.0).child_id(bar_id));
+    let expand_src = tree.add(crate::Expand::new().flex(1.0).child_id(source_id));
+    tree.add(
+        crate::HStack::new()
+            .add_child(expand_src)
+            .add_child(expand_bar),
+    );
+    tree.layout(SizeProposal::exact(900.0, 80.0));
+
+    let from = tree.bounds(source_id).center();
+    let to = header_center(&tree, bar_id, 0);
+    tree.drag(from, to);
+
+    let calls = dropped.borrow();
+    assert_eq!(calls.len(), 1, "on_external_drop should fire once");
+    assert_eq!(calls[0].0, "notes.txt", "payload delivered to handler");
+}
+
+#[test]
+fn non_tab_payload_rejected_without_handler() {
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+
+    let model = ListModel::from_vec(vec![doc_handle("T0", std::rc::Rc::new(0))]);
+    // Reorderable bar, but NO on_external_drop: a FileRef drag must be
+    // ignored (the bar only consumes TabBarDragData here).
+    let bar = TabBar::horizontal(
+        model.clone(),
+        doc_delegate(),
+        Signal::new(None),
+        |_, h: &TabHandle| h.id,
+    )
+    .show_scroll_arrows(false)
+    .show_overflow_dropdown(false)
+    .reorderable(true)
+    .on_reorder({
+        let m = model.clone();
+        move |from, to, _| m.move_item(from, to)
+    });
+
+    let bar_id = tree.add(bar);
+    let source_id = tree.add(FileDragSource {
+        name: "x.txt".to_string(),
+    });
+    let expand_bar = tree.add(crate::Expand::new().flex(1.0).child_id(bar_id));
+    let expand_src = tree.add(crate::Expand::new().flex(1.0).child_id(source_id));
+    tree.add(
+        crate::HStack::new()
+            .add_child(expand_src)
+            .add_child(expand_bar),
+    );
+    tree.layout(SizeProposal::exact(900.0, 80.0));
+
+    // Should not panic, and the model is untouched (no tab created).
+    let from = tree.bounds(source_id).center();
+    let to = header_center(&tree, bar_id, 0);
+    tree.drag(from, to);
+    assert_eq!(model.len(), 1, "non-tab drop without a handler is a no-op");
+}
+
 // ─── Suppress unused-warning when only some tests run ───────────────
 #[cfg(test)]
 fn _orientation_export_used() {

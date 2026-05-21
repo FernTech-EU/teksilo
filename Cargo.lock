@@ -4644,6 +4644,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "tab-migration"
+version = "0.4.0"
+dependencies = [
+ "bastyde",
+]
+
+[[package]]
 name = "tab-widget"
 version = "0.4.0"
 dependencies = [

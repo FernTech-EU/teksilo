@@ -56,6 +56,7 @@ use bastyde_canvas::{Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
+use bastyde_core::drag_payload::DragPayload;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{
     EventContext, LayoutContext, LayoutResponse, PendingChild, Widget, WidgetPlacement,
@@ -250,6 +251,22 @@ pub struct TabWidget {
     on_close: Option<Rc<dyn Fn(TabId, &mut EventContext)>>,
     on_reorder: Option<Rc<dyn Fn(TabId, usize, &mut EventContext)>>,
     on_pin_toggle: Option<Rc<dyn Fn(TabId, bool, &mut EventContext)>>,
+    /// Cross-bar transfer opt-in. Enables this `TabWidget` to both
+    /// hand its (dynamic) tabs to other accepting `TabWidget`s and
+    /// receive tabs from them.
+    accept_external_tabs: bool,
+    /// Target-side override: insert a received tab. Receives the moved
+    /// [`TabHandle`] and the insertion index *within the dynamic
+    /// region*. Defaults to inserting into [`dynamic_model`](Self::dynamic_model).
+    on_tab_received: Option<Rc<dyn Fn(TabHandle, usize, &mut EventContext)>>,
+    /// Source-side override: one of this widget's tabs was accepted by
+    /// another `TabWidget`. Receives the transferred [`TabId`].
+    /// Defaults to removing it from [`dynamic_model`](Self::dynamic_model).
+    on_transfer_out: Option<Rc<dyn Fn(TabId, &mut EventContext)>>,
+    /// Handler for **non-tab** drops (an in-app foreign drag carrying
+    /// app data, or an OS file/text/URL drop). Receives the raw
+    /// payload and the insertion index *within the dynamic region*.
+    on_external_drop: Option<Rc<dyn Fn(&DragPayload, usize, &mut EventContext) -> bool>>,
     bar_leading_slot: Option<BarSlot>,
     bar_trailing_slot: Option<BarSlot>,
 
@@ -296,6 +313,10 @@ impl TabWidget {
             on_close: None,
             on_reorder: None,
             on_pin_toggle: None,
+            accept_external_tabs: false,
+            on_tab_received: None,
+            on_transfer_out: None,
+            on_external_drop: None,
             bar_leading_slot: None,
             bar_trailing_slot: None,
             root_child_id: None,
@@ -571,6 +592,82 @@ impl TabWidget {
     /// tab's `info.pinned`.
     pub fn on_pin_toggle(mut self, f: impl Fn(TabId, bool, &mut EventContext) + 'static) -> Self {
         self.on_pin_toggle = Some(Rc::new(f));
+        self
+    }
+
+    /// Opt into cross-`TabWidget` tab transfer (app-internal
+    /// drag-and-drop between two tabbed containers). When enabled,
+    /// this widget's **dynamic** tabs can be dragged out to any other
+    /// accepting `TabWidget`, and it accepts tabs dragged in from one,
+    /// painting an insertion-line indicator between its tabs.
+    ///
+    /// The dragged [`TabHandle`] moves intact — its `Rc<dyn Any>`
+    /// payload (the heavy per-tab state) is preserved, not rebuilt —
+    /// so the receiving widget must register a content factory for the
+    /// tab's `kind` via [`dynamic_tab`](Self::dynamic_tab).
+    ///
+    /// **Static tabs are excluded**: they have no factory on a
+    /// receiving widget, so they can never be transferred out (they
+    /// still reorder in place if [`reorderable`](Self::reorderable)).
+    ///
+    /// By default, accepting a tab inserts it into this widget's
+    /// [`dynamic_model`](Self::dynamic_model) and transferring one out
+    /// removes it from this widget's model. Override either side with
+    /// [`on_tab_received`](Self::on_tab_received) /
+    /// [`on_transfer_out`](Self::on_transfer_out). Default: off.
+    pub fn accept_external_tabs(mut self, on: bool) -> Self {
+        self.accept_external_tabs = on;
+        self
+    }
+
+    /// Override the target-side behaviour when a foreign tab is
+    /// dropped onto this widget. Receives `(handle, insertion_index,
+    /// ctx)` where `insertion_index` is within the **dynamic** tab
+    /// region. The app inserts the handle into its own model. Implies
+    /// [`accept_external_tabs(true)`](Self::accept_external_tabs).
+    ///
+    /// If unset, the default inserts the handle into
+    /// [`dynamic_model`](Self::dynamic_model) at the drop position.
+    pub fn on_tab_received(
+        mut self,
+        f: impl Fn(TabHandle, usize, &mut EventContext) + 'static,
+    ) -> Self {
+        self.on_tab_received = Some(Rc::new(f));
+        self.accept_external_tabs = true;
+        self
+    }
+
+    /// Override the source-side behaviour after one of this widget's
+    /// tabs has been accepted by another `TabWidget`. Receives the
+    /// transferred [`TabId`]; the app removes it from its own model.
+    /// Implies [`accept_external_tabs(true)`](Self::accept_external_tabs).
+    ///
+    /// If unset, the default removes the tab from
+    /// [`dynamic_model`](Self::dynamic_model).
+    pub fn on_transfer_out(mut self, f: impl Fn(TabId, &mut EventContext) + 'static) -> Self {
+        self.on_transfer_out = Some(Rc::new(f));
+        self.accept_external_tabs = true;
+        self
+    }
+
+    /// Accept **non-tab** drops onto the tab bar — an in-app foreign
+    /// drag (e.g. a file dragged from a `TreeView`, carrying app data)
+    /// or an OS file/text/URL drop. The bar shows an insertion-line
+    /// indicator while such a payload hovers; on drop, `f` runs with
+    /// the raw [`DragPayload`], the insertion index *within the dynamic
+    /// region*, and the firing context. Inspect the payload
+    /// (`get_typed::<T>()` / `files()` / `text()` / `uris()`) and, e.g.,
+    /// push a new `TabHandle` into your [`dynamic_model`](Self::dynamic_model);
+    /// return `true` if accepted.
+    ///
+    /// This is the "open a dropped file as a tab" hook (VS Code style).
+    /// Independent of [`accept_external_tabs`](Self::accept_external_tabs).
+    /// OS drops also require `BastydeAppBuilder::install_external_dnd()`.
+    pub fn on_external_drop(
+        mut self,
+        f: impl Fn(&DragPayload, usize, &mut EventContext) -> bool + 'static,
+    ) -> Self {
+        self.on_external_drop = Some(Rc::new(f));
         self
     }
 
@@ -861,6 +958,62 @@ impl Widget for TabWidget {
                     f(id, pinned, ctx);
                 }
             });
+        }
+
+        // Cross-bar transfer wiring. The bar speaks in unified model
+        // indices (static tabs first, then dynamic); the app speaks in
+        // dynamic-region indices and TabIds. Static tabs are excluded
+        // from transfer — they have no factory on a receiving widget.
+        if self.accept_external_tabs {
+            bar = bar
+                .accept_external_tabs(true)
+                .with_transferable_predicate(|_, h: &TabHandle| h.kind != STATIC_KIND);
+
+            // Target side: insert the received handle. The bar's
+            // insertion index is in unified model space; translate to
+            // a dynamic-region index for the app / default model.
+            let received_cb = self.on_tab_received.clone();
+            let dyn_model_for_recv = self.dynamic_model.clone();
+            bar = bar.on_tab_received_rc(Rc::new(
+                move |handle: TabHandle, to_model: usize, ctx: &mut EventContext| {
+                    let dyn_index = to_model.saturating_sub(static_count);
+                    if let Some(ref f) = received_cb {
+                        f(handle, dyn_index, ctx);
+                    } else if let Some(ref model) = dyn_model_for_recv {
+                        let idx = dyn_index.min(model.len());
+                        model.insert(idx, handle);
+                    }
+                },
+            ));
+
+            // Source side: remove the transferred tab by id.
+            let transfer_out_cb = self.on_transfer_out.clone();
+            let dyn_model_for_out = self.dynamic_model.clone();
+            bar = bar.on_transfer_out_rc(Rc::new(
+                move |tab_id: TabId, ctx: &mut EventContext| {
+                    if let Some(ref f) = transfer_out_cb {
+                        f(tab_id, ctx);
+                    } else if let Some(ref model) = dyn_model_for_out {
+                        let pos = (0..model.len())
+                            .find(|&i| model.with_item(i, |h| h.id) == Some(tab_id));
+                        if let Some(pos) = pos {
+                            let _ = model.remove(pos);
+                        }
+                    }
+                },
+            ));
+        }
+
+        // Non-tab drops (foreign in-app drag / OS file drop). Translate
+        // the bar's unified model index to a dynamic-region index for
+        // the app callback. Independent of `accept_external_tabs`.
+        if let Some(external_cb) = self.on_external_drop.clone() {
+            bar = bar.on_external_drop_rc(Rc::new(
+                move |payload: &DragPayload, to_model: usize, ctx: &mut EventContext| {
+                    let dyn_index = to_model.saturating_sub(static_count);
+                    (external_cb)(payload, dyn_index, ctx)
+                },
+            ));
         }
 
         if let Some(ref mut slot) = self.bar_leading_slot {
