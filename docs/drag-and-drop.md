@@ -391,6 +391,67 @@ avoid a single-thread deadlock). Windows / X11 decline (`begin_drag` returns
 `false`) and the framework keeps the in-app drag alive. Demo: the "Drag OUT" rows
 and "Internal drop target" in `cargo run -p file-drop`.
 
+### 11.6 The `DropTarget` widget
+
+[`DropTarget`](../crates/bastyde-widgets/src/drop_target.rs) is the *wrapping*
+counterpart to `DropZone`: instead of being a standalone "drop here" placeholder,
+it turns **any existing widget subtree** into a drop target without replacing its
+look. The wrapped child fills the bounds and stays fully visible; the highlight is
+a **border** stroked over the child (never an opaque fill that would hide it), plus
+an optional popup hint card centered in the zone. It reacts to **both** internal
+(typed `DragPayload`) and external (OS) drops through the same
+`on_drag_hover` / `on_drag_leave` / `on_drop` pipeline.
+
+```rust
+// Wrap a panel; accept image files; show a hint while an accepted drag hovers.
+DropTarget::new()
+    .child(my_panel)
+    .hint(TextWidget::new_literal("Drop your image here"))
+    .accept_external_extensions(["png", "jpg", "jpeg"])
+    .on_drop(|payload, _pos, _ctx| { import(payload.files()); true });
+
+// Typed internal drag — recovers the value even after an OS round-trip or
+// across windows (§11.5 typed re-entry), since it rides the unchanged
+// target-side pipeline.
+DropTarget::new()
+    .child(project_card)
+    .on_drop_typed::<ProjectRef>(|project, _pos, ctx| {
+        ctx.send_intent(AppIntent::Link(project));
+        true
+    });
+```
+
+**Accept filtering** (last-call-wins; default = accept everything once `on_drop`
+is set): `accept_any`, `accept_external` / `accept_external_files` /
+`accept_external_text` / `accept_external_extensions([…])`, `accept_typed::<T>()`,
+or `accept_when(|payload| …)` for full control. The external-extension filters
+mirror `DropZone`'s Wayland-aware split — optimistic at hover (file bytes haven't
+arrived yet, only advertised formats), real check at drop. `on_drop` re-checks the
+filter before invoking the callback (the hover gate is visual only; the framework
+still routes the drop to the target).
+
+**Caller-observable state.** `bind_is_targeted(Signal<bool>)` (SwiftUI's
+`isTargeted` pattern — `true` only while an *accepted* drag hovers) and
+`bind_drag_state(Signal<DropTargetDragState>)` (full `Idle` / `HoverAccept` /
+`HoverReject`) let the surrounding UI drive its own visuals. `on_drop_typed::<T>`
+implicitly sets `accept_typed::<T>()` and hands the extracted `T` to the callback.
+
+**Styling.** Tier-3 `DropTargetStyle` (default `RecipeDropTargetStyle`); per-call
+`DropTarget::style(…)` or theme-wide `theme.style_slots.drop_target`.
+`DropTargetVariant` (`Default` 2 px / `Prominent` 3 px / `Subtle` 1 px / `None`)
+sets the highlight-border weight. The hint is gated with `visible_when` on a derived
+"accepted-hover?" signal, so it is culled from paint **and** the accessibility tree
+while idle; `Live::Polite` on the hint card announces it appearing.
+
+**Accessibility.** `Role::Group`. Unlike `DropZone`, `Live` is *not* placed on the
+group itself (that would announce every change to the wrapped child) — it is scoped
+to the hint card. There is no Browse fallback: `DropTarget` wraps arbitrary content,
+which provides its own keyboard affordances.
+
+Demo: the "Internal drop target" panel in `cargo run -p file-drop` is a `DropTarget`
+recovering a typed `String` (drop a row on it directly, or drag a row out to the OS
+and back).
+
 ## 12. Non-goals — what DnD does NOT do yet
 
 - **Cross-window / re-entry *move* semantics.** A drop that crossed the window boundary reports `OsCopy`, never `OsMove`/`InApp` — the source can't know to delete its item. True app-internal move across windows would need a private-MIME handshake beyond the current Copy-only export.
@@ -407,6 +468,6 @@ and "Internal drop target" in `cargo run -p file-drop`.
 - [shortcut-intent-action.md](shortcut-intent-action.md) — when a drop should fire a typed `Intent` instead of mutating a model directly.
 - [crates/bastyde-core/src/drag_payload.rs](../crates/bastyde-core/src/drag_payload.rs), [drag_state.rs](../crates/bastyde-core/src/drag_state.rs) — the framework types.
 - [crates/bastyde-widgets/src/list_view.rs](../crates/bastyde-widgets/src/list_view.rs), [tree_view.rs](../crates/bastyde-widgets/src/tree_view.rs), [drag_preview.rs](../crates/bastyde-widgets/src/drag_preview.rs) — the canonical widget integrations.
-- [crates/bastyde-platform/src/external_dnd.rs](../crates/bastyde-platform/src/external_dnd.rs) — the external (OS) drag backend trait (`ExternalDndGuard::begin_drag` for outbound), handle, and macOS / Wayland / no-op / memory backends; [external_dnd/macos.rs](../crates/bastyde-platform/src/external_dnd/macos.rs) (`NSDraggingSource`), [external_dnd/wayland.rs](../crates/bastyde-platform/src/external_dnd/wayland.rs) (`wl_data_source`); [drop_zone.rs](../crates/bastyde-widgets/src/drop_zone.rs) — the `DropZone` widget.
+- [crates/bastyde-platform/src/external_dnd.rs](../crates/bastyde-platform/src/external_dnd.rs) — the external (OS) drag backend trait (`ExternalDndGuard::begin_drag` for outbound), handle, and macOS / Wayland / no-op / memory backends; [external_dnd/macos.rs](../crates/bastyde-platform/src/external_dnd/macos.rs) (`NSDraggingSource`), [external_dnd/wayland.rs](../crates/bastyde-platform/src/external_dnd/wayland.rs) (`wl_data_source`); [drop_zone.rs](../crates/bastyde-widgets/src/drop_zone.rs) — the standalone `DropZone` widget; [drop_target.rs](../crates/bastyde-widgets/src/drop_target.rs) — the wrapping `DropTarget` widget (§11.6).
 - Outbound escalation + typed re-entry live in [crates/bastyde-core/src/widget_tree/drag_drop_impl.rs](../crates/bastyde-core/src/widget_tree/drag_drop_impl.rs) (`try_escalate_to_os_drag`, `handle_os_drag_ended`, the global typed-payload stash); `DropOutcome` / `OutboundDragData` / `DragImageData` / `DragPayload::{to_outbound,is_os_exportable,enrich_external_from_mime}` in [drag_payload.rs](../crates/bastyde-core/src/drag_payload.rs); `WindowOps::begin_os_drag` in [window/ops.rs](../crates/bastyde-core/src/window/ops.rs).
 - [examples/drag_and_drop](../examples/drag_and_drop/) — runnable in-app DnD demo; [examples/file_drop](../examples/file_drop/) — external (OS) drop demo.

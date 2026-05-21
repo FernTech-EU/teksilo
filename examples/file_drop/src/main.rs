@@ -1,26 +1,35 @@
-//! External (OS) drag-and-drop showcase.
+//! Drag-and-drop showcase — inbound, outbound, and wrapping targets.
 //!
-//! Two [`DropZone`]s accept files (and text / URLs) dragged in from the file
-//! manager or another application:
+//! **Inbound (OS → app).** Two [`DropZone`]s accept files (and text / URLs)
+//! dragged in from the file manager or another application:
 //!
 //! - an image-only zone filtered to `png` / `jpg` / `jpeg` / `gif`
 //! - a general zone that takes any file, plus dropped text and URLs
 //!
-//! Each accepted drop appends to the log panel below; rejected drops flash the
-//! zone red and announce politely to screen readers. Every zone also has a
-//! keyboard-operable **Browse…** button (the accessible equivalent, since an
-//! OS drag can't be started from the keyboard).
+//! Each zone also has a keyboard-operable **Browse…** button (the accessible
+//! equivalent, since an OS drag can't be started from the keyboard).
 //!
-//! Run with: `cargo run -p file-drop`. Drag a file from Finder / Explorer /
-//! Nautilus onto a zone. (External OS drops are live on macOS / Windows /
-//! Wayland; on X11 the Browse button is the path.)
+//! **Outbound (app → OS).** Two rows start a drag carrying a typed value AND a
+//! MIME representation; the moment the pointer leaves the window the framework
+//! escalates to a native OS drag, so they drop into Finder / Nautilus / a text
+//! editor. `on_drag_ended` reports the [`DropOutcome`].
+//!
+//! **Wrapping target.** A [`DropTarget`] wraps an ordinary `Panel` and turns it
+//! into an internal drop target without changing its look: it highlights and
+//! fades in a centered hint while a row hovers, and recovers the original typed
+//! `String` on drop — even after the payload was dragged out to the OS and back
+//! (the framework's typed re-entry, which is what enables cross-window DnD).
+//!
+//! Run with: `cargo run -p file-drop`. (External OS drops are live on macOS /
+//! Windows / Wayland; on X11 the Browse button is the path.)
 
-use bastyde::core::DropFeedback;
 use bastyde::core::drag_payload::{DragPayload, DropOutcome};
 use bastyde::core::gesture::DragPhase;
 use bastyde::core::widget_id::WidgetId;
 use bastyde::prelude::*;
-use bastyde::widgets::{DropZone, Expand, HStack, Padding, Panel, TextWidget, VStack};
+use bastyde::widgets::{
+    DropTarget, DropTargetVariant, DropZone, Expand, HStack, Padding, Panel, TextWidget, VStack,
+};
 
 fn main() {
     BastydeAppBuilder::new()
@@ -137,36 +146,29 @@ fn main() {
                         ),
                     );
 
-                    // Internal drop target that reads the *typed* payload. Drop
-                    // a row here directly (in-app), OR drag it out of the window
-                    // and back in before dropping — either way the original
-                    // typed `String` is recovered, proving the OS round-trip
-                    // preserves the typed fast-path (this is what enables
-                    // drag-and-drop between two windows of the same app).
+                    // Internal drop target built from the `DropTarget` wrapper.
+                    // Drop a row here directly (in-app), OR drag it out of the
+                    // window and back in before dropping — either way the
+                    // original typed `String` is recovered, proving the OS
+                    // round-trip preserves the typed fast-path (this is what
+                    // enables drag-and-drop between two windows of the same app).
+                    //
+                    // `on_drop_typed::<String>()` implicitly accepts only
+                    // payloads carrying a `String`, so the highlight + hint
+                    // appear for the rows above but not for a stray OS file drag.
                     let typed_target = {
                         let log = log.clone();
-                        Panel::new()
-                            .child(Padding::uniform(12.0).child(TextWidget::new_literal(
-                                "Internal drop target — drop a row here (recovers the typed value)",
+                        DropTarget::new()
+                            .child(Panel::new().child(Padding::uniform(12.0).child(
+                                TextWidget::new_literal(
+                                    "Internal drop target — drop a row here (recovers the typed value)",
+                                ),
                             )))
-                            .on_drag_hover(|payload, _pos, _ctx| {
-                                if payload.has_typed::<String>() {
-                                    DropFeedback::HighlightRect {
-                                        rect: Rect::new(0.0, 0.0, 0.0, 0.0),
-                                        color: Color::new(0.2, 0.6, 1.0, 0.25),
-                                    }
-                                } else {
-                                    DropFeedback::NoFeedback
-                                }
-                            })
-                            .on_drop(move |mut payload, _pos, _ctx| {
-                                match payload.take_typed::<String>() {
-                                    Some(value) => {
-                                        prepend(&log, &format!("✅  typed drop recovered: {value}"));
-                                        true
-                                    }
-                                    None => false,
-                                }
+                            .hint(TextWidget::new_literal("Drop to recover the typed value"))
+                            .variant(DropTargetVariant::Prominent)
+                            .on_drop_typed::<String>(move |value, _pos, _ctx| {
+                                prepend(&log, &format!("✅  typed drop recovered: {value}"));
+                                true
                             })
                     };
 

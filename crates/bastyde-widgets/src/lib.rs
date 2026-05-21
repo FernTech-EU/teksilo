@@ -35,6 +35,7 @@ pub mod date_range_edit;
 pub mod date_time_edit;
 pub mod dialog;
 pub(crate) mod drag_preview;
+pub mod drop_target;
 pub mod drop_zone;
 #[cfg(feature = "rich-text")]
 pub mod file_picker_field;
@@ -137,7 +138,12 @@ pub use date_range_edit::DateRangeEdit;
 #[cfg(feature = "rich-text")]
 pub use date_time_edit::DateTimeEdit;
 pub use dialog::{Dialog, DialogContent, ModalContainer, ModalScrim};
+pub use drop_target::DropTarget;
 pub use drop_zone::DropZone;
+pub use bastyde_core::styles::{
+    DropTargetDragState, DropTargetStyle, DropTargetStyleConfig, DropTargetVariant,
+    SharedDropTargetStyle,
+};
 pub use bastyde_data::CheckState;
 #[cfg(feature = "rich-text")]
 pub use file_picker_field::{FilePickerField, FilePickerKind};
