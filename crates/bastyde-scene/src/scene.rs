@@ -45,6 +45,12 @@ pub enum ItemChange {
     OpacityChanged { id: ItemId, old: f32, new: f32 },
     /// `set_z`: paint z-order changed.
     ZChanged { id: ItemId, old: f32, new: f32 },
+    /// `set_layer`: the Under/Over paint band changed.
+    LayerChanged {
+        id: ItemId,
+        old: SceneLayer,
+        new: SceneLayer,
+    },
     /// `set_item_parent`: logical parent changed.
     ParentChanged {
         id: ItemId,
@@ -55,6 +61,32 @@ pub enum ItemChange {
     Removed { id: ItemId },
     /// `add_item` / `add_widget`: item was inserted.
     Added { id: ItemId },
+}
+
+/// Which paint band a lightweight [`SceneItem`] sits in, relative to
+/// the heavyweight widget tier.
+///
+/// A `SceneView` paints in three passes: lightweight `Under` items
+/// (its `paint`, a backdrop), then the heavyweight widget children
+/// (the arena child-walk), then lightweight `Over` items (its
+/// `post_paint`, a foreground). Within each band, `z` still orders
+/// items among themselves.
+///
+/// This is a binary band, not a continuous z across the tiers, because
+/// the render walker offers exactly two lightweight paint positions
+/// (before and after the child subtree). The heavyweight tier is one
+/// contiguous block in between — to interleave a lightweight item
+/// *between* two specific heavyweight nodes you must promote it to a
+/// heavyweight widget. `Under` is the default (background furniture:
+/// connectors, grids, decorations); `Over` is for foreground overlays
+/// that must sit above the cards (selection halos, highlighted edges).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SceneLayer {
+    /// Painted under the heavyweight widget children (the default).
+    #[default]
+    Under,
+    /// Painted over the heavyweight widget children.
+    Over,
 }
 
 /// Which axes a [`SceneView`](crate::SceneView) is allowed to pan
@@ -183,6 +215,11 @@ pub(crate) struct SceneEntry {
     /// tier only; heavyweight widget z-order is governed by the
     /// arena's child order.
     pub(crate) z: f32,
+    /// Which lightweight paint band this item sits in relative to the
+    /// heavyweight tier — [`SceneLayer::Under`] (default, backdrop) or
+    /// [`SceneLayer::Over`] (foreground). Lightweight tier only; ignored
+    /// for heavyweight widget entries (they paint via the arena).
+    pub(crate) layer: SceneLayer,
     /// Logical parent. `None` means the item is rooted directly in
     /// the Scene. Composes coordinate frames: a child's `local_pos`
     /// is in the parent's local frame, and the child's
@@ -314,6 +351,7 @@ impl Scene {
                 pending: Some(Box::new(widget)),
             },
             z: 0.0,
+            layer: SceneLayer::Under,
             parent: None,
             flags: ItemFlags::default(),
             opacity: 1.0,
@@ -368,6 +406,7 @@ impl Scene {
             transform: Transform2D::identity(),
             kind: SceneEntryKind::Item(Box::new(item)),
             z: 0.0,
+            layer: SceneLayer::Under,
             parent: None,
             flags,
             opacity: 1.0,
@@ -856,8 +895,15 @@ impl Scene {
     // Z-order and parenting
     // -----------------------------------------------------------------
 
-    /// Set z-order for a lightweight entry. Higher z paints later
-    /// (on top); equal-z falls back to insertion order. Default 0.0.
+    /// Set paint z-order for an entry. Higher z paints later (on top);
+    /// equal-z falls back to insertion order. Default 0.0.
+    ///
+    /// Works for **both** tiers: lightweight items re-sort within their
+    /// band on the next paint, and heavyweight widget entries restack the
+    /// arena children on the next rebuild (the SceneView reorders
+    /// `node.children` by z without recreating the widgets, so focus /
+    /// text-edit / animation state survives the restack). No-op for
+    /// unknown ids.
     pub fn set_z(&mut self, id: ItemId, z: f32) {
         if let Some(&pos) = self.entry_index.get(&id) {
             let old = self.entries[pos].z;
@@ -870,10 +916,71 @@ impl Scene {
         }
     }
 
+    /// Raise an entry above all current entries by giving it a z one
+    /// greater than the current maximum. The drag-to-front primitive —
+    /// call it on drag-start so the grabbed card (and its text) renders
+    /// over the others. Works for both tiers (see [`set_z`](Self::set_z)).
+    pub fn bring_to_front(&mut self, id: ItemId) {
+        if !self.entry_index.contains_key(&id) {
+            return;
+        }
+        let max_z = self
+            .entries
+            .iter()
+            .map(|e| e.z)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let target = if max_z.is_finite() { max_z + 1.0 } else { 1.0 };
+        self.set_z(id, target);
+    }
+
+    /// Lower an entry below all current entries by giving it a z one less
+    /// than the current minimum. Works for both tiers (see
+    /// [`set_z`](Self::set_z)).
+    pub fn send_to_back(&mut self, id: ItemId) {
+        if !self.entry_index.contains_key(&id) {
+            return;
+        }
+        let min_z = self.entries.iter().map(|e| e.z).fold(f32::INFINITY, f32::min);
+        let target = if min_z.is_finite() { min_z - 1.0 } else { -1.0 };
+        self.set_z(id, target);
+    }
+
     /// Read an entry's z-order.
     pub fn z(&self, id: ItemId) -> Option<f32> {
         let pos = *self.entry_index.get(&id)?;
         Some(self.entries[pos].z)
+    }
+
+    /// Set the Under/Over paint band for a lightweight entry. `Over`
+    /// items paint *after* the heavyweight widget children (in the
+    /// SceneView's `post_paint`), so they sit on top of the cards;
+    /// `Under` items (the default) paint before them. Within a band,
+    /// [`set_z`](Self::set_z) still orders items among themselves.
+    /// No-op for unknown ids.
+    pub fn set_layer(&mut self, id: ItemId, layer: SceneLayer) {
+        if let Some(&pos) = self.entry_index.get(&id) {
+            let old = self.entries[pos].layer;
+            if old == layer {
+                return;
+            }
+            self.entries[pos].layer = layer;
+            self.item_change_signal
+                .set(ItemChange::LayerChanged { id, old, new: layer });
+        }
+    }
+
+    /// Read an entry's Under/Over paint band. `None` for unknown ids.
+    pub fn layer(&self, id: ItemId) -> Option<SceneLayer> {
+        let pos = *self.entry_index.get(&id)?;
+        Some(self.entries[pos].layer)
+    }
+
+    /// Whether any entry is in the [`SceneLayer::Over`] band. The
+    /// SceneView consults this in `wants_post_paint` to skip the
+    /// foreground pass entirely when nothing is raised above the cards.
+    /// Linear in entry count, called once per frame.
+    pub(crate) fn has_over_layer_items(&self) -> bool {
+        self.entries.iter().any(|e| e.layer == SceneLayer::Over)
     }
 
     /// Declare a parent/child relationship. `child`'s `local_pos`
