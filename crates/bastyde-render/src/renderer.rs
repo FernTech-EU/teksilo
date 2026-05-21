@@ -393,7 +393,14 @@ impl Renderer {
         // drawable produces exactly 4 vertices. The shared index buffer
         // sizes to the largest per-pipeline quad count so one index stream
         // serves all pipelines.
-        let rect_quads = frame.decorations.len();
+        // The rect pipeline draws both `DrawCommand::Decoration` (Tier-1
+        // rects) AND `DrawCommand::CosmeticLine` (each hairline emits one
+        // 4-vertex quad through the same rect stream — see the CosmeticLine
+        // arm in the draw walk). Both must be counted here or the rect stream
+        // is under-sized and overflows on the first cosmetic-line-heavy frame
+        // (e.g. a tiled hairline grid). GPU-path + debug-assert only, so
+        // headless RenderFrame tests don't catch it.
+        let rect_quads = frame.decorations.len() + frame.cosmetic_lines.len();
         let sdf_quads = frame.shapes.len();
         // Each blur scope produces one composite-blit quad on End,
         // emitted via the quad pipeline. Account for it in the stream
