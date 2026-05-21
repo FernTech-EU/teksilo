@@ -12,13 +12,13 @@ pub mod text_backend;
 pub use animated::AnimatedIcon;
 pub use canvas::Canvas;
 pub use geometry::{EdgeInsets, Point, Rect, Size, SizeProposal, Transform2D, Vec2};
-pub use paint::{GradientStop, ImageHandle, LineCap, Paint, StrokeStyle};
+pub use paint::{GradientStop, ImageHandle, LineCap, Paint, StrokeSpace, StrokeStyle};
 pub use path::{Path, PathCommand};
 pub use raster::{ImageDecodeError, RasterIcon};
 pub use render_frame::{
-    AnimParams, AnimatedQuadClass, AnimatedQuadDraw, BlendMode, DecorationKind, DecorationRect,
-    DrawCommand, GlyphQuad, ImageQuad, PaintData, PathEntry, PendingImage, RasterizedQuad,
-    RenderFrame, ShadowQuad, ShapeKind, ShapeQuad,
+    AnimParams, AnimatedQuadClass, AnimatedQuadDraw, BlendMode, CosmeticLine, DecorationKind,
+    DecorationRect, DrawCommand, GlyphQuad, ImageQuad, PaintData, PathEntry, PendingImage,
+    RasterizedQuad, RenderFrame, ShadowQuad, ShapeKind, ShapeQuad,
 };
 pub use svg::{SvgIcon, SvgParseError};
 pub use text_backend::{

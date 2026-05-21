@@ -4,11 +4,12 @@ use std::rc::Rc;
 use bastyde_tokens::{Color, CornerRadius, Shadow, TextStyle};
 
 use crate::geometry::{Point, Rect, Transform2D};
-use crate::paint::{Paint, StrokeStyle};
+use crate::paint::{Paint, StrokeSpace, StrokeStyle};
 use crate::path::Path;
 use crate::render_frame::{
-    AnimatedQuadClass, AnimatedQuadDraw, BlendMode, DecorationKind, DecorationRect, DrawCommand,
-    GlyphQuad, ImageQuad, PaintData, PathEntry, RenderFrame, ShadowQuad, ShapeKind, ShapeQuad,
+    AnimatedQuadClass, AnimatedQuadDraw, BlendMode, CosmeticLine, DecorationKind, DecorationRect,
+    DrawCommand, GlyphQuad, ImageQuad, PaintData, PathEntry, RenderFrame, ShadowQuad, ShapeKind,
+    ShapeQuad,
 };
 use crate::text_backend::TextBackend;
 
@@ -94,6 +95,19 @@ impl Canvas {
         style: impl Into<StrokeStyle>,
     ) {
         let style = style.into();
+        if style.space == StrokeSpace::Device {
+            // Cosmetic / hairline: keep the width un-baked so the renderer can
+            // apply a transform-invariant device-pixel thickness.
+            let idx = self.frame.cosmetic_lines.len();
+            self.frame.cosmetic_lines.push(CosmeticLine {
+                from: [from.x, from.y],
+                to: [to.x, to.y],
+                width: style.width,
+                color: color.to_array(),
+            });
+            self.frame.draw_order.push(DrawCommand::CosmeticLine(idx));
+            return;
+        }
         let width = style.width;
         let rect = if (from.y - to.y).abs() < 0.001 {
             // Horizontal line
@@ -118,38 +132,52 @@ impl Canvas {
     /// Stroke the outline of an axis-aligned rectangle.
     pub fn stroke_rect(&mut self, rect: Rect, color: Color, style: impl Into<StrokeStyle>) {
         let style = style.into();
-        let width = style.width;
+        // Pass the full style (not just the width) so `StrokeSpace::Device`
+        // (cosmetic) propagates to each edge line.
         // Top
         self.draw_line(
             Point::new(rect.x, rect.y),
             Point::new(rect.right(), rect.y),
             color,
-            width,
+            style.clone(),
         );
         // Bottom
         self.draw_line(
             Point::new(rect.x, rect.bottom()),
             Point::new(rect.right(), rect.bottom()),
             color,
-            width,
+            style.clone(),
         );
         // Left
         self.draw_line(
             Point::new(rect.x, rect.y),
             Point::new(rect.x, rect.bottom()),
             color,
-            width,
+            style.clone(),
         );
         // Right
         self.draw_line(
             Point::new(rect.right(), rect.y),
             Point::new(rect.right(), rect.bottom()),
             color,
-            width,
+            style,
         );
     }
 
     // --- Tier 2: SDF shapes (ShapeQuad) ---
+
+    /// Extract a logical stroke width, asserting (debug only) that the style
+    /// is not cosmetic. SDF/path shapes don't yet honor cosmetic strokes, so
+    /// a cosmetic style silently falls back to a logical (zoom-scaled) width.
+    fn stroke_width_logical(style: impl Into<StrokeStyle>) -> f32 {
+        let style = style.into();
+        debug_assert!(
+            style.space == StrokeSpace::Logical,
+            "cosmetic stroke is not yet supported on SDF/path shapes; \
+             falling back to a logical (zoom-scaled) width"
+        );
+        style.width
+    }
 
     /// Fill a rounded rectangle using SDF rendering.
     pub fn fill_rounded_rect(
@@ -187,7 +215,7 @@ impl Canvas {
             screen: rect.to_array(),
             color,
             shape: ShapeKind::RoundedRect,
-            stroke_width: style.into().width,
+            stroke_width: Self::stroke_width_logical(style),
             corner_radii: clamped.to_array(),
             paint_data,
         });
@@ -233,7 +261,7 @@ impl Canvas {
             ],
             color,
             shape: ShapeKind::Circle,
-            stroke_width: style.into().width,
+            stroke_width: Self::stroke_width_logical(style),
             corner_radii: [radius; 4],
             paint_data,
         });
@@ -268,7 +296,7 @@ impl Canvas {
             screen: rect.to_array(),
             color,
             shape: ShapeKind::Ellipse,
-            stroke_width: style.into().width,
+            stroke_width: Self::stroke_width_logical(style),
             corner_radii: [0.0; 4],
             paint_data,
         });
@@ -295,6 +323,11 @@ impl Canvas {
     /// The path will be CPU-rasterized (Tier 3) and cached in the shape atlas.
     pub fn stroke_path(&mut self, path: &Path, color: Color, style: impl Into<StrokeStyle>) {
         let style = style.into();
+        debug_assert!(
+            style.space == StrokeSpace::Logical,
+            "cosmetic stroke is not yet supported on stroke_path; \
+             falling back to a logical (zoom-scaled) width"
+        );
         let bounds = path.bounds().expand(style.width);
         let idx = self.frame.paths.len();
         self.frame.paths.push(PathEntry {
@@ -739,6 +772,12 @@ impl Canvas {
         for d in &mut shifted.decorations {
             d.rect[0] += offset.x;
             d.rect[1] += offset.y;
+        }
+        for c in &mut shifted.cosmetic_lines {
+            c.from[0] += offset.x;
+            c.from[1] += offset.y;
+            c.to[0] += offset.x;
+            c.to[1] += offset.y;
         }
         for s in &mut shifted.shapes {
             s.screen[0] += offset.x;
@@ -1304,5 +1343,78 @@ mod tests {
         assert_eq!(frame.shapes.len(), 1);
         assert_eq!(frame.shapes[0].shape, ShapeKind::Ellipse);
         assert!(frame.shapes[0].stroke_width > 0.0);
+    }
+
+    #[test]
+    fn cosmetic_draw_line_emits_unbaked_line() {
+        let mut canvas = Canvas::new();
+        canvas.draw_line(
+            Point::new(0.0, 50.0),
+            Point::new(200.0, 50.0),
+            Color::BLACK,
+            StrokeStyle::hairline(1.0),
+        );
+        let frame = canvas.into_render_frame();
+        // Routed to the cosmetic path, NOT baked into a decoration rect.
+        assert_eq!(frame.cosmetic_lines.len(), 1);
+        assert!(frame.decorations.is_empty());
+        assert!(matches!(frame.draw_order[0], DrawCommand::CosmeticLine(0)));
+        assert_eq!(frame.cosmetic_lines[0].width, 1.0);
+    }
+
+    #[test]
+    fn cosmetic_line_width_is_unbaked_under_transform() {
+        // A canvas transform must not bake into the cosmetic width: the
+        // stored width is identical regardless of any prior scale (the
+        // transform-invariance is realized later, in the renderer).
+        let mut canvas = Canvas::new();
+        canvas.draw_line(
+            Point::new(0.0, 0.0),
+            Point::new(10.0, 0.0),
+            Color::BLACK,
+            StrokeStyle::hairline(1.0),
+        );
+        canvas.scale(4.0, 4.0);
+        canvas.draw_line(
+            Point::new(0.0, 0.0),
+            Point::new(10.0, 0.0),
+            Color::BLACK,
+            StrokeStyle::hairline(1.0),
+        );
+        let frame = canvas.into_render_frame();
+        assert_eq!(frame.cosmetic_lines.len(), 2);
+        assert_eq!(
+            frame.cosmetic_lines[0].width,
+            frame.cosmetic_lines[1].width
+        );
+        assert_eq!(frame.cosmetic_lines[1].width, 1.0);
+    }
+
+    #[test]
+    fn logical_draw_line_still_bakes_decoration() {
+        let mut canvas = Canvas::new();
+        canvas.draw_line(
+            Point::new(0.0, 10.0),
+            Point::new(100.0, 10.0),
+            Color::BLACK,
+            1.0_f32, // From<f32> => logical solid
+        );
+        let frame = canvas.into_render_frame();
+        assert_eq!(frame.decorations.len(), 1);
+        assert!(frame.cosmetic_lines.is_empty());
+        assert!(matches!(frame.draw_order[0], DrawCommand::Decoration(0)));
+    }
+
+    #[test]
+    fn cosmetic_stroke_rect_emits_four_cosmetic_lines() {
+        let mut canvas = Canvas::new();
+        canvas.stroke_rect(
+            Rect::new(0.0, 0.0, 50.0, 30.0),
+            Color::BLACK,
+            StrokeStyle::hairline(1.0),
+        );
+        let frame = canvas.into_render_frame();
+        assert_eq!(frame.cosmetic_lines.len(), 4);
+        assert!(frame.decorations.is_empty());
     }
 }

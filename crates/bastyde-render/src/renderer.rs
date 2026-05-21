@@ -724,6 +724,78 @@ impl Renderer {
                                     });
                                 }
                             }
+                            bastyde_canvas::DrawCommand::CosmeticLine(idx) => {
+                                flush_all!(
+                                    pass,
+                                    &self.queue,
+                                    self.streams,
+                                    &self.rect_pipeline,
+                                    &self.sdf_pipeline,
+                                    &self.quad_pipeline,
+                                    &self.shadow_pipeline,
+                                    rect_batch,
+                                    sdf_batch,
+                                    quad_batch,
+                                    shadow_batch,
+                                    self.atlas_texture,
+                                    self.path_atlas_texture,
+                                    quad_source,
+                                    index_binding
+                                );
+                                quad_source = None;
+                                let Some(line) = frame.cosmetic_lines.get(*idx) else {
+                                    continue;
+                                };
+                                // Transform the endpoints (premultiplied by the
+                                // HiDPI scale_factor) through the active
+                                // transform, then apply a device-pixel thickness
+                                // that does NOT scale with the transform's zoom.
+                                let p0 = apply_transform_pixel(
+                                    [line.from[0] * scale_factor, line.from[1] * scale_factor],
+                                    &current_transform,
+                                );
+                                let p1 = apply_transform_pixel(
+                                    [line.to[0] * scale_factor, line.to[1] * scale_factor],
+                                    &current_transform,
+                                );
+                                let thickness = (line.width * scale_factor).max(1.0);
+                                let half = thickness * 0.5;
+                                let dx = p1[0] - p0[0];
+                                let dy = p1[1] - p0[1];
+                                let len = (dx * dx + dy * dy).sqrt();
+                                if len < 1e-3 {
+                                    continue;
+                                }
+                                // Perpendicular unit normal in device space.
+                                let nx = -dy / len;
+                                let ny = dx / len;
+                                // Pixel-snap axis-aligned lines (edge-aligned
+                                // center) for crispness; leave diagonals as-is.
+                                let (mut a0, mut a1) = (p0, p1);
+                                if dy.abs() < 0.5 {
+                                    let cy = ((p0[1] + p1[1]) * 0.5 - half).round() + half;
+                                    a0 = [p0[0], cy];
+                                    a1 = [p1[0], cy];
+                                } else if dx.abs() < 0.5 {
+                                    let cx = ((p0[0] + p1[0]) * 0.5 - half).round() + half;
+                                    a0 = [cx, p0[1]];
+                                    a1 = [cx, p1[1]];
+                                }
+                                let lin = crate::vertex::srgb_to_linear_rgba(line.color);
+                                let color = [lin[0], lin[1], lin[2], lin[3] * current_opacity];
+                                let corners = [
+                                    [a0[0] + nx * half, a0[1] + ny * half],
+                                    [a1[0] + nx * half, a1[1] + ny * half],
+                                    [a1[0] - nx * half, a1[1] - ny * half],
+                                    [a0[0] - nx * half, a0[1] - ny * half],
+                                ];
+                                for pos in corners {
+                                    rect_batch.push(RectVertex {
+                                        position: pixel_to_ndc(pos, viewport_width, viewport_height),
+                                        color,
+                                    });
+                                }
+                            }
                             bastyde_canvas::DrawCommand::Shape(idx) => {
                                 flush_all!(
                                     pass,
