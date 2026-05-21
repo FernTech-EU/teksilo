@@ -60,7 +60,8 @@
 //! Run with: `cargo run -p scene-corkboard`
 
 use bastyde_scene::{
-    A11yGroup, A11yNode, ItemFlags, PathItem, RectItem, Scene, SceneSelectionMode, SceneView,
+    A11yGroup, A11yNode, ItemFlags, PathItem, RectItem, Scene, SceneLayer, SceneSelectionMode,
+    SceneView,
 };
 use bastyde::canvas::{Path, Point, Rect};
 use bastyde::prelude::*;
@@ -241,6 +242,20 @@ fn build_corkboard() -> SceneView {
             A11yNode::Item(connector_id),
             Some(A11yNode::Group(acts[act_index])),
         );
+    }
+
+    // Over-band demo: a small accent tag pinned to the first card's
+    // top-right corner. Lightweight items default to the `Under` band and
+    // would hide *behind* the heavyweight card; raising it to `SceneLayer::Over`
+    // routes it to the SceneView's `post_paint`, so it paints *on top* of the
+    // card — the annotation / "featured" / selection-overlay use case. See
+    // docs/bastyde-scene.md §"Z-order and paint bands".
+    if let Some(&first) = card_rects.first() {
+        let tag = RectItem::new(Rect::new(0.0, 0.0, 16.0, 16.0))
+            .fill(Color::new(0.95, 0.55, 0.15, 0.95));
+        let tag_id = scene.add_item(tag, Point::new(first.x + first.width - 12.0, first.y - 4.0));
+        scene.set_layer(tag_id, SceneLayer::Over);
+        scene.set_flag(tag_id, ItemFlags::IS_SELECTABLE, false);
     }
 
     SceneView::new(scene)
