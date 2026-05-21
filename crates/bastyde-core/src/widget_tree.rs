@@ -2061,6 +2061,10 @@ impl WidgetTree {
         );
         if let Some(node) = self.arena.get_mut(id) {
             node.transform_prop = Some(prop);
+            // A plain transform is a *self* transform — clear any prior
+            // content-transform marker so the flag can never go stale if a
+            // node switches from `set_content_transform` to `set_transform`.
+            node.content_transform = false;
         }
     }
 
