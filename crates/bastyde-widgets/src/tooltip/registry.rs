@@ -23,7 +23,7 @@
 //! [`TooltipRegistry::parse_url`] to recognize `:key` URLs; every other
 //! URL scheme (`http://`, `mailto:`, …) passes through unmodified.
 
-use std::cell::OnceCell;
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use bastyde_i18n::LocalizedString;
@@ -165,11 +165,13 @@ impl TooltipRegistry {
 
 // Thread-local storage. The registry is installed once by
 // `install_tooltip_registry` from `BastydeAppBuilder::register_tooltips`
-// at app boot and is read-only afterwards. Using `OnceCell` (rather
-// than `RefCell<Option<_>>`) enforces the "install once" invariant at
-// the type level — double-install panics.
+// at app boot and is read-only afterwards. The "install once" invariant
+// is enforced at runtime (debug-build panic on double-install) rather
+// than by the cell type, so tests can reset it without `unsafe` — see
+// `_reset_tooltip_registry`. Mirrors the `RefCell<Option<_>>` pattern
+// used by `bastyde-i18n`'s thread-local manager slot.
 thread_local! {
-    static TOOLTIP_REGISTRY: OnceCell<TooltipRegistry> = const { OnceCell::new() };
+    static TOOLTIP_REGISTRY: RefCell<Option<TooltipRegistry>> = const { RefCell::new(None) };
 }
 
 /// Install the tooltip registry for the current thread. Called once
@@ -182,11 +184,15 @@ pub fn install_tooltip_registry(contents: Vec<TooltipContent>) {
     let reg = TooltipRegistry {
         by_key: contents.into_iter().map(|c| (c.key.clone(), c)).collect(),
     };
-    TOOLTIP_REGISTRY.with(|cell| {
-        if cell.set(reg).is_err() {
-            #[cfg(debug_assertions)]
-            panic!("tooltip registry already installed");
+    TOOLTIP_REGISTRY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_some() {
+            // Debug: enforce the install-once invariant. Release: keep
+            // the first installation and ignore the second.
+            debug_assert!(false, "tooltip registry already installed");
+            return;
         }
+        *slot = Some(reg);
     });
 }
 
@@ -194,25 +200,15 @@ pub fn install_tooltip_registry(contents: Vec<TooltipContent>) {
 /// borrowed reference to the installed registry. Returns `None` if no
 /// registry has been installed yet (early bootstrap, headless tests).
 pub fn with_tooltip_registry<R>(f: impl FnOnce(&TooltipRegistry) -> R) -> Option<R> {
-    TOOLTIP_REGISTRY.with(|cell| cell.get().map(f))
+    TOOLTIP_REGISTRY.with(|slot| slot.borrow().as_ref().map(f))
 }
 
 /// Test-only helper: reset the thread-local registry. Not exposed in
 /// release builds — tests clone-install-read then move on.
 #[cfg(test)]
 pub(crate) fn _reset_tooltip_registry() {
-    TOOLTIP_REGISTRY.with(|cell| {
-        // Cheap trick: take() would require Fn(&mut OnceCell), which
-        // the std API doesn't offer. Instead we leak by overwriting.
-        let new_cell: OnceCell<TooltipRegistry> = OnceCell::new();
-        // Safety: we're inside a test and no other code on this thread
-        // is holding a reference to the registry contents at this
-        // point (tests run serially per thread local).
-        #[allow(invalid_reference_casting)]
-        unsafe {
-            let ptr = cell as *const OnceCell<TooltipRegistry> as *mut OnceCell<TooltipRegistry>;
-            std::ptr::write(ptr, new_cell);
-        }
+    TOOLTIP_REGISTRY.with(|slot| {
+        *slot.borrow_mut() = None;
     });
 }
 

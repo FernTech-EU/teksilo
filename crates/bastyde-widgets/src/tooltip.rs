@@ -8,8 +8,10 @@
 //!   long-form "more" disclosure + shortcut chip), inline-markup body
 //!   so `[label](:key)` cascade links resolve against
 //!   [`TooltipRegistry`]. Attached via `.rich_tooltip(key)` /
-//!   `.rich_tooltip_content(content)`. Promotes to a focusable
-//!   `Role::Dialog` on dwell.
+//!   `.rich_tooltip_content(content)`. On dwell it flips its AT role
+//!   to `Role::Dialog` and advertises a `Focus` action — keyboard
+//!   focus is not auto-transferred; the user Tabs in (the correct
+//!   non-modal-panel a11y pattern).
 //! - [`composite::CompositeTooltipWidget`] — hosts an arbitrary
 //!   `impl Widget + 'static` body inside the same chrome with a
 //!   larger surface budget. Crusader Kings 3-style: tabbed sections,
@@ -42,12 +44,10 @@ pub use registry::{
 pub use rich::RichTooltipWidget;
 
 use std::rc::Rc;
-use std::time::{Duration, Instant};
 
 use bastyde_canvas::{Canvas, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::overlay::OverlayId;
 use bastyde_core::styles::{SharedTooltipStyle, TooltipStyleConfig};
 use bastyde_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
@@ -194,34 +194,6 @@ impl Widget for TooltipWidget {
 
     fn children(&self) -> Vec<WidgetId> {
         self.root_child_id.into_iter().collect()
-    }
-}
-
-/// Tracks tooltip hover state for a widget.
-/// Stored on the WidgetTree and processed during event dispatch.
-#[allow(dead_code)] // Part of tooltip system, used when tooltip overlays are wired up
-pub(crate) struct TooltipState {
-    /// The widget this tooltip is attached to.
-    pub anchor_id: WidgetId,
-    /// The pre-created tooltip content widget ID (starts dormant).
-    pub content_id: WidgetId,
-    /// The tooltip text.
-    pub text: String,
-    /// Hover delay before showing.
-    pub delay: Duration,
-    /// When the pointer entered the anchor (None if not hovering).
-    pub hover_start: Option<Instant>,
-    /// Active overlay ID (Some if tooltip is currently shown).
-    pub overlay_id: Option<OverlayId>,
-}
-
-impl std::fmt::Debug for TooltipState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TooltipState")
-            .field("anchor_id", &self.anchor_id)
-            .field("text", &self.text)
-            .field("is_shown", &self.overlay_id.is_some())
-            .finish()
     }
 }
 

@@ -216,13 +216,22 @@ so unit tests don't actually launch external apps.
 When a body contains `[label](:key)` links, the rich tooltip widget
 **pre-creates** dormant `RichTooltipWidget` children for every registered
 target during its `build()` (matching the menu-submenu pattern in
-`menu_item.rs`). Clicking a link activates the matching child and calls
-`ctx.show_overlay(...)` anchored to the parent tooltip's own widget id,
-positioned 8 px below it, with dismiss behavior `EscapeOrClickOutside`.
-Nested overlays are registered with `parent_overlay: None`, so each is
-independent from the manager's perspective — Escape / click-outside
-dismisses each level on its own behavior, and a deep cascade unwinds as
-the user clicks away.
+`menu_item.rs`). Each child is marked a *cascade child*, which **suppresses
+its dwell-to-sticky indicator** and reads as a persistent, focusable
+`Role::Dialog` (advertising `Focus`) straight away — it's opened by an
+explicit click and is already persistent, so the hover-to-sticky affordance
+and the ephemeral `Role::Tooltip` don't apply.
+Clicking a link activates the matching child and calls `ctx.show_overlay(...)`
+anchored to the parent tooltip's own widget id, positioned 8 px below it,
+with dismiss behavior `EscapeOrClickOutside`.
+
+The request passes `parent_overlay: None`, but the event dispatcher fills it
+in with the containing tooltip's overlay (`overlay_ancestor_for_widget`), so
+the child is linked to its parent: dismissing the parent cascade-closes the
+whole subtree (`OverlayManager::dismiss_immediate`'s BFS), while Escape
+dismisses the top-most level first. A runaway cascade — e.g. a cyclic
+`A → B → A` `:key` loop — is bounded by `MAX_OVERLAY_NESTING_DEPTH`, so the
+overlay stack can't grow without limit.
 
 ---
 
@@ -333,7 +342,10 @@ delayed-overlay deadline so the idle-event loop knows when to wake (see
 ## Sticky-on-dwell (rich tooltips)
 
 Rich tooltips opt into a 2-second dwell timer that promotes a hover-shown
-tooltip into a focusable, click-through Dialog. The threshold lives in
+tooltip into a focusable, click-through Dialog. Promotion advertises focus
+but does **not** steal it: the panel becomes focusable and AT-reachable and
+the user Tabs in (the correct non-modal-panel pattern) — whatever the user
+was doing keeps keyboard focus. The threshold lives in
 [`DWELL_PROMOTION`](../crates/bastyde-widgets/src/tooltip/rich.rs) and is
 `Duration::from_secs(2)`; it's split into 4 visible quarters of 500 ms each,
 driving the [`DwellIndicator`](../crates/bastyde-widgets/src/tooltip/dwell_indicator.rs)

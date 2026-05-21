@@ -13,6 +13,7 @@
 
 a11y-status-bar-name = État
 a11y-dialog-name = Boîte de dialogue
+a11y-tooltip-name = Infobulle
 a11y-snackbar-name = Notification
 a11y-split-view-divider-name = Séparateur de vue divisée
 a11y-breadcrumb-current-page-value = page actuelle

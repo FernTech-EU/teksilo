@@ -26,6 +26,7 @@
 
 a11y-status-bar-name = Status
 a11y-dialog-name = Dialog
+a11y-tooltip-name = Tooltip
 a11y-snackbar-name = Snackbar
 a11y-split-view-divider-name = Split view divider
 a11y-breadcrumb-current-page-value = current page
