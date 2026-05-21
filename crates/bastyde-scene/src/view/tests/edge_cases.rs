@@ -211,3 +211,125 @@ fn parent_reference_to_removed_item_resolves_safely() {
     let pt = xform.apply_point(Point::ZERO);
     assert!(pt.x.is_finite() && pt.y.is_finite());
 }
+
+// -----------------------------------------------------------------
+// Under / Over lightweight bands vs the heavyweight tier
+// -----------------------------------------------------------------
+
+/// A minimal heavyweight widget that paints a solid colored rect — used
+/// to interleave the two lightweight bands with a real arena child.
+#[derive(Debug)]
+struct ColorBox(bastyde_tokens::Color);
+
+impl bastyde_core::widget::Widget for ColorBox {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &bastyde_core::widget::LayoutContext,
+    ) -> bastyde_core::widget::LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+
+    fn paint(
+        &self,
+        bounds: Rect,
+        canvas: &mut bastyde_canvas::Canvas,
+        _ctx: &bastyde_core::widget::PaintContext,
+    ) {
+        canvas.fill_rounded_rect(bounds, bastyde_tokens::CornerRadius::uniform(0.0), self.0);
+    }
+}
+
+#[test]
+fn over_band_paints_after_heavyweight_under_band_before() {
+    // Nested P-C-AP at the scene level: an Under lightweight item (RED) is
+    // the backdrop, a heavyweight widget (GREEN) is the middle tier, and an
+    // Over lightweight item (BLUE) is the foreground. Assert the draw order
+    // is RED < GREEN < BLUE — i.e. the Over item routes to post_paint and
+    // lands on top of the heavyweight child, while Under stays beneath it.
+    let mut scene = Scene::new();
+    scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 20.0, 20.0)).fill(bastyde_tokens::Color::RED),
+        Point::new(10.0, 10.0),
+    );
+    scene.add_widget(
+        ColorBox(bastyde_tokens::Color::GREEN),
+        Rect::new(10.0, 10.0, 20.0, 20.0),
+    );
+    let over = scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 20.0, 20.0)).fill(bastyde_tokens::Color::BLUE),
+        Point::new(10.0, 10.0),
+    );
+    scene.set_layer(over, crate::scene::SceneLayer::Over);
+
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(200.0, 200.0));
+    let frame = tree.render();
+
+    let color_of = |cmd: &bastyde_canvas::DrawCommand| -> Option<[f32; 4]> {
+        match cmd {
+            bastyde_canvas::DrawCommand::Shape(i) => frame.shapes.get(*i).map(|s| s.color),
+            bastyde_canvas::DrawCommand::Decoration(i) => {
+                frame.decorations.get(*i).map(|d| d.color)
+            }
+            _ => None,
+        }
+    };
+    let find = |dominant: usize| -> Option<usize> {
+        frame.draw_order.iter().position(|cmd| {
+            color_of(cmd)
+                .is_some_and(|c| c[dominant] > 0.5 && (0..3).all(|ch| ch == dominant || c[ch] < 0.5))
+        })
+    };
+    let red = find(0).expect("Under item (RED) painted");
+    let green = find(1).expect("heavyweight ColorBox (GREEN) painted");
+    let blue = find(2).expect("Over item (BLUE) painted");
+    assert!(
+        red < green && green < blue,
+        "expected Under < heavyweight < Over; RED@{red}, GREEN@{green}, BLUE@{blue}"
+    );
+}
+
+/// Index in `draw_order` of the first fill whose color is dominated by the
+/// `dominant` channel (0 = red, 1 = green, 2 = blue).
+fn find_color(frame: &bastyde_canvas::RenderFrame, dominant: usize) -> Option<usize> {
+    frame.draw_order.iter().position(|cmd| {
+        let c = match cmd {
+            bastyde_canvas::DrawCommand::Shape(i) => frame.shapes.get(*i).map(|s| s.color),
+            bastyde_canvas::DrawCommand::Decoration(i) => frame.decorations.get(*i).map(|d| d.color),
+            _ => None,
+        };
+        c.is_some_and(|c| c[dominant] > 0.5 && (0..3).all(|ch| ch == dominant || c[ch] < 0.5))
+    })
+}
+
+#[test]
+fn heavyweight_z_order_restacks_cards() {
+    // Two heavyweight cards: A (RED) added first, B (GREEN) second. By
+    // insertion order A would paint under B. Raising A's z via
+    // `bring_to_front` must flip the paint order — A on top — by reordering
+    // the arena children in `build()` (Option C), not by recreating them.
+    let mut scene = Scene::new();
+    let a = scene.add_widget(
+        ColorBox(bastyde_tokens::Color::RED),
+        Rect::new(10.0, 10.0, 40.0, 40.0),
+    );
+    scene.add_widget(
+        ColorBox(bastyde_tokens::Color::GREEN),
+        Rect::new(20.0, 20.0, 40.0, 40.0),
+    );
+    scene.bring_to_front(a);
+
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(200.0, 200.0));
+    let frame = tree.render();
+
+    let green = find_color(&frame, 1).expect("card B (GREEN) painted");
+    let red = find_color(&frame, 0).expect("card A (RED) painted");
+    assert!(
+        green < red,
+        "raised card A (RED) must paint after B (GREEN): GREEN@{green}, RED@{red}"
+    );
+}

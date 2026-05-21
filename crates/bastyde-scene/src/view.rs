@@ -1201,6 +1201,128 @@ impl SceneView {
         )
     }
 
+    /// Paint one lightweight band into `canvas`, under the active view
+    /// transform. Queries the visible items, z-sorts them, keeps only those
+    /// in `band`, and paints each. Heavyweight ids are skipped (they paint
+    /// via the arena walker). Shared by [`paint`](Self::paint) (the `Under`
+    /// backdrop, before the children) and [`post_paint`](Self::post_paint)
+    /// (the `Over` foreground, after the children). Within a band, `z`
+    /// orders items among themselves.
+    fn paint_band(
+        &self,
+        canvas: &mut bastyde_canvas::Canvas,
+        bounds: Rect,
+        band: crate::scene::SceneLayer,
+    ) {
+        let region = self.visible_scene_region(bounds);
+        let view_transform = self.view_transform();
+        let item_ctx = crate::item::SceneItemPaintContext::new(view_transform, Some(region));
+        let drag_target = self.drag_target.get();
+        let mut visible_ids = self.scene.items_in_rect(region);
+        // Z-order within the band: higher z paints last (on top); equal-z
+        // preserves insertion order (stable sort). Heavyweight ids stay in the
+        // list but are skipped below — they paint via the arena walker.
+        self.scene.sort_by_z(&mut visible_ids);
+        for id in visible_ids {
+            if self.scene.item(id).is_none() {
+                continue;
+            }
+            // Only this band; items default to Under.
+            if self
+                .scene
+                .layer(id)
+                .unwrap_or(crate::scene::SceneLayer::Under)
+                != band
+            {
+                continue;
+            }
+            // Skip items whose chain is invisible or which carry the
+            // HAS_NO_CONTENTS flag (logical-only).
+            if !self.scene.is_effectively_visible(id) {
+                continue;
+            }
+            let flags = self.scene.flags(id).unwrap_or_default();
+            if flags.contains(crate::flags::ItemFlags::HAS_NO_CONTENTS) {
+                continue;
+            }
+            // Items that are the drag target or a declared descendant paint
+            // with a visual delta in scene coords — a child follows its
+            // dragged parent until the rebuild commits the new local_pos.
+            let drag_delta = drag_target
+                .filter(|t| t.item_id == id || self.scene.is_descendant_of(id, t.item_id))
+                .map(|t| {
+                    bastyde_canvas::Transform2D::translate(
+                        t.current_scene.x - t.anchor_scene.x,
+                        t.current_scene.y - t.anchor_scene.y,
+                    )
+                });
+
+            // Compose `local→scene`, optionally with a scene-coord drag
+            // offset baked in. Push beneath the view transform so the item's
+            // `paint` works in local coords. `save` / `restore` isolate
+            // neighbouring items' transforms.
+            let mut local_to_scene = self.scene.scene_transform(id);
+            if let Some(t) = drag_delta {
+                local_to_scene = local_to_scene.then(&t);
+            }
+            canvas.save();
+            // IGNORES_TRANSFORMATIONS items pin at their parent-relative
+            // position but render at a fixed pixel size (Qt's
+            // `ItemIgnoresTransformations`). Project the anchor through the
+            // parent chain + view transform, then push a transform that —
+            // composed with the outer view transform on the canvas —
+            // collapses to a pure `Translate(screen_anchor)`.
+            if flags.contains(crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS) {
+                let scene_anchor = local_to_scene.apply_point(Point::ZERO);
+                let screen_anchor = view_transform.apply_point(scene_anchor);
+                let view_inv = view_transform
+                    .inverse()
+                    .unwrap_or_else(Transform2D::identity);
+                let t =
+                    Transform2D::translate(screen_anchor.x, screen_anchor.y).then(&view_inv);
+                canvas.apply_transform(t);
+            } else {
+                canvas.apply_transform(local_to_scene);
+            }
+            // Effective opacity composes through the parent chain. Pushed via
+            // `set_opacity` / `restore_opacity` so the scope is balanced.
+            let alpha = self.scene.effective_opacity(id);
+            let opacity_pushed = alpha < 0.999;
+            if opacity_pushed {
+                canvas.set_opacity(alpha);
+            }
+            if let Some(item) = self.scene.item(id) {
+                // Item-coordinate cache: replay a cached local-coord
+                // RenderFrame instead of re-running paint when the item opted
+                // into `CacheMode::ItemCoordinate`; record on a miss.
+                match item.cache_mode() {
+                    crate::cache::CacheMode::ItemCoordinate => {
+                        let cached = self.item_cache.borrow().get(id).cloned();
+                        if let Some(frame) = cached {
+                            canvas.draw_render_frame(&frame, Point::ZERO);
+                        } else {
+                            let mut sub = match canvas.text_backend() {
+                                Some(tb) => bastyde_canvas::Canvas::with_text_backend(tb.clone()),
+                                None => bastyde_canvas::Canvas::new(),
+                            };
+                            item.paint(&mut sub, &item_ctx);
+                            let frame = sub.into_render_frame();
+                            canvas.draw_render_frame(&frame, Point::ZERO);
+                            self.item_cache.borrow_mut().insert(id, frame);
+                        }
+                    }
+                    crate::cache::CacheMode::None => {
+                        item.paint(canvas, &item_ctx);
+                    }
+                }
+            }
+            if opacity_pushed {
+                canvas.restore_opacity();
+            }
+            canvas.restore();
+        }
+    }
+
     /// Project a point in **view space** (screen-pixel coords —
     /// the same frame pointer events arrive in) into scene
     /// coordinates. Inverse of [`map_from_scene`](Self::map_from_scene).
@@ -1586,12 +1708,21 @@ impl Widget for SceneView {
         // re-installing.
         {
             let cache = self.item_cache.clone();
+            let drag_dirty = self.drag_dirty.clone();
             let handle = self.scene.item_change_signal().observe(move |change| {
                 use crate::scene::ItemChange;
-                let mut c = cache.borrow_mut();
                 match *change {
                     ItemChange::LocalBoundsChanged { id, .. } | ItemChange::Removed { id } => {
-                        c.evict(id);
+                        cache.borrow_mut().evict(id);
+                    }
+                    // A z-change must restack the heavyweight arena children
+                    // (only `build()` reorders them) and a band change moves a
+                    // lightweight item between the paint / post_paint passes.
+                    // Both take effect on rebuild, so bump the rebuild signal.
+                    // Lightweight z is re-sorted every paint, so the rebuild is
+                    // harmless (and cheap — children are preserved) there too.
+                    ItemChange::ZChanged { .. } | ItemChange::LayerChanged { .. } => {
+                        drag_dirty.set(drag_dirty.get().wrapping_add(1));
                     }
                     _ => {}
                 }
@@ -1622,6 +1753,27 @@ impl Widget for SceneView {
                 }
             }
         }
+
+        // Heavyweight z-order: sort the arena children by their scene-entry
+        // z so higher-z cards paint later (on top). Equal-z keeps insertion
+        // order (stable sort). This is the heavyweight-tier analogue of the
+        // lightweight `sort_by_z` — `Scene::set_z` / `bring_to_front` on a
+        // widget entry restacks the cards here, on the next rebuild.
+        // Reordering `node.children` (rather than destroying / recreating the
+        // widgets) preserves each card's focus, text-edit and animation state.
+        child_ids.sort_by(|a, b| {
+            let za = self
+                .widget_to_item
+                .get(a)
+                .and_then(|id| self.scene.z(*id))
+                .unwrap_or(0.0);
+            let zb = self
+                .widget_to_item
+                .get(b)
+                .and_then(|id| self.scene.z(*id))
+                .unwrap_or(0.0);
+            za.partial_cmp(&zb).unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Register the four animated signals with the scheduler so
         // they participate in idle gating (paint-epoch visibility,
@@ -2816,8 +2968,6 @@ impl Widget for SceneView {
         // background-furniture use case (connector lines, tiled grids,
         // decorations) — items render under the cards.
         let region = self.visible_scene_region(bounds);
-        let view_transform = self.view_transform();
-        let item_ctx = crate::item::SceneItemPaintContext::new(view_transform, Some(region));
 
         // App-supplied background closure: paints under all items in
         // scene coords, with the visible scene region passed so the
@@ -2825,141 +2975,44 @@ impl Widget for SceneView {
         if let Some(bg) = &self.background_paint {
             bg(canvas, ctx, region);
         }
-        // `items_in_rect` returns both widget and item entries that
-        // intersect the visible region. We filter to the lightweight
-        // tier here — heavyweights are painted by the arena walker via
-        // their own widget paint methods.
-        //
-        // Drag-to-move: if an item is being dragged, paint
-        // it at its in-flight scene-coord offset by translating
-        // the canvas. Restored after.
-        let drag_target = self.drag_target.get();
-        let mut visible_ids = self.scene.items_in_rect(region);
-        // Z-order: sort visible ids by z so higher-z items
-        // paint last (on top). Equal-z preserves insertion order
-        // (sort is stable). Heavyweight ids stay in the list but
-        // are filtered out below — their z is honored only as a
-        // sort key for any lightweight neighbours interleaved with
-        // them, which is the right semantic: a lightweight item
-        // with z > 0 paints atop preceding lightweights, not atop
-        // heavyweight widgets (heavyweights paint via the arena
-        // walker after SceneView's paint method).
-        self.scene.sort_by_z(&mut visible_ids);
-        for id in visible_ids {
-            if self.scene.item(id).is_none() {
-                continue;
-            }
-            // Skip items whose chain is invisible or which carry the
-            // HAS_NO_CONTENTS flag (logical-only).
-            if !self.scene.is_effectively_visible(id) {
-                continue;
-            }
-            let flags = self.scene.flags(id).unwrap_or_default();
-            if flags.contains(crate::flags::ItemFlags::HAS_NO_CONTENTS) {
-                continue;
-            }
-            // Items that are either the drag target or a declared
-            // descendant paint with a visual delta in scene coords —
-            // a child follows its dragged parent until the rebuild
-            // commits the new local_pos.
-            let drag_delta = drag_target
-                .filter(|t| t.item_id == id || self.scene.is_descendant_of(id, t.item_id))
-                .map(|t| {
-                    bastyde_canvas::Transform2D::translate(
-                        t.current_scene.x - t.anchor_scene.x,
-                        t.current_scene.y - t.anchor_scene.y,
-                    )
-                });
 
-            // Compose `local→scene`, optionally with a scene-coord
-            // drag offset baked in. Push beneath the view transform
-            // so the item's `paint` works in local coords. `save` /
-            // `restore` isolate neighbouring items' transforms.
-            let mut local_to_scene = self.scene.scene_transform(id);
-            if let Some(t) = drag_delta {
-                local_to_scene = local_to_scene.then(&t);
-            }
-            canvas.save();
-            // IGNORES_TRANSFORMATIONS items pin at their parent-relative
-            // position but render at a fixed pixel size — they don't
-            // grow with zoom and don't rotate with the view. (Same
-            // semantic as Qt's `ItemIgnoresTransformations`.) We compute
-            // the screen-projected anchor through the full parent chain
-            // + view transform, then push a transform that — when
-            // composed with the outer view transform already on the
-            // canvas — collapses to a pure `Translate(screen_anchor)`.
-            // For the common case (no rotation, identity bounds_origin
-            // adjust) this is `Translate(screen_anchor) ∘
-            // view_transform_inverse`; we don't special-case to keep
-            // the math simple and correct under rotation.
-            if flags.contains(crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS) {
-                let scene_anchor = local_to_scene.apply_point(Point::ZERO);
-                let screen_anchor = view_transform.apply_point(scene_anchor);
-                let view_inv = view_transform
-                    .inverse()
-                    .unwrap_or_else(Transform2D::identity);
-                let t = Transform2D::translate(screen_anchor.x, screen_anchor.y)
-                    .then(&view_inv);
-                canvas.apply_transform(t);
-            } else {
-                canvas.apply_transform(local_to_scene);
-            }
-            // Effective opacity composes through the parent chain.
-            // Pushed via `Canvas::set_opacity` / `restore_opacity`
-            // so the scope is balanced regardless of paint paths.
-            let alpha = self.scene.effective_opacity(id);
-            let opacity_pushed = alpha < 0.999;
-            if opacity_pushed {
-                canvas.set_opacity(alpha);
-            }
-            if let Some(item) = self.scene.item(id) {
-                // Item-coordinate cache: when the item opted in via
-                // `cache_mode() == ItemCoordinate`, replay a cached
-                // local-coord RenderFrame instead of re-running its
-                // paint. On a miss, record into a sub-canvas, store
-                // the result, and splice into the main canvas — the
-                // first frame is a tiny overhead, every subsequent
-                // frame is just a memcpy of the recorded commands.
-                match item.cache_mode() {
-                    crate::cache::CacheMode::ItemCoordinate => {
-                        let cached = self.item_cache.borrow().get(id).cloned();
-                        if let Some(frame) = cached {
-                            canvas.draw_render_frame(&frame, Point::ZERO);
-                        } else {
-                            let mut sub = match canvas.text_backend() {
-                                Some(tb) => bastyde_canvas::Canvas::with_text_backend(tb.clone()),
-                                None => bastyde_canvas::Canvas::new(),
-                            };
-                            item.paint(&mut sub, &item_ctx);
-                            let frame = sub.into_render_frame();
-                            canvas.draw_render_frame(&frame, Point::ZERO);
-                            self.item_cache.borrow_mut().insert(id, frame);
-                        }
-                    }
-                    crate::cache::CacheMode::None => {
-                        item.paint(canvas, &item_ctx);
-                    }
-                }
-            }
-            if opacity_pushed {
-                canvas.restore_opacity();
-            }
-            canvas.restore();
-        }
+        // Under band: lightweight items below the heavyweight children
+        // (background furniture — connector lines, tiled grids, decorations).
+        // The render walker invokes the parent's paint first, then descends
+        // into children, so these render under the cards. The Over band and
+        // the marquee / foreground / debug overlays paint in `post_paint`
+        // (after the children) so they sit on top.
+        self.paint_band(canvas, bounds, crate::scene::SceneLayer::Under);
+    }
 
-        // Marquee overlay — semi-transparent fill plus a
-        // single-pixel stroke. The marquee state is in screen
-        // coords (set by the on_drag closure). The view-transform
-        // scope is on the canvas, so to paint at screen coords we
-        // inverse-apply the transform. For a non-rotated identity-
-        // ish transform that's just `inv * screen_rect`. We project
-        // the screen-rect to scene coords and paint there — same
-        // visual position because the transform applies to scene
-        // coords back the other way.
+    fn wants_post_paint(&self) -> bool {
+        // SceneView has a foreground pass (post_paint) only when something
+        // must render over the heavyweight children: a selection marquee, an
+        // app-supplied foreground closure, debug overlays, or any lightweight
+        // item raised to the Over band.
+        self.marquee.get().is_some()
+            || self.foreground_paint.is_some()
+            || self.debug_overlay.is_active()
+            || self.scene.has_over_layer_items()
+    }
+
+    fn post_paint(&self, bounds: Rect, canvas: &mut bastyde_canvas::Canvas, ctx: &PaintContext) {
+        // Foreground pass — runs after the heavyweight children, inside the
+        // same view-transform / clip scope as `paint`. Everything here sits
+        // on top of the cards: the Over-band lightweight items, then the
+        // selection marquee, then the app foreground hook, then debug overlays.
+        let view_transform = self.view_transform();
+
+        // Over band: lightweight items explicitly raised above the cards
+        // (highlighted connectors, selection halos, annotations).
+        self.paint_band(canvas, bounds, crate::scene::SceneLayer::Over);
+
+        // Marquee overlay — semi-transparent fill plus a single-pixel
+        // stroke. The marquee state is in screen coords (set by the on_drag
+        // closure); the view-transform scope is on the canvas, so we project
+        // the screen-rect back to scene coords and paint there.
         if let Some(state) = self.marquee.get() {
             let screen_rect = state.rect();
-            // Project to scene coords so the paint commands land
-            // through the view-transform stack to the right pixels.
             if let Some(inv) = view_transform.inverse() {
                 let scene_rect = inv.apply_rect(screen_rect);
                 let fill = bastyde_tokens::Color::new(0.40, 0.55, 0.85, 0.18);
@@ -2969,15 +3022,14 @@ impl Widget for SceneView {
             }
         }
 
-        // App-supplied foreground closure: paints over all items
-        // (and the marquee), under the debug overlay. Same coordinate
-        // conventions as the background hook.
+        // App-supplied foreground closure: paints over all items (and the
+        // marquee), under the debug overlay.
         if let Some(fg) = &self.foreground_paint {
+            let region = self.visible_scene_region(bounds);
             fg(canvas, ctx, region);
         }
 
-        // Visual-debug overlays. All paint in scene coords
-        // so they ride the same view-transform projection as items.
+        // Visual-debug overlays, on top of everything.
         if self.debug_overlay.is_active() {
             self.paint_debug_overlay(bounds, canvas);
         }

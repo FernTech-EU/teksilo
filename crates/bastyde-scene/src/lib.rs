@@ -81,7 +81,7 @@ pub use items::AccessSubtreeMode;
 pub use items::{GroupItem, ImageItem, PathItem, RectItem, TextItem};
 pub use minimap::SceneMinimap;
 pub use scene::Scene;
-pub use scene::{ItemChange, PanAxes, SceneConstraints};
+pub use scene::{ItemChange, PanAxes, SceneConstraints, SceneLayer};
 pub use selection::{SceneSelection, SceneSelectionMode};
 pub use state::SceneViewState;
 pub use view::{DebugOverlay, FocusDirection, SceneView};
