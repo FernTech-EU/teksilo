@@ -13,6 +13,7 @@ use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::Easing;
 
+use crate::common::scroll::OverscrollBehavior;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
 
 /// How the scroll bar is displayed.
@@ -73,6 +74,10 @@ pub struct ScrollArea {
     /// Preferred size returned by `size_that_fits` when the proposal is
     /// unconstrained. `None` falls back to cached content size or 300×200.
     preferred_size: Option<Size>,
+    /// Scroll-chaining behavior at the boundary. `Chain` (default) lets a
+    /// boundary scroll bubble to an ancestor scrollable; `Contain` absorbs it
+    /// (the web's `overscroll-behavior`).
+    overscroll_behavior: OverscrollBehavior,
 
     // --- shared reactive state ---
     /// Vertical scroll position (0.0 = top).
@@ -141,6 +146,7 @@ impl ScrollArea {
             smooth_scrolling: true,
             smooth_scroll_duration: Duration::from_millis(150),
             preferred_size: None,
+            overscroll_behavior: OverscrollBehavior::default(),
             scroll_y: Signal::new_animated(0.0),
             scroll_x: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
@@ -222,6 +228,14 @@ impl ScrollArea {
     /// dimensions. If not set, falls back to cached content size or 300×200.
     pub fn preferred_size(mut self, width: f32, height: f32) -> Self {
         self.preferred_size = Some(Size::new(width, height));
+        self
+    }
+
+    /// Set the scroll-chaining behavior at the boundary. Default
+    /// [`OverscrollBehavior::Chain`] (a boundary scroll bubbles to an ancestor
+    /// scrollable); [`OverscrollBehavior::Contain`] absorbs it instead.
+    pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self {
+        self.overscroll_behavior = behavior;
         self
     }
 
@@ -339,6 +353,7 @@ impl Widget for ScrollArea {
         let line_height = self.line_height;
         let smooth_scrolling = self.smooth_scrolling;
         let smooth_scroll_duration = self.smooth_scroll_duration;
+        let overscroll_behavior = self.overscroll_behavior;
 
         let clamp_and_set = {
             let scroll_y = scroll_y.clone();
@@ -386,52 +401,35 @@ impl Widget for ScrollArea {
                     let max_x = max_scroll_x.get();
                     let cur_y = scroll_y.get();
                     let cur_x = scroll_x.get();
+                    // Base off the animation target (not the rendered offset)
+                    // so a mid-fling boundary correctly chains.
+                    let base_y = scroll_y.animation_target().unwrap_or(cur_y);
+                    let base_x = scroll_x.animation_target().unwrap_or(cur_x);
 
-                    match delta {
-                        ScrollDelta::Lines { x, y } => {
-                            let base_y = scroll_y.animation_target().unwrap_or(cur_y);
-                            let base_x = scroll_x.animation_target().unwrap_or(cur_x);
-                            let target_y = (base_y + y * line_height).clamp(0.0, max_y);
-                            let target_x = (base_x + x * line_height).clamp(0.0, max_x);
-                            if smooth_scrolling {
-                                scroll_y.animate_to(
-                                    target_y,
-                                    smooth_scroll_duration,
-                                    Easing::EaseOut,
-                                );
-                                scroll_x.animate_to(
-                                    target_x,
-                                    smooth_scroll_duration,
-                                    Easing::EaseOut,
-                                );
-                            } else {
-                                scroll_y.set(target_y);
-                                scroll_x.set(target_x);
-                            }
-                        }
-                        ScrollDelta::Pixels { x, y } => {
-                            let base_y = scroll_y.animation_target().unwrap_or(cur_y);
-                            let base_x = scroll_x.animation_target().unwrap_or(cur_x);
-                            let target_y = (base_y + y).clamp(0.0, max_y);
-                            let target_x = (base_x + x).clamp(0.0, max_x);
-                            if smooth_scrolling {
-                                scroll_y.animate_to(
-                                    target_y,
-                                    smooth_scroll_duration,
-                                    Easing::EaseOut,
-                                );
-                                scroll_x.animate_to(
-                                    target_x,
-                                    smooth_scroll_duration,
-                                    Easing::EaseOut,
-                                );
-                            } else {
-                                scroll_y.set(target_y);
-                                scroll_x.set(target_x);
-                            }
+                    let (dx, dy) = match delta {
+                        ScrollDelta::Lines { x, y } => (x * line_height, y * line_height),
+                        ScrollDelta::Pixels { x, y } => (*x, *y),
+                    };
+                    let (target_x, moved_x) =
+                        crate::common::scroll::scroll_clamp_axis(base_x, dx, max_x);
+                    let (target_y, moved_y) =
+                        crate::common::scroll::scroll_clamp_axis(base_y, dy, max_y);
+
+                    if moved_x || moved_y {
+                        if smooth_scrolling {
+                            scroll_y.animate_to(target_y, smooth_scroll_duration, Easing::EaseOut);
+                            scroll_x.animate_to(target_x, smooth_scroll_duration, Easing::EaseOut);
+                        } else {
+                            scroll_y.set(target_y);
+                            scroll_x.set(target_x);
                         }
                     }
-                    EventResponse::Handled
+                    // Decline (Ignored) when fully clamped so the event chains
+                    // to an ancestor scrollable, unless Contain is set.
+                    crate::common::scroll::scroll_response(
+                        moved_x || moved_y,
+                        overscroll_behavior == OverscrollBehavior::Contain,
+                    )
                 }
                 WidgetEvent::ScrollIntoView {
                     target_bounds,
@@ -1706,6 +1704,94 @@ mod tests {
             cb.x.abs() < 0.01,
             "LTR content should be flush-left at x=0, got {}",
             cb.x
+        );
+    }
+
+    /// Build an outer ScrollArea whose content is `[inner ScrollArea (100px
+    /// viewport, 300px content), 200px filler]` in a 150px outer viewport.
+    /// Returns `(tree, inner_scroll_y, outer_scroll_y)`.
+    fn nested_scroll_fixture(
+        inner_overscroll: OverscrollBehavior,
+    ) -> (WidgetTree, Signal<f32>, Signal<f32>) {
+        let mut tree = WidgetTree::new();
+
+        let inner_content = tree.add(TallLeaf::new(200.0, 300.0));
+        let inner_sa = ScrollArea::from_id(inner_content)
+            .smooth_scrolling(false)
+            .preferred_size(200.0, 100.0)
+            .overscroll_behavior(inner_overscroll);
+        let inner_y = inner_sa.scroll_y_signal().clone();
+        let inner = tree.add(inner_sa);
+
+        let filler = tree.add(TallLeaf::new(200.0, 200.0));
+        let outer_content = tree.add(VStack::new().add_child(inner).add_child(filler));
+        let outer_sa = ScrollArea::from_id(outer_content).smooth_scrolling(false);
+        let outer_y = outer_sa.scroll_y_signal().clone();
+        let _outer = tree.add(outer_sa);
+
+        tree.layout(SizeProposal::exact(200.0, 150.0));
+        (tree, inner_y, outer_y)
+    }
+
+    #[test]
+    fn nested_scroll_chains_to_outer_at_boundary() {
+        let (mut tree, inner_y, outer_y) = nested_scroll_fixture(OverscrollBehavior::Chain);
+
+        // Pointer over the inner viewport, then scroll the inner to its bottom.
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            modifiers: Default::default(),
+        });
+        tree.layout(SizeProposal::exact(200.0, 150.0));
+
+        let inner_bottom = inner_y.get();
+        assert!(inner_bottom > 0.0, "inner should have scrolled down");
+        assert!(
+            outer_y.get() < 0.01,
+            "outer must not move while the inner still absorbs the scroll"
+        );
+
+        // Another downward scroll: inner is clamped → the event chains to outer.
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            modifiers: Default::default(),
+        });
+        tree.layout(SizeProposal::exact(200.0, 150.0));
+
+        assert!(
+            (inner_y.get() - inner_bottom).abs() < 0.01,
+            "inner stays clamped at its bottom"
+        );
+        assert!(
+            outer_y.get() > 0.01,
+            "outer scrolled because the inner chained the boundary scroll"
+        );
+    }
+
+    #[test]
+    fn contain_blocks_scroll_chaining() {
+        let (mut tree, _inner_y, outer_y) = nested_scroll_fixture(OverscrollBehavior::Contain);
+
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            modifiers: Default::default(),
+        });
+        tree.layout(SizeProposal::exact(200.0, 150.0));
+
+        // Inner at bottom + Contain → a further scroll is absorbed, not chained.
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            modifiers: Default::default(),
+        });
+        tree.layout(SizeProposal::exact(200.0, 150.0));
+
+        assert!(
+            outer_y.get() < 0.01,
+            "Contain must prevent chaining: outer stays put"
         );
     }
 }

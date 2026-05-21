@@ -453,7 +453,7 @@ pub struct SceneView {
     /// `pending_item_move`. SceneView binds to this at
     /// `BindingLevel::Rebuild` in `build`, so the next build
     /// cycle drains the pending move and calls
-    /// `Scene::move_item` (which requires `&mut self.scene`,
+    /// `Scene::set_local_pos` (which requires `&mut self.scene`,
     /// only available inside `build`). Without this signal, the
     /// move was queued but never applied — items "snapped back"
     /// to their original positions on drag release.
@@ -2083,6 +2083,15 @@ impl Widget for SceneView {
                         last_viewport_for_scroll.get(),
                         zoom.get(),
                     );
+                    // Boundary-based scroll chaining: if the pan can't move on
+                    // either axis (already clamped at a bound), decline so the
+                    // event bubbles to an ancestor scrollable. Mirrors the
+                    // ScrollArea / ListView / TreeView / TableView behavior.
+                    let moved_x = (clamped.x - base_x).abs() > 1e-3_f32;
+                    let moved_y = (clamped.y - base_y).abs() > 1e-3_f32;
+                    if !moved_x && !moved_y {
+                        return EventResponse::Ignored;
+                    }
                     if prefers_reduced {
                         pan_x.set(clamped.x);
                         pan_y.set(clamped.y);
@@ -2490,7 +2499,7 @@ impl Widget for SceneView {
                             // Bump the rebuild signal so SceneView's
                             // `build()` runs and drains the pending
                             // move (where `&mut self.scene` is
-                            // available and `Scene::move_item` can
+                            // available and `Scene::set_local_pos` can
                             // commit + re-bucket the spatial index).
                             drag_dirty.set(drag_dirty.get().wrapping_add(1));
                             return;
@@ -2681,7 +2690,7 @@ impl Widget for SceneView {
         // Drain any pending drag-to-move commit, applied
         // via the public `flush_pending_mutations` helper to keep
         // the borrow tractable (`place_children` takes `&self`,
-        // and `Scene::move_item` needs `&mut Scene`). The
+        // and `Scene::set_local_pos` needs `&mut Scene`). The
         // framework calls layout from `&mut tree`, which gives
         // `&mut self` access elsewhere — but inside this trait
         // method we have only `&self`. Defer to a separate

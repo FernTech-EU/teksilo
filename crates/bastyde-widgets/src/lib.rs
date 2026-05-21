@@ -181,6 +181,7 @@ pub use progress_bar::ProgressBar;
 pub use radio_button::RadioButton;
 pub use radio_group::RadioGroup;
 pub use repeater::Repeater;
+pub use common::scroll::OverscrollBehavior;
 pub use scroll_area::{ScrollArea, ScrollBarMode, ScrollBarPolicy};
 pub use scroll_bar::{ScrollBar, ScrollBarOrientation};
 #[cfg(feature = "rich-text")]
