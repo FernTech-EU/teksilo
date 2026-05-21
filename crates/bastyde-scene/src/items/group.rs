@@ -96,8 +96,9 @@ impl GroupItem {
     }
 
     /// Cosmetic border stroke: holds a constant **device-pixel** width at any
-    /// zoom. With `corner_radius > 0` the rounded outline stays crisp via the
-    /// SDF cosmetic path; otherwise it routes through the hairline-line path.
+    /// zoom. With `corner_radius > 0` the rounded outline goes through the SDF
+    /// cosmetic path; otherwise `stroke_rect` emits four `CosmeticLine` edges
+    /// (one per side), which are hard-edged and crisp at any zoom.
     pub fn stroke_cosmetic(mut self, color: Color, width: f32) -> Self {
         self.stroke = Some((color, StrokeStyle::hairline(width.max(0.0))));
         self

@@ -127,9 +127,13 @@ impl StrokeStyle {
     /// **invariant to the canvas transform** (it does not grow with a
     /// `SceneView` zoom), still scaled for HiDPI. Use for grid lines, 1px
     /// borders, focus rings, and connectors that must stay crisp at any zoom.
-    /// Currently honored by [`Canvas::draw_line`](crate::Canvas::draw_line)
-    /// and [`Canvas::stroke_rect`](crate::Canvas::stroke_rect); other stroke
-    /// shapes fall back to logical width.
+    ///
+    /// Honored by every stroke method: [`Canvas::draw_line`](crate::Canvas::draw_line)
+    /// / [`Canvas::stroke_rect`](crate::Canvas::stroke_rect) (exact, hard-edged
+    /// quad); [`Canvas::stroke_rounded_rect`](crate::Canvas::stroke_rounded_rect)
+    /// / `stroke_circle` / `stroke_ellipse` (SDF — constant device-pixel
+    /// width); and [`Canvas::stroke_path`](crate::Canvas::stroke_path)
+    /// (zoom-aware atlas).
     pub fn hairline(width: f32) -> Self {
         Self {
             width,
