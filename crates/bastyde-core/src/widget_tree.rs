@@ -200,6 +200,19 @@ pub struct WidgetTree {
     text_scale_factor: f64,
     /// Active drag-and-drop session, if any.
     pub(crate) active_drag: Option<crate::drag_state::DragSession>,
+    /// Source widget of an in-flight OS (outbound) drag that escalated past
+    /// the window boundary. Set only on the window that *started* the drag.
+    /// The in-app `active_drag` session is torn down at escalation (the OS owns
+    /// the pointer); this remembers who started it so the eventual `DragEnded`
+    /// can fire the source's `on_drag_ended`.
+    pub(crate) outbound_drag_source: Option<WidgetId>,
+    /// True while *this* window currently holds the re-entered internal session
+    /// for an in-flight app-originated OS drag (the OS drag wandered back over
+    /// this window — possibly a different window than the source — and we
+    /// restored the original typed payload). Distinguishes that session from a
+    /// plain internal drag so leaving again re-stashes instead of starting a
+    /// second OS drag, and dropping doesn't double-fire `on_drag_ended`.
+    pub(crate) os_drag_reentered: bool,
     /// Optional platform host for custom window chrome (set when the
     /// application opts in via `WindowConfig::custom_chrome(true)`). Stored
     /// here so that the root-builder closure has access during widget
@@ -358,6 +371,8 @@ impl WidgetTree {
             prefers_reduced_motion: false,
             text_scale_factor: 1.0,
             active_drag: None,
+            outbound_drag_source: None,
+            os_drag_reentered: false,
             title_bar_host: None,
             app_context: Rc::new(crate::event_source::TreeAppContext::empty()),
             locale: None,

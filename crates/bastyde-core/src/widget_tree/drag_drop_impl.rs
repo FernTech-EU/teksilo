@@ -1,5 +1,83 @@
 use super::*;
 
+// App-global stash for the typed payload of an in-flight app-originated OS
+// drag. When an in-app drag escalates to a native OS drag at the window
+// boundary, the OS only carries the serialized MIME bytes — the typed
+// `Box<dyn Any>` fast-path value would be lost. We park the whole `DragPayload`
+// here for the lifetime of the OS drag so that if the drag wanders back over
+// **any** window of this app (the source window or another one), that window
+// can recover the original typed payload and present it as a normal internal
+// drag. Single-threaded GUI ⇒ a thread-local is the process-wide registry, and
+// it is only ever touched on the main thread (escalation and all
+// `*_external_drag` / `handle_os_drag_ended` routing run there; the Wayland
+// dispatch thread only `post_external`s).
+//
+// **Liveness gate.** Recovery is gated on the `live` flag, not on payload
+// presence. `live` is set true by `outbound_begin` (escalation) and cleared by
+// `outbound_end` (the terminal `DragEnded`, or a source-window close). This is
+// what keeps a leaked / stale payload from mis-claiming a *later* genuine
+// external drag from another application: `outbound_take_if_live` only hands
+// the payload back while `live`, and `outbound_restash` is a no-op once the
+// drag has ended — so even a racing re-stash (cross-window drop-on-nothing)
+// can't resurrect a finished drag.
+struct OutboundStash {
+    /// True while an app-originated OS drag is in flight.
+    live: bool,
+    /// The parked typed payload, present whenever no window currently holds it
+    /// as a re-entered session.
+    payload: Option<crate::drag_payload::DragPayload>,
+}
+
+thread_local! {
+    static OUTBOUND: std::cell::RefCell<OutboundStash> =
+        const { std::cell::RefCell::new(OutboundStash { live: false, payload: None }) };
+}
+
+/// Begin an outbound drag: mark live and park the typed payload.
+fn outbound_begin(payload: crate::drag_payload::DragPayload) {
+    OUTBOUND.with(|s| {
+        let mut s = s.borrow_mut();
+        s.live = true;
+        s.payload = Some(payload);
+    });
+}
+
+/// Recover the parked payload **only while the drag is live**. Leaves `live`
+/// set (a window now holds the payload as a re-entered session).
+fn outbound_take_if_live() -> Option<crate::drag_payload::DragPayload> {
+    OUTBOUND.with(|s| {
+        let mut s = s.borrow_mut();
+        if s.live { s.payload.take() } else { None }
+    })
+}
+
+/// Return a re-entered payload to the stash so another window can recover it —
+/// but only if the drag is still live (a racing terminal event may have ended
+/// it first, in which case the payload is dropped).
+fn outbound_restash(payload: crate::drag_payload::DragPayload) {
+    OUTBOUND.with(|s| {
+        let mut s = s.borrow_mut();
+        if s.live {
+            s.payload = Some(payload);
+        }
+    });
+}
+
+/// Whether a payload is currently parked. Test/diagnostic helper.
+fn has_outbound_typed() -> bool {
+    OUTBOUND.with(|s| s.borrow().payload.is_some())
+}
+
+/// End the outbound drag: clear the live flag and drop any parked payload.
+/// Idempotent. After this, no window can recover the payload.
+fn outbound_end() {
+    OUTBOUND.with(|s| {
+        let mut s = s.borrow_mut();
+        s.live = false;
+        s.payload = None;
+    });
+}
+
 impl WidgetTree {
     /// Clean up drag preview overlay (if any).
     pub(super) fn cleanup_drag_preview(&mut self) {
@@ -19,12 +97,19 @@ impl WidgetTree {
     /// and the source-destroyed salvage in `revalidate_interaction_state`.
     pub(super) fn cancel_active_drag(&mut self, ops: &mut dyn crate::window::WindowOps) {
         let prev_target = self.active_drag.as_ref().and_then(|d| d.current_target);
+        // The source widget, so a cancelled in-app drag still notifies its
+        // originator via `on_drag_ended(Cancelled)`. External drags carry no
+        // source (`None`), so they never fire it.
+        let source = self.active_drag.as_ref().and_then(|d| d.source_widget);
         self.cleanup_drag_preview();
         self.active_drag = None;
         self.pointer_captured_by = None;
         self.current_cursor = crate::widget::CursorIcon::Default;
         if let Some(prev) = prev_target {
             self.fire_on_drag_leave(prev, &mut *ops);
+        }
+        if let Some(src) = source {
+            self.fire_on_drag_ended(src, crate::drag_payload::DropOutcome::Cancelled, &mut *ops);
         }
     }
 
@@ -58,6 +143,36 @@ impl WidgetTree {
         if self.active_drag.is_some() {
             self.cancel_active_drag(&mut *ops);
         }
+
+        // Is this our own app's in-flight OS drag wandering (back) over a
+        // window? A non-empty global stash means an app-originated OS drag is
+        // live (only one OS drag exists at a time), so recover the original
+        // typed payload and present it as a normal *internal* drag. In-app
+        // targets then see the typed value — this is what enables a drag to
+        // round-trip out and back, and drag-and-drop between two windows of the
+        // same app. The terminal `on_drag_ended` is owned by the source window
+        // (via `DragEnded`), so this re-entered session carries no
+        // `source_widget` and never fires it on drop.
+        if let Some(mut payload) = outbound_take_if_live() {
+            // Also expose the file/text/URI view derived from the carried MIME,
+            // so the re-entered drag satisfies external-style targets (DropZone)
+            // in addition to typed in-app targets.
+            payload.enrich_external_from_mime();
+            self.active_drag = Some(crate::drag_state::DragSession {
+                payload,
+                source_widget: None,
+                is_external: false,
+                current_position: position,
+                current_target: None,
+                feedback: crate::drag_state::DropFeedback::NoFeedback,
+                preview_content_id: None,
+                preview_overlay_id: None,
+            });
+            self.os_drag_reentered = true;
+            self.handle_drag_move(position, &mut *ops);
+            return;
+        }
+
         self.active_drag = Some(crate::drag_state::DragSession {
             payload: crate::drag_payload::DragPayload::external(data),
             source_widget: None,
@@ -80,7 +195,10 @@ impl WidgetTree {
         position: bastyde_canvas::Point,
         ops: &mut dyn crate::window::WindowOps,
     ) {
-        if self.active_drag.as_ref().is_some_and(|d| d.is_external) {
+        // Drives both a genuine external drag and our own re-entered OS drag
+        // (now an internal session). `handle_drag_move` re-stashes and re-exits
+        // if a re-entered drag leaves the window again.
+        if self.active_drag.as_ref().is_some_and(|d| d.is_external) || self.os_drag_reentered {
             self.handle_drag_move(position, &mut *ops);
         }
     }
@@ -96,6 +214,18 @@ impl WidgetTree {
         data: crate::drag_payload::ExternalDropData,
         ops: &mut dyn crate::window::WindowOps,
     ) {
+        // Our own OS drag dropped inside an app window: complete it as an
+        // internal drop with the recovered typed payload. The re-entered
+        // session has no `source_widget`, so `handle_drag_drop` fires `on_drop`
+        // on the target but not `on_drag_ended` — the source window fires that
+        // once when the OS posts the terminal `DragEnded`. Clear the global
+        // stash so that trailing event treats the drag as finished.
+        if self.os_drag_reentered {
+            self.os_drag_reentered = false;
+            self.handle_drag_drop(position, &mut *ops);
+            outbound_end();
+            return;
+        }
         if !self.active_drag.as_ref().is_some_and(|d| d.is_external) {
             return;
         }
@@ -111,7 +241,13 @@ impl WidgetTree {
     /// OS aborted the operation) without dropping. No-op unless an external
     /// session is active.
     pub fn cancel_external_drag(&mut self, ops: &mut dyn crate::window::WindowOps) {
-        if self.active_drag.as_ref().is_some_and(|d| d.is_external) {
+        // A re-entered OS drag leaving the window again must NOT cancel the
+        // whole drag (the OS drag is still live) — re-stash the typed payload
+        // for the next window it enters and tear down this internal session
+        // without a terminal `on_drag_ended`.
+        if self.os_drag_reentered {
+            self.reexit_outbound(&mut *ops);
+        } else if self.active_drag.as_ref().is_some_and(|d| d.is_external) {
             self.cancel_active_drag(&mut *ops);
         }
     }
@@ -204,6 +340,178 @@ impl WidgetTree {
         self.arena.mark_needs_paint(target_id);
     }
 
+    /// Fire `on_drag_ended` on a drag's **source** widget with the final
+    /// outcome (in-app drop, OS export, or cancel). Mirrors
+    /// [`Self::fire_on_drag_leave`]'s take/restore-handler discipline.
+    pub(super) fn fire_on_drag_ended(
+        &mut self,
+        source_id: WidgetId,
+        outcome: crate::drag_payload::DropOutcome,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        if !self.arena.is_active(source_id) {
+            return;
+        }
+        // Handlers attached at the widget's creation site live in the
+        // `external_handlers` bucket; those installed from the widget's own
+        // `build()` live in `handlers`. Fire whichever is present (both, if
+        // both) — same dual-bucket discipline as `fire_on_drag_leave`.
+        let (mut ext_handler, mut own_handler) = match self.arena.get_mut(source_id) {
+            Some(node) => (
+                node.external_handlers.on_drag_ended.take(),
+                node.handlers.on_drag_ended.take(),
+            ),
+            None => return,
+        };
+        if ext_handler.is_none() && own_handler.is_none() {
+            return;
+        }
+        let mut ctx = self.make_event_context(&mut *ops);
+        if let Some(h) = ext_handler.as_mut() {
+            h(outcome, &mut ctx);
+        }
+        if let Some(h) = own_handler.as_mut() {
+            h(outcome, &mut ctx);
+        }
+        if let Some(node) = self.arena.get_mut(source_id) {
+            node.external_handlers.on_drag_ended = ext_handler;
+            node.handlers.on_drag_ended = own_handler;
+        }
+        self.collect_from_ctx(ctx, source_id);
+    }
+
+    /// Window content size (logical px) from the last layout proposal, if both
+    /// axes were exact. Used to detect when an in-app drag leaves the window.
+    fn window_content_size(&self) -> Option<(f32, f32)> {
+        Some((self.last_proposal.width?, self.last_proposal.height?))
+    }
+
+    /// Whether `position` is outside this window's content rect. Unknown bounds
+    /// (non-exact proposal) ⇒ never treated as outside.
+    fn is_outside_window(&self, position: bastyde_canvas::Point) -> bool {
+        match self.window_content_size() {
+            Some((w, h)) => {
+                position.x < 0.0 || position.y < 0.0 || position.x > w || position.y > h
+            }
+            None => false,
+        }
+    }
+
+    /// When an **internal** drag whose payload is OS-exportable leaves the
+    /// window bounds, hand it to the platform as a native OS drag. Returns
+    /// `true` if it consumed the move (escalated, or re-exited a re-entered
+    /// drag); `false` when escalation does not apply, leaving the caller to
+    /// continue the normal in-app flow.
+    fn try_escalate_to_os_drag(
+        &mut self,
+        position: bastyde_canvas::Point,
+        ops: &mut dyn crate::window::WindowOps,
+    ) -> bool {
+        // Already handed off to the OS and currently re-entered into this
+        // window: leaving again must NOT start a second OS drag. Re-stash the
+        // typed payload (so the next window can recover it) and tear the
+        // internal session down without a terminal `on_drag_ended`.
+        if self.os_drag_reentered {
+            if self.is_outside_window(position) {
+                self.reexit_outbound(&mut *ops);
+                return true;
+            }
+            return false;
+        }
+
+        // Only a plain internal drag with an exportable payload escalates.
+        let data = match self.active_drag.as_ref() {
+            Some(d)
+                if !d.is_external && d.source_widget.is_some() && d.payload.is_os_exportable() =>
+            {
+                d.payload.to_outbound()
+            }
+            _ => return false,
+        };
+        if !self.is_outside_window(position) {
+            return false;
+        }
+
+        // Ask the platform to start a native OS drag. If it can't (no backend
+        // / X11 / test sink), leave the in-app session intact — current
+        // behavior: the drag can still come back into the window.
+        if !ops.begin_os_drag(data, None) {
+            return false;
+        }
+
+        // Escalated: the OS owns the drag now. Take the in-app session and park
+        // its full (typed) payload in the app-global stash for the OS drag's
+        // lifetime, so any window the drag re-enters can recover it. Remember
+        // the source so the eventual `DragEnded` notifies it.
+        let prev_target = self.active_drag.as_ref().and_then(|d| d.current_target);
+        self.cleanup_drag_preview();
+        let drag = self
+            .active_drag
+            .take()
+            .expect("active_drag present (matched above)");
+        self.pointer_captured_by = None;
+        self.current_cursor = crate::widget::CursorIcon::Default;
+        self.outbound_drag_source = drag.source_widget;
+        outbound_begin(drag.payload);
+        if let Some(prev) = prev_target {
+            self.fire_on_drag_leave(prev, &mut *ops);
+        }
+        true
+    }
+
+    /// A re-entered OS drag left this window again: return the typed payload to
+    /// the app-global stash and tear down the internal session, *without* a
+    /// terminal `on_drag_ended` (the OS drag is still in flight).
+    fn reexit_outbound(&mut self, ops: &mut dyn crate::window::WindowOps) {
+        let prev_target = self.active_drag.as_ref().and_then(|d| d.current_target);
+        self.cleanup_drag_preview();
+        if let Some(drag) = self.active_drag.take() {
+            outbound_restash(drag.payload);
+        }
+        self.os_drag_reentered = false;
+        self.pointer_captured_by = None;
+        self.current_cursor = crate::widget::CursorIcon::Default;
+        if let Some(prev) = prev_target {
+            self.fire_on_drag_leave(prev, &mut *ops);
+        }
+    }
+
+    /// Resolve an OS (outbound) drag at its terminal event. Clears the global
+    /// typed-payload stash and fires `on_drag_ended(outcome)` once on the
+    /// source widget (set only on the window that started the drag). Routed
+    /// here by `bastyde-app` when the platform backend reports `DragEnded`.
+    pub fn handle_os_drag_ended(
+        &mut self,
+        outcome: crate::drag_payload::DropOutcome,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        // The OS guarantees this terminal event; end the stash so a later drag
+        // from another app can't be mistaken for ours.
+        outbound_end();
+        self.os_drag_reentered = false;
+        if let Some(source) = self.outbound_drag_source.take() {
+            self.fire_on_drag_ended(source, outcome, &mut *ops);
+        }
+    }
+
+    /// Abort any outbound OS drag this tree participates in, used when the
+    /// window is closing. If this tree is the drag *source*, the whole drag is
+    /// ending (the source object dies with the window) — end the stash so a
+    /// later genuine external drag can't be mistaken for ours. If instead this
+    /// is a non-source window currently holding the re-entered payload, hand it
+    /// back to the stash so another window can still recover it. No
+    /// `on_drag_ended` fires (the window and its handlers are being torn down).
+    pub fn abort_outbound_drag(&mut self) {
+        if self.outbound_drag_source.take().is_some() {
+            outbound_end();
+        } else if self.os_drag_reentered
+            && let Some(drag) = self.active_drag.take()
+        {
+            outbound_restash(drag.payload);
+        }
+        self.os_drag_reentered = false;
+    }
+
     /// Update the drag session on pointer move: find the drop target under the
     /// pointer and call its `on_drag_hover` handler.
     pub(super) fn handle_drag_move(
@@ -214,6 +522,12 @@ impl WidgetTree {
         // Update position on the session
         if let Some(ref mut drag) = self.active_drag {
             drag.current_position = position;
+        }
+
+        // If an internal, OS-exportable drag has left the window, hand it to
+        // the OS as a native drag and stop the in-app pipeline.
+        if self.try_escalate_to_os_drag(position, &mut *ops) {
+            return;
         }
 
         // Update preview overlay placement. `update_placement` only
@@ -321,6 +635,12 @@ impl WidgetTree {
         };
         self.pointer_captured_by = None;
         self.current_cursor = crate::widget::CursorIcon::Default;
+        // Source widget so an in-app drop notifies its originator via
+        // `on_drag_ended`. External drags carry no source.
+        let source = drag.source_widget;
+        // Default: landed on nothing ⇒ cancelled. Set to `InApp { accepted }`
+        // when a drop handler actually runs.
+        let mut outcome = crate::drag_payload::DropOutcome::Cancelled;
 
         // Fire on_drag_leave on the session's current target before on_drop
         // runs — widgets own their feedback state and must be given a
@@ -360,7 +680,8 @@ impl WidgetTree {
             };
             if let Some((mut handler, is_own)) = picked {
                 let mut ctx = self.make_event_context(&mut *ops);
-                let _accepted = handler(drag.payload, local, &mut ctx);
+                let accepted = handler(drag.payload, local, &mut ctx);
+                outcome = crate::drag_payload::DropOutcome::InApp { accepted };
                 if let Some(node) = self.arena.get_mut(target_id) {
                     if is_own {
                         node.handlers.on_drop = Some(handler);
@@ -372,7 +693,12 @@ impl WidgetTree {
                 self.arena.mark_needs_paint(target_id);
             }
         }
-        // Drop was not accepted — payload is dropped (Rust Drop)
+        // Notify the source the drag it started has ended (in-app drops only;
+        // external drags carry no source). Payload was moved into the handler
+        // above, or dropped (Rust Drop) if unaccepted.
+        if let Some(src) = source {
+            self.fire_on_drag_ended(src, outcome, &mut *ops);
+        }
     }
 
     /// Walk up from a widget to find the nearest ancestor (or self) with a
@@ -1553,5 +1879,481 @@ mod tests {
         );
         tree.cancel_external_drag(&mut noop);
         assert!(tree.active_drag.is_none());
+    }
+
+    // --- Outbound (app → OS) escalation + unified on_drag_ended ----------
+
+    /// `WindowOps` sink that records `begin_os_drag` calls and reports a
+    /// configurable success, standing in for the platform backend.
+    struct RecordingWindowOps {
+        started: std::rc::Rc<std::cell::RefCell<Vec<crate::drag_payload::OutboundDragData>>>,
+        succeed: bool,
+    }
+    impl crate::window::WindowOps for RecordingWindowOps {
+        fn open_window(&mut self, _c: crate::window::WindowConfig) -> crate::window::BastydeWindowId {
+            panic!("not used in these tests")
+        }
+        fn find_window(&self, _s: &str) -> Option<crate::window::BastydeWindowId> {
+            None
+        }
+        fn window_state(&self, _id: crate::window::BastydeWindowId) -> Option<crate::window::WindowState> {
+            None
+        }
+        fn windows(&self) -> Vec<crate::window::WindowState> {
+            Vec::new()
+        }
+        fn focus_window(&mut self, _id: crate::window::BastydeWindowId) {}
+        fn close_window_by_id(&mut self, _id: crate::window::BastydeWindowId) {}
+        fn begin_os_drag(
+            &mut self,
+            data: crate::drag_payload::OutboundDragData,
+            _image: Option<crate::drag_payload::DragImageData>,
+        ) -> bool {
+            self.started.borrow_mut().push(data);
+            self.succeed
+        }
+    }
+
+    fn exportable_payload() -> crate::drag_payload::DragPayload {
+        crate::drag_payload::DragPayload::typed(7_u32).with_mime("text/plain", b"hi".to_vec())
+    }
+
+    #[test]
+    fn internal_exportable_drag_escalates_when_leaving_window() {
+        let started = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut ops = RecordingWindowOps {
+            started: started.clone(),
+            succeed: true,
+        };
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, exportable_payload());
+        tree.collect_from_ctx(ctx, source);
+        assert!(tree.active_drag.is_some());
+
+        // Inside the window: no escalation.
+        tree.handle_drag_move(Point::new(100.0, 50.0), &mut ops);
+        assert!(started.borrow().is_empty());
+        assert!(tree.active_drag.is_some());
+
+        // Pointer leaves the window: escalate.
+        tree.handle_drag_move(Point::new(-5.0, 50.0), &mut ops);
+        assert_eq!(started.borrow().len(), 1, "begin_os_drag called once");
+        assert!(
+            started.borrow()[0].mime.contains_key("text/plain"),
+            "outbound data carries the payload's mime"
+        );
+        assert!(tree.active_drag.is_none(), "in-app session torn down");
+        assert_eq!(tree.outbound_drag_source, Some(source));
+    }
+
+    #[test]
+    fn os_drag_ended_fires_source_on_drag_ended() {
+        use crate::drag_payload::DropOutcome;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let outcome = Rc::new(Cell::new(None));
+        let o = outcome.clone();
+
+        let started = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut ops = RecordingWindowOps {
+            started,
+            succeed: true,
+        };
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(
+            FillWidget::new().on_drag_ended(move |outcome, _ctx| o.set(Some(outcome))),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, exportable_payload());
+        tree.collect_from_ctx(ctx, source);
+        tree.handle_drag_move(Point::new(-5.0, 50.0), &mut ops); // escalate
+        assert_eq!(tree.outbound_drag_source, Some(source));
+
+        tree.handle_os_drag_ended(DropOutcome::OsMove, &mut ops);
+        assert_eq!(outcome.get(), Some(DropOutcome::OsMove));
+        assert!(tree.outbound_drag_source.is_none(), "cleared after delivery");
+    }
+
+    #[test]
+    fn no_backend_keeps_session_active_on_leave() {
+        // begin_os_drag returns false (no outbound backend / X11): the in-app
+        // drag stays active so the user can drag back in — current behavior.
+        let started = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut ops = RecordingWindowOps {
+            started: started.clone(),
+            succeed: false,
+        };
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, exportable_payload());
+        tree.collect_from_ctx(ctx, source);
+        tree.handle_drag_move(Point::new(-5.0, 50.0), &mut ops);
+
+        assert_eq!(started.borrow().len(), 1, "escalation was attempted");
+        assert!(tree.active_drag.is_some(), "session kept (no backend)");
+        assert!(tree.outbound_drag_source.is_none());
+    }
+
+    #[test]
+    fn non_exportable_drag_does_not_escalate() {
+        let started = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut ops = RecordingWindowOps {
+            started: started.clone(),
+            succeed: true,
+        };
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        // Plain typed payload, no mime ⇒ not OS-exportable.
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(1_u32));
+        tree.collect_from_ctx(ctx, source);
+        tree.handle_drag_move(Point::new(-5.0, 50.0), &mut ops);
+
+        assert!(started.borrow().is_empty(), "no escalation attempt");
+        assert!(tree.active_drag.is_some(), "session unaffected");
+    }
+
+    #[test]
+    fn in_app_drop_fires_source_on_drag_ended_with_accepted() {
+        use crate::drag_payload::DropOutcome;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let outcome = Rc::new(Cell::new(None));
+        let o = outcome.clone();
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(
+            FillWidget::new().on_drag_ended(move |outcome, _ctx| o.set(Some(outcome))),
+        );
+        let _target = tree.add(FillWidget::new().on_drop(|_, _, _| true));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(42_u32));
+        tree.collect_from_ctx(ctx, source);
+
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(150.0, 50.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+
+        assert_eq!(outcome.get(), Some(DropOutcome::InApp { accepted: true }));
+    }
+
+    #[test]
+    fn escape_fires_source_on_drag_ended_cancelled() {
+        use crate::drag_payload::DropOutcome;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let outcome = Rc::new(Cell::new(None));
+        let o = outcome.clone();
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(
+            FillWidget::new().on_drag_ended(move |outcome, _ctx| o.set(Some(outcome))),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(0_u32));
+        tree.collect_from_ctx(ctx, source);
+
+        tree.press_key(Key::Escape, Modifiers::NONE);
+        assert_eq!(outcome.get(), Some(DropOutcome::Cancelled));
+    }
+
+    /// Drag out (escalate to OS), then the OS drag re-enters the same window
+    /// and drops on an in-app target: the original *typed* payload is
+    /// recovered (not lost to the file/text round-trip), and the source's
+    /// `on_drag_ended` fires exactly once with the OS outcome.
+    #[test]
+    fn os_drag_reentry_recovers_typed_payload_for_in_app_drop() {
+        use crate::drag_payload::{DragPayload, DropOutcome};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let started = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut ops = RecordingWindowOps {
+            started,
+            succeed: true,
+        };
+
+        let got_typed = Rc::new(Cell::new(0_u32));
+        let ended = Rc::new(Cell::new(0_u32));
+        let last_outcome = Rc::new(Cell::new(None));
+        let g = got_typed.clone();
+        let e = ended.clone();
+        let lo = last_outcome.clone();
+
+        let mut tree = WidgetTree::new();
+        let source =
+            tree.add(FillWidget::new().on_drag_ended(move |outcome, _ctx| {
+                e.set(e.get() + 1);
+                lo.set(Some(outcome));
+            }));
+        let _target = tree.add(FillWidget::new().on_drop(move |mut p, _, _| {
+            match p.take_typed::<u32>() {
+                Some(v) => {
+                    g.set(v);
+                    true
+                }
+                None => false,
+            }
+        }));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        // Internal drag with a typed value AND an exportable MIME rep.
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(
+            source,
+            DragPayload::typed(123_u32).with_mime("text/plain", b"x".to_vec()),
+        );
+        tree.collect_from_ctx(ctx, source);
+
+        // Leave the window → escalate to OS drag (typed payload stashed).
+        tree.handle_drag_move(Point::new(-5.0, 50.0), &mut ops);
+        assert!(tree.active_drag.is_none());
+        assert!(super::has_outbound_typed(), "typed payload stashed globally");
+
+        // OS drag re-enters → restored as an internal session with the typed
+        // value (not an external file/text drop).
+        tree.begin_external_drag(
+            Point::new(100.0, 50.0),
+            crate::drag_payload::ExternalDropData::default(),
+            &mut ops,
+        );
+        let d = tree.active_drag.as_ref().expect("re-entered session");
+        assert!(!d.is_external, "re-entry is an internal session");
+        assert!(d.payload.has_typed::<u32>(), "typed payload recovered");
+        assert_eq!(
+            d.payload.text(),
+            Some("x"),
+            "external view enriched from MIME so DropZone-style targets also accept"
+        );
+        assert!(!super::has_outbound_typed(), "stash taken by the re-entry");
+
+        // Drop inside on the target → on_drop receives the typed value.
+        tree.end_external_drag(
+            Point::new(150.0, 50.0),
+            crate::drag_payload::ExternalDropData::default(),
+            &mut ops,
+        );
+        assert_eq!(got_typed.get(), 123, "target received the typed payload");
+        assert_eq!(ended.get(), 0, "source on_drag_ended not fired by the drop itself");
+
+        // OS posts the terminal event on the source window → exactly one
+        // on_drag_ended with the OS outcome.
+        tree.handle_os_drag_ended(DropOutcome::OsCopy, &mut ops);
+        assert_eq!(ended.get(), 1, "on_drag_ended fired exactly once");
+        assert_eq!(last_outcome.get(), Some(DropOutcome::OsCopy));
+    }
+
+    /// The same recovery works across two windows of the same app: window A
+    /// starts the drag, the OS drag enters window B, and B's target receives
+    /// the original typed payload.
+    #[test]
+    fn os_drag_reentry_recovers_typed_payload_across_windows() {
+        use crate::drag_payload::{DragPayload, DropOutcome};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let started = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut ops = RecordingWindowOps {
+            started,
+            succeed: true,
+        };
+
+        // Window A: starts and escalates.
+        let mut tree_a = WidgetTree::new();
+        let src = tree_a.add(FillWidget::new());
+        tree_a.layout(SizeProposal::exact(200.0, 100.0));
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(
+            src,
+            DragPayload::typed(77_u32).with_mime("text/plain", b"x".to_vec()),
+        );
+        tree_a.collect_from_ctx(ctx, src);
+        tree_a.handle_drag_move(Point::new(-5.0, 50.0), &mut ops);
+        assert!(super::has_outbound_typed());
+        assert_eq!(tree_a.outbound_drag_source, Some(src));
+
+        // Window B (separate tree, same thread ⇒ same global stash): the OS
+        // drag enters and drops on B's target, which gets the typed value.
+        let got = Rc::new(Cell::new(0_u32));
+        let g = got.clone();
+        let mut tree_b = WidgetTree::new();
+        let _t = tree_b.add(FillWidget::new().on_drop(move |mut p, _, _| {
+            match p.take_typed::<u32>() {
+                Some(v) => {
+                    g.set(v);
+                    true
+                }
+                None => false,
+            }
+        }));
+        tree_b.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree_b.begin_external_drag(
+            Point::new(50.0, 50.0),
+            crate::drag_payload::ExternalDropData::default(),
+            &mut ops,
+        );
+        assert!(
+            tree_b
+                .active_drag
+                .as_ref()
+                .is_some_and(|d| d.payload.has_typed::<u32>()),
+            "window B recovered the typed payload"
+        );
+        tree_b.end_external_drag(
+            Point::new(50.0, 50.0),
+            crate::drag_payload::ExternalDropData::default(),
+            &mut ops,
+        );
+        assert_eq!(got.get(), 77, "window B's target received the typed payload");
+
+        // Source window A reports the terminal outcome.
+        tree_a.handle_os_drag_ended(DropOutcome::OsCopy, &mut ops);
+    }
+
+    /// A re-entered OS drag that leaves the window again re-stashes the typed
+    /// payload (does not start a second OS drag, does not fire on_drag_ended),
+    /// so a later window can still recover it.
+    #[test]
+    fn os_drag_reexit_restashes_payload() {
+        use crate::drag_payload::DragPayload;
+        use std::rc::Rc;
+
+        let started = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut ops = RecordingWindowOps {
+            started: started.clone(),
+            succeed: true,
+        };
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(
+            source,
+            DragPayload::typed(9_u32).with_mime("text/plain", b"x".to_vec()),
+        );
+        tree.collect_from_ctx(ctx, source);
+
+        // Escalate, then re-enter, then leave again.
+        tree.handle_drag_move(Point::new(-5.0, 50.0), &mut ops);
+        assert_eq!(started.borrow().len(), 1, "OS drag started once");
+        tree.begin_external_drag(
+            Point::new(100.0, 50.0),
+            crate::drag_payload::ExternalDropData::default(),
+            &mut ops,
+        );
+        assert!(tree.os_drag_reentered);
+        tree.handle_drag_move(Point::new(-5.0, 50.0), &mut ops); // leave again
+
+        assert!(!tree.os_drag_reentered, "re-exited");
+        assert!(tree.active_drag.is_none(), "session torn down on re-exit");
+        assert!(super::has_outbound_typed(), "payload re-stashed");
+        assert_eq!(
+            started.borrow().len(),
+            1,
+            "no second OS drag started on re-exit"
+        );
+    }
+
+    /// Closing the source window mid-OS-drag clears the global stash, so a
+    /// later genuine external drag from another app is NOT mis-recovered as the
+    /// stale typed payload. (Regression for the CRITICAL stash-leak finding.)
+    #[test]
+    fn source_window_close_clears_stash_no_hijack() {
+        use crate::drag_payload::{DragPayload, ExternalDropData};
+        use std::path::PathBuf;
+        use std::rc::Rc;
+
+        let started = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut ops = RecordingWindowOps {
+            started,
+            succeed: true,
+        };
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        let _target = tree.add(FillWidget::new().on_drop(|_, _, _| true));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(
+            source,
+            DragPayload::typed(5_u32).with_mime("text/plain", b"x".to_vec()),
+        );
+        tree.collect_from_ctx(ctx, source);
+        tree.handle_drag_move(Point::new(-5.0, 50.0), &mut ops); // escalate
+        assert!(super::has_outbound_typed());
+        assert_eq!(tree.outbound_drag_source, Some(source));
+
+        // Window closes mid-drag.
+        tree.abort_outbound_drag();
+        assert!(
+            !super::has_outbound_typed(),
+            "stash cleared when the source window closes"
+        );
+        assert!(tree.outbound_drag_source.is_none());
+
+        // A later real external drag (another app) must present as external,
+        // NOT recover the stale typed payload.
+        tree.begin_external_drag(
+            Point::new(50.0, 50.0),
+            ExternalDropData {
+                files: vec![PathBuf::from("/tmp/real")],
+                ..Default::default()
+            },
+            &mut ops,
+        );
+        let d = tree.active_drag.as_ref().expect("external session");
+        assert!(d.is_external, "stale stash did not hijack the new external drag");
+        assert!(!d.payload.has_typed::<u32>(), "no stale typed payload leaked in");
+        assert_eq!(d.payload.files(), &[PathBuf::from("/tmp/real")]);
+    }
+
+    /// A re-stash that races in *after* the drag's terminal event must not
+    /// resurrect a finished drag (cross-window drop-on-nothing race). Tests the
+    /// liveness gate directly. (Regression for the HIGH race finding.)
+    #[test]
+    fn restash_after_drag_ended_is_noop() {
+        use crate::drag_payload::DragPayload;
+
+        super::outbound_begin(DragPayload::typed(1_u32).with_mime("text/plain", b"x".to_vec()));
+        assert!(super::has_outbound_typed());
+        // A window re-entered and took the payload.
+        let held = super::outbound_take_if_live().expect("payload taken while live");
+        assert!(!super::has_outbound_typed());
+        // The source window's terminal DragEnded ends the drag first.
+        super::outbound_end();
+        // The other window's late re-stash must be dropped, not resurrected.
+        super::outbound_restash(held);
+        assert!(
+            !super::has_outbound_typed(),
+            "ended drag is not resurrected by a racing re-stash"
+        );
+        // And a take after end yields nothing.
+        assert!(super::outbound_take_if_live().is_none());
     }
 }

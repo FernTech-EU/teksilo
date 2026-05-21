@@ -15,8 +15,12 @@
 //! Nautilus onto a zone. (External OS drops are live on macOS / Windows /
 //! Wayland; on X11 the Browse button is the path.)
 
+use bastyde::core::DropFeedback;
+use bastyde::core::drag_payload::{DragPayload, DropOutcome};
+use bastyde::core::gesture::DragPhase;
+use bastyde::core::widget_id::WidgetId;
 use bastyde::prelude::*;
-use bastyde::widgets::{DropZone, Expand, HStack, Panel, TextWidget, VStack};
+use bastyde::widgets::{DropZone, Expand, HStack, Padding, Panel, TextWidget, VStack};
 
 fn main() {
     BastydeAppBuilder::new()
@@ -65,12 +69,116 @@ fn main() {
                             })
                     };
 
+                    // --- Outbound (app → OS) drag source ------------------
+                    //
+                    // The same `DragPayload` carries a typed value (for any
+                    // future in-app target) AND a `text/uri-list` / `text/plain`
+                    // MIME representation. The framework runs a normal in-app
+                    // drag and, the moment the pointer leaves the window,
+                    // escalates to a native OS drag using the MIME bytes — so
+                    // these rows drop into Finder / Nautilus / a text editor.
+                    let this_file = concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs");
+
+                    let file_row = {
+                        let id = Signal::new(WidgetId::default());
+                        let id_for_drag = id.clone();
+                        let log = log.clone();
+                        let row = Panel::new()
+                            .child(Padding::uniform(10.0).child(TextWidget::new_literal(
+                                "⠿  Drag this file out →  (main.rs)",
+                            )))
+                            .on_drag(move |phase, ctx| {
+                                if let DragPhase::Started { .. } = phase {
+                                    let uri_list = format!("file://{this_file}\r\n");
+                                    let payload = DragPayload::typed(this_file.to_string())
+                                        .with_mime("text/uri-list", uri_list.into_bytes());
+                                    ctx.start_drag(id_for_drag.get(), payload);
+                                }
+                            })
+                            .on_drag_ended(move |outcome, _ctx| {
+                                prepend(&log, &format!("↗  file drag ended: {}", describe(outcome)));
+                            });
+                        let added = tree.add(row);
+                        id.set(added);
+                        added
+                    };
+
+                    let text_row = {
+                        let id = Signal::new(WidgetId::default());
+                        let id_for_drag = id.clone();
+                        let log = log.clone();
+                        let row = Panel::new()
+                            .child(Padding::uniform(10.0).child(TextWidget::new_literal(
+                                "⠿  Drag this text out →  (\"Hello from Bastyde\")",
+                            )))
+                            .on_drag(move |phase, ctx| {
+                                if let DragPhase::Started { .. } = phase {
+                                    let text = "Hello from Bastyde";
+                                    let payload = DragPayload::typed(text.to_string())
+                                        .with_mime("text/plain", text.as_bytes().to_vec());
+                                    ctx.start_drag(id_for_drag.get(), payload);
+                                }
+                            })
+                            .on_drag_ended(move |outcome, _ctx| {
+                                prepend(&log, &format!("↗  text drag ended: {}", describe(outcome)));
+                            });
+                        let added = tree.add(row);
+                        id.set(added);
+                        added
+                    };
+
+                    let drag_out = Panel::new().child(
+                        Padding::uniform(12.0).child(
+                            VStack::new()
+                                .spacing(10.0)
+                                .child(TextWidget::new_literal("Drag OUT (app → OS)"))
+                                .add_child(file_row)
+                                .add_child(text_row),
+                        ),
+                    );
+
+                    // Internal drop target that reads the *typed* payload. Drop
+                    // a row here directly (in-app), OR drag it out of the window
+                    // and back in before dropping — either way the original
+                    // typed `String` is recovered, proving the OS round-trip
+                    // preserves the typed fast-path (this is what enables
+                    // drag-and-drop between two windows of the same app).
+                    let typed_target = {
+                        let log = log.clone();
+                        Panel::new()
+                            .child(Padding::uniform(12.0).child(TextWidget::new_literal(
+                                "Internal drop target — drop a row here (recovers the typed value)",
+                            )))
+                            .on_drag_hover(|payload, _pos, _ctx| {
+                                if payload.has_typed::<String>() {
+                                    DropFeedback::HighlightRect {
+                                        rect: Rect::new(0.0, 0.0, 0.0, 0.0),
+                                        color: Color::new(0.2, 0.6, 1.0, 0.25),
+                                    }
+                                } else {
+                                    DropFeedback::NoFeedback
+                                }
+                            })
+                            .on_drop(move |mut payload, _pos, _ctx| {
+                                match payload.take_typed::<String>() {
+                                    Some(value) => {
+                                        prepend(&log, &format!("✅  typed drop recovered: {value}"));
+                                        true
+                                    }
+                                    None => false,
+                                }
+                            })
+                    };
+
                     tree.add(
                         VStack::new()
                             .spacing(16.0)
                             .child(TextWidget::new_literal(
-                                "Drag files from your file manager onto a zone — or click Browse.",
+                                "Drag files from your file manager onto a zone — or drag the rows \
+                                 below out into Finder / a text editor.",
                             ))
+                            .child(drag_out)
+                            .child(typed_target)
                             .child(
                                 Expand::new().child(
                                     HStack::new()
@@ -94,4 +202,15 @@ fn main() {
 fn prepend(log: &Signal<String>, line: &str) {
     let current = log.get();
     log.set(format!("{line}\n{current}"));
+}
+
+/// Human-readable drag outcome for the log.
+fn describe(outcome: DropOutcome) -> &'static str {
+    match outcome {
+        DropOutcome::InApp { accepted: true } => "dropped in-app (accepted)",
+        DropOutcome::InApp { accepted: false } => "dropped in-app (rejected)",
+        DropOutcome::OsCopy => "copied to another app",
+        DropOutcome::OsMove => "moved to another app",
+        DropOutcome::Cancelled => "cancelled",
+    }
 }

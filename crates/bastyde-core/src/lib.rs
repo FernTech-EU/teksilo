@@ -55,7 +55,10 @@ pub use async_completion::{AsyncCompletionHandle, AsyncCompletionPayload};
 pub use binding::{BindingLevel, BindingRegistry};
 pub use build_context::BuildContext;
 pub use color_prop::{ColorProp, TextStyleProp};
-pub use drag_payload::{DragData, DragOrigin, DragPayload, ExternalDropData};
+pub use drag_payload::{
+    DragData, DragImageData, DragOrigin, DragPayload, DropOutcome, ExternalDropData,
+    OutboundDragData,
+};
 pub use drag_state::DropFeedback;
 pub use environment::{Environment, LayoutDirection};
 pub use event::{

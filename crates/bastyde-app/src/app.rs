@@ -940,6 +940,9 @@ impl BastydeAppHandler {
                 ExternalDragEvent::Dropped { data, position } => {
                     current.tree.end_external_drag(position, data, &mut ops);
                 }
+                ExternalDragEvent::DragEnded { outcome } => {
+                    current.tree.handle_os_drag_ended(outcome, &mut ops);
+                }
             }
         }
 

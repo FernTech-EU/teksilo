@@ -46,9 +46,9 @@ use std::sync::Arc;
 
 use bastyde_canvas::Point;
 use bastyde_core::AppEventPoster;
-use bastyde_core::ExternalDropData;
 use bastyde_core::raw_handle::ParentHandle;
 use bastyde_core::window::BastydeWindowId;
+use bastyde_core::{DragImageData, DropOutcome, ExternalDropData, OutboundDragData};
 
 #[cfg(target_os = "macos")]
 mod macos;
@@ -91,6 +91,13 @@ pub enum ExternalDragEvent {
         /// Drop position in window-logical coordinates.
         position: Point,
     },
+    /// An **outbound** (app → OS) drag this window started has finished. Posted
+    /// by the platform backend's drag-source callback so the framework can
+    /// notify the source widget's `on_drag_ended`.
+    DragEnded {
+        /// How the OS drag resolved (copy / move into another app, or cancel).
+        outcome: DropOutcome,
+    },
 }
 
 // ============================================================
@@ -119,7 +126,24 @@ pub struct ExternalDndEventPayload {
 /// listener on Wayland). Backends return a boxed guard from
 /// [`ExternalDndBackend::attach`]; [`ExternalDndHandle`] holds it for the
 /// lifetime of the window.
-pub trait ExternalDndGuard {}
+pub trait ExternalDndGuard {
+    /// Start a native OS drag session (app → OS, "outbound") for this window,
+    /// exporting `data` and optionally drawing `image` as the drag cursor.
+    /// Called when an in-app drag escalates past the window boundary carrying
+    /// an OS-exportable payload.
+    ///
+    /// Returns `true` if a native session actually started. The default is a
+    /// no-op returning `false` — outbound is only implemented on macOS and
+    /// Wayland; Windows / X11 / the test sink decline, and the framework then
+    /// keeps the in-app drag alive (it can come back into the window).
+    ///
+    /// When the OS drag ends, the backend MUST post an
+    /// [`ExternalDragEvent::DragEnded`] through the poster captured at
+    /// [`ExternalDndBackend::attach`].
+    fn begin_drag(&self, _data: &OutboundDragData, _image: Option<&DragImageData>) -> bool {
+        false
+    }
+}
 
 /// A guard that does nothing on drop. Used by [`NoopExternalDndBackend`] and
 /// by backends whose registration needs no explicit teardown.
@@ -219,6 +243,24 @@ impl ExternalDndHandle {
     pub fn attached_count(&self) -> usize {
         self.inner.guards.borrow().len()
     }
+
+    /// Start a native OS (outbound) drag for `window_id`, delegating to that
+    /// window's guard. Returns `true` if a native session started, `false` if
+    /// the window isn't attached or the backend declines (no outbound
+    /// support). Called from `bastyde-app`'s `WindowOps::begin_os_drag`.
+    pub fn begin_drag(
+        &self,
+        window_id: BastydeWindowId,
+        data: &OutboundDragData,
+        image: Option<&DragImageData>,
+    ) -> bool {
+        self.inner
+            .guards
+            .borrow()
+            .get(&window_id)
+            .map(|g| g.begin_drag(data, image))
+            .unwrap_or(false)
+    }
 }
 
 impl std::fmt::Debug for ExternalDndHandle {
@@ -270,6 +312,7 @@ impl ExternalDndBackend for NoopExternalDndBackend {
 #[derive(Clone, Default)]
 pub struct MemoryExternalDndBackend {
     attachments: Arc<std::sync::Mutex<Vec<(BastydeWindowId, Arc<dyn AppEventPoster>)>>>,
+    outbound: Arc<std::sync::Mutex<Vec<OutboundDragData>>>,
 }
 
 /// Guard that removes the window's attachment record on drop, so
@@ -278,9 +321,19 @@ pub struct MemoryExternalDndBackend {
 pub struct MemoryDndGuard {
     window_id: BastydeWindowId,
     attachments: Arc<std::sync::Mutex<Vec<(BastydeWindowId, Arc<dyn AppEventPoster>)>>>,
+    outbound: Arc<std::sync::Mutex<Vec<OutboundDragData>>>,
 }
 
-impl ExternalDndGuard for MemoryDndGuard {}
+impl ExternalDndGuard for MemoryDndGuard {
+    fn begin_drag(&self, data: &OutboundDragData, _image: Option<&DragImageData>) -> bool {
+        // Record the outbound request and report success so tests can assert
+        // escalation reached the backend. Test code drives the matching
+        // `DragEnded` via [`MemoryExternalDndBackend::emit`].
+        self.outbound.lock().unwrap().push(data.clone());
+        let _ = self.window_id;
+        true
+    }
+}
 
 impl Drop for MemoryDndGuard {
     fn drop(&mut self) {
@@ -326,6 +379,12 @@ impl MemoryExternalDndBackend {
             .map(|(id, _)| *id)
             .collect()
     }
+
+    /// Outbound (app → OS) drags requested via `begin_drag`, in order. Test
+    /// helper for the escalation path.
+    pub fn outbound_drags(&self) -> Vec<OutboundDragData> {
+        self.outbound.lock().unwrap().clone()
+    }
 }
 
 impl ExternalDndBackend for MemoryExternalDndBackend {
@@ -339,6 +398,7 @@ impl ExternalDndBackend for MemoryExternalDndBackend {
         Box::new(MemoryDndGuard {
             window_id,
             attachments: self.attachments.clone(),
+            outbound: self.outbound.clone(),
         })
     }
 }

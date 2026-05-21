@@ -641,6 +641,19 @@ impl HandlerSet {
         self.handlers.on_drop = Some(Box::new(f));
         self
     }
+
+    /// Set the drag-ended handler on a drag **source**. Fires when a drag
+    /// this widget started ends — dropped on an in-app target, exported to
+    /// another application via the OS (copy / move), or cancelled. Use it to
+    /// react to the outcome, e.g. remove the dragged item on a
+    /// [`DropOutcome::OsMove`](crate::drag_payload::DropOutcome::OsMove).
+    pub fn on_drag_ended(
+        mut self,
+        f: impl FnMut(crate::drag_payload::DropOutcome, &mut EventContext) + 'static,
+    ) -> Self {
+        self.handlers.on_drag_ended = Some(Box::new(f));
+        self
+    }
 }
 
 impl Default for HandlerSet {
@@ -923,6 +936,16 @@ impl<W: Widget> WidgetWithHandlers<W> {
         + 'static,
     ) -> Self {
         self.handler_set.handlers.on_drop = Some(Box::new(f));
+        self
+    }
+
+    /// Set the drag-ended handler on a drag source. See
+    /// [`HandlerSet::on_drag_ended`].
+    pub fn on_drag_ended(
+        mut self,
+        f: impl FnMut(crate::drag_payload::DropOutcome, &mut EventContext) + 'static,
+    ) -> Self {
+        self.handler_set.handlers.on_drag_ended = Some(Box::new(f));
         self
     }
 
@@ -1481,6 +1504,15 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         + 'static,
     ) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).on_drop(f)
+    }
+
+    /// Set the drag-ended handler on a drag source. See
+    /// [`HandlerSet::on_drag_ended`].
+    fn on_drag_ended(
+        self,
+        f: impl FnMut(crate::drag_payload::DropOutcome, &mut EventContext) + 'static,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).on_drag_ended(f)
     }
 
     // ── Accessibility overrides ────────────────────────────────────────

@@ -700,8 +700,13 @@ impl WindowManager {
             handle.detach(bastyde_id);
         }
         if let Some(winit_id) = self.bastyde_to_winit.remove(&bastyde_id)
-            && let Some(managed) = self.windows.remove(&winit_id)
+            && let Some(mut managed) = self.windows.remove(&winit_id)
         {
+            // If this window is involved in an in-flight app-originated OS
+            // drag, abort it before the tree is dropped — otherwise the
+            // app-global typed-payload stash would leak and a later genuine
+            // external drop could be mis-recovered as the stale payload.
+            managed.tree.abort_outbound_drag();
             if let Some(sid) = managed.string_id.as_deref() {
                 self.string_to_id.remove(sid);
             }
@@ -1219,5 +1224,24 @@ impl bastyde_core::WindowOps for WindowOpsImpl<'_> {
                 winit::dpi::LogicalSize::new(area.width.max(1.0), area.height.max(1.0)),
             );
         }
+    }
+
+    fn begin_os_drag(
+        &mut self,
+        data: bastyde_core::OutboundDragData,
+        image: Option<bastyde_core::DragImageData>,
+    ) -> bool {
+        use bastyde_platform::external_dnd::ExternalDndHandle;
+        // Outbound drag is wired only if the app installed the external-DnD
+        // service. Without it (X11, or no `install_external_dnd`), decline so
+        // the framework keeps the in-app drag alive.
+        let Some(handle) = self
+            .wm
+            .app_context_template()
+            .and_then(|t| t.app_state::<ExternalDndHandle>().cloned())
+        else {
+            return false;
+        };
+        handle.begin_drag(self.current_id, &data, image.as_ref())
     }
 }
