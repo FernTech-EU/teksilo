@@ -25,7 +25,7 @@ pub struct GroupItem {
     label: Option<String>,
     show_label: bool,
     fill: Option<Color>,
-    stroke: Option<(Color, f32)>,
+    stroke: Option<(Color, StrokeStyle)>,
     corner_radius: f32,
     label_inset: (f32, f32),
     label_color: Option<Color>,
@@ -89,9 +89,17 @@ impl GroupItem {
         self
     }
 
-    /// Border stroke (color + scene-coord pixel width).
+    /// Border stroke (color + scene-coord pixel width) — scales with zoom.
     pub fn stroke(mut self, color: Color, width: f32) -> Self {
-        self.stroke = Some((color, width.max(0.0)));
+        self.stroke = Some((color, StrokeStyle::solid(width.max(0.0))));
+        self
+    }
+
+    /// Cosmetic border stroke: holds a constant **device-pixel** width at any
+    /// zoom. With `corner_radius > 0` the rounded outline stays crisp via the
+    /// SDF cosmetic path; otherwise it routes through the hairline-line path.
+    pub fn stroke_cosmetic(mut self, color: Color, width: f32) -> Self {
+        self.stroke = Some((color, StrokeStyle::hairline(width.max(0.0))));
         self
     }
 
@@ -134,16 +142,16 @@ impl SceneItem for GroupItem {
                 canvas.fill_rect(lb, fill);
             }
         }
-        if let Some((color, width)) = self.stroke {
+        if let Some((color, style)) = &self.stroke {
             if self.corner_radius > 0.0 {
                 canvas.stroke_rounded_rect(
                     lb,
                     bastyde_tokens::CornerRadius::uniform(self.corner_radius),
-                    color,
-                    StrokeStyle::solid(width),
+                    *color,
+                    style.clone(),
                 );
             } else {
-                canvas.stroke_rect(lb, color, StrokeStyle::solid(width));
+                canvas.stroke_rect(lb, *color, style.clone());
             }
         }
         if self.show_label
@@ -151,7 +159,7 @@ impl SceneItem for GroupItem {
         {
             let color = self
                 .label_color
-                .or_else(|| self.stroke.map(|(c, _)| c))
+                .or_else(|| self.stroke.as_ref().map(|(c, _)| *c))
                 .unwrap_or(Color::BLACK);
             let (dx, dy) = self.label_inset;
             let label_bounds = Rect::new(
@@ -198,8 +206,8 @@ impl SceneItem for GroupItem {
         if let Some(c) = self.fill {
             return c;
         }
-        if let Some((c, _)) = self.stroke {
-            return c;
+        if let Some((c, _)) = &self.stroke {
+            return *c;
         }
         if self.is_visual() {
             return Color::new(0.6, 0.6, 0.6, 1.0);

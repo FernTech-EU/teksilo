@@ -305,7 +305,8 @@ fn build_lightweight_items_section(scene: &mut Scene) {
     let path_bounds = Rect::new(path_x - 2.0, path_y - 2.0, 22.0 * 5.0, 54.0);
     scene.add_item(
         PathItem::new(zigzag, path_bounds)
-            .stroke(pastel_purple(), 3.0)
+            // Cosmetic stroke: crisp constant-width zigzag at any zoom.
+            .stroke_cosmetic(pastel_purple(), 3.0)
             .access_label("decorative zigzag"),
         Point::ZERO,
     );
@@ -666,7 +667,8 @@ fn build_inner_scene() -> impl Widget + 'static {
         .line_to(Point::new(26.0, 77.0))
         .close();
     inner.add_item(
-        PathItem::new(path, Rect::new(24.0, 22.0, 90.0, 60.0)).stroke(connector_color(), 2.0),
+        PathItem::new(path, Rect::new(24.0, 22.0, 90.0, 60.0))
+            .stroke_cosmetic(connector_color(), 2.0),
         Point::ZERO,
     );
     // Movement policy demo: this nested view is locked to horizontal
@@ -779,7 +781,7 @@ fn add_section_connector(
         (from.y.max(to.y) - from.y.min(to.y)).max(stroke_w) + 2.0 * pad,
     );
     scene.add_item(
-        PathItem::new(path, bounds).stroke(connector_color(), stroke_w),
+        PathItem::new(path, bounds).stroke_cosmetic(connector_color(), stroke_w),
         Point::ZERO,
     );
 }
