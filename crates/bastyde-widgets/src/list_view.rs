@@ -1862,4 +1862,75 @@ mod tests {
             modifiers: Modifiers::NONE,
         });
     }
+
+    // -- Boundary scroll chaining -------------------------------------------
+
+    /// A ListView (40 × 30px items in a 100px viewport → 1100px of scroll)
+    /// stacked above a filler inside an outer ScrollArea, so chaining from the
+    /// inner list to the outer area is observable.
+    fn nested_list_fixture(
+        inner: OverscrollBehavior,
+    ) -> (WidgetTree, Signal<f32>, Signal<f32>) {
+        use crate::ScrollArea;
+        use crate::primitives::{FixedSize, VStack};
+        let mut tree = WidgetTree::new();
+        let model = ListModel::from_vec((0..40_usize).collect());
+        let lv = ListView::new(model, move |_i, _item, _sel| Box::new(FixedLeaf(180.0, 30.0)))
+            .item_height(30.0)
+            .overscroll_behavior(inner);
+        let inner_y = lv.scroll_y_signal().clone();
+        let lv_id = tree.add(lv);
+        let viewport =
+            tree.add(FixedSize::new().bind_width(200.0).bind_height(100.0).child_id(lv_id));
+        let filler = tree.add(FixedLeaf(200.0, 200.0));
+        let outer_content = tree.add(VStack::new().add_child(viewport).add_child(filler));
+        let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
+        let outer_y = outer.scroll_y_signal().clone();
+        let _outer = tree.add(outer);
+        tree.layout(SizeProposal::exact(200.0, 150.0));
+        (tree, inner_y, outer_y)
+    }
+
+    #[test]
+    fn nested_list_chains_to_outer_at_boundary() {
+        use bastyde_core::event::{Modifiers, ScrollDelta, WidgetEvent};
+        let (mut tree, inner_y, outer_y) = nested_list_fixture(OverscrollBehavior::Chain);
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal::exact(200.0, 150.0));
+        let inner_bottom = inner_y.get();
+        assert!(inner_bottom > 0.0, "inner list should scroll down; got {inner_bottom}");
+        assert!(outer_y.get() < 0.01, "outer must not move while the inner absorbs");
+
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal::exact(200.0, 150.0));
+        assert!((inner_y.get() - inner_bottom).abs() < 0.01, "inner stays clamped at bottom");
+        assert!(outer_y.get() > 0.01, "outer scrolled because the inner chained the boundary");
+    }
+
+    #[test]
+    fn nested_list_contain_blocks_chaining() {
+        use bastyde_core::event::{Modifiers, ScrollDelta, WidgetEvent};
+        let (mut tree, _inner_y, outer_y) = nested_list_fixture(OverscrollBehavior::Contain);
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal::exact(200.0, 150.0));
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal::exact(200.0, 150.0));
+        assert!(outer_y.get() < 0.01, "Contain must prevent chaining: outer stays put");
+    }
 }

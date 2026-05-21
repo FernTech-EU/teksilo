@@ -82,7 +82,7 @@ pub use modal::{
 pub use overlay::{
     DismissBehavior, OverlayId, OverlayLayer, OverlayManager, OverlayPlacement, OverlayRequest,
 };
-pub use overscroll::OverscrollBehavior;
+pub use overscroll::{OverscrollBehavior, SCROLL_MOVE_EPSILON};
 pub use raw_handle::ParentHandle;
 pub use shortcut::{
     CaptureHandle, EffectiveShortcut, KeyCaptureCallback, KeyStroke, KeyStrokeOverride, Shortcut,

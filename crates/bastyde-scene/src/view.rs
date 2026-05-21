@@ -2120,8 +2120,15 @@ impl Widget for SceneView {
                     // ScrollArea / ListView / TreeView / TableView behavior.
                     // `OverscrollBehavior::Contain` opts out — the scene keeps
                     // the wheel even at its bound (no chaining).
-                    let moved_x = (clamped.x - base_x).abs() > 1e-3_f32;
-                    let moved_y = (clamped.y - base_y).abs() > 1e-3_f32;
+                    let moved_x =
+                        (clamped.x - base_x).abs() > bastyde_core::overscroll::SCROLL_MOVE_EPSILON;
+                    let moved_y =
+                        (clamped.y - base_y).abs() > bastyde_core::overscroll::SCROLL_MOVE_EPSILON;
+                    // Only the *total* boundary (neither axis can move) is a
+                    // chain/contain decision point. If one axis still moves the
+                    // event is consumed below (Handled) regardless of
+                    // `overscroll` — the partial-absorb / drop-the-pinned-axis
+                    // tradeoff, matching the widget scrollables and the browser.
                     if !moved_x && !moved_y {
                         return match overscroll {
                             OverscrollBehavior::Contain => EventResponse::Handled,

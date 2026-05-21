@@ -20,6 +20,7 @@ use bastyde_core::widget_tree::WidgetTree;
 use bastyde_data::{ListModel, SelectionMode, SelectionModel};
 
 use super::{CellContext, Column, ColumnWidth, SortDirection, TableSelectionMode, TableView};
+use crate::OverscrollBehavior;
 use crate::primitives::TextWidget;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1847,4 +1848,96 @@ fn header_cells_route_through_table_style_make_header_cell() {
         2,
         "TableStyle::make_header_cell must be called once per header cell",
     );
+}
+
+// -- Boundary scroll chaining -----------------------------------------------
+
+/// A TableView (40 × 20px rows in a ~120px viewport) above a filler inside an
+/// outer ScrollArea, so chaining from the inner table to the outer area is
+/// observable.
+fn nested_table_fixture(inner: OverscrollBehavior) -> (WidgetTree, Signal<f32>, Signal<f32>) {
+    use crate::ScrollArea;
+    use crate::primitives::{FixedSize, VStack};
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let tv = TableView::new(rows(40))
+        .add_column(id_col())
+        .add_column(name_col())
+        .row_height(20.0)
+        .overscroll_behavior(inner);
+    let inner_y = tv.scroll_y_signal().clone();
+    let tv_id = tree.add(tv);
+    let viewport = tree.add(FixedSize::new().bind_width(220.0).bind_height(120.0).child_id(tv_id));
+    let filler = tree.add(
+        FixedSize::new()
+            .bind_width(220.0)
+            .bind_height(300.0)
+            .child(TextWidget::new_literal("")),
+    );
+    let outer_content = tree.add(VStack::new().add_child(viewport).add_child(filler));
+    let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
+    let outer_y = outer.scroll_y_signal().clone();
+    let _outer = tree.add(outer);
+    tree.layout(SizeProposal {
+        width: Some(220.0),
+        height: Some(150.0),
+    });
+    (tree, inner_y, outer_y)
+}
+
+#[test]
+fn nested_table_chains_to_outer_at_boundary() {
+    use bastyde_canvas::Point;
+    use bastyde_core::event::{Modifiers, ScrollDelta, WidgetEvent};
+    let (mut tree, inner_y, outer_y) = nested_table_fixture(OverscrollBehavior::Chain);
+    // Pointer in the table body (below the header).
+    tree.pointer_move(Point::new(110.0, 90.0));
+    tree.dispatch_event(WidgetEvent::Scroll {
+        delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+        modifiers: Modifiers::NONE,
+    });
+    tree.layout(SizeProposal {
+        width: Some(220.0),
+        height: Some(150.0),
+    });
+    let inner_bottom = inner_y.get();
+    assert!(inner_bottom > 0.0, "inner table should scroll down; got {inner_bottom}");
+    assert!(outer_y.get() < 0.01, "outer must not move while the inner absorbs");
+
+    tree.pointer_move(Point::new(110.0, 90.0));
+    tree.dispatch_event(WidgetEvent::Scroll {
+        delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+        modifiers: Modifiers::NONE,
+    });
+    tree.layout(SizeProposal {
+        width: Some(220.0),
+        height: Some(150.0),
+    });
+    assert!((inner_y.get() - inner_bottom).abs() < 0.01, "inner stays clamped at bottom");
+    assert!(outer_y.get() > 0.01, "outer scrolled because the inner chained the boundary");
+}
+
+#[test]
+fn nested_table_contain_blocks_chaining() {
+    use bastyde_canvas::Point;
+    use bastyde_core::event::{Modifiers, ScrollDelta, WidgetEvent};
+    let (mut tree, _inner_y, outer_y) = nested_table_fixture(OverscrollBehavior::Contain);
+    tree.pointer_move(Point::new(110.0, 90.0));
+    tree.dispatch_event(WidgetEvent::Scroll {
+        delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+        modifiers: Modifiers::NONE,
+    });
+    tree.layout(SizeProposal {
+        width: Some(220.0),
+        height: Some(150.0),
+    });
+    tree.pointer_move(Point::new(110.0, 90.0));
+    tree.dispatch_event(WidgetEvent::Scroll {
+        delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+        modifiers: Modifiers::NONE,
+    });
+    tree.layout(SizeProposal {
+        width: Some(220.0),
+        height: Some(150.0),
+    });
+    assert!(outer_y.get() < 0.01, "Contain must prevent chaining: outer stays put");
 }
