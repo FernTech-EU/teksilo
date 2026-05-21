@@ -314,8 +314,12 @@ SceneView::new(scene)
     })
 ```
 
-Paint order: background → items → marquee → foreground → debug
-overlay.
+Paint order, bottom to top: `background` → **Under** items → heavyweight
+children → **Over** items → marquee → `foreground` → debug overlay. The
+`background` hook runs in the SceneView's `paint` (a backdrop, before the
+heavyweight children); the `foreground` hook runs in its `post_paint` (after the
+children), so it paints over the cards. See [Z-order and paint bands](#z-order-and-paint-bands)
+for the Under/Over band and the three-pass model.
 
 ---
 
@@ -371,17 +375,80 @@ exposed via [`SceneSelection`](../crates/bastyde-scene/src/selection.rs).
 
 ---
 
-## Z-order
+## Z-order and paint bands
+
+A `SceneView` paints in three passes — the per-widget `paint → children →
+post_paint` model applied at the scene level:
+
+| Pass | What paints | Tier |
+| --- | --- | --- |
+| `paint` (backdrop) | lightweight **Under** items, z-sorted | lightweight |
+| arena child-walk | heavyweight widgets, z-sorted | heavyweight |
+| `post_paint` (foreground) | lightweight **Over** items, then the selection marquee / app foreground hook / debug overlays | lightweight |
+
+So the stacking order, bottom to top, is **Under items → heavyweight cards →
+Over items**.
+
+### Within a tier
 
 ```rust
-scene.set_z(id, 5.0);
-scene.z(id) -> Option<f32>
+scene.set_z(id, 5.0);          // higher z paints later (on top)
+scene.z(id) -> Option<f32>;
+scene.bring_to_front(id);      // z = current max + 1
+scene.send_to_back(id);        // z = current min − 1
 ```
 
-Higher `z` paints later (on top). Equal-`z` items fall back to
-insertion order. Z-order is paint-only — it does not change hit-test
-priority *between tiers* (heavyweight widgets always win
-heavyweight-vs-lightweight collisions).
+`set_z` works for **both** tiers. Lightweight items re-sort within their band on
+the next paint. Heavyweight widget entries restack the arena children on the next
+rebuild — the SceneView reorders `node.children` by z *without recreating the
+widgets*, so a dragged card keeps its focus, text-edit cursor and in-flight
+animations across the restack. Equal-`z` falls back to insertion order (stable).
+
+`bring_to_front` is the drag-to-front primitive: call it on drag-start (via
+[`SceneView::scene_mut`]) so the grabbed card — and its text — render over the
+others.
+
+### Across the tiers — the Over band
+
+```rust
+scene.set_layer(id, SceneLayer::Over);   // raise a lightweight item above the cards
+scene.layer(id) -> Option<SceneLayer>;   // Under (default) | Over
+```
+
+Lightweight items default to `Under` (background furniture: connector lines,
+grids, decorations). `Over` raises an item into the foreground pass so it paints
+*above* the heavyweight widgets — selection halos, highlighted connectors,
+annotations. Within each band `z` still orders items among themselves.
+
+This is a **binary band, not a continuous z across the tiers**, because the
+render walker offers exactly two lightweight paint positions (before and after
+the child subtree). The heavyweight tier is one contiguous block in between. To
+place a lightweight item *between* two specific cards, promote it to a
+heavyweight widget and give it a z between theirs.
+
+### Nested P-C-AP — a node is one widget
+
+The `paint → children → post_paint` model is per-widget and *nests*. A scene's
+bands are for **furniture** (connectors, the nodes-as-units, the lasso); each
+**node** is itself a P-C-AP scope — its `paint` draws the container, its children
+are the text. **Keep a node whole: build it as one heavyweight widget; never
+split its container into the lightweight tier and its text into the heavyweight
+tier.** The render walker paints each heavyweight child's entire subtree
+atomically, so a node ordered last paints its container *and* its text on top of
+the node beneath — drag-to-front "with text included" is structural, not
+something you arrange. Splitting a node across tiers tears it: every container
+would sit in one band and every text in the band above, so a raised card's
+neighbour would have its text leak on top of it.
+
+### Hit-testing irregular nodes
+
+Z-order is paint-only; it does not change hit-test priority between tiers
+(heavyweight widgets win heavyweight-vs-lightweight collisions). For a node whose
+visible shape isn't its bounding box — an ellipse, a cloud — override
+`Widget::hit_shape` so a click lands on the silhouette you see, not the
+rectangle. Returning `false` for an in-bounds point makes the click fall through
+to whatever node is painted underneath; this mirrors the lightweight tier's
+`SceneItem::shape_contains`.
 
 ---
 
