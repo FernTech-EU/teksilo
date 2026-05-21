@@ -156,7 +156,10 @@ fn build_corkboard() -> SceneView {
         for c in 0..cols {
             // Draw only the cell border to keep the tile pattern airy.
             let cell = Rect::new(c as f32 * tile, r as f32 * tile, tile, tile);
-            let id = scene.add_item(RectItem::new(cell).stroke(grid_color, 1.0), Point::ZERO);
+            // Cosmetic (hairline) border: stays a crisp 1px at any zoom
+            // instead of thinning out / vanishing as you zoom the corkboard.
+            let id =
+                scene.add_item(RectItem::new(cell).stroke_cosmetic(grid_color, 1.0), Point::ZERO);
             // Decorative backdrop: keep it out of marquee box-select so
             // selection targets the connectors, not the grid.
             scene.set_flag(id, ItemFlags::IS_SELECTABLE, false);
@@ -223,7 +226,9 @@ fn build_corkboard() -> SceneView {
         let bounds = Rect::new(min_x, min_y, max_x - min_x, max_y - min_y);
         let connector_id = scene.add_item(
             PathItem::new(path, bounds)
-                .stroke(connector_color, stroke_w)
+                // Cosmetic stroke: the connector keeps a constant device-pixel
+                // width at any zoom (correct joins via the zoom-aware atlas).
+                .stroke_cosmetic(connector_color, stroke_w)
                 .access_label(format!("connector {} → {}", i + 1, i + 2)),
             Point::ZERO,
         );

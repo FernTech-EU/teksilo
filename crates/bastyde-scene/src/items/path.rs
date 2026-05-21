@@ -16,16 +16,18 @@ use crate::items::{AccessSubtreeMode, ItemA11yOverrides};
 /// An arbitrary vector path with optional fill and stroke, in local
 /// item coordinates.
 ///
-/// The path's commands are evaluated in local space. Stroke widths
-/// scale with view zoom. The caller-provided `local_bounds` AABB is
-/// what the spatial index buckets on; it must enclose the path's
-/// strokes (including stroke half-width on each side).
+/// The path's commands are evaluated in local space. A logical stroke scales
+/// with the view zoom; a [`stroke_cosmetic`](Self::stroke_cosmetic) stroke
+/// holds a constant device-pixel width at any zoom (crisp connectors). The
+/// caller-provided `local_bounds` AABB is what the spatial index buckets on;
+/// it must enclose the path's strokes (including stroke half-width on each
+/// side).
 #[derive(Debug)]
 pub struct PathItem {
     path: Path,
     local_bounds: Rect,
     fill: Option<Color>,
-    stroke: Option<(Color, f32)>,
+    stroke: Option<(Color, StrokeStyle)>,
     label: Option<String>,
     flags: ItemFlags,
     a11y: ItemA11yOverrides,
@@ -53,9 +55,18 @@ impl PathItem {
         self
     }
 
-    /// Stroke color and width (scene-coord pixels).
+    /// Stroke color and width in **scene-coordinate** pixels — the stroke
+    /// scales with the view zoom.
     pub fn stroke(mut self, color: Color, width: f32) -> Self {
-        self.stroke = Some((color, width.max(0.0)));
+        self.stroke = Some((color, StrokeStyle::solid(width.max(0.0))));
+        self
+    }
+
+    /// Cosmetic stroke: the connector holds a constant **device-pixel** width
+    /// at any zoom (it never thins out or thickens). The renderer keeps the
+    /// path body sharp at the current zoom, so joins/caps stay correct.
+    pub fn stroke_cosmetic(mut self, color: Color, width: f32) -> Self {
+        self.stroke = Some((color, StrokeStyle::hairline(width.max(0.0))));
         self
     }
 
@@ -98,8 +109,8 @@ impl SceneItem for PathItem {
         if let Some(fill) = self.fill {
             canvas.fill_path(&self.path, fill);
         }
-        if let Some((color, width)) = self.stroke {
-            canvas.stroke_path(&self.path, color, StrokeStyle::solid(width));
+        if let Some((color, style)) = &self.stroke {
+            canvas.stroke_path(&self.path, *color, style.clone());
         }
     }
 
@@ -108,7 +119,7 @@ impl SceneItem for PathItem {
             &self.path,
             self.local_bounds,
             self.fill.is_some(),
-            self.stroke,
+            self.stroke.as_ref().map(|(_, s)| s.width),
             local_pt,
         )
     }
@@ -122,9 +133,9 @@ impl SceneItem for PathItem {
         let path = self.path.clone();
         let local_bounds = self.local_bounds;
         let has_fill = self.fill.is_some();
-        let stroke = self.stroke;
+        let stroke_width = self.stroke.as_ref().map(|(_, s)| s.width);
         Box::new(move |local_pt| {
-            path_shape_contains(&path, local_bounds, has_fill, stroke, local_pt)
+            path_shape_contains(&path, local_bounds, has_fill, stroke_width, local_pt)
         })
     }
 
@@ -132,7 +143,7 @@ impl SceneItem for PathItem {
         // Connector-line and outline use cases dominate stroke-only
         // paths; fill takes precedence when present.
         self.fill
-            .or_else(|| self.stroke.map(|(c, _)| c))
+            .or_else(|| self.stroke.as_ref().map(|(c, _)| *c))
             .unwrap_or_else(|| Color::new(0.6, 0.6, 0.6, 1.0))
     }
 
@@ -168,11 +179,11 @@ fn path_shape_contains(
     path: &Path,
     local_bounds: Rect,
     has_fill: bool,
-    stroke: Option<(Color, f32)>,
+    stroke_width: Option<f32>,
     local_pt: Point,
 ) -> bool {
-    let stroke_width = match stroke {
-        Some((_, w)) => w,
+    let stroke_width = match stroke_width {
+        Some(w) => w,
         None => return local_bounds.contains(local_pt),
     };
     if has_fill {
