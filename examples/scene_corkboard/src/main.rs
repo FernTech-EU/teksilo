@@ -51,12 +51,17 @@
 //!   and `crates/bastyde-scene/src/index.rs::tests` for the
 //!   correctness pins.
 //!
-//! Phase 6 will add drag-to-move, marquee select, and group-move on
-//! the same demo.
+//! Marquee box-select is enabled (`SceneSelectionMode::Multi`) over the
+//! lightweight connectors; the decorative background grid opts out via
+//! `IS_SELECTABLE = false`. Drag-to-move targets lightweight items that
+//! set `IS_DRAGGABLE`; the heavyweight story cards are arena widgets,
+//! so moving them is future work.
 //!
 //! Run with: `cargo run -p scene-corkboard`
 
-use bastyde_scene::{A11yGroup, A11yNode, PathItem, RectItem, Scene, SceneView};
+use bastyde_scene::{
+    A11yGroup, A11yNode, ItemFlags, PathItem, RectItem, Scene, SceneSelectionMode, SceneView,
+};
 use bastyde::canvas::{Path, Point, Rect};
 use bastyde::prelude::*;
 use bastyde::widgets::{Button, Expand, HStack, Panel, Spacer, TextWidget, Toolbar, VStack};
@@ -151,7 +156,10 @@ fn build_corkboard() -> SceneView {
         for c in 0..cols {
             // Draw only the cell border to keep the tile pattern airy.
             let cell = Rect::new(c as f32 * tile, r as f32 * tile, tile, tile);
-            scene.add_item(RectItem::new(cell).stroke(grid_color, 1.0), Point::ZERO);
+            let id = scene.add_item(RectItem::new(cell).stroke(grid_color, 1.0), Point::ZERO);
+            // Decorative backdrop: keep it out of marquee box-select so
+            // selection targets the connectors, not the grid.
+            scene.set_flag(id, ItemFlags::IS_SELECTABLE, false);
         }
     }
 
@@ -165,11 +173,6 @@ fn build_corkboard() -> SceneView {
     let act3 = scene.add_a11y_group(A11yGroup::builder().label("Act III — Resolution"));
     let acts = [act1, act2, act3];
 
-    // Heavyweight cards. The cards themselves don't yet route
-    // through the logical-tree (Phase 5b heavyweight grouping is
-    // the deferred auto-graft work — see docs/bastyde-scene-a11y.md);
-    // we still bookkeep their ids so the demo source documents the
-    // intent.
     // Heavyweight cards. Auto-graft places each card under its
     // declared Act group: the screen reader announces "Act I —
     // Setup, contains: Card, Card, Card, connector 1 → 2,
@@ -235,7 +238,9 @@ fn build_corkboard() -> SceneView {
         );
     }
 
-    SceneView::new(scene).default_size(scene_width, scene_height)
+    SceneView::new(scene)
+        .selection_mode(SceneSelectionMode::Multi)
+        .default_size(scene_width, scene_height)
 }
 
 fn main() {
