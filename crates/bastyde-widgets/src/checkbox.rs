@@ -189,26 +189,12 @@ impl Checkbox {
         self
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) for `label(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
-        self
-    }
-
     /// Secondary explanatory text rendered below the label, left-aligned
     /// with the label (not the box). Uses the `small` / `text_secondary`
     /// style. Has no effect unless `label(...)` is also set.
     pub fn caption(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
         self.caption = Some(ls.resolve_now());
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `caption(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn caption_literal(mut self, text: impl Into<String>) -> Self {
-        self.caption = Some(text.into());
         self
     }
 
@@ -242,15 +228,6 @@ impl Checkbox {
     pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
         self.tooltip_text = Some(ls.resolve_now());
-        self.rich_tooltip_source = None;
-        self.composite_tooltip_content = None;
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `tooltip(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
-        self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;
         self

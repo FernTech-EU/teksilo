@@ -135,36 +135,11 @@ impl Banner {
         Self::new(BannerSeverity::Error, title)
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw title in
-    /// `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn info_literal(title: impl Into<String>) -> Self {
-        Self::info(bastyde_i18n::LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn success_literal(title: impl Into<String>) -> Self {
-        Self::success(bastyde_i18n::LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn warning_literal(title: impl Into<String>) -> Self {
-        Self::warning(bastyde_i18n::LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn error_literal(title: impl Into<String>) -> Self {
-        Self::error(bastyde_i18n::LocalizedString::literal(title))
-    }
-
     /// Optional secondary line of text rendered below the title.
     pub fn description(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
         self.description = Some(ls.resolve_now());
         self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `description(...)`.
-    #[doc(hidden)]
-    pub fn description_literal(self, text: impl Into<String>) -> Self {
-        self.description(bastyde_i18n::LocalizedString::literal(text))
     }
 
     /// Trailing widget — typically a [`Button`](crate::button::Button) or

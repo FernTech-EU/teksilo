@@ -249,12 +249,6 @@ impl DateEdit {
         self
     }
 
-    /// Untranslated [`placeholder`](Self::placeholder).
-    pub fn placeholder_literal(mut self, text: impl Into<String>) -> Self {
-        self.placeholder = text.into();
-        self
-    }
-
     pub fn first_day_of_week(mut self, w: Weekday) -> Self {
         self.first_day_of_week = Some(w);
         self
@@ -312,12 +306,6 @@ impl DateEdit {
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
         self.label = Some(ls.resolve_now());
-        self
-    }
-
-    /// Untranslated [`label`](Self::label).
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
         self
     }
 

@@ -129,12 +129,6 @@ impl TooltipWidget {
         }
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw string in `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(text: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(text))
-    }
-
     /// Per-call style override. Replaces the theme-wide default
     /// `TooltipStyle` for just this TooltipWidget instance.
     pub fn style(mut self, style: impl bastyde_core::styles::TooltipStyle) -> Self {

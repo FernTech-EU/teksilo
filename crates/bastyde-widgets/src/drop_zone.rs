@@ -104,25 +104,10 @@ impl DropZone {
         }
     }
 
-    /// Shim (`#[doc(hidden)]`) — wraps a raw label in
-    /// `LocalizedString::literal` for tests and scaffolding. Production code
-    /// uses `new(tr!(...))`; the `_literal` suffix is the grep marker for
-    /// untranslated strings.
-    #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(label))
-    }
-
     /// Secondary line under the prompt (e.g. `tr!("png_or_jpeg")`).
     pub fn subtitle(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         self.subtitle = Some(text.into().resolve_now());
         self
-    }
-
-    /// `#[doc(hidden)]` untranslated twin of [`Self::subtitle`].
-    #[doc(hidden)]
-    pub fn subtitle_literal(self, text: impl Into<String>) -> Self {
-        self.subtitle(bastyde_i18n::LocalizedString::literal(text))
     }
 
     /// Restrict accepted files to these extensions (without leading dots,
@@ -159,12 +144,6 @@ impl DropZone {
     pub fn browse_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         self.browse_label = label.into().resolve_now();
         self
-    }
-
-    /// `#[doc(hidden)]` untranslated twin of [`Self::browse_label`].
-    #[doc(hidden)]
-    pub fn browse_label_literal(self, label: impl Into<String>) -> Self {
-        self.browse_label(bastyde_i18n::LocalizedString::literal(label))
     }
 
     /// An icon widget shown above the prompt (any widget — typically an

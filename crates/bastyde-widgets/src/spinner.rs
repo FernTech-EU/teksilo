@@ -104,14 +104,6 @@ impl Spinner {
         self.label = Some(ls.resolve_now());
         self
     }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `label(...)` accepting
-    /// a raw string.
-    #[doc(hidden)]
-    pub fn label_literal(mut self, text: impl Into<String>) -> Self {
-        self.label = Some(text.into());
-        self
-    }
 }
 
 impl std::fmt::Debug for Spinner {

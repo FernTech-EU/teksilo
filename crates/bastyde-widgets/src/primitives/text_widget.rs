@@ -101,16 +101,6 @@ impl TextWidget {
         }
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw string in
-    /// `LocalizedString::literal` for tests and scaffolding where
-    /// translation is overkill. Production code uses
-    /// `new(tr!(...))`; the `*_literal` suffix is the grep marker for
-    /// untranslated strings alongside `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(text: impl Into<String>) -> Self {
-        Self::new(LocalizedString::literal(text))
-    }
-
     /// Set the text color. Accepts any `impl Into<ColorProp>`:
     ///
     /// - A raw `Color` — a frozen literal.

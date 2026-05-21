@@ -112,12 +112,6 @@ impl MenuItem {
         }
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(label))
-    }
-
     /// Closure invoked on activation.
     /// See architecture Section 9.2.6.
     /// Note: shortcut label auto-lookup is not available with this variant
@@ -197,15 +191,6 @@ impl MenuItem {
         self
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) for `tooltip(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
-        self.tooltip_text = Some(text.into());
-        self.rich_tooltip_source = None;
-        self.composite_tooltip_content = None;
-        self
-    }
-
     /// Attach a rich tooltip resolved from the app-wide tooltip
     /// registry. Body text supports inline markup
     /// (`[label](url)`, `*italic*`, `**bold**`); the entry's shortcut
@@ -261,15 +246,6 @@ impl MenuItem {
             root_child_id: None,
             submenu_content_id: None,
         }
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `submenu(...)` accepting a raw label.
-    #[doc(hidden)]
-    pub fn submenu_literal(
-        label: impl Into<String>,
-        factory: impl Fn() -> Box<dyn Widget> + 'static,
-    ) -> Self {
-        Self::submenu(bastyde_i18n::LocalizedString::literal(label), factory)
     }
 
     /// Set a custom submenu open delay (default: 200ms).

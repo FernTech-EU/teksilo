@@ -229,19 +229,6 @@ impl Avatar {
         self.style_override = Some(Rc::new(style));
         self
     }
-
-    /// Permanent `#[doc(hidden)]` shim for tests — wraps in
-    /// `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn with_initials_literal(initials: &str) -> Self {
-        Self::with_initials(bastyde_i18n::LocalizedString::literal(initials))
-    }
-
-    /// Permanent `#[doc(hidden)]` shim for tests.
-    #[doc(hidden)]
-    pub fn with_name_literal(name: &str) -> Self {
-        Self::with_name(bastyde_i18n::LocalizedString::literal(name))
-    }
 }
 
 // ─── Builder methods ───────────────────────────────────────────────────────
@@ -268,13 +255,6 @@ impl Avatar {
         let ls: bastyde_i18n::LocalizedString = initials.into();
         let raw = ls.resolve_now();
         self.initials = normalize_initials(&raw);
-        self
-    }
-
-    /// Permanent `#[doc(hidden)]` shim.
-    #[doc(hidden)]
-    pub fn fallback_initials_literal(mut self, initials: &str) -> Self {
-        self.initials = normalize_initials(initials);
         self
     }
 
@@ -343,26 +323,12 @@ impl Avatar {
         self
     }
 
-    /// Permanent `#[doc(hidden)]` shim.
-    #[doc(hidden)]
-    pub fn label_literal(mut self, label: &str) -> Self {
-        self.label = Some(label.to_string());
-        self
-    }
-
     /// Image alt text — distinct from `label` so a clickable avatar
     /// can have a button label like "Open user menu" while still
     /// describing the image as "Jane Doe".
     pub fn alt(mut self, alt: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = alt.into();
         self.alt = Some(ls.resolve_now());
-        self
-    }
-
-    /// Permanent `#[doc(hidden)]` shim.
-    #[doc(hidden)]
-    pub fn alt_literal(mut self, alt: &str) -> Self {
-        self.alt = Some(alt.to_string());
         self
     }
 

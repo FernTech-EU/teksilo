@@ -50,12 +50,6 @@ impl WizardStep {
         }
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw title in `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(title: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(title))
-    }
-
     pub fn content<W, F>(mut self, factory: F) -> Self
     where
         W: Widget + 'static,
@@ -68,13 +62,6 @@ impl WizardStep {
     pub fn supporting_text(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
         self.supporting_text = Some(ls.resolve_now());
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `supporting_text(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn supporting_text_literal(mut self, text: impl Into<String>) -> Self {
-        self.supporting_text = Some(text.into());
         self
     }
 
@@ -624,12 +611,6 @@ impl Wizard {
         }
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(label))
-    }
-
     pub fn step(mut self, step: WizardStep) -> Self {
         self.steps.push(step);
         self
@@ -671,23 +652,9 @@ impl Wizard {
         self
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) for `back_label(...)`.
-    #[doc(hidden)]
-    pub fn back_label_literal(mut self, label: impl Into<String>) -> Self {
-        self.back_label = label.into();
-        self
-    }
-
     pub fn cancel_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
         self.cancel_label = ls.resolve_now();
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `cancel_label(...)`.
-    #[doc(hidden)]
-    pub fn cancel_label_literal(mut self, label: impl Into<String>) -> Self {
-        self.cancel_label = label.into();
         self
     }
 
@@ -697,23 +664,9 @@ impl Wizard {
         self
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) for `next_label(...)`.
-    #[doc(hidden)]
-    pub fn next_label_literal(mut self, label: impl Into<String>) -> Self {
-        self.next_label = label.into();
-        self
-    }
-
     pub fn finish_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
         self.finish_label = ls.resolve_now();
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `finish_label(...)`.
-    #[doc(hidden)]
-    pub fn finish_label_literal(mut self, label: impl Into<String>) -> Self {
-        self.finish_label = label.into();
         self
     }
 

@@ -43,12 +43,6 @@ impl Badge {
         self
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw string in `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(label))
-    }
-
     /// Override the badge background. Accepts `Color`, a
     /// [`SurfaceRole`](bastyde_tokens::SurfaceRole) / [`TextRole`](bastyde_tokens::TextRole),
     /// or a `Signal<Color>`. Default (unset) is `SurfaceRole::AccentSubtle`.

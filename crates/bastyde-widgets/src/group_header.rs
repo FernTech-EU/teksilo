@@ -52,14 +52,6 @@ impl GroupHeader {
         }
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in
-    /// `LocalizedString::literal` for tests and scaffolding where
-    /// translation is overkill.
-    #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(label))
-    }
-
     /// Override the label's text style (font, size, weight, …).
     pub fn style(mut self, style: TextStyle) -> Self {
         self.style = Some(style);

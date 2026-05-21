@@ -85,13 +85,6 @@ impl ModalContainer {
         self.title = Some(ls.resolve_now());
         self
     }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `title(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn title_literal(mut self, title: impl Into<String>) -> Self {
-        self.title = Some(title.into());
-        self
-    }
 }
 
 impl std::fmt::Debug for ModalContainer {
@@ -374,23 +367,9 @@ impl DialogContent {
         self
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) for `title(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn title_literal(mut self, title: impl Into<String>) -> Self {
-        self.title = Some(title.into());
-        self
-    }
-
     pub fn supporting_text(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
         self.supporting_text = Some(ls.resolve_now());
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `supporting_text(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn supporting_text_literal(mut self, text: impl Into<String>) -> Self {
-        self.supporting_text = Some(text.into());
         self
     }
 
@@ -542,12 +521,6 @@ impl Dialog {
             pending_trigger: None,
             root_child_id: None,
         }
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(label))
     }
 
     pub fn content<W, F>(mut self, factory: F) -> Self

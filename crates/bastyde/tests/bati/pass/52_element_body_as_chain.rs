@@ -73,7 +73,7 @@ fn main() {
         Menu {
             item: MenuItem::new(lit!("Run")) {
                 on_activate: 1
-                tooltip_literal: "Runs the thing"
+                tooltip: lit!("Runs the thing")
             }
             item: MenuItem::new(lit!("Stop")) {
                 on_activate: 2

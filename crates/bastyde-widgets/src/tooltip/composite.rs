@@ -112,12 +112,6 @@ impl CompositeTooltipWidget {
         self
     }
 
-    #[doc(hidden)]
-    pub fn access_label_literal(mut self, label: impl Into<String>) -> Self {
-        self.access_label = Some(label.into());
-        self
-    }
-
     /// Override the per-theme `composite_tooltip.max_width`.
     pub fn max_width(mut self, w: f32) -> Self {
         self.max_width_override = Some(w);

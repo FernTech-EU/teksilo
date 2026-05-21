@@ -96,13 +96,6 @@ impl RadioGroup {
         self
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) for `label(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
-        self
-    }
-
     /// Add a radio button. The group's shared sibling-id buffer is
     /// injected into the radio at build time so its accessibility
     /// impl can publish group membership via `push_to_radio_group`.

@@ -271,13 +271,6 @@ impl MessageBoxButton {
         self
     }
 
-    /// Raw-string label override — mirrors `Button::new_literal`.
-    #[doc(hidden)]
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label_override = Some(LocalizedString::literal(label));
-        self
-    }
-
     fn resolved_label(&self) -> LocalizedString {
         self.label_override
             .clone()
@@ -570,37 +563,12 @@ impl MessageBox {
         Self::new_with_severity(MessageBoxSeverity::None, title)
     }
 
-    #[doc(hidden)]
-    pub fn information_literal(title: impl Into<String>) -> Self {
-        Self::information(LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn warning_literal(title: impl Into<String>) -> Self {
-        Self::warning(LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn critical_literal(title: impl Into<String>) -> Self {
-        Self::critical(LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn question_literal(title: impl Into<String>) -> Self {
-        Self::question(LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn plain_literal(title: impl Into<String>) -> Self {
-        Self::plain(LocalizedString::literal(title))
-    }
-
     /// Primary message line, rendered in `typography.body` with
     /// `text_primary`. Prefer a short, self-contained sentence —
     /// details belong in `informative_text`.
     pub fn text(mut self, text: impl Into<LocalizedString>) -> Self {
         self.text = Some(text.into().resolve_now());
         self
-    }
-    #[doc(hidden)]
-    pub fn text_literal(self, text: impl Into<String>) -> Self {
-        self.text(LocalizedString::literal(text))
     }
 
     /// Secondary, explanatory text rendered below the primary text in
@@ -610,10 +578,6 @@ impl MessageBox {
         self.informative_text = Some(text.into().resolve_now());
         self
     }
-    #[doc(hidden)]
-    pub fn informative_text_literal(self, text: impl Into<String>) -> Self {
-        self.informative_text(LocalizedString::literal(text))
-    }
 
     /// Detailed text hidden behind a "Show details" [`Accordion`] —
     /// for technical diagnostics (stack traces, error codes). Matches
@@ -621,10 +585,6 @@ impl MessageBox {
     pub fn detailed_text(mut self, text: impl Into<LocalizedString>) -> Self {
         self.detailed_text = Some(text.into().resolve_now());
         self
-    }
-    #[doc(hidden)]
-    pub fn detailed_text_literal(self, text: impl Into<String>) -> Self {
-        self.detailed_text(LocalizedString::literal(text))
     }
 
     /// Apply a preset button bundle. Implicitly sets default and
@@ -673,10 +633,6 @@ impl MessageBox {
     pub fn show_again_checkbox(mut self, label: impl Into<LocalizedString>) -> Self {
         self.show_again_label = Some(label.into().resolve_now());
         self
-    }
-    #[doc(hidden)]
-    pub fn show_again_checkbox_literal(self, label: impl Into<String>) -> Self {
-        self.show_again_checkbox(LocalizedString::literal(label))
     }
 
     /// Like [`MessageBox::show_again_checkbox`], but with a

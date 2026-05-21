@@ -104,16 +104,6 @@ macro_rules! item_a11y_builders {
             self
         }
 
-        /// Untranslated twin of [`access_label`](Self::access_label).
-        /// Wraps a raw string in
-        /// [`LocalizedString::literal`](bastyde_i18n::LocalizedString::literal)
-        /// — a grep-marker for call sites that intentionally bypass
-        /// the i18n pipeline (debug demos, engine-internal labels).
-        #[doc(hidden)]
-        pub fn access_label_literal(self, label: impl Into<String>) -> Self {
-            self.access_label(bastyde_i18n::LocalizedString::literal(label))
-        }
-
         /// Long-form context appended to the item's announcement.
         pub fn access_description(
             mut self,
@@ -122,12 +112,6 @@ macro_rules! item_a11y_builders {
             let ls: bastyde_i18n::LocalizedString = description.into();
             self.a11y.description = Some(ls.resolve_now());
             self
-        }
-
-        /// Untranslated twin of [`access_description`](Self::access_description).
-        #[doc(hidden)]
-        pub fn access_description_literal(self, description: impl Into<String>) -> Self {
-            self.access_description(bastyde_i18n::LocalizedString::literal(description))
         }
 
         /// Override the AccessKit role for this item.

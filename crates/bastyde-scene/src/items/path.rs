@@ -77,12 +77,6 @@ impl PathItem {
         self
     }
 
-    /// Untranslated twin of [`label`](Self::label).
-    #[doc(hidden)]
-    pub fn label_literal(self, label: impl Into<String>) -> Self {
-        self.label(bastyde_i18n::LocalizedString::literal(label))
-    }
-
     /// Opt the path into drag-to-move.
     pub fn draggable(mut self, draggable: bool) -> Self {
         self.flags.set(ItemFlags::IS_DRAGGABLE, draggable);

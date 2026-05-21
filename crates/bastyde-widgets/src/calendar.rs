@@ -325,12 +325,6 @@ impl Calendar {
         self
     }
 
-    /// Untranslated [`label`](Self::label).
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
-        self
-    }
-
     /// Set the initial enabled state. Forwarded to the arena at build
     /// time. Use `ctx.enabled_when(calendar_id, signal)` for reactivity.
     pub fn enabled(mut self, enabled: bool) -> Self {

@@ -342,12 +342,6 @@ impl Popover {
         self
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(label))
-    }
-
     pub fn content(mut self, content: impl Widget + 'static) -> Self {
         self.pending_content = Some(PendingChild::Deferred(Box::new(content)));
         self

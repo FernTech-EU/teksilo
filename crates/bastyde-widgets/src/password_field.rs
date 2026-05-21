@@ -164,23 +164,11 @@ impl PasswordField {
         self
     }
 
-    /// Untranslated [`placeholder`](Self::placeholder).
-    pub fn placeholder_literal(mut self, text: impl Into<String>) -> Self {
-        self.placeholder = text.into();
-        self
-    }
-
     /// Accessible name, applied to the `Role::PasswordInput` field node.
     /// Strongly recommended for screen-reader users.
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
         self.label = ls.resolve_now();
-        self
-    }
-
-    /// Untranslated [`label`](Self::label).
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = label.into();
         self
     }
 
@@ -298,14 +286,6 @@ impl PasswordField {
     /// [`AtRevealPolicy::SwapRole`]).
     pub fn at_reveal_policy(mut self, policy: AtRevealPolicy) -> Self {
         self.at_reveal_policy = policy;
-        self
-    }
-
-    /// Plain-text tooltip.
-    pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
-        self.tooltip_text = Some(text.into());
-        self.rich_tooltip_source = None;
-        self.composite_tooltip_content = None;
         self
     }
 

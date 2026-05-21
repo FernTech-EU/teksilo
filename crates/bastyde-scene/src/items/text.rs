@@ -64,13 +64,6 @@ impl TextItem {
         }
     }
 
-    /// Untranslated twin of [`new`](Self::new). Wraps the argument
-    /// via [`LocalizedString::literal`](bastyde_i18n::LocalizedString::literal).
-    #[doc(hidden)]
-    pub fn new_literal(text: impl Into<String>, local_bounds: Rect) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(text), local_bounds)
-    }
-
     /// A text item whose content is driven by a `Signal<String>`.
     /// `register_bindings` ties the signal to the SceneView at
     /// `BindingLevel::RepaintOnly` so changes dirty paint and the
@@ -103,12 +96,6 @@ impl TextItem {
         let ls: bastyde_i18n::LocalizedString = label.into();
         self.label = Some(ls.resolve_now());
         self
-    }
-
-    /// Untranslated twin of [`label`](Self::label).
-    #[doc(hidden)]
-    pub fn label_literal(self, label: impl Into<String>) -> Self {
-        self.label(bastyde_i18n::LocalizedString::literal(label))
     }
 
     crate::items::item_a11y_builders!();

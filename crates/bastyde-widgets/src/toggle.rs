@@ -64,13 +64,6 @@ impl Toggle {
         self
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) for `label(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
-        self
-    }
-
     /// Set the initial enabled state. Forwarded to the arena via
     /// `ctx.enabled_when(self_id, false)` at build time. Reactive
     /// enable/disable is supported via `ctx.enabled_when(id, signal)`.

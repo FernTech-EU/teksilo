@@ -74,18 +74,6 @@ impl BreadcrumbItem {
         }
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(label))
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `current(...)` accepting a raw label.
-    #[doc(hidden)]
-    pub fn current_literal(label: impl Into<String>) -> Self {
-        Self::current(bastyde_i18n::LocalizedString::literal(label))
-    }
-
     /// Closure invoked on activation.
     pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.action = Some(Box::new(f));
@@ -426,13 +414,6 @@ impl Breadcrumb {
     pub fn label(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
         self.label = Some(ls.resolve_now());
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `label(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn label_literal(mut self, text: impl Into<String>) -> Self {
-        self.label = Some(text.into());
         self
     }
 

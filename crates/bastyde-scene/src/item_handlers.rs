@@ -265,14 +265,6 @@ impl SceneItemHandlerSet {
         self
     }
 
-    /// Untranslated twin of [`tooltip`](Self::tooltip). Wraps the
-    /// argument via [`LocalizedString::literal`](bastyde_i18n::LocalizedString::literal)
-    /// — a grep-marker for call sites that intentionally bypass i18n.
-    #[doc(hidden)]
-    pub fn tooltip_literal(&mut self, t: impl Into<String>) -> &mut Self {
-        self.tooltip(bastyde_i18n::LocalizedString::literal(t))
-    }
-
     /// Mark whether the item accepts dropped payloads.
     pub fn accepts_drops(&mut self, accepts: bool) -> &mut Self {
         self.accepts_drops = accepts;

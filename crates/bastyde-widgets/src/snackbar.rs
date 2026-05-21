@@ -204,12 +204,6 @@ impl Snackbar {
         self
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(label))
-    }
-
     pub fn content(mut self, content: impl Widget + 'static) -> Self {
         self.pending_content = Some(PendingChild::Deferred(Box::new(content)));
         self
@@ -265,13 +259,6 @@ impl Snackbar {
     pub fn announcement(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
         self.announcement = Some(ls.resolve_now());
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `announcement(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn announcement_literal(mut self, text: impl Into<String>) -> Self {
-        self.announcement = Some(text.into());
         self
     }
 }

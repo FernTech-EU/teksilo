@@ -278,15 +278,6 @@ impl IconButton {
         self
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) for `tooltip(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
-        self.tooltip_text = Some(text.into());
-        self.rich_tooltip_source = None;
-        self.composite_tooltip_content = None;
-        self
-    }
-
     /// Attach a rich tooltip resolved from the app-wide tooltip
     /// registry. See [`Button::rich_tooltip`](crate::button::Button::rich_tooltip).
     pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {

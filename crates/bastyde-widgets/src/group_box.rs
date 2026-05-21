@@ -46,12 +46,6 @@ impl GroupBox {
         }
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw title in `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(title: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(title))
-    }
-
     /// Turn this into a checkable GroupBox. When the signal is `false`, events
     /// to descendants of the content area are blocked via effective-enabled
     /// ancestor propagation. The title checkbox itself stays interactive.

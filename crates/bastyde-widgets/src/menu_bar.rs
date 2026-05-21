@@ -81,16 +81,6 @@ impl MenuBar {
         self
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) for `menu(...)` accepting a raw label.
-    #[doc(hidden)]
-    pub fn menu_literal(
-        self,
-        label: impl Into<String>,
-        factory: impl Fn() -> Box<dyn Widget> + 'static,
-    ) -> Self {
-        self.menu(bastyde_i18n::LocalizedString::literal(label), factory)
-    }
-
     pub fn leading_slot(mut self, widget: impl Widget + 'static) -> Self {
         self.leading_slot
             .push(PendingChild::Deferred(Box::new(widget)));

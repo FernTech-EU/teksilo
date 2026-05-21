@@ -139,15 +139,6 @@ impl ToastAction {
         }
     }
 
-    /// Permanent grep marker for untranslated action labels.
-    #[doc(hidden)]
-    pub fn new_literal(
-        label: impl Into<String>,
-        on_invoke: impl Fn(&mut EventContext) + 'static,
-    ) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(label), on_invoke)
-    }
-
     /// Shorthand for `ToastAction::new(label, on_invoke).style(Button { Filled })`.
     /// The visual-weight default for primary calls-to-action.
     pub fn primary(
@@ -413,27 +404,6 @@ impl Toast {
 
     // ----- _literal shims (permanent grep markers for untranslated strings) -----
 
-    #[doc(hidden)]
-    pub fn info_literal(title: impl Into<String>) -> Self {
-        Self::info(bastyde_i18n::LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn success_literal(title: impl Into<String>) -> Self {
-        Self::success(bastyde_i18n::LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn warning_literal(title: impl Into<String>) -> Self {
-        Self::warning(bastyde_i18n::LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn error_literal(title: impl Into<String>) -> Self {
-        Self::error(bastyde_i18n::LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn loading_literal(title: impl Into<String>) -> Self {
-        Self::loading(bastyde_i18n::LocalizedString::literal(title))
-    }
-
     // ----- Body content -----
 
     /// Optional secondary line below the title.
@@ -441,10 +411,6 @@ impl Toast {
         let ls: bastyde_i18n::LocalizedString = text.into();
         self.body = Some(ls.resolve_now());
         self
-    }
-    #[doc(hidden)]
-    pub fn body_literal(self, text: impl Into<String>) -> Self {
-        self.body(bastyde_i18n::LocalizedString::literal(text))
     }
 
     /// Replace the default severity glyph with a custom leading
@@ -537,10 +503,6 @@ impl Toast {
         let ls: bastyde_i18n::LocalizedString = text.into();
         self.announcement = Some(ls.resolve_now());
         self
-    }
-    #[doc(hidden)]
-    pub fn announcement_literal(self, text: impl Into<String>) -> Self {
-        self.announcement(bastyde_i18n::LocalizedString::literal(text))
     }
 
     // ----- Archive -----

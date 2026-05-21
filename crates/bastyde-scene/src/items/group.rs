@@ -58,12 +58,6 @@ impl GroupItem {
         self
     }
 
-    /// Untranslated twin of [`label`](Self::label).
-    #[doc(hidden)]
-    pub fn label_literal(self, label: impl Into<String>) -> Self {
-        self.label(bastyde_i18n::LocalizedString::literal(label))
-    }
-
     /// Render the label inline at paint time.
     pub fn show_label(mut self, show: bool) -> Self {
         self.show_label = show;

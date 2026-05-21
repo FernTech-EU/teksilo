@@ -191,15 +191,6 @@ impl SplitButton {
         self
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) for `tooltip(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
-        self.tooltip_text = Some(text.into());
-        self.rich_tooltip_source = None;
-        self.composite_tooltip_content = None;
-        self
-    }
-
     /// Attach a rich tooltip to the main region.
     pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
         self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
@@ -233,15 +224,6 @@ impl SplitButton {
     pub fn chevron_tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
         self.chevron_tooltip_text = Some(ls.resolve_now());
-        self.chevron_rich_tooltip_source = None;
-        self.chevron_composite_tooltip_content = None;
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `chevron_tooltip(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn chevron_tooltip_literal(mut self, text: impl Into<String>) -> Self {
-        self.chevron_tooltip_text = Some(text.into());
         self.chevron_rich_tooltip_source = None;
         self.chevron_composite_tooltip_content = None;
         self

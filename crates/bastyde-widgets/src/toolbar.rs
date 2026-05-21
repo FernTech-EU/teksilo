@@ -57,12 +57,6 @@ impl Toolbar {
         self.label = Some(ls.resolve_now());
         self
     }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `label(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn label_literal(self, label: impl Into<String>) -> Self {
-        self.label(bastyde_i18n::LocalizedString::literal(label))
-    }
 }
 
 impl Default for Toolbar {

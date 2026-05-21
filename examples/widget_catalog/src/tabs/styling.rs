@@ -406,19 +406,19 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     spacing: 16.0
                     Toggle::new(tog_switch) {
                         variant: ToggleVariant::Switch
-                        label_literal: "Switch"
+                        label: lit!("Switch")
                     }
                     Toggle::new(tog_pill) {
                         variant: ToggleVariant::Pill
-                        label_literal: "Pill"
+                        label: lit!("Pill")
                     }
                     Toggle::new(tog_square) {
                         variant: ToggleVariant::Square
-                        label_literal: "Square"
+                        label: lit!("Square")
                     }
                     Toggle::new(tog_inset) {
                         variant: ToggleVariant::Inset
-                        label_literal: "Inset"
+                        label: lit!("Inset")
                     }
                 }
             }
@@ -433,15 +433,15 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     spacing: 16.0
                     Checkbox::new(cb_square) {
                         variant: CheckboxVariant::Square
-                        label_literal: "Square"
+                        label: lit!("Square")
                     }
                     Checkbox::new(cb_rounded) {
                         variant: CheckboxVariant::Rounded
-                        label_literal: "Rounded"
+                        label: lit!("Rounded")
                     }
                     Checkbox::new(cb_circle) {
                         variant: CheckboxVariant::Circle
-                        label_literal: "Circle"
+                        label: lit!("Circle")
                     }
                 }
             }
@@ -470,7 +470,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                 HStack {
                     spacing: 16.0
                     Toggle::new(tog_default) {
-                        label_literal: "Default"
+                        label: lit!("Default")
                     }
                     #{ square_toggle }
                 }

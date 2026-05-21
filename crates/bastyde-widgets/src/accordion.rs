@@ -139,12 +139,6 @@ impl Accordion {
         self
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw title in `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(title: impl Into<String>, expanded: Signal<bool>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(title), expanded)
-    }
-
     /// Set the content widget by pre-registered ID.
     pub fn content_id(mut self, id: WidgetId) -> Self {
         self.content_id = Some(id);

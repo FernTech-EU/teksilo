@@ -208,16 +208,6 @@ impl Button {
         self
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in
-    /// `LocalizedString::literal` for tests and scaffolding where
-    /// translation is overkill. Production code uses
-    /// `new(tr!(...))`; the `*_literal` suffix is the grep marker for
-    /// untranslated strings alongside `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(label))
-    }
-
     /// Set the Tier-1 design-language variant. The active
     /// [`ButtonStyle`] decides whether to honour or remap it (the IntUI
     /// default `RecipeButtonStyle` collapses Destructive → Filled,
@@ -265,15 +255,6 @@ impl Button {
     pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
         self.tooltip_text = Some(ls.resolve_now());
-        self.rich_tooltip_source = None;
-        self.composite_tooltip_content = None;
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `tooltip(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
-        self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;
         self

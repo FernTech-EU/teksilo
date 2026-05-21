@@ -66,13 +66,6 @@ impl InputDialog {
         }
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw title in
-    /// `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(title: impl Into<String>) -> Self {
-        Self::new(LocalizedString::literal(title))
-    }
-
     /// Prompt rendered above the input field. Optional but recommended.
     pub fn prompt(mut self, text: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = text.into();
@@ -80,22 +73,10 @@ impl InputDialog {
         self
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) for `prompt(...)`.
-    #[doc(hidden)]
-    pub fn prompt_literal(self, text: impl Into<String>) -> Self {
-        self.prompt(LocalizedString::literal(text))
-    }
-
     /// Placeholder shown when the field is empty.
     pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
         self.placeholder = Some(ls.resolve_now());
-        self
-    }
-
-    /// Untranslated [`placeholder`](Self::placeholder).
-    pub fn placeholder_literal(mut self, text: impl Into<String>) -> Self {
-        self.placeholder = Some(text.into());
         self
     }
 

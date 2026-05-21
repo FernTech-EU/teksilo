@@ -127,13 +127,6 @@ impl ToolBoxItem {
         }
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in
-    /// `LocalizedString::literal` for tests and scaffolding.
-    #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>, content: impl Widget + 'static) -> Self {
-        Self::new(LocalizedString::literal(label), content)
-    }
-
     /// Attach a leading-slot widget rendered before the label (after
     /// the selection indicator bar). Use for a small `IconWidget`, a
     /// `Checkbox` for checkable sections, a `Badge`, or any other
@@ -225,13 +218,6 @@ impl ToolBox {
     /// Append an item whose content is a pre-registered widget id.
     pub fn item_id(self, label: impl Into<LocalizedString>, content_id: WidgetId) -> Self {
         self.add(ToolBoxItem::new_id(label, content_id))
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) — raw-label convenience for
-    /// tests and scaffolding.
-    #[doc(hidden)]
-    pub fn item_literal(self, label: impl Into<String>, content: impl Widget + 'static) -> Self {
-        self.item(LocalizedString::literal(label), content)
     }
 
     /// Append a fully-built [`ToolBoxItem`] — required when an icon,

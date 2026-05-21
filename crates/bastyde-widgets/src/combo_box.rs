@@ -277,12 +277,6 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
         self
     }
 
-    /// Untranslated [`placeholder`](Self::placeholder).
-    pub fn placeholder_literal(mut self, text: impl Into<String>) -> Self {
-        self.placeholder = text.into();
-        self
-    }
-
     /// Accessible label describing what this combo box is for
     /// (e.g. "Fruit", "Font family"). Independent of the visible
     /// placeholder and of the current selection — screen readers
@@ -290,12 +284,6 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
         self.label = Some(ls.resolve_now());
-        self
-    }
-
-    /// Untranslated [`label`](Self::label).
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
         self
     }
 

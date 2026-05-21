@@ -212,12 +212,6 @@ impl DateRangeEdit {
         self
     }
 
-    /// Untranslated [`label`](Self::label).
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
-        self
-    }
-
     pub fn validation_behavior(mut self, behavior: ValidationBehavior) -> Self {
         self.validation_behavior = behavior;
         self

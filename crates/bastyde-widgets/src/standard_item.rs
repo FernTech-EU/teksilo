@@ -145,22 +145,10 @@ impl StandardListItem {
         self
     }
 
-    /// Shim for raw, untranslated strings — `_literal` suffix is the
-    /// grep marker for unlocalized call sites.
-    #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>) -> Self {
-        Self::new(LocalizedString::literal(label))
-    }
-
     pub fn subtitle(mut self, text: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = text.into();
         self.subtitle = Some(ls.resolve_now());
         self
-    }
-
-    #[doc(hidden)]
-    pub fn subtitle_literal(self, text: impl Into<String>) -> Self {
-        self.subtitle(LocalizedString::literal(text))
     }
 
     /// Leading slot — placed AFTER the optional checkbox, BEFORE the
@@ -547,21 +535,10 @@ impl StandardTreeItem {
         }
     }
 
-    #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>) -> Self {
-        Self::new(LocalizedString::literal(label))
-    }
-
     // Forward all StandardListItem builders ----------------------------------
 
     pub fn subtitle(mut self, text: impl Into<LocalizedString>) -> Self {
         self.inner = self.inner.subtitle(text);
-        self
-    }
-
-    #[doc(hidden)]
-    pub fn subtitle_literal(mut self, text: impl Into<String>) -> Self {
-        self.inner = self.inner.subtitle(lit!(text));
         self
     }
 

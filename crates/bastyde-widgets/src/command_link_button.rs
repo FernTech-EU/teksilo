@@ -66,24 +66,11 @@ impl CommandLinkButton {
         }
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw title in
-    /// `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(title: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(title))
-    }
-
     /// Optional descriptive subtitle rendered below the title.
     pub fn description(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
         self.description = Some(ls.resolve_now());
         self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `description(...)`.
-    #[doc(hidden)]
-    pub fn description_literal(self, text: impl Into<String>) -> Self {
-        self.description(bastyde_i18n::LocalizedString::literal(text))
     }
 
     /// Leading icon — large enough to anchor the card visually
