@@ -1289,7 +1289,7 @@ impl WidgetTree {
             if Some(overlay_id) == exclude_overlay {
                 // Skip this excluded overlay, fall through to widget tree
             } else if let Some(overlay) = self.overlay_manager.overlay(overlay_id) {
-                return self.hit_test_recursive_excluding(
+                return self.arena.hit_test_in_subtree_excluding(
                     overlay.content_id,
                     point,
                     exclude_widget,
@@ -1306,66 +1306,6 @@ impl WidgetTree {
         self.arena.hit_test_at(point, exclude_widget)
     }
 
-    fn hit_test_recursive_excluding(
-        &self,
-        id: WidgetId,
-        point: Point,
-        exclude: Option<WidgetId>,
-    ) -> Option<WidgetId> {
-        // Subtree hit-test from a specific root — used by the overlay
-        // path. Delegates to a tiny wrapper around the arena's recursion
-        // by walking from `id` only.
-        if !self.arena.is_active(id) || Some(id) == exclude {
-            return None;
-        }
-        // Mirror `WidgetArena::hit_test_recursive`: inverse-apply this node's
-        // transform once. A *content* transform (`content_transform`, e.g.
-        // `SceneView`) is a fixed viewport — test its bounds against the
-        // parent-space point and apply the transform only when descending into
-        // children; a *self* transform (`Scale` / `Rotate`) inverse-transforms
-        // first and tests its bounds in the resulting local space. Identity /
-        // missing transforms collapse both to the scalar case.
-        let transform = self
-            .arena
-            .get(id)
-            .and_then(|n| n.transform_prop.as_ref())
-            .map(|p| p.get())
-            .filter(|t| !t.is_identity());
-        let content_transform = self
-            .arena
-            .get(id)
-            .map(|n| n.content_transform)
-            .unwrap_or(false);
-        let child_point = match transform {
-            Some(t) => match t.inverse() {
-                Some(inv) => inv.apply_point(point),
-                // A degenerate transform (collapsed axis) hides the entire
-                // subtree visually; mirror that for hit-testing.
-                None => return None,
-            },
-            None => point,
-        };
-        let bounds_point = if content_transform { point } else { child_point };
-        let bounds = self.arena.bounds(id);
-        if !bounds.contains(bounds_point) {
-            return None;
-        }
-        let pass_through = self
-            .arena
-            .get(id)
-            .map(|n| n.event_pass_through)
-            .unwrap_or(false);
-        let children = self.arena.children(id).to_vec();
-        for &child in children.iter().rev() {
-            if let Some(hit) = self.hit_test_recursive_excluding(child, child_point, exclude) {
-                return Some(hit);
-            }
-        }
-        if pass_through {
-            return None;
-        }
-        Some(id)
-    }
 }
 
 #[cfg(test)]

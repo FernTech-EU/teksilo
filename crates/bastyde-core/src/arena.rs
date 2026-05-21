@@ -140,7 +140,7 @@ pub struct WidgetNode {
     /// test the bounds in parent space (keeping the whole visible viewport
     /// interactive at any pan) and apply the transform only when descending
     /// into children. Set via `BuildContext::set_content_transform`.
-    pub content_transform: bool,
+    pub(crate) content_transform: bool,
     /// Optional Gaussian-equivalent blur radius applied to this widget's
     /// entire subtree during paint. The render walker emits
     /// `BeginBlurredSubtree { bounds, radius }` before walking the
@@ -519,6 +519,19 @@ impl WidgetArena {
         point: bastyde_canvas::Point,
     ) -> Option<WidgetId> {
         self.hit_test_recursive(start, point, None)
+    }
+
+    /// Like [`hit_test_in_subtree`](Self::hit_test_in_subtree) but also
+    /// excludes a widget (and its descendants) from the walk. Lets the
+    /// overlay / drag-and-drop hit-test reuse the single canonical recursion
+    /// in [`hit_test_recursive`] instead of duplicating it.
+    pub fn hit_test_in_subtree_excluding(
+        &self,
+        start: WidgetId,
+        point: bastyde_canvas::Point,
+        exclude: Option<WidgetId>,
+    ) -> Option<WidgetId> {
+        self.hit_test_recursive(start, point, exclude)
     }
 
     fn hit_test_recursive(
@@ -1054,5 +1067,36 @@ mod tests {
         // Past the scaled-down visual (but inside the un-scaled 100x100 bounds
         // in parent space) → miss, because the bounds test is in local space.
         assert_eq!(arena.hit_test_at(Point::new(75.0, 75.0), None), None);
+    }
+
+    #[test]
+    fn nested_content_transform_nodes_each_claim_their_viewport() {
+        // A content-transform node embedded inside another (the nested-
+        // SceneView case): each level tests its own viewport bounds in its
+        // parent's space, and only the transform is applied when descending.
+        // The inner viewport stays hittable regardless of either node's pan.
+        use bastyde_canvas::{Point, Rect, Transform2D};
+        let mut arena = WidgetArena::new();
+        let outer = arena.insert(Box::new(FillWidget::new()));
+        let inner = arena.insert_child(outer, Box::new(FillWidget::new()));
+        {
+            let n = arena.get_mut(outer).unwrap();
+            n.bounds = Rect::new(0.0, 0.0, 200.0, 200.0);
+            n.clips_children = true;
+            n.content_transform = true;
+            n.transform_prop = Some(Prop::Static(Transform2D::translate(20.0, 20.0)));
+        }
+        {
+            let n = arena.get_mut(inner).unwrap();
+            // Inner viewport expressed in the OUTER's content space.
+            n.bounds = Rect::new(10.0, 10.0, 50.0, 50.0);
+            n.clips_children = true;
+            n.content_transform = true;
+            n.transform_prop = Some(Prop::Static(Transform2D::translate(5.0, 5.0)));
+        }
+        // Screen (40,40) → outer-content (20,20) ∈ inner viewport → reaches inner.
+        assert_eq!(arena.hit_test_at(Point::new(40.0, 40.0), None), Some(inner));
+        // Screen (5,5) → outer-content (-15,-15) ∉ inner viewport → reaches outer.
+        assert_eq!(arena.hit_test_at(Point::new(5.0, 5.0), None), Some(outer));
     }
 }
