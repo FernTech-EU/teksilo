@@ -24,7 +24,7 @@ use bastyde::widgets::{
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -125,14 +125,14 @@ impl Root {
                     VStack::new()
                         .spacing(6.0)
                         .child(
-                            TextWidget::new_literal("Songs")
+                            TextWidget::new(lit!("Songs"))
                                 .style(body_bold)
                                 .color(text_primary),
                         )
                         .child(
-                            TextWidget::new_literal(
-                                "Drag to reorder. Alt+\u{2191}/\u{2193} reorders the selected row.",
-                            )
+                            TextWidget::new(lit!(
+                                "Drag to reorder. Alt+\u{2191}/\u{2193} reorders the selected row."
+                            ))
                             .style(small)
                             .color(text_muted),
                         ),
@@ -142,12 +142,12 @@ impl Root {
                 Expand::vertical().child(
                     ListView::new(songs, move |index, title, selected| {
                         Box::new(
-                            StandardListItem::new_literal(title.clone())
+                            StandardListItem::new(lit!(title.clone()))
                                 .selected(selected)
                                 .leading_slot(
-                                    TextWidget::new_literal(
+                                    TextWidget::new(lit!(
                                         format!("{:>2}.", index + 1).leak() as &str
-                                    )
+                                    ))
                                     .color(TextRole::Secondary),
                                 ),
                         )
@@ -174,13 +174,12 @@ impl Root {
                     VStack::new()
                         .spacing(6.0)
                         .child(
-                            TextWidget::new_literal("Folders")
+                            TextWidget::new(lit!("Folders"))
                                 .style(body_bold)
                                 .color(text_primary),
                         )
                         .child(
-                            TextWidget::new_literal(
-                                "Drag a row onto another: top third = before, middle = into, bottom = after.",
+                            TextWidget::new(lit!("Drag a row onto another: top third = before, middle = into, bottom = after."),
                             )
                             .style(small)
                             .color(text_muted),
@@ -191,7 +190,7 @@ impl Root {
                 Expand::vertical().child(
                     TreeView::new_with_context(folders, move |name, entry, selected, ctx| {
                         Box::new(
-                            StandardTreeItem::new_literal(name.clone())
+                            StandardTreeItem::new(lit!(name.clone()))
                                 .from_entry(entry)
                                 .selected(selected)
                                 .on_toggle_rc(ctx.toggle_callback()),

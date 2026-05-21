@@ -205,13 +205,14 @@ mod tests {
     use super::*;
     use crate::primitives::TextWidget;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn starts_collapsed_when_signal_is_false() {
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree
-            .add(Collapse::new(expanded.clone()).child(TextWidget::new_literal("hidden content")));
+            .add(Collapse::new(expanded.clone()).child(TextWidget::new(lit!("hidden content"))));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -228,7 +229,7 @@ mod tests {
         let expanded = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree
-            .add(Collapse::new(expanded.clone()).child(TextWidget::new_literal("visible content")));
+            .add(Collapse::new(expanded.clone()).child(TextWidget::new(lit!("visible content"))));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -246,7 +247,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
             Collapse::new(expanded.clone())
-                .child(TextWidget::new_literal("content with some natural height")),
+                .child(TextWidget::new(lit!("content with some natural height"))),
         );
         tree.layout(SizeProposal {
             width: Some(300.0),
@@ -282,7 +283,7 @@ mod tests {
         let expanded = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let root =
-            tree.add(Collapse::new(expanded.clone()).child(TextWidget::new_literal("content")));
+            tree.add(Collapse::new(expanded.clone()).child(TextWidget::new(lit!("content"))));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -320,7 +321,7 @@ mod tests {
         let expanded = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let root =
-            tree.add(Collapse::new(expanded.clone()).child(TextWidget::new_literal("content")));
+            tree.add(Collapse::new(expanded.clone()).child(TextWidget::new(lit!("content"))));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -359,7 +360,7 @@ mod tests {
     fn animation_is_active_mid_tween() {
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Collapse::new(expanded.clone()).child(TextWidget::new_literal("content")));
+        tree.add(Collapse::new(expanded.clone()).child(TextWidget::new(lit!("content"))));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,

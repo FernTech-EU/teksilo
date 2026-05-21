@@ -11,6 +11,7 @@
 
 use bastyde_app::BastydeAppBuilder;
 use bastyde_i18n::I18nConfig;
+use bastyde_i18n::lit;
 use bastyde_widgets::{Snackbar, StatusBar};
 
 #[test]
@@ -78,7 +79,7 @@ fn snackbar_a11y_name_resolves_via_framework_bundle() {
         )
         .build_headless();
 
-    app.tree.add(Snackbar::new_literal("Trigger").content(Noop));
+    app.tree.add(Snackbar::new(lit!("Trigger")).content(Noop));
     app.tree
         .layout(bastyde_canvas::SizeProposal::exact(400.0, 300.0));
 

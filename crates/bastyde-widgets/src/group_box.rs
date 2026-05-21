@@ -15,6 +15,7 @@ use bastyde_core::build_context::BuildContext;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
+use bastyde_i18n::lit;
 
 use crate::Checkbox;
 use crate::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
@@ -101,7 +102,7 @@ impl Widget for GroupBox {
         let theme_signal = ctx.theme_signal();
         let _ = theme_signal.get();
 
-        let title_label = TextWidget::new_literal(&self.title)
+        let title_label = TextWidget::new(lit!(&self.title))
             .style(TextStyleRole::BodyBold)
             .color(TextRole::Primary)
             .single_line()
@@ -110,7 +111,7 @@ impl Widget for GroupBox {
         let title_row_id = if let Some(ref checked) = self.checked {
             // The adjacent title text is `a11y_hidden`, so the checkbox must
             // carry the accessible name for the group's on/off state.
-            let checkbox = Checkbox::new(checked.clone()).label_literal(&self.title);
+            let checkbox = Checkbox::new(checked.clone()).label(lit!(&self.title));
             ctx.add(
                 HStack::new()
                     .spacing(GROUP_BOX_CHECKBOX_GAP)

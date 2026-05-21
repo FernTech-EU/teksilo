@@ -563,6 +563,7 @@ mod tests {
     use bastyde_canvas::MockTextBackend;
     use bastyde_core::signal::Signal;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -574,7 +575,7 @@ mod tests {
     fn bind_text_renders_state_value() {
         let text = Signal::new("Hello".to_string());
         let mut tree = WidgetTree::new();
-        let w = tree.add(TextWidget::new_literal("").bind_text(text.clone()));
+        let w = tree.add(TextWidget::new(lit!("")).bind_text(text.clone()));
         text.bind_to(
             w,
             tree.binding_registry(),
@@ -589,7 +590,7 @@ mod tests {
     fn bind_text_updates_on_state_change() {
         let text = Signal::new("Hello".to_string());
         let mut tree = WidgetTree::new();
-        let w = tree.add(TextWidget::new_literal("").bind_text(text.clone()));
+        let w = tree.add(TextWidget::new(lit!("")).bind_text(text.clone()));
         text.bind_to(
             w,
             tree.binding_registry(),
@@ -610,7 +611,7 @@ mod tests {
 
     #[test]
     fn wrap_is_the_default_mode() {
-        let w = TextWidget::new_literal("Hello");
+        let w = TextWidget::new(lit!("Hello"));
         assert_eq!(w.overflow, TextOverflow::Wrap);
     }
 
@@ -620,7 +621,7 @@ mod tests {
         // = 18 bytes × 8 = 144px wide single-line. At max_width 50 it
         // should wrap across several lines.
         let mut tree = tree_with_mock_backend();
-        let w = tree.add(TextWidget::new_literal("one two three four"));
+        let w = tree.add(TextWidget::new(lit!("one two three four")));
         tree.layout(SizeProposal {
             width: Some(50.0),
             height: None,
@@ -641,7 +642,7 @@ mod tests {
     #[test]
     fn wrap_falls_back_to_single_line_when_proposal_width_is_none() {
         let mut tree = tree_with_mock_backend();
-        let w = tree.add(TextWidget::new_literal("one two three"));
+        let w = tree.add(TextWidget::new(lit!("one two three")));
         tree.layout(SizeProposal {
             width: None,
             height: None,
@@ -658,7 +659,7 @@ mod tests {
     fn wrap_max_lines_caps_paragraph_height() {
         // "one two three four five" wraps to multiple lines; cap at 2.
         let mut tree = tree_with_mock_backend();
-        let w = tree.add(TextWidget::new_literal("one two three four five six seven").max_lines(2));
+        let w = tree.add(TextWidget::new(lit!("one two three four five six seven")).max_lines(2));
         tree.layout(SizeProposal {
             width: Some(40.0),
             height: None,
@@ -676,7 +677,7 @@ mod tests {
         // MockTextBackend clamps at max_width for single-line measurement.
         let mut tree = tree_with_mock_backend();
         let w = tree.add(
-            TextWidget::new_literal("a very long piece of text")
+            TextWidget::new(lit!("a very long piece of text"))
                 .overflow(TextOverflow::Ellipsis(EllipsisMode::Trailing)),
         );
         tree.layout(SizeProposal {
@@ -695,7 +696,7 @@ mod tests {
     fn middle_ellipsis_produces_narrow_single_line_layout() {
         let mut tree = tree_with_mock_backend();
         let w = tree.add(
-            TextWidget::new_literal("abcdefghijklmnop")
+            TextWidget::new(lit!("abcdefghijklmnop"))
                 .overflow(TextOverflow::Ellipsis(EllipsisMode::Middle)),
         );
         tree.layout(SizeProposal {
@@ -718,7 +719,7 @@ mod tests {
     fn leading_ellipsis_produces_narrow_single_line_layout() {
         let mut tree = tree_with_mock_backend();
         let w = tree.add(
-            TextWidget::new_literal("abcdefghijklmnop")
+            TextWidget::new(lit!("abcdefghijklmnop"))
                 .overflow(TextOverflow::Ellipsis(EllipsisMode::Leading)),
         );
         tree.layout(SizeProposal {
@@ -735,9 +736,9 @@ mod tests {
 
     #[test]
     fn single_line_shorthand_matches_trailing_ellipsis() {
-        let a = TextWidget::new_literal("hi").single_line();
+        let a = TextWidget::new(lit!("hi")).single_line();
         let b =
-            TextWidget::new_literal("hi").overflow(TextOverflow::Ellipsis(EllipsisMode::Trailing));
+            TextWidget::new(lit!("hi")).overflow(TextOverflow::Ellipsis(EllipsisMode::Trailing));
         assert_eq!(a.overflow, b.overflow);
     }
 }

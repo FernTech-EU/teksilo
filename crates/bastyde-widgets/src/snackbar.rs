@@ -1,3 +1,4 @@
+use bastyde_i18n::lit;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -380,7 +381,7 @@ impl Widget for Snackbar {
             ctx.add(overlay_trigger)
         } else {
             ctx.add(
-                Button::new_literal(label)
+                Button::new(lit!(label))
                     .variant(style)
                     .enabled(enabled)
                     .on_tap(open_on_tap)
@@ -488,7 +489,7 @@ mod tests {
     #[test]
     fn access_click_opens_bottom_center_snackbar() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Snackbar::new_literal("Show snackbar").content(FixedLeaf(220.0, 40.0)));
+        tree.add(Snackbar::new(lit!("Show snackbar")).content(FixedLeaf(220.0, 40.0)));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Show snackbar").unwrap();
@@ -512,7 +513,7 @@ mod tests {
     fn custom_trigger_opens_snackbar() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(
-            Snackbar::new_literal("Show snackbar")
+            Snackbar::new(lit!("Show snackbar"))
                 .content(FixedLeaf(180.0, 36.0))
                 .trigger(FixedLeaf(132.0, 36.0)),
         );
@@ -531,7 +532,7 @@ mod tests {
     fn snackbar_auto_dismisses_after_duration() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(
-            Snackbar::new_literal("Show snackbar")
+            Snackbar::new(lit!("Show snackbar"))
                 .content(FixedLeaf(220.0, 40.0))
                 .auto_dismiss_after(Duration::from_millis(300)),
         );
@@ -557,7 +558,7 @@ mod tests {
     #[should_panic(expected = "Snackbar requires .content(...)")]
     fn snackbar_without_content_panics_on_build() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Snackbar::new_literal("Show snackbar"));
+        tree.add(Snackbar::new(lit!("Show snackbar")));
         tree.layout(SizeProposal::exact(800.0, 600.0));
     }
 }

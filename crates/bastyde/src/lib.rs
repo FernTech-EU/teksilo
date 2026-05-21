@@ -95,13 +95,12 @@ pub mod prelude {
     // Core widget types
     pub use bastyde_core::{
         AccessNodeBuilder, AccessSubtreeMode, AccessibilityOverrides, Action, AnimationSpec,
-        BuildContext, ButtonMask, CursorIcon, EventContext, EventResponse, BatiBranch, BatiBranch3,
-        BatiBranch4, FocusPolicy, ImeContext, ImePurpose, Intent, IntentKind, IntentResponse,
+        BatiBranch, BatiBranch3, BatiBranch4, BuildContext, ButtonMask, CursorIcon, EventContext,
+        EventResponse, FocusPolicy, ImeContext, ImePurpose, Intent, IntentKind, IntentResponse,
         IntoBatiChild, IntoBatiCondition, Key, KeyStroke, LayoutContext, LayoutResponse,
-        ModalCloseBehavior,
-        ModalPresentation, Modifiers, OverscrollBehavior, PaintContext, PointerButton, Prop,
-        Shortcut, ShortcutRegistry, ShortcutScope, Signal, TapEvent, Widget, WidgetBuilder,
-        WidgetEvent, WidgetId,
+        ModalCloseBehavior, ModalPresentation, Modifiers, OverscrollBehavior, PaintContext,
+        PointerButton, Prop, Shortcut, ShortcutRegistry, ShortcutScope, Signal, TapEvent, Widget,
+        WidgetBuilder, WidgetEvent, WidgetId,
     };
 
     // Geometry (lives in bastyde-canvas)
@@ -111,7 +110,9 @@ pub mod prelude {
     pub use bastyde_canvas::{Canvas, EllipsisMode, Paint, Path, RenderFrame, TextOverflow};
 
     // Tokens
-    pub use bastyde_tokens::{BorderRole, Color, CornerRadius, SurfaceRole, TextRole, TextStyleRole};
+    pub use bastyde_tokens::{
+        BorderRole, Color, CornerRadius, SurfaceRole, TextRole, TextStyleRole,
+    };
 
     // Theme + appearance + extensions live in bastyde-core (so they can
     // co-locate with the per-widget style trait protocols and the typed
@@ -151,8 +152,8 @@ pub mod prelude {
 
     // Multi-window API
     pub use bastyde_core::{
-        DecorationsMode, BastydeWindowId, ModalConfig, UserAttentionKind, WindowCommand, WindowConfig,
-        WindowPlacement, WindowState,
+        BastydeWindowId, DecorationsMode, ModalConfig, UserAttentionKind, WindowCommand,
+        WindowConfig, WindowPlacement, WindowState,
     };
 
     // i18n (architecture §12)
@@ -203,8 +204,8 @@ pub mod prelude {
     };
 
     // Reactor adapters — install hooks for awaiting native runtime futures.
-    #[cfg(feature = "tokio")]
-    pub use bastyde_tokio::{BastydeAppBuilderTokioExt, TokioHandle};
     #[cfg(feature = "async-std")]
     pub use bastyde_async_std::BastydeAppBuilderAsyncStdExt;
+    #[cfg(feature = "tokio")]
+    pub use bastyde_tokio::{BastydeAppBuilderTokioExt, TokioHandle};
 }

@@ -38,7 +38,7 @@ struct SwitchToStaticTab;
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -166,24 +166,23 @@ fn animated_page() -> impl Widget + 'static {
     VStack::new()
         .spacing(20.0)
         .child(
-            TextWidget::new_literal("Shader-driven animated widgets")
-                .style(TextStyleRole::BodyBold),
+            TextWidget::new(lit!("Shader-driven animated widgets")).style(TextStyleRole::BodyBold),
         )
         .child(
-            TextWidget::new_literal(
+            TextWidget::new(lit!(
                 "Three indeterminate progress bars should sweep continuously — one \
-                 `queue.write_buffer` + one `draw_indexed` per frame, no `paint()` re-run.",
-            )
+                 `queue.write_buffer` + one `draw_indexed` per frame, no `paint()` re-run."
+            ))
             .style(TextStyleRole::Body),
         )
         .child(labelled_bar("Default"))
         .child(labelled_bar("Accent on dark track"))
         .child(labelled_bar("Accent on dark track"))
         .child(
-            TextWidget::new_literal(
+            TextWidget::new(lit!(
                 "Run with `--5s-tab` to auto-switch to the Static tab after 5 s and \
-                 observe the frame rate and CPU drop to idle.",
-            )
+                 observe the frame rate and CPU drop to idle."
+            ))
             .style(TextStyleRole::Small),
         )
 }
@@ -191,7 +190,7 @@ fn animated_page() -> impl Widget + 'static {
 fn labelled_bar(label: &str) -> impl Widget + use<> {
     HStack::new()
         .spacing(12.0)
-        .child(TextWidget::new_literal(label.to_string()).style(TextStyleRole::Small))
+        .child(TextWidget::new(lit!(label.to_string())).style(TextStyleRole::Small))
         .child(ProgressBar::indeterminate())
 }
 
@@ -201,10 +200,10 @@ fn labelled_bar(label: &str) -> impl Widget + use<> {
 
 fn static_page() -> impl Widget + 'static {
     VStack::new().spacing(20.0).child(
-        TextWidget::new_literal(
+        TextWidget::new(lit!(
             "Static tab — no animations, no timers, no per-frame work. CPU and GPU \
-             should drop to idle; BASTYDE_IDLE_TRACE=1 should emit zero lines.",
-        )
+             should drop to idle; BASTYDE_IDLE_TRACE=1 should emit zero lines."
+        ))
         .style(TextStyleRole::BodyBold),
     )
 }

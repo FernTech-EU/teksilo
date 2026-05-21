@@ -174,10 +174,12 @@ impl DropView {
 
     fn post(&self, event: ExternalDragEvent) {
         let ivars = self.ivars();
-        ivars.poster.post_external(Box::new(ExternalDndEventPayload {
-            window_id_owner: ivars.window_id,
-            event,
-        }));
+        ivars
+            .poster
+            .post_external(Box::new(ExternalDndEventPayload {
+                window_id_owner: ivars.window_id,
+                event,
+            }));
     }
 
     /// Start a native OS drag exporting `data`. Called on the AppKit main

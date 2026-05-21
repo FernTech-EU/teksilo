@@ -2,6 +2,7 @@
 //! panel, plus the `build_default_item` helper used when the caller
 //! hasn't supplied a custom `render_item` closure.
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Rect, Size, SizeProposal};
@@ -29,7 +30,7 @@ pub(super) fn build_default_item(
     label: &str,
     theme: &bastyde_core::Theme,
 ) -> WidgetId {
-    let text = TextWidget::new_literal(label)
+    let text = TextWidget::new(lit!(label))
         .style(TextStyleRole::Body)
         .color(TextRole::Primary)
         .single_line()

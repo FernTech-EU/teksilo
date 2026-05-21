@@ -2,21 +2,21 @@
 //!
 //! Run with: `cargo run -p chart-demo`
 
-use bastyde_charts::{
-    AxisConfig, BarChart, BarGrouping, ChartDatum, ChartSeries, LegendPosition, LineChart,
-    PieChart, PieLabelMode,
-};
 use bastyde::prelude::*;
 use bastyde::tokens::HAlignment;
 use bastyde::widgets::{
     Button, ButtonVariant, Center, Expand, GroupHeader, HStack, Padding, SegmentedControl, Spacer,
     Switcher, TextWidget, Toolbar, VStack,
 };
+use bastyde_charts::{
+    AxisConfig, BarChart, BarGrouping, ChartDatum, ChartSeries, LegendPosition, LineChart,
+    PieChart, PieLabelMode,
+};
 
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -125,10 +125,10 @@ fn main() {
                                     .spacing(0.0)
                                     .alignment(HAlignment::Center)
                                     .child(
-                                        TextWidget::new_literal("Total").style(TextStyleRole::Tiny),
+                                        TextWidget::new(lit!("Total")).style(TextStyleRole::Tiny),
                                     )
                                     .child(
-                                        TextWidget::new_literal("")
+                                        TextWidget::new(lit!(""))
                                             .style(TextStyleRole::BodyBold)
                                             .bind_text(total_label),
                                     ),
@@ -147,12 +147,12 @@ fn main() {
 
                     let content = VStack::new()
                         .spacing(12.0)
-                        .child(GroupHeader::new_literal("Quarterly Performance"))
+                        .child(GroupHeader::new(lit!("Quarterly Performance")))
                         .child(segmented)
                         .child(switcher)
                         .child(
                             HStack::new().spacing(8.0).child(Spacer::new()).child(
-                                Button::new_literal("Refresh data")
+                                Button::new(lit!("Refresh data"))
                                     .variant(ButtonVariant::Filled)
                                     .on_activate_fn(move |_ctx| {
                                         let next = counter_for_btn.get().wrapping_add(1);

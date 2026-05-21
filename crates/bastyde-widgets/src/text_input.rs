@@ -26,6 +26,7 @@
 #[cfg(test)]
 mod tests;
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Point, Rect, SizeProposal};
@@ -389,8 +390,10 @@ impl TextInput {
         self
     }
 
-    pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
-        self.tooltip_text = Some(text.into());
+    /// Attach a plain tooltip. Accepts `tr!(...)` or `lit!(...)`.
+    pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+        let ls: bastyde_i18n::LocalizedString = text.into();
+        self.tooltip_text = Some(ls.resolve_now());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;
         self
@@ -412,7 +415,10 @@ impl TextInput {
 
     /// Attach a composite tooltip — third tier, hosting an arbitrary
     /// widget tree. See [`Button::composite_tooltip`](crate::button::Button::composite_tooltip).
-    pub fn composite_tooltip(mut self, content: impl bastyde_core::widget::Widget + 'static) -> Self {
+    pub fn composite_tooltip(
+        mut self,
+        content: impl bastyde_core::widget::Widget + 'static,
+    ) -> Self {
         self.composite_tooltip_content = Some(Box::new(content));
         self.tooltip_text = None;
         self.rich_tooltip_source = None;
@@ -690,7 +696,7 @@ impl Widget for TextInput {
                 tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
             );
         } else if let Some(ref text) = self.tooltip_text {
-            let tw = crate::tooltip::TooltipWidget::new_literal(text);
+            let tw = crate::tooltip::TooltipWidget::new(lit!(text));
             let tooltip_id = ctx.add(tw);
             let delay = std::time::Duration::from_millis(500);
             ctx.attach_tooltip(root_id, tooltip_id, delay);

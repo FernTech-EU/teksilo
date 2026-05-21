@@ -220,12 +220,13 @@ mod tests {
     use super::*;
     use crate::primitives::TextWidget;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn zero_angle_emits_identity_skip() {
         let angle = Signal::new(0.0_f32);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Rotate::new(angle).child(TextWidget::new_literal("x")));
+        tree.add(Rotate::new(angle).child(TextWidget::new(lit!("x"))));
         tree.layout(SizeProposal {
             width: Some(200.0),
             height: None,
@@ -243,7 +244,7 @@ mod tests {
     fn nonzero_angle_emits_rotation_matrix() {
         let angle = Signal::new(std::f32::consts::FRAC_PI_2); // 90°
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Rotate::new(angle).child(TextWidget::new_literal("x")));
+        tree.add(Rotate::new(angle).child(TextWidget::new(lit!("x"))));
         tree.layout(SizeProposal {
             width: Some(200.0),
             height: None,
@@ -275,7 +276,7 @@ mod tests {
         // about layout size, not animation timing.
         let angle = Signal::new(0.0_f32);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let id = tree.add(Rotate::new(angle.clone()).child(TextWidget::new_literal("hello")));
+        let id = tree.add(Rotate::new(angle.clone()).child(TextWidget::new(lit!("hello"))));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -301,7 +302,7 @@ mod tests {
         use std::time::Duration;
         let angle = Signal::new_animated(0.0_f32);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Rotate::new(angle.clone()).child(TextWidget::new_literal("x")));
+        tree.add(Rotate::new(angle.clone()).child(TextWidget::new(lit!("x"))));
         tree.layout(SizeProposal {
             width: Some(200.0),
             height: None,
@@ -480,9 +481,9 @@ mod tests {
                 Padding::uniform(24.0).child(
                     VStack::new()
                         .spacing(20.0)
-                        .child(TextWidget::new_literal("filler 1"))
-                        .child(TextWidget::new_literal("filler 2"))
-                        .child(TextWidget::new_literal("filler 3"))
+                        .child(TextWidget::new(lit!("filler 1")))
+                        .child(TextWidget::new(lit!("filler 2")))
+                        .child(TextWidget::new(lit!("filler 3")))
                         .child(
                             HStack::new()
                                 .spacing(12.0)
@@ -494,7 +495,7 @@ mod tests {
                                             .child(RectWidget::new().background(Color::RED)),
                                     ),
                                 )
-                                .child(TextWidget::new_literal("Rotate 90°")),
+                                .child(TextWidget::new(lit!("Rotate 90°"))),
                         ),
                 ),
             ),
@@ -566,9 +567,9 @@ mod tests {
             Padding::uniform(24.0).child(
                 VStack::new()
                     .spacing(20.0)
-                    .child(TextWidget::new_literal("filler"))
-                    .child(TextWidget::new_literal("filler"))
-                    .child(TextWidget::new_literal("filler"))
+                    .child(TextWidget::new(lit!("filler")))
+                    .child(TextWidget::new(lit!("filler")))
+                    .child(TextWidget::new(lit!("filler")))
                     .child(
                         HStack::new()
                             .spacing(12.0)
@@ -580,7 +581,7 @@ mod tests {
                                         .child(RectWidget::new().background(Color::RED)),
                                 ),
                             )
-                            .child(TextWidget::new_literal("Rotate 90°")),
+                            .child(TextWidget::new(lit!("Rotate 90°"))),
                     ),
             ),
         );
@@ -754,7 +755,7 @@ mod tests {
         use std::time::Duration;
         let angle = Signal::new_animated(0.0_f32);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Rotate::new(angle.clone()).child(TextWidget::new_literal("x")));
+        tree.add(Rotate::new(angle.clone()).child(TextWidget::new(lit!("x"))));
         tree.layout(SizeProposal {
             width: Some(200.0),
             height: None,
@@ -782,7 +783,7 @@ mod tests {
         // PushTransform value — no rebuild required.
         let angle = Signal::new(0.0_f32);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Rotate::new(angle.clone()).child(TextWidget::new_literal("x")));
+        tree.add(Rotate::new(angle.clone()).child(TextWidget::new(lit!("x"))));
         tree.layout(SizeProposal {
             width: Some(200.0),
             height: None,

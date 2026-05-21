@@ -154,7 +154,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("RectWidget") {
+                TextWidget::new(lit!("RectWidget")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -172,7 +172,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("TextWidget") {
+                TextWidget::new(lit!("TextWidget")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -198,7 +198,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("IconWidget") {
+                TextWidget::new(lit!("IconWidget")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -214,7 +214,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("ImageWidget") {
+                TextWidget::new(lit!("ImageWidget")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -243,7 +243,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("TwistArrow") {
+                TextWidget::new(lit!("TwistArrow")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

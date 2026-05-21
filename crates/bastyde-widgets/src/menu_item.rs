@@ -3,6 +3,7 @@
 //! Non-generic, closure-based command erasure (same pattern as Button).
 //! Supports icons, shortcut labels, disabled state, and submenu triggers.
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -328,9 +329,13 @@ impl Widget for MenuItem {
         // muted on hover-while-disabled too (defense in depth — the
         // leaves' `ColorProp::resolve(theme, ctx.effective_enabled)`
         // would substitute Disabled anyway).
-        let text_role = interaction
-            .zip(&effective_enabled)
-            .map(|(s, on)| if !*on { TextRole::Disabled } else { resolve_text_role(*s) });
+        let text_role = interaction.zip(&effective_enabled).map(|(s, on)| {
+            if !*on {
+                TextRole::Disabled
+            } else {
+                resolve_text_role(*s)
+            }
+        });
 
         // Build the three slots fed to the active `MenuItemStyle`.
         // The style decides the row layout (and chrome); the widget
@@ -355,7 +360,7 @@ impl Widget for MenuItem {
 
         // Label.
         let label = ctx.add(
-            TextWidget::new_literal(&self.label)
+            TextWidget::new(lit!(&self.label))
                 .style(TextStyleRole::Body)
                 .bind_color(text_role.clone())
                 .single_line()
@@ -400,7 +405,7 @@ impl Widget for MenuItem {
             let mut trailing_row = HStack::new().spacing(0.0);
             if let Some(ref shortcut_text) = resolved_shortcut {
                 let shortcut_role = interaction.map(|s| resolve_shortcut_role(*s));
-                let shortcut = TextWidget::new_literal(shortcut_text)
+                let shortcut = TextWidget::new(lit!(shortcut_text))
                     .style(TextStyleRole::Body)
                     .bind_color(shortcut_role)
                     .single_line()
@@ -476,7 +481,7 @@ impl Widget for MenuItem {
                 crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
             );
         } else if let Some(ref tooltip_text) = self.tooltip_text {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new_literal(tooltip_text);
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(lit!(tooltip_text));
             let tooltip_id = ctx.add(tooltip_widget);
             let delay = std::time::Duration::from_millis(500);
             ctx.attach_tooltip(root_id, tooltip_id, delay);

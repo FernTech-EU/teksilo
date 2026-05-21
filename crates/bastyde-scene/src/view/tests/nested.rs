@@ -16,8 +16,8 @@
 use crate::items::RectItem;
 use crate::scene::{PanAxes, Scene};
 use crate::view::SceneView;
-use bastyde_canvas::{Point, Rect, Vec2};
 use bastyde_canvas::SizeProposal;
+use bastyde_canvas::{Point, Rect, Vec2};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_core::widget_tree::WidgetTree;
 
@@ -308,14 +308,10 @@ fn view_pan_bounds_override_is_per_view_even_with_same_scene() {
     let scene_b = Scene::new();
 
     let mut tree = WidgetTree::new();
-    let a_id = tree.add(
-        SceneView::new(scene_a)
-            .pan_bounds_override(Some(Rect::new(0.0, 0.0, 1000.0, 800.0))),
-    );
-    let b_id = tree.add(
-        SceneView::new(scene_b)
-            .pan_bounds_override(Some(Rect::new(0.0, 0.0, 200.0, 200.0))),
-    );
+    let a_id = tree
+        .add(SceneView::new(scene_a).pan_bounds_override(Some(Rect::new(0.0, 0.0, 1000.0, 800.0))));
+    let b_id = tree
+        .add(SceneView::new(scene_b).pan_bounds_override(Some(Rect::new(0.0, 0.0, 200.0, 200.0))));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     {

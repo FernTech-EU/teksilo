@@ -224,6 +224,7 @@ mod tests {
     use super::*;
     use bastyde_core::signal::Signal;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn group_publishes_radio_group_role_and_name() {
@@ -231,9 +232,9 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let rg = tree.add(
             RadioGroup::new()
-                .label_literal("Theme")
-                .radio(RadioButton::new(0, selected.clone()).label_literal("Light"))
-                .radio(RadioButton::new(1, selected.clone()).label_literal("Dark")),
+                .label(lit!("Theme"))
+                .radio(RadioButton::new(0, selected.clone()).label(lit!("Light")))
+                .radio(RadioButton::new(1, selected.clone()).label(lit!("Dark"))),
         );
         tree.layout(SizeProposal::exact(200.0, 200.0));
         let info = tree.accessibility_node(rg);
@@ -254,9 +255,9 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(
             RadioGroup::new()
-                .radio(RadioButton::new(0, selected.clone()).label_literal("A"))
-                .radio(RadioButton::new(1, selected.clone()).label_literal("B"))
-                .radio(RadioButton::new(2, selected.clone()).label_literal("C")),
+                .radio(RadioButton::new(0, selected.clone()).label(lit!("A")))
+                .radio(RadioButton::new(1, selected.clone()).label(lit!("B")))
+                .radio(RadioButton::new(2, selected.clone()).label(lit!("C"))),
         );
         tree.layout(SizeProposal::exact(200.0, 200.0));
 

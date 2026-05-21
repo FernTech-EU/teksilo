@@ -6,7 +6,7 @@ use syn::punctuated::Punctuated;
 use syn::{Expr, Path, Token, token};
 
 use crate::diag;
-use crate::ir::{BodyItem, BatiElement};
+use crate::ir::{BatiElement, BodyItem};
 
 use super::parse_body;
 

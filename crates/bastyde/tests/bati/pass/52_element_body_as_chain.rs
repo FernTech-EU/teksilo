@@ -71,11 +71,11 @@ impl Widget for Menu {
 fn main() {
     let m: Menu = bati!(
         Menu {
-            item: MenuItem::new_literal("Run") {
+            item: MenuItem::new(lit!("Run")) {
                 on_activate: 1
                 tooltip_literal: "Runs the thing"
             }
-            item: MenuItem::new_literal("Stop") {
+            item: MenuItem::new(lit!("Stop")) {
                 on_activate: 2
             }
         }

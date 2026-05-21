@@ -12,8 +12,8 @@ use crate::items::RectItem;
 use crate::scene::Scene;
 use crate::selection::{SceneSelection, SceneSelectionMode};
 use crate::view::SceneView;
-use bastyde_canvas::{Point, Rect};
 use bastyde_canvas::SizeProposal;
+use bastyde_canvas::{Point, Rect};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_core::widget_tree::WidgetTree;
 
@@ -278,8 +278,9 @@ fn over_band_paints_after_heavyweight_under_band_before() {
     };
     let find = |dominant: usize| -> Option<usize> {
         frame.draw_order.iter().position(|cmd| {
-            color_of(cmd)
-                .is_some_and(|c| c[dominant] > 0.5 && (0..3).all(|ch| ch == dominant || c[ch] < 0.5))
+            color_of(cmd).is_some_and(|c| {
+                c[dominant] > 0.5 && (0..3).all(|ch| ch == dominant || c[ch] < 0.5)
+            })
         })
     };
     let red = find(0).expect("Under item (RED) painted");
@@ -297,7 +298,9 @@ fn find_color(frame: &bastyde_canvas::RenderFrame, dominant: usize) -> Option<us
     frame.draw_order.iter().position(|cmd| {
         let c = match cmd {
             bastyde_canvas::DrawCommand::Shape(i) => frame.shapes.get(*i).map(|s| s.color),
-            bastyde_canvas::DrawCommand::Decoration(i) => frame.decorations.get(*i).map(|d| d.color),
+            bastyde_canvas::DrawCommand::Decoration(i) => {
+                frame.decorations.get(*i).map(|d| d.color)
+            }
             _ => None,
         };
         c.is_some_and(|c| c[dominant] > 0.5 && (0..3).all(|ch| ch == dominant || c[ch] < 0.5))

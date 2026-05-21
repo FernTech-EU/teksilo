@@ -510,7 +510,10 @@ mod tests {
         tree.layout(SizeProposal::exact(300.0, 60.0));
         tree.focus(sc);
         let frame = tree.render();
-        let accent = bastyde_core::presets::intui::light().colors.accent.to_array();
+        let accent = bastyde_core::presets::intui::light()
+            .colors
+            .accent
+            .to_array();
         assert!(
             frame.shapes.iter().any(|s| s.color == accent),
             "focused selected segment should render with accent color"
@@ -527,7 +530,10 @@ mod tests {
         ));
         tree.layout(SizeProposal::exact(300.0, 60.0));
         let frame = tree.render();
-        let accent = bastyde_core::presets::intui::light().colors.accent.to_array();
+        let accent = bastyde_core::presets::intui::light()
+            .colors
+            .accent
+            .to_array();
         let inactive = bastyde_core::presets::intui::light()
             .colors
             .surface_selected_inactive

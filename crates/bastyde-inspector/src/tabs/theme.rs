@@ -17,6 +17,7 @@ use bastyde_core::build_context::BuildContext;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
+use bastyde_i18n::lit;
 use bastyde_platform::ClipboardHandle;
 use bastyde_tokens::{Color, ColorTokens, ShapeTokens, TextRole, TextStyleRole};
 use bastyde_widgets::primitives::{HStack, Padding, Spacer, VStack};
@@ -184,7 +185,7 @@ impl std::fmt::Debug for ThemeTab {
 /// Components groups inside the tab's scroll body.
 fn section_header(text: &str) -> impl Widget {
     Padding::new(8.0, 0.0, 4.0, 0.0).child(
-        TextWidget::new_literal(text)
+        TextWidget::new(lit!(text))
             .style(TextStyleRole::BodyBold)
             .color(TextRole::Primary),
     )
@@ -195,10 +196,10 @@ fn section_header(text: &str) -> impl Widget {
 /// developer can read the exact alpha / density without dragging.
 fn slider_row(name: &'static str, draft: Signal<f32>) -> impl Widget {
     let value_text = draft.map(|v| format!("{:.2}", v));
-    let name_text = TextWidget::new_literal(name)
+    let name_text = TextWidget::new(lit!(name))
         .style(TextStyleRole::Body)
         .color(TextRole::Primary);
-    let value_label = TextWidget::new_literal("")
+    let value_label = TextWidget::new(lit!(""))
         .bind_text(value_text)
         .style(TextStyleRole::Body)
         .color(TextRole::Secondary);
@@ -261,16 +262,16 @@ impl Widget for ThemeTab {
         }
 
         // Preset buttons.
-        let light_btn = Button::new_literal("Light")
+        let light_btn = Button::new(lit!("Light"))
             .on_activate_fn(|c| c.set_theme(bastyde_core::presets::intui::light()));
-        let dark_btn = Button::new_literal("Dark")
+        let dark_btn = Button::new(lit!("Dark"))
             .on_activate_fn(|c| c.set_theme(bastyde_core::presets::intui::dark()));
 
         // Apply: fold every draft back into a fresh theme and commit.
         let drafts_for_apply = drafts.clone();
         let alpha_drafts_for_apply = alpha_drafts.clone();
         let theme_for_apply = theme_sig.clone();
-        let apply_btn = Button::new_literal("Apply").on_activate_fn(move |c| {
+        let apply_btn = Button::new(lit!("Apply")).on_activate_fn(move |c| {
             let mut next = theme_for_apply.get();
             for ((_, _, set), sig) in SHOWN_COLORS.iter().zip(&drafts_for_apply) {
                 set(&mut next.colors, sig.get());
@@ -285,7 +286,7 @@ impl Widget for ThemeTab {
         let drafts_for_reset = drafts.clone();
         let alpha_drafts_for_reset = alpha_drafts.clone();
         let theme_for_reset = theme_sig.clone();
-        let reset_btn = Button::new_literal("Reset").on_activate_fn(move |_c| {
+        let reset_btn = Button::new(lit!("Reset")).on_activate_fn(move |_c| {
             let theme = theme_for_reset.get();
             for ((_, get, _), sig) in SHOWN_COLORS.iter().zip(&drafts_for_reset) {
                 let v = get(&theme.colors);
@@ -303,7 +304,7 @@ impl Widget for ThemeTab {
 
         // Export → JSON dump → clipboard.
         let theme_for_export = theme_sig.clone();
-        let export_btn = Button::new_literal("Export").on_activate_fn(move |c| {
+        let export_btn = Button::new(lit!("Export")).on_activate_fn(move |c| {
             if let Some(cb) = c.app_state::<ClipboardHandle>() {
                 let theme = theme_for_export.get();
                 if let Ok(json) = serde_json::to_string_pretty(&theme) {
@@ -315,7 +316,7 @@ impl Widget for ThemeTab {
         // Import ← clipboard JSON → set_theme. Silently ignores parse
         // errors (a debug tool — the developer can check the clipboard
         // and try again).
-        let import_btn = Button::new_literal("Import").on_activate_fn(|c| {
+        let import_btn = Button::new(lit!("Import")).on_activate_fn(|c| {
             let Some(cb) = c.app_state::<ClipboardHandle>() else {
                 return;
             };
@@ -344,7 +345,7 @@ impl Widget for ThemeTab {
         // default so the swatch and the name stay aligned.
         let mut rows = VStack::new().spacing(2.0);
         for ((name, _, _), sig) in SHOWN_COLORS.iter().zip(&drafts) {
-            let name_text = TextWidget::new_literal(*name)
+            let name_text = TextWidget::new(lit!(*name))
                 .style(TextStyleRole::Body)
                 .color(TextRole::Primary);
             let row = HStack::new()

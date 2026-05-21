@@ -47,8 +47,8 @@ fn main() {
 
                     let images_zone = {
                         let log = log.clone();
-                        DropZone::new_literal("Drop images here")
-                            .subtitle_literal("PNG · JPEG · GIF")
+                        DropZone::new(lit!("Drop images here"))
+                            .subtitle(lit!("PNG · JPEG · GIF"))
                             .accept_extensions(["png", "jpg", "jpeg", "gif"])
                             .on_files_dropped(move |paths, _ctx| {
                                 for p in &paths {
@@ -61,8 +61,8 @@ fn main() {
                         let files_log = log.clone();
                         let text_log = log.clone();
                         let urls_log = log.clone();
-                        DropZone::new_literal("Drop anything here")
-                            .subtitle_literal("files, text, or links")
+                        DropZone::new(lit!("Drop anything here"))
+                            .subtitle(lit!("files, text, or links"))
                             .on_files_dropped(move |paths, _ctx| {
                                 for p in &paths {
                                     prepend(&files_log, &format!("📄  {}", p.display()));
@@ -93,8 +93,7 @@ fn main() {
                         let id_for_drag = id.clone();
                         let log = log.clone();
                         let row = Panel::new()
-                            .child(Padding::uniform(10.0).child(TextWidget::new_literal(
-                                "⠿  Drag this file out →  (main.rs)",
+                            .child(Padding::uniform(10.0).child(TextWidget::new(lit!("⠿  Drag this file out →  (main.rs)"),
                             )))
                             .on_drag(move |phase, ctx| {
                                 if let DragPhase::Started { .. } = phase {
@@ -117,8 +116,7 @@ fn main() {
                         let id_for_drag = id.clone();
                         let log = log.clone();
                         let row = Panel::new()
-                            .child(Padding::uniform(10.0).child(TextWidget::new_literal(
-                                "⠿  Drag this text out →  (\"Hello from Bastyde\")",
+                            .child(Padding::uniform(10.0).child(TextWidget::new(lit!("⠿  Drag this text out →  (\"Hello from Bastyde\")"),
                             )))
                             .on_drag(move |phase, ctx| {
                                 if let DragPhase::Started { .. } = phase {
@@ -140,7 +138,7 @@ fn main() {
                         Padding::uniform(12.0).child(
                             VStack::new()
                                 .spacing(10.0)
-                                .child(TextWidget::new_literal("Drag OUT (app → OS)"))
+                                .child(TextWidget::new(lit!("Drag OUT (app → OS)")))
                                 .add_child(file_row)
                                 .add_child(text_row),
                         ),
@@ -160,11 +158,10 @@ fn main() {
                         let log = log.clone();
                         DropTarget::new()
                             .child(Panel::new().child(Padding::uniform(12.0).child(
-                                TextWidget::new_literal(
-                                    "Internal drop target — drop a row here (recovers the typed value)",
+                                TextWidget::new(lit!("Internal drop target — drop a row here (recovers the typed value)"),
                                 ),
                             )))
-                            .hint(TextWidget::new_literal("Drop to recover the typed value"))
+                            .hint(TextWidget::new(lit!("Drop to recover the typed value")))
                             .variant(DropTargetVariant::Prominent)
                             .on_drop_typed::<String>(move |value, _pos, _ctx| {
                                 prepend(&log, &format!("✅  typed drop recovered: {value}"));
@@ -175,9 +172,8 @@ fn main() {
                     tree.add(
                         VStack::new()
                             .spacing(16.0)
-                            .child(TextWidget::new_literal(
-                                "Drag files from your file manager onto a zone — or drag the rows \
-                                 below out into Finder / a text editor.",
+                            .child(TextWidget::new(lit!("Drag files from your file manager onto a zone — or drag the rows \
+                                 below out into Finder / a text editor."),
                             ))
                             .child(drag_out)
                             .child(typed_target)
@@ -191,7 +187,7 @@ fn main() {
                             )
                             .child(
                                 Panel::new().child(
-                                    TextWidget::new_literal(String::new()).bind_text(log.clone()),
+                                    TextWidget::new(lit!(String::new())).bind_text(log.clone()),
                                 ),
                             ),
                     )

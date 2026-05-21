@@ -452,7 +452,10 @@ mod tests {
         let pb = tree.add(ProgressBar::new(0.75));
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let info = tree.accessibility_node(pb);
-        assert_eq!(info.role(), bastyde_core::accesskit::Role::ProgressIndicator);
+        assert_eq!(
+            info.role(),
+            bastyde_core::accesskit::Role::ProgressIndicator
+        );
     }
 
     #[test]

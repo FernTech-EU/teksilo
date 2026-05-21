@@ -61,7 +61,7 @@ impl Widget for DialogShell {
 
 fn main() {
     let d: DialogShell = bati!(
-        DialogShell::new_literal("Modal") {
+        DialogShell::new(lit!("Modal")) {
             content: || bati!(Body("the dialog's body"))
         }
     );

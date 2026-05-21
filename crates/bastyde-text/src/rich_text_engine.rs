@@ -377,11 +377,7 @@ impl RichTextEngine {
     /// given affinity. Affinity only changes the result at soft-wrap
     /// boundaries; at every other position the two affinities return
     /// the same rect. See [`text_typeset::CursorAffinity`].
-    pub fn caret_rect(
-        &self,
-        position: usize,
-        affinity: text_typeset::CursorAffinity,
-    ) -> [f32; 4] {
+    pub fn caret_rect(&self, position: usize, affinity: text_typeset::CursorAffinity) -> [f32; 4] {
         self.flow.caret_rect(position, affinity)
     }
 
@@ -636,7 +632,10 @@ mod tests {
         // Caret at the last char index is valid and to the right of 0.
         let end = engine.caret_rect(char_count, Downstream)[0];
         let start = engine.caret_rect(0, Downstream)[0];
-        assert!(end > start, "end caret ({end}) must be right of start ({start})");
+        assert!(
+            end > start,
+            "end caret ({end}) must be right of start ({start})"
+        );
     }
 
     /// Companion to the test above — verifies the `relayout_block`

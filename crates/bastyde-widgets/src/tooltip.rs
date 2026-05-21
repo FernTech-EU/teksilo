@@ -43,6 +43,7 @@ pub use registry::{
 };
 pub use rich::RichTooltipWidget;
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Canvas, Rect, Size, SizeProposal};
@@ -144,7 +145,7 @@ impl TooltipWidget {
 
 impl Widget for TooltipWidget {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let text = TextWidget::new_literal(&self.text)
+        let text = TextWidget::new(lit!(&self.text))
             .style(TextStyleRole::Small)
             .color(TextRole::TooltipText)
             .single_line();
@@ -207,7 +208,7 @@ mod tests {
     #[test]
     fn tooltip_widget_emits_shadow() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let _ = tree.add(TooltipWidget::new_literal("hello"));
+        let _ = tree.add(TooltipWidget::new(lit!("hello")));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let frame = tree.render();
         assert!(
@@ -222,8 +223,8 @@ mod tests {
         // applied (the production overlay path). Shadow must still
         // land in the rendered frame.
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let anchor = tree.add(TooltipWidget::new_literal("anchor"));
-        let tip = tree.add(TooltipWidget::new_literal("hello"));
+        let anchor = tree.add(TooltipWidget::new(lit!("anchor")));
+        let tip = tree.add(TooltipWidget::new(lit!("hello")));
         tree.set_dormant(tip);
         tree.layout(SizeProposal::exact(800.0, 600.0));
 

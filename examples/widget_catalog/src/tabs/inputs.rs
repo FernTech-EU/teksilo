@@ -178,7 +178,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Checkbox") {
+                TextWidget::new(lit!("Checkbox")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -219,7 +219,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Toggle") {
+                TextWidget::new(lit!("Toggle")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -284,7 +284,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("SegmentedControl") {
+                TextWidget::new(lit!("SegmentedControl")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -293,7 +293,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("ComboBox") {
+                TextWidget::new(lit!("ComboBox")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

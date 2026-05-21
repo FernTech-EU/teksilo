@@ -2278,8 +2278,16 @@ impl Widget for RichTextEditor {
         // wheel, resize) forced a layout pass.
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
-        max_scroll_y.bind_to(self_id, registry, bastyde_core::binding::BindingLevel::Relayout);
-        max_scroll_x.bind_to(self_id, registry, bastyde_core::binding::BindingLevel::Relayout);
+        max_scroll_y.bind_to(
+            self_id,
+            registry,
+            bastyde_core::binding::BindingLevel::Relayout,
+        );
+        max_scroll_x.bind_to(
+            self_id,
+            registry,
+            bastyde_core::binding::BindingLevel::Relayout,
+        );
 
         children
     }
@@ -2420,8 +2428,7 @@ pub(super) fn sync_cursor_signals(state: &SharedState) {
     // frame loop reads `blink_last_toggle` each tick and toggles only
     // after CARET_BLINK_INTERVAL elapses, so resetting it here delays
     // the next toggle by a full interval.
-    let blink_reset =
-        st.has_focus && matches!(st.policy.caret_policy, CaretPolicy::Blinking);
+    let blink_reset = st.has_focus && matches!(st.policy.caret_policy, CaretPolicy::Blinking);
     if blink_reset {
         st.blink_last_toggle = Some(std::time::Instant::now());
     }

@@ -49,6 +49,7 @@
 #[cfg(test)]
 mod tests;
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Path, Point, Rect, SizeProposal};
@@ -464,7 +465,7 @@ impl Widget for DateTimeEdit {
                     .bind_height(field_dims::TEXT_FIELD_HEIGHT),
             ),
             Some(s) => {
-                let text = TextWidget::new_literal(s)
+                let text = TextWidget::new(lit!(s))
                     .style(bastyde_tokens::TextStyleRole::Body)
                     .color(bastyde_tokens::TextRole::Secondary)
                     .single_line()

@@ -29,7 +29,9 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use bastyde_canvas::Point;
 use bastyde_core::raw_handle::ParentHandle;
 use bastyde_core::window::BastydeWindowId;
-use bastyde_core::{AppEventPoster, DragImageData, DropOutcome, ExternalDropData, OutboundDragData};
+use bastyde_core::{
+    AppEventPoster, DragImageData, DropOutcome, ExternalDropData, OutboundDragData,
+};
 use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
 
 use wayland_backend::client::ObjectId;
@@ -39,9 +41,7 @@ use wayland_client::protocol::wl_data_device::{Event as DataDeviceEvent, WlDataD
 use wayland_client::protocol::wl_data_device_manager::{DndAction, WlDataDeviceManager};
 use wayland_client::protocol::wl_data_offer::{Event as DataOfferEvent, WlDataOffer};
 use wayland_client::protocol::wl_data_source::{Event as DataSourceEvent, WlDataSource};
-use wayland_client::protocol::wl_pointer::{
-    ButtonState, Event as PointerEvent, WlPointer,
-};
+use wayland_client::protocol::wl_pointer::{ButtonState, Event as PointerEvent, WlPointer};
 use wayland_client::protocol::wl_registry::WlRegistry;
 use wayland_client::protocol::wl_seat::WlSeat;
 use wayland_client::protocol::wl_surface::WlSurface;
@@ -272,7 +272,9 @@ impl Dispatch<WlPointer, ()> for DndState {
         // Capture the serial of the most recent button *press*. `start_drag`
         // requires a serial from a button-down event in the current implicit
         // grab; the most recent press is the one that began the drag.
-        if let PointerEvent::Button { serial, state: btn, .. } = event
+        if let PointerEvent::Button {
+            serial, state: btn, ..
+        } = event
             && btn == WEnum::Value(ButtonState::Pressed)
         {
             state.last_press_serial = serial;
@@ -604,9 +606,10 @@ impl ExternalDndBackend for WaylandExternalDndBackend {
         let pointer = seat.get_pointer(&qh, ());
 
         // winit's surface id (same connection ⇒ comparable to `enter.surface`).
-        let target_surface =
-            unsafe { ObjectId::from_ptr(WlSurface::interface(), window.surface.as_ptr() as *mut _) }
-                .ok();
+        let target_surface = unsafe {
+            ObjectId::from_ptr(WlSurface::interface(), window.surface.as_ptr() as *mut _)
+        }
+        .ok();
         // A `WlSurface` proxy for the same surface — the drag origin.
         let origin_surface = target_surface
             .clone()

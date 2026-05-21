@@ -14,6 +14,7 @@
 //!     .on_dismiss(|ctx| ctx.send_intent(AppIntent::DismissBanner))
 //! ```
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Canvas, Path, Point, Rect, SizeProposal};
@@ -205,7 +206,7 @@ impl Widget for Banner {
 
         // Title + optional description column.
         let title = ctx.add(
-            TextWidget::new_literal(&self.title)
+            TextWidget::new(lit!(&self.title))
                 .style(TextStyleRole::BodyBold)
                 .bind_color(TextRole::Primary)
                 .single_line(),
@@ -215,7 +216,7 @@ impl Widget for Banner {
             .add_child(title);
         if let Some(description) = &self.description {
             let desc = ctx.add(
-                TextWidget::new_literal(description)
+                TextWidget::new(lit!(description))
                     .style(TextStyleRole::Body)
                     .bind_color(TextRole::Secondary),
             );
@@ -330,8 +331,8 @@ mod tests {
     fn banner_builds_and_lays_out() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
-            Banner::warning_literal("Unsaved changes")
-                .description_literal("Close will discard your edits."),
+            Banner::warning(lit!("Unsaved changes"))
+                .description(lit!("Close will discard your edits.")),
         );
         tree.layout(SizeProposal {
             width: Some(640.0),
@@ -345,7 +346,7 @@ mod tests {
     #[test]
     fn banner_a11y_role_and_name() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let id = tree.add(Banner::info_literal("Heads up"));
+        let id = tree.add(Banner::info(lit!("Heads up")));
         tree.layout(SizeProposal {
             width: Some(400.0),
             height: None,
@@ -363,8 +364,8 @@ mod tests {
         // Banner's `layout_response` overrides the width to the proposal.
         use crate::primitives::VStack;
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let banner = Banner::warning_literal("Unsaved changes")
-            .description_literal("Close will discard your edits.");
+        let banner = Banner::warning(lit!("Unsaved changes"))
+            .description(lit!("Close will discard your edits."));
         let stack_id = tree.add(VStack::new().spacing(8.0).child(banner));
         tree.layout(SizeProposal {
             width: Some(640.0),
@@ -399,8 +400,7 @@ mod tests {
         let dismissed_clone = dismissed.clone();
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(
-            Banner::error_literal("Disk almost full")
-                .on_dismiss(move |_| dismissed_clone.set(true)),
+            Banner::error(lit!("Disk almost full")).on_dismiss(move |_| dismissed_clone.set(true)),
         );
         tree.layout(SizeProposal {
             width: Some(640.0),

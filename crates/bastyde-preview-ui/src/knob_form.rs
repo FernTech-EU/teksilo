@@ -24,6 +24,7 @@
 //! form — so we omit it. Equality checks in the observer prevent
 //! self-feedback loops.
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_core::build_context::BuildContext;
@@ -46,7 +47,7 @@ pub fn build_knob_form(ctx: &mut BuildContext, spec: &KnobSpec, values: &KnobVal
     for decl in spec.declarations() {
         if decl.group != current_group {
             if let Some(label) = decl.group {
-                let header = TextWidget::new_literal(label)
+                let header = TextWidget::new(lit!(label))
                     .style(TextStyleRole::Tiny)
                     .color(TextRole::Secondary);
                 column = column.child(Padding::new(8.0, 0.0, 2.0, 0.0).child(header));
@@ -61,7 +62,7 @@ pub fn build_knob_form(ctx: &mut BuildContext, spec: &KnobSpec, values: &KnobVal
 
 fn build_row(ctx: &mut BuildContext, decl: &KnobDecl, values: &KnobValues) -> WidgetId {
     let editor = build_editor(ctx, decl, values);
-    let label = TextWidget::new_literal(decl.label)
+    let label = TextWidget::new(lit!(decl.label))
         .style(TextStyleRole::Small)
         .color(TextRole::Secondary)
         .single_line();
@@ -83,7 +84,7 @@ fn build_editor(ctx: &mut BuildContext, decl: &KnobDecl, values: &KnobValues) ->
             // a11y label. Pass `decl.label` — visually duplicated for
             // sighted users but correct for screen readers.
             let sig = values.bool_(decl.id);
-            ctx.add(Toggle::new(sig).label_literal(decl.label))
+            ctx.add(Toggle::new(sig).label(lit!(decl.label)))
         }
         KnobKind::OptBool { .. } => build_opt_bool(ctx, decl, values),
         KnobKind::I32 { min, max, .. } => build_i32(ctx, decl, values, *min, *max),
@@ -128,7 +129,7 @@ fn build_i32(
     }
     let value_label = int_sig.map(|v| format!("{}", *v));
     let slider = Slider::new(f_sig, min as f32, max as f32);
-    let label = TextWidget::new_literal("")
+    let label = TextWidget::new(lit!(""))
         .style(TextStyleRole::Small)
         .color(TextRole::Secondary)
         .single_line()
@@ -151,7 +152,7 @@ fn build_f32(
     let sig = values.f32_(decl.id);
     let value_label = sig.map(|v| format!("{:.2}", *v));
     let slider = Slider::new(sig, min, max);
-    let label = TextWidget::new_literal("")
+    let label = TextWidget::new(lit!(""))
         .style(TextStyleRole::Small)
         .color(TextRole::Secondary)
         .single_line()
@@ -172,8 +173,8 @@ fn build_opt_bool(ctx: &mut BuildContext, decl: &KnobDecl, values: &KnobValues) 
     ctx.add(
         HStack::new()
             .spacing(8.0)
-            .child(Checkbox::new(enabled).label_literal("Enabled"))
-            .child(Toggle::new(inner).label_literal(decl.label)),
+            .child(Checkbox::new(enabled).label(lit!("Enabled")))
+            .child(Toggle::new(inner).label(lit!(decl.label))),
     )
 }
 
@@ -191,7 +192,7 @@ fn build_opt_i32(
     ctx.add(
         HStack::new()
             .spacing(8.0)
-            .child(Checkbox::new(enabled).label_literal("Enabled"))
+            .child(Checkbox::new(enabled).label(lit!("Enabled")))
             .child(Slider::new(inner_f, min as f32, max as f32)),
     )
 }
@@ -210,7 +211,7 @@ fn build_opt_f32(
     ctx.add(
         HStack::new()
             .spacing(8.0)
-            .child(Checkbox::new(enabled).label_literal("Enabled"))
+            .child(Checkbox::new(enabled).label(lit!("Enabled")))
             .child(Slider::new(inner, min, max)),
     )
 }
@@ -241,7 +242,7 @@ fn build_opt_text(ctx: &mut BuildContext, decl: &KnobDecl, values: &KnobValues) 
     ctx.add(
         HStack::new()
             .spacing(8.0)
-            .child(Checkbox::new(enabled).label_literal("Enabled"))
+            .child(Checkbox::new(enabled).label(lit!("Enabled")))
             .child(TextInput::new(inner)),
     )
 }

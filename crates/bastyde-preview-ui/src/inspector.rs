@@ -17,6 +17,7 @@ use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
+use bastyde_i18n::lit;
 use bastyde_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
 use bastyde_widgets::primitives::{Padding, ZStack};
 use bastyde_widgets::{
@@ -207,7 +208,7 @@ impl InspectorBody {
         let mut column = VStack::new().spacing(4.0);
         for (i, name) in names.iter().enumerate() {
             let radio = RadioButton::new(i, idx_sig.clone());
-            let label = TextWidget::new_literal(*name)
+            let label = TextWidget::new(lit!(*name))
                 .style(TextStyleRole::Body)
                 .color(TextRole::Primary)
                 .single_line();
@@ -227,7 +228,7 @@ impl InspectorBody {
         let spec = entry.knobs();
         if spec.declarations().is_empty() {
             let header = section_header(ctx, "Knobs");
-            let placeholder = TextWidget::new_literal("No knobs declared for this widget.")
+            let placeholder = TextWidget::new(lit!("No knobs declared for this widget."))
                 .style(TextStyleRole::Small)
                 .color(TextRole::Secondary);
             return ctx.add(
@@ -241,12 +242,12 @@ impl InspectorBody {
         let form_id = build_knob_form(ctx, &spec, &values);
 
         // Header with Reset button on the right.
-        let title = TextWidget::new_literal("Knobs")
+        let title = TextWidget::new(lit!("Knobs"))
             .style(TextStyleRole::SmallBold)
             .color(TextRole::Primary);
         let widget_id = entry.id();
         let st = self.state.clone();
-        let reset_btn = Button::new_literal("Reset")
+        let reset_btn = Button::new(lit!("Reset"))
             .variant(ButtonVariant::Ghost)
             .on_activate_fn(move |_ctx| {
                 st.reset_knobs(widget_id, variant_name);
@@ -271,7 +272,7 @@ impl InspectorBody {
     fn build_export_section(&self, ctx: &mut BuildContext) -> WidgetId {
         let header = section_header(ctx, "Export");
         let st = self.state.clone();
-        let save_btn = Button::new_literal("Save PNG…")
+        let save_btn = Button::new(lit!("Save PNG…"))
             .variant(ButtonVariant::Plain)
             .on_activate_fn(move |_ctx| {
                 if let Err(e) = crate::png_export::export_current(&st) {
@@ -283,7 +284,7 @@ impl InspectorBody {
 }
 
 fn section_header(ctx: &mut BuildContext, title: &str) -> WidgetId {
-    let title_widget = TextWidget::new_literal(title)
+    let title_widget = TextWidget::new(lit!(title))
         .style(TextStyleRole::SmallBold)
         .color(TextRole::Primary);
     let divider = MaxSize::new(f32::INFINITY, 1.0).child(Divider::horizontal());
@@ -296,7 +297,7 @@ fn section_header(ctx: &mut BuildContext, title: &str) -> WidgetId {
 }
 
 fn placeholder_section(ctx: &mut BuildContext, msg: &str) -> WidgetId {
-    let title = TextWidget::new_literal(msg)
+    let title = TextWidget::new(lit!(msg))
         .style(TextStyleRole::Body)
         .color(TextRole::Secondary);
     ctx.add(title)

@@ -8,6 +8,7 @@ use bastyde_core::event_source::{
 use bastyde_core::modal::{ModalCloseBehavior, ModalContent, ModalPresentation, ModalRequest};
 use bastyde_core::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
 use bastyde_core::{WidgetId, WidgetTree};
+use bastyde_i18n::lit;
 use bastyde_i18n::{I18nConfig, I18nManager, LanguageIdentifier};
 use bastyde_platform::event_translation;
 use bastyde_tokens::ColorTokens;
@@ -1526,7 +1527,9 @@ impl ApplicationHandler<AppEvent> for BastydeAppHandler {
                         }
                     }
                     Err(e) => {
-                        eprintln!("bastyde-app: hot-reload event with invalid locale `{locale}`: {e}")
+                        eprintln!(
+                            "bastyde-app: hot-reload event with invalid locale `{locale}`: {e}"
+                        )
                     }
                 }
             }
@@ -1547,14 +1550,17 @@ impl ApplicationHandler<AppEvent> for BastydeAppHandler {
                 };
                 let payload = match payload {
                     None => None,
-                    Some(payload) => match self.try_route_external_dnd_payload(payload, event_loop) {
+                    Some(payload) => match self.try_route_external_dnd_payload(payload, event_loop)
+                    {
                         Ok(()) => None,
                         Err(payload) => Some(payload),
                     },
                 };
                 let payload = match payload {
                     None => None,
-                    Some(payload) => self.try_route_async_completion_payload(payload, event_loop).err(),
+                    Some(payload) => self
+                        .try_route_async_completion_payload(payload, event_loop)
+                        .err(),
                 };
                 if let Some(payload) = payload {
                     {
@@ -2592,7 +2598,7 @@ mod tests {
 
     #[test]
     fn auto_prefers_native_for_deferred_content_when_supported() {
-        let request = ModalRequest::deferred(|tree| tree.add(Button::new_literal("Deferred")));
+        let request = ModalRequest::deferred(|tree| tree.add(Button::new(lit!("Deferred"))));
 
         assert_eq!(
             resolve_modal_presentation(request.presentation, &request.content, true),
@@ -2603,7 +2609,7 @@ mod tests {
     #[test]
     fn existing_widget_forces_in_tree_even_if_native_requested() {
         let mut tree = WidgetTree::new();
-        let content = tree.add(Button::new_literal("Existing"));
+        let content = tree.add(Button::new(lit!("Existing")));
         let request = ModalRequest::in_tree(content).presentation(ModalPresentation::NativeWindow);
 
         assert_eq!(
@@ -2615,8 +2621,8 @@ mod tests {
     #[test]
     fn present_in_tree_modal_request_shows_centered_overlay() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let source = tree.add(Button::new_literal("Trigger"));
-        let content = tree.add(Button::new_literal("Modal content"));
+        let source = tree.add(Button::new(lit!("Trigger")));
+        let content = tree.add(Button::new(lit!("Modal content")));
         tree.set_dormant(content);
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -2636,13 +2642,13 @@ mod tests {
     #[test]
     fn present_in_tree_modal_request_builds_deferred_content() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let source = tree.add(Button::new_literal("Trigger"));
+        let source = tree.add(Button::new(lit!("Trigger")));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         present_in_tree_modal_request(
             &mut tree,
             source,
-            ModalRequest::deferred(|tree| tree.add(Button::new_literal("Deferred modal")))
+            ModalRequest::deferred(|tree| tree.add(Button::new(lit!("Deferred modal"))))
                 .presentation(ModalPresentation::InTree),
         );
         tree.layout(SizeProposal::exact(800.0, 600.0));
@@ -2660,8 +2666,8 @@ mod tests {
         // stack order (oldest → newest), so the first id is the
         // scrim and the second is the modal content.
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let source = tree.add(Button::new_literal("Trigger"));
-        let content = tree.add(Button::new_literal("Modal content"));
+        let source = tree.add(Button::new(lit!("Trigger")));
+        let content = tree.add(Button::new(lit!("Modal content")));
         tree.set_dormant(content);
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -2684,8 +2690,8 @@ mod tests {
         // also dismiss the scrim through the cascade walk in
         // `dismiss_immediate`.
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let source = tree.add(Button::new_literal("Trigger"));
-        let content = tree.add(Button::new_literal("Modal content"));
+        let source = tree.add(Button::new(lit!("Trigger")));
+        let content = tree.add(Button::new(lit!("Modal content")));
         tree.set_dormant(content);
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -2717,8 +2723,8 @@ mod tests {
         // covers the entire window regardless of the modal's size or
         // position.
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let source = tree.add(Button::new_literal("Trigger"));
-        let content = tree.add(Button::new_literal("Modal content"));
+        let source = tree.add(Button::new(lit!("Trigger")));
+        let content = tree.add(Button::new(lit!("Modal content")));
         tree.set_dormant(content);
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -2745,7 +2751,7 @@ mod tests {
     #[test]
     fn present_in_tree_modal_request_moves_focus_into_modal() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let source = tree.add(Button::new_literal("Trigger"));
+        let source = tree.add(Button::new(lit!("Trigger")));
         tree.layout(SizeProposal::exact(800.0, 600.0));
         tree.focus(source);
 
@@ -2753,7 +2759,7 @@ mod tests {
             &mut tree,
             source,
             ModalRequest::deferred(|tree| {
-                tree.add(ModalContainer::new(Button::new_literal("Continue")))
+                tree.add(ModalContainer::new(Button::new(lit!("Continue"))))
             })
             .presentation(ModalPresentation::InTree),
         );
@@ -2774,8 +2780,8 @@ mod tests {
 
     impl bastyde_core::Widget for TwoButtonContent {
         fn build(&mut self, ctx: &mut bastyde_core::BuildContext) -> Vec<WidgetId> {
-            let first = ctx.add(Button::new_literal("First"));
-            let second = ctx.add(Button::new_literal("Second"));
+            let first = ctx.add(Button::new(lit!("First")));
+            let second = ctx.add(Button::new(lit!("Second")));
             let row = ctx.add(
                 bastyde_widgets::HStack::new()
                     .add_child(first)
@@ -2816,7 +2822,7 @@ mod tests {
         // content widget's `initial_focus_hint` before falling back to
         // `first_focusable_descendant`.
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let source = tree.add(Button::new_literal("Trigger"));
+        let source = tree.add(Button::new(lit!("Trigger")));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         present_in_tree_modal_request(
@@ -2848,7 +2854,7 @@ mod tests {
         // Baseline: content without an initial_focus_hint gets the first
         // focusable descendant, matching prior behavior.
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let source = tree.add(Button::new_literal("Trigger"));
+        let source = tree.add(Button::new(lit!("Trigger")));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         present_in_tree_modal_request(
@@ -2879,7 +2885,7 @@ mod tests {
         // descendant of content_id must be rejected. The framework falls
         // back to initial_focus_hint → first_focusable_descendant.
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let source = tree.add(Button::new_literal("Trigger"));
+        let source = tree.add(Button::new(lit!("Trigger")));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         present_in_tree_modal_request(

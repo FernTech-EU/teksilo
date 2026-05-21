@@ -46,7 +46,8 @@ pub(crate) struct KeyHandlerConfig {
     pub display_col_editable: Rc<dyn Fn(usize) -> bool>,
     /// Optional: user callback fired when an edit trigger matches.
     #[allow(clippy::type_complexity)]
-    pub on_cell_edit_request: Option<Rc<dyn Fn(usize, &str, &mut bastyde_core::widget::EventContext)>>,
+    pub on_cell_edit_request:
+        Option<Rc<dyn Fn(usize, &str, &mut bastyde_core::widget::EventContext)>>,
     /// Optional: row-activate (Enter) callback.
     #[allow(clippy::type_complexity)]
     pub on_row_activate: Option<Rc<dyn Fn(usize, &mut bastyde_core::widget::EventContext)>>,

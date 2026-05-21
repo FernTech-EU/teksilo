@@ -38,6 +38,7 @@
 //!   non-modal `Dialog` advertising `Focus`, same as a dwell-promoted
 //!   tooltip — rather than reading as an ephemeral `Tooltip`.
 
+use bastyde_i18n::lit;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -294,7 +295,7 @@ impl Widget for RichTooltipWidget {
         // Body row: text + optional shortcut chip.
         // a11y_hidden: the tooltip root owns `set_name(body_text)`, so the
         // body TextWidget would duplicate it as a child Label node.
-        let body_widget = TextWidget::new_literal(body_source)
+        let body_widget = TextWidget::new(lit!(body_source))
             .style(TextStyleRole::Small)
             .color(TextRole::TooltipText)
             .markup(true)
@@ -303,7 +304,7 @@ impl Widget for RichTooltipWidget {
         let body_id = ctx.add(body_widget);
 
         let header: WidgetId = if let Some(shortcut) = shortcut_text {
-            let shortcut_widget = TextWidget::new_literal(shortcut)
+            let shortcut_widget = TextWidget::new(lit!(shortcut))
                 .style(TextStyleRole::Small)
                 .color(TextRole::TooltipShortcut)
                 .single_line()
@@ -329,7 +330,7 @@ impl Widget for RichTooltipWidget {
         // Optional "more" disclosure accordion, independent of the dwell
         // indicator. `None` when the entry has no long-form body.
         let more_accordion: Option<WidgetId> = if let Some(more_text) = more_source {
-            let more_widget = TextWidget::new_literal(more_text)
+            let more_widget = TextWidget::new(lit!(more_text))
                 .style(TextStyleRole::Small)
                 .color(TextRole::TooltipText)
                 .markup(true)
@@ -667,7 +668,11 @@ mod tests {
                 .cascade_child();
         let mut cb = AccessNodeBuilder::new();
         child.accessibility(&mut cb);
-        assert_eq!(cb.role(), Role::Dialog, "cascade child should read as Dialog");
+        assert_eq!(
+            cb.role(),
+            Role::Dialog,
+            "cascade child should read as Dialog"
+        );
         assert!(
             cb.actions().contains(&Action::Focus),
             "cascade child should advertise the Focus action"

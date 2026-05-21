@@ -874,7 +874,11 @@ mod tests {
         let poster: Arc<dyn AppEventPoster> = cap.clone();
         // Bad filter — should never reach the backend.
         let bad = FileDialogRequest::pick_file().add_filter("Images", &[".png"]);
-        assert!(handle.submit(bastyde_id(1), bad, poster, |_, _| {}).is_err());
+        assert!(
+            handle
+                .submit(bastyde_id(1), bad, poster, |_, _| {})
+                .is_err()
+        );
         assert_eq!(handle.pending_count(), 0);
         // Backend was not asked to dispatch — nothing was posted.
         assert_eq!(cap.drain().len(), 0);

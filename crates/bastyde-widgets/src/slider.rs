@@ -262,23 +262,21 @@ impl Widget for Slider {
         {
             let dragging = dragging.clone();
             let set_value = set_value_from_position.clone();
-            handlers = handlers.on_drag(move |phase, _ctx| {
-                match phase {
-                    DragPhase::Started {
-                        position,
-                        button: PointerButton::Primary,
-                    } => {
-                        dragging.set(true);
-                        set_value(position.x, position.y);
-                    }
-                    DragPhase::Moved { position, .. } if dragging.get() => {
-                        set_value(position.x, position.y);
-                    }
-                    DragPhase::Ended { .. } => {
-                        dragging.set(false);
-                    }
-                    _ => {}
+            handlers = handlers.on_drag(move |phase, _ctx| match phase {
+                DragPhase::Started {
+                    position,
+                    button: PointerButton::Primary,
+                } => {
+                    dragging.set(true);
+                    set_value(position.x, position.y);
                 }
+                DragPhase::Moved { position, .. } if dragging.get() => {
+                    set_value(position.x, position.y);
+                }
+                DragPhase::Ended { .. } => {
+                    dragging.set(false);
+                }
+                _ => {}
             });
         }
 
@@ -302,29 +300,27 @@ impl Widget for Slider {
         {
             let adjust = adjust_by_step.clone();
             let value = value.clone();
-            handlers = handlers.on_key(move |event, _ctx| {
-                match event {
-                    WidgetEvent::KeyDown { key, .. } => match key {
-                        Key::ArrowRight | Key::ArrowUp => {
-                            adjust(true);
-                            EventResponse::Handled
-                        }
-                        Key::ArrowLeft | Key::ArrowDown => {
-                            adjust(false);
-                            EventResponse::Handled
-                        }
-                        Key::Home => {
-                            value.set(min);
-                            EventResponse::Handled
-                        }
-                        Key::End => {
-                            value.set(max);
-                            EventResponse::Handled
-                        }
-                        _ => EventResponse::Ignored,
-                    },
+            handlers = handlers.on_key(move |event, _ctx| match event {
+                WidgetEvent::KeyDown { key, .. } => match key {
+                    Key::ArrowRight | Key::ArrowUp => {
+                        adjust(true);
+                        EventResponse::Handled
+                    }
+                    Key::ArrowLeft | Key::ArrowDown => {
+                        adjust(false);
+                        EventResponse::Handled
+                    }
+                    Key::Home => {
+                        value.set(min);
+                        EventResponse::Handled
+                    }
+                    Key::End => {
+                        value.set(max);
+                        EventResponse::Handled
+                    }
                     _ => EventResponse::Ignored,
-                }
+                },
+                _ => EventResponse::Ignored,
             });
         }
 

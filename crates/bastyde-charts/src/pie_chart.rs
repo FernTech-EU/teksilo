@@ -11,6 +11,7 @@
 //! (`.center(impl Widget)` / `.center_id(WidgetId)`), and `build()`
 //! resolves the pending child via `ctx.add_boxed`.
 
+use bastyde_i18n::lit;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -909,7 +910,7 @@ mod tests {
         // zero placement size when rendered.
         use bastyde_widgets::TextWidget;
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let pie = PieChart::new(three_slices()).center(TextWidget::new_literal("$100"));
+        let pie = PieChart::new(three_slices()).center(TextWidget::new(lit!("$100")));
         let id = tree.add(pie);
         tree.layout(SizeProposal::exact(400.0, 300.0));
         // child exists but its bounds should be zero (inner radius = 0).
@@ -926,7 +927,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let donut = PieChart::new(three_slices())
             .donut(0.6)
-            .center(TextWidget::new_literal("$100"));
+            .center(TextWidget::new(lit!("$100")));
         let id = tree.add(donut);
         tree.layout(SizeProposal::exact(400.0, 300.0));
         let kids = tree.children(id);
@@ -952,7 +953,7 @@ mod tests {
                 .donut(0.6)
                 .legend(true)
                 .legend_position(LegendPosition::Bottom)
-                .center(TextWidget::new_literal("100")),
+                .center(TextWidget::new(lit!("100"))),
         );
         tree.layout(SizeProposal::exact(400.0, 300.0));
         let kids = tree.children(id);

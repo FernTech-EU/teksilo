@@ -151,7 +151,10 @@ impl SyntaxHighlighter for SpellCheckHighlighter {
                 while i < len && (chars[i].is_alphanumeric() || chars[i] == '\'') {
                     i += 1;
                 }
-                let word: String = chars[start..i].iter().flat_map(|c| c.to_lowercase()).collect();
+                let word: String = chars[start..i]
+                    .iter()
+                    .flat_map(|c| c.to_lowercase())
+                    .collect();
                 if MISSPELLED.contains(&word.as_str()) {
                     ctx.set_format(
                         start,
@@ -197,7 +200,10 @@ mod tests {
         assert_eq!(s.len(), 2);
         assert_eq!(s[0].start, 0);
         assert_eq!(s[0].length, 5);
-        assert_eq!(s[0].format.background_color, Some(Color::rgba(255, 214, 0, 150)));
+        assert_eq!(
+            s[0].format.background_color,
+            Some(Color::rgba(255, 214, 0, 150))
+        );
     }
 
     #[test]

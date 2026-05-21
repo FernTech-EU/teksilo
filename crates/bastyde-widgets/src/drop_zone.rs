@@ -36,6 +36,7 @@
 //! ARIA's `aria-grabbed` / `aria-dropeffect` are deprecated, so live-region
 //! announcements plus the Browse fallback are the supported pattern.
 
+use bastyde_i18n::lit;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -51,7 +52,9 @@ use bastyde_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, 
 use bastyde_core::widget_builder::{HandlerSet, WidgetBuilder};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_core::{DragPayload, DropFeedback};
-use bastyde_platform::file_dialog::{EventContextFileDialogExt, FileDialogRequest, FileDialogResult};
+use bastyde_platform::file_dialog::{
+    EventContextFileDialogExt, FileDialogRequest, FileDialogResult,
+};
 use bastyde_tokens::{HAlignment, TextRole};
 
 use crate::button::Button;
@@ -318,16 +321,16 @@ impl Widget for DropZone {
             content = content.add_child(icon_id);
         }
 
-        content = content.child(TextWidget::new_literal(self.label.clone()));
+        content = content.child(TextWidget::new(lit!(self.label.clone())));
 
         if let Some(subtitle) = &self.subtitle {
             content =
-                content.child(TextWidget::new_literal(subtitle.clone()).color(TextRole::Secondary));
+                content.child(TextWidget::new(lit!(subtitle.clone())).color(TextRole::Secondary));
         }
 
         // Live-region status line: empty at rest, narrates hover / drop.
         content = content.child(
-            TextWidget::new_literal(String::new())
+            TextWidget::new(lit!(String::new()))
                 .bind_text(announce.clone())
                 .color(TextRole::Secondary)
                 .access_live(Live::Polite),
@@ -338,7 +341,7 @@ impl Widget for DropZone {
             let allow_multiple_browse = self.allow_multiple;
             let on_files_browse = on_files.clone();
             let announce_browse = announce.clone();
-            let browse = Button::new_literal(self.browse_label.clone()).on_activate_fn(
+            let browse = Button::new(lit!(self.browse_label.clone())).on_activate_fn(
                 move |ctx: &mut EventContext| {
                     let mut request = FileDialogRequest::pick_file();
                     if !browse_extensions.is_empty() {
@@ -508,7 +511,7 @@ mod tests {
     #[test]
     fn builds_with_nonzero_size() {
         let mut tree = tree();
-        let id = tree.add(DropZone::new_literal("Drop files here"));
+        let id = tree.add(DropZone::new(lit!("Drop files here")));
         tree.layout(SizeProposal::exact(400.0, 300.0));
         let b = tree.bounds(id);
         assert!(b.width > 0.0 && b.height > 0.0);
@@ -520,7 +523,7 @@ mod tests {
         let got: Rc<RefCell<Vec<PathBuf>>> = Rc::new(RefCell::new(Vec::new()));
         let g = got.clone();
         tree.add(
-            DropZone::new_literal("Images")
+            DropZone::new(lit!("Images"))
                 .accept_extensions(["png", "jpg"])
                 .on_files_dropped(move |paths, _ctx| *g.borrow_mut() = paths),
         );
@@ -544,7 +547,7 @@ mod tests {
         let got: Rc<RefCell<Vec<PathBuf>>> = Rc::new(RefCell::new(Vec::new()));
         let g = got.clone();
         tree.add(
-            DropZone::new_literal("Images")
+            DropZone::new(lit!("Images"))
                 .accept_extensions(["png"])
                 .on_files_dropped(move |paths, _ctx| *g.borrow_mut() = paths),
         );
@@ -568,7 +571,7 @@ mod tests {
         let got: Rc<RefCell<Vec<PathBuf>>> = Rc::new(RefCell::new(Vec::new()));
         let g = got.clone();
         tree.add(
-            DropZone::new_literal("One file")
+            DropZone::new(lit!("One file"))
                 .allow_multiple(false)
                 .on_files_dropped(move |paths, _ctx| *g.borrow_mut() = paths),
         );
@@ -592,7 +595,7 @@ mod tests {
         let got: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
         let g = got.clone();
         tree.add(
-            DropZone::new_literal("Notes").on_text_dropped(move |t, _ctx| *g.borrow_mut() = Some(t)),
+            DropZone::new(lit!("Notes")).on_text_dropped(move |t, _ctx| *g.borrow_mut() = Some(t)),
         );
         tree.layout(SizeProposal::exact(400.0, 300.0));
 

@@ -8,7 +8,9 @@ use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use bastyde_core::telemetry::{ConsentScope, Event, RemoteDataExport, TelemetryError, UsageReporter};
+use bastyde_core::telemetry::{
+    ConsentScope, Event, RemoteDataExport, TelemetryError, UsageReporter,
+};
 use bastyde_telemetry::{EventQueue, InMemoryEventQueue, PersistentEventQueue};
 
 use crate::config::PlausibleConfig;

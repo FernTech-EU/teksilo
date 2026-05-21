@@ -9,6 +9,7 @@
 //! Most apps mount this in their `StatusBar` or `TitleBar`. The
 //! button is one widget; the popover behaviour is fully self-managed.
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Rect, SizeProposal};
@@ -160,7 +161,7 @@ impl Widget for NotificationCenterButton {
         // renders bare.
         let mut stack = ZStack::new().add_child(pib_id);
         if unread_count > 0 || show_when_zero {
-            let badge_id = ctx.add(Badge::new_literal(label));
+            let badge_id = ctx.add(Badge::new(lit!(label)));
             stack = stack.add_child(badge_id);
         }
         let root = ctx.add(stack);

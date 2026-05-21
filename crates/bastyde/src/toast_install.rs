@@ -37,7 +37,7 @@
 
 use std::rc::Rc;
 
-use bastyde_app::{DefaultPostRoot, BastydeAppBuilder};
+use bastyde_app::{BastydeAppBuilder, DefaultPostRoot};
 use bastyde_widgets::notification::{NotificationArchive, NotificationArchiveModel};
 use bastyde_widgets::primitives::ZStack;
 use bastyde_widgets::toast::{ToastHost, ToastInstallOptions, ToastRegistry};

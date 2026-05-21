@@ -847,7 +847,10 @@ impl WidgetTree {
         self
     }
 
-    pub fn with_text_backend(mut self, backend: Rc<RefCell<dyn bastyde_canvas::TextBackend>>) -> Self {
+    pub fn with_text_backend(
+        mut self,
+        backend: Rc<RefCell<dyn bastyde_canvas::TextBackend>>,
+    ) -> Self {
         self.text_backend = Some(backend);
         self
     }
@@ -2171,10 +2174,7 @@ impl WidgetTree {
     /// chain (including itself) has no `enabled_state` bound. Captures
     /// the ancestor chain at call time; re-parenting a widget afterwards
     /// will not retroactively update the derived signal.
-    pub fn effective_enabled_signal(
-        &self,
-        id: WidgetId,
-    ) -> crate::signal::Signal<bool> {
+    pub fn effective_enabled_signal(&self, id: WidgetId) -> crate::signal::Signal<bool> {
         use crate::signal::{Prop, Signal};
         // Walk this node's ancestor chain, collecting every bound
         // `enabled_state` signal. Static `Prop::Static(b)` and unbound

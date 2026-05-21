@@ -158,7 +158,7 @@ pub fn color_cell(role: impl Into<ColorProp>, label: &'static str) -> impl Widge
         .corner_radius(4.0)
         .padding(8.0)
         .child(
-            TextWidget::new_literal(label)
+            TextWidget::new(lit!(label))
                 .style(TextStyleRole::SmallBold)
                 .color(TextRole::Primary),
         )

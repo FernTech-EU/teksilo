@@ -19,6 +19,7 @@ use bastyde_core::build_context::BuildContext;
 use bastyde_core::color_prop::ColorProp;
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
+use bastyde_i18n::lit;
 use bastyde_tokens::{Color, TextRole, TextStyle};
 
 use crate::primitives::{Divider, Expand, HStack, TextWidget};
@@ -101,7 +102,7 @@ impl Widget for GroupHeader {
             None => TextRole::Primary.into(),
         };
 
-        let label = TextWidget::new_literal(&self.label)
+        let label = TextWidget::new(lit!(&self.label))
             .style(style)
             .bind_color(color)
             .single_line()
@@ -176,7 +177,7 @@ mod tests {
     #[test]
     fn builds_and_lays_out_with_proposed_width() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let header = tree.add(GroupHeader::new_literal("Appearance"));
+        let header = tree.add(GroupHeader::new(lit!("Appearance")));
         tree.layout(SizeProposal {
             width: Some(400.0),
             height: None,
@@ -200,7 +201,7 @@ mod tests {
         // Walk the tree to the Expand and verify its bounds consume the
         // remaining width, not the natural 0-width of a bare Divider.
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let header = tree.add(GroupHeader::new_literal("X"));
+        let header = tree.add(GroupHeader::new(lit!("X")));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -230,7 +231,7 @@ mod tests {
     #[test]
     fn accessibility_role_and_name() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let header = tree.add(GroupHeader::new_literal("Appearance"));
+        let header = tree.add(GroupHeader::new(lit!("Appearance")));
         tree.layout(SizeProposal {
             width: Some(400.0),
             height: None,
@@ -257,14 +258,14 @@ mod tests {
         }
 
         let mut tree_default = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let h0 = tree_default.add(GroupHeader::new_literal("Section").gap(0.0));
+        let h0 = tree_default.add(GroupHeader::new(lit!("Section")).gap(0.0));
         tree_default.layout(SizeProposal {
             width: Some(400.0),
             height: None,
         });
 
         let mut tree_wide = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let h60 = tree_wide.add(GroupHeader::new_literal("Section").gap(60.0));
+        let h60 = tree_wide.add(GroupHeader::new(lit!("Section")).gap(60.0));
         tree_wide.layout(SizeProposal {
             width: Some(400.0),
             height: None,

@@ -33,7 +33,7 @@ use bastyde::widgets::{
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -78,15 +78,15 @@ impl Widget for Root {
             .spacing(20.0)
             // Heading.
             .child(
-                TextWidget::new_literal("ColorPicker gallery")
+                TextWidget::new(lit!("ColorPicker gallery"))
                     .style(TextStyleRole::BodyBold)
                     .color(TextRole::Primary),
             )
             .child(
-                TextWidget::new_literal(
+                TextWidget::new(lit!(
                     "All ColorPicker / HexColorInput / ColorEdit configurations \
-                     driving live Signal<Color> sources.",
-                )
+                     driving live Signal<Color> sources."
+                ))
                 .style(TextStyleRole::Body)
                 .color(TextRole::Secondary),
             )
@@ -196,7 +196,7 @@ fn section(title: &'static str, body: impl Widget + 'static) -> impl Widget + 's
     VStack::new()
         .spacing(8.0)
         .child(
-            TextWidget::new_literal(title)
+            TextWidget::new(lit!(title))
                 .style(TextStyleRole::BodyBold)
                 .color(TextRole::Primary),
         )
@@ -210,7 +210,7 @@ fn live_preview(color: Signal<Color>) -> impl Widget + 'static {
     let bg: ColorProp = color.into();
     Panel::new()
         .background(bg)
-        .child(Padding::uniform(20.0).child(TextWidget::new_literal("preview")))
+        .child(Padding::uniform(20.0).child(TextWidget::new(lit!("preview"))))
 }
 
 fn material_palette() -> Vec<Color> {

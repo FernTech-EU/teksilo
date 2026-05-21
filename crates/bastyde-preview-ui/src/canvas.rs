@@ -24,6 +24,7 @@ use bastyde_core::build_context::BuildContext;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
+use bastyde_i18n::lit;
 use bastyde_tokens::{SurfaceRole, TextRole, TextStyleRole};
 use bastyde_widgets::primitives::ZStack;
 use bastyde_widgets::{
@@ -83,7 +84,11 @@ impl PreviewCanvas {
         // `Button::new_literal(label)` consumes the string by-value
         // rather than `Prop::Bound`), so the only way to reflect the
         // edit is to reconstruct.
-        knobs.bind_all(self_id, registry, bastyde_core::binding::BindingLevel::Rebuild);
+        knobs.bind_all(
+            self_id,
+            registry,
+            bastyde_core::binding::BindingLevel::Rebuild,
+        );
         entry.build(variant_name, &knobs)
     }
 }
@@ -225,12 +230,12 @@ impl PreviewCanvas {
             (Some(w), Some(v)) => format!("{} · {}", w, v),
             _ => "—".to_string(),
         });
-        let label_widget = TextWidget::new_literal("")
+        let label_widget = TextWidget::new(lit!(""))
             .style(TextStyleRole::Tiny)
             .color(TextRole::Secondary)
             .single_line()
             .bind_text(label);
-        let size_widget = TextWidget::new_literal("")
+        let size_widget = TextWidget::new(lit!(""))
             .style(TextStyleRole::Tiny)
             .color(TextRole::Secondary)
             .single_line()
@@ -249,7 +254,7 @@ impl PreviewCanvas {
 fn placeholder_message(text: &str) -> Box<dyn Widget> {
     Box::new(
         Center::new().child(
-            TextWidget::new_literal(text)
+            TextWidget::new(lit!(text))
                 .style(TextStyleRole::Body)
                 .color(TextRole::Secondary),
         ),

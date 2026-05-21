@@ -188,15 +188,16 @@ mod tests {
     use super::*;
     use crate::primitives::TextWidget;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn cycle_builds_with_children() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
             Cycle::new()
-                .child(TextWidget::new_literal("A"))
-                .child(TextWidget::new_literal("B"))
-                .child(TextWidget::new_literal("C")),
+                .child(TextWidget::new(lit!("A")))
+                .child(TextWidget::new(lit!("B")))
+                .child(TextWidget::new(lit!("C"))),
         );
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let b = tree.bounds(id);
@@ -214,7 +215,7 @@ mod tests {
     #[test]
     fn single_child_cycle_does_not_animate() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Cycle::new().child(TextWidget::new_literal("only")));
+        tree.add(Cycle::new().child(TextWidget::new(lit!("only"))));
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let _ = tree.render();
         assert!(
@@ -229,8 +230,8 @@ mod tests {
         tree.set_accessibility_preferences(false, true, 1.0);
         tree.add(
             Cycle::new()
-                .child(TextWidget::new_literal("A"))
-                .child(TextWidget::new_literal("B")),
+                .child(TextWidget::new(lit!("A")))
+                .child(TextWidget::new(lit!("B"))),
         );
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let _ = tree.render();

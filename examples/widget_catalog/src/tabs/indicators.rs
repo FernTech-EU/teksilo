@@ -69,26 +69,26 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         "Badge",
         HStack::new()
             .spacing(8.0)
-            .child(Badge::new_literal("New"))
-            .child(Badge::new_literal("Beta"))
-            .child(Badge::new_literal("Stable").color(SurfaceRole::AccentSubtle))
-            .child(Badge::new_literal("3"))
-            .child(Badge::new_literal("99+")),
+            .child(Badge::new(lit!("New")))
+            .child(Badge::new(lit!("Beta")))
+            .child(Badge::new(lit!("Stable")).color(SurfaceRole::AccentSubtle))
+            .child(Badge::new(lit!("3")))
+            .child(Badge::new(lit!("99+"))),
     );
     let avatar = section(
         ctx,
         "Avatar",
         HStack::new()
             .spacing(12.0)
-            .child(Avatar::with_initials_literal("CJ").size(AvatarSize::Medium))
+            .child(Avatar::with_initials(lit!("CJ")).size(AvatarSize::Medium))
             .child(
-                Avatar::with_initials_literal("AB")
+                Avatar::with_initials(lit!("AB"))
                     .shape(AvatarShape::RoundedSquare)
                     .seed("alice")
                     .presence(AvatarPresence::Online),
             )
             .child(
-                Avatar::with_initials_literal("MN")
+                Avatar::with_initials(lit!("MN"))
                     .size(AvatarSize::Large)
                     .seed("mallory")
                     .presence(AvatarPresence::Busy),
@@ -176,7 +176,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             // Spinner
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Spinner") {
+                TextWidget::new(lit!("Spinner")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -193,7 +193,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             // Link
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Link") {
+                TextWidget::new(lit!("Link")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -211,40 +211,40 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             // Badge
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Badge") {
+                TextWidget::new(lit!("Badge")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
                 HStack {
                     spacing: 8.0
-                    Badge::new_literal("New")
-                    Badge::new_literal("Beta")
-                    Badge::new_literal("Stable") {
+                    Badge::new(lit!("New"))
+                    Badge::new(lit!("Beta"))
+                    Badge::new(lit!("Stable")) {
                         color: SurfaceRole::Raised
                     }
-                    Badge::new_literal("3")
-                    Badge::new_literal("99+")
+                    Badge::new(lit!("3"))
+                    Badge::new(lit!("99+"))
                 }
             }
 
             // Avatar
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Avatar") {
+                TextWidget::new(lit!("Avatar")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
                 HStack {
                     spacing: 12.0
-                    Avatar::with_initials_literal("CJ") {
+                    Avatar::with_initials(lit!("CJ")) {
                         size: AvatarSize::Medium
                     }
-                    Avatar::with_initials_literal("AB") {
+                    Avatar::with_initials(lit!("AB")) {
                         shape: AvatarShape::RoundedSquare
                         seed: "alice"
                         presence: AvatarPresence::Online
                     }
-                    Avatar::with_initials_literal("MN") {
+                    Avatar::with_initials(lit!("MN")) {
                         size: AvatarSize::Large
                         seed: "mallory"
                         presence: AvatarPresence::Busy

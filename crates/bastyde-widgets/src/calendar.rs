@@ -70,6 +70,7 @@ mod header;
 mod tests;
 mod zoom_grid;
 
+use bastyde_i18n::lit;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -544,7 +545,9 @@ impl Widget for Calendar {
                 .background(bastyde_tokens::SurfaceRole::Raised)
                 .border_color(bastyde_tokens::BorderRole::Default)
                 .border_width(theme.shape.border_width)
-                .corner_radius(bastyde_tokens::CornerRadius::uniform(theme.shape.radius_popup)),
+                .corner_radius(bastyde_tokens::CornerRadius::uniform(
+                    theme.shape.radius_popup,
+                )),
         );
         let framed_id = ctx.add(
             crate::primitives::ZStack::new()
@@ -746,7 +749,7 @@ fn build_weekday_row(
         let label = resolve_message_widget(key, &[]);
         let long_label =
             resolve_message_widget(crate::common::datetime::weekday_long_key(dow), &[]);
-        let text = TextWidget::new_literal(label)
+        let text = TextWidget::new(lit!(label))
             .style(TextStyleRole::Body)
             .color(TextRole::Secondary)
             .single_line()
@@ -802,7 +805,7 @@ fn build_footer(
         let cb_selection = selection.clone();
         let cb_on_sel = on_selection_changed.clone();
         let cb_on_month = on_month_changed.clone();
-        let today_btn = Button::new_literal(today_label)
+        let today_btn = Button::new(lit!(today_label))
             .variant(ButtonVariant::Filled)
             .on_activate_fn(move |ctx_evt| {
                 let today = today_local();
@@ -827,7 +830,7 @@ fn build_footer(
         row = row.child(today_btn);
     }
     if is_range_mode {
-        let status_label = TextWidget::new_literal("")
+        let status_label = TextWidget::new(lit!(""))
             .style(TextStyleRole::Body)
             .color(TextRole::Secondary)
             .bind_text(range_status.clone())
@@ -951,7 +954,7 @@ impl Widget for CalendarBody {
                     .unwrap_or(week_first)
                     .iso_week_date();
                 let label_text = format!("{}", iso_wk.week());
-                let week_text = TextWidget::new_literal(label_text)
+                let week_text = TextWidget::new(lit!(label_text))
                     .style(TextStyleRole::Body)
                     .color(TextRole::Secondary)
                     .single_line()

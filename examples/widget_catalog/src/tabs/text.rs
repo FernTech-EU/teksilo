@@ -206,7 +206,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("TextInput") {
+                TextWidget::new(lit!("TextInput")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -225,7 +225,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("SpinBox") {
+                TextWidget::new(lit!("SpinBox")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -237,7 +237,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("SearchField") {
+                TextWidget::new(lit!("SearchField")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -246,7 +246,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("PasswordField") {
+                TextWidget::new(lit!("PasswordField")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -255,7 +255,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("FilePickerField") {
+                TextWidget::new(lit!("FilePickerField")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -268,7 +268,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("InputDialog") {
+                TextWidget::new(lit!("InputDialog")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

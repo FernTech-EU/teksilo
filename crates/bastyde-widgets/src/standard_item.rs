@@ -63,6 +63,7 @@
 //! decorative (`set_hidden`); the row's expanded state is owned by
 //! the wrapper.
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Rect, SizeProposal};
@@ -297,7 +298,7 @@ impl StandardListItem {
 
         // Label column: either a single TextWidget or a VStack with
         // label on top and subtitle (with its own slots) below.
-        let label_widget = TextWidget::new_literal(&self.label)
+        let label_widget = TextWidget::new(lit!(&self.label))
             .style(self.label_style)
             .bind_color(label_role.clone())
             .a11y_hidden();
@@ -305,7 +306,7 @@ impl StandardListItem {
 
         let label_column_id = if let Some(subtitle) = &self.subtitle {
             // Two-line: VStack { label, subtitle line }.
-            let subtitle_widget = TextWidget::new_literal(subtitle)
+            let subtitle_widget = TextWidget::new(lit!(subtitle))
                 .style(self.subtitle_style)
                 .color(TextRole::Secondary)
                 .a11y_hidden();
@@ -361,7 +362,7 @@ impl StandardListItem {
                 CheckboxKind::TriState(s) => Checkbox::tristate(s),
             }
             .labels_hidden(true);
-            let cb_id = ctx.add(cb.access_label_literal(self.label.clone()));
+            let cb_id = ctx.add(cb.access_label(lit!(self.label.clone())));
             row = row.add_child(cb_id);
         }
         if let Some(w) = self.leading_slot.take() {
@@ -560,7 +561,7 @@ impl StandardTreeItem {
 
     #[doc(hidden)]
     pub fn subtitle_literal(mut self, text: impl Into<String>) -> Self {
-        self.inner = self.inner.subtitle_literal(text);
+        self.inner = self.inner.subtitle(lit!(text));
         self
     }
 
@@ -701,7 +702,10 @@ impl StandardTreeItem {
     /// dispatch an intent (e.g. lazy-load children on expand), open
     /// a dialog, or otherwise route the toggle through the framework
     /// before mutating model state.
-    pub fn on_toggle(mut self, f: impl Fn(&mut bastyde_core::widget::EventContext) + 'static) -> Self {
+    pub fn on_toggle(
+        mut self,
+        f: impl Fn(&mut bastyde_core::widget::EventContext) + 'static,
+    ) -> Self {
         self.on_toggle = Some(Rc::new(f));
         self
     }
@@ -818,7 +822,7 @@ mod tests {
     #[test]
     fn list_item_layout_single_line() {
         let mut tree = WidgetTree::new().with_theme(theme());
-        let id = tree.add(StandardListItem::new_literal("Hello"));
+        let id = tree.add(StandardListItem::new(lit!("Hello")));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -831,7 +835,7 @@ mod tests {
     #[test]
     fn list_item_layout_two_line() {
         let mut tree = WidgetTree::new().with_theme(theme());
-        let id = tree.add(StandardListItem::new_literal("Title").subtitle_literal("Subtitle text"));
+        let id = tree.add(StandardListItem::new(lit!("Title")).subtitle(lit!("Subtitle text")));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -852,7 +856,7 @@ mod tests {
         // name. Lets screen readers present primary vs supplementary
         // info distinctly.
         let mut tree = WidgetTree::new().with_theme(theme());
-        let id = tree.add(StandardListItem::new_literal("Title").subtitle_literal("Subtitle"));
+        let id = tree.add(StandardListItem::new(lit!("Title")).subtitle(lit!("Subtitle")));
         tree.layout(SizeProposal::exact(300.0, 100.0));
         let info = tree.accessibility_node(id);
         assert_eq!(info.name(), Some("Title"));
@@ -861,7 +865,7 @@ mod tests {
     #[test]
     fn list_item_a11y_name_no_subtitle() {
         let mut tree = WidgetTree::new().with_theme(theme());
-        let id = tree.add(StandardListItem::new_literal("Just a title"));
+        let id = tree.add(StandardListItem::new(lit!("Just a title")));
         tree.layout(SizeProposal::exact(300.0, 100.0));
         let info = tree.accessibility_node(id);
         assert_eq!(info.name(), Some("Just a title"));
@@ -873,7 +877,7 @@ mod tests {
         let checked = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(theme());
         let _id =
-            tree.add(StandardListItem::new_literal("Item with checkbox").checkbox(checked.clone()));
+            tree.add(StandardListItem::new(lit!("Item with checkbox")).checkbox(checked.clone()));
         tree.layout(SizeProposal::exact(300.0, 100.0));
         // Just verify the build succeeds with the checkbox attached.
         // Toggle behavior is exercised by Checkbox's own tests.
@@ -885,7 +889,7 @@ mod tests {
         use bastyde_core::signal::Signal;
         let state = Signal::new(CheckState::Indeterminate);
         let mut tree = WidgetTree::new().with_theme(theme());
-        let id = tree.add(StandardListItem::new_literal("Folder").tristate_checkbox(state.clone()));
+        let id = tree.add(StandardListItem::new(lit!("Folder")).tristate_checkbox(state.clone()));
         tree.layout(SizeProposal::exact(300.0, 100.0));
         let b = tree.bounds(id);
         assert!(b.width > 0.0);
@@ -899,7 +903,7 @@ mod tests {
         // Last call wins — we just verify the builder doesn't panic.
         let mut tree = WidgetTree::new().with_theme(theme());
         let _id = tree.add(
-            StandardListItem::new_literal("Mix")
+            StandardListItem::new(lit!("Mix"))
                 .checkbox(two.clone())
                 .tristate_checkbox(tri.clone()),
         );
@@ -913,9 +917,9 @@ mod tests {
         // touches them when self.subtitle.is_some()).
         let mut tree = WidgetTree::new().with_theme(theme());
         let _id = tree.add(
-            StandardListItem::new_literal("Item")
-                .subtitle_leading_slot(TextWidget::new_literal("•"))
-                .subtitle_trailing_slot(TextWidget::new_literal("∗")),
+            StandardListItem::new(lit!("Item"))
+                .subtitle_leading_slot(TextWidget::new(lit!("•")))
+                .subtitle_trailing_slot(TextWidget::new(lit!("∗"))),
         );
         tree.layout(SizeProposal::exact(300.0, 100.0));
     }
@@ -923,8 +927,8 @@ mod tests {
     #[test]
     fn tree_item_indent_scales_with_depth() {
         let mut tree = WidgetTree::new().with_theme(theme());
-        let id_d0 = tree.add(StandardTreeItem::new_literal("root").depth(0));
-        let id_d2 = tree.add(StandardTreeItem::new_literal("deep").depth(2));
+        let id_d0 = tree.add(StandardTreeItem::new(lit!("root")).depth(0));
+        let id_d2 = tree.add(StandardTreeItem::new(lit!("deep")).depth(2));
         tree.layout(SizeProposal {
             width: Some(400.0),
             height: None,
@@ -941,12 +945,12 @@ mod tests {
         // outer widths (chevron column reserved).
         let mut tree = WidgetTree::new().with_theme(theme());
         let leaf = tree.add(
-            StandardTreeItem::new_literal("file")
+            StandardTreeItem::new(lit!("file"))
                 .depth(1)
                 .has_children(false),
         );
         let branch = tree.add(
-            StandardTreeItem::new_literal("folder")
+            StandardTreeItem::new(lit!("folder"))
                 .depth(1)
                 .has_children(true),
         );
@@ -1023,7 +1027,7 @@ mod tests {
             FixedSize::new()
                 .bind_width(40.0_f32)
                 .bind_height(40.0_f32)
-                .child(TextWidget::new_literal("x"))
+                .child(TextWidget::new(lit!("x")))
                 .on_tap(move |_, _| f.set(f.get() + 1)),
         );
         tree.layout(SizeProposal::exact(200.0, 200.0));
@@ -1051,7 +1055,7 @@ mod tests {
         use bastyde_canvas::Point;
         let checked = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(theme());
-        let id = tree.add(StandardListItem::new_literal("Row").checkbox(checked.clone()));
+        let id = tree.add(StandardListItem::new(lit!("Row")).checkbox(checked.clone()));
         tree.layout(SizeProposal::exact(400.0, 60.0));
         let bounds = tree.bounds(id);
         use crate::styles::recipe_standard_item_style as si;
@@ -1078,7 +1082,7 @@ mod tests {
         let checked = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(theme());
         let id = tree.add(
-            StandardListItem::new_literal("A long-enough label so the tap target lands on text")
+            StandardListItem::new(lit!("A long-enough label so the tap target lands on text"))
                 .checkbox(checked.clone()),
         );
         tree.layout(SizeProposal::exact(400.0, 60.0));
@@ -1103,7 +1107,7 @@ mod tests {
         let fired_clone = fired.clone();
         let mut tree = WidgetTree::new().with_theme(theme());
         let id = tree.add(
-            StandardTreeItem::new_literal("Folder")
+            StandardTreeItem::new(lit!("Folder"))
                 .depth(0)
                 .has_children(true)
                 .is_expanded(false)
@@ -1135,7 +1139,7 @@ mod tests {
         use bastyde_canvas::Point;
         let state = Signal::new(CheckState::Unchecked);
         let mut tree = WidgetTree::new().with_theme(theme());
-        let id = tree.add(StandardListItem::new_literal("Folder").tristate_checkbox(state.clone()));
+        let id = tree.add(StandardListItem::new(lit!("Folder")).tristate_checkbox(state.clone()));
         tree.layout(SizeProposal::exact(400.0, 60.0));
         let bounds = tree.bounds(id);
         use crate::styles::recipe_standard_item_style as si;
@@ -1160,7 +1164,7 @@ mod tests {
         use bastyde_canvas::Point;
         let state = Signal::new(CheckState::Indeterminate);
         let mut tree = WidgetTree::new().with_theme(theme());
-        let id = tree.add(StandardListItem::new_literal("Folder").tristate_checkbox(state.clone()));
+        let id = tree.add(StandardListItem::new(lit!("Folder")).tristate_checkbox(state.clone()));
         tree.layout(SizeProposal::exact(400.0, 60.0));
         let bounds = tree.bounds(id);
         use crate::styles::recipe_standard_item_style as si;
@@ -1179,7 +1183,7 @@ mod tests {
         let fired_clone = fired.clone();
         let mut tree = WidgetTree::new().with_theme(theme());
         let id = tree.add(
-            StandardTreeItem::new_literal("Leaf")
+            StandardTreeItem::new(lit!("Leaf"))
                 .depth(0)
                 .has_children(false)
                 .on_toggle(move |_ctx| fired_clone.set(fired_clone.get() + 1)),
@@ -1213,7 +1217,7 @@ mod tests {
             is_expanded: true,
         };
         let mut tree = WidgetTree::new().with_theme(theme());
-        let id = tree.add(StandardTreeItem::new_literal("x").from_entry(&entry));
+        let id = tree.add(StandardTreeItem::new(lit!("x")).from_entry(&entry));
         tree.layout(SizeProposal::exact(400.0, 100.0));
         assert!(tree.bounds(id).width > 0.0);
     }

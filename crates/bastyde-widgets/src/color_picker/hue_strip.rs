@@ -154,23 +154,21 @@ impl Widget for HueStrip {
         {
             let dragging = dragging.clone();
             let apply = apply.clone();
-            handlers = handlers.on_drag(move |phase, _ctx| {
-                match phase {
-                    DragPhase::Started {
-                        position,
-                        button: PointerButton::Primary,
-                    } => {
-                        dragging.set(true);
-                        apply(position.x, position.y);
-                    }
-                    DragPhase::Moved { position, .. } if dragging.get() => {
-                        apply(position.x, position.y);
-                    }
-                    DragPhase::Ended { .. } => {
-                        dragging.set(false);
-                    }
-                    _ => {}
+            handlers = handlers.on_drag(move |phase, _ctx| match phase {
+                DragPhase::Started {
+                    position,
+                    button: PointerButton::Primary,
+                } => {
+                    dragging.set(true);
+                    apply(position.x, position.y);
                 }
+                DragPhase::Moved { position, .. } if dragging.get() => {
+                    apply(position.x, position.y);
+                }
+                DragPhase::Ended { .. } => {
+                    dragging.set(false);
+                }
+                _ => {}
             });
         }
         {

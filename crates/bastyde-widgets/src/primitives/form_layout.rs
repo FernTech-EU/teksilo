@@ -161,7 +161,10 @@ impl FormLayout {
     }
 }
 
-fn resolve_pending(p: PendingChild, ctx: &mut bastyde_core::build_context::BuildContext) -> WidgetId {
+fn resolve_pending(
+    p: PendingChild,
+    ctx: &mut bastyde_core::build_context::BuildContext,
+) -> WidgetId {
     match p {
         PendingChild::Id(id) => id,
         PendingChild::Deferred(w) => ctx.add_boxed(w),

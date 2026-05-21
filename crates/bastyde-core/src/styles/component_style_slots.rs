@@ -28,12 +28,12 @@ use crate::styles::{
     SharedAvatarStyle, SharedBadgeStyle, SharedBannerStyle, SharedButtonStyle, SharedCalendarStyle,
     SharedCardStyle, SharedCheckboxStyle, SharedColorPickerStyle, SharedComboBoxStyle,
     SharedDateEditStyle, SharedDialogStyle, SharedDropTargetStyle, SharedDropZoneStyle,
-    SharedIconButtonStyle, SharedLinkStyle,
-    SharedListContainerStyle, SharedMenuItemStyle, SharedPanelStyle, SharedPopoverStyle,
-    SharedProgressBarStyle, SharedRadioStyle, SharedRichTextEditorStyle, SharedScrollBarStyle,
-    SharedSearchFieldStyle, SharedSegmentedControlStyle, SharedSliderStyle, SharedSnackbarStyle,
-    SharedSpinBoxStyle, SharedStandardItemStyle, SharedTabStyle, SharedTableStyle,
-    SharedTextInputStyle, SharedToastStyle, SharedToggleStyle, SharedTooltipStyle,
+    SharedIconButtonStyle, SharedLinkStyle, SharedListContainerStyle, SharedMenuItemStyle,
+    SharedPanelStyle, SharedPopoverStyle, SharedProgressBarStyle, SharedRadioStyle,
+    SharedRichTextEditorStyle, SharedScrollBarStyle, SharedSearchFieldStyle,
+    SharedSegmentedControlStyle, SharedSliderStyle, SharedSnackbarStyle, SharedSpinBoxStyle,
+    SharedStandardItemStyle, SharedTabStyle, SharedTableStyle, SharedTextInputStyle,
+    SharedToastStyle, SharedToggleStyle, SharedTooltipStyle,
 };
 
 /// Typed slot bag living on [`crate::styles::Theme`]. One slot per

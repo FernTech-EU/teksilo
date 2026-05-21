@@ -36,7 +36,11 @@ fn has_role(update: &bastyde_core::accesskit::TreeUpdate, role: Role) -> bool {
 fn constructs_and_lays_out() {
     let pw = Signal::new(String::new());
     let mut t = tree();
-    let id = t.add(PasswordField::new(pw).label("Password").placeholder("Enter…"));
+    let id = t.add(
+        PasswordField::new(pw)
+            .label("Password")
+            .placeholder("Enter…"),
+    );
     t.layout(SizeProposal::exact(320.0, 60.0));
     tick(&mut t);
     let bounds = t.bounds(id);
@@ -59,11 +63,17 @@ fn masked_field_reports_password_role_and_bullet_value_never_plaintext() {
     let value = value_of_role(&update, Role::PasswordInput).expect("password node has a value");
     // Length-preserving bullets, never the secret.
     assert_eq!(value.chars().count(), "hunter2".chars().count());
-    assert!(value.chars().all(|c| c == '\u{2022}'), "value must be bullets, got {value:?}");
+    assert!(
+        value.chars().all(|c| c == '\u{2022}'),
+        "value must be bullets, got {value:?}"
+    );
     assert_ne!(value, "hunter2", "plaintext must never reach the AT value");
     // The plaintext must not appear on ANY node.
     assert!(
-        update.nodes.iter().all(|(_, n)| n.value() != Some("hunter2")),
+        update
+            .nodes
+            .iter()
+            .all(|(_, n)| n.value() != Some("hunter2")),
         "plaintext leaked into the accessibility tree"
     );
 }
@@ -118,7 +128,10 @@ fn always_protected_keeps_password_role_when_revealed() {
         "AlwaysProtected must keep Role::PasswordInput even when revealed"
     );
     assert!(
-        update.nodes.iter().all(|(_, n)| n.value() != Some("hunter2")),
+        update
+            .nodes
+            .iter()
+            .all(|(_, n)| n.value() != Some("hunter2")),
         "AlwaysProtected must never expose plaintext, even revealed"
     );
 }
@@ -171,7 +184,10 @@ fn revealed_signal_accessor_round_trips() {
     let revealed = Signal::new(false);
     let field = PasswordField::new(pw).bind_revealed(revealed.clone());
     field.revealed_signal().set(true);
-    assert!(revealed.get(), "revealed_signal() must reflect the bound signal");
+    assert!(
+        revealed.get(),
+        "revealed_signal() must reflect the bound signal"
+    );
 }
 
 // ── IME composition on a secure field ───────────────────────────────

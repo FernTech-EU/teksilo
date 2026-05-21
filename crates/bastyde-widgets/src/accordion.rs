@@ -14,6 +14,7 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
+use bastyde_i18n::lit;
 use bastyde_tokens::{BorderRole, Color, TextRole, TextStyle, TextStyleRole};
 
 use crate::animations::collapse::Collapse;
@@ -197,7 +198,7 @@ impl Widget for Accordion {
 
         // Custom override wins; otherwise use the Body role so the title
         // tracks typography changes across themes.
-        let title_widget = TextWidget::new_literal(&self.title).bind_color(header_fg);
+        let title_widget = TextWidget::new(lit!(&self.title)).bind_color(header_fg);
         let title_widget = if let Some(style) = self.title_style.clone() {
             title_widget.style(style)
         } else {
@@ -233,7 +234,9 @@ impl Widget for Accordion {
             crate::primitives::RectWidget::new()
                 .bind_border_color(focus_border_role)
                 .bind_border_width(focus_border_width)
-                .corner_radius(bastyde_tokens::CornerRadius::uniform(accordion_corner_radius)),
+                .corner_radius(bastyde_tokens::CornerRadius::uniform(
+                    accordion_corner_radius,
+                )),
         );
         let header_with_ring = ctx.add(
             crate::primitives::ZStack::new()
@@ -357,7 +360,7 @@ mod tests {
     fn accordion_builds_collapsed() {
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let acc = tree.add(Accordion::new_literal("Section", expanded.clone()));
+        let acc = tree.add(Accordion::new(lit!("Section"), expanded.clone()));
         tree.layout(SizeProposal::exact(300.0, 200.0));
         let b = tree.bounds(acc);
         assert!(b.width > 0.0);
@@ -367,7 +370,7 @@ mod tests {
     fn click_toggles_expanded_state() {
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let acc = tree.add(Accordion::new_literal("Section", expanded.clone()));
+        let acc = tree.add(Accordion::new(lit!("Section"), expanded.clone()));
         tree.layout(SizeProposal::exact(300.0, 200.0));
 
         tree.click(acc);
@@ -381,8 +384,8 @@ mod tests {
         use crate::primitives::TextWidget;
         let expanded = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let content = tree.add(TextWidget::new_literal("Content text"));
-        let acc = tree.add(Accordion::new_literal("Details", expanded.clone()).content_id(content));
+        let content = tree.add(TextWidget::new(lit!("Content text")));
+        let acc = tree.add(Accordion::new(lit!("Details"), expanded.clone()).content_id(content));
         tree.layout(SizeProposal::exact(300.0, 200.0));
         let b = tree.bounds(acc);
         assert!(b.height > 0.0);
@@ -392,7 +395,7 @@ mod tests {
     fn accessibility() {
         let expanded = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let acc = tree.add(Accordion::new_literal("Details", expanded));
+        let acc = tree.add(Accordion::new(lit!("Details"), expanded));
         tree.layout(SizeProposal::exact(300.0, 200.0));
         let info = tree.accessibility_node(acc);
         assert_eq!(info.name(), Some("Details"));
@@ -409,8 +412,8 @@ mod tests {
 
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let content = tree.add(TextWidget::new_literal("Some content"));
-        let acc = tree.add(Accordion::new_literal("Section", expanded.clone()).content_id(content));
+        let content = tree.add(TextWidget::new(lit!("Some content")));
+        let acc = tree.add(Accordion::new(lit!("Section"), expanded.clone()).content_id(content));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -440,8 +443,8 @@ mod tests {
 
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let content = tree.add(TextWidget::new_literal("Some content"));
-        let acc = tree.add(Accordion::new_literal("Section", expanded.clone()).content_id(content));
+        let content = tree.add(TextWidget::new(lit!("Some content")));
+        let acc = tree.add(Accordion::new(lit!("Section"), expanded.clone()).content_id(content));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -481,8 +484,8 @@ mod tests {
 
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let content = tree.add(TextWidget::new_literal("Some content text here"));
-        let acc = tree.add(Accordion::new_literal("Section", expanded.clone()).content_id(content));
+        let content = tree.add(TextWidget::new(lit!("Some content text here")));
+        let acc = tree.add(Accordion::new(lit!("Section"), expanded.clone()).content_id(content));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,

@@ -31,20 +31,20 @@
 //! emission — the dispatch tap is consent-gated and would drop every
 //! event without the auto-grant below.
 
-use bastyde_analytics_plausible::PlausibleAdapter;
-use bastyde_telemetry::{TelemetryBundle, TelemetryMode, UsageReporter};
 use bastyde::core::Action;
 use bastyde::prelude::*;
 use bastyde::widgets::{
     Button, ButtonVariant, Expand, HStack, Padding, PrivacySettings, Spacer, TextWidget, Toolbar,
     VStack,
 };
+use bastyde_analytics_plausible::PlausibleAdapter;
+use bastyde_telemetry::{TelemetryBundle, TelemetryMode, UsageReporter};
 use std::rc::Rc;
 
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -73,17 +73,17 @@ impl Widget for DemoRoot {
             ));
         }
 
-        let click_btn = Button::new_literal("Fire 'click' intent")
+        let click_btn = Button::new(lit!("Fire 'click' intent"))
             .variant(ButtonVariant::Filled)
             .on_activate_fn(|ctx| {
                 ctx.send_intent(bastyde::core::Intent::new("app.demo.click"));
             });
-        let save_btn = Button::new_literal("Fire 'save' intent")
+        let save_btn = Button::new(lit!("Fire 'save' intent"))
             .variant(ButtonVariant::Filled)
             .on_activate_fn(|ctx| {
                 ctx.send_intent(bastyde::core::Intent::new("app.demo.save"));
             });
-        let about_btn = Button::new_literal("Fire 'about' intent")
+        let about_btn = Button::new(lit!("Fire 'about' intent"))
             .variant(ButtonVariant::Filled)
             .on_activate_fn(|ctx| {
                 ctx.send_intent(bastyde::core::Intent::new("app.demo.about"));
@@ -91,12 +91,12 @@ impl Widget for DemoRoot {
 
         let column = VStack::new()
             .spacing(16.0)
-            .child(TextWidget::new_literal("Plausible telemetry demo"))
-            .child(TextWidget::new_literal(
+            .child(TextWidget::new(lit!("Plausible telemetry demo")))
+            .child(TextWidget::new(lit!(
                 "Each click fires an intent that flows through the dispatch tap, \
                  the anonymous Plausible adapter, and (with consent + a working \
-                 endpoint) lands in your Plausible dashboard.",
-            ))
+                 endpoint) lands in your Plausible dashboard."
+            )))
             .child(click_btn)
             .child(save_btn)
             .child(about_btn)

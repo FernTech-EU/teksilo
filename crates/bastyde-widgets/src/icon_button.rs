@@ -61,6 +61,7 @@
 //!     )
 //! ```
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 use std::sync::OnceLock;
 
@@ -305,7 +306,10 @@ impl IconButton {
 
     /// Attach a composite tooltip — third tier, hosting an arbitrary
     /// widget tree. See [`Button::composite_tooltip`](crate::button::Button::composite_tooltip).
-    pub fn composite_tooltip(mut self, content: impl bastyde_core::widget::Widget + 'static) -> Self {
+    pub fn composite_tooltip(
+        mut self,
+        content: impl bastyde_core::widget::Widget + 'static,
+    ) -> Self {
         self.composite_tooltip_content = Some(Box::new(content));
         self.tooltip_text = None;
         self.rich_tooltip_source = None;
@@ -450,7 +454,8 @@ impl IconButton {
 
     /// Add button (plus icon). Adds a new entry.
     pub fn add() -> Self {
-        Self::new((BuiltInIcons::global().add)()).tooltip(bastyde_i18n::tr_widget!(a11y_builtin_add()))
+        Self::new((BuiltInIcons::global().add)())
+            .tooltip(bastyde_i18n::tr_widget!(a11y_builtin_add()))
     }
 
     /// Notification bell. Used by
@@ -677,7 +682,7 @@ impl bastyde_core::widget::Widget for IconButton {
                 crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
             );
         } else if let Some(ref tooltip_text) = self.tooltip_text {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new_literal(tooltip_text);
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(lit!(tooltip_text));
             let tooltip_id = ctx.add(tooltip_widget);
             let delay = std::time::Duration::from_millis(500);
             ctx.attach_tooltip(root_id, tooltip_id, delay);
@@ -1022,10 +1027,7 @@ mod tests {
         tree.set_theme(theme.clone());
 
         let is_enabled = Signal::new(true);
-        let btn_id = tree.add(
-            IconButton::new(IconWidget::checkmark(24.0))
-                .tooltip_literal("test"),
-        );
+        let btn_id = tree.add(IconButton::new(IconWidget::checkmark(24.0)).tooltip(lit!("test")));
         tree.enabled_when(btn_id, is_enabled.clone());
         tree.layout(bastyde_canvas::SizeProposal::exact(100.0, 40.0));
 
@@ -1067,7 +1069,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let btn_id = tree.add(
             IconButton::new(IconWidget::checkmark(24.0))
-                .tooltip_literal("test")
+                .tooltip(lit!("test"))
                 .enabled(false),
         );
         tree.layout(bastyde_canvas::SizeProposal::exact(100.0, 40.0));

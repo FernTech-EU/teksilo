@@ -26,7 +26,7 @@ use bastyde::widgets::{
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -63,24 +63,24 @@ fn main() {
                                 .background(theme.colors.surface_pressed)
                                 .border(theme.colors.text_secondary, 2.0)
                                 .leading(
-                                    TextWidget::new_literal("  Bastyde — Title Bar Demo")
+                                    TextWidget::new(lit!("  Bastyde — Title Bar Demo"))
                                         .style(theme.typography.body_bold.clone())
                                         .color(theme.colors.text_primary),
                                 )
                                 .center(
-                                    TextWidget::new_literal(
-                                        "drag · double-click maximize · right-click for menu  ",
-                                    )
+                                    TextWidget::new(lit!(
+                                        "drag · double-click maximize · right-click for menu  "
+                                    ))
                                     .style(theme.typography.small.clone())
                                     .color(theme.colors.text_secondary),
                                 )
                                 .close_action(|ctx| ctx.close_window()),
                         ),
                         None => Box::new(
-                            TextWidget::new_literal(
+                            TextWidget::new(lit!(
                                 "(custom chrome unsupported on this platform — \
-            falling back to native decorations)",
-                            )
+            falling back to native decorations)"
+                            ))
                             .color(theme.colors.text_error),
                         ),
                     };
@@ -89,7 +89,7 @@ fn main() {
                         .child(RectWidget::new().background(theme.colors.surface_main))
                         .child(
                             Expand::new().child(
-                                TextWidget::new_literal("body content goes here")
+                                TextWidget::new(lit!("body content goes here"))
                                     .style(theme.typography.body.clone())
                                     .color(theme.colors.text_primary),
                             ),

@@ -458,6 +458,7 @@ mod tests {
     use bastyde_canvas::Size;
     use bastyde_core::widget_tree::WidgetTree;
     use bastyde_core::{ExternalDropData, NoopWindowOps};
+    use bastyde_i18n::lit;
     use std::cell::Cell;
     use std::path::PathBuf;
     use std::rc::Rc;
@@ -684,7 +685,7 @@ mod tests {
         let target = tree.add(
             DropTarget::new()
                 .child(Fixed(160.0, 90.0))
-                .hint(crate::primitives::TextWidget::new_literal("Drop here"))
+                .hint(crate::primitives::TextWidget::new(lit!("Drop here")))
                 .variant(DropTargetVariant::Prominent)
                 .accept_any()
                 .on_drop(|_p, _pos, _ctx| true),

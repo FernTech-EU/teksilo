@@ -20,7 +20,7 @@ use jiff::civil::{Date, DateTime, Time};
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -115,7 +115,7 @@ impl Widget for Root {
         let calendar_single = Calendar::single(self.selected_date.clone()).show_today_button(true);
         let calendar_single_id = ctx.add(calendar_single);
         let single_status_id = ctx.add(
-            TextWidget::new_literal("")
+            TextWidget::new(lit!(""))
                 .bind_text(single_value_text)
                 .single_line(),
         );
@@ -124,7 +124,7 @@ impl Widget for Root {
         let calendar_range = Calendar::range(self.selected_range.clone()).show_today_button(true);
         let calendar_range_id = ctx.add(calendar_range);
         let range_status_id = ctx.add(
-            TextWidget::new_literal("")
+            TextWidget::new(lit!(""))
                 .bind_text(range_value_text)
                 .single_line(),
         );
@@ -136,7 +136,7 @@ impl Widget for Root {
             .placeholder("YYYY-MM-DD");
         let date_edit_id = ctx.add(date_edit);
         let date_edit_status_id = ctx.add(
-            TextWidget::new_literal("")
+            TextWidget::new(lit!(""))
                 .bind_text(edit_date_text)
                 .single_line(),
         );
@@ -145,7 +145,7 @@ impl Widget for Root {
         let time_24h = TimeEdit::new(self.edit_time_24h.clone()).format(TimeFormat::Hour24);
         let time_24h_id = ctx.add(time_24h);
         let time24_status_id = ctx.add(
-            TextWidget::new_literal("")
+            TextWidget::new(lit!(""))
                 .bind_text(time24_text)
                 .single_line(),
         );
@@ -156,7 +156,7 @@ impl Widget for Root {
             .seconds(SecondsMode::Editable);
         let time_12h_id = ctx.add(time_12h);
         let time12_status_id = ctx.add(
-            TextWidget::new_literal("")
+            TextWidget::new(lit!(""))
                 .bind_text(time12_text)
                 .single_line(),
         );
@@ -164,7 +164,7 @@ impl Widget for Root {
         // Section: DateTimeEdit
         let dt_edit = DateTimeEdit::new(self.edit_dt.clone()).format_pattern_separator();
         let dt_edit_id = ctx.add(dt_edit);
-        let dt_status_id = ctx.add(TextWidget::new_literal("").bind_text(dt_text).single_line());
+        let dt_status_id = ctx.add(TextWidget::new(lit!("")).bind_text(dt_text).single_line());
 
         // Section: DateRangeEdit
         let range_edit_text = self.edit_range.map(|r| match r {
@@ -186,7 +186,7 @@ impl Widget for Root {
             .placeholder_end("End");
         let range_edit_id = ctx.add(range_edit);
         let range_edit_status_id = ctx.add(
-            TextWidget::new_literal("")
+            TextWidget::new(lit!(""))
                 .bind_text(range_edit_text)
                 .single_line(),
         );
@@ -199,7 +199,7 @@ impl Widget for Root {
                     Padding::uniform(12.0).child(
                         VStack::new()
                             .spacing(8.0)
-                            .child(GroupHeader::new_literal("Calendar (single)"))
+                            .child(GroupHeader::new(lit!("Calendar (single)")))
                             .add_child(calendar_single_id)
                             .add_child(single_status_id),
                     ),
@@ -210,7 +210,7 @@ impl Widget for Root {
                     Padding::uniform(12.0).child(
                         VStack::new()
                             .spacing(8.0)
-                            .child(GroupHeader::new_literal("Calendar (range)"))
+                            .child(GroupHeader::new(lit!("Calendar (range)")))
                             .add_child(calendar_range_id)
                             .add_child(range_status_id),
                     ),
@@ -221,7 +221,7 @@ impl Widget for Root {
             Padding::uniform(12.0).child(
                 VStack::new()
                     .spacing(10.0)
-                    .child(GroupHeader::new_literal("Inline editors"))
+                    .child(GroupHeader::new(lit!("Inline editors")))
                     .child(
                         HStack::new()
                             .spacing(12.0)

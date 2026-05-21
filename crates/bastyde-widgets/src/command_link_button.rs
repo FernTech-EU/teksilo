@@ -22,6 +22,7 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
+use bastyde_i18n::lit;
 use bastyde_tokens::{
     BorderRole, CornerRadius, HAlignment, SurfaceRole, TextRole, TextStyleRole, VAlignment,
 };
@@ -162,7 +163,7 @@ impl Widget for CommandLinkButton {
         let corner_radius = crate::styles::recipe_button_style::BUTTON_CORNER_RADIUS;
 
         // Title + optional description column.
-        let title_widget = TextWidget::new_literal(&self.title)
+        let title_widget = TextWidget::new(lit!(&self.title))
             .style(TextStyleRole::BodyBold)
             .bind_color(title_role)
             .single_line()
@@ -175,7 +176,7 @@ impl Widget for CommandLinkButton {
             .add_child(title_id);
         if let Some(description) = &self.description {
             let desc = ctx.add(
-                TextWidget::new_literal(description)
+                TextWidget::new(lit!(description))
                     .style(TextStyleRole::Body)
                     .bind_color(desc_role)
                     .a11y_hidden(),
@@ -241,12 +242,14 @@ impl Widget for CommandLinkButton {
         let handlers = HandlerSet::new()
             .focusable(true)
             .cursor(CursorIcon::Pointer)
-            .on_tap(move |_ev: &bastyde_core::TapEvent, ctx: &mut EventContext| {
-                if let Some(ref a) = *action_for_tap {
-                    a(ctx);
-                }
-                int_tap.set(InteractionState::Hovered);
-            })
+            .on_tap(
+                move |_ev: &bastyde_core::TapEvent, ctx: &mut EventContext| {
+                    if let Some(ref a) = *action_for_tap {
+                        a(ctx);
+                    }
+                    int_tap.set(InteractionState::Hovered);
+                },
+            )
             .on_hover(move |entered: bool, _ctx: &mut EventContext| {
                 if entered {
                     int_hover_enter.set(InteractionState::Hovered);
@@ -360,8 +363,8 @@ mod tests {
     fn builds_with_title_and_description() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
-            CommandLinkButton::new_literal("Create new project")
-                .description_literal("Start with a blank workspace."),
+            CommandLinkButton::new(lit!("Create new project"))
+                .description(lit!("Start with a blank workspace.")),
         );
         tree.layout(SizeProposal {
             width: Some(420.0),
@@ -377,8 +380,7 @@ mod tests {
     fn a11y_role_is_button_with_combined_name() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
-            CommandLinkButton::new_literal("Create new project")
-                .description_literal("Start blank."),
+            CommandLinkButton::new(lit!("Create new project")).description(lit!("Start blank.")),
         );
         tree.layout(SizeProposal::exact(400.0, 100.0));
         let info = tree.accessibility_node(id);
@@ -394,7 +396,7 @@ mod tests {
         let fired_clone = fired.clone();
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
-            CommandLinkButton::new_literal("Open existing project")
+            CommandLinkButton::new(lit!("Open existing project"))
                 .on_activate_fn(move |_| fired_clone.set(fired_clone.get() + 1)),
         );
         tree.layout(SizeProposal::exact(400.0, 100.0));

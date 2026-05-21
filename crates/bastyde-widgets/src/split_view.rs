@@ -281,7 +281,11 @@ impl Widget for SplitHandle {
                 move |entered, _ctx| {
                     if !enabled {
                         interaction.set(SplitHandleState::Idle);
-                        hover_progress.animate_to(0.0, HOVER_FADE_OUT, bastyde_tokens::Easing::Linear);
+                        hover_progress.animate_to(
+                            0.0,
+                            HOVER_FADE_OUT,
+                            bastyde_tokens::Easing::Linear,
+                        );
                         return;
                     }
                     if interaction.get() == SplitHandleState::Dragging {
@@ -299,7 +303,11 @@ impl Widget for SplitHandle {
                             bastyde_tokens::Easing::Linear,
                         );
                     } else {
-                        hover_progress.animate_to(0.0, HOVER_FADE_OUT, bastyde_tokens::Easing::Linear);
+                        hover_progress.animate_to(
+                            0.0,
+                            HOVER_FADE_OUT,
+                            bastyde_tokens::Easing::Linear,
+                        );
                     }
                 }
             })

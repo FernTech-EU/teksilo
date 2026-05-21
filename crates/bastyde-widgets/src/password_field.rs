@@ -30,6 +30,7 @@
 #[cfg(test)]
 mod tests;
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Point, Rect, SizeProposal};
@@ -420,21 +421,29 @@ impl Widget for PasswordField {
 
         // Placeholder overlay (never masked) shares the field's column.
         let text_column_id = if self.placeholder.is_empty() {
-            ctx.add(Expand::horizontal().respect_intrinsic().child_id(padded_field))
+            ctx.add(
+                Expand::horizontal()
+                    .respect_intrinsic()
+                    .child_id(padded_field),
+            )
         } else {
             let ph = TextWidget::new(self.placeholder.clone())
                 .style(TextStyleRole::Body)
                 .color(TextRole::Secondary)
                 .single_line()
                 .a11y_hidden();
-            let ph_id = ctx.add(Expand::new().respect_intrinsic().child(Center::new().child(ph)));
+            let ph_id = ctx.add(
+                Expand::new()
+                    .respect_intrinsic()
+                    .child(Center::new().child(ph)),
+            );
             let text_for_vis = self.text.clone();
             let visible = text_for_vis.map(|t| t.is_empty());
             ctx.visible_when(ph_id, visible);
             ctx.add(
-                Expand::horizontal().respect_intrinsic().child(
-                    ZStack::new().add_child(ph_id).add_child(padded_field),
-                ),
+                Expand::horizontal()
+                    .respect_intrinsic()
+                    .child(ZStack::new().add_child(ph_id).add_child(padded_field)),
             )
         };
 
@@ -447,7 +456,7 @@ impl Widget for PasswordField {
             && let Some(window) = ctx.window()
         {
             let caps = window.caps_lock().clone();
-            let warn = TextWidget::new_literal(CAPS_LOCK_GLYPH)
+            let warn = TextWidget::new(lit!(CAPS_LOCK_GLYPH))
                 .style(TextStyleRole::Body)
                 .color(TextRole::Secondary)
                 .single_line()
@@ -495,7 +504,10 @@ impl Widget for PasswordField {
             RevealMode::None => {}
         }
 
-        let row_id = ctx.add(row.focus_within(focused.clone()).hover_within(hovered.clone()));
+        let row_id = ctx.add(
+            row.focus_within(focused.clone())
+                .hover_within(hovered.clone()),
+        );
 
         // ── Frame chrome via the (reused) TextInputStyle ────────────
         let effective_enabled = ctx.effective_enabled_signal(self_id);
@@ -554,7 +566,7 @@ impl Widget for PasswordField {
                 tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
             );
         } else if let Some(ref text) = self.tooltip_text {
-            let tooltip_id = ctx.add(crate::tooltip::TooltipWidget::new_literal(text));
+            let tooltip_id = ctx.add(crate::tooltip::TooltipWidget::new(lit!(text)));
             ctx.attach_tooltip(root_id, tooltip_id, std::time::Duration::from_millis(500));
         }
 

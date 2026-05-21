@@ -49,6 +49,7 @@
 //! `set_position_in_set(idx + 1)`, and `set_size_of_set(total)` so
 //! screen readers can announce "Apple, 1 of 5".
 
+use bastyde_i18n::lit;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -515,9 +516,7 @@ impl Widget for SearchField {
                 }
                 WidgetEvent::KeyDown {
                     key: Key::Space, ..
-                } if overlay_open_for_space.get()
-                    && highlighted_for_space.get().is_some() =>
-                {
+                } if overlay_open_for_space.get() && highlighted_for_space.get().is_some() => {
                     // Space-to-select: only kicks in when the popover
                     // is open AND a row is currently highlighted (i.e.
                     // the user navigated with arrow keys). Otherwise
@@ -575,8 +574,7 @@ impl Widget for SearchField {
                     // for Tab, Escape, Backspace's "\u{8}", etc.
                     let mut became_empty = false;
                     if let (Some(ch), Some(provider)) = (text, &provider_for_typing) {
-                        let clean: String =
-                            ch.chars().filter(|c| !c.is_control()).collect();
+                        let clean: String = ch.chars().filter(|c| !c.is_control()).collect();
                         if !clean.is_empty() {
                             let projected = format!("{}{}", text_for_typing.get(), clean);
                             if projected.chars().count() >= min_chars_for_typing {
@@ -754,7 +752,7 @@ impl Widget for SuggestionPanel {
                     .corner_radius(CornerRadius::uniform(sf::ROW_CORNER_RADIUS)),
             );
             let label_id = ctx.add(
-                TextWidget::new_literal(&value)
+                TextWidget::new(lit!(&value))
                     .style(TextStyleRole::Body)
                     .single_line(),
             );

@@ -78,7 +78,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("ShortcutSettings") {
+                TextWidget::new(lit!("ShortcutSettings")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -94,7 +94,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("PrivacySettings") {
+                TextWidget::new(lit!("PrivacySettings")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

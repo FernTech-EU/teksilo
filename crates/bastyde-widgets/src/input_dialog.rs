@@ -21,6 +21,7 @@
 //!     .present(ctx);
 //! ```
 
+use bastyde_i18n::lit;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -138,7 +139,7 @@ impl InputDialog {
                     .expect("InputDialog present closure called twice");
                 tree.add(
                     ModalContainer::new(InputDialogBody::new(dlg))
-                        .title_literal(dialog_title.clone()),
+                        .title(lit!(dialog_title.clone())),
                 )
             })
             .presentation(ModalPresentation::Auto)
@@ -220,13 +221,13 @@ impl std::fmt::Debug for InputDialogBody {
 
 impl Widget for InputDialogBody {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let title = TextWidget::new_literal(&self.title)
+        let title = TextWidget::new(lit!(&self.title))
             .style(TextStyleRole::BodyBold)
             .single_line();
 
         let mut column = VStack::new().spacing(10.0).child(title);
         if let Some(p) = &self.prompt {
-            column = column.child(TextWidget::new_literal(p).style(TextStyleRole::Body));
+            column = column.child(TextWidget::new(lit!(p)).style(TextStyleRole::Body));
         }
 
         // The bound text input. Submit-on-Enter accepts the dialog.
@@ -318,8 +319,8 @@ mod tests {
         // Smoke test: the body widget renders without panic when added
         // standalone (without going through present_modal).
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let dlg = InputDialog::new_literal("Rename")
-            .prompt_literal("Choose a new name:")
+        let dlg = InputDialog::new(lit!("Rename"))
+            .prompt(lit!("Choose a new name:"))
             .default_text("untitled");
         let body = InputDialogBody::new(dlg);
         let id = tree.add(body);

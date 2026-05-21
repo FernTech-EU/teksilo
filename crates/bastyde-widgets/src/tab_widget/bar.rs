@@ -479,7 +479,10 @@ impl<T: 'static> TabBar<T> {
     /// idle, and hovered all paint the same fill. Accepts any `Color`,
     /// `SurfaceRole`, or `Signal<Color>` (via [`ColorProp`](bastyde_core::color_prop::ColorProp)).
     /// Default `None` = transparent.
-    pub fn tab_surface_role(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self {
+    pub fn tab_surface_role(
+        mut self,
+        color: impl Into<bastyde_core::color_prop::ColorProp>,
+    ) -> Self {
         self.tab_surface_role = Some(color.into());
         self
     }
@@ -745,10 +748,7 @@ impl<T: 'static> TabBar<T> {
     /// Internal hook: install the source-side transfer-out callback.
     /// `pub(crate)` because `TabWidget` wires its own translation
     /// layer; the public entry point is on `TabWidget`.
-    pub(crate) fn on_transfer_out_rc(
-        mut self,
-        f: Rc<dyn Fn(TabId, &mut EventContext)>,
-    ) -> Self {
+    pub(crate) fn on_transfer_out_rc(mut self, f: Rc<dyn Fn(TabId, &mut EventContext)>) -> Self {
         self.on_transfer_out = Some(f);
         self
     }
@@ -756,10 +756,7 @@ impl<T: 'static> TabBar<T> {
     /// Internal hook: install the target-side received callback.
     /// `pub(crate)` because `TabWidget` wires its own translation
     /// layer; the public entry point is on `TabWidget`.
-    pub(crate) fn on_tab_received_rc(
-        mut self,
-        f: Rc<dyn Fn(T, usize, &mut EventContext)>,
-    ) -> Self {
+    pub(crate) fn on_tab_received_rc(mut self, f: Rc<dyn Fn(T, usize, &mut EventContext)>) -> Self {
         self.on_tab_received = Some(f);
         self
     }
@@ -1054,8 +1051,7 @@ impl<T: 'static> Widget for TabBar<T> {
                 let is_drag_source = reorder_handler.is_some() || self.accept_external_tabs;
                 let make_drag_payload: Option<Rc<dyn Fn() -> DragPayload>> = if is_drag_source {
                     let tab_id = (self.id_of)(i, item);
-                    let transferable =
-                        self.transferable_fn.as_ref().is_none_or(|f| f(i, item));
+                    let transferable = self.transferable_fn.as_ref().is_none_or(|f| f(i, item));
                     let item_payload: Option<(T, Rc<dyn Fn(&T) -> T>)> = if transferable {
                         self.clone_item.as_ref().map(|cf| ((cf)(item), cf.clone()))
                     } else {
@@ -1086,13 +1082,16 @@ impl<T: 'static> Widget for TabBar<T> {
                         (true, Some(transfer_out)) => {
                             let tab_id = (self.id_of)(i, item);
                             let self_reorder = self.self_reorder_flag.clone();
-                            Some(Rc::new(move |outcome: DropOutcome, ctx: &mut EventContext| {
-                                if matches!(outcome, DropOutcome::InApp { accepted: true })
-                                    && !self_reorder.replace(false)
-                                {
-                                    (transfer_out)(tab_id, ctx);
-                                }
-                            }) as Rc<dyn Fn(DropOutcome, &mut EventContext)>)
+                            Some(
+                                Rc::new(move |outcome: DropOutcome, ctx: &mut EventContext| {
+                                    if matches!(outcome, DropOutcome::InApp { accepted: true })
+                                        && !self_reorder.replace(false)
+                                    {
+                                        (transfer_out)(tab_id, ctx);
+                                    }
+                                })
+                                    as Rc<dyn Fn(DropOutcome, &mut EventContext)>,
+                            )
                         }
                         _ => None,
                     };
@@ -1454,9 +1453,7 @@ impl<T: 'static> Widget for TabBar<T> {
         //   - cross-bar transfer: a foreign bar's payload carrying
         //     `item: Some(_)` → `on_tab_received(item, to_model)`
         //     (only when `accept_external` is on).
-        if reorder_handler.is_some()
-            || self.accept_external_tabs
-            || self.on_external_drop.is_some()
+        if reorder_handler.is_some() || self.accept_external_tabs || self.on_external_drop.is_some()
         {
             let bar_id_for_drop = self_id;
             let axis = self.orientation;
@@ -1510,7 +1507,10 @@ impl<T: 'static> Widget for TabBar<T> {
                                 TabBarOrientation::Vertical => bar.width,
                             };
                             drop_indicator.set(Some(0.0));
-                            return DropFeedback::InsertionLine { y: 0.0, width: cross };
+                            return DropFeedback::InsertionLine {
+                                y: 0.0,
+                                width: cross,
+                            };
                         }
                         // Layout-axis pointer position in world coords:
                         // x for horizontal bars, y for vertical bars.

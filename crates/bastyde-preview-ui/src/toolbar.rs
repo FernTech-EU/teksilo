@@ -22,6 +22,7 @@
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::widget::EventContext;
 use bastyde_core::widget_id::WidgetId;
+use bastyde_i18n::lit;
 use bastyde_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
 use bastyde_widgets::primitives::{Padding, ZStack};
 use bastyde_widgets::{
@@ -52,7 +53,7 @@ pub fn build_toolbar(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
 }
 
 fn labelled(label: &str, control: WidgetId) -> impl bastyde_core::widget::Widget + 'static {
-    let label_widget = TextWidget::new_literal(label)
+    let label_widget = TextWidget::new(lit!(label))
         .style(TextStyleRole::Tiny)
         .color(TextRole::Secondary)
         .single_line();
@@ -78,7 +79,7 @@ fn build_theme_picker(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
             }
         });
         let style = style_sig.get();
-        let btn = Button::new_literal(label).variant(style).on_activate_fn(
+        let btn = Button::new(lit!(label)).variant(style).on_activate_fn(
             move |ctx: &mut EventContext| {
                 ctx.set_theme(theme_choice.theme());
                 theme_sig.set(theme_choice);
@@ -146,7 +147,7 @@ fn build_locale_picker(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
             }
         });
         let style = style_sig.get();
-        let btn = Button::new_literal(*label).variant(style).on_activate_fn(
+        let btn = Button::new(lit!(*label)).variant(style).on_activate_fn(
             move |ctx: &mut EventContext| {
                 if let Some(ref s) = locale_str_owned {
                     ctx.set_locale(s.clone());
@@ -156,6 +157,9 @@ fn build_locale_picker(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
         );
         row = row.child(btn);
     }
-    let _ = ComboBox::<String>::new(Vec::<String>::new(), bastyde_core::signal::Signal::new(None));
+    let _ = ComboBox::<String>::new(
+        Vec::<String>::new(),
+        bastyde_core::signal::Signal::new(None),
+    );
     ctx.add(row)
 }

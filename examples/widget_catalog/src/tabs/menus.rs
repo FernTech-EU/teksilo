@@ -93,7 +93,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("MenuBar") {
+                TextWidget::new(lit!("MenuBar")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

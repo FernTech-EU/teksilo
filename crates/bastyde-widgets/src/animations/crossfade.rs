@@ -182,6 +182,7 @@ mod tests {
     use crate::primitives::TextWidget;
     use bastyde_canvas::Size;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     fn count_set_opacity(frame: &bastyde_canvas::RenderFrame) -> Vec<f32> {
         frame
@@ -199,7 +200,7 @@ mod tests {
         let key = Signal::new(0_u32);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(Crossfade::new(key, |k| {
-            Box::new(TextWidget::new_literal(format!("page {k}")))
+            Box::new(TextWidget::new(lit!(format!("page {k}"))))
         }));
         tree.layout(SizeProposal {
             width: Some(200.0),
@@ -218,7 +219,7 @@ mod tests {
         let key = Signal::new(0_u32);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(Crossfade::new(key.clone(), |k| {
-            Box::new(TextWidget::new_literal(format!("page {k}")))
+            Box::new(TextWidget::new(lit!(format!("page {k}"))))
         }));
         tree.layout(SizeProposal {
             width: Some(200.0),
@@ -325,7 +326,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.set_accessibility_preferences(false, true, 1.0);
         tree.add(Crossfade::new(key.clone(), |k| {
-            Box::new(TextWidget::new_literal(format!("page {k}")))
+            Box::new(TextWidget::new(lit!(format!("page {k}"))))
         }));
         tree.layout(SizeProposal {
             width: Some(200.0),

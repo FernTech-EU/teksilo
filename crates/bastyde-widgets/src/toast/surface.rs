@@ -6,6 +6,7 @@
 //! chrome (background, padding, layout) is delegated to the active
 //! [`ToastStyle`] via `make_body`.
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Canvas, Path, Point, Rect, SizeProposal};
@@ -199,18 +200,18 @@ impl ToastSurface {
         // widget here.
         match action.style_ref() {
             ToastActionStyle::Link => {
-                let mut link = Link::new_literal(label_owned).on_activate_fn(activate);
+                let mut link = Link::new(lit!(label_owned)).on_activate_fn(activate);
                 if let Some(tip) = tooltip_owned {
-                    link = link.tooltip_literal(tip);
+                    link = link.tooltip(lit!(tip));
                 }
                 ctx.add(link)
             }
             ToastActionStyle::Button { variant } => {
-                let mut btn = Button::new_literal(label_owned)
+                let mut btn = Button::new(lit!(label_owned))
                     .variant(*variant)
                     .on_activate_fn(activate);
                 if let Some(tip) = tooltip_owned {
-                    btn = btn.tooltip_literal(tip);
+                    btn = btn.tooltip(lit!(tip));
                 }
                 ctx.add(btn)
             }
@@ -236,7 +237,7 @@ impl Widget for ToastSurface {
 
         // Title + optional body column.
         let title = ctx.add(
-            TextWidget::new_literal(&self.data.title)
+            TextWidget::new(lit!(&self.data.title))
                 .style(TextStyleRole::BodyBold)
                 .bind_color(TextRole::Primary)
                 .single_line(),
@@ -246,7 +247,7 @@ impl Widget for ToastSurface {
             .add_child(title);
         if let Some(body) = &self.data.body {
             let body_widget = ctx.add(
-                TextWidget::new_literal(body)
+                TextWidget::new(lit!(body))
                     .style(TextStyleRole::Body)
                     .bind_color(TextRole::Secondary),
             );

@@ -504,7 +504,10 @@ impl TabWidget {
     /// selection is conveyed only by the accent indicator and the
     /// label-color shift (Int UI editor-strip convention). Default
     /// is transparent.
-    pub fn tab_surface_role(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self {
+    pub fn tab_surface_role(
+        mut self,
+        color: impl Into<bastyde_core::color_prop::ColorProp>,
+    ) -> Self {
         self.tab_surface_role = Some(color.into());
         self
     }
@@ -989,19 +992,17 @@ impl Widget for TabWidget {
             // Source side: remove the transferred tab by id.
             let transfer_out_cb = self.on_transfer_out.clone();
             let dyn_model_for_out = self.dynamic_model.clone();
-            bar = bar.on_transfer_out_rc(Rc::new(
-                move |tab_id: TabId, ctx: &mut EventContext| {
-                    if let Some(ref f) = transfer_out_cb {
-                        f(tab_id, ctx);
-                    } else if let Some(ref model) = dyn_model_for_out {
-                        let pos = (0..model.len())
-                            .find(|&i| model.with_item(i, |h| h.id) == Some(tab_id));
-                        if let Some(pos) = pos {
-                            let _ = model.remove(pos);
-                        }
+            bar = bar.on_transfer_out_rc(Rc::new(move |tab_id: TabId, ctx: &mut EventContext| {
+                if let Some(ref f) = transfer_out_cb {
+                    f(tab_id, ctx);
+                } else if let Some(ref model) = dyn_model_for_out {
+                    let pos =
+                        (0..model.len()).find(|&i| model.with_item(i, |h| h.id) == Some(tab_id));
+                    if let Some(pos) = pos {
+                        let _ = model.remove(pos);
                     }
-                },
-            ));
+                }
+            }));
         }
 
         // Non-tab drops (foreign in-app drag / OS file drop). Translate
@@ -1243,7 +1244,9 @@ impl Widget for TabPane {
             // Apply self-handlers so the framework treats this pane
             // as a Tab-key stop, allowing Tab from the selected tab
             // header to land inside an otherwise-empty panel.
-            ctx.apply_self_handlers(bastyde_core::widget_builder::HandlerSet::new().focusable(true));
+            ctx.apply_self_handlers(
+                bastyde_core::widget_builder::HandlerSet::new().focusable(true),
+            );
         }
         self.child_id.into_iter().collect()
     }

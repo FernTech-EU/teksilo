@@ -512,7 +512,9 @@ fn paint_widget_cached(
     }
 
     if clips && !clip_outside_transform {
-        frame.draw_order.push(bastyde_canvas::DrawCommand::ClearClip);
+        frame
+            .draw_order
+            .push(bastyde_canvas::DrawCommand::ClearClip);
     }
 
     if push_transform.is_some() {
@@ -524,7 +526,9 @@ fn paint_widget_cached(
     // A content-transform clip opened before the transform, so it closes after
     // the transform pops (clip { transform { … } } nesting).
     if clip_outside_transform {
-        frame.draw_order.push(bastyde_canvas::DrawCommand::ClearClip);
+        frame
+            .draw_order
+            .push(bastyde_canvas::DrawCommand::ClearClip);
     }
 
     if opacity.is_some() {
@@ -583,7 +587,10 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 40.0));
         let frame = tree.render();
         assert_eq!(frame.shapes.len(), 1);
-        assert_eq!(frame.shapes[0].shape, bastyde_canvas::ShapeKind::RoundedRect);
+        assert_eq!(
+            frame.shapes[0].shape,
+            bastyde_canvas::ShapeKind::RoundedRect
+        );
     }
 
     #[test]
@@ -690,7 +697,9 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let frame = tree.render();
 
-        let dark_accent = bastyde_tokens::ColorTokens::dark_default().accent.to_array();
+        let dark_accent = bastyde_tokens::ColorTokens::dark_default()
+            .accent
+            .to_array();
         assert_eq!(frame.shapes[0].color, dark_accent);
         assert_eq!(frame.shapes[1].color, dark_accent);
     }
@@ -709,8 +718,12 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let frame = tree.render();
 
-        let light_accent = bastyde_tokens::ColorTokens::light_default().accent.to_array();
-        let dark_accent = bastyde_tokens::ColorTokens::dark_default().accent.to_array();
+        let light_accent = bastyde_tokens::ColorTokens::light_default()
+            .accent
+            .to_array();
+        let dark_accent = bastyde_tokens::ColorTokens::dark_default()
+            .accent
+            .to_array();
 
         assert_eq!(frame.shapes[0].color, light_accent);
         assert_eq!(frame.shapes[1].color, dark_accent);
@@ -946,10 +959,7 @@ mod tests {
     }
 
     impl Widget for Sandwich {
-        fn build(
-            &mut self,
-            ctx: &mut crate::build_context::BuildContext,
-        ) -> Vec<crate::WidgetId> {
+        fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<crate::WidgetId> {
             let c = ctx.add(FillWidget::new().background(Color::GREEN));
             self.child = Some(c);
             vec![c]

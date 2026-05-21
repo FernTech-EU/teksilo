@@ -173,6 +173,7 @@ mod tests {
     use super::*;
     use crate::primitives::{RectWidget, TextWidget};
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
     use bastyde_tokens::Color;
 
     fn count_set_opacity(frame: &bastyde_canvas::RenderFrame) -> Vec<f32> {
@@ -224,7 +225,7 @@ mod tests {
     fn flipping_signal_drives_animation() {
         let visible = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Fade::new(visible.clone()).child(TextWidget::new_literal("payload")));
+        tree.add(Fade::new(visible.clone()).child(TextWidget::new(lit!("payload"))));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         visible.set(true);
@@ -246,7 +247,7 @@ mod tests {
     fn animation_completes_at_target() {
         let visible = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Fade::new(visible.clone()).child(TextWidget::new_literal("payload")));
+        tree.add(Fade::new(visible.clone()).child(TextWidget::new(lit!("payload"))));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         visible.set(true);
@@ -268,7 +269,7 @@ mod tests {
         // bounds match it regardless of opacity.
         let visible = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let id = tree.add(Fade::new(visible.clone()).child(TextWidget::new_literal("hello")));
+        let id = tree.add(Fade::new(visible.clone()).child(TextWidget::new(lit!("hello"))));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,

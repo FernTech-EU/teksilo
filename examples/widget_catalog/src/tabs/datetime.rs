@@ -112,7 +112,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("DateEdit") {
+                TextWidget::new(lit!("DateEdit")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -121,7 +121,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("TimeEdit") {
+                TextWidget::new(lit!("TimeEdit")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -130,7 +130,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("DateTimeEdit") {
+                TextWidget::new(lit!("DateTimeEdit")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -139,7 +139,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("DateRangeEdit") {
+                TextWidget::new(lit!("DateRangeEdit")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

@@ -269,7 +269,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Panel") {
+                TextWidget::new(lit!("Panel")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -286,7 +286,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Card") {
+                TextWidget::new(lit!("Card")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -295,7 +295,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("GroupBox") {
+                TextWidget::new(lit!("GroupBox")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -315,7 +315,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("GroupHeader") {
+                TextWidget::new(lit!("GroupHeader")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -330,7 +330,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Accordion") {
+                TextWidget::new(lit!("Accordion")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -347,7 +347,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("ToolBox") {
+                TextWidget::new(lit!("ToolBox")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -359,7 +359,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("ScrollArea") {
+                TextWidget::new(lit!("ScrollArea")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -385,7 +385,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("SplitView") {
+                TextWidget::new(lit!("SplitView")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

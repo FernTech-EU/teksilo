@@ -56,6 +56,7 @@
 //! `Widget` works (a `Panel` with custom chrome, a domain-specific
 //! command palette, etc.).
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_core::intent::Intent;
@@ -130,7 +131,7 @@ fn build_menu(state: SharedState, policy: PolicyBundle) -> MenuList {
     if policy.clipboard_policy.allows_cut() {
         let state_for_cut = state.clone();
         list = list.item(
-            MenuItem::new_literal("Cut")
+            MenuItem::new(lit!("Cut"))
                 .shortcut_label("Ctrl+X")
                 .enabled(has_selection)
                 .on_activate_fn(move |evt_ctx| {
@@ -148,7 +149,7 @@ fn build_menu(state: SharedState, policy: PolicyBundle) -> MenuList {
     {
         let state_for_copy = state.clone();
         list = list.item(
-            MenuItem::new_literal("Copy")
+            MenuItem::new(lit!("Copy"))
                 .shortcut_label("Ctrl+C")
                 .enabled(has_selection)
                 .on_activate_fn(move |evt_ctx| {
@@ -171,7 +172,7 @@ fn build_menu(state: SharedState, policy: PolicyBundle) -> MenuList {
     if policy.clipboard_policy.allows_paste() {
         let state_for_paste = state.clone();
         list = list.item(
-            MenuItem::new_literal("Paste")
+            MenuItem::new(lit!("Paste"))
                 .shortcut_label("Ctrl+V")
                 .on_activate_fn(move |evt_ctx| {
                     let mut st = state_for_paste.borrow_mut();
@@ -188,7 +189,7 @@ fn build_menu(state: SharedState, policy: PolicyBundle) -> MenuList {
     if policy.clipboard_policy.allows_paste_unformatted() {
         let state_for_pu = state.clone();
         list = list.item(
-            MenuItem::new_literal("Paste Unformatted")
+            MenuItem::new(lit!("Paste Unformatted"))
                 .shortcut_label("Ctrl+Shift+V")
                 .on_activate_fn(move |evt_ctx| {
                     let mut st = state_for_pu.borrow_mut();
@@ -211,7 +212,7 @@ fn build_menu(state: SharedState, policy: PolicyBundle) -> MenuList {
     {
         let state_for_sa = state.clone();
         list = list.item(
-            MenuItem::new_literal("Select All")
+            MenuItem::new(lit!("Select All"))
                 .shortcut_label("Ctrl+A")
                 .enabled(doc_non_empty)
                 .on_activate_fn(move |evt_ctx| {
@@ -264,7 +265,10 @@ pub(super) fn resolve_factory(
 /// locally so the rich-text module doesn't have to thread the public
 /// alias through every signature.
 pub(super) type RichTextContextMenuFactory = Box<
-    dyn Fn(bastyde_canvas::Point, &mut bastyde_core::widget::EventContext) -> Option<Box<dyn Widget>>,
+    dyn Fn(
+        bastyde_canvas::Point,
+        &mut bastyde_core::widget::EventContext,
+    ) -> Option<Box<dyn Widget>>,
 >;
 
 /// Keep the `Rc` re-export so callers that need the shared-state
@@ -285,7 +289,10 @@ mod tests {
         assert_eq!(INTENT_CUT, "bastyde.rich_text.cut");
         assert_eq!(INTENT_COPY, "bastyde.rich_text.copy");
         assert_eq!(INTENT_PASTE, "bastyde.rich_text.paste");
-        assert_eq!(INTENT_PASTE_UNFORMATTED, "bastyde.rich_text.paste_unformatted");
+        assert_eq!(
+            INTENT_PASTE_UNFORMATTED,
+            "bastyde.rich_text.paste_unformatted"
+        );
         assert_eq!(INTENT_SELECT_ALL, "bastyde.rich_text.select_all");
     }
 }

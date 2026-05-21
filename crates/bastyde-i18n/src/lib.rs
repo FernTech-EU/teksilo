@@ -29,15 +29,15 @@ pub mod resolve;
 #[doc(hidden)]
 pub mod thread_local;
 
-pub use config::I18nConfig;
-pub use direction::rtl_from_locale;
 pub use bastyde_core::environment::LayoutDirection;
 pub use bastyde_core::signal::{Signal, WeakSignal};
 pub use bastyde_i18n_macros::{tr, tr_signal, tr_signal_widget, tr_widget};
+pub use config::I18nConfig;
+pub use direction::rtl_from_locale;
 pub use file_watcher::{FtlFileWatcher, ReloadSink};
 pub use fluent_bundle::FluentValue;
 pub use format::{
-    DateStyle, BastydeDateTime, BastydeDateTimeFormatter, NumberFormatter, NumberStyle, TimeStyle,
+    BastydeDateTime, BastydeDateTimeFormatter, DateStyle, NumberFormatter, NumberStyle, TimeStyle,
 };
 pub use localized_string::{LocalizedString, localized};
 pub use manager::{I18nManager, LocaleSwitchOutcome, ReloadError};

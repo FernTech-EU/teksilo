@@ -1,3 +1,4 @@
+use bastyde_i18n::lit;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -198,14 +199,14 @@ impl Widget for WizardHeader {
         });
 
         let progress_id = ctx.add(
-            TextWidget::new_literal("")
+            TextWidget::new(lit!(""))
                 .bind_text(progress)
                 .style(TextStyleRole::Small)
                 .color(TextRole::Secondary)
                 .single_line(),
         );
         let title_id = ctx.add(
-            TextWidget::new_literal("")
+            TextWidget::new(lit!(""))
                 .bind_text(title)
                 .style(TextStyleRole::BodyBold)
                 .color(TextRole::Primary)
@@ -214,7 +215,7 @@ impl Widget for WizardHeader {
         // `supporting_text` wraps naturally — it's the caller's
         // explanatory paragraph.
         let supporting_id = ctx.add(
-            TextWidget::new_literal("")
+            TextWidget::new(lit!(""))
                 .bind_text(supporting_text)
                 .style(TextStyleRole::Body)
                 .color(TextRole::Secondary),
@@ -341,7 +342,7 @@ impl Widget for WizardFooter {
             let finish_focus_id = Rc::new(RefCell::new(None));
 
             let back_id = ctx.add(
-                Button::new_literal(self.back_label.clone())
+                Button::new(lit!(self.back_label.clone()))
                     .variant(ButtonVariant::Plain)
                     .on_activate_fn({
                         let current_step = current_step.clone();
@@ -360,13 +361,13 @@ impl Widget for WizardFooter {
             );
 
             let cancel_id = ctx.add(
-                Button::new_literal(self.cancel_label.clone())
+                Button::new(lit!(self.cancel_label.clone()))
                     .variant(ButtonVariant::Ghost)
                     .on_activate_fn(|ctx| ctx.dismiss_modal()),
             );
 
             let next_id = ctx.add(
-                Button::new_literal(self.next_label.clone())
+                Button::new(lit!(self.next_label.clone()))
                     .variant(ButtonVariant::Filled)
                     .on_activate_fn({
                         let current_step = current_step.clone();
@@ -393,7 +394,7 @@ impl Widget for WizardFooter {
 
             let finish_action = self.finish_action.clone();
             let finish_id = ctx.add(
-                Button::new_literal(self.finish_label.clone())
+                Button::new(lit!(self.finish_label.clone()))
                     .variant(ButtonVariant::Filled)
                     .on_activate_fn(move |ctx| {
                         if let Some(action) = &finish_action {
@@ -851,7 +852,7 @@ impl Widget for Wizard {
             )
         } else {
             ctx.add(
-                Button::new_literal(self.label.clone())
+                Button::new(lit!(self.label.clone()))
                     .variant(style)
                     .enabled(enabled)
                     .on_activate_fn({
@@ -946,8 +947,8 @@ mod tests {
     fn wizard_queues_modal_request() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(
-            Wizard::new_literal("Open wizard")
-                .step(WizardStep::new_literal("Details").content(|| FixedLeaf(220.0, 120.0))),
+            Wizard::new(lit!("Open wizard"))
+                .step(WizardStep::new(lit!("Details")).content(|| FixedLeaf(220.0, 120.0))),
         );
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -983,9 +984,9 @@ mod tests {
     fn wizard_with_button_trigger_queues_modal_on_tap() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(
-            Wizard::new_literal("Open wizard")
-                .trigger(Button::new_literal("Launch"))
-                .step(WizardStep::new_literal("Details").content(|| FixedLeaf(220.0, 120.0))),
+            Wizard::new(lit!("Open wizard"))
+                .trigger(Button::new(lit!("Launch")))
+                .step(WizardStep::new(lit!("Details")).content(|| FixedLeaf(220.0, 120.0))),
         );
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -1006,19 +1007,16 @@ mod tests {
         let finished_flag = finished.clone();
 
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let trigger = tree.add(Button::new_literal("Anchor"));
+        let trigger = tree.add(Button::new(lit!("Anchor")));
         tree.add(
-            Wizard::new_literal("Launch")
+            Wizard::new(lit!("Launch"))
                 .step(
-                    WizardStep::new_literal("Account")
-                        .content(|| Button::new_literal("Account field"))
-                        .supporting_text_literal("Enter the account details before continuing."),
+                    WizardStep::new(lit!("Account"))
+                        .content(|| Button::new(lit!("Account field")))
+                        .supporting_text(lit!("Enter the account details before continuing.")),
                 )
-                .step(
-                    WizardStep::new_literal("Review")
-                        .content(|| Button::new_literal("Review field")),
-                )
-                .finish_label_literal("Create")
+                .step(WizardStep::new(lit!("Review")).content(|| Button::new(lit!("Review field"))))
+                .finish_label(lit!("Create"))
                 .on_finish(move |_ctx| {
                     *finished_flag.borrow_mut() = true;
                 }),
@@ -1081,7 +1079,7 @@ mod tests {
     #[should_panic(expected = "requires .content(...)")]
     fn wizard_step_without_content_panics_on_modal_build() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Wizard::new_literal("Open wizard").step(WizardStep::new_literal("Details")));
+        tree.add(Wizard::new(lit!("Open wizard")).step(WizardStep::new(lit!("Details"))));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open wizard").unwrap();

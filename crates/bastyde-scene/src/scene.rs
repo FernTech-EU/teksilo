@@ -940,7 +940,11 @@ impl Scene {
         if !self.entry_index.contains_key(&id) {
             return;
         }
-        let min_z = self.entries.iter().map(|e| e.z).fold(f32::INFINITY, f32::min);
+        let min_z = self
+            .entries
+            .iter()
+            .map(|e| e.z)
+            .fold(f32::INFINITY, f32::min);
         let target = if min_z.is_finite() { min_z - 1.0 } else { -1.0 };
         self.set_z(id, target);
     }
@@ -964,8 +968,11 @@ impl Scene {
                 return;
             }
             self.entries[pos].layer = layer;
-            self.item_change_signal
-                .set(ItemChange::LayerChanged { id, old, new: layer });
+            self.item_change_signal.set(ItemChange::LayerChanged {
+                id,
+                old,
+                new: layer,
+            });
         }
     }
 

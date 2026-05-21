@@ -640,7 +640,11 @@ impl HandlerSet {
     /// Return `true` if the drop was accepted.
     pub fn on_drop(
         mut self,
-        f: impl FnMut(crate::drag_payload::DragPayload, bastyde_canvas::Point, &mut EventContext) -> bool
+        f: impl FnMut(
+            crate::drag_payload::DragPayload,
+            bastyde_canvas::Point,
+            &mut EventContext,
+        ) -> bool
         + 'static,
     ) -> Self {
         self.handlers.on_drop = Some(Box::new(f));
@@ -937,7 +941,11 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// Set the drop handler. Called when a payload is dropped on this widget.
     pub fn on_drop(
         mut self,
-        f: impl FnMut(crate::drag_payload::DragPayload, bastyde_canvas::Point, &mut EventContext) -> bool
+        f: impl FnMut(
+            crate::drag_payload::DragPayload,
+            bastyde_canvas::Point,
+            &mut EventContext,
+        ) -> bool
         + 'static,
     ) -> Self {
         self.handler_set.handlers.on_drop = Some(Box::new(f));
@@ -1508,7 +1516,11 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
 
     fn on_drop(
         self,
-        f: impl FnMut(crate::drag_payload::DragPayload, bastyde_canvas::Point, &mut EventContext) -> bool
+        f: impl FnMut(
+            crate::drag_payload::DragPayload,
+            bastyde_canvas::Point,
+            &mut EventContext,
+        ) -> bool
         + 'static,
     ) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).on_drop(f)

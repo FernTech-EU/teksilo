@@ -309,7 +309,10 @@ pub fn res(input: TokenStream) -> TokenStream {
         Err(e) => {
             return syn::Error::new(
                 span,
-                format!("bastyde-resources: cannot read `{}`: {e}", abs_path.display()),
+                format!(
+                    "bastyde-resources: cannot read `{}`: {e}",
+                    abs_path.display()
+                ),
             )
             .to_compile_error()
             .into();

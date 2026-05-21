@@ -59,13 +59,13 @@
 //!
 //! Run with: `cargo run -p scene-corkboard`
 
+use bastyde::canvas::{Path, Point, Rect};
+use bastyde::prelude::*;
+use bastyde::widgets::{Button, Expand, HStack, Panel, Spacer, TextWidget, Toolbar, VStack};
 use bastyde_scene::{
     A11yGroup, A11yNode, ItemFlags, PathItem, RectItem, Scene, SceneLayer, SceneSelectionMode,
     SceneView,
 };
-use bastyde::canvas::{Path, Point, Rect};
-use bastyde::prelude::*;
-use bastyde::widgets::{Button, Expand, HStack, Panel, Spacer, TextWidget, Toolbar, VStack};
 
 const CARDS_PER_ROW: usize = 3;
 const ROWS: usize = 3;
@@ -77,7 +77,7 @@ const SCENE_MARGIN: f32 = 32.0;
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -121,8 +121,8 @@ fn build_card(title: &str, body: &str) -> impl Widget + 'static {
     Panel::new().child(
         VStack::new()
             .spacing(8.0)
-            .child(TextWidget::new_literal(title).style(TextStyleRole::BodyBold))
-            .child(TextWidget::new_literal(body).style(TextStyleRole::Body)),
+            .child(TextWidget::new(lit!(title)).style(TextStyleRole::BodyBold))
+            .child(TextWidget::new(lit!(body)).style(TextStyleRole::Body)),
     )
 }
 
@@ -159,8 +159,10 @@ fn build_corkboard() -> SceneView {
             let cell = Rect::new(c as f32 * tile, r as f32 * tile, tile, tile);
             // Cosmetic (hairline) border: stays a crisp 1px at any zoom
             // instead of thinning out / vanishing as you zoom the corkboard.
-            let id =
-                scene.add_item(RectItem::new(cell).stroke_cosmetic(grid_color, 1.0), Point::ZERO);
+            let id = scene.add_item(
+                RectItem::new(cell).stroke_cosmetic(grid_color, 1.0),
+                Point::ZERO,
+            );
             // Decorative backdrop: keep it out of marquee box-select so
             // selection targets the connectors, not the grid.
             scene.set_flag(id, ItemFlags::IS_SELECTABLE, false);
@@ -251,8 +253,8 @@ fn build_corkboard() -> SceneView {
     // card — the annotation / "featured" / selection-overlay use case. See
     // docs/bastyde-scene.md §"Z-order and paint bands".
     if let Some(&first) = card_rects.first() {
-        let tag = RectItem::new(Rect::new(0.0, 0.0, 16.0, 16.0))
-            .fill(Color::new(0.95, 0.55, 0.15, 0.95));
+        let tag =
+            RectItem::new(Rect::new(0.0, 0.0, 16.0, 16.0)).fill(Color::new(0.95, 0.55, 0.15, 0.95));
         let tag_id = scene.add_item(tag, Point::new(first.x + first.width - 12.0, first.y - 4.0));
         scene.set_layer(tag_id, SceneLayer::Over);
         scene.set_flag(tag_id, ItemFlags::IS_SELECTABLE, false);

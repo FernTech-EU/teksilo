@@ -1,5 +1,6 @@
 //! Badge — a pill-shaped label for tags, status indicators, and counts.
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Rect, Size, SizeProposal};
@@ -84,7 +85,7 @@ impl Widget for Badge {
             .take()
             .unwrap_or_else(|| ColorProp::Bound(theme_signal.map(|t| t.colors.status_info_fg)));
 
-        let text_widget = TextWidget::new_literal(&self.label)
+        let text_widget = TextWidget::new(lit!(&self.label))
             .style(TextStyleRole::Tiny)
             .color(text)
             .single_line()
@@ -153,7 +154,7 @@ mod tests {
     #[test]
     fn badge_builds_and_renders() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let badge = tree.add(Badge::new_literal("New"));
+        let badge = tree.add(Badge::new(lit!("New")));
         tree.layout(SizeProposal::exact(200.0, 50.0));
         let b = tree.bounds(badge);
         assert!(b.width > 0.0);
@@ -163,7 +164,7 @@ mod tests {
     #[test]
     fn badge_accessibility() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let badge = tree.add(Badge::new_literal("3"));
+        let badge = tree.add(Badge::new(lit!("3")));
         tree.layout(SizeProposal::exact(200.0, 50.0));
         let info = tree.accessibility_node(badge);
         assert_eq!(info.role(), bastyde_core::accesskit::Role::Label);

@@ -42,7 +42,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         "Repeater",
         Repeater::new(make_repeater_model(), |_idx, item: &String| {
             Box::new(
-                TextWidget::new_literal(format!("• {item}"))
+                TextWidget::new(lit!(format!("• {item}")))
                     .style(TextStyleRole::Body)
                     .color(TextRole::Primary),
             )
@@ -57,7 +57,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .bind_height(180.0_f32)
             .child(ListView::new(
                 make_list_model(),
-                |_idx, item: &String, _sel| Box::new(StandardListItem::new_literal(item.clone())),
+                |_idx, item: &String, _sel| Box::new(StandardListItem::new(lit!(item.clone()))),
             )),
     );
     let standard_list_item = section(
@@ -123,7 +123,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let repeater_widget = ctx.add(
         Repeater::new(make_repeater_model(), |_idx, item: &String| {
             Box::new(
-                TextWidget::new_literal(format!("• {item}"))
+                TextWidget::new(lit!(format!("• {item}")))
                     .style(TextStyleRole::Body)
                     .color(TextRole::Primary),
             )
@@ -132,7 +132,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let list_view_widget = ctx.add(ListView::new(
         make_list_model(),
-        |_idx, item: &String, _sel| Box::new(StandardListItem::new_literal(item.clone())),
+        |_idx, item: &String, _sel| Box::new(StandardListItem::new(lit!(item.clone()))),
     ));
 
     bati!(ctx => VStack {
@@ -152,7 +152,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Repeater") {
+                TextWidget::new(lit!("Repeater")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -161,7 +161,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("ListView") {
+                TextWidget::new(lit!("ListView")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -211,7 +211,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("TreeView") {
+                TextWidget::new(lit!("TreeView")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -223,7 +223,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("TableView") {
+                TextWidget::new(lit!("TableView")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -235,7 +235,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("TreeTable") {
+                TextWidget::new(lit!("TreeTable")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

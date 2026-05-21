@@ -31,7 +31,7 @@ use bastyde::widgets::{
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -241,18 +241,18 @@ impl Widget for Root {
         //     with distinct tuple payloads
         //   - Go to line 100: struct variant constructed inline
         let menu_bar = MenuBar::new()
-            .menu_literal("File", || {
+            .menu(lit!("File"), || {
                 Box::new(
                     MenuList::new()
                         .item(
-                            MenuItem::new_literal("Open notes.txt")
+                            MenuItem::new(lit!("Open notes.txt"))
                                 .for_shortcut("app.open")
                                 .on_activate_fn(|ctx: &mut EventContext| {
                                     ctx.send_intent(AppIntent::Open("notes.txt".into()));
                                 }),
                         )
                         .item(
-                            MenuItem::new_literal("Save")
+                            MenuItem::new(lit!("Save"))
                                 .for_shortcut("app.save")
                                 .on_activate_fn(|ctx: &mut EventContext| {
                                     ctx.send_intent(AppIntent::Save);
@@ -260,7 +260,7 @@ impl Widget for Root {
                         )
                         .separator()
                         .item(
-                            MenuItem::new_literal("Quit")
+                            MenuItem::new(lit!("Quit"))
                                 .for_shortcut("app.quit")
                                 .on_activate_fn(|ctx: &mut EventContext| {
                                     ctx.send_intent(AppIntent::Quit);
@@ -268,18 +268,18 @@ impl Widget for Root {
                         ),
                 )
             })
-            .menu_literal("Edit", || {
+            .menu(lit!("Edit"), || {
                 Box::new(
                     MenuList::new()
                         .item(
-                            MenuItem::new_literal("Bold")
+                            MenuItem::new(lit!("Bold"))
                                 .for_shortcut("edit.format.bold")
                                 .on_activate_fn(|ctx: &mut EventContext| {
                                     ctx.send_intent(AppIntent::ToggleBold);
                                 }),
                         )
                         .item(
-                            MenuItem::new_literal("Italic")
+                            MenuItem::new(lit!("Italic"))
                                 .for_shortcut("edit.format.italic")
                                 .on_activate_fn(|ctx: &mut EventContext| {
                                     ctx.send_intent(AppIntent::ToggleItalic);
@@ -287,7 +287,7 @@ impl Widget for Root {
                         )
                         .separator()
                         .item(
-                            MenuItem::new_literal("Find…")
+                            MenuItem::new(lit!("Find…"))
                                 .for_shortcut("edit.find")
                                 .on_activate_fn(|ctx: &mut EventContext| {
                                     ctx.send_intent(AppIntent::Find);
@@ -295,33 +295,33 @@ impl Widget for Root {
                         ),
                 )
             })
-            .menu_literal("View", || {
+            .menu(lit!("View"), || {
                 Box::new(
                     MenuList::new()
                         .item(
-                            MenuItem::new_literal("Scroll up")
+                            MenuItem::new(lit!("Scroll up"))
                                 .for_shortcut("app.scroll_by")
                                 .on_activate_fn(|ctx: &mut EventContext| {
                                     ctx.send_intent(AppIntent::ScrollBy(-1));
                                 }),
                         )
-                        .item(MenuItem::new_literal("Scroll down").on_activate_fn(
+                        .item(MenuItem::new(lit!("Scroll down")).on_activate_fn(
                             |ctx: &mut EventContext| {
                                 ctx.send_intent(AppIntent::ScrollBy(1));
                             },
                         ))
                         .separator()
-                        .item(MenuItem::new_literal("Go to line 100").on_activate_fn(
+                        .item(MenuItem::new(lit!("Go to line 100")).on_activate_fn(
                             |ctx: &mut EventContext| {
                                 ctx.send_intent(AppIntent::GoToLine { line: 100 });
                             },
                         )),
                 )
             })
-            .menu_literal("Help", || {
+            .menu(lit!("Help"), || {
                 Box::new(
                     MenuList::new().item(
-                        MenuItem::new_literal("Show Help")
+                        MenuItem::new(lit!("Show Help"))
                             .for_shortcut("help.show")
                             .on_activate_fn(|ctx: &mut EventContext| {
                                 ctx.send_intent(AppIntent::Help);
@@ -335,7 +335,7 @@ impl Widget for Root {
             bastyde::i18n::LocalizedString::literal("Save the current document."),
         )
         .for_shortcut("app.save");
-        let save_button = Button::new_literal("Save (button)")
+        let save_button = Button::new(lit!("Save (button)"))
             .variant(ButtonVariant::Filled)
             .on_activate_fn(|ctx: &mut EventContext| {
                 ctx.send_intent(AppIntent::Save);
@@ -343,15 +343,14 @@ impl Widget for Root {
             .rich_tooltip_content(tooltip);
 
         // Button firing a tuple payload programmatically.
-        let open_button = Button::new_literal("Open 'from-button.md'").on_activate_fn(
-            |ctx: &mut EventContext| {
+        let open_button =
+            Button::new(lit!("Open 'from-button.md'")).on_activate_fn(|ctx: &mut EventContext| {
                 ctx.send_intent(AppIntent::Open("from-button.md".into()));
-            },
-        );
+            });
 
         // Button firing a struct payload programmatically.
         let goto_button =
-            Button::new_literal("Go to line 7").on_activate_fn(|ctx: &mut EventContext| {
+            Button::new(lit!("Go to line 7")).on_activate_fn(|ctx: &mut EventContext| {
                 ctx.send_intent(AppIntent::GoToLine { line: 7 });
             });
 
@@ -367,15 +366,14 @@ impl Widget for Root {
                         .child(goto_button)
                         .child(Spacer::new())
                         .child(
-                            TextWidget::new_literal(
-                                "Press PageUp / PageDown, or use the View menu to see the typed payload print.",
+                            TextWidget::new(lit!("Press PageUp / PageDown, or use the View menu to see the typed payload print."),
                             )
                             .color(theme.colors.text_secondary),
                         ),
                 ),
             );
 
-        let settings_heading = TextWidget::new_literal("Shortcut settings")
+        let settings_heading = TextWidget::new(lit!("Shortcut settings"))
             .style(theme.typography.body_bold.clone())
             .color(theme.colors.text_primary);
         let settings_panel = Panel::new()
@@ -387,10 +385,10 @@ impl Widget for Root {
                     .spacing(12.0)
                     .child(settings_heading)
                     .child(
-                        TextWidget::new_literal(
+                        TextWidget::new(lit!(
                             "Click Rebind, press a chord. Esc cancels, Del/Backspace unbinds. \
-                             Conflicts auto-resolve.",
-                        )
+                             Conflicts auto-resolve."
+                        ))
                         .color(theme.colors.text_secondary),
                     )
                     .child(ShortcutSettings::new()),

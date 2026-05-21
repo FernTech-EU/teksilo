@@ -1305,7 +1305,6 @@ impl WidgetTree {
         // event_pass_through and clips_children correctly.
         self.arena.hit_test_at(point, exclude_widget)
     }
-
 }
 
 #[cfg(test)]

@@ -1389,10 +1389,7 @@ mod tests {
         );
         let frame = canvas.into_render_frame();
         assert_eq!(frame.cosmetic_lines.len(), 2);
-        assert_eq!(
-            frame.cosmetic_lines[0].width,
-            frame.cosmetic_lines[1].width
-        );
+        assert_eq!(frame.cosmetic_lines[0].width, frame.cosmetic_lines[1].width);
         assert_eq!(frame.cosmetic_lines[1].width, 1.0);
     }
 

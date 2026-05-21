@@ -24,7 +24,9 @@ use bastyde_core::build_context::BuildContext;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
-use bastyde_platform::file_dialog::{EventContextFileDialogExt, FileDialogRequest, FileDialogResult};
+use bastyde_platform::file_dialog::{
+    EventContextFileDialogExt, FileDialogRequest, FileDialogResult,
+};
 
 use crate::icon_button::IconButton;
 use crate::text_input::TextInput;

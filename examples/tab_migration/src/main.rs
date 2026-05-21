@@ -73,7 +73,7 @@ fn doc_pane(state: &DocState) -> impl Widget + 'static {
 
     Card::new()
         .header(
-            TextWidget::new_literal(title)
+            TextWidget::new(lit!(title))
                 .style(TextStyleRole::BodyBold)
                 .color(TextRole::Primary),
         )
@@ -81,10 +81,10 @@ fn doc_pane(state: &DocState) -> impl Widget + 'static {
             VStack::new()
                 .spacing(12.0)
                 .child(
-                    TextWidget::new_literal(
+                    TextWidget::new(lit!(
                         "Drag this tab's header into the other group. The tab — and \
-                         this edit count — move across intact.",
-                    )
+                         this edit count — move across intact."
+                    ))
                     .style(TextStyleRole::Body)
                     .color(TextRole::Secondary),
                 )
@@ -92,19 +92,19 @@ fn doc_pane(state: &DocState) -> impl Widget + 'static {
                     HStack::new()
                         .spacing(8.0)
                         .child(
-                            TextWidget::new_literal("Edits:")
+                            TextWidget::new(lit!("Edits:"))
                                 .style(TextStyleRole::Small)
                                 .color(TextRole::Secondary),
                         )
                         .child(
-                            TextWidget::new_literal("")
+                            TextWidget::new(lit!(""))
                                 .bind_text(edits.map(|n| n.to_string()))
                                 .style(TextStyleRole::BodyBold)
                                 .color(TextRole::Accent),
                         ),
                 )
                 .child(
-                    Button::new_literal("Make an edit")
+                    Button::new(lit!("Make an edit"))
                         .variant(ButtonVariant::Filled)
                         .on_activate_fn({
                             let edits = edits.clone();
@@ -125,11 +125,8 @@ struct Root {
 
 impl Root {
     fn new() -> Self {
-        let model_a = ListModel::from_vec(vec![
-            new_doc("Alpha"),
-            new_doc("Bravo"),
-            new_doc("Charlie"),
-        ]);
+        let model_a =
+            ListModel::from_vec(vec![new_doc("Alpha"), new_doc("Bravo"), new_doc("Charlie")]);
         let model_b = ListModel::from_vec(vec![new_doc("Xeno"), new_doc("Yotta")]);
         let selected_a = Signal::new(model_a.with_item(0, |h| h.id));
         let selected_b = Signal::new(model_b.with_item(0, |h| h.id));
@@ -162,7 +159,7 @@ impl Root {
             VStack::new()
                 .spacing(8.0)
                 .child(
-                    TextWidget::new_literal(label.to_string())
+                    TextWidget::new(lit!(label.to_string()))
                         .style(TextStyleRole::BodyBold)
                         .color(TextRole::Primary),
                 )

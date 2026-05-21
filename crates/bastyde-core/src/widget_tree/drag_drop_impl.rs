@@ -582,8 +582,10 @@ impl WidgetTree {
         // own feedback reflects its internal view of acceptance.
         if let Some(target_id) = drop_target {
             let target_bounds = self.arena.bounds(target_id);
-            let local =
-                bastyde_canvas::Point::new(position.x - target_bounds.x, position.y - target_bounds.y);
+            let local = bastyde_canvas::Point::new(
+                position.x - target_bounds.x,
+                position.y - target_bounds.y,
+            );
             let (mut ext_handler, mut own_handler) = match self.arena.get_mut(target_id) {
                 Some(node) => (
                     node.external_handlers.on_drag_hover.take(),
@@ -659,8 +661,10 @@ impl WidgetTree {
         // external. Fires exactly once, not both.
         if let Some(target_id) = drop_target {
             let target_bounds = self.arena.bounds(target_id);
-            let local =
-                bastyde_canvas::Point::new(position.x - target_bounds.x, position.y - target_bounds.y);
+            let local = bastyde_canvas::Point::new(
+                position.x - target_bounds.x,
+                position.y - target_bounds.y,
+            );
             let (taken_own, taken_ext) = match self.arena.get_mut(target_id) {
                 Some(node) => {
                     let own = node.handlers.on_drop.take();
@@ -1776,7 +1780,10 @@ mod tests {
         };
         tree.end_external_drag(Point::new(110.0, 55.0), drop_data, &mut noop);
 
-        assert!(tree.active_drag.is_none(), "external drag must clear on drop");
+        assert!(
+            tree.active_drag.is_none(),
+            "external drag must clear on drop"
+        );
         assert!(was_external.get(), "payload should report external origin");
         assert_eq!(
             *dropped_files.borrow(),
@@ -1799,10 +1806,12 @@ mod tests {
         // Inset 40 → target origin at (40, 40).
         let target = tree.add(
             FillWidget::new()
-                .on_drag_hover(|_p, _pos, _ctx| crate::drag_state::DropFeedback::HighlightRect {
-                    rect: bastyde_canvas::Rect::new(0.0, 0.0, 10.0, 10.0),
-                    color: bastyde_tokens::Color::WHITE,
-                })
+                .on_drag_hover(
+                    |_p, _pos, _ctx| crate::drag_state::DropFeedback::HighlightRect {
+                        rect: bastyde_canvas::Rect::new(0.0, 0.0, 10.0, 10.0),
+                        color: bastyde_tokens::Color::WHITE,
+                    },
+                )
                 .on_drop(move |_payload, pos, _ctx| {
                     d.set(pos);
                     true
@@ -1818,7 +1827,11 @@ mod tests {
         };
         // Drop at tree (110, 55) → target-local (70, 15).
         tree.begin_external_drag(Point::new(110.0, 55.0), data, &mut noop);
-        tree.end_external_drag(Point::new(110.0, 55.0), ExternalDropData::default(), &mut noop);
+        tree.end_external_drag(
+            Point::new(110.0, 55.0),
+            ExternalDropData::default(),
+            &mut noop,
+        );
 
         let drp = drop_local.get();
         assert!(
@@ -1841,10 +1854,12 @@ mod tests {
         let mut tree = WidgetTree::new();
         let _target = tree.add(
             FillWidget::new()
-                .on_drag_hover(|_p, _pos, _ctx| crate::drag_state::DropFeedback::HighlightRect {
-                    rect: bastyde_canvas::Rect::new(0.0, 0.0, 10.0, 10.0),
-                    color: bastyde_tokens::Color::WHITE,
-                })
+                .on_drag_hover(
+                    |_p, _pos, _ctx| crate::drag_state::DropFeedback::HighlightRect {
+                        rect: bastyde_canvas::Rect::new(0.0, 0.0, 10.0, 10.0),
+                        color: bastyde_tokens::Color::WHITE,
+                    },
+                )
                 .on_drag_leave(move |_ctx| l.set(l.get() + 1))
                 .on_drop(|_, _, _| true),
         );
@@ -1860,7 +1875,11 @@ mod tests {
 
         tree.cancel_external_drag(&mut noop);
         assert!(tree.active_drag.is_none(), "cancel must clear the session");
-        assert_eq!(left.get(), 1, "cancel must fire on_drag_leave on the target");
+        assert_eq!(
+            left.get(),
+            1,
+            "cancel must fire on_drag_leave on the target"
+        );
     }
 
     #[test]
@@ -1890,13 +1909,19 @@ mod tests {
         succeed: bool,
     }
     impl crate::window::WindowOps for RecordingWindowOps {
-        fn open_window(&mut self, _c: crate::window::WindowConfig) -> crate::window::BastydeWindowId {
+        fn open_window(
+            &mut self,
+            _c: crate::window::WindowConfig,
+        ) -> crate::window::BastydeWindowId {
             panic!("not used in these tests")
         }
         fn find_window(&self, _s: &str) -> Option<crate::window::BastydeWindowId> {
             None
         }
-        fn window_state(&self, _id: crate::window::BastydeWindowId) -> Option<crate::window::WindowState> {
+        fn window_state(
+            &self,
+            _id: crate::window::BastydeWindowId,
+        ) -> Option<crate::window::WindowState> {
             None
         }
         fn windows(&self) -> Vec<crate::window::WindowState> {
@@ -1967,9 +1992,8 @@ mod tests {
         };
 
         let mut tree = WidgetTree::new();
-        let source = tree.add(
-            FillWidget::new().on_drag_ended(move |outcome, _ctx| o.set(Some(outcome))),
-        );
+        let source =
+            tree.add(FillWidget::new().on_drag_ended(move |outcome, _ctx| o.set(Some(outcome))));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let mut ctx = crate::widget::EventContext::new();
@@ -1980,7 +2004,10 @@ mod tests {
 
         tree.handle_os_drag_ended(DropOutcome::OsMove, &mut ops);
         assert_eq!(outcome.get(), Some(DropOutcome::OsMove));
-        assert!(tree.outbound_drag_source.is_none(), "cleared after delivery");
+        assert!(
+            tree.outbound_drag_source.is_none(),
+            "cleared after delivery"
+        );
     }
 
     #[test]
@@ -2039,9 +2066,8 @@ mod tests {
         let o = outcome.clone();
 
         let mut tree = WidgetTree::new();
-        let source = tree.add(
-            FillWidget::new().on_drag_ended(move |outcome, _ctx| o.set(Some(outcome))),
-        );
+        let source =
+            tree.add(FillWidget::new().on_drag_ended(move |outcome, _ctx| o.set(Some(outcome))));
         let _target = tree.add(FillWidget::new().on_drop(|_, _, _| true));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -2068,9 +2094,8 @@ mod tests {
         let o = outcome.clone();
 
         let mut tree = WidgetTree::new();
-        let source = tree.add(
-            FillWidget::new().on_drag_ended(move |outcome, _ctx| o.set(Some(outcome))),
-        );
+        let source =
+            tree.add(FillWidget::new().on_drag_ended(move |outcome, _ctx| o.set(Some(outcome))));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let mut ctx = crate::widget::EventContext::new();
@@ -2105,20 +2130,20 @@ mod tests {
         let lo = last_outcome.clone();
 
         let mut tree = WidgetTree::new();
-        let source =
-            tree.add(FillWidget::new().on_drag_ended(move |outcome, _ctx| {
-                e.set(e.get() + 1);
-                lo.set(Some(outcome));
-            }));
-        let _target = tree.add(FillWidget::new().on_drop(move |mut p, _, _| {
-            match p.take_typed::<u32>() {
-                Some(v) => {
-                    g.set(v);
-                    true
-                }
-                None => false,
-            }
+        let source = tree.add(FillWidget::new().on_drag_ended(move |outcome, _ctx| {
+            e.set(e.get() + 1);
+            lo.set(Some(outcome));
         }));
+        let _target =
+            tree.add(
+                FillWidget::new().on_drop(move |mut p, _, _| match p.take_typed::<u32>() {
+                    Some(v) => {
+                        g.set(v);
+                        true
+                    }
+                    None => false,
+                }),
+            );
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         // Internal drag with a typed value AND an exportable MIME rep.
@@ -2132,7 +2157,10 @@ mod tests {
         // Leave the window → escalate to OS drag (typed payload stashed).
         tree.handle_drag_move(Point::new(-5.0, 50.0), &mut ops);
         assert!(tree.active_drag.is_none());
-        assert!(super::has_outbound_typed(), "typed payload stashed globally");
+        assert!(
+            super::has_outbound_typed(),
+            "typed payload stashed globally"
+        );
 
         // OS drag re-enters → restored as an internal session with the typed
         // value (not an external file/text drop).
@@ -2158,7 +2186,11 @@ mod tests {
             &mut ops,
         );
         assert_eq!(got_typed.get(), 123, "target received the typed payload");
-        assert_eq!(ended.get(), 0, "source on_drag_ended not fired by the drop itself");
+        assert_eq!(
+            ended.get(),
+            0,
+            "source on_drag_ended not fired by the drop itself"
+        );
 
         // OS posts the terminal event on the source window → exactly one
         // on_drag_ended with the OS outcome.
@@ -2201,15 +2233,15 @@ mod tests {
         let got = Rc::new(Cell::new(0_u32));
         let g = got.clone();
         let mut tree_b = WidgetTree::new();
-        let _t = tree_b.add(FillWidget::new().on_drop(move |mut p, _, _| {
-            match p.take_typed::<u32>() {
+        let _t = tree_b.add(FillWidget::new().on_drop(
+            move |mut p, _, _| match p.take_typed::<u32>() {
                 Some(v) => {
                     g.set(v);
                     true
                 }
                 None => false,
-            }
-        }));
+            },
+        ));
         tree_b.layout(SizeProposal::exact(200.0, 100.0));
 
         tree_b.begin_external_drag(
@@ -2229,7 +2261,11 @@ mod tests {
             crate::drag_payload::ExternalDropData::default(),
             &mut ops,
         );
-        assert_eq!(got.get(), 77, "window B's target received the typed payload");
+        assert_eq!(
+            got.get(),
+            77,
+            "window B's target received the typed payload"
+        );
 
         // Source window A reports the terminal outcome.
         tree_a.handle_os_drag_ended(DropOutcome::OsCopy, &mut ops);
@@ -2328,8 +2364,14 @@ mod tests {
             &mut ops,
         );
         let d = tree.active_drag.as_ref().expect("external session");
-        assert!(d.is_external, "stale stash did not hijack the new external drag");
-        assert!(!d.payload.has_typed::<u32>(), "no stale typed payload leaked in");
+        assert!(
+            d.is_external,
+            "stale stash did not hijack the new external drag"
+        );
+        assert!(
+            !d.payload.has_typed::<u32>(),
+            "no stale typed payload leaked in"
+        );
         assert_eq!(d.payload.files(), &[PathBuf::from("/tmp/real")]);
     }
 

@@ -904,7 +904,10 @@ mod multi_window_tests {
             let mut ctx = EventContext::new().with_window_context(&mut ops, Some(main_state));
             ctx.close_window_by_id(BastydeWindowId::new(9));
         }
-        assert_eq!(ops.close_calls.borrow().as_slice(), &[BastydeWindowId::new(9)]);
+        assert_eq!(
+            ops.close_calls.borrow().as_slice(),
+            &[BastydeWindowId::new(9)]
+        );
     }
 
     #[test]

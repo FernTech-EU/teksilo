@@ -478,7 +478,9 @@ pub(super) fn report_ime_cursor_area(state: &SharedState, ctx: &mut EventContext
         if !st.has_focus || !st.engine.has_full_layout() {
             return;
         }
-        let caret = st.engine.caret_rect(st.cursor.position(), st.cursor_affinity);
+        let caret = st
+            .engine
+            .caret_rect(st.cursor.position(), st.cursor_affinity);
         bastyde_canvas::Rect::new(
             st.viewport_origin.x + caret[0] - st.scroll_x.get(),
             st.viewport_origin.y + caret[1] - st.scroll_y.get(),

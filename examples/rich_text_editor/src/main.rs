@@ -145,7 +145,7 @@ fn apply_alignment_demos(doc: &TextDocument) {
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -403,17 +403,15 @@ fn main() {
                             .child(highlight_controls)
                             .child(
                                 Expand::new().child(
-                                    SplitView::new(split)
-                                        .first(editor)
-                                        .second(
-                                            // The preview stays bare of highlights:
-                                            // `read_only` defaults to
-                                            // `show_highlights(false)`. A read-only
-                                            // *syntax* viewer would opt back in with
-                                            // `.show_highlights(true)`.
-                                            RichTextEditor::read_only(doc_preview)
-                                                .v_scroll_policy(ScrollPolicy::Auto),
-                                        ),
+                                    SplitView::new(split).first(editor).second(
+                                        // The preview stays bare of highlights:
+                                        // `read_only` defaults to
+                                        // `show_highlights(false)`. A read-only
+                                        // *syntax* viewer would opt back in with
+                                        // `.show_highlights(true)`.
+                                        RichTextEditor::read_only(doc_preview)
+                                            .v_scroll_policy(ScrollPolicy::Auto),
+                                    ),
                                 ),
                             ),
                     )

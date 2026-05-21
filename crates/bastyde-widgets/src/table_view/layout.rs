@@ -131,10 +131,11 @@ mod tests {
     use super::*;
     use crate::primitives::TextWidget;
     use crate::table_view::column::{CellContext, Column};
+    use bastyde_i18n::lit;
 
     fn col(id: &str, w: ColumnWidth) -> Column<&'static str> {
         Column::<&str>::new(id, "h", |_, _: &CellContext| {
-            Box::new(TextWidget::new_literal("x"))
+            Box::new(TextWidget::new(lit!("x")))
         })
         .width(w)
     }

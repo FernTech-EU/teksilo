@@ -9,7 +9,7 @@ use bastyde::widgets::{
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -47,13 +47,12 @@ impl Widget for SplitViewDemo {
                 VStack::new()
                     .spacing(24.0)
                     .child(
-                        TextWidget::new_literal("SplitView")
+                        TextWidget::new(lit!("SplitView"))
                             .style(TextStyleRole::BodyBold)
                             .color(TextRole::Primary),
                     )
                     .child(
-                        TextWidget::new_literal(
-                            "Drag the divider or focus it and use arrow keys to resize the panes.",
+                        TextWidget::new(lit!("Drag the divider or focus it and use arrow keys to resize the panes."),
                         )
                         .style(TextStyleRole::Body)
                         .color(TextRole::Secondary),
@@ -129,12 +128,12 @@ impl Widget for SplitViewDemo {
 
 fn build_editor_pane(title: &str, items: &[&str], theme: &Theme) -> impl Widget {
     let mut stack = VStack::new().spacing(10.0).child(
-        TextWidget::new_literal(title)
+        TextWidget::new(lit!(title))
             .style(theme.typography.body_bold.clone())
             .color(theme.colors.text_primary),
     );
     for item in items {
-        stack = stack.child(Badge::new_literal(*item));
+        stack = stack.child(Badge::new(lit!(*item)));
     }
     Panel::new().padding(16.0).child(stack)
 }
@@ -144,12 +143,12 @@ fn build_preview_pane(title: &str, text: &str, theme: &Theme) -> impl Widget {
         VStack::new()
             .spacing(12.0)
             .child(
-                TextWidget::new_literal(title)
+                TextWidget::new(lit!(title))
                     .style(theme.typography.body_bold.clone())
                     .color(theme.colors.text_primary),
             )
             .child(
-                TextWidget::new_literal(text)
+                TextWidget::new(lit!(text))
                     .style(theme.typography.body.clone())
                     .color(theme.colors.text_secondary),
             ),

@@ -202,10 +202,11 @@ impl WindowManager {
         // against the current monitor — into `config` before any
         // winit attribute is built. See `window_persist` for the
         // exact policy.
-        let persist_service: Option<bastyde_settings::WindowStateService> = self
-            .app_context_template
-            .as_ref()
-            .and_then(|t| t.app_state::<bastyde_settings::WindowStateService>().cloned());
+        let persist_service: Option<bastyde_settings::WindowStateService> =
+            self.app_context_template.as_ref().and_then(|t| {
+                t.app_state::<bastyde_settings::WindowStateService>()
+                    .cloned()
+            });
         if let Some(svc) = persist_service.as_ref() {
             crate::window_persist::apply_restored_geometry(&mut config, svc, target);
         }
@@ -654,9 +655,9 @@ impl WindowManager {
         let Some(managed) = self.windows.get(&winit_id) else {
             return;
         };
-        if let Some(parent) = bastyde_core::raw_handle::ParentHandle::from_window(
-            managed.platform_window.window(),
-        ) {
+        if let Some(parent) =
+            bastyde_core::raw_handle::ParentHandle::from_window(managed.platform_window.window())
+        {
             handle.attach(bastyde_id, parent, poster);
         }
     }
@@ -852,7 +853,9 @@ impl WindowManager {
 
     /// `pub(crate)` access to the bastyde→winit id map used by
     /// [`WindowOpsImpl`](WindowOpsImpl).
-    pub(crate) fn bastyde_to_winit_map(&self) -> &HashMap<BastydeWindowId, winit::window::WindowId> {
+    pub(crate) fn bastyde_to_winit_map(
+        &self,
+    ) -> &HashMap<BastydeWindowId, winit::window::WindowId> {
         &self.bastyde_to_winit
     }
 
@@ -971,7 +974,10 @@ impl WindowManager {
     }
 
     /// Get the winit WindowId for a BastydeWindowId.
-    pub fn winit_id_for_bastyde(&self, bastyde_id: BastydeWindowId) -> Option<winit::window::WindowId> {
+    pub fn winit_id_for_bastyde(
+        &self,
+        bastyde_id: BastydeWindowId,
+    ) -> Option<winit::window::WindowId> {
         self.bastyde_to_winit.get(&bastyde_id).copied()
     }
 
@@ -980,7 +986,10 @@ impl WindowManager {
     /// platform supports it. Returns `None` for windows that use native
     /// decorations or run on a window system without custom chrome support
     /// (currently X11).
-    pub fn title_bar_host(&self, bastyde_id: BastydeWindowId) -> Option<Rc<dyn PlatformTitleBarHost>> {
+    pub fn title_bar_host(
+        &self,
+        bastyde_id: BastydeWindowId,
+    ) -> Option<Rc<dyn PlatformTitleBarHost>> {
         let winit_id = self.bastyde_to_winit.get(&bastyde_id).copied()?;
         self.windows
             .get(&winit_id)

@@ -22,7 +22,9 @@
 
 use std::ops::Range;
 
-use bastyde_parse::{BodyItem, BatiElement, BatiElse, BatiFor, BatiIf, BatiMatch, BatiRoot, PropArg};
+use bastyde_parse::{
+    BatiElement, BatiElse, BatiFor, BatiIf, BatiMatch, BatiRoot, BodyItem, PropArg,
+};
 use proc_macro2::TokenStream;
 use quote::ToTokens;
 

@@ -32,7 +32,7 @@ fn dark_mode_toolbar() -> impl Widget {
         Toolbar {
             HStack {
                 Spacer
-                Button::new_literal("Toggle Dark Mode") {
+                Button::new(lit!("Toggle Dark Mode")) {
                     on_activate_fn: move |ctx| {
                         let next = !is_dark.get();
                         is_dark.set(next);
@@ -116,13 +116,13 @@ impl Widget for Root {
                         VStack {
                             spacing: 14.0
                             // Heading.
-                            TextWidget::new_literal("SpinBox gallery") {
+                            TextWidget::new(lit!("SpinBox gallery")) {
                                 style: TextStyleRole::BodyBold
                                 color: TextRole::Primary
                             }
-                            TextWidget::new_literal("Every SpinBox feature on one page. \
+                            TextWidget::new(lit!("Every SpinBox feature on one page. \
                             Use arrow keys, Page↑/Page↓, mouse wheel, \
-                            or the ± buttons; press Enter or Tab to commit typed input.") {
+                            or the ± buttons; press Enter or Tab to commit typed input.")) {
                                 style: TextStyleRole::Body
                                 color: TextRole::Secondary
                             }
@@ -213,7 +213,7 @@ impl Widget for Root {
                             // signal so the different widths are easy to
                             // compare side by side. Each row labels its
                             // width policy.
-                            TextWidget::new_literal("Width control") {
+                            TextWidget::new(lit!("Width control")) {
                                 style: TextStyleRole::BodyBold
                                 color: TextRole::Primary
                             }
@@ -254,8 +254,7 @@ impl Widget for Root {
                             // instead of the normal `row` helper.
                             HStack {
                                 spacing: 12.0
-                                MinSizeForLabel::new(TextWidget::new_literal(
-                                    "Fill — .fill_width()",
+                                MinSizeForLabel::new(TextWidget::new(lit!("Fill — .fill_width()"),
                                 )) {
                                     width: 220.0
                                 }
@@ -266,14 +265,14 @@ impl Widget for Root {
                                         label: "Opacity (fill)"
                                     }
                                 }
-                                TextWidget::new_literal("") {
+                                TextWidget::new(lit!("")) {
                                     bind_text: self.values.opacity.map(|v| format!("{} %", v))
                                 }
                             }
                             // Reset button.
                             HStack {
                                 spacing: 8.0
-                                Button::new_literal("Reset all") {
+                                Button::new(lit!("Reset all")) {
                                     variant: ButtonVariant::Plain
                                     on_activate_fn: move |_ctx| {
                                         reset_font.set(12);
@@ -310,11 +309,11 @@ fn row(
     bati!(
         HStack {
             spacing: 12.0
-            MinSizeForLabel::new(TextWidget::new_literal(label)) {
+            MinSizeForLabel::new(TextWidget::new(lit!(label))) {
                 width: 220.0
             }
             child: spin
-            TextWidget::new_literal("") {
+            TextWidget::new(lit!("")) {
                 bind_text: readout
             }
         }

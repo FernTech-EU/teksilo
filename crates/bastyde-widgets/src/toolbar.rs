@@ -155,6 +155,7 @@ impl Widget for Toolbar {
 mod tests {
     use super::*;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn toolbar_builds() {
@@ -169,7 +170,7 @@ mod tests {
     fn toolbar_with_children() {
         use crate::Button;
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let btn = tree.add(Button::new_literal("Action"));
+        let btn = tree.add(Button::new(lit!("Action")));
         let tb = tree.add(Toolbar::new().add_child(btn));
         tree.layout(SizeProposal::exact(400.0, 50.0));
         let b = tree.bounds(tb);
@@ -192,7 +193,7 @@ mod tests {
     #[test]
     fn toolbar_custom_label_overrides_default() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let tb = tree.add(Toolbar::new().label_literal("Formatting"));
+        let tb = tree.add(Toolbar::new().label(lit!("Formatting")));
         tree.layout(SizeProposal::exact(400.0, 50.0));
         let info = tree.accessibility_node(tb);
         assert_eq!(info.name(), Some("Formatting"));

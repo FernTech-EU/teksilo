@@ -52,10 +52,10 @@ use bastyde_core::{DragImageData, DropOutcome, ExternalDropData, OutboundDragDat
 
 #[cfg(target_os = "macos")]
 mod macos;
-#[cfg(target_os = "windows")]
-mod windows;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod wayland;
+#[cfg(target_os = "windows")]
+mod windows;
 
 // ============================================================
 // ExternalDragEvent

@@ -3,6 +3,7 @@
 //! Follows the Button pattern for interaction but renders as underlined text.
 //! V2 attached handlers — no event() override.
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Rect, Size, SizeProposal};
@@ -128,7 +129,10 @@ impl Link {
 
     /// Attach a composite tooltip — third tier, hosting an arbitrary
     /// widget tree. See [`Button::composite_tooltip`](crate::button::Button::composite_tooltip).
-    pub fn composite_tooltip(mut self, content: impl bastyde_core::widget::Widget + 'static) -> Self {
+    pub fn composite_tooltip(
+        mut self,
+        content: impl bastyde_core::widget::Widget + 'static,
+    ) -> Self {
         self.composite_tooltip_content = Some(Box::new(content));
         self.tooltip_text = None;
         self.rich_tooltip_source = None;
@@ -207,7 +211,7 @@ impl Widget for Link {
                 crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
             );
         } else if let Some(ref tooltip_text) = self.tooltip_text {
-            let tw = crate::tooltip::TooltipWidget::new_literal(tooltip_text);
+            let tw = crate::tooltip::TooltipWidget::new(lit!(tooltip_text));
             let tid = ctx.add(tw);
             ctx.attach_tooltip(root_id, tid, std::time::Duration::from_millis(500));
         }

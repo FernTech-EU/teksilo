@@ -317,12 +317,16 @@ mod tests {
         // band must shrink as the view zooms in. A point 3 scene-units off a
         // cosmetic 4px line is inside the band at 1× but outside at 4×.
         let mut path = Path::new();
-        path.move_to(Point::new(0.0, 0.0)).line_to(Point::new(100.0, 0.0));
+        path.move_to(Point::new(0.0, 0.0))
+            .line_to(Point::new(100.0, 0.0));
         let item =
             PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 8.0)).stroke_cosmetic(Color::BLACK, 4.0);
         let test = item.clone_shape_test();
         let p = Point::new(50.0, 3.0);
-        assert!(test(p, 1.0), "cosmetic band at 1x: width 4 → tolerance 4 → hit");
+        assert!(
+            test(p, 1.0),
+            "cosmetic band at 1x: width 4 → tolerance 4 → hit"
+        );
         assert!(
             !test(p, 4.0),
             "cosmetic band shrinks at 4x: width 1 → tolerance 2.5 → miss"
@@ -331,7 +335,9 @@ mod tests {
         // A LOGICAL stroke's width is already in scene units, so its band is
         // unaffected by the view scale (regression guard).
         let mut path2 = Path::new();
-        path2.move_to(Point::new(0.0, 0.0)).line_to(Point::new(100.0, 0.0));
+        path2
+            .move_to(Point::new(0.0, 0.0))
+            .line_to(Point::new(100.0, 0.0));
         let logical =
             PathItem::new(path2, Rect::new(0.0, 0.0, 100.0, 8.0)).stroke(Color::BLACK, 4.0);
         let test_l = logical.clone_shape_test();

@@ -41,9 +41,9 @@ fn cascade_plain_column() -> impl Widget + 'static {
                         .style(TextStyleRole::Small)
                         .color(TextRole::Secondary),
                 )
-                .child(Button::new_literal("Save").tooltip(tr!(ovr_tooltip_save_doc())))
-                .child(Button::new_literal("Open").tooltip(tr!(ovr_tooltip_open_file())))
-                .child(Button::new_literal("Close").tooltip(tr!(ovr_tooltip_close_tab())))
+                .child(Button::new(lit!("Save")).tooltip(tr!(ovr_tooltip_save_doc())))
+                .child(Button::new(lit!("Open")).tooltip(tr!(ovr_tooltip_open_file())))
+                .child(Button::new(lit!("Close")).tooltip(tr!(ovr_tooltip_close_tab())))
                 .child(Spacer::new()),
         )
 }
@@ -109,7 +109,9 @@ fn province_composite_body() -> impl Widget + 'static {
                 .spacing(12.0)
                 .child(Button::new(tr!(ovr_stat_food_label())).rich_tooltip(KEY_STAT_FOOD))
                 .child(Button::new(tr!(ovr_stat_trade_label())).rich_tooltip(KEY_STAT_TRADE))
-                .child(Button::new(tr!(ovr_stat_happiness_label())).rich_tooltip(KEY_STAT_HAPPINESS)),
+                .child(
+                    Button::new(tr!(ovr_stat_happiness_label())).rich_tooltip(KEY_STAT_HAPPINESS),
+                ),
         )
 }
 
@@ -135,8 +137,7 @@ fn tabbed_composite_body() -> impl Widget + 'static {
         )
         .static_tab(
             TabInfo::new().title(tr!(ovr_tab_history())),
-            TextWidget::new(tr!(ovr_province_history()))
-                .color(TextRole::TooltipText),
+            TextWidget::new(tr!(ovr_province_history())).color(TextRole::TooltipText),
         );
     VStack::new()
         .spacing(8.0)
@@ -252,11 +253,7 @@ pub fn refs() -> LocalizedString {
 
 pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
-    let tooltip = section(
-        ctx,
-        tr!(ovr_section_tooltip_cascade()),
-        cascade_showcase(),
-    );
+    let tooltip = section(ctx, tr!(ovr_section_tooltip_cascade()), cascade_showcase());
     let popover = section(
         ctx,
         tr!(ovr_section_popover()),
@@ -517,7 +514,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Snackbar") {
+                TextWidget::new(lit!("Snackbar")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

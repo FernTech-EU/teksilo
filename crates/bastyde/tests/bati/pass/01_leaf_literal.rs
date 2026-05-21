@@ -41,7 +41,7 @@ impl Widget for Probe {
 
 fn main() {
     let w: Probe = bati!(
-        Probe::new_literal("Click Me") {
+        Probe::new(lit!("Click Me")) {
             style: 42
             tag: "demo"
         }

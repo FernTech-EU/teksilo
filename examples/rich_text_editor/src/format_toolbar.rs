@@ -138,9 +138,8 @@ impl Widget for FormatToolbar {
         let is_in_table = ctx.signal(self.handle.is_in_table());
 
         // ── Heading-picker mutable signal (two-way bound to ComboBox) ──
-        let heading_selected: Signal<Option<HeadingLevel>> = ctx.signal(Some(
-            HeadingLevel::from_u8(self.handle.get_heading_level()),
-        ));
+        let heading_selected: Signal<Option<HeadingLevel>> =
+            ctx.signal(Some(HeadingLevel::from_u8(self.handle.get_heading_level())));
 
         // ── Editor → toolbar re-sync via per-frame poll with version
         // diff. NOT direct `ctx.effect(&format_version, ...)` because
@@ -254,11 +253,9 @@ impl Widget for FormatToolbar {
         ));
 
         let heading_picker_id = ctx.add(
-            ComboBox::from_items(
-                ALL_HEADING_LEVELS,
-                heading_selected.clone(),
-                |level| level.label().to_string(),
-            )
+            ComboBox::from_items(ALL_HEADING_LEVELS, heading_selected.clone(), |level| {
+                level.label().to_string()
+            })
             .label("Heading level")
             .max_visible_items(7),
         );
@@ -382,7 +379,7 @@ impl Widget for FormatToolbar {
 
         let row1 = ctx.add(
             Toolbar::new()
-                .label_literal("Formatting")
+                .label(lit!("Formatting"))
                 .add_child(bold_id)
                 .add_child(italic_id)
                 .add_child(underline_id)
@@ -480,7 +477,7 @@ impl Widget for FormatToolbar {
 
         let row2 = ctx.add(
             Toolbar::new()
-                .label_literal("Table operations")
+                .label(lit!("Table operations"))
                 .add_child(row_above_id)
                 .add_child(row_below_id)
                 .add_child(col_before_id)
@@ -534,7 +531,7 @@ fn toggle_btn(
     IconButton::new(IconWidget::from_svg_icon(icon))
         .toolbar()
         .focusable(false)
-        .tooltip_literal(tooltip)
+        .tooltip(lit!(tooltip))
         .toggle(state)
         .on_activate_fn(on_click)
 }
@@ -547,7 +544,7 @@ fn plain_btn(
     IconButton::new(IconWidget::from_svg_icon(icon))
         .toolbar()
         .focusable(false)
-        .tooltip_literal(tooltip)
+        .tooltip(lit!(tooltip))
         .on_activate_fn(on_click)
 }
 
@@ -631,7 +628,10 @@ mod tests {
         // Block-format operations don't need a selection — they
         // affect the caret's current block.
         let doc = TextDocument::new();
-        doc.set_markdown("Hello").expect("parse").wait().expect("import");
+        doc.set_markdown("Hello")
+            .expect("parse")
+            .wait()
+            .expect("import");
         let editor = RichTextEditor::editor(doc);
         let handle = editor.handle();
         assert_eq!(handle.get_heading_level(), 0);
@@ -644,7 +644,10 @@ mod tests {
     #[test]
     fn handle_alignment_round_trip() {
         let doc = TextDocument::new();
-        doc.set_markdown("Hello").expect("parse").wait().expect("import");
+        doc.set_markdown("Hello")
+            .expect("parse")
+            .wait()
+            .expect("import");
         let editor = RichTextEditor::editor(doc);
         let handle = editor.handle();
         assert_eq!(handle.get_alignment(), Alignment::Left);

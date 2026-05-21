@@ -24,6 +24,7 @@
 //! `set_expanded`. The label binds reactively to the hex value so
 //! AT name updates as the picker mutates the bound color.
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Rect, SizeProposal};
@@ -362,7 +363,7 @@ impl Widget for ColorEdit {
         let trigger = if let Some(ls) = self.label.take() {
             Button::new(ls)
         } else {
-            Button::new_literal("").bind_label(label_signal)
+            Button::new(lit!("")).bind_label(label_signal)
         };
         let mut trigger = trigger.enabled(self.initial_enabled).leading(swatch);
         if self.show_chevron {

@@ -79,17 +79,17 @@ impl Widget for Root {
             VStack::new()
                 .spacing(12.0)
                 .child(
-                    TextWidget::new_literal("ComboBox / Dropdown")
+                    TextWidget::new(lit!("ComboBox / Dropdown"))
                         .style(TextStyleRole::BodyBold)
                         .color(TextRole::Primary),
                 )
                 .child(
-                    TextWidget::new_literal(
+                    TextWidget::new(lit!(
                         "Click to open the dropdown. Use arrow keys to navigate, \
                          Enter to select, Escape to close. The searchable variant \
                          adds a text field at the top of the panel that filters the \
-                         list live.",
-                    )
+                         list live."
+                    ))
                     .style(TextStyleRole::Body)
                     .color(TextRole::Primary),
                 )
@@ -100,7 +100,7 @@ impl Widget for Root {
                             VStack::new()
                                 .spacing(4.0)
                                 .child(
-                                    TextWidget::new_literal("Fruit")
+                                    TextWidget::new(lit!("Fruit"))
                                         .style(TextStyleRole::Small)
                                         .color(TextRole::Primary),
                                 )
@@ -124,7 +124,7 @@ impl Widget for Root {
                             VStack::new()
                                 .spacing(4.0)
                                 .child(
-                                    TextWidget::new_literal("Color")
+                                    TextWidget::new(lit!("Color"))
                                         .style(TextStyleRole::Small)
                                         .color(TextRole::Primary),
                                 )
@@ -137,7 +137,7 @@ impl Widget for Root {
                             VStack::new()
                                 .spacing(4.0)
                                 .child(
-                                    TextWidget::new_literal("Size (disabled)")
+                                    TextWidget::new(lit!("Size (disabled)"))
                                         .style(TextStyleRole::Small)
                                         .color(TextRole::Primary),
                                 )
@@ -154,7 +154,7 @@ impl Widget for Root {
                             VStack::new()
                                 .spacing(4.0)
                                 .child(
-                                    TextWidget::new_literal("Country (searchable)")
+                                    TextWidget::new(lit!("Country (searchable)"))
                                         .style(TextStyleRole::Small)
                                         .color(TextRole::Primary),
                                 )
@@ -203,7 +203,7 @@ impl Widget for Root {
                             VStack::new()
                                 .spacing(4.0)
                                 .child(
-                                    TextWidget::new_literal("Huge (10 000 items)")
+                                    TextWidget::new(lit!("Huge (10 000 items)"))
                                         .style(TextStyleRole::Small)
                                         .color(TextRole::Primary),
                                 )
@@ -222,15 +222,15 @@ impl Widget for Root {
             VStack::new()
                 .spacing(12.0)
                 .child(
-                    TextWidget::new_literal("Context Menu")
+                    TextWidget::new(lit!("Context Menu"))
                         .style(TextStyleRole::BodyBold)
                         .color(TextRole::Primary),
                 )
                 .child(
-                    TextWidget::new_literal(
+                    TextWidget::new(lit!(
                         "Right-click on the panels below to open a context menu. \
-                         Each panel has a different menu.",
-                    )
+                         Each panel has a different menu."
+                    ))
                     .style(TextStyleRole::Body)
                     .color(TextRole::Primary),
                 )
@@ -246,77 +246,75 @@ impl Widget for Root {
                                     VStack::new()
                                         .spacing(6.0)
                                         .child(
-                                            TextWidget::new_literal("Edit Menu")
+                                            TextWidget::new(lit!("Edit Menu"))
                                                 .style(TextStyleRole::Small)
                                                 .color(TextRole::Primary),
                                         )
                                         .child(
-                                            TextWidget::new_literal(
-                                                "Right-click for Cut/Copy/Paste",
-                                            )
-                                            .style(TextStyleRole::Body)
-                                            .color(TextRole::Primary),
+                                            TextWidget::new(lit!("Right-click for Cut/Copy/Paste"))
+                                                .style(TextStyleRole::Body)
+                                                .color(TextRole::Primary),
                                         ),
                                 )
                                 .context_menu(|_pos, _ctx| {
                                     Some(Box::new(
                                         MenuList::new()
                                             .item(
-                                                MenuItem::new_literal("Undo")
+                                                MenuItem::new(lit!("Undo"))
                                                     .on_activate_fn(|_| println!("Undo"))
                                                     .shortcut_label("Ctrl+Z"),
                                             )
                                             .item(
-                                                MenuItem::new_literal("Redo")
+                                                MenuItem::new(lit!("Redo"))
                                                     .on_activate_fn(|_| println!("Redo"))
                                                     .shortcut_label("Ctrl+Shift+Z"),
                                             )
                                             .separator()
                                             .item(
-                                                MenuItem::new_literal("Cut")
+                                                MenuItem::new(lit!("Cut"))
                                                     .on_activate_fn(|_| println!("Cut"))
                                                     .shortcut_label("Ctrl+X"),
                                             )
                                             .item(
-                                                MenuItem::new_literal("Copy")
+                                                MenuItem::new(lit!("Copy"))
                                                     .on_activate_fn(|_| println!("Copy"))
                                                     .shortcut_label("Ctrl+C"),
                                             )
                                             .item(
-                                                MenuItem::new_literal("Paste")
+                                                MenuItem::new(lit!("Paste"))
                                                     .on_activate_fn(|_| println!("Paste"))
                                                     .shortcut_label("Ctrl+V"),
                                             )
                                             .separator()
                                             .item(
-                                                MenuItem::new_literal("Select All")
+                                                MenuItem::new(lit!("Select All"))
                                                     .on_activate_fn(|_| println!("SelectAll"))
                                                     .shortcut_label("Ctrl+A"),
                                             )
                                             .separator()
-                                            .item(MenuItem::submenu_literal("Alignment", || {
+                                            .item(MenuItem::submenu(lit!("Alignment"), || {
                                                 Box::new(
                                                     MenuList::new()
                                                         .item(
-                                                            MenuItem::new_literal("Left")
+                                                            MenuItem::new(lit!("Left"))
                                                                 .on_activate_fn(|_| {
                                                                     println!("AlignLeft")
                                                                 }),
                                                         )
                                                         .item(
-                                                            MenuItem::new_literal("Center")
+                                                            MenuItem::new(lit!("Center"))
                                                                 .on_activate_fn(|_| {
                                                                     println!("AlignCenter")
                                                                 }),
                                                         )
                                                         .item(
-                                                            MenuItem::new_literal("Right")
+                                                            MenuItem::new(lit!("Right"))
                                                                 .on_activate_fn(|_| {
                                                                     println!("AlignRight")
                                                                 }),
                                                         )
                                                         .item(
-                                                            MenuItem::new_literal("Justify")
+                                                            MenuItem::new(lit!("Justify"))
                                                                 .on_activate_fn(|_| {
                                                                     println!("AlignJustify")
                                                                 }),
@@ -335,14 +333,14 @@ impl Widget for Root {
                                     VStack::new()
                                         .spacing(6.0)
                                         .child(
-                                            TextWidget::new_literal("File Menu")
+                                            TextWidget::new(lit!("File Menu"))
                                                 .style(TextStyleRole::Small)
                                                 .color(TextRole::Primary),
                                         )
                                         .child(
-                                            TextWidget::new_literal(
-                                                "Right-click for file operations",
-                                            )
+                                            TextWidget::new(lit!(
+                                                "Right-click for file operations"
+                                            ))
                                             .style(TextStyleRole::Body)
                                             .color(TextRole::Primary),
                                         ),
@@ -351,24 +349,23 @@ impl Widget for Root {
                                     Some(Box::new(
                                         MenuList::new()
                                             .item(
-                                                MenuItem::new_literal("New File")
+                                                MenuItem::new(lit!("New File"))
                                                     .on_activate_fn(|_| println!("NewFile"))
                                                     .shortcut_label("Ctrl+N"),
                                             )
                                             .item(
-                                                MenuItem::new_literal("Open File...")
+                                                MenuItem::new(lit!("Open File..."))
                                                     .on_activate_fn(|_| println!("OpenFile"))
                                                     .shortcut_label("Ctrl+O"),
                                             )
                                             .item(
-                                                MenuItem::new_literal("Save")
+                                                MenuItem::new(lit!("Save"))
                                                     .on_activate_fn(|_| println!("SaveFile"))
                                                     .shortcut_label("Ctrl+S"),
                                             )
                                             .separator()
                                             .item(
-                                                MenuItem::new_literal("Export as PDF")
-                                                    .enabled(false),
+                                                MenuItem::new(lit!("Export as PDF")).enabled(false),
                                             ),
                                     ))
                                 }),
@@ -382,15 +379,15 @@ impl Widget for Root {
             VStack::new()
                 .spacing(12.0)
                 .child(
-                    TextWidget::new_literal("Menu Items (inline)")
+                    TextWidget::new(lit!("Menu Items (inline)"))
                         .style(TextStyleRole::BodyBold)
                         .color(TextRole::Primary),
                 )
                 .child(
-                    TextWidget::new_literal(
+                    TextWidget::new(lit!(
                         "MenuItems shown directly (not in an overlay) to demonstrate \
-                         their visual styles and interaction states.",
-                    )
+                         their visual styles and interaction states."
+                    ))
                     .style(TextStyleRole::Body)
                     .color(TextRole::Primary),
                 )
@@ -403,19 +400,19 @@ impl Widget for Root {
                         .child(
                             VStack::new()
                                 .child(
-                                    MenuItem::new_literal("Normal item")
+                                    MenuItem::new(lit!("Normal item"))
                                         .on_activate_fn(|_| println!("Cut"))
                                         .shortcut_label("Ctrl+X"),
                                 )
                                 .child(
-                                    MenuItem::new_literal("With icon")
+                                    MenuItem::new(lit!("With icon"))
                                         .on_activate_fn(|_| println!("Copy"))
                                         .icon(IconWidget::checkmark(16.0))
                                         .shortcut_label("Ctrl+C"),
                                 )
-                                .child(MenuItem::new_literal("Disabled item").enabled(false))
-                                .child(MenuItem::submenu_literal("Submenu trigger", || {
-                                    Box::new(TextWidget::new_literal("submenu placeholder"))
+                                .child(MenuItem::new(lit!("Disabled item")).enabled(false))
+                                .child(MenuItem::submenu(lit!("Submenu trigger"), || {
+                                    Box::new(TextWidget::new(lit!("submenu placeholder")))
                                 })),
                         ),
                 ),
@@ -437,25 +434,25 @@ impl Widget for Root {
             VStack::new()
                 .spacing(12.0)
                 .child(
-                    TextWidget::new_literal("Rich-content menu")
+                    TextWidget::new(lit!("Rich-content menu"))
                         .style(TextStyleRole::BodyBold)
                         .color(TextRole::Primary),
                 )
                 .child(
-                    TextWidget::new_literal(
+                    TextWidget::new(lit!(
                         "Click the button below to open a menu mixing a column of icon \
                          actions, a slider, a combo box, a regular button, and plain \
-                         menu items. `MenuList` accepts any widget via `.item(...)`.",
-                    )
+                         menu items. `MenuList` accepts any widget via `.item(...)`."
+                    ))
                     .style(TextStyleRole::Body)
                     .color(TextRole::Primary),
                 )
                 .child(
-                    TextWidget::new_literal(
+                    TextWidget::new(lit!(
                         "Or use a PopoverIconButton — same overlay wiring, square \
                          icon-only trigger with a disclosure caret painted in the \
-                         bottom-right corner.",
-                    )
+                         bottom-right corner."
+                    ))
                     .style(TextStyleRole::Small)
                     .color(TextRole::Secondary),
                 )
@@ -466,17 +463,17 @@ impl Widget for Root {
                             PopoverIconButton::new(IconButton::add().toolbar()).content(
                                 MenuList::new()
                                     .item(
-                                        MenuItem::new_literal("New file")
+                                        MenuItem::new(lit!("New file"))
                                             .on_activate_fn(|_| println!("NewFileFromPopoverIcon")),
                                     )
                                     .item(
-                                        MenuItem::new_literal("New folder").on_activate_fn(|_| {
+                                        MenuItem::new(lit!("New folder")).on_activate_fn(|_| {
                                             println!("NewFolderFromPopoverIcon")
                                         }),
                                     )
                                     .separator()
                                     .item(
-                                        MenuItem::new_literal("New project…")
+                                        MenuItem::new(lit!("New project…"))
                                             .on_activate_fn(|_| println!("NewProject")),
                                     ),
                             ),
@@ -485,17 +482,17 @@ impl Widget for Root {
                             PopoverIconButton::new(IconButton::search().large()).content(
                                 MenuList::new()
                                     .item(
-                                        MenuItem::new_literal("Search files")
+                                        MenuItem::new(lit!("Search files"))
                                             .shortcut_label("Ctrl+P")
                                             .on_activate_fn(|_| println!("SearchFiles")),
                                     )
                                     .item(
-                                        MenuItem::new_literal("Search symbols")
+                                        MenuItem::new(lit!("Search symbols"))
                                             .shortcut_label("Ctrl+T")
                                             .on_activate_fn(|_| println!("SearchSymbols")),
                                     )
                                     .item(
-                                        MenuItem::new_literal("Search everywhere")
+                                        MenuItem::new(lit!("Search everywhere"))
                                             .shortcut_label("Shift+Shift")
                                             .on_activate_fn(|_| println!("SearchEverywhere")),
                                     ),
@@ -504,7 +501,7 @@ impl Widget for Root {
                 )
                 .child(
                     PopoverButton::new(
-                        Button::new_literal("View options").variant(ButtonVariant::Plain),
+                        Button::new(lit!("View options")).variant(ButtonVariant::Plain),
                     )
                     .show_disclosure_caret(true)
                     .content(
@@ -522,31 +519,31 @@ impl Widget for Root {
                                         .child(
                                             IconButton::new(IconWidget::chevron_left(20.0))
                                                 .toolbar()
-                                                .tooltip_literal("Previous")
+                                                .tooltip(lit!("Previous"))
                                                 .on_activate_fn(|_| println!("Prev")),
                                         )
                                         .child(
                                             IconButton::new(IconWidget::chevron_right(20.0))
                                                 .toolbar()
-                                                .tooltip_literal("Next")
+                                                .tooltip(lit!("Next"))
                                                 .on_activate_fn(|_| println!("Next")),
                                         )
                                         .child(
                                             IconButton::new(IconWidget::chevron_up(20.0))
                                                 .toolbar()
-                                                .tooltip_literal("Move up")
+                                                .tooltip(lit!("Move up"))
                                                 .on_activate_fn(|_| println!("MoveUp")),
                                         )
                                         .child(
                                             IconButton::new(IconWidget::chevron_down(20.0))
                                                 .toolbar()
-                                                .tooltip_literal("Move down")
+                                                .tooltip(lit!("Move down"))
                                                 .on_activate_fn(|_| println!("MoveDown")),
                                         )
                                         .child(
                                             IconButton::new(IconWidget::checkmark(20.0))
                                                 .toolbar()
-                                                .tooltip_literal("Pin (bistate)")
+                                                .tooltip(lit!("Pin (bistate)"))
                                                 .toggle(pinned.clone())
                                                 .on_activate_fn(|_| println!("TogglePin")),
                                         ),
@@ -589,13 +586,13 @@ impl Widget for Root {
                                     VStack::new()
                                         .spacing(4.0)
                                         .child(
-                                            TextWidget::new_literal("Opacity")
+                                            TextWidget::new(lit!("Opacity"))
                                                 .style(TextStyleRole::Small)
                                                 .color(TextRole::Primary),
                                         )
                                         .child(
                                             Slider::new(opacity_signal.clone(), 0.0, 1.0)
-                                                .label_literal("Opacity"),
+                                                .label(lit!("Opacity")),
                                         ),
                                 ),
                             )
@@ -605,7 +602,7 @@ impl Widget for Root {
                                     VStack::new()
                                         .spacing(4.0)
                                         .child(
-                                            TextWidget::new_literal("Theme")
+                                            TextWidget::new(lit!("Theme"))
                                                 .style(TextStyleRole::Small)
                                                 .color(TextRole::Primary),
                                         )
@@ -618,7 +615,7 @@ impl Widget for Root {
                             // Plain button.
                             .item(
                                 Padding::symmetric(6.0, 10.0).child(
-                                    Button::new_literal("Advanced settings…")
+                                    Button::new(lit!("Advanced settings…"))
                                         .variant(ButtonVariant::Ghost)
                                         .on_activate_fn(|_| println!("AdvancedSettings")),
                                 ),
@@ -626,11 +623,11 @@ impl Widget for Root {
                             .separator()
                             // Plain menu items still work alongside rich content.
                             .item(
-                                MenuItem::new_literal("Reset to defaults")
+                                MenuItem::new(lit!("Reset to defaults"))
                                     .on_activate_fn(|_| println!("ResetDefaults")),
                             )
                             .item(
-                                MenuItem::new_literal("Close menu")
+                                MenuItem::new(lit!("Close menu"))
                                     .shortcut_label("Esc")
                                     .on_activate_fn(|_| println!("CloseMenu")),
                             ),
@@ -644,13 +641,13 @@ impl Widget for Root {
             Toolbar::new().child(
                 HStack::new()
                     .child(
-                        TextWidget::new_literal("Menus & Dropdowns")
+                        TextWidget::new(lit!("Menus & Dropdowns"))
                             .style(TextStyleRole::BodyBold)
                             .color(TextRole::Primary),
                     )
                     .child(Spacer::new())
                     .child(
-                        Button::new_literal("Toggle Dark Mode")
+                        Button::new(lit!("Toggle Dark Mode"))
                             .variant(ButtonVariant::Plain)
                             .on_activate_fn(|ctx| {
                                 ctx.send_intent(AppIntent::ToggleDarkMode);
@@ -678,101 +675,99 @@ impl Widget for Root {
         let menu_bar = ctx.add(
             MenuBar::new()
                 .leading_slot(IconWidget::chevron_right(16.0).color(TextRole::Accent))
-                .menu_literal("File", || {
+                .menu(lit!("File"), || {
                     Box::new(
                         MenuList::new()
                             .item(
-                                MenuItem::new_literal("New")
+                                MenuItem::new(lit!("New"))
                                     .on_activate_fn(|_| println!("NewFile"))
                                     .shortcut_label("Ctrl+N"),
                             )
                             .item(
-                                MenuItem::new_literal("Open")
+                                MenuItem::new(lit!("Open"))
                                     .on_activate_fn(|_| println!("OpenFile"))
                                     .shortcut_label("Ctrl+O"),
                             )
                             .item(
-                                MenuItem::new_literal("Save")
+                                MenuItem::new(lit!("Save"))
                                     .on_activate_fn(|_| println!("SaveFile"))
                                     .shortcut_label("Ctrl+S"),
                             )
                             .separator()
-                            .item(
-                                MenuItem::new_literal("Quit").on_activate_fn(|_| println!("Quit")),
-                            ),
+                            .item(MenuItem::new(lit!("Quit")).on_activate_fn(|_| println!("Quit"))),
                     )
                 })
-                .menu_literal("Edit", || {
+                .menu(lit!("Edit"), || {
                     Box::new(
                         MenuList::new()
                             .item(
-                                MenuItem::new_literal("Undo")
+                                MenuItem::new(lit!("Undo"))
                                     .on_activate_fn(|_| println!("Undo"))
                                     .shortcut_label("Ctrl+Z"),
                             )
                             .item(
-                                MenuItem::new_literal("Redo")
+                                MenuItem::new(lit!("Redo"))
                                     .on_activate_fn(|_| println!("Redo"))
                                     .shortcut_label("Ctrl+Shift+Z"),
                             )
                             .separator()
                             .item(
-                                MenuItem::new_literal("Cut")
+                                MenuItem::new(lit!("Cut"))
                                     .on_activate_fn(|_| println!("Cut"))
                                     .shortcut_label("Ctrl+X"),
                             )
                             .item(
-                                MenuItem::new_literal("Copy")
+                                MenuItem::new(lit!("Copy"))
                                     .on_activate_fn(|_| println!("Copy"))
                                     .shortcut_label("Ctrl+C"),
                             )
                             .item(
-                                MenuItem::new_literal("Paste")
+                                MenuItem::new(lit!("Paste"))
                                     .on_activate_fn(|_| println!("Paste"))
                                     .shortcut_label("Ctrl+V"),
                             )
                             .separator()
                             .item(
-                                MenuItem::new_literal("Select All")
+                                MenuItem::new(lit!("Select All"))
                                     .on_activate_fn(|_| println!("SelectAll"))
                                     .shortcut_label("Ctrl+A"),
                             ),
                     )
                 })
-                .menu_literal("View", || {
+                .menu(lit!("View"), || {
                     Box::new(
                         MenuList::new()
-                            .item(MenuItem::submenu_literal("Alignment", || {
+                            .item(MenuItem::submenu(lit!("Alignment"), || {
                                 Box::new(
                                     MenuList::new()
                                         .item(
-                                            MenuItem::new_literal("Left")
+                                            MenuItem::new(lit!("Left"))
                                                 .on_activate_fn(|_| println!("AlignLeft")),
                                         )
                                         .item(
-                                            MenuItem::new_literal("Center")
+                                            MenuItem::new(lit!("Center"))
                                                 .on_activate_fn(|_| println!("AlignCenter")),
                                         )
                                         .item(
-                                            MenuItem::new_literal("Right")
+                                            MenuItem::new(lit!("Right"))
                                                 .on_activate_fn(|_| println!("AlignRight")),
                                         )
                                         .item(
-                                            MenuItem::new_literal("Justify")
+                                            MenuItem::new(lit!("Justify"))
                                                 .on_activate_fn(|_| println!("AlignJustify")),
                                         ),
                                 )
                             }))
                             .separator()
-                            .item(MenuItem::new_literal("Toggle Dark Mode").on_activate_fn(
-                                |ctx| {
+                            .item(
+                                MenuItem::new(lit!("Toggle Dark Mode")).on_activate_fn(|ctx| {
                                     ctx.send_intent(AppIntent::ToggleDarkMode);
-                                },
-                            )),
+                                }),
+                            ),
                     )
                 })
                 .trailing_slot(
-                    Button::new_literal("Settings")
+                    Button::new(lit!("Settings"))
                         .variant(ButtonVariant::Ghost)
                         .on_activate_fn(|_| println!("Settings")),
                 ),
@@ -785,7 +780,7 @@ impl Widget for Root {
                 .child(Expand::new().child_id(scroll))
                 .child(
                     StatusBar::new().child(
-                        TextWidget::new_literal("Milestone 4 -- Menus & Dropdowns")
+                        TextWidget::new(lit!("Milestone 4 -- Menus & Dropdowns"))
                             .style(TextStyleRole::Tiny)
                             .color(TextRole::Primary),
                     ),

@@ -20,6 +20,7 @@
 //! in the scene with `Scene::add_item(item, local_pos)`.
 
 use bastyde_core::accessibility::AccessNodeBuilder;
+use bastyde_i18n::lit;
 
 pub mod group;
 pub mod image;
@@ -181,18 +182,18 @@ mod tests {
         let r = Rect::new(0.0, 0.0, 10.0, 10.0);
 
         let translated = RectItem::new(r).label("Hello");
-        let literal = RectItem::new(r).label_literal("Hello");
+        let literal = RectItem::new(r).label(lit!("Hello"));
         // The builder shadows the trait getter — disambiguate via UFCS.
         assert_eq!(SceneItem::label(&translated), SceneItem::label(&literal));
 
         let t1 = TextItem::new("hi", r);
-        let t2 = TextItem::new_literal("hi", r);
+        let t2 = TextItem::new(lit!("hi"), r);
         assert_eq!(t1.local_bounds(), t2.local_bounds());
 
         let mut h1 = crate::item_handlers::SceneItemHandlerSet::new();
         h1.tooltip("Tip");
         let mut h2 = crate::item_handlers::SceneItemHandlerSet::new();
-        h2.tooltip_literal("Tip");
+        h2.tooltip(lit!("Tip"));
         assert_eq!(h1.tooltip, h2.tooltip);
     }
 

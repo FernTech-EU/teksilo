@@ -8,6 +8,7 @@
 //! The bare minimum is the navigator widget list; the full 4-pane
 //! layout is built incrementally on top.
 
+use bastyde_i18n::lit;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -312,10 +313,10 @@ impl Widget for PreviewerRoot {
         if bastyde_preview::iter_entries().next().is_none() {
             let empty = ctx.add(
                 Center::new().child(
-                    TextWidget::new_literal(
+                    TextWidget::new(lit!(
                         "No widget catalog entries registered.\n\
-                         Add `WidgetCatalog` impls and link with the `preview` feature.",
-                    )
+                         Add `WidgetCatalog` impls and link with the `preview` feature."
+                    ))
                     .style(bastyde_tokens::TextStyleRole::Body)
                     .color(bastyde_tokens::TextRole::Secondary),
                 ),

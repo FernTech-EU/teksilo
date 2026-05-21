@@ -204,6 +204,7 @@ mod tests {
     use super::*;
     use bastyde_canvas::DrawCommand;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn spinner_size() {
@@ -287,10 +288,13 @@ mod tests {
     #[test]
     fn accessibility_role_and_live_region() {
         let mut tree = WidgetTree::new();
-        let id = tree.add(Spinner::new(24.0).label_literal("Loading"));
+        let id = tree.add(Spinner::new(24.0).label(lit!("Loading")));
         tree.layout(SizeProposal::exact(64.0, 64.0));
         let info = tree.accessibility_node(id);
-        assert_eq!(info.role(), bastyde_core::accesskit::Role::ProgressIndicator);
+        assert_eq!(
+            info.role(),
+            bastyde_core::accesskit::Role::ProgressIndicator
+        );
         assert_eq!(info.name(), Some("Loading"));
     }
 }

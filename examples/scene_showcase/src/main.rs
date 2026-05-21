@@ -38,17 +38,17 @@
 
 use std::time::Duration;
 
-use bastyde_scene::{
-    A11yGroup, A11yNode, DragMode, GroupItem, ItemId, PanAxes, PathItem, RectItem, Scene,
-    SceneItem, SceneItemPaintContext, SceneSelectionMode, SceneView, TextItem,
-    register_animated_item_signal,
-};
 use bastyde::canvas::{Canvas, Path, Point, Rect, StrokeStyle};
 use bastyde::core::binding::BindingLevel;
 use bastyde::prelude::*;
 use bastyde::tokens::Easing;
 use bastyde::widgets::{
     Button, ComboBox, Expand, HStack, Panel, ScrollArea, Spacer, TextWidget, Toolbar, VStack,
+};
+use bastyde_scene::{
+    A11yGroup, A11yNode, DragMode, GroupItem, ItemId, PanAxes, PathItem, RectItem, Scene,
+    SceneItem, SceneItemPaintContext, SceneSelectionMode, SceneView, TextItem,
+    register_animated_item_signal,
 };
 
 // ---------------------------------------------------------------------------
@@ -446,12 +446,12 @@ fn build_card_with_button() -> impl Widget + 'static {
     Panel::new().child(
         VStack::new()
             .spacing(8.0)
-            .child(TextWidget::new_literal("Card with Button").style(TextStyleRole::BodyBold))
+            .child(TextWidget::new(lit!("Card with Button")).style(TextStyleRole::BodyBold))
             .child(
-                TextWidget::new_literal("Real widget machinery: focus, keyboard, a11y.")
+                TextWidget::new(lit!("Real widget machinery: focus, keyboard, a11y."))
                     .style(TextStyleRole::Body),
             )
-            .child(Button::new_literal("Click me").on_activate_fn(|_ctx| {
+            .child(Button::new(lit!("Click me")).on_activate_fn(|_ctx| {
                 eprintln!("[scene-showcase] button clicked");
             })),
     )
@@ -462,10 +462,8 @@ fn build_card_with_combo() -> impl Widget + 'static {
     Panel::new().child(
         VStack::new()
             .spacing(8.0)
-            .child(TextWidget::new_literal("Card with ComboBox").style(TextStyleRole::BodyBold))
-            .child(
-                TextWidget::new_literal("Pick a fruit from the list:").style(TextStyleRole::Body),
-            )
+            .child(TextWidget::new(lit!("Card with ComboBox")).style(TextStyleRole::BodyBold))
+            .child(TextWidget::new(lit!("Pick a fruit from the list:")).style(TextStyleRole::Body))
             .child(ComboBox::new(
                 vec!["Apple", "Banana", "Cherry", "Date"],
                 selected,
@@ -477,8 +475,8 @@ fn build_card_plain(title: &str, body: &str) -> impl Widget + 'static {
     Panel::new().child(
         VStack::new()
             .spacing(8.0)
-            .child(TextWidget::new_literal(title).style(TextStyleRole::BodyBold))
-            .child(TextWidget::new_literal(body).style(TextStyleRole::Body)),
+            .child(TextWidget::new(lit!(title)).style(TextStyleRole::BodyBold))
+            .child(TextWidget::new(lit!(body)).style(TextStyleRole::Body)),
     )
 }
 
@@ -885,22 +883,22 @@ fn build_status_row(view: &SceneView) -> impl Widget + 'static {
     HStack::new()
         .spacing(28.0)
         .child(
-            TextWidget::new_literal("")
+            TextWidget::new(lit!(""))
                 .bind_text(pan_text)
                 .style(TextStyleRole::Body),
         )
         .child(
-            TextWidget::new_literal("")
+            TextWidget::new(lit!(""))
                 .bind_text(zoom_text)
                 .style(TextStyleRole::Body),
         )
         .child(
-            TextWidget::new_literal("")
+            TextWidget::new(lit!(""))
                 .bind_text(sel_text)
                 .style(TextStyleRole::Body),
         )
         .child(
-            TextWidget::new_literal("")
+            TextWidget::new(lit!(""))
                 .bind_text(drag_text)
                 .style(TextStyleRole::Body),
         )
@@ -912,7 +910,7 @@ fn build_toolbar(drag_mode: Signal<DragMode>) -> impl Widget {
         HStack::new()
             .spacing(12.0)
             .child(
-                Button::new_literal("Drag mode: Marquee ⇄ Pan").on_activate_fn(move |_ctx| {
+                Button::new(lit!("Drag mode: Marquee ⇄ Pan")).on_activate_fn(move |_ctx| {
                     // Flip between marquee box-select and scroll-hand pan.
                     let next = match drag_mode.get() {
                         DragMode::ScrollHandDrag => DragMode::RubberBand,
@@ -923,7 +921,7 @@ fn build_toolbar(drag_mode: Signal<DragMode>) -> impl Widget {
             )
             .child(Spacer::new())
             .child(
-                Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+                Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
                     let next = !is_dark.get();
                     is_dark.set(next);
                     ctx.set_theme(if next {
@@ -944,7 +942,7 @@ fn build_root() -> impl Widget + 'static {
     VStack::new()
         .spacing(8.0)
         .child(build_toolbar(drag_mode))
-        .child(TextWidget::new_literal("bastyde-scene showcase").style(TextStyleRole::BodyBold))
+        .child(TextWidget::new(lit!("bastyde-scene showcase")).style(TextStyleRole::BodyBold))
         .child(status)
         .child(Expand::new().child(view))
 }

@@ -167,7 +167,8 @@ mod tests {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let knobs = bastyde_preview::KnobValues::from_spec(&entry.knobs(), None);
                     let widget = entry.build(variant.name(), &knobs);
-                    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+                    let mut tree =
+                        WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
                     let _ = tree.add_boxed(widget);
                     tree.layout(SizeProposal::exact(800.0, 600.0));
                 }));

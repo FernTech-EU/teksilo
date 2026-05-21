@@ -55,6 +55,7 @@ mod mouse;
 pub(crate) mod state;
 pub mod validator;
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Canvas, Point, Rect, Size, SizeProposal};
@@ -723,7 +724,11 @@ impl Widget for TextInputField {
             let id = ctx.self_id();
             let reg = ctx.binding_registry();
             revealed.bind_to(id, reg, bastyde_core::binding::BindingLevel::RepaintOnly);
-            revealed.bind_to(id, reg, bastyde_core::binding::BindingLevel::AccessibilityOnly);
+            revealed.bind_to(
+                id,
+                reg,
+                bastyde_core::binding::BindingLevel::AccessibilityOnly,
+            );
         }
 
         let text_signal = shared_state.borrow().text_signal.clone();
@@ -1228,7 +1233,9 @@ impl Widget for TextInputField {
             && st.engine.has_full_layout()
             && range.start < range.end
         {
-            let start_c = st.engine.caret_rect(range.start, CursorAffinity::Downstream);
+            let start_c = st
+                .engine
+                .caret_rect(range.start, CursorAffinity::Downstream);
             let end_c = st.engine.caret_rect(range.end, CursorAffinity::Downstream);
             let x0 = bounds.x - scroll_x + start_c[0];
             let x1 = bounds.x - scroll_x + end_c[0];
@@ -1600,7 +1607,7 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
     Box::new(
         MenuList::new()
             .item(
-                MenuItem::new_literal("Cut")
+                MenuItem::new(lit!("Cut"))
                     .shortcut_label("Ctrl+X")
                     .enabled(has_selection && copy_allowed)
                     .on_activate_fn(move |ctx| {
@@ -1613,7 +1620,7 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
                     }),
             )
             .item(
-                MenuItem::new_literal("Copy")
+                MenuItem::new(lit!("Copy"))
                     .shortcut_label("Ctrl+C")
                     .enabled(has_selection && copy_allowed)
                     .on_activate_fn(move |ctx| {
@@ -1622,7 +1629,7 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
                     }),
             )
             .item(
-                MenuItem::new_literal("Paste")
+                MenuItem::new(lit!("Paste"))
                     .shortcut_label("Ctrl+V")
                     .on_activate_fn(move |ctx| {
                         {
@@ -1635,7 +1642,7 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
             )
             .item(MenuSeparator)
             .item(
-                MenuItem::new_literal("Select All")
+                MenuItem::new(lit!("Select All"))
                     .shortcut_label("Ctrl+A")
                     .enabled(doc_non_empty)
                     .on_activate_fn(move |ctx| {

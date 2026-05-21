@@ -29,6 +29,7 @@
 
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::Widget;
+use bastyde_i18n::lit;
 use bastyde_preview::{
     KnobOverrides, KnobSpec, KnobValues, PreviewVariant, WidgetCatalog, register_widget_catalog_at,
 };
@@ -100,9 +101,9 @@ impl WidgetCatalog for Button {
             2 => ButtonVariant::Ghost,
             _ => ButtonVariant::Plain,
         };
-        let mut b = Button::new_literal(label).variant(style).enabled(enabled);
+        let mut b = Button::new(lit!(label)).variant(style).enabled(enabled);
         if let Some(t) = tooltip {
-            b = b.tooltip_literal(t);
+            b = b.tooltip(lit!(t));
         }
         Box::new(b)
     }
@@ -140,7 +141,7 @@ impl WidgetCatalog for Checkbox {
         let label = knobs.text("label").get();
         let checked = knobs.bool_("checked");
         let enabled = knobs.bool_("enabled").get();
-        Box::new(Checkbox::new(checked).label_literal(label).enabled(enabled))
+        Box::new(Checkbox::new(checked).label(lit!(label)).enabled(enabled))
     }
 }
 register_widget_catalog_at!("crates/bastyde-widgets/src/checkbox.rs", Checkbox);
@@ -183,7 +184,7 @@ impl WidgetCatalog for RadioButton {
         let enabled = knobs.bool_("enabled").get();
         let mut r = RadioButton::new(0, knobs.choice("selected")).enabled(enabled);
         if let Some(label) = label {
-            r = r.label_literal(label);
+            r = r.label(lit!(label));
         }
         Box::new(r)
     }
@@ -224,7 +225,7 @@ impl WidgetCatalog for Toggle {
         let on = knobs.bool_("on");
         let label = knobs.text("label").get();
         let enabled = knobs.bool_("enabled").get();
-        Box::new(Toggle::new(on).label_literal(label).enabled(enabled))
+        Box::new(Toggle::new(on).label(lit!(label)).enabled(enabled))
     }
 }
 register_widget_catalog_at!("crates/bastyde-widgets/src/toggle.rs", Toggle);
@@ -284,7 +285,7 @@ impl WidgetCatalog for Slider {
             s = s.step(step);
         }
         if let Some(label) = label {
-            s = s.label_literal(label);
+            s = s.label(lit!(label));
         }
         // Vertical sliders need a fixed height to be visible.
         let widget: Box<dyn Widget> = if matches!(orient, Orientation::Vertical) {
@@ -351,7 +352,7 @@ impl WidgetCatalog for ProgressBar {
         };
         bar = bar.orientation(orient);
         if let Some(label) = label {
-            bar = bar.label_literal(label);
+            bar = bar.label(lit!(label));
         }
         let widget: Box<dyn Widget> = if matches!(orient, Orientation::Vertical) {
             Box::new(FixedSize::new().bind_height(160.0_f32).child(bar))
@@ -415,7 +416,7 @@ impl WidgetCatalog for Badge {
         let bg = knobs.surface_role("background");
         let fg = knobs.text_role("text_color");
         Box::new(
-            Badge::new_literal(knobs.text("label").get())
+            Badge::new(lit!(knobs.text("label").get()))
                 .color(bg)
                 .text_color(fg),
         )
@@ -539,9 +540,9 @@ impl WidgetCatalog for Avatar {
         let initials_override = knobs.opt_text("initials_override").get();
 
         let mut a = if let Some(initials) = initials_override {
-            Avatar::with_initials_literal(&initials)
+            Avatar::with_initials(lit!(&initials))
         } else {
-            Avatar::with_name_literal(&name)
+            Avatar::with_name(lit!(&name))
         }
         .size(size)
         .shape(shape)
@@ -554,7 +555,7 @@ impl WidgetCatalog for Avatar {
             a = a.border(2.0);
         }
         if clickable {
-            a = a.label_literal("Open user menu").on_activate_fn(|_ctx| {});
+            a = a.label(lit!("Open user menu")).on_activate_fn(|_ctx| {});
         }
         Box::new(a)
     }
@@ -587,7 +588,7 @@ impl WidgetCatalog for Link {
         ]
     }
     fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
-        Box::new(Link::new_literal(knobs.text("label").get()).enabled(knobs.bool_("enabled").get()))
+        Box::new(Link::new(lit!(knobs.text("label").get())).enabled(knobs.bool_("enabled").get()))
     }
 }
 register_widget_catalog_at!("crates/bastyde-widgets/src/link.rs", Link);
@@ -859,7 +860,7 @@ register_widget_catalog_at!(
 // ---------------------------------------------------------------------------
 
 fn sample_text(label: &str) -> TextWidget {
-    TextWidget::new_literal(label)
+    TextWidget::new(lit!(label))
         .style(TextStyleRole::Body)
         .color(TextRole::Primary)
 }
@@ -914,13 +915,13 @@ impl WidgetCatalog for Card {
             .corner_radius(knobs.f32_("corner_radius").get())
             .padding(knobs.f32_("padding").get())
             .content(
-                TextWidget::new_literal(knobs.text("body").get())
+                TextWidget::new(lit!(knobs.text("body").get()))
                     .style(TextStyleRole::Body)
                     .color(TextRole::Primary),
             );
         if knobs.bool_("show_header").get() {
             card = card.header(
-                TextWidget::new_literal(knobs.text("title").get())
+                TextWidget::new(lit!(knobs.text("title").get()))
                     .style(TextStyleRole::BodyBold)
                     .color(TextRole::Primary),
             );
@@ -930,8 +931,8 @@ impl WidgetCatalog for Card {
                 HStack::new()
                     .spacing(8.0)
                     .child(Spacer::new())
-                    .child(Button::new_literal("Cancel").variant(ButtonVariant::Plain))
-                    .child(Button::new_literal("Save").variant(ButtonVariant::Filled)),
+                    .child(Button::new(lit!("Cancel")).variant(ButtonVariant::Plain))
+                    .child(Button::new(lit!("Save")).variant(ButtonVariant::Filled)),
             );
         }
         Box::new(card)
@@ -1027,9 +1028,9 @@ impl WidgetCatalog for GroupBox {
             .child(
                 VStack::new()
                     .spacing(8.0)
-                    .child(Checkbox::new(Signal::new(true)).label_literal("Sounds"))
-                    .child(Checkbox::new(Signal::new(false)).label_literal("Badges"))
-                    .child(Checkbox::new(Signal::new(true)).label_literal("Banners")),
+                    .child(Checkbox::new(Signal::new(true)).label(lit!("Sounds")))
+                    .child(Checkbox::new(Signal::new(false)).label(lit!("Badges")))
+                    .child(Checkbox::new(Signal::new(true)).label(lit!("Banners"))),
             ),
         )
     }
@@ -1154,7 +1155,7 @@ impl WidgetCatalog for Snackbar {
             .corner_radius(6.0)
             .padding(12.0)
             .child(
-                TextWidget::new_literal(message)
+                TextWidget::new(lit!(message))
                     .style(TextStyleRole::Body)
                     .color(TextRole::Primary),
             );
@@ -1224,9 +1225,9 @@ impl WidgetCatalog for Toolbar {
         fn build_default() -> Box<dyn Widget> {
             Box::new(
                 Toolbar::new()
-                    .child(Button::new_literal("New").variant(ButtonVariant::Ghost))
-                    .child(Button::new_literal("Open…").variant(ButtonVariant::Ghost))
-                    .child(Button::new_literal("Save").variant(ButtonVariant::Ghost)),
+                    .child(Button::new(lit!("New")).variant(ButtonVariant::Ghost))
+                    .child(Button::new(lit!("Open…")).variant(ButtonVariant::Ghost))
+                    .child(Button::new(lit!("Save")).variant(ButtonVariant::Ghost)),
             )
         }
         vec![PreviewVariant::scenario("default", build_default)]
@@ -1256,13 +1257,13 @@ impl WidgetCatalog for StatusBar {
             Box::new(
                 StatusBar::new()
                     .child(
-                        TextWidget::new_literal("Ready")
+                        TextWidget::new(lit!("Ready"))
                             .style(TextStyleRole::Tiny)
                             .color(TextRole::Secondary),
                     )
                     .child(Spacer::new())
                     .child(
-                        TextWidget::new_literal("Ln 42, Col 17")
+                        TextWidget::new(lit!("Ln 42, Col 17"))
                             .style(TextStyleRole::Tiny)
                             .color(TextRole::Secondary),
                     ),
@@ -1314,7 +1315,7 @@ impl WidgetCatalog for Accordion {
         // the header in the canvas mutates the signal, the inspector
         // toggle reflects it.
         let expanded = knobs.bool_("expanded");
-        Box::new(Accordion::new_literal(title, expanded).content(sample_text(&body)))
+        Box::new(Accordion::new(lit!(title), expanded).content(sample_text(&body)))
     }
 }
 register_widget_catalog_at!("crates/bastyde-widgets/src/accordion.rs", Accordion);
@@ -1338,9 +1339,9 @@ impl WidgetCatalog for RadioGroup {
             let selected = Signal::new(0_usize);
             Box::new(
                 RadioGroup::new()
-                    .child(RadioButton::new(0, selected.clone()).label_literal("First"))
-                    .child(RadioButton::new(1, selected.clone()).label_literal("Second"))
-                    .child(RadioButton::new(2, selected).label_literal("Third")),
+                    .child(RadioButton::new(0, selected.clone()).label(lit!("First")))
+                    .child(RadioButton::new(1, selected.clone()).label(lit!("Second")))
+                    .child(RadioButton::new(2, selected).label(lit!("Third"))),
             )
         }
         vec![PreviewVariant::scenario("default", build_default)]
@@ -1369,9 +1370,9 @@ impl WidgetCatalog for SplitButton {
         fn build_default() -> Box<dyn Widget> {
             Box::new(
                 SplitButton::new_static()
-                    .item(MenuItem::new_literal("Save"))
-                    .item(MenuItem::new_literal("Save As…"))
-                    .item(MenuItem::new_literal("Save All")),
+                    .item(MenuItem::new(lit!("Save")))
+                    .item(MenuItem::new(lit!("Save As…")))
+                    .item(MenuItem::new(lit!("Save All"))),
             )
         }
         vec![PreviewVariant::scenario("default", build_default)]
@@ -1415,7 +1416,7 @@ impl WidgetCatalog for ListView<String> {
                     .bind_width(280.0_f32)
                     .bind_height(220.0_f32)
                     .child(ListView::new(model, |_idx, item, selected| {
-                        Box::new(StandardListItem::new_literal(item.clone()).selected(selected))
+                        Box::new(StandardListItem::new(lit!(item.clone())).selected(selected))
                     })),
             )
         }
@@ -1459,7 +1460,7 @@ impl WidgetCatalog for TreeView<String> {
                         model,
                         |item, entry, selected, ctx| {
                             Box::new(
-                                StandardTreeItem::new_literal(item.clone())
+                                StandardTreeItem::new(lit!(item.clone()))
                                     .from_entry(entry)
                                     .selected(selected)
                                     .on_toggle_rc(ctx.toggle_callback()),
@@ -1492,42 +1493,42 @@ impl WidgetCatalog for StandardListItem {
     }
     fn variants() -> Vec<PreviewVariant> {
         fn build_single_line() -> Box<dyn Widget> {
-            Box::new(StandardListItem::new_literal("Single-line item"))
+            Box::new(StandardListItem::new(lit!("Single-line item")))
         }
         fn build_with_all_primary_slots() -> Box<dyn Widget> {
             Box::new(
-                StandardListItem::new_literal("With every primary slot")
-                    .leading_slot(TextWidget::new_literal("●").color(TextRole::Accent))
-                    .center_slot(TextWidget::new_literal("•").color(TextRole::Secondary))
-                    .trailing_slot(TextWidget::new_literal("12").color(TextRole::Secondary)),
+                StandardListItem::new(lit!("With every primary slot"))
+                    .leading_slot(TextWidget::new(lit!("●")).color(TextRole::Accent))
+                    .center_slot(TextWidget::new(lit!("•")).color(TextRole::Secondary))
+                    .trailing_slot(TextWidget::new(lit!("12")).color(TextRole::Secondary)),
             )
         }
         fn build_two_line_with_subtitle_slots() -> Box<dyn Widget> {
             Box::new(
-                StandardListItem::new_literal("Title line")
-                    .subtitle_literal("Subtitle line")
-                    .leading_slot(TextWidget::new_literal("●").color(TextRole::Accent))
-                    .subtitle_leading_slot(TextWidget::new_literal("•").color(TextRole::Secondary))
+                StandardListItem::new(lit!("Title line"))
+                    .subtitle(lit!("Subtitle line"))
+                    .leading_slot(TextWidget::new(lit!("●")).color(TextRole::Accent))
+                    .subtitle_leading_slot(TextWidget::new(lit!("•")).color(TextRole::Secondary))
                     .subtitle_trailing_slot(
-                        TextWidget::new_literal("just now").color(TextRole::Secondary),
+                        TextWidget::new(lit!("just now")).color(TextRole::Secondary),
                     )
-                    .trailing_slot(TextWidget::new_literal("∗").color(TextRole::Accent)),
+                    .trailing_slot(TextWidget::new(lit!("∗")).color(TextRole::Accent)),
             )
         }
         fn build_with_checkbox() -> Box<dyn Widget> {
             let checked = Signal::new(true);
-            Box::new(StandardListItem::new_literal("With two-state checkbox").checkbox(checked))
+            Box::new(StandardListItem::new(lit!("With two-state checkbox")).checkbox(checked))
         }
         fn build_with_tristate_checkbox() -> Box<dyn Widget> {
             use bastyde_data::CheckState;
             let s = Signal::new(CheckState::Indeterminate);
-            Box::new(StandardListItem::new_literal("With tristate checkbox").tristate_checkbox(s))
+            Box::new(StandardListItem::new(lit!("With tristate checkbox")).tristate_checkbox(s))
         }
         fn build_selected() -> Box<dyn Widget> {
-            Box::new(StandardListItem::new_literal("Selected").selected(true))
+            Box::new(StandardListItem::new(lit!("Selected")).selected(true))
         }
         fn build_disabled() -> Box<dyn Widget> {
-            Box::new(StandardListItem::new_literal("Disabled").enabled(false))
+            Box::new(StandardListItem::new(lit!("Disabled")).enabled(false))
         }
         vec![
             PreviewVariant::scenario("single_line", build_single_line),
@@ -1543,7 +1544,10 @@ impl WidgetCatalog for StandardListItem {
         scenario_for::<Self>(variant)
     }
 }
-register_widget_catalog_at!("crates/bastyde-widgets/src/standard_item.rs", StandardListItem);
+register_widget_catalog_at!(
+    "crates/bastyde-widgets/src/standard_item.rs",
+    StandardListItem
+);
 
 // ---------------------------------------------------------------------------
 // StandardTreeItem
@@ -1562,7 +1566,7 @@ impl WidgetCatalog for StandardTreeItem {
     fn variants() -> Vec<PreviewVariant> {
         fn build_collapsed_branch() -> Box<dyn Widget> {
             Box::new(
-                StandardTreeItem::new_literal("Folder (collapsed)")
+                StandardTreeItem::new(lit!("Folder (collapsed)"))
                     .depth(0)
                     .has_children(true)
                     .is_expanded(false),
@@ -1570,7 +1574,7 @@ impl WidgetCatalog for StandardTreeItem {
         }
         fn build_expanded_branch() -> Box<dyn Widget> {
             Box::new(
-                StandardTreeItem::new_literal("Folder (expanded)")
+                StandardTreeItem::new(lit!("Folder (expanded)"))
                     .depth(0)
                     .has_children(true)
                     .is_expanded(true),
@@ -1578,7 +1582,7 @@ impl WidgetCatalog for StandardTreeItem {
         }
         fn build_leaf_indented() -> Box<dyn Widget> {
             Box::new(
-                StandardTreeItem::new_literal("Deep leaf")
+                StandardTreeItem::new(lit!("Deep leaf"))
                     .depth(2)
                     .has_children(false),
             )
@@ -1587,7 +1591,7 @@ impl WidgetCatalog for StandardTreeItem {
             use bastyde_data::CheckState;
             let s = Signal::new(CheckState::Indeterminate);
             Box::new(
-                StandardTreeItem::new_literal("Folder with tristate")
+                StandardTreeItem::new(lit!("Folder with tristate"))
                     .depth(1)
                     .has_children(true)
                     .is_expanded(true)
@@ -1596,14 +1600,12 @@ impl WidgetCatalog for StandardTreeItem {
         }
         fn build_two_line() -> Box<dyn Widget> {
             Box::new(
-                StandardTreeItem::new_literal("Folder")
-                    .subtitle_literal("3 items · last week")
+                StandardTreeItem::new(lit!("Folder"))
+                    .subtitle(lit!("3 items · last week"))
                     .depth(0)
                     .has_children(true)
                     .is_expanded(false)
-                    .subtitle_trailing_slot(
-                        TextWidget::new_literal("3").color(TextRole::Secondary),
-                    ),
+                    .subtitle_trailing_slot(TextWidget::new(lit!("3")).color(TextRole::Secondary)),
             )
         }
         vec![
@@ -1618,7 +1620,10 @@ impl WidgetCatalog for StandardTreeItem {
         scenario_for::<Self>(variant)
     }
 }
-register_widget_catalog_at!("crates/bastyde-widgets/src/standard_item.rs", StandardTreeItem);
+register_widget_catalog_at!(
+    "crates/bastyde-widgets/src/standard_item.rs",
+    StandardTreeItem
+);
 
 // ---------------------------------------------------------------------------
 // MenuList
@@ -1638,11 +1643,11 @@ impl WidgetCatalog for MenuList {
         fn build_default() -> Box<dyn Widget> {
             Box::new(
                 MenuList::new()
-                    .item(MenuItem::new_literal("New"))
-                    .item(MenuItem::new_literal("Open…"))
-                    .item(MenuItem::new_literal("Save"))
-                    .item(MenuItem::new_literal("Save As…"))
-                    .item(MenuItem::new_literal("Close")),
+                    .item(MenuItem::new(lit!("New")))
+                    .item(MenuItem::new(lit!("Open…")))
+                    .item(MenuItem::new(lit!("Save")))
+                    .item(MenuItem::new(lit!("Save As…")))
+                    .item(MenuItem::new(lit!("Close"))),
             )
         }
         vec![PreviewVariant::scenario("default", build_default)]
@@ -1673,7 +1678,7 @@ impl WidgetCatalog for ScrollArea {
             for i in 1..=40 {
                 col = col.child(
                     Padding::symmetric(4.0, 8.0).child(
-                        TextWidget::new_literal(format!("Row {}", i))
+                        TextWidget::new(lit!(format!("Row {}", i)))
                             .style(TextStyleRole::Body)
                             .color(TextRole::Primary),
                     ),
@@ -1807,16 +1812,16 @@ impl WidgetCatalog for ToolBox {
                     .bind_height(280.0_f32)
                     .child(
                         ToolBox::new(selected)
-                            .item_literal(
-                                "General",
+                            .item(
+                                lit!("General"),
                                 Padding::uniform(12.0).child(sample_text("General settings")),
                             )
-                            .item_literal(
-                                "Editor",
+                            .item(
+                                lit!("Editor"),
                                 Padding::uniform(12.0).child(sample_text("Editor settings")),
                             )
-                            .item_literal(
-                                "Keymap",
+                            .item(
+                                lit!("Keymap"),
                                 Padding::uniform(12.0).child(sample_text("Keymap settings")),
                             ),
                     ),
@@ -1856,7 +1861,7 @@ impl WidgetCatalog for crate::Repeater<String> {
                 crate::Repeater::new(model, |_idx, item| {
                     Box::new(
                         Padding::symmetric(4.0, 8.0).child(
-                            TextWidget::new_literal(item.clone())
+                            TextWidget::new(lit!(item.clone()))
                                 .style(TextStyleRole::Body)
                                 .color(TextRole::Primary),
                         ),
@@ -1893,7 +1898,7 @@ fn scenario_for<W: WidgetCatalog>(name: &str) -> Box<dyn Widget> {
     match chosen {
         Some(PreviewVariant::Scenario { builder, .. }) => builder(),
         _ => Box::new(
-            TextWidget::new_literal(format!("(no scenario for variant '{}')", name))
+            TextWidget::new(lit!(format!("(no scenario for variant '{}')", name)))
                 .style(TextStyleRole::Small)
                 .color(TextRole::Secondary),
         ),
@@ -1953,7 +1958,10 @@ mod color_family {
             scenario_for::<Self>(variant)
         }
     }
-    register_widget_catalog_at!("crates/bastyde-widgets/src/hex_color_input.rs", HexColorInput);
+    register_widget_catalog_at!(
+        "crates/bastyde-widgets/src/hex_color_input.rs",
+        HexColorInput
+    );
 
     impl WidgetCatalog for ColorPicker {
         fn id() -> &'static str {
@@ -2082,7 +2090,12 @@ mod secure_input_family {
                     &["Masked", "NoEcho", "RevealWhileTyping"],
                     0,
                 )
-                .choice("reveal_mode", "Reveal button", &["Toggle", "Hold", "None"], 0)
+                .choice(
+                    "reveal_mode",
+                    "Reveal button",
+                    &["Toggle", "Hold", "None"],
+                    0,
+                )
                 .bool_("enabled", "Enabled", true)
                 .bool_("caps_warning", "Caps Lock warning", true)
         }
@@ -2093,7 +2106,10 @@ mod secure_input_family {
                     "reveal-while-typing",
                     KnobOverrides::new().choice("echo_mode", 2),
                 ),
-                PreviewVariant::knobs("hold-to-reveal", KnobOverrides::new().choice("reveal_mode", 1)),
+                PreviewVariant::knobs(
+                    "hold-to-reveal",
+                    KnobOverrides::new().choice("reveal_mode", 1),
+                ),
                 PreviewVariant::knobs("no-echo", KnobOverrides::new().choice("echo_mode", 1)),
                 PreviewVariant::knobs(
                     "no-reveal-button",

@@ -282,6 +282,7 @@ mod tests {
     use super::*;
     use crate::primitives::{FixedSize, TextWidget};
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn first_measurement_snaps_to_natural_no_grow_in_animation() {
@@ -425,7 +426,7 @@ mod tests {
             SmoothSize::new()
                 .axes(SmoothSizeAxes::Width)
                 .duration(Duration::from_millis(100))
-                .child(TextWidget::new_literal("hi")),
+                .child(TextWidget::new(lit!("hi"))),
         );
         tree.layout(SizeProposal {
             width: None,

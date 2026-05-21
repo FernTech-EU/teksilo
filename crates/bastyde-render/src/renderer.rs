@@ -342,13 +342,11 @@ impl Renderer {
             for cmd in &frame.draw_order {
                 match cmd {
                     bastyde_canvas::DrawCommand::SetTransform(t) => {
-                        let stack_top =
-                            ptf_stack.last().copied().unwrap_or(Transform2D::IDENTITY);
+                        let stack_top = ptf_stack.last().copied().unwrap_or(Transform2D::IDENTITY);
                         ptf_current = device_t(t).then(&stack_top);
                     }
                     bastyde_canvas::DrawCommand::PushTransform(t) => {
-                        let prev_top =
-                            ptf_stack.last().copied().unwrap_or(Transform2D::IDENTITY);
+                        let prev_top = ptf_stack.last().copied().unwrap_or(Transform2D::IDENTITY);
                         let new_top = device_t(t).then(&prev_top);
                         ptf_stack.push(new_top);
                         ptf_current = new_top;
@@ -357,8 +355,7 @@ impl Renderer {
                         if ptf_stack.len() > 1 {
                             ptf_stack.pop();
                         }
-                        ptf_current =
-                            ptf_stack.last().copied().unwrap_or(Transform2D::IDENTITY);
+                        ptf_current = ptf_stack.last().copied().unwrap_or(Transform2D::IDENTITY);
                     }
                     bastyde_canvas::DrawCommand::Path(idx) => {
                         if let Some(entry) = frame.paths.get(*idx) {
@@ -852,7 +849,11 @@ impl Renderer {
                                 ];
                                 for pos in corners {
                                     rect_batch.push(RectVertex {
-                                        position: pixel_to_ndc(pos, viewport_width, viewport_height),
+                                        position: pixel_to_ndc(
+                                            pos,
+                                            viewport_width,
+                                            viewport_height,
+                                        ),
                                         color,
                                     });
                                 }
@@ -895,13 +896,8 @@ impl Renderer {
                                     // zoom (no scale_factor — it lives only in
                                     // the translation column). `from_shape_quad_cosmetic`
                                     // applies the divide-by-zero floor.
-                                    let zoom = current_transform.m[0]
-                                        .hypot(current_transform.m[1]);
-                                    SdfVertex::from_shape_quad_cosmetic(
-                                        shape,
-                                        scale_factor,
-                                        zoom,
-                                    )
+                                    let zoom = current_transform.m[0].hypot(current_transform.m[1]);
+                                    SdfVertex::from_shape_quad_cosmetic(shape, scale_factor, zoom)
                                 } else {
                                     SdfVertex::from_shape_quad(shape, scale_factor)
                                 };
@@ -1353,8 +1349,9 @@ impl Renderer {
                                 current_blend = *mode;
                             }
                             bastyde_canvas::DrawCommand::RestoreBlendMode => {
-                                current_blend =
-                                    blend_stack.pop().unwrap_or(bastyde_canvas::BlendMode::Normal);
+                                current_blend = blend_stack
+                                    .pop()
+                                    .unwrap_or(bastyde_canvas::BlendMode::Normal);
                             }
                             bastyde_canvas::DrawCommand::SetTransform(t) => {
                                 flush_all!(

@@ -27,6 +27,7 @@
 //!     .add(ToolBoxItem::new("Build", build_widget).enabled(false))
 //! ```
 
+use bastyde_i18n::lit;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -466,7 +467,7 @@ impl Widget for ToolBoxHeader {
         // Label — single-line, clips with ellipsis if the header is
         // narrower than the text.
         let label_id = ctx.add(
-            TextWidget::new_literal(&self.label)
+            TextWidget::new(lit!(&self.label))
                 .bind_color(text_role.clone())
                 .style(TextStyleRole::Body)
                 .single_line()
@@ -587,8 +588,8 @@ impl Widget for ToolBoxHeader {
                 };
                 focus_origin_for_focus.set(Some(origin));
             })
-            .on_key(move |event: &WidgetEvent, ctx: &mut EventContext| {
-                match event {
+            .on_key(
+                move |event: &WidgetEvent, ctx: &mut EventContext| match event {
                     WidgetEvent::KeyDown {
                         key: Key::Space | Key::Enter,
                         ..
@@ -652,11 +653,12 @@ impl Widget for ToolBoxHeader {
                         EventResponse::Ignored
                     }
                     _ => EventResponse::Ignored,
-                }
-            })
+                },
+            )
             .on_access_action(move |action, _ctx| {
                 match action {
-                    bastyde_core::accesskit::Action::Click | bastyde_core::accesskit::Action::Expand => {
+                    bastyde_core::accesskit::Action::Click
+                    | bastyde_core::accesskit::Action::Expand => {
                         selected_access.set(idx);
                         EventResponse::Handled
                     }
@@ -966,9 +968,9 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .item_literal("Outline", TextWidget::new_literal("Outline content"))
-                .item_literal("Props", TextWidget::new_literal("Props content"))
-                .item_literal("Refs", TextWidget::new_literal("Refs content")),
+                .item(lit!("Outline"), TextWidget::new(lit!("Outline content")))
+                .item(lit!("Props"), TextWidget::new(lit!("Props content")))
+                .item(lit!("Refs"), TextWidget::new(lit!("Refs content"))),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -983,9 +985,9 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .item_literal("A", TextWidget::new_literal("A"))
-                .item_literal("B", TextWidget::new_literal("B"))
-                .item_literal("C", TextWidget::new_literal("C")),
+                .item(lit!("A"), TextWidget::new(lit!("A")))
+                .item(lit!("B"), TextWidget::new(lit!("B")))
+                .item(lit!("C"), TextWidget::new(lit!("C"))),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -1002,8 +1004,8 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .item_literal("A", TextWidget::new_literal("AAAAAAAA"))
-                .item_literal("B", TextWidget::new_literal("BBBBBBBB")),
+                .item(lit!("A"), TextWidget::new(lit!("AAAAAAAA")))
+                .item(lit!("B"), TextWidget::new(lit!("BBBBBBBB"))),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -1030,8 +1032,8 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .item_literal("A", TextWidget::new_literal("AAA"))
-                .item_literal("B", TextWidget::new_literal("BBB")),
+                .item(lit!("A"), TextWidget::new(lit!("AAA")))
+                .item(lit!("B"), TextWidget::new(lit!("BBB"))),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -1051,9 +1053,9 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .item_literal("A", TextWidget::new_literal("A"))
-                .add(ToolBoxItem::new_literal("B", TextWidget::new_literal("B")).enabled(false))
-                .item_literal("C", TextWidget::new_literal("C")),
+                .item(lit!("A"), TextWidget::new(lit!("A")))
+                .add(ToolBoxItem::new(lit!("B"), TextWidget::new(lit!("B"))).enabled(false))
+                .item(lit!("C"), TextWidget::new(lit!("C"))),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -1068,9 +1070,9 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .item_literal("A", TextWidget::new_literal("A"))
-                .add(ToolBoxItem::new_literal("B", TextWidget::new_literal("B")).enabled(false))
-                .item_literal("C", TextWidget::new_literal("C")),
+                .item(lit!("A"), TextWidget::new(lit!("A")))
+                .add(ToolBoxItem::new(lit!("B"), TextWidget::new(lit!("B"))).enabled(false))
+                .item(lit!("C"), TextWidget::new(lit!("C"))),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -1088,11 +1090,9 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .add(
-                    ToolBoxItem::new_literal("Locked", TextWidget::new_literal("x")).enabled(false),
-                )
-                .item_literal("Middle", TextWidget::new_literal("m"))
-                .item_literal("Last", TextWidget::new_literal("l")),
+                .add(ToolBoxItem::new(lit!("Locked"), TextWidget::new(lit!("x"))).enabled(false))
+                .item(lit!("Middle"), TextWidget::new(lit!("m")))
+                .item(lit!("Last"), TextWidget::new(lit!("l"))),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -1116,8 +1116,8 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .item_literal("A", TextWidget::new_literal("A"))
-                .item_literal("B", TextWidget::new_literal("B")),
+                .item(lit!("A"), TextWidget::new(lit!("A")))
+                .item(lit!("B"), TextWidget::new(lit!("B"))),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -1147,9 +1147,9 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .item_literal("A", TextWidget::new_literal("A"))
-                .item_literal("B", TextWidget::new_literal("B"))
-                .item_literal("C", TextWidget::new_literal("C")),
+                .item(lit!("A"), TextWidget::new(lit!("A")))
+                .item(lit!("B"), TextWidget::new(lit!("B")))
+                .item(lit!("C"), TextWidget::new(lit!("C"))),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -1169,8 +1169,8 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .item_literal("A", TextWidget::new_literal("A"))
-                .item_literal("B", TextWidget::new_literal("B")),
+                .item(lit!("A"), TextWidget::new(lit!("A")))
+                .item(lit!("B"), TextWidget::new(lit!("B"))),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -1193,8 +1193,8 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone()).add(
-                ToolBoxItem::new_literal("A", TextWidget::new_literal("A"))
-                    .leading(Button::new_literal("start")),
+                ToolBoxItem::new(lit!("A"), TextWidget::new(lit!("A")))
+                    .leading(Button::new(lit!("start"))),
             ),
         );
         t.layout(SizeProposal::exact(300.0, 200.0));
@@ -1234,8 +1234,8 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone()).add(
-                ToolBoxItem::new_literal("A", TextWidget::new_literal("A"))
-                    .trailing(Button::new_literal("x")),
+                ToolBoxItem::new(lit!("A"), TextWidget::new(lit!("A")))
+                    .trailing(Button::new(lit!("x"))),
             ),
         );
         t.layout(SizeProposal::exact(300.0, 200.0));
@@ -1277,8 +1277,8 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .item_literal("A", TextWidget::new_literal("A"))
-                .add(ToolBoxItem::new_literal("B", TextWidget::new_literal("B")).enabled(false)),
+                .item(lit!("A"), TextWidget::new(lit!("A")))
+                .add(ToolBoxItem::new(lit!("B"), TextWidget::new(lit!("B"))).enabled(false)),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 

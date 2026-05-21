@@ -8,6 +8,7 @@
 //! - Bindings auto-registered via register_bindings (no manual bind_to)
 //! - Minimum touch target size from theme
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Rect, SizeProposal};
@@ -310,7 +311,10 @@ impl Button {
     /// `Role::Dialog` after the user dwells for the standard
     /// promotion threshold. Overrides any plain or rich tooltip
     /// previously set on this button.
-    pub fn composite_tooltip(mut self, content: impl bastyde_core::widget::Widget + 'static) -> Self {
+    pub fn composite_tooltip(
+        mut self,
+        content: impl bastyde_core::widget::Widget + 'static,
+    ) -> Self {
         self.composite_tooltip_content = Some(Box::new(content));
         self.tooltip_text = None;
         self.rich_tooltip_source = None;
@@ -408,7 +412,7 @@ impl Button {
     /// initial text; `bind_text` immediately overwrites it with the
     /// prop's current value (and tracks updates for `Prop::Bound`).
     fn make_label_text(&self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> TextWidget {
-        TextWidget::new_literal("")
+        TextWidget::new(lit!(""))
             .bind_text(self.label.clone())
             .bind_color(color)
             .single_line()
@@ -684,7 +688,7 @@ impl bastyde_core::widget::Widget for Button {
                 crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
             );
         } else if let Some(ref tooltip_text) = self.tooltip_text {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new_literal(tooltip_text);
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(lit!(tooltip_text));
             let tooltip_id = ctx.add(tooltip_widget);
             let delay = std::time::Duration::from_millis(200);
             ctx.attach_tooltip(root_id, tooltip_id, delay);
@@ -879,7 +883,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let fired = Rc::new(Cell::new(0_u32));
         let fired_for_btn = fired.clone();
-        let btn = tree.add(Button::new_literal("T").on_activate_fn(move |_ctx| {
+        let btn = tree.add(Button::new(lit!("T")).on_activate_fn(move |_ctx| {
             fired_for_btn.set(fired_for_btn.get() + 1);
         }));
         tree.layout(SizeProposal::exact(200.0, 80.0));
@@ -921,7 +925,7 @@ mod tests {
         let label = Signal::new("May 2026".to_string());
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
-            Button::new_literal("")
+            Button::new(lit!(""))
                 .bind_label(label.clone())
                 .on_activate_fn(|_| {}),
         );
@@ -961,9 +965,9 @@ mod tests {
         // button.
         use crate::primitives::MinSize;
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let plain = tree.add(Button::new_literal("X").on_activate_fn(|_| {}));
+        let plain = tree.add(Button::new(lit!("X")).on_activate_fn(|_| {}));
         let with_slots = tree.add(
-            Button::new_literal("X")
+            Button::new(lit!("X"))
                 .leading(MinSize::new(120.0, 12.0))
                 .trailing(MinSize::new(120.0, 12.0))
                 .on_activate_fn(|_| {}),
@@ -987,7 +991,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let fired = Rc::new(Cell::new(0_u32));
         let fired_for_btn = fired.clone();
-        let btn = tree.add(Button::new_literal("T").on_activate_fn(move |_ctx| {
+        let btn = tree.add(Button::new(lit!("T")).on_activate_fn(move |_ctx| {
             fired_for_btn.set(fired_for_btn.get() + 1);
         }));
         tree.layout(SizeProposal::exact(200.0, 80.0));
@@ -1018,7 +1022,7 @@ mod tests {
         let fired = Rc::new(Cell::new(0_u32));
         let fired_for_btn = fired.clone();
         let btn = tree.add(
-            Button::new_literal("T")
+            Button::new(lit!("T"))
                 .on_activate_fn(move |_ctx| {
                     fired_for_btn.set(fired_for_btn.get() + 1);
                 })
@@ -1056,7 +1060,7 @@ mod tests {
         use bastyde_tokens::Color;
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
-            Button::new_literal("Pick")
+            Button::new(lit!("Pick"))
                 .leading(ColorSwatch::new(Color::RED).access_hidden(true))
                 .on_activate_fn(|_| {}),
         );
@@ -1112,7 +1116,7 @@ mod tests {
         let mut theme = bastyde_core::presets::intui::light();
         theme.style_slots.button = Some(Rc::new(SentinelButton));
         let mut tree = WidgetTree::new().with_theme(theme);
-        let _btn = tree.add(Button::new_literal("T").on_activate_fn(|_| {}));
+        let _btn = tree.add(Button::new(lit!("T")).on_activate_fn(|_| {}));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let frame = tree.render();
 
@@ -1176,7 +1180,7 @@ mod tests {
         theme.style_slots.button = Some(Rc::new(ThemeSentinel));
         let mut tree = WidgetTree::new().with_theme(theme);
         let _btn = tree.add(
-            Button::new_literal("T")
+            Button::new(lit!("T"))
                 .style(CallSentinel)
                 .on_activate_fn(|_| {}),
         );

@@ -1648,11 +1648,7 @@ fn cross_bar_transfer_moves_tab_and_preserves_state() {
     let b_id = tree.add(bar_b);
     let expand_a = tree.add(crate::Expand::new().flex(1.0).child_id(a_id));
     let expand_b = tree.add(crate::Expand::new().flex(1.0).child_id(b_id));
-    tree.add(
-        crate::HStack::new()
-            .add_child(expand_a)
-            .add_child(expand_b),
-    );
+    tree.add(crate::HStack::new().add_child(expand_a).add_child(expand_b));
     tree.layout(SizeProposal::exact(900.0, 80.0));
 
     // Drag A's first tab onto B's header strip.
@@ -1674,9 +1670,14 @@ fn cross_bar_transfer_moves_tab_and_preserves_state() {
     // State preserved: the migrated handle carries the *same* Rc
     // payload (proves a real move, not a reconstruction).
     let same_state = model_b
-        .with_item(landed.unwrap(), |h| std::rc::Rc::ptr_eq(&h.payload, &dragged_payload))
+        .with_item(landed.unwrap(), |h| {
+            std::rc::Rc::ptr_eq(&h.payload, &dragged_payload)
+        })
         .unwrap_or(false);
-    assert!(same_state, "migrated tab must carry the same Rc<dyn Any> state");
+    assert!(
+        same_state,
+        "migrated tab must carry the same Rc<dyn Any> state"
+    );
     assert_eq!(*marker, 42, "shared marker still reachable");
 }
 

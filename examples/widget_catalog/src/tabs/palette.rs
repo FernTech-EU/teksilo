@@ -36,13 +36,13 @@ fn surface_swatch(
                 .corner_radius(4.0)
                 .padding(10.0)
                 .child(
-                    TextWidget::new_literal(name)
+                    TextWidget::new(lit!(name))
                         .style(TextStyleRole::Small)
                         .color(text_color),
                 ),
         )
         .child(
-            TextWidget::new_literal(text_role)
+            TextWidget::new(lit!(text_role))
                 .style(TextStyleRole::Tiny)
                 .color(TextRole::Secondary),
         )
@@ -56,18 +56,18 @@ fn text_sample(
     HStack::new()
         .spacing(12.0)
         .child(
-            TextWidget::new_literal(PANGRAM)
+            TextWidget::new(lit!(PANGRAM))
                 .style(TextStyleRole::Body)
                 .color(color),
         )
         .child(Spacer::new())
         .child(
-            TextWidget::new_literal(name)
+            TextWidget::new(lit!(name))
                 .style(TextStyleRole::Tiny)
                 .color(TextRole::Secondary),
         )
         .child(
-            TextWidget::new_literal(description)
+            TextWidget::new(lit!(description))
                 .style(TextStyleRole::Tiny)
                 .color(TextRole::Secondary),
         )
@@ -78,13 +78,13 @@ fn editor_line(line_no: &str, code: &str) -> impl Widget + 'static {
         .spacing(12.0)
         .child(
             FixedSize::new().bind_width(24.0_f32).child(
-                TextWidget::new_literal(line_no)
+                TextWidget::new(lit!(line_no))
                     .style(TextStyleRole::Mono)
                     .color(TextRole::EditorGutterFg),
             ),
         )
         .child(
-            TextWidget::new_literal(code)
+            TextWidget::new(lit!(code))
                 .style(TextStyleRole::Mono)
                 .color(TextRole::EditorFg),
         )
@@ -105,13 +105,13 @@ fn editor_swatch(
                 .corner_radius(4.0)
                 .padding(10.0)
                 .child(
-                    TextWidget::new_literal("Aa Bb 123")
+                    TextWidget::new(lit!("Aa Bb 123"))
                         .style(TextStyleRole::Mono)
                         .color(sample_color),
                 ),
         )
         .child(
-            TextWidget::new_literal(name)
+            TextWidget::new(lit!(name))
                 .style(TextStyleRole::Tiny)
                 .color(TextRole::Secondary),
         )
@@ -284,13 +284,13 @@ fn text_on_accent_row() -> impl Widget + 'static {
             HStack::new()
                 .spacing(12.0)
                 .child(
-                    TextWidget::new_literal(PANGRAM)
+                    TextWidget::new(lit!(PANGRAM))
                         .style(TextStyleRole::Body)
                         .color(TextRole::OnAccent),
                 )
                 .child(Spacer::new())
                 .child(
-                    TextWidget::new_literal("text_on_accent on accent")
+                    TextWidget::new(lit!("text_on_accent on accent"))
                         .style(TextStyleRole::Tiny)
                         .color(TextRole::OnAccent),
                 ),
@@ -302,13 +302,13 @@ fn mock_editor() -> impl Widget + 'static {
         .spacing(12.0)
         .child(
             FixedSize::new().bind_width(24.0_f32).child(
-                TextWidget::new_literal("2")
+                TextWidget::new(lit!("2"))
                     .style(TextStyleRole::Mono)
                     .color(TextRole::EditorGutterFg),
             ),
         )
         .child(
-            TextWidget::new_literal("    let ")
+            TextWidget::new(lit!("    let "))
                 .style(TextStyleRole::Mono)
                 .color(TextRole::EditorFg),
         )
@@ -320,14 +320,14 @@ fn mock_editor() -> impl Widget + 'static {
                 .border_width(0.0)
                 .child(
                     Padding::symmetric(1.0, 2.0).child(
-                        TextWidget::new_literal("x")
+                        TextWidget::new(lit!("x"))
                             .style(TextStyleRole::Mono)
                             .color(TextRole::EditorFg),
                     ),
                 ),
         )
         .child(
-            TextWidget::new_literal(" = 42;")
+            TextWidget::new(lit!(" = 42;"))
                 .style(TextStyleRole::Mono)
                 .color(TextRole::EditorFg),
         )
@@ -654,12 +654,12 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                                 border_width: 1.0
                                 corner_radius: 4.0
                                 padding: 10.0
-                                TextWidget::new_literal(name) {
+                                TextWidget::new(lit!(name)) {
                                     style: TextStyleRole::Small
                                     color: fg
                                 }
                             }
-                            TextWidget::new_literal(role_caption) {
+                            TextWidget::new(lit!(role_caption)) {
                                 style: TextStyleRole::Tiny
                                 color: TextRole::Secondary
                             }
@@ -691,16 +691,16 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                                 let description = *description;
                                 HStack {
                                     spacing: 12.0
-                                    TextWidget::new_literal(PANGRAM) {
+                                    TextWidget::new(lit!(PANGRAM)) {
                                         style: TextStyleRole::Body
                                         color: fg
                                     }
                                     Spacer {}
-                                    TextWidget::new_literal(name) {
+                                    TextWidget::new(lit!(name)) {
                                         style: TextStyleRole::Tiny
                                         color: TextRole::Secondary
                                     }
-                                    TextWidget::new_literal(description) {
+                                    TextWidget::new(lit!(description)) {
                                         style: TextStyleRole::Tiny
                                         color: TextRole::Secondary
                                     }
@@ -714,12 +714,12 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                         padding: 12.0
                         HStack {
                             spacing: 12.0
-                            TextWidget::new_literal(PANGRAM) {
+                            TextWidget::new(lit!(PANGRAM)) {
                                 style: TextStyleRole::Body
                                 color: TextRole::OnAccent
                             }
                             Spacer
-                            TextWidget::new_literal("text_on_accent on accent") {
+                            TextWidget::new(lit!("text_on_accent on accent")) {
                                 style: TextStyleRole::Tiny
                                 color: TextRole::OnAccent
                             }
@@ -750,12 +750,12 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                                 spacing: 12.0
                                 FixedSize {
                                     bind_width: 24.0_f32
-                                    TextWidget::new_literal("1") {
+                                    TextWidget::new(lit!("1")) {
                                         style: TextStyleRole::Mono
                                         color: TextRole::EditorGutterFg
                                     }
                                 }
-                                TextWidget::new_literal("fn main() {") {
+                                TextWidget::new(lit!("fn main() {")) {
                                     style: TextStyleRole::Mono
                                     color: TextRole::EditorFg
                                 }
@@ -771,12 +771,12 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                                     spacing: 12.0
                                     FixedSize {
                                         bind_width: 24.0_f32
-                                        TextWidget::new_literal("2") {
+                                        TextWidget::new(lit!("2")) {
                                             style: TextStyleRole::Mono
                                             color: TextRole::EditorGutterFg
                                         }
                                     }
-                                    TextWidget::new_literal("    let ") {
+                                    TextWidget::new(lit!("    let ")) {
                                         style: TextStyleRole::Mono
                                         color: TextRole::EditorFg
                                     }
@@ -786,13 +786,13 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                                         padding: 0.0
                                         border_width: 0.0
                                         Padding::symmetric(1.0, 2.0) {
-                                            TextWidget::new_literal("x") {
+                                            TextWidget::new(lit!("x")) {
                                                 style: TextStyleRole::Mono
                                                 color: TextRole::EditorFg
                                             }
                                         }
                                     }
-                                    TextWidget::new_literal(" = 42;") {
+                                    TextWidget::new(lit!(" = 42;")) {
                                         style: TextStyleRole::Mono
                                         color: TextRole::EditorFg
                                     }
@@ -813,12 +813,12 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                                 spacing: 12.0
                                 FixedSize {
                                     bind_width: 24.0_f32
-                                    TextWidget::new_literal("3") {
+                                    TextWidget::new(lit!("3")) {
                                         style: TextStyleRole::Mono
                                         color: TextRole::EditorGutterFg
                                     }
                                 }
-                                TextWidget::new_literal("    println!(\"{}\", x);") {
+                                TextWidget::new(lit!("    println!(\"{}\", x);")) {
                                     style: TextStyleRole::Mono
                                     color: TextRole::EditorFg
                                 }
@@ -827,12 +827,12 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                                 spacing: 12.0
                                 FixedSize {
                                     bind_width: 24.0_f32
-                                    TextWidget::new_literal("4") {
+                                    TextWidget::new(lit!("4")) {
                                         style: TextStyleRole::Mono
                                         color: TextRole::EditorGutterFg
                                     }
                                 }
-                                TextWidget::new_literal("}") {
+                                TextWidget::new(lit!("}")) {
                                     style: TextStyleRole::Mono
                                     color: TextRole::EditorFg
                                 }
@@ -861,12 +861,12 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                                     border_width: 1.0
                                     corner_radius: 4.0
                                     padding: 10.0
-                                    TextWidget::new_literal("Aa Bb 123") {
+                                    TextWidget::new(lit!("Aa Bb 123")) {
                                         style: TextStyleRole::Mono
                                         color: fg_clone
                                     }
                                 }
-                                TextWidget::new_literal(name) {
+                                TextWidget::new(lit!(name)) {
                                     style: TextStyleRole::Tiny
                                     color: TextRole::Secondary
                                 }

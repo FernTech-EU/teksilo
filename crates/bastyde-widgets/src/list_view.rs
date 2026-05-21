@@ -24,8 +24,8 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_data::ListModel;
 use bastyde_data::selection_model::SelectionModel;
 
-use crate::list_source::ListSource;
 use crate::common::scroll::OverscrollBehavior;
+use crate::list_source::ListSource;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
 
 /// Internal drag payload for intra-ListView reordering.
@@ -1868,20 +1868,24 @@ mod tests {
     /// A ListView (40 × 30px items in a 100px viewport → 1100px of scroll)
     /// stacked above a filler inside an outer ScrollArea, so chaining from the
     /// inner list to the outer area is observable.
-    fn nested_list_fixture(
-        inner: OverscrollBehavior,
-    ) -> (WidgetTree, Signal<f32>, Signal<f32>) {
+    fn nested_list_fixture(inner: OverscrollBehavior) -> (WidgetTree, Signal<f32>, Signal<f32>) {
         use crate::ScrollArea;
         use crate::primitives::{FixedSize, VStack};
         let mut tree = WidgetTree::new();
         let model = ListModel::from_vec((0..40_usize).collect());
-        let lv = ListView::new(model, move |_i, _item, _sel| Box::new(FixedLeaf(180.0, 30.0)))
-            .item_height(30.0)
-            .overscroll_behavior(inner);
+        let lv = ListView::new(model, move |_i, _item, _sel| {
+            Box::new(FixedLeaf(180.0, 30.0))
+        })
+        .item_height(30.0)
+        .overscroll_behavior(inner);
         let inner_y = lv.scroll_y_signal().clone();
         let lv_id = tree.add(lv);
-        let viewport =
-            tree.add(FixedSize::new().bind_width(200.0).bind_height(100.0).child_id(lv_id));
+        let viewport = tree.add(
+            FixedSize::new()
+                .bind_width(200.0)
+                .bind_height(100.0)
+                .child_id(lv_id),
+        );
         let filler = tree.add(FixedLeaf(200.0, 200.0));
         let outer_content = tree.add(VStack::new().add_child(viewport).add_child(filler));
         let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
@@ -1902,8 +1906,14 @@ mod tests {
         });
         tree.layout(SizeProposal::exact(200.0, 150.0));
         let inner_bottom = inner_y.get();
-        assert!(inner_bottom > 0.0, "inner list should scroll down; got {inner_bottom}");
-        assert!(outer_y.get() < 0.01, "outer must not move while the inner absorbs");
+        assert!(
+            inner_bottom > 0.0,
+            "inner list should scroll down; got {inner_bottom}"
+        );
+        assert!(
+            outer_y.get() < 0.01,
+            "outer must not move while the inner absorbs"
+        );
 
         tree.pointer_move(Point::new(50.0, 40.0));
         tree.dispatch_event(WidgetEvent::Scroll {
@@ -1911,8 +1921,14 @@ mod tests {
             modifiers: Modifiers::NONE,
         });
         tree.layout(SizeProposal::exact(200.0, 150.0));
-        assert!((inner_y.get() - inner_bottom).abs() < 0.01, "inner stays clamped at bottom");
-        assert!(outer_y.get() > 0.01, "outer scrolled because the inner chained the boundary");
+        assert!(
+            (inner_y.get() - inner_bottom).abs() < 0.01,
+            "inner stays clamped at bottom"
+        );
+        assert!(
+            outer_y.get() > 0.01,
+            "outer scrolled because the inner chained the boundary"
+        );
     }
 
     #[test]
@@ -1931,6 +1947,9 @@ mod tests {
             modifiers: Modifiers::NONE,
         });
         tree.layout(SizeProposal::exact(200.0, 150.0));
-        assert!(outer_y.get() < 0.01, "Contain must prevent chaining: outer stays put");
+        assert!(
+            outer_y.get() < 0.01,
+            "Contain must prevent chaining: outer stays put"
+        );
     }
 }

@@ -73,7 +73,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("HexColorInput") {
+                TextWidget::new(lit!("HexColorInput")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -84,7 +84,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("ColorEdit") {
+                TextWidget::new(lit!("ColorEdit")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -96,7 +96,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("ColorPicker") {
+                TextWidget::new(lit!("ColorPicker")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

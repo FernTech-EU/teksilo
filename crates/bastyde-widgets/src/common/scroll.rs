@@ -75,13 +75,25 @@ mod tests {
 
     #[test]
     fn response_chains_only_when_not_moved() {
-        assert!(matches!(scroll_response(false, false), EventResponse::Ignored));
-        assert!(matches!(scroll_response(true, false), EventResponse::Handled));
+        assert!(matches!(
+            scroll_response(false, false),
+            EventResponse::Ignored
+        ));
+        assert!(matches!(
+            scroll_response(true, false),
+            EventResponse::Handled
+        ));
     }
 
     #[test]
     fn response_contain_always_handled() {
-        assert!(matches!(scroll_response(false, true), EventResponse::Handled));
-        assert!(matches!(scroll_response(true, true), EventResponse::Handled));
+        assert!(matches!(
+            scroll_response(false, true),
+            EventResponse::Handled
+        ));
+        assert!(matches!(
+            scroll_response(true, true),
+            EventResponse::Handled
+        ));
     }
 }

@@ -384,12 +384,13 @@ mod tests {
     use bastyde_core::accesskit::Role;
     use bastyde_core::event::{Key, Modifiers, WidgetEvent};
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn build_does_not_panic_with_minimum_config() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(
-            PopoverButton::new(Button::new_literal("Open"))
+            PopoverButton::new(Button::new(lit!("Open")))
                 .content(MinSize::new(40.0, 40.0).child(RectWidget::new())),
         );
         tree.layout(SizeProposal::exact(300.0, 80.0));
@@ -399,7 +400,7 @@ mod tests {
     #[should_panic(expected = "PopoverButton::content")]
     fn build_panics_without_content() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(PopoverButton::new(Button::new_literal("Open")));
+        tree.add(PopoverButton::new(Button::new(lit!("Open"))));
         tree.layout(SizeProposal::exact(300.0, 80.0));
     }
 
@@ -407,7 +408,7 @@ mod tests {
     fn trigger_node_announces_button_role_and_haspopup() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
-            PopoverButton::new(Button::new_literal("Open"))
+            PopoverButton::new(Button::new(lit!("Open")))
                 .content(MinSize::new(40.0, 40.0).child(RectWidget::new())),
         );
         tree.layout(SizeProposal::exact(300.0, 80.0));
@@ -438,7 +439,7 @@ mod tests {
     #[test]
     fn enter_key_opens_popover_and_flips_open_signal() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let pb = PopoverButton::new(Button::new_literal("Open"))
+        let pb = PopoverButton::new(Button::new(lit!("Open")))
             .content(MinSize::new(40.0, 40.0).child(RectWidget::new()));
         let open_signal = pb.open_signal();
         let id = tree.add(pb);
@@ -470,7 +471,7 @@ mod tests {
         // Button (where the caret paints).
         use bastyde_core::event::PointerButton;
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let pb = PopoverButton::new(Button::new_literal("Open"))
+        let pb = PopoverButton::new(Button::new(lit!("Open")))
             .show_disclosure_caret(true)
             .content(MinSize::new(40.0, 40.0).child(RectWidget::new()));
         let open_signal = pb.open_signal();

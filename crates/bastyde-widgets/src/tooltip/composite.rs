@@ -330,6 +330,7 @@ mod tests {
     use crate::tooltip::attach::{DEFAULT_COMPOSITE_TOOLTIP_DELAY, attach_composite_tooltip};
     use bastyde_canvas::{MockTextBackend, SizeProposal};
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -358,11 +359,11 @@ mod tests {
 
     impl Widget for ComposeTooltipHost {
         fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-            let anchor = ctx.add(Button::new_literal("Hover me"));
+            let anchor = ctx.add(Button::new(lit!("Hover me")));
             self.anchor_id = Some(anchor);
             let body = VStack::new()
-                .child(TextWidget::new_literal("Header"))
-                .child(TextWidget::new_literal("Body"));
+                .child(TextWidget::new(lit!("Header")))
+                .child(TextWidget::new(lit!("Body")));
             let tip = attach_composite_tooltip(ctx, anchor, body, DEFAULT_COMPOSITE_TOOLTIP_DELAY);
             self.tooltip_id_sink.set(Some(tip));
             vec![anchor]
@@ -459,7 +460,7 @@ mod tests {
         // being preserved (otherwise the reused `body_id` would dangle).
         // Assert that contract directly — it links the two halves of the
         // fix (reuse + preserve); removing either should fail here.
-        let w = CompositeTooltipWidget::new().content(TextWidget::new_literal("Body"));
+        let w = CompositeTooltipWidget::new().content(TextWidget::new(lit!("Body")));
         assert!(
             w.preserves_children_on_rebuild(),
             "composite must preserve children so the reused body id stays valid across rebuild"

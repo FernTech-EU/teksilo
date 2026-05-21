@@ -1156,6 +1156,7 @@ impl<T: 'static> Widget for TreeView<T> {
 mod tests {
     use super::*;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
@@ -1543,8 +1544,8 @@ mod tests {
                         Padding::symmetric(4.0, 12.0).child(
                             HStack::new()
                                 .spacing(8.0)
-                                .child(TextWidget::new_literal(arrow))
-                                .child(TextWidget::new_literal(name.to_string()))
+                                .child(TextWidget::new(lit!(arrow)))
+                                .child(TextWidget::new(lit!(name.to_string())))
                                 .child(Spacer::new()),
                         ),
                     ),
@@ -1592,7 +1593,7 @@ mod tests {
                             Padding::symmetric(4.0, 12.0).child(
                                 HStack::new()
                                     .spacing(8.0)
-                                    .child(TextWidget::new_literal(name.to_string()))
+                                    .child(TextWidget::new(lit!(name.to_string())))
                                     .child(Spacer::new()),
                             ),
                         ),
@@ -1976,12 +1977,18 @@ mod tests {
             model.insert_root(i, i as i32);
         }
         let mut tree = WidgetTree::new();
-        let tv = TreeView::new(model, |_item: &i32, _entry, _sel| Box::new(FixedLeaf(180.0, 20.0)))
-            .item_height(20.0)
-            .overscroll_behavior(inner);
+        let tv = TreeView::new(model, |_item: &i32, _entry, _sel| {
+            Box::new(FixedLeaf(180.0, 20.0))
+        })
+        .item_height(20.0)
+        .overscroll_behavior(inner);
         let tv_id = tree.add(tv);
-        let viewport =
-            tree.add(FixedSize::new().bind_width(200.0).bind_height(100.0).child_id(tv_id));
+        let viewport = tree.add(
+            FixedSize::new()
+                .bind_width(200.0)
+                .bind_height(100.0)
+                .child_id(tv_id),
+        );
         let filler = tree.add(FixedLeaf(200.0, 200.0));
         let outer_content = tree.add(VStack::new().add_child(viewport).add_child(filler));
         let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
@@ -2002,7 +2009,10 @@ mod tests {
         });
         tree.layout(SizeProposal::exact(200.0, 150.0));
         // The inner tree absorbed the big scroll (didn't chain) → outer at 0.
-        assert!(outer_y.get() < 0.01, "outer must not move while the inner absorbs");
+        assert!(
+            outer_y.get() < 0.01,
+            "outer must not move while the inner absorbs"
+        );
 
         tree.pointer_move(Point::new(50.0, 40.0));
         tree.dispatch_event(WidgetEvent::Scroll {
@@ -2010,7 +2020,10 @@ mod tests {
             modifiers: Modifiers::NONE,
         });
         tree.layout(SizeProposal::exact(200.0, 150.0));
-        assert!(outer_y.get() > 0.01, "outer scrolled because the clamped tree chained");
+        assert!(
+            outer_y.get() > 0.01,
+            "outer scrolled because the clamped tree chained"
+        );
     }
 
     #[test]
@@ -2029,6 +2042,9 @@ mod tests {
             modifiers: Modifiers::NONE,
         });
         tree.layout(SizeProposal::exact(200.0, 150.0));
-        assert!(outer_y.get() < 0.01, "Contain must prevent chaining: outer stays put");
+        assert!(
+            outer_y.get() < 0.01,
+            "Contain must prevent chaining: outer stays put"
+        );
     }
 }

@@ -257,7 +257,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("IconButton") {
+                TextWidget::new(lit!("IconButton")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -283,7 +283,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("CommandLinkButton") {
+                TextWidget::new(lit!("CommandLinkButton")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -300,7 +300,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("PopoverButton") {
+                TextWidget::new(lit!("PopoverButton")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -309,7 +309,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("PopoverIconButton") {
+                TextWidget::new(lit!("PopoverIconButton")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -318,7 +318,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("SplitButton") {
+                TextWidget::new(lit!("SplitButton")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

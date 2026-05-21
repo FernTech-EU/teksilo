@@ -96,9 +96,7 @@ impl RenderFrame {
                 DrawCommand::Glyph(i) => DrawCommand::Glyph(i + glyph_offset),
                 DrawCommand::Image(i) => DrawCommand::Image(i + image_offset),
                 DrawCommand::Decoration(i) => DrawCommand::Decoration(i + decoration_offset),
-                DrawCommand::CosmeticLine(i) => {
-                    DrawCommand::CosmeticLine(i + cosmetic_line_offset)
-                }
+                DrawCommand::CosmeticLine(i) => DrawCommand::CosmeticLine(i + cosmetic_line_offset),
                 DrawCommand::Shape(i) => DrawCommand::Shape(i + shape_offset),
                 DrawCommand::Shadow(i) => DrawCommand::Shadow(i + shadow_offset),
                 DrawCommand::Rasterized(i) => DrawCommand::Rasterized(i + rasterized_offset),

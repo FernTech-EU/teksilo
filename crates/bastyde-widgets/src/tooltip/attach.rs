@@ -156,6 +156,7 @@ mod tests {
     use bastyde_canvas::{MockTextBackend, SizeProposal};
     use bastyde_core::widget_tree::WidgetTree;
     use bastyde_i18n::LocalizedString;
+    use bastyde_i18n::lit;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -172,7 +173,7 @@ mod tests {
         )]);
 
         let mut tree = tree_with_backend();
-        let btn = tree.add(Button::new_literal("Save As").rich_tooltip("save-as"));
+        let btn = tree.add(Button::new(lit!("Save As")).rich_tooltip("save-as"));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         // No tooltip visible before hover.
@@ -207,8 +208,8 @@ mod tests {
         // Plain set first, then rich: rich should win (latest setter
         // clears the other field).
         let btn = tree.add(
-            Button::new_literal("Help")
-                .tooltip_literal("stale plain text")
+            Button::new(lit!("Help"))
+                .tooltip(lit!("stale plain text"))
                 .rich_tooltip("help"),
         );
         tree.layout(SizeProposal::exact(400.0, 200.0));
@@ -235,7 +236,7 @@ mod tests {
         )]);
 
         let mut tree = tree_with_backend();
-        let btn = tree.add(Button::new_literal("Focus me").rich_tooltip("focus-key"));
+        let btn = tree.add(Button::new(lit!("Focus me")).rich_tooltip("focus-key"));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         assert!(tree.active_overlays().is_empty());
@@ -261,8 +262,8 @@ mod tests {
         )]);
 
         let mut tree = tree_with_backend();
-        let btn = tree.add(Button::new_literal("Anchor").rich_tooltip("leave-key"));
-        let other = tree.add(Button::new_literal("Elsewhere"));
+        let btn = tree.add(Button::new(lit!("Anchor")).rich_tooltip("leave-key"));
+        let other = tree.add(Button::new(lit!("Elsewhere")));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         tree.focus(btn);
@@ -283,7 +284,7 @@ mod tests {
     #[test]
     fn button_plain_tooltip_appears_after_hover_delay() {
         let mut tree = tree_with_backend();
-        let btn = tree.add(Button::new_literal("Save").tooltip_literal("Save the document"));
+        let btn = tree.add(Button::new(lit!("Save")).tooltip(lit!("Save the document")));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         assert!(tree.active_overlays().is_empty());
@@ -308,7 +309,7 @@ mod tests {
         let mut tree = tree_with_backend();
         let content =
             TooltipContent::new("inline-only", LocalizedString::literal("Inline content"));
-        let btn = tree.add(Button::new_literal("Go").rich_tooltip_content(content));
+        let btn = tree.add(Button::new(lit!("Go")).rich_tooltip_content(content));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         tree.pointer_move(tree.bounds(btn).center());
         tree.advance_time(DEFAULT_RICH_TOOLTIP_DELAY + Duration::from_millis(50));

@@ -1152,6 +1152,7 @@ mod tests {
     use bastyde_core::accesskit::Role;
     use bastyde_core::widget_tree::WidgetTree;
     use bastyde_data::{SortFilterTreeModel, TreeFilterMode, TreeModel};
+    use bastyde_i18n::lit;
 
     fn sample_tree() -> TreeModel<&'static str> {
         let t = TreeModel::new();
@@ -1165,14 +1166,14 @@ mod tests {
 
     fn name_col() -> Column<&'static str> {
         Column::<&str>::new("name", "Name", |row, _: &CellContext| {
-            Box::new(crate::primitives::TextWidget::new_literal(*row))
+            Box::new(crate::primitives::TextWidget::new(lit!(*row)))
         })
         .width(ColumnWidth::Flex(1.0))
     }
 
     fn size_col() -> Column<&'static str> {
         Column::<&str>::new("size", "Size", |_row, _: &CellContext| {
-            Box::new(crate::primitives::TextWidget::new_literal("0"))
+            Box::new(crate::primitives::TextWidget::new(lit!("0")))
         })
         .width(ColumnWidth::Fixed(60.0))
     }

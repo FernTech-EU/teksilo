@@ -107,7 +107,7 @@ pub use widget_id::WidgetId;
 pub use widget_tree::WidgetTree;
 pub use window::state::WindowStateInit;
 pub use window::{
-    DecorationsMode, BastydeWindowId, ModalConfig, NoopWindowOps, PostRootBuilder, RootBuilder,
+    BastydeWindowId, DecorationsMode, ModalConfig, NoopWindowOps, PostRootBuilder, RootBuilder,
     UserAttentionKind, WindowCommand, WindowConfig, WindowIcon, WindowOps, WindowPlacement,
     WindowState,
 };

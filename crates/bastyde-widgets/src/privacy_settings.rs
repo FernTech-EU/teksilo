@@ -43,6 +43,7 @@ use bastyde_core::build_context::BuildContext;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
+use bastyde_i18n::lit;
 use bastyde_i18n::tr_widget;
 use bastyde_telemetry::{
     ConsentScope, ConsentState, ConsentStore, OpenedTelemetry, RemoteDataExport, TelemetryExt,
@@ -390,11 +391,11 @@ fn scope_row(
         .child(
             VStack::new()
                 .spacing(2.0)
-                .child(TextWidget::new_literal(label.clone()).style(TextStyleRole::Body))
-                .child(TextWidget::new_literal(description).style(TextStyleRole::Small)),
+                .child(TextWidget::new(lit!(label.clone())).style(TextStyleRole::Body))
+                .child(TextWidget::new(lit!(description)).style(TextStyleRole::Small)),
         )
         .child(Spacer::new())
-        .child(Toggle::new(signal).label_literal(label).enabled(enabled))
+        .child(Toggle::new(signal).label(lit!(label)).enabled(enabled))
 }
 
 fn build_accept_reject(telemetry: &OpenedTelemetry, endpoint: &str) -> HStack {
@@ -506,13 +507,13 @@ fn build_identity_row(telemetry: &OpenedTelemetry) -> Panel {
                                     .text(tr_widget!(privacy_fetch_success_text(
                                         count = event_count
                                     )))
-                                    .informative_text_literal(format!(
+                                    .informative_text(lit!(format!(
                                         "{}\n\n{details}",
                                         tr_widget!(privacy_fetch_saved_to(
                                             path = path.display().to_string()
                                         ))
                                         .resolve_now()
-                                    ))
+                                    )))
                                     .buttons(MessageBoxButtons::Ok)
                                     .present(ctx);
                                 }
@@ -547,14 +548,14 @@ fn build_identity_row(telemetry: &OpenedTelemetry) -> Panel {
                             }
                             MessageBox::information(tr_widget!(privacy_fetch_success_title()))
                                 .text(tr_widget!(privacy_fetch_success_text(count = event_count)))
-                                .informative_text_literal(details)
-                                .detailed_text_literal(json)
+                                .informative_text(lit!(details))
+                                .detailed_text(lit!(json))
                                 .buttons(MessageBoxButtons::Ok)
                                 .present(ctx);
                         }
                         FileDialogResult::Error(msg) => {
                             MessageBox::warning(tr_widget!(privacy_fetch_error_title()))
-                                .text_literal(msg)
+                                .text(lit!(msg))
                                 .buttons(MessageBoxButtons::Ok)
                                 .present(ctx);
                         }
@@ -565,14 +566,14 @@ fn build_identity_row(telemetry: &OpenedTelemetry) -> Panel {
                     });
                     if let Err(msg) = submit {
                         MessageBox::warning(tr_widget!(privacy_fetch_error_title()))
-                            .text_literal(msg)
+                            .text(lit!(msg))
                             .buttons(MessageBoxButtons::Ok)
                             .present(ctx);
                     }
                 }
                 Err(e) => {
                     MessageBox::warning(tr_widget!(privacy_fetch_error_title()))
-                        .text_literal(format!("{e}"))
+                        .text(lit!(format!("{e}")))
                         .buttons(MessageBoxButtons::Ok)
                         .present(ctx);
                 }
@@ -757,7 +758,7 @@ fn build_inspect_accordion(telemetry: &OpenedTelemetry, n: usize) -> Accordion {
             } else {
                 format!("{}. {} ({})", idx + 1, event.name, props_summary)
             };
-            col = col.child(TextWidget::new_literal(line).style(TextStyleRole::Mono));
+            col = col.child(TextWidget::new(lit!(line)).style(TextStyleRole::Mono));
         }
         col
     };

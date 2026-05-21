@@ -69,7 +69,13 @@ impl AsyncCompletionHandle {
         let mut state = self.inner.borrow_mut();
         let id = state.next_id;
         state.next_id = state.next_id.wrapping_add(1);
-        state.pending.insert(id, Pending { window_id, callback });
+        state.pending.insert(
+            id,
+            Pending {
+                window_id,
+                callback,
+            },
+        );
         id
     }
 
@@ -134,7 +140,11 @@ mod tests {
         tree.run_with_event_context(&mut NoopWindowOps, |ctx| handle.deliver(id, win, ctx));
 
         assert!(ran.get(), "callback must run with the fresh context");
-        assert_eq!(handle.pending_len(), 0, "delivered completion must be removed");
+        assert_eq!(
+            handle.pending_len(),
+            0,
+            "delivered completion must be removed"
+        );
     }
 
     #[test]
@@ -147,7 +157,11 @@ mod tests {
         assert_eq!(handle.pending_len(), 3);
 
         handle.purge_window(win);
-        assert_eq!(handle.pending_len(), 1, "only the other window's completion survives");
+        assert_eq!(
+            handle.pending_len(),
+            1,
+            "only the other window's completion survives"
+        );
     }
 
     #[test]
@@ -162,6 +176,9 @@ mod tests {
         tree.run_with_event_context(&mut NoopWindowOps, |ctx| {
             handle.deliver(id, BastydeWindowId::new(999), ctx)
         });
-        assert!(!ran.get(), "a window-mismatched delivery must not run the callback");
+        assert!(
+            !ran.get(),
+            "a window-mismatched delivery must not run the callback"
+        );
     }
 }

@@ -222,12 +222,13 @@ mod tests {
     use super::*;
     use crate::primitives::TextWidget;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn shake_starts_at_rest() {
         let trigger = Signal::new(0_u32);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Shake::new(trigger).child(TextWidget::new_literal("oops")));
+        tree.add(Shake::new(trigger).child(TextWidget::new(lit!("oops"))));
         tree.layout(SizeProposal {
             width: Some(200.0),
             height: None,
@@ -242,7 +243,7 @@ mod tests {
     fn bumping_trigger_starts_shake() {
         let trigger = Signal::new(0_u32);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Shake::new(trigger.clone()).child(TextWidget::new_literal("oops")));
+        tree.add(Shake::new(trigger.clone()).child(TextWidget::new(lit!("oops"))));
         tree.layout(SizeProposal {
             width: Some(200.0),
             height: None,
@@ -260,7 +261,7 @@ mod tests {
     fn shake_completes() {
         let trigger = Signal::new(0_u32);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Shake::new(trigger.clone()).child(TextWidget::new_literal("oops")));
+        tree.add(Shake::new(trigger.clone()).child(TextWidget::new(lit!("oops"))));
         tree.layout(SizeProposal {
             width: Some(200.0),
             height: None,
@@ -280,7 +281,7 @@ mod tests {
         let trigger = Signal::new(0_u32);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.set_accessibility_preferences(false, true, 1.0);
-        tree.add(Shake::new(trigger.clone()).child(TextWidget::new_literal("oops")));
+        tree.add(Shake::new(trigger.clone()).child(TextWidget::new(lit!("oops"))));
         tree.layout(SizeProposal {
             width: Some(200.0),
             height: None,

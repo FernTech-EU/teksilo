@@ -897,8 +897,10 @@ mod tests {
         let mut atlas = PathAtlas::new(512, 512);
         atlas.begin_frame();
         let mut path = Path::new();
-        path.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        path.commands.push(PathCommand::LineTo(Point::new(40.0, 0.0)));
+        path.commands
+            .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.commands
+            .push(PathCommand::LineTo(Point::new(40.0, 0.0)));
         let bounds = [0.0, 0.0, 40.0, 4.0];
         let color = [0.0, 0.0, 0.0, 1.0];
 
@@ -910,7 +912,10 @@ mod tests {
             .lookup_or_rasterize(&path, color, &cosmetic, bounds, 1.0, 2.0)
             .unwrap();
         assert_eq!(r1.w, 40, "cosmetic body at zoom 1: 40·sf1·zoom1");
-        assert_eq!(r2.w, 80, "cosmetic body at zoom 2: 40·sf1·zoom2 (zoom-aware)");
+        assert_eq!(
+            r2.w, 80,
+            "cosmetic body at zoom 2: 40·sf1·zoom2 (zoom-aware)"
+        );
 
         let logical = StrokeStyle::solid(2.0);
         let l1 = atlas
@@ -920,11 +925,18 @@ mod tests {
             .lookup_or_rasterize(&path, color, &logical, bounds, 1.0, 4.0)
             .unwrap();
         assert_eq!(l1.w, l2.w, "logical raster size ignores zoom");
-        assert_eq!((l1.x, l1.y), (l2.x, l2.y), "logical hits the same cache entry");
+        assert_eq!(
+            (l1.x, l1.y),
+            (l2.x, l2.y),
+            "logical hits the same cache entry"
+        );
 
         // Same width/color/dims but different stroke space must not collide.
         let k_cos = PathCacheKey::new(&path, color, &cosmetic, 40, 4);
         let k_log = PathCacheKey::new(&path, color, &logical, 40, 4);
-        assert_ne!(k_cos, k_log, "cache key must distinguish cosmetic vs logical");
+        assert_ne!(
+            k_cos, k_log,
+            "cache key must distinguish cosmetic vs logical"
+        );
     }
 }

@@ -354,7 +354,15 @@ pub struct SceneView {
     hovered_item: Rc<Cell<Option<crate::item::ItemId>>>,
     /// Last press recorded for tap detection: (scene_pt, item_id).
     /// Cleared on PointerUp / PointerLeave.
-    pending_tap: Rc<Cell<Option<(Point, crate::item::ItemId, bastyde_core::event::PointerButton)>>>,
+    pending_tap: Rc<
+        Cell<
+            Option<(
+                Point,
+                crate::item::ItemId,
+                bastyde_core::event::PointerButton,
+            )>,
+        >,
+    >,
     /// Latest viewport size observed during layout. Cached so
     /// imperative methods like [`SceneView::fit_to_content`] can
     /// reason about the visible rectangle without re-running layout.
@@ -1068,7 +1076,10 @@ impl SceneView {
     pub fn min_zoom(self, v: f32) -> Self {
         let lo = v.max(0.0001);
         let current = self.zoom_range_override.get();
-        let hi = current.as_ref().map(|r| *r.end()).unwrap_or(DEFAULT_MAX_ZOOM);
+        let hi = current
+            .as_ref()
+            .map(|r| *r.end())
+            .unwrap_or(DEFAULT_MAX_ZOOM);
         self.zoom_range_override.set(Some(lo..=hi.max(lo)));
         self
     }
@@ -1077,7 +1088,10 @@ impl SceneView {
     /// bound of the override range. See [`min_zoom`](Self::min_zoom).
     pub fn max_zoom(self, v: f32) -> Self {
         let current = self.zoom_range_override.get();
-        let lo = current.as_ref().map(|r| *r.start()).unwrap_or(DEFAULT_MIN_ZOOM);
+        let lo = current
+            .as_ref()
+            .map(|r| *r.start())
+            .unwrap_or(DEFAULT_MIN_ZOOM);
         self.zoom_range_override.set(Some(lo..=v.max(lo)));
         self
     }
@@ -1278,8 +1292,7 @@ impl SceneView {
                 let view_inv = view_transform
                     .inverse()
                     .unwrap_or_else(Transform2D::identity);
-                let t =
-                    Transform2D::translate(screen_anchor.x, screen_anchor.y).then(&view_inv);
+                let t = Transform2D::translate(screen_anchor.x, screen_anchor.y).then(&view_inv);
                 canvas.apply_transform(t);
             } else {
                 canvas.apply_transform(local_to_scene);
@@ -1919,54 +1932,53 @@ impl Widget for SceneView {
                 // `screen_pt` against the projected screen rect;
                 // narrow-phase passes `(screen_pt - screen_anchor)`
                 // as the item-local point.
-                let hit_handler_item = |screen_pt: Point,
-                                        scene_pt: Point|
-                 -> Option<HandlerSnapshotEntry> {
-                    let snap = handler_snapshot.borrow();
-                    let view_xform = view_xform_signal.get();
-                    // Logical view zoom (uniform scale of the linear part) —
-                    // passed to each item's shape-test so a cosmetic
-                    // (device-pixel) stroke's clickable band is converted to
-                    // scene coordinates at the current zoom.
-                    let view_scale = view_xform.m[0].hypot(view_xform.m[1]);
-                    for entry in snap.iter() {
-                        if entry.ignores_xform {
-                            let screen_anchor = view_xform.apply_point(entry.scene_anchor);
-                            let screen_rect = Rect::new(
-                                screen_anchor.x + entry.local_bounds.x,
-                                screen_anchor.y + entry.local_bounds.y,
-                                entry.local_bounds.width,
-                                entry.local_bounds.height,
-                            );
-                            if !screen_rect.contains(screen_pt) {
+                let hit_handler_item =
+                    |screen_pt: Point, scene_pt: Point| -> Option<HandlerSnapshotEntry> {
+                        let snap = handler_snapshot.borrow();
+                        let view_xform = view_xform_signal.get();
+                        // Logical view zoom (uniform scale of the linear part) —
+                        // passed to each item's shape-test so a cosmetic
+                        // (device-pixel) stroke's clickable band is converted to
+                        // scene coordinates at the current zoom.
+                        let view_scale = view_xform.m[0].hypot(view_xform.m[1]);
+                        for entry in snap.iter() {
+                            if entry.ignores_xform {
+                                let screen_anchor = view_xform.apply_point(entry.scene_anchor);
+                                let screen_rect = Rect::new(
+                                    screen_anchor.x + entry.local_bounds.x,
+                                    screen_anchor.y + entry.local_bounds.y,
+                                    entry.local_bounds.width,
+                                    entry.local_bounds.height,
+                                );
+                                if !screen_rect.contains(screen_pt) {
+                                    continue;
+                                }
+                                let local_pt = Point::new(
+                                    screen_pt.x - screen_anchor.x,
+                                    screen_pt.y - screen_anchor.y,
+                                );
+                                // Screen-anchored items ignore the view transform,
+                                // so their hit-test runs at unit scale.
+                                if (entry.shape_contains)(local_pt, 1.0) {
+                                    return Some(entry.clone());
+                                }
                                 continue;
                             }
-                            let local_pt = Point::new(
-                                screen_pt.x - screen_anchor.x,
-                                screen_pt.y - screen_anchor.y,
-                            );
-                            // Screen-anchored items ignore the view transform,
-                            // so their hit-test runs at unit scale.
-                            if (entry.shape_contains)(local_pt, 1.0) {
+                            if !entry.scene_rect.contains(scene_pt) {
+                                continue;
+                            }
+                            // Inverse-project to local for narrow-phase.
+                            let local_pt = entry
+                                .scene_transform
+                                .inverse()
+                                .map(|inv| inv.apply_point(scene_pt))
+                                .unwrap_or(Point::ZERO);
+                            if (entry.shape_contains)(local_pt, view_scale) {
                                 return Some(entry.clone());
                             }
-                            continue;
                         }
-                        if !entry.scene_rect.contains(scene_pt) {
-                            continue;
-                        }
-                        // Inverse-project to local for narrow-phase.
-                        let local_pt = entry
-                            .scene_transform
-                            .inverse()
-                            .map(|inv| inv.apply_point(scene_pt))
-                            .unwrap_or(Point::ZERO);
-                        if (entry.shape_contains)(local_pt, view_scale) {
-                            return Some(entry.clone());
-                        }
-                    }
-                    None
-                };
+                        None
+                    };
 
                 match ev {
                     Ev::PointerMove { position, .. } => {
@@ -2256,10 +2268,8 @@ impl Widget for SceneView {
                     let base_x = pan_x.animation_target().unwrap_or_else(|| pan_x.get());
                     let base_y = pan_y.animation_target().unwrap_or_else(|| pan_y.get());
                     // Clamp the projected pan against effective bounds.
-                    let effective_bounds = intersect_pan_bounds(
-                        scene_pan_bounds_sig.get(),
-                        view_pan_bounds_sig.get(),
-                    );
+                    let effective_bounds =
+                        intersect_pan_bounds(scene_pan_bounds_sig.get(), view_pan_bounds_sig.get());
                     let clamped = clamp_pan_to_bounds(
                         Vec2::new(base_x + dx, base_y + dy),
                         effective_bounds.as_ref(),
@@ -2468,10 +2478,7 @@ impl Widget for SceneView {
                     let pan_axis = |dx: f32, dy: f32| {
                         let base_x = pan_x.animation_target().unwrap_or_else(|| pan_x.get());
                         let base_y = pan_y.animation_target().unwrap_or_else(|| pan_y.get());
-                        let target = clamp_to_pan(
-                            Vec2::new(base_x + dx, base_y + dy),
-                            zoom.get(),
-                        );
+                        let target = clamp_to_pan(Vec2::new(base_x + dx, base_y + dy), zoom.get());
                         if dx != 0.0 {
                             pan_x.animate_to(target.x, pan_dur, Easing::EaseOut);
                         }
@@ -2820,8 +2827,7 @@ impl Widget for SceneView {
                 // GroupItem logical-only) override `clone_shape_test`
                 // to capture the data they need; default impl returns
                 // an AABB predicate over `local_bounds`.
-                let shape_contains: Rc<dyn Fn(Point, f32) -> bool> =
-                    item.clone_shape_test().into();
+                let shape_contains: Rc<dyn Fn(Point, f32) -> bool> = item.clone_shape_test().into();
                 let local_bounds = self.scene.local_bounds(id).unwrap_or(Rect::ZERO);
                 let flags = self.scene.flags(id).unwrap_or_default();
                 let ignores_xform =
@@ -3480,7 +3486,8 @@ impl SceneView {
                         );
                         return;
                     };
-                    let widget_node_id = bastyde_core::accessibility::widget_id_to_node_id(widget_id);
+                    let widget_node_id =
+                        bastyde_core::accessibility::widget_id_to_node_id(widget_id);
                     builder.attach_scene_child_under(parent, widget_node_id);
                     widget_node_id
                 } else {

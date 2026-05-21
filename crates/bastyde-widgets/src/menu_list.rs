@@ -491,6 +491,7 @@ mod tests {
     use super::*;
     use crate::menu_item::MenuItem;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     fn light_tree() -> WidgetTree {
         WidgetTree::new().with_theme(bastyde_core::presets::intui::light())
@@ -505,7 +506,7 @@ mod tests {
         let mut tree = light_tree();
         let mut menu = MenuList::new();
         for i in 0..20 {
-            menu = menu.item(MenuItem::new_literal(format!("Entry {i}")));
+            menu = menu.item(MenuItem::new(lit!(format!("Entry {i}"))));
         }
         let id = tree.add(menu);
         tree.layout(SizeProposal::with_width(300.0));
@@ -526,7 +527,7 @@ mod tests {
         let mut tree = light_tree();
         let mut menu = MenuList::new().max_visible_items(5);
         for i in 0..20 {
-            menu = menu.item(MenuItem::new_literal(format!("Entry {i}")));
+            menu = menu.item(MenuItem::new(lit!(format!("Entry {i}"))));
         }
         let id = tree.add(menu);
         tree.layout(SizeProposal::with_width(300.0));
@@ -550,8 +551,8 @@ mod tests {
         let mut tree = light_tree();
         let menu = MenuList::new()
             .max_visible_items(10)
-            .item(MenuItem::new_literal("A"))
-            .item(MenuItem::new_literal("B"));
+            .item(MenuItem::new(lit!("A")))
+            .item(MenuItem::new(lit!("B")));
         let id = tree.add(menu);
         tree.layout(SizeProposal::with_width(300.0));
         let h = tree.bounds(id).height;

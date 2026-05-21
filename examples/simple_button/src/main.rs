@@ -15,12 +15,14 @@ fn main() {
                 .size(400, 300)
                 .root(|tree, _state| {
                     tree.add(
-                        Button::new_literal("Click Me")
+                        Button::new(lit!("Click Me"))
                             .variant(ButtonVariant::Filled)
                             .on_activate_fn(|_ctx| {
                                 println!("Button clicked!");
                             })
-                            .tooltip_literal("This is a simple button. Click it to see a message in the console."),
+                            .tooltip(lit!(
+                                "This is a simple button. Click it to see a message in the console."
+                            )),
                     )
                 }),
         )
@@ -37,7 +39,7 @@ mod tests {
     #[test]
     fn button_has_correct_accessibility() {
         let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
-        let button = tree.add(Button::new_literal("Click Me").on_activate_fn(|_| {}));
+        let button = tree.add(Button::new(lit!("Click Me")).on_activate_fn(|_| {}));
         tree.layout(SizeProposal::exact(400.0, 300.0));
         let info = tree.accessibility_node(button);
         assert_eq!(info.role(), bastyde::core::accesskit::Role::Button);
@@ -49,7 +51,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
         let clicked = Rc::new(Cell::new(false));
         let c = clicked.clone();
-        let button = tree.add(Button::new_literal("Click Me").on_activate_fn(move |_| c.set(true)));
+        let button = tree.add(Button::new(lit!("Click Me")).on_activate_fn(move |_| c.set(true)));
         tree.layout(SizeProposal::exact(400.0, 300.0));
         tree.click(button);
         assert!(clicked.get());
@@ -60,7 +62,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
         let clicked = Rc::new(Cell::new(false));
         let c = clicked.clone();
-        let button = tree.add(Button::new_literal("Click Me").on_activate_fn(move |_| c.set(true)));
+        let button = tree.add(Button::new(lit!("Click Me")).on_activate_fn(move |_| c.set(true)));
         tree.layout(SizeProposal::exact(400.0, 300.0));
         tree.focus(button);
         tree.press_key(Key::Space, Modifiers::NONE);

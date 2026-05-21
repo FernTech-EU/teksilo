@@ -595,7 +595,11 @@ impl WidgetArena {
         // Content-transform nodes test their (parent-space) viewport against
         // the incoming point; everything else tests in the inverse-transformed
         // local space.
-        let bounds_point = if content_transform { point } else { child_point };
+        let bounds_point = if content_transform {
+            point
+        } else {
+            child_point
+        };
         let bounds = self.bounds(id);
         if !bounds.contains(bounds_point) {
             return None;

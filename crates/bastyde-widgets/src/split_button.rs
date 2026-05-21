@@ -23,6 +23,7 @@
 //!     .variant(ButtonVariant::Plain)
 //! ```
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Rect, SizeProposal};
@@ -216,7 +217,10 @@ impl SplitButton {
     }
 
     /// Attach a composite tooltip to the main region.
-    pub fn composite_tooltip(mut self, content: impl bastyde_core::widget::Widget + 'static) -> Self {
+    pub fn composite_tooltip(
+        mut self,
+        content: impl bastyde_core::widget::Widget + 'static,
+    ) -> Self {
         self.composite_tooltip_content = Some(Box::new(content));
         self.tooltip_text = None;
         self.rich_tooltip_source = None;
@@ -531,7 +535,7 @@ impl Widget for SplitButton {
         let self_id = ctx.self_id();
 
         // ---- Main region subtree ----
-        let label_widget = TextWidget::new_literal("")
+        let label_widget = TextWidget::new(lit!(""))
             .bind_text(main_label_text)
             .bind_color(text_role.clone())
             .single_line()
@@ -583,7 +587,7 @@ impl Widget for SplitButton {
                 crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
             );
         } else if let Some(ref text) = self.tooltip_text {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new_literal(text);
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(lit!(text));
             let tooltip_id = ctx.add(tooltip_widget);
             ctx.attach_tooltip(
                 main_region_id,
@@ -666,7 +670,7 @@ impl Widget for SplitButton {
                 .chevron_tooltip_text
                 .clone()
                 .unwrap_or_else(|| "Show dropdown menu".to_string());
-            let tooltip_widget = crate::tooltip::TooltipWidget::new_literal(&chevron_text);
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(lit!(&chevron_text));
             let tooltip_id = ctx.add(tooltip_widget);
             ctx.attach_tooltip(
                 chevron_region_id,

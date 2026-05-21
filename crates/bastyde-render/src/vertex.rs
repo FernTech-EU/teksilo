@@ -222,7 +222,11 @@ impl SdfVertex {
         zoom: f32,
     ) -> [SdfVertex; 4] {
         let zoom = zoom.max(1e-3);
-        Self::shape_quad_verts(shape, scale_factor, shape.stroke_width * scale_factor / zoom)
+        Self::shape_quad_verts(
+            shape,
+            scale_factor,
+            shape.stroke_width * scale_factor / zoom,
+        )
     }
 
     /// Shared core for [`from_shape_quad`](Self::from_shape_quad) and

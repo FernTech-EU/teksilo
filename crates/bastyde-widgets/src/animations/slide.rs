@@ -220,12 +220,13 @@ mod tests {
     use super::*;
     use crate::primitives::TextWidget;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn starts_visible_when_signal_is_true() {
         let visible = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let id = tree.add(Slide::new(visible.clone()).child(TextWidget::new_literal("hello")));
+        let id = tree.add(Slide::new(visible.clone()).child(TextWidget::new(lit!("hello"))));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -241,7 +242,7 @@ mod tests {
         tree.add(
             Slide::new(visible.clone())
                 .from(SlideEdge::Bottom)
-                .child(TextWidget::new_literal("snackbar message")),
+                .child(TextWidget::new(lit!("snackbar message"))),
         );
         tree.layout(SizeProposal {
             width: Some(300.0),
@@ -264,7 +265,7 @@ mod tests {
         let id = tree.add(
             Slide::new(visible.clone())
                 .from(SlideEdge::Leading)
-                .child(TextWidget::new_literal("content")),
+                .child(TextWidget::new(lit!("content"))),
         );
         tree.layout(SizeProposal {
             width: Some(300.0),
@@ -303,7 +304,7 @@ mod tests {
         let id = tree.add(
             Slide::new(visible.clone())
                 .from(SlideEdge::Leading)
-                .child(TextWidget::new_literal("rtl content")),
+                .child(TextWidget::new(lit!("rtl content"))),
         );
         tree.layout(SizeProposal {
             width: Some(300.0),
@@ -329,7 +330,7 @@ mod tests {
         let visible = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.set_accessibility_preferences(false, true, 1.0);
-        tree.add(Slide::new(visible.clone()).child(TextWidget::new_literal("snap")));
+        tree.add(Slide::new(visible.clone()).child(TextWidget::new(lit!("snap"))));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,

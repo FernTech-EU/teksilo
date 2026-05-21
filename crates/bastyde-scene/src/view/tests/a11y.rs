@@ -151,11 +151,7 @@ fn relations_round_trip_in_insertion_order() {
     let a = scene.add_item(rect_at(0.0, 0.0), Point::ZERO);
     let b = scene.add_item(rect_at(20.0, 0.0), Point::ZERO);
     let c = scene.add_item(rect_at(40.0, 0.0), Point::ZERO);
-    scene.add_a11y_relation(
-        A11yNode::Item(a),
-        A11yRelation::Controls,
-        A11yNode::Item(b),
-    );
+    scene.add_a11y_relation(A11yNode::Item(a), A11yRelation::Controls, A11yNode::Item(b));
     scene.add_a11y_relation(
         A11yNode::Item(a),
         A11yRelation::LabelledBy,
@@ -216,10 +212,7 @@ fn set_a11y_categories_round_trips() {
 fn set_a11y_categories_empty_clears_entry() {
     let mut scene = Scene::new();
     let item_id = scene.add_item(rect_at(0.0, 0.0), Point::ZERO);
-    scene.set_a11y_categories(
-        A11yNode::Item(item_id),
-        &[A11yCategory::new("rotor.x")],
-    );
+    scene.set_a11y_categories(A11yNode::Item(item_id), &[A11yCategory::new("rotor.x")]);
     scene.set_a11y_categories(A11yNode::Item(item_id), &[]);
     assert!(scene.a11y_categories_of(A11yNode::Item(item_id)).is_none());
 }
@@ -255,10 +248,7 @@ fn invisible_items_can_still_have_a11y_metadata_attached() {
     scene.set_flag(item_id, ItemFlags::IS_VISIBLE, false);
     scene.set_a11y_landmark(A11yNode::Item(item_id), Role::Region);
     scene.set_a11y_live(A11yNode::Item(item_id), Live::Assertive);
-    scene.set_a11y_categories(
-        A11yNode::Item(item_id),
-        &[A11yCategory::new("rotor.x")],
-    );
+    scene.set_a11y_categories(A11yNode::Item(item_id), &[A11yCategory::new("rotor.x")]);
     // No assertion needed; reaches the end without panicking.
     let _ = item_id;
 }
@@ -280,7 +270,10 @@ fn a11y_parent_to_removed_item_is_left_dangling_by_design() {
     let mut scene = Scene::new();
     let parent_item = scene.add_item(rect_at(0.0, 0.0), Point::ZERO);
     let child_item = scene.add_item(rect_at(20.0, 0.0), Point::ZERO);
-    scene.set_a11y_parent(A11yNode::Item(child_item), Some(A11yNode::Item(parent_item)));
+    scene.set_a11y_parent(
+        A11yNode::Item(child_item),
+        Some(A11yNode::Item(parent_item)),
+    );
     scene.remove(parent_item);
     // Reference survives (intended for now; documenting
     // current behaviour as a regression pin, not as desired
@@ -293,4 +286,3 @@ fn a11y_parent_to_removed_item_is_left_dangling_by_design() {
     );
     let _ = (parent_item, child_item);
 }
-

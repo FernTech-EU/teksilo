@@ -22,6 +22,7 @@
 //! cannot leak a stray rebind onto the next keystroke pressed
 //! somewhere else in the app.
 
+use bastyde_i18n::lit;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -246,7 +247,7 @@ impl LiveStatusText {
 impl Widget for LiveStatusText {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let id = ctx.add(
-            TextWidget::new_literal(&self.text)
+            TextWidget::new(lit!(&self.text))
                 .color(self.role)
                 .single_line()
                 .a11y_hidden(),
@@ -302,7 +303,7 @@ struct ShortcutRowData {
 
 fn category_header(category: Option<&'static str>) -> impl Widget + 'static {
     let label = category.unwrap_or("General");
-    TextWidget::new_literal(label)
+    TextWidget::new(lit!(label))
         .style(TextStyleRole::BodyBold)
         .color(TextRole::Primary)
         .single_line()
@@ -322,14 +323,14 @@ impl ShortcutSettings {
         // `TextRole::Disabled` on their own when the arena says the
         // row is disabled (either via the registry-driven flag below
         // or via an ancestor's `enabled_when`).
-        let name_widget = TextWidget::new_literal(&row.name)
+        let name_widget = TextWidget::new(lit!(&row.name))
             .color(TextRole::Primary)
             .single_line();
 
         let primary_slot = self.slot_widget(id, SlotKind::Primary, row.primary, capturing);
         let secondary_slot = self.slot_widget(id, SlotKind::Secondary, row.secondary, capturing);
 
-        let reset_button = Button::new_literal("Reset")
+        let reset_button = Button::new(lit!("Reset"))
             .enabled(row.has_override)
             .on_activate_fn(move |ctx: &mut EventContext| {
                 ctx.clear_shortcut_override(id);
@@ -380,7 +381,7 @@ impl ShortcutSettings {
         let rebind_button = {
             let capturing_signal = self.capturing.clone();
             let handle_cell = self.active_handle.clone();
-            Button::new_literal(slot_label).on_activate_fn(move |ctx: &mut EventContext| {
+            Button::new(lit!(slot_label)).on_activate_fn(move |ctx: &mut EventContext| {
                 let target = CaptureTarget { id, slot };
                 capturing_signal.set(Some(target));
                 let cap_for_cb = capturing_signal.clone();
@@ -411,7 +412,7 @@ impl ShortcutSettings {
             row.child(LiveStatusText::new(keystroke_text, TextRole::Accent))
         } else {
             row.child(
-                TextWidget::new_literal(&keystroke_text)
+                TextWidget::new(lit!(&keystroke_text))
                     .color(TextRole::Primary)
                     .single_line(),
             )

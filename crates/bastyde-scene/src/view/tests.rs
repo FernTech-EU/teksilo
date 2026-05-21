@@ -326,7 +326,13 @@ fn panned_scene_viewport_is_fully_hittable() {
     // Every point inside the screen viewport hits the panned SceneView. The
     // near-origin points (1,1)/(10,10)/(20,10) inverse-map to negative scene
     // coords and missed before the hit-test fix.
-    for p in [(1.0, 1.0), (10.0, 10.0), (20.0, 10.0), (100.0, 50.0), (199.0, 99.0)] {
+    for p in [
+        (1.0, 1.0),
+        (10.0, 10.0),
+        (20.0, 10.0),
+        (100.0, 50.0),
+        (199.0, 99.0),
+    ] {
         assert_eq!(
             tree.hit_test(bastyde_canvas::Point::new(p.0, p.1)),
             Some(view_id),
@@ -4097,7 +4103,11 @@ impl crate::item::SceneItem for TransformRecorder {
     fn set_local_bounds(&mut self, b: Rect) {
         self.bounds = b;
     }
-    fn paint(&self, canvas: &mut bastyde_canvas::Canvas, _ctx: &crate::item::SceneItemPaintContext) {
+    fn paint(
+        &self,
+        canvas: &mut bastyde_canvas::Canvas,
+        _ctx: &crate::item::SceneItemPaintContext,
+    ) {
         self.captured.set(Some(canvas.current_transform()));
         // Emit something so the renderer doesn't elide the whole
         // item — also gives a draw_order entry to inspect if needed.
@@ -4440,14 +4450,8 @@ fn ignores_xform_debug_overlay_paints_screen_anchored_bounds() {
         "stroke_rect should emit 4 edge decorations, got {}",
         edges.len()
     );
-    let min_x = edges
-        .iter()
-        .map(|r| r[0])
-        .fold(f32::INFINITY, f32::min);
-    let min_y = edges
-        .iter()
-        .map(|r| r[1])
-        .fold(f32::INFINITY, f32::min);
+    let min_x = edges.iter().map(|r| r[0]).fold(f32::INFINITY, f32::min);
+    let min_y = edges.iter().map(|r| r[1]).fold(f32::INFINITY, f32::min);
     let max_x = edges
         .iter()
         .map(|r| r[0] + r[2])
@@ -4825,7 +4829,8 @@ fn group_item_logical_only_dispatch_passes_through_to_item_beneath() {
     // Inner RectItem at (20, 20, 30, 30); GroupItem AABB
     // (0, 0, 100, 100) overlapping it. Group is logical-only
     // (default — no fill, no stroke, no label).
-    let inner_item = RectItem::new(Rect::new(0.0, 0.0, 30.0, 30.0)).fill(bastyde_tokens::Color::RED);
+    let inner_item =
+        RectItem::new(Rect::new(0.0, 0.0, 30.0, 30.0)).fill(bastyde_tokens::Color::RED);
     let group = GroupItem::new(Rect::new(0.0, 0.0, 100.0, 100.0));
 
     let mut scene = Scene::new();
@@ -4840,15 +4845,21 @@ fn group_item_logical_only_dispatch_passes_through_to_item_beneath() {
     let inner_hits = Rc::new(Cell::new(0_u32));
     {
         let group_hits = group_hits.clone();
-        scene.handlers_mut(group_id).unwrap().on_tap(move |_pt, _ctx| {
-            group_hits.set(group_hits.get() + 1);
-        });
+        scene
+            .handlers_mut(group_id)
+            .unwrap()
+            .on_tap(move |_pt, _ctx| {
+                group_hits.set(group_hits.get() + 1);
+            });
     }
     {
         let inner_hits = inner_hits.clone();
-        scene.handlers_mut(inner_id).unwrap().on_tap(move |_pt, _ctx| {
-            inner_hits.set(inner_hits.get() + 1);
-        });
+        scene
+            .handlers_mut(inner_id)
+            .unwrap()
+            .on_tap(move |_pt, _ctx| {
+                inner_hits.set(inner_hits.get() + 1);
+            });
     }
 
     let mut tree = WidgetTree::new();
@@ -5155,10 +5166,7 @@ fn drag_mode_signal_flips_behavior_at_runtime() {
     // marquee fires, drag does NOT pan.
     {
         let view = view_handle(&tree, view_id);
-        assert_eq!(
-            view.drag_mode_signal().get(),
-            crate::DragMode::RubberBand
-        );
+        assert_eq!(view.drag_mode_signal().get(), crate::DragMode::RubberBand);
     }
     drag(&mut tree, 50.0, 50.0, 200.0, 200.0);
     {
@@ -5174,8 +5182,7 @@ fn drag_mode_signal_flips_behavior_at_runtime() {
     // gesture — should pan now, marquee should NOT trigger.
     {
         let view = view_handle(&tree, view_id);
-        view.drag_mode_signal()
-            .set(crate::DragMode::ScrollHandDrag);
+        view.drag_mode_signal().set(crate::DragMode::ScrollHandDrag);
     }
     drag(&mut tree, 100.0, 100.0, 175.0, 150.0);
     {
@@ -5250,8 +5257,7 @@ fn drag_mode_signal_to_no_drag_disables_dispatch_at_runtime() {
 fn bind_drag_mode_shares_app_owned_signal() {
     // Caller owns a Signal<DragMode>, binds the view to it,
     // toggles it from outside — view picks up the change.
-    let app_owned: Signal<crate::DragMode> =
-        Signal::new(crate::DragMode::RubberBand);
+    let app_owned: Signal<crate::DragMode> = Signal::new(crate::DragMode::RubberBand);
     let scene = Scene::new();
     let mut tree = WidgetTree::new();
     let view_id = tree.add(
@@ -5384,7 +5390,8 @@ fn accept_tap_buttons_gates_middle_click() {
         RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)).fill(bastyde_tokens::Color::RED),
         Point::new(20.0, 20.0),
     );
-    let buttons: Rc<RefCell<Vec<bastyde_core::event::PointerButton>>> = Rc::new(RefCell::new(vec![]));
+    let buttons: Rc<RefCell<Vec<bastyde_core::event::PointerButton>>> =
+        Rc::new(RefCell::new(vec![]));
     let buttons_clone = buttons.clone();
     {
         let h = scene.handlers_mut(id).unwrap();

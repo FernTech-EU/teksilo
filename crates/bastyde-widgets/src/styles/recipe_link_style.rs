@@ -9,6 +9,7 @@ use bastyde_core::build_context::BuildContext;
 use bastyde_core::signal::Signal;
 use bastyde_core::styles::{LinkStyle, LinkStyleConfig};
 use bastyde_core::widget_id::WidgetId;
+use bastyde_i18n::lit;
 use bastyde_tokens::{BorderRole, CornerRadius, TextRole, TextStyleRole};
 
 use crate::primitives::{FixedSize, RectWidget, TextWidget, VStack, ZStack};
@@ -70,7 +71,7 @@ impl LinkStyle for RecipeLinkStyle {
             .map(move |(((h, p, f), v), d)| link_text_role(*h, *p, *f, *v, *d));
 
         let text_id = ctx.add(
-            TextWidget::new_literal(&cfg.text)
+            TextWidget::new(lit!(&cfg.text))
                 .style(TextStyleRole::Body)
                 .bind_color(text_role.clone())
                 .single_line()

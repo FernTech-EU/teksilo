@@ -1,3 +1,4 @@
+use bastyde_i18n::lit;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -437,7 +438,7 @@ impl Widget for DialogContent {
             let mut header = VStack::new().spacing(8.0);
             if let Some(title) = self.title.clone() {
                 header = header.child(
-                    TextWidget::new_literal(title)
+                    TextWidget::new(lit!(title))
                         .style(TextStyleRole::BodyBold)
                         .color(TextRole::Primary)
                         .single_line(),
@@ -445,7 +446,7 @@ impl Widget for DialogContent {
             }
             if let Some(text) = self.supporting_text.clone() {
                 header = header.child(
-                    TextWidget::new_literal(text)
+                    TextWidget::new(lit!(text))
                         .style(TextStyleRole::Body)
                         .color(TextRole::Secondary),
                 );
@@ -711,7 +712,7 @@ impl Widget for Dialog {
             let action_open = is_open.clone();
             let action_dismiss = dismiss_callback.clone();
             ctx.add(
-                Button::new_literal(label)
+                Button::new(lit!(label))
                     .variant(style)
                     .enabled(enabled)
                     .has_popup(bastyde_core::accesskit::HasPopup::Dialog)
@@ -839,7 +840,7 @@ mod tests {
     #[test]
     fn access_click_opens_centered_dialog_overlay() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Dialog::new_literal("Open dialog").content(|| FixedLeaf(220.0, 120.0)));
+        tree.add(Dialog::new(lit!("Open dialog")).content(|| FixedLeaf(220.0, 120.0)));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
@@ -866,7 +867,7 @@ mod tests {
     #[test]
     fn dialog_surface_exposes_dialog_role() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Dialog::new_literal("Open dialog").content(|| FixedLeaf(220.0, 120.0)));
+        tree.add(Dialog::new(lit!("Open dialog")).content(|| FixedLeaf(220.0, 120.0)));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
@@ -903,7 +904,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let container = tree.add(ModalContainer::new(
             DialogContent::new()
-                .title_literal("Delete file?")
+                .title(lit!("Delete file?"))
                 .body(FixedLeaf(100.0, 40.0)),
         ));
         tree.layout(SizeProposal::exact(600.0, 400.0));
@@ -920,10 +921,10 @@ mod tests {
         let container = tree.add(
             ModalContainer::new(
                 DialogContent::new()
-                    .title_literal("Inner title")
+                    .title(lit!("Inner title"))
                     .body(FixedLeaf(100.0, 40.0)),
             )
-            .title_literal("Outer title"),
+            .title(lit!("Outer title")),
         );
         tree.layout(SizeProposal::exact(600.0, 400.0));
         let info = tree.accessibility_node(container);
@@ -968,7 +969,7 @@ mod tests {
     fn custom_trigger_opens_dialog_overlay() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(
-            Dialog::new_literal("Open dialog")
+            Dialog::new(lit!("Open dialog"))
                 .content(|| FixedLeaf(220.0, 120.0))
                 .trigger(FixedLeaf(140.0, 40.0)),
         );
@@ -988,12 +989,12 @@ mod tests {
     #[test]
     fn dialog_content_helper_builds_dialog_sections() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Dialog::new_literal("Open dialog").content(|| {
+        tree.add(Dialog::new(lit!("Open dialog")).content(|| {
             DialogContent::new()
-                .title_literal("Review Changes")
-                .supporting_text_literal("Confirm the staged updates before continuing.")
+                .title(lit!("Review Changes"))
+                .supporting_text(lit!("Confirm the staged updates before continuing."))
                 .body(FixedLeaf(220.0, 120.0))
-                .footer(Button::new_literal("Close"))
+                .footer(Button::new(lit!("Close")))
         }));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -1024,7 +1025,7 @@ mod tests {
     fn dialog_presentation_can_be_overridden() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(
-            Dialog::new_literal("Open dialog")
+            Dialog::new(lit!("Open dialog"))
                 .content(|| FixedLeaf(220.0, 120.0))
                 .presentation(ModalPresentation::InTree),
         );
@@ -1047,7 +1048,7 @@ mod tests {
     fn dialog_close_behavior_can_be_overridden() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(
-            Dialog::new_literal("Open dialog")
+            Dialog::new(lit!("Open dialog"))
                 .content(|| FixedLeaf(220.0, 120.0))
                 .close_behavior(ModalCloseBehavior::Manual),
         );
@@ -1073,7 +1074,7 @@ mod tests {
     #[should_panic(expected = "Dialog requires .content(...)")]
     fn dialog_without_content_panics_on_build() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Dialog::new_literal("Open dialog"));
+        tree.add(Dialog::new(lit!("Open dialog")));
         tree.layout(SizeProposal::exact(800.0, 600.0));
     }
 }

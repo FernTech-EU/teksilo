@@ -1,3 +1,4 @@
+use bastyde_i18n::lit;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -591,7 +592,7 @@ impl Widget for Popover {
             let action_dismiss = dismiss_callback.clone();
             let action_focus = initial_focus_slot;
             ctx.add(
-                Button::new_literal(label)
+                Button::new(lit!(label))
                     .variant(style)
                     .enabled(enabled)
                     .has_popup(bastyde_core::accesskit::HasPopup::Dialog)
@@ -764,7 +765,7 @@ mod tests {
     #[test]
     fn access_click_opens_popover_overlay() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Popover::new_literal("Show popover").content(FixedLeaf(140.0, 60.0)));
+        tree.add(Popover::new(lit!("Show popover")).content(FixedLeaf(140.0, 60.0)));
         tree.layout(SizeProposal::exact(480.0, 320.0));
 
         let trigger = tree.find_by_label("Show popover").unwrap();
@@ -781,7 +782,7 @@ mod tests {
     #[test]
     fn escape_dismisses_popover_overlay() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Popover::new_literal("Show popover").content(FixedLeaf(140.0, 60.0)));
+        tree.add(Popover::new(lit!("Show popover")).content(FixedLeaf(140.0, 60.0)));
         tree.layout(SizeProposal::exact(480.0, 320.0));
 
         let trigger = tree.find_by_label("Show popover").unwrap();
@@ -803,7 +804,7 @@ mod tests {
         // set_expanded(false) after it's dismissed — including
         // framework-level dismiss paths (via on_dismiss callback).
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Popover::new_literal("Show popover").content(FixedLeaf(140.0, 60.0)));
+        tree.add(Popover::new(lit!("Show popover")).content(FixedLeaf(140.0, 60.0)));
         tree.layout(SizeProposal::exact(480.0, 320.0));
         let trigger = tree.find_by_label("Show popover").unwrap();
 
@@ -841,7 +842,7 @@ mod tests {
     fn custom_trigger_opens_popover_overlay() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(
-            Popover::new_literal("Show popover")
+            Popover::new(lit!("Show popover"))
                 .content(FixedLeaf(140.0, 60.0))
                 .trigger(FixedLeaf(128.0, 36.0)),
         );
@@ -860,7 +861,7 @@ mod tests {
     fn caret_increases_popover_height_for_below_placement() {
         let mut plain_tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         plain_tree.add(
-            Popover::new_literal("Show popover")
+            Popover::new(lit!("Show popover"))
                 .content(FixedLeaf(140.0, 60.0))
                 .placement(OverlayPlacement::Below)
                 .caret(false),
@@ -878,7 +879,7 @@ mod tests {
 
         let mut caret_tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         caret_tree.add(
-            Popover::new_literal("Show popover")
+            Popover::new(lit!("Show popover"))
                 .content(FixedLeaf(140.0, 60.0))
                 .placement(OverlayPlacement::Below)
                 .caret_size(12.0),
@@ -901,7 +902,7 @@ mod tests {
     #[should_panic(expected = "Popover requires .content(...)")]
     fn popover_without_content_panics_on_build() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Popover::new_literal("Show popover"));
+        tree.add(Popover::new(lit!("Show popover")));
         tree.layout(SizeProposal::exact(480.0, 320.0));
     }
 }

@@ -123,7 +123,13 @@ impl IDropTarget_Impl for DropTarget_Impl {
             data,
             position: self.logical_position(pt),
         });
-        unsafe { *pdweffect = if accepted { DROPEFFECT_COPY } else { DROPEFFECT_NONE } };
+        unsafe {
+            *pdweffect = if accepted {
+                DROPEFFECT_COPY
+            } else {
+                DROPEFFECT_NONE
+            }
+        };
         Ok(())
     }
 }

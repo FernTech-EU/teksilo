@@ -20,6 +20,7 @@
 //!   `rich-text` — the `FilteredItemList` inner widget.
 //! - [`tests`] holds the headless unit tests.
 
+use bastyde_i18n::lit;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Instant;
@@ -473,7 +474,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         // `accessibility(builder)` already announces the selected value
         // via `set_value`, so a screen reader exposed to the inner text
         // node would double-announce.
-        let label = TextWidget::new_literal("")
+        let label = TextWidget::new(lit!(""))
             .style(TextStyleRole::Body)
             .bind_text(label_text)
             .bind_color(text_role)

@@ -27,6 +27,7 @@ use bastyde_core::widget::{
 };
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
+use bastyde_i18n::lit;
 use bastyde_tokens::{SurfaceRole, TextStyleRole};
 
 use crate::menu_context::MenuContext;
@@ -164,7 +165,7 @@ impl Widget for MenuBarTrigger {
                 }
             });
 
-        let label = TextWidget::new_literal(&self.label)
+        let label = TextWidget::new(lit!(&self.label))
             .style(TextStyleRole::Small)
             .bind_color(text_color)
             .single_line()
