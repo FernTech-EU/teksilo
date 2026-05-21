@@ -453,7 +453,7 @@ impl Widget for PasswordField {
                 .single_line()
                 .access_role(Role::Status)
                 .access_live(Live::Polite)
-                .access_label(bastyde_i18n::tr!(a11y_caps_lock_on()));
+                .access_label(bastyde_i18n::tr_widget!(a11y_caps_lock_on()));
             let warn_id = ctx.add(warn);
             let visible = caps.zip(&focused).map(|(c, f)| *c && *f);
             ctx.visible_when(warn_id, visible);
@@ -466,7 +466,7 @@ impl Widget for PasswordField {
                 let reveal = IconButton::visibility_toggle(revealed.clone())
                     .embedded()
                     .focusable(true)
-                    .access_label(bastyde_i18n::tr!(a11y_password_reveal()));
+                    .access_label(bastyde_i18n::tr_widget!(a11y_password_reveal()));
                 row = row.add_child(ctx.add(reveal));
             }
             RevealMode::Hold => {
@@ -489,7 +489,7 @@ impl Widget for PasswordField {
                     })
                     .cursor(CursorIcon::Pointer)
                     .access_role(Role::Button)
-                    .access_label(bastyde_i18n::tr!(a11y_password_reveal()));
+                    .access_label(bastyde_i18n::tr_widget!(a11y_password_reveal()));
                 row = row.add_child(ctx.add(hold));
             }
             RevealMode::None => {}
