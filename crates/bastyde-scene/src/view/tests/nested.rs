@@ -150,11 +150,10 @@ fn scene_pan_at_bound_chains_to_outer_scrollarea() {
 
     // A scene whose content is larger than its viewport, resting at its
     // top-left pan bound: the default pan (0,0) is the max corner, so a
-    // positive wheel delta on either axis is fully clamped. The pan stays at
-    // identity, so the SceneView's transform-aware hit-test still claims the
-    // viewport and the wheel actually reaches the scene's handler (a pan
-    // pinned far off-bound would inverse-map the pointer outside the viewport
-    // and silently miss the scene — testing nothing).
+    // positive wheel delta on either axis is fully clamped, and the scene's
+    // handler declines (default `Chain`). (The SceneView's viewport is
+    // hittable at any pan — see `panned_scene_viewport_is_fully_hittable` —
+    // so the pan value here is only about being at a clamped bound.)
     let mut scene = Scene::new();
     scene.set_pan_bounds(Some(Rect::new(0.0, 0.0, 1000.0, 1000.0)));
     let scene_view = SceneView::new(scene).default_size(200.0, 100.0);
@@ -210,8 +209,6 @@ fn scene_overscroll_contain_does_not_chain_to_outer_scrollarea() {
     // top-left pan bound (the default pan of (0,0) is the max corner). The
     // pan can't increase further, so a positive wheel delta is fully clamped
     // — but `Contain` keeps the event instead of chaining to the outer.
-    // (Pan stays at identity here, so the SceneView's transform-aware
-    // hit-test still claims the viewport — see the chaining test.)
     let mut scene = Scene::new();
     scene.set_pan_bounds(Some(Rect::new(0.0, 0.0, 1000.0, 1000.0)));
     let scene_view = SceneView::new(scene)

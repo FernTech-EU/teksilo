@@ -312,6 +312,32 @@ fn on_scroll_pixels_animates_pan() {
 }
 
 #[test]
+fn panned_scene_viewport_is_fully_hittable() {
+    // A SceneView applies pan/zoom as a node transform but `clips_children`,
+    // so its bounds are a fixed screen viewport: the whole viewport must stay
+    // hittable at any pan, so a wheel / click over the visible scene reaches
+    // the SceneView instead of falling through to whatever is behind it.
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(Scene::new()).default_size(200.0, 100.0));
+    tree.layout(SizeProposal::exact(200.0, 100.0));
+    view_handle(&tree, view_id).set_pan(bastyde_canvas::Vec2::new(50.0, 30.0));
+    tree.layout(SizeProposal::exact(200.0, 100.0));
+
+    // Every point inside the screen viewport hits the panned SceneView. The
+    // near-origin points (1,1)/(10,10)/(20,10) inverse-map to negative scene
+    // coords and missed before the hit-test fix.
+    for p in [(1.0, 1.0), (10.0, 10.0), (20.0, 10.0), (100.0, 50.0), (199.0, 99.0)] {
+        assert_eq!(
+            tree.hit_test(bastyde_canvas::Point::new(p.0, p.1)),
+            Some(view_id),
+            "viewport point {p:?} must hit the panned SceneView",
+        );
+    }
+    // Outside the viewport: no hit.
+    assert_eq!(tree.hit_test(bastyde_canvas::Point::new(250.0, 50.0)), None);
+}
+
+#[test]
 fn on_scroll_lines_uses_line_height_multiplier() {
     // Mouse-wheel scrolling delivers `ScrollDelta::Lines`. Each
     // line notch translates to `line_height` logical pixels of

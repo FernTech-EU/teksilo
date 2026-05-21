@@ -281,6 +281,21 @@ impl<'a> BuildContext<'a> {
         self.tree.set_transform(id, transform);
     }
 
+    /// Bind a 2D affine **content** transform to a widget — the transform
+    /// positions the widget's content within its fixed parent-space viewport
+    /// (its bounds) rather than transforming the widget itself. Renders the
+    /// same `PushTransform` / `PopTransform` scope as
+    /// [`set_transform`](Self::set_transform), but hit-testing treats the
+    /// bounds as a fixed viewport so the whole visible area stays interactive
+    /// at any pan / zoom. Used by `SceneView` for its pan/zoom view transform.
+    pub fn set_content_transform(
+        &mut self,
+        id: WidgetId,
+        transform: impl Into<crate::signal::Prop<bastyde_canvas::Transform2D>>,
+    ) {
+        self.tree.set_content_transform(id, transform);
+    }
+
     /// Bind a Gaussian-equivalent blur radius to a widget. The render
     /// walker emits `BeginBlurredSubtree { bounds, radius }` before
     /// painting the widget's subtree and `EndBlurredSubtree` afterwards;

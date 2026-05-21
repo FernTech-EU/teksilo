@@ -2049,6 +2049,29 @@ impl WidgetTree {
         }
     }
 
+    /// Like [`set_transform`](Self::set_transform), but marks the transform as
+    /// a **content** transform: it positions the node's content within a fixed
+    /// parent-space viewport (the node's bounds) rather than transforming the
+    /// node itself. Hit-testing then keeps the whole viewport interactive at
+    /// any pan / zoom. Used by `SceneView`; see
+    /// [`WidgetNode::content_transform`](crate::arena::WidgetNode::content_transform).
+    pub fn set_content_transform(
+        &mut self,
+        id: WidgetId,
+        transform: impl Into<crate::signal::Prop<bastyde_canvas::Transform2D>>,
+    ) {
+        let prop = transform.into();
+        prop.register_if_bound(
+            id,
+            &self.binding_registry,
+            crate::binding::BindingLevel::RepaintOnly,
+        );
+        if let Some(node) = self.arena.get_mut(id) {
+            node.transform_prop = Some(prop);
+            node.content_transform = true;
+        }
+    }
+
     /// Bind a Gaussian-equivalent blur radius to a widget. The render
     /// walker emits `BeginBlurredSubtree { bounds, radius }` before
     /// painting the widget's subtree and `EndBlurredSubtree` afterwards;

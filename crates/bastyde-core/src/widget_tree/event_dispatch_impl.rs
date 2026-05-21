@@ -1318,21 +1318,25 @@ impl WidgetTree {
         if !self.arena.is_active(id) || Some(id) == exclude {
             return None;
         }
-        // If this node carries a `set_transform` scope, the render walker
-        // pushes that transform onto its stack around this node's own paint
-        // AND its subtree. Hit-testing must mirror that composition: the
-        // input point arrives in this node's parent-effective space; apply
-        // this node's transform inverse once, then both the node's own
-        // bounds test and the recursion into children operate in the new
-        // local space. Identity transforms (and missing transform_prop) are
-        // skipped so the hot path stays scalar.
-        let local_point = match self
+        // Mirror `WidgetArena::hit_test_recursive`: inverse-apply this node's
+        // transform once. A *content* transform (`content_transform`, e.g.
+        // `SceneView`) is a fixed viewport — test its bounds against the
+        // parent-space point and apply the transform only when descending into
+        // children; a *self* transform (`Scale` / `Rotate`) inverse-transforms
+        // first and tests its bounds in the resulting local space. Identity /
+        // missing transforms collapse both to the scalar case.
+        let transform = self
             .arena
             .get(id)
             .and_then(|n| n.transform_prop.as_ref())
             .map(|p| p.get())
-            .filter(|t| !t.is_identity())
-        {
+            .filter(|t| !t.is_identity());
+        let content_transform = self
+            .arena
+            .get(id)
+            .map(|n| n.content_transform)
+            .unwrap_or(false);
+        let child_point = match transform {
             Some(t) => match t.inverse() {
                 Some(inv) => inv.apply_point(point),
                 // A degenerate transform (collapsed axis) hides the entire
@@ -1341,8 +1345,9 @@ impl WidgetTree {
             },
             None => point,
         };
+        let bounds_point = if content_transform { point } else { child_point };
         let bounds = self.arena.bounds(id);
-        if !bounds.contains(local_point) {
+        if !bounds.contains(bounds_point) {
             return None;
         }
         let pass_through = self
@@ -1352,7 +1357,7 @@ impl WidgetTree {
             .unwrap_or(false);
         let children = self.arena.children(id).to_vec();
         for &child in children.iter().rev() {
-            if let Some(hit) = self.hit_test_recursive_excluding(child, local_point, exclude) {
+            if let Some(hit) = self.hit_test_recursive_excluding(child, child_point, exclude) {
                 return Some(hit);
             }
         }
