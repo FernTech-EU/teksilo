@@ -313,18 +313,72 @@ impl Renderer {
             }
         }
 
-        // Pre-rasterize all paths in this frame into the path atlas
+        // Pre-rasterize all paths in this frame into the path atlas. Cosmetic
+        // (device-space) strokes must rasterize the body at the view zoom
+        // active *where the path is drawn* so the border holds a constant
+        // device-pixel width (see PathAtlas::lookup_or_rasterize). Zoom is only
+        // known by replaying the transform commands, so we walk `draw_order`
+        // with the same SetTransform / PushTransform / PopTransform bookkeeping
+        // the main render loop uses and rasterize each path at its effective
+        // zoom. `path_regions` is indexed by path index (one Path command per
+        // entry). Logical strokes ignore the zoom; a path inside a blurred
+        // subtree may get a slightly off zoom estimate (acceptably rare —
+        // positioning is unaffected, only raster sharpness).
         let mut path_regions: Vec<Option<crate::path_atlas::AtlasRegion>> =
-            Vec::with_capacity(frame.paths.len());
-        for entry in &frame.paths {
-            let region = self.path_atlas.lookup_or_rasterize(
-                &entry.path,
-                entry.color,
-                &entry.stroke_style,
-                entry.bounds,
-                scale_factor,
-            );
-            path_regions.push(region);
+            vec![None; frame.paths.len()];
+        {
+            let mut ptf_stack: Vec<Transform2D> = vec![Transform2D::IDENTITY];
+            let mut ptf_current = Transform2D::IDENTITY;
+            let device_t = |t: &Transform2D| Transform2D {
+                m: [
+                    t.m[0],
+                    t.m[1],
+                    t.m[2],
+                    t.m[3],
+                    t.m[4] * scale_factor,
+                    t.m[5] * scale_factor,
+                ],
+            };
+            for cmd in &frame.draw_order {
+                match cmd {
+                    bastyde_canvas::DrawCommand::SetTransform(t) => {
+                        let stack_top =
+                            ptf_stack.last().copied().unwrap_or(Transform2D::IDENTITY);
+                        ptf_current = device_t(t).then(&stack_top);
+                    }
+                    bastyde_canvas::DrawCommand::PushTransform(t) => {
+                        let prev_top =
+                            ptf_stack.last().copied().unwrap_or(Transform2D::IDENTITY);
+                        let new_top = device_t(t).then(&prev_top);
+                        ptf_stack.push(new_top);
+                        ptf_current = new_top;
+                    }
+                    bastyde_canvas::DrawCommand::PopTransform => {
+                        if ptf_stack.len() > 1 {
+                            ptf_stack.pop();
+                        }
+                        ptf_current =
+                            ptf_stack.last().copied().unwrap_or(Transform2D::IDENTITY);
+                    }
+                    bastyde_canvas::DrawCommand::Path(idx) => {
+                        if let Some(entry) = frame.paths.get(*idx) {
+                            // Uniform scale of the linear part = view zoom
+                            // (no scale_factor — it lives only in the
+                            // translation column, see SetTransform handling).
+                            let zoom = ptf_current.m[0].hypot(ptf_current.m[1]);
+                            path_regions[*idx] = self.path_atlas.lookup_or_rasterize(
+                                &entry.path,
+                                entry.color,
+                                &entry.stroke_style,
+                                entry.bounds,
+                                scale_factor,
+                                zoom,
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
 
         // Upload path atlas to GPU if dirty
