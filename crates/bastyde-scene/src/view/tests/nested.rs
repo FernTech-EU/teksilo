@@ -128,6 +128,61 @@ fn two_scenes_have_independent_pan_bounds() {
     );
 }
 
+#[test]
+fn scene_pan_at_bound_chains_to_outer_scrollarea() {
+    use bastyde_canvas::Size;
+    use bastyde_core::event::{ScrollDelta, WidgetEvent};
+    use bastyde_core::widget::{LayoutContext, LayoutResponse, Widget};
+    use bastyde_core::widget_builder::WidgetBuilder;
+    use bastyde_widgets::ScrollArea;
+    use bastyde_widgets::primitives::VStack;
+
+    /// Fixed-size leaf used as scroll filler.
+    #[derive(Debug)]
+    struct TallLeaf(f32, f32);
+    impl Widget for TallLeaf {
+        fn layout_response(&self, p: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+            Size::new(p.width.unwrap_or(self.0), p.height.unwrap_or(self.1)).into()
+        }
+    }
+
+    let mut tree = WidgetTree::new();
+
+    // SceneView with pan_bounds smaller than its viewport → it cannot pan at
+    // all, so a scroll over it is always declined and must chain to the outer
+    // ScrollArea.
+    let mut scene = Scene::new();
+    scene.set_pan_bounds(Some(Rect::new(0.0, 0.0, 10.0, 10.0)));
+    let scene_view = SceneView::new(scene).default_size(200.0, 100.0);
+    let scene_id = tree.add(scene_view);
+
+    let filler = tree.add(TallLeaf(200.0, 300.0));
+    let content = tree.add(VStack::new().add_child(scene_id).add_child(filler));
+    let outer = ScrollArea::from_id(content).smooth_scrolling(false);
+    let outer_y = outer.scroll_y_signal().clone();
+    let _outer_id = tree.add(outer);
+
+    tree.layout(SizeProposal::exact(200.0, 150.0));
+
+    // Pin the scene at its (centered, un-pannable) clamp so the first wheel
+    // event finds it already at the bound.
+    view_handle(&tree, scene_id).set_pan(Vec2::new(-9999.0, -9999.0));
+
+    // Scroll over the scene → it cannot pan → the event chains to the outer.
+    tree.pointer_move(Point::new(50.0, 40.0));
+    tree.dispatch_event(WidgetEvent::Scroll {
+        delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+        modifiers: Default::default(),
+    });
+    tree.layout(SizeProposal::exact(200.0, 150.0));
+
+    assert!(
+        outer_y.get() > 0.01,
+        "a wheel over an un-pannable scene must chain to the outer ScrollArea; outer_y={}",
+        outer_y.get()
+    );
+}
+
 // -----------------------------------------------------------------
 // Chart-shaped: outer fixed, inner free-pan
 // -----------------------------------------------------------------

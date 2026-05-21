@@ -25,6 +25,7 @@ use bastyde_data::ListModel;
 use bastyde_data::selection_model::SelectionModel;
 
 use crate::list_source::ListSource;
+use crate::common::scroll::OverscrollBehavior;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
 
 /// Internal drag payload for intra-ListView reordering.
@@ -81,6 +82,8 @@ pub struct ListView<T: 'static> {
     // Persistent state (survives rebuild)
     scroll_y: Signal<f32>,
     max_scroll_y: Signal<f32>,
+    /// Scroll-chaining behavior at the boundary (default `Chain`).
+    overscroll_behavior: OverscrollBehavior,
     viewport_ratio_y: Signal<f32>,
 
     /// Active drop feedback (set by on_drag_hover, cleared by on_drag_leave,
@@ -157,6 +160,7 @@ impl<T: 'static> ListView<T> {
             on_item_drop: None,
             drop_feedback: Signal::new(None),
             placed_content_width: Rc::new(Cell::new(0.0)),
+            overscroll_behavior: OverscrollBehavior::default(),
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
             viewport_ratio_y: Signal::new(1.0),
@@ -164,6 +168,14 @@ impl<T: 'static> ListView<T> {
             scrollbar_id: None,
             viewport_height: Rc::new(Cell::new(600.0)),
         }
+    }
+
+    /// Set the scroll-chaining behavior at the boundary (default
+    /// [`OverscrollBehavior::Chain`]; [`Contain`](OverscrollBehavior::Contain)
+    /// disables chaining to an ancestor scrollable).
+    pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self {
+        self.overscroll_behavior = behavior;
+        self
     }
 
     /// Set the fixed height per item (default 32.0).
@@ -430,6 +442,7 @@ impl<T: 'static> Widget for ListView<T> {
         let scroll_y = self.scroll_y.clone();
         let max_scroll = self.max_scroll_y.clone();
         let line_height = self.item_height;
+        let overscroll_behavior = self.overscroll_behavior;
         let mut handlers = HandlerSet::new()
             .on_scroll(move |event, _ctx| match event {
                 bastyde_core::event::WidgetEvent::Scroll { delta, .. } => {
@@ -439,9 +452,14 @@ impl<T: 'static> Widget for ListView<T> {
                     };
                     let current = scroll_y.get();
                     let max = max_scroll.get();
-                    let new_y = (current + dy).clamp(0.0, max);
+                    let (new_y, moved) = crate::common::scroll::scroll_clamp_axis(current, dy, max);
                     scroll_y.set(new_y);
-                    bastyde_core::event::EventResponse::Handled
+                    // Chain to an ancestor scrollable when fully clamped
+                    // (unless Contain), otherwise consume.
+                    crate::common::scroll::scroll_response(
+                        moved,
+                        overscroll_behavior == OverscrollBehavior::Contain,
+                    )
                 }
                 _ => bastyde_core::event::EventResponse::Ignored,
             })

@@ -43,6 +43,7 @@ use bastyde_tokens::{BorderRole, SurfaceRole};
 
 use crate::styles::recipe_table_style as cp;
 
+use crate::common::scroll::OverscrollBehavior;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
 
 pub use self::column::{
@@ -169,6 +170,8 @@ pub struct TableView<T: 'static> {
     // Public reactive signals
     scroll_y: Signal<f32>,
     max_scroll_y: Signal<f32>,
+    /// Scroll-chaining behavior at the boundary (default `Chain`).
+    overscroll_behavior: OverscrollBehavior,
     viewport_ratio_y: Signal<f32>,
     sort_signal: Signal<Option<(String, SortDirection)>>,
     column_widths_signal: Signal<HashMap<String, f32>>,
@@ -282,6 +285,7 @@ impl<T: 'static> TableView<T> {
             show_internal_scrollbars: true,
             empty_view: None,
             column_resize_policy: ColumnResizePolicy::default(),
+            overscroll_behavior: OverscrollBehavior::default(),
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
             viewport_ratio_y: Signal::new(1.0),
@@ -312,6 +316,14 @@ impl<T: 'static> TableView<T> {
     }
 
     // ── Builder ────────────────────────────────────────────────────────
+
+    /// Set the scroll-chaining behavior at the boundary (default
+    /// [`OverscrollBehavior::Chain`]; [`Contain`](OverscrollBehavior::Contain)
+    /// disables chaining to an ancestor scrollable).
+    pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self {
+        self.overscroll_behavior = behavior;
+        self
+    }
 
     pub fn add_column(mut self, col: Column<T>) -> Self {
         self.columns.push(col);
@@ -948,6 +960,7 @@ impl<T: 'static> Widget for TableView<T> {
         let scroll_y_for_wheel = self.scroll_y.clone();
         let max_scroll_for_wheel = self.max_scroll_y.clone();
         let line_height = row_h;
+        let overscroll_behavior = self.overscroll_behavior;
 
         // Bind focused_cell at RepaintOnly — its update redraws the
         // focus ring without rebuilding the row tree.
@@ -1018,9 +1031,14 @@ impl<T: 'static> Widget for TableView<T> {
                     };
                     let current = scroll_y_for_wheel.get();
                     let max = max_scroll_for_wheel.get();
-                    let new_y = (current + dy).clamp(0.0, max);
+                    let (new_y, moved) = crate::common::scroll::scroll_clamp_axis(current, dy, max);
                     scroll_y_for_wheel.set(new_y);
-                    bastyde_core::event::EventResponse::Handled
+                    // Chain to an ancestor scrollable when fully clamped
+                    // (unless Contain), otherwise consume.
+                    crate::common::scroll::scroll_response(
+                        moved,
+                        overscroll_behavior == OverscrollBehavior::Contain,
+                    )
                 }
                 _ => bastyde_core::event::EventResponse::Ignored,
             })
