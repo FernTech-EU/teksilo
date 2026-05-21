@@ -99,9 +99,9 @@ pub mod prelude {
         BatiBranch4, FocusPolicy, ImeContext, ImePurpose, Intent, IntentKind, IntentResponse,
         IntoBatiChild, IntoBatiCondition, Key, KeyStroke, LayoutContext, LayoutResponse,
         ModalCloseBehavior,
-        ModalPresentation, Modifiers, PaintContext, PointerButton, Prop, Shortcut,
-        ShortcutRegistry, ShortcutScope, Signal, TapEvent, Widget, WidgetBuilder, WidgetEvent,
-        WidgetId,
+        ModalPresentation, Modifiers, OverscrollBehavior, PaintContext, PointerButton, Prop,
+        Shortcut, ShortcutRegistry, ShortcutScope, Signal, TapEvent, Widget, WidgetBuilder,
+        WidgetEvent, WidgetId,
     };
 
     // Geometry (lives in bastyde-canvas)

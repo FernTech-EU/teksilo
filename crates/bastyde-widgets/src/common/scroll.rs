@@ -8,17 +8,17 @@
 //! the next ancestor scrollable — the web's `overscroll-behavior` model.
 
 use bastyde_core::event::EventResponse;
-
-/// Below this many pixels a scroll axis is considered "did not move". Tighter
-/// than a display pixel, looser than f32 clamp rounding noise.
-const MOVE_EPSILON: f32 = 1e-3;
+// One shared boundary threshold across the widget scrollables and the
+// bastyde-scene pan handler (defined in bastyde-core so both tiers use it).
+use bastyde_core::overscroll::SCROLL_MOVE_EPSILON;
 
 /// Clamp a single scroll axis. Returns `(new_pos, moved)` where `new_pos` is
 /// `base + delta` clamped to `[0, max]` and `moved` is whether it changed by
-/// more than [`MOVE_EPSILON`] (i.e. the axis could absorb part of the delta).
+/// more than [`SCROLL_MOVE_EPSILON`] (i.e. the axis could absorb part of the
+/// delta).
 pub(crate) fn scroll_clamp_axis(base: f32, delta: f32, max: f32) -> (f32, bool) {
     let new_pos = (base + delta).clamp(0.0, max);
-    let moved = (new_pos - base).abs() > MOVE_EPSILON;
+    let moved = (new_pos - base).abs() > SCROLL_MOVE_EPSILON;
     (new_pos, moved)
 }
 

@@ -1959,4 +1959,76 @@ mod tests {
             "C should still be last after Alt+Down on last item"
         );
     }
+
+    // -- Boundary scroll chaining -------------------------------------------
+
+    /// A TreeView of 40 flat roots (20px each → 800px) in a 100px viewport,
+    /// above a filler inside an outer ScrollArea. TreeView doesn't expose its
+    /// scroll signal, so chaining is observed via the outer: the inner
+    /// absorbing the first (huge) scroll leaves the outer at 0 (the
+    /// anti-trivial guard), and the clamped second scroll then moves the
+    /// outer under `Chain` but not under `Contain`.
+    fn nested_tree_fixture(inner: OverscrollBehavior) -> (WidgetTree, Signal<f32>) {
+        use crate::ScrollArea;
+        use crate::primitives::{FixedSize, VStack};
+        let model = TreeModel::new();
+        for i in 0..40 {
+            model.insert_root(i, i as i32);
+        }
+        let mut tree = WidgetTree::new();
+        let tv = TreeView::new(model, |_item: &i32, _entry, _sel| Box::new(FixedLeaf(180.0, 20.0)))
+            .item_height(20.0)
+            .overscroll_behavior(inner);
+        let tv_id = tree.add(tv);
+        let viewport =
+            tree.add(FixedSize::new().bind_width(200.0).bind_height(100.0).child_id(tv_id));
+        let filler = tree.add(FixedLeaf(200.0, 200.0));
+        let outer_content = tree.add(VStack::new().add_child(viewport).add_child(filler));
+        let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
+        let outer_y = outer.scroll_y_signal().clone();
+        let _outer = tree.add(outer);
+        tree.layout(SizeProposal::exact(200.0, 150.0));
+        (tree, outer_y)
+    }
+
+    #[test]
+    fn nested_tree_chains_to_outer_at_boundary() {
+        use bastyde_core::event::{Modifiers, ScrollDelta, WidgetEvent};
+        let (mut tree, outer_y) = nested_tree_fixture(OverscrollBehavior::Chain);
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal::exact(200.0, 150.0));
+        // The inner tree absorbed the big scroll (didn't chain) → outer at 0.
+        assert!(outer_y.get() < 0.01, "outer must not move while the inner absorbs");
+
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal::exact(200.0, 150.0));
+        assert!(outer_y.get() > 0.01, "outer scrolled because the clamped tree chained");
+    }
+
+    #[test]
+    fn nested_tree_contain_blocks_chaining() {
+        use bastyde_core::event::{Modifiers, ScrollDelta, WidgetEvent};
+        let (mut tree, outer_y) = nested_tree_fixture(OverscrollBehavior::Contain);
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal::exact(200.0, 150.0));
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal::exact(200.0, 150.0));
+        assert!(outer_y.get() < 0.01, "Contain must prevent chaining: outer stays put");
+    }
 }
