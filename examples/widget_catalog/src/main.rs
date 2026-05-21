@@ -7,9 +7,6 @@
 //! Auto-cycle through tabs every 100 ms (for screen recordings):
 //!   `cargo run -p widget-catalog -- --cycle`
 //!
-//! See the project plan at
-//! `~/.claude/plans/widget-catalog-example-must-contain-valiant-alpaca.md`
-//! for the full design.
 
 use std::cell::Cell;
 use std::rc::Rc;

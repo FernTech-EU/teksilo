@@ -6,7 +6,7 @@
 //! (when archiving is enabled via `ToastInstallOptions::archive`).
 //! The model is a [`ListModel<NotificationEntry>`](bastyde_data::ListModel)
 //! plus an unread-count signal — pre-shaped for binding to a
-//! `NotificationLog` / `NotificationCenterButton` (the Phase 4
+//! `NotificationLog` / `NotificationCenterButton` (the
 //! widgets that consume this archive).
 //!
 //! Two storage variants are supported:
@@ -28,7 +28,7 @@
 //! ```ignore
 //! // In app boot, after install_toast:
 //! let archive = ctx.app_state::<Rc<RefCell<NotificationArchiveModel>>>().unwrap();
-//! let log = NotificationLog::new(archive.clone()); // Phase 4 widget
+//! let log = NotificationLog::new(archive.clone());
 //! ```
 
 pub mod archive;
@@ -48,7 +48,7 @@ pub use log::NotificationLog;
 pub use log_dialog::NotificationLogDialog;
 
 /// A single archived notification — what
-/// [`NotificationLog`](Phase 4 widget) renders, what survives across
+/// [`NotificationLog`](crate::notification::log::NotificationLog) renders, what survives across
 /// app restarts under `NotificationArchive::Persistent`. Owned, plain
 /// fields only; no closures, no `Rc<dyn Fn>`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

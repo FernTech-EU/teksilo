@@ -338,15 +338,15 @@ fn shutdown_drains_pending_events() {
 
 #[test]
 fn events_persist_across_process_restart() {
-    // Simulates a hard exit: phase 1 records events to a persistent
+    // Simulates a hard exit: stage 1 records events to a persistent
     // queue against an unreachable endpoint (so the worker's drop-
-    // time flush fails and events stay queued). Phase 2 spins up a
+    // time flush fails and events stay queued). Stage 2 spins up a
     // mock server, opens a new adapter at the same queue path, and
     // verifies the queued events flush.
     let dir = tempfile::tempdir().unwrap();
     let queue_path = dir.path().join("plausible-queue.redb");
 
-    // Phase 1 — record while no server is listening.
+    // Stage 1 — record while no server is listening.
     {
         let adapter = PlausibleAdapter::builder()
             // Port 1 is the standard "unreachable" port (TCPMUX, almost
@@ -382,7 +382,7 @@ fn events_persist_across_process_restart() {
     // Verify the queue file actually has the events on disk.
     assert!(queue_path.exists(), "queue file should persist");
 
-    // Phase 2 — server is up, new adapter opens the same queue, drains.
+    // Stage 2 — server is up, new adapter opens the same queue, drains.
     let server = MockServer::start();
     let adapter = PlausibleAdapter::builder()
         .endpoint(server.endpoint())
@@ -393,12 +393,12 @@ fn events_persist_across_process_restart() {
         .persistent_queue_path(&queue_path)
         .build();
 
-    // Trigger flush; the queue is non-empty from phase 1.
+    // Trigger flush; the queue is non-empty from stage 1.
     adapter.flush().unwrap();
 
     assert!(
         server.wait_for_captured(3, Duration::from_secs(3)),
-        "all 3 events from phase 1 should be flushed by phase 2 \
+        "all 3 events from stage 1 should be flushed by stage 2 \
          (received {})",
         server.state.captured_count()
     );

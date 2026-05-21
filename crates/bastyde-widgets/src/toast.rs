@@ -188,12 +188,9 @@ impl ToastAction {
     /// Associate the action with a registered [`Shortcut`] id. Two
     /// effects: the keystroke label is shown as a chip on the action,
     /// and the archived form of this action (in
-    /// [`NotificationLog`](crate::notification::log::NotificationLog),
-    /// Phase 4) is re-invokable by name through the existing Intent
+    /// [`NotificationLog`](crate::notification::log::NotificationLog))
+    /// is re-invokable by name through the existing Intent
     /// dispatcher.
-    ///
-    /// (Phase 2: only stored. The chip rendering and archive-replay
-    /// paths land with Phase 3 / Phase 4.)
     pub fn shortcut_id(mut self, id: impl Into<String>) -> Self {
         self.shortcut_id = Some(id.into());
         self
@@ -494,9 +491,8 @@ impl Toast {
 
     /// Stable identity for the "progress toast updates in place"
     /// pattern. Two toasts presented with the same id reuse the same
-    /// slot (Phase 3 will land the actual mutation hooks; for now the
-    /// id is captured + archived but each present allocates a new
-    /// slot).
+    /// slot (mutation hooks are not yet implemented; the id is captured
+    /// and archived but each present allocates a new slot).
     pub fn id(mut self, id: impl Into<String>) -> Self {
         self.id = Some(id.into());
         self
@@ -550,8 +546,8 @@ impl Toast {
     // ----- Archive -----
 
     /// Whether this toast is added to the persistent archive that
-    /// drives [`NotificationLog`](crate::notification::log::NotificationLog)
-    /// (Phase 4). Default `true`. Set `false` for noise-suppressing
+    /// drives [`NotificationLog`](crate::notification::log::NotificationLog).
+    /// Default `true`. Set `false` for noise-suppressing
     /// transient notifications like quick "Copied!" feedback.
     pub fn archive(mut self, archive: bool) -> Self {
         self.archive = archive;

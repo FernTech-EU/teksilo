@@ -4,8 +4,8 @@
 //! the available pane width, in three passes:
 //!
 //! 1. `Fixed(px)` is clamped by `min_width` / `max_width`.
-//! 2. `Auto` evaluates to a fallback width (Phase 2 uses the table's
-//!    `min_column_width_default`; later phases will probe the header label
+//! 2. `Auto` evaluates to a fallback width (the table's
+//!    `min_column_width_default`; a future pass will probe the header label
 //!    and visible cells).
 //! 3. Remaining horizontal space is distributed among `Flex` columns
 //!    proportional to their flex factor, again clamped.
@@ -107,14 +107,14 @@ impl ColumnSolver {
         widths
     }
 
-    /// Sum of resolved widths. Used by Phase 4 pane partitioning.
+    /// Sum of resolved widths. Used for pane partitioning.
     #[allow(dead_code)]
     pub(crate) fn total_width(widths: &[f32]) -> f32 {
         widths.iter().sum()
     }
 
     /// X-offset of column `i` relative to the pane's leading edge.
-    /// Used by Phase 3 column-resize hit testing.
+    /// Used for column-resize hit testing.
     #[allow(dead_code)]
     pub(crate) fn x_offset(widths: &[f32], i: usize) -> f32 {
         widths.iter().take(i).sum()

@@ -64,8 +64,8 @@ pub enum BodyItem {
     Binding { name: Ident, element: BatiElement },
     /// `#{ expr }` at body position — the expr is expected to evaluate
     /// to a `WidgetId` and attaches via `.add_child(expr)` (spec §6.1).
-    /// Phase 2 keeps the semantics simple: always WidgetId. The full
-    /// `IntoBatiChild` routing (widget-or-id dispatch) is Phase 3.
+    /// The semantics are simple: always WidgetId. The full
+    /// `IntoBatiChild` routing (widget-or-id dispatch) is not yet implemented.
     Escape { expr: Expr, span: Span },
     /// `let pat = expr;` at body position — spec §5.4. Introduces a
     /// local whose value is used by subsequent body items. Triggers

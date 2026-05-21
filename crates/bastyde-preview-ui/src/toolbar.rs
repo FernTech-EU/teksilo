@@ -11,7 +11,7 @@
 //! sub-tree alone — that requires per-subtree theme scoping which
 //! the framework does not yet expose. For development purposes the
 //! whole-app reskin is still useful (seeing a widget on dark mode
-//! also reskins the chrome). Per-subtree scoping is Phase 7.
+//! also reskins the chrome).
 //!
 //! Zoom is intentionally absent: real visual zoom requires a
 //! transform-aware paint primitive (a `ScaleWidget` that pushes a

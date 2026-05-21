@@ -36,7 +36,7 @@
 //!   `bastyde-collector` → Parquet on disk.
 //!
 //! Watch the live update in the `PrivacySettings` "Inspect data
-//! sent" accordion — Phase 3.2 added a revision signal so the
+//! sent" accordion — a revision signal was added so the
 //! accordion refreshes as events land.
 //!
 //! ## Pseudonymous mode
@@ -117,11 +117,10 @@ impl Widget for DemoRoot {
                 "Each click fires an intent through the dispatch tap → \
                  bastyde-analytics-bastyde adapter → gRPC → your local \
                  bastyde-collector. The 'Inspect data sent' accordion \
-                 below auto-refreshes as events land (Phase 3.2 \
-                 revision signal). In pseudonymous mode (set \
-                 BASTYDE_INSTALL_ID), 'Get my data' opens a Save-as-JSON \
-                 dialog and 'Erase my data' round-trips through \
-                 Telemetry.Erase.",
+                 below auto-refreshes as events land. In pseudonymous \
+                 mode (set BASTYDE_INSTALL_ID), 'Get my data' opens a \
+                 Save-as-JSON dialog and 'Erase my data' round-trips \
+                 through Telemetry.Erase.",
             ))
             .child(click_btn)
             .child(save_btn)

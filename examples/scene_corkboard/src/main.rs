@@ -1,4 +1,4 @@
-//! `scene-corkboard` — Phase 4 demo of `bastyde-scene`.
+//! `scene-corkboard` — `bastyde-scene` demo.
 //!
 //! Renders a 3×3 grid of story cards on a bastyde-scene `SceneView`. Each
 //! card is a real heavyweight widget — `Panel { VStack { TextWidget,
@@ -7,7 +7,7 @@
 //! and are stitched together by **lightweight** connector lines
 //! (`PathItem`) tracing the reading-order through the story beats.
 //!
-//! Phase 4 mixes the two content tiers under one `SceneView`:
+//! This demo mixes the two content tiers under one `SceneView`:
 //!
 //! - **Heavyweight** cards (real widgets, focus + keyboard + a11y).
 //! - **Lightweight** items (RectItem cells, PathItem connectors)
@@ -17,7 +17,7 @@
 //! - **Same spatial index** culls both tiers — off-screen connectors
 //!   never enter the paint walk.
 //!
-//! Phase 1 + 2 + 3 exercises (still in effect):
+//! Earlier exercises (still in effect):
 //!
 //! - `Scene::add_widget` round-trip (heavyweight widgets at scene
 //!   rects).
@@ -51,8 +51,7 @@
 //!   and `crates/bastyde-scene/src/index.rs::tests` for the
 //!   correctness pins.
 //!
-//! Phase 6 will add drag-to-move, marquee select, and group-move on
-//! the same demo.
+//! Drag-to-move, marquee select, and group-move are not yet implemented.
 //!
 //! Run with: `cargo run -p scene-corkboard`
 
@@ -139,7 +138,7 @@ fn scene_size() -> (f32, f32) {
 fn build_corkboard() -> SceneView {
     let mut scene = Scene::new();
 
-    // Background tile grid (Phase 4 lightweight tier). One RectItem
+    // Background tile grid (lightweight tier). One RectItem
     // per cell — they share the spatial index with the cards and are
     // culled by viewport just like heavyweight children.
     let (scene_width, scene_height) = scene_size();
@@ -155,19 +154,19 @@ fn build_corkboard() -> SceneView {
         }
     }
 
-    // Phase 5b: declare three logical groups for the three Acts.
+    // Declare three logical groups for the three Acts.
     // The screen reader announces "Act 1, Scene cards, 1 of 3" when
     // landing on a card, regardless of where the card is visually
     // placed in scene coordinates. Apps changing the visual layout
-    // (drag-to-move in Phase 6) won't disturb the AT-shape.
+    // won't disturb the AT-shape.
     let act1 = scene.add_a11y_group(A11yGroup::builder().label("Act I — Setup"));
     let act2 = scene.add_a11y_group(A11yGroup::builder().label("Act II — Confrontation"));
     let act3 = scene.add_a11y_group(A11yGroup::builder().label("Act III — Resolution"));
     let acts = [act1, act2, act3];
 
     // Heavyweight cards. The cards themselves don't yet route
-    // through the logical-tree (Phase 5b heavyweight grouping is
-    // the deferred auto-graft work — see docs/bastyde-scene-a11y.md);
+    // through the logical-tree (heavyweight grouping is the deferred
+    // auto-graft work — see docs/bastyde-scene-a11y.md);
     // we still bookkeep their ids so the demo source documents the
     // intent.
     // Heavyweight cards. Auto-graft places each card under its
@@ -189,7 +188,7 @@ fn build_corkboard() -> SceneView {
     }
 
     // Connector lines wiring each card to the next in reading order
-    // (Phase 4 lightweight tier — PathItem). The path runs from the
+    // (PathItem). The path runs from the
     // trailing-mid of card N to the leading-mid of card N+1, with a
     // gentle horizontal-then-vertical bend so cards on different rows
     // get a step-shaped connector. Each connector also declares an
@@ -224,7 +223,7 @@ fn build_corkboard() -> SceneView {
                 .access_label(format!("connector {} → {}", i + 1, i + 2)),
             Point::ZERO,
         );
-        // Phase 5b: parent the connector under the act its source
+        // Parent the connector under the act its source
         // card belongs to. Screen-reader users walking the AT tree
         // hear "Act I, contains: connector 1 → 2, connector 2 → 3"
         // before reaching Act II.
@@ -244,7 +243,7 @@ fn main() {
         .theme(bastyde::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Scene Corkboard (Phase 5b: cards auto-grafted into Act groups)")
+                .title("Bastyde — Scene Corkboard (cards auto-grafted into Act groups)")
                 .size(900, 600)
                 .root(|tree, _state| {
                     tree.add(

@@ -70,7 +70,7 @@ pub(crate) fn build_key_handler(
         let row = row.min(row_count - 1);
         let col = col.min(cfg.col_count - 1);
 
-        // Tree-aware ArrowLeft / ArrowRight (Phase 7 — flat impls are
+        // Tree-aware ArrowLeft / ArrowRight (flat impls are
         // no-ops, so this is safe to evaluate eagerly).
         let on_tree_column = col == 0; // tree column is leftmost in
         // current TreeTable scope

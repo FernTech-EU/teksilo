@@ -114,7 +114,7 @@ impl WidgetTree {
         ctx: &mut EventContext,
     ) {
         use crate::gesture::{DragPhase, PinchPhase};
-        // Phase 5.2 — every gesture handler invocation runs under a
+        // Every gesture handler invocation runs under a
         // `Handler` source label. Any `ctx.send_intent(...)` issued
         // from inside a tap / double-tap / drag / etc. handler
         // emits with `IntentSource::Handler`. The label is restored
@@ -238,7 +238,7 @@ impl WidgetTree {
                 }
             }
         }
-        // Phase 5.2 restore — see the matching `replace` at the
+        // Restore — see the matching `replace` at the
         // top of this function.
         ctx.current_source = saved_source;
     }

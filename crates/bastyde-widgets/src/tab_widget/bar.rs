@@ -1,11 +1,11 @@
 //! `TabBar<T>` — header strip driven by a data source.
 //!
-//! Phase 1 scope: horizontal orientation only, with shared / independent
-//! sizing. Bar-leading and bar-trailing slots are wired. ScrollArea
-//! around the headers row provides overflow scroll on its own (no
-//! arrows / dropdown yet — those are Phase 2). DnD reorder, close
-//! buttons, pinned tabs, vertical and multi-line orientations land in
-//! later phases.
+//! Horizontal orientation only, with shared / independent sizing.
+//! Bar-leading and bar-trailing slots are wired. ScrollArea around
+//! the headers row provides overflow scroll on its own (no arrows /
+//! dropdown yet — not yet implemented). DnD reorder, close buttons,
+//! pinned tabs, vertical and multi-line orientations are not yet
+//! implemented.
 //!
 //! The data source is consumed via the `pub(crate)` [`ListSource`]
 //! abstraction so callers can pass either a `ListModel<T>` (clonable,

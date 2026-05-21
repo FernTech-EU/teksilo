@@ -182,7 +182,7 @@ impl WidgetTree {
                             .invoke_on_activate(id, keystroke, &mut act_ctx)
                     {
                         self.collect_from_ctx(act_ctx, anchor_id);
-                        // Phase 5.2: tag shortcut origin so analytics can
+                        // Tag shortcut origin so analytics can
                         // distinguish keyboard-driven activations from
                         // button / menu / programmatic ones.
                         let intent = intent.with_source(crate::telemetry::IntentSource::Shortcut);
@@ -748,7 +748,7 @@ impl WidgetTree {
                 // and own handlers — Button (own) and Dialog (external)
                 // layered together rely on both firing for a single
                 // accesskit click.
-                // Phase 5.2 — assistive-tech action paths run under
+                // Assistive-tech action paths run under
                 // the `Accessibility` source label. Restored after
                 // the inner if/else.
                 let saved_a11y_source = ctx
@@ -2067,7 +2067,7 @@ mod tests {
 
     #[test]
     fn widget_type_histogram_counts_distinct_types() {
-        // Phase 5.3: the histogram surfaces concrete widget types
+        // The histogram surfaces concrete widget types
         // by std::any::type_name_of_val. Widgets become active
         // after the first layout pass, so we run that before
         // checking the histogram.
@@ -2096,7 +2096,7 @@ mod tests {
 
     #[test]
     fn intent_source_tagged_handler_for_tap_activation() {
-        // Phase 5.2: a tap-driven `ctx.send_intent` must surface as
+        // A tap-driven `ctx.send_intent` must surface as
         // `IntentSource::Handler` to ancestor actions, not the
         // `Programmatic` default of `Intent::new`.
         use crate::action::Action;

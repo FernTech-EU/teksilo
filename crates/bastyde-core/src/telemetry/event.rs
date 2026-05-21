@@ -180,7 +180,7 @@ pub enum OwnedPropValue {
 /// Where an intent came from. Reserved for future use; all dispatch
 /// sites currently emit `IntentSource::Unknown` because the dispatch
 /// path doesn't yet propagate origin information. Plumbing through the
-/// real source is a Phase 5 deliverable.
+/// real source is not yet implemented.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum IntentSource {
     Shortcut,

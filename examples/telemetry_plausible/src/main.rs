@@ -23,9 +23,9 @@
 //! endpoint_override = "https://plausible.io/api/event"
 //! ```
 //!
-//! ## Consent UX (Phase 1 placeholder)
+//! ## Consent UX
 //!
-//! The Phase 3 `PrivacySettings` widget is not yet built, so this
+//! The `PrivacySettings` widget is not yet built, so this
 //! example **auto-grants consent at startup** to keep the demo
 //! self-contained. Real apps must obtain explicit consent before
 //! emission — the dispatch tap is consent-gated and would drop every

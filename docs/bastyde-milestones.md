@@ -84,7 +84,7 @@ Completed. A window with multiple widgets in nested layouts (HStack-in-VStack, S
 
 Completed. All Milestone 3 widgets are implemented and tested. The milestone also included the V2 widget authoring model migration (architecture Section 28), which was driven by three problems identified during implementation: the Widget/CompositeWidget split forced wrong decisions, the `RefCell<Option<State>>` pattern was required by every stateful composite, and the four reactivity types confused widget authors.
 
-**V2 migration is now complete.** The V1 state types and the compatibility layer from earlier phases are fully removed:
+**V2 migration is now complete.** The V1 state types and the compatibility layer are fully removed:
 
 - `composite_widget.rs` and `composite_adapter.rs` deleted. No CompositeWidget references remain.
 - All widget files use `impl Widget for` with the unified trait.

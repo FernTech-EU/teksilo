@@ -75,7 +75,7 @@ pub struct PrivacySettings {
     /// Show the "Inspect data sent" accordion. When enabled, the
     /// widget peeks the last `inspect_event_count` events from the
     /// `recent_log` ring buffer and lists them. Default `true`.
-    /// Note: snapshot-at-build (Phase 3.1) — opening and closing the
+    /// Note: snapshot-at-build — opening and closing the
     /// accordion refreshes the list to current state.
     show_inspect: bool,
     /// How many recent events to show in the accordion. Default 50.
@@ -176,7 +176,7 @@ impl Widget for PrivacySettings {
         let consent_signal = telemetry.consent.state_signal();
         consent_signal.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
-        // Phase 3.2: live-update the "Inspect data sent" accordion as
+        // Live-update the "Inspect data sent" accordion as
         // events stream in. The reporter bumps `recent_log_revision`
         // on every `record()` and `discard_pending()`. Bound at
         // `BindingLevel::Rebuild` so the accordion's snapshot

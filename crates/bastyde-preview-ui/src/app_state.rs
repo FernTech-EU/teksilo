@@ -5,8 +5,8 @@
 //! 4-way layout (toolbar over a 3-pane SplitView) inside its
 //! `build()`.
 //!
-//! Filled in across Phases 1–4. Phase 0 leaves only the bare
-//! placeholder that opens an empty window.
+//! The bare minimum is the navigator widget list; the full 4-pane
+//! layout is built incrementally on top.
 
 use std::cell::RefCell;
 use std::collections::HashMap;

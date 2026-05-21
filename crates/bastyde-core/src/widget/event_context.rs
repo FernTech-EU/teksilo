@@ -105,7 +105,7 @@ pub struct EventContext<'ops> {
     /// Intents queued by handlers via `send_intent`. Drained by the
     /// tree after event dispatch and routed source-widget → root.
     pub(crate) pending_intents: Vec<crate::intent::Intent>,
-    /// Phase 5.2 — the dispatcher sets this to the appropriate
+    /// The dispatcher sets this to the appropriate
     /// [`IntentSource`](crate::telemetry::IntentSource) before
     /// invoking a typed handler (menu select → `Menu`, AccessKit
     /// action → `Accessibility`, on_tap / button activation →

@@ -196,7 +196,7 @@ impl TelemetryBundle {
         // recipient-change check. Adapters are constructed before this
         // function runs, so they already hold their endpoint by value;
         // the override path is for adapters that subscribe to the
-        // signal directly. Phase 1 stores only the recipient marker.
+        // signal directly. Only the recipient marker is stored.
         let endpoint_override = settings.signal_for(&TELEMETRY_ENDPOINT_OVERRIDE).get();
         let _region_override = settings.signal_for(&TELEMETRY_REGION_OVERRIDE).get();
 

@@ -5,7 +5,7 @@
 //! 1. **Variant** — radio-button group bound to `selected_variant`.
 //! 2. **Knobs** — auto-generated form via `knob_form::build_knob_form`.
 //!    Reset button at the section header.
-//! 3. **Export** — PNG snapshot button (Phase 6).
+//! 3. **Export** — PNG snapshot button.
 //!
 //! The inspector itself is a custom widget so its `build()` re-runs
 //! when the selected widget changes (different `KnobSpec`, different

@@ -12,7 +12,7 @@
 //! - [`crate::toast::surface::ToastSurface`] — calls back into the
 //!   registry to dismiss its entry on close-click / action-invoked.
 //!
-//! Phase 2 limitation: a single shared host state. Multi-window apps
+//! Current limitation: a single shared host state. Multi-window apps
 //! that install `ToastHost` in every window share one queue; toasts
 //! show up in whichever window's host last bound. Multi-window
 //! routing is planned as a follow-up.

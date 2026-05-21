@@ -291,7 +291,7 @@ fn root_role_is_table_with_row_and_col_count() {
     let row_count = count_role(&tree, table, Role::Row);
     let header_count = count_role(&tree, table, Role::ColumnHeader);
     let cell_count = count_role(&tree, table, Role::Cell);
-    // Phase 3: header is on by default. Each body row carries 2
+    // Header is on by default. Each body row carries 2
     // `Role::Cell` children; the header row carries 2 `Role::ColumnHeader`
     // children. row_count includes the header row.
     assert!(row_count >= 2);
@@ -372,7 +372,7 @@ fn cells_carry_role_cell_under_row() {
     );
 }
 
-// ── Header / Sort / Resize (Phase 3) ───────────────────────────────────────
+// ── Header / Sort / Resize ─────────────────────────────────────────────────
 
 #[test]
 fn header_strip_renders_one_column_header_per_column() {
@@ -556,7 +556,7 @@ fn header_row_carries_role_row_with_index_one() {
     );
 }
 
-// ── Reorder + pinned-side (Phase 4) ────────────────────────────────────────
+// ── Reorder + pinned-side ──────────────────────────────────────────────────
 
 #[test]
 fn declared_order_is_default_display_order() {
@@ -762,7 +762,7 @@ fn unknown_column_id_in_order_signal_is_ignored() {
     assert_eq!(row_cells.len(), 2, "phantom id was skipped");
 }
 
-// ── Keyboard / focused cell / cell selection (Phase 5) ─────────────────────
+// ── Keyboard / focused cell / cell selection ───────────────────────────────
 
 use bastyde_core::event::{Key, Modifiers};
 
@@ -997,7 +997,7 @@ fn cell_selection_mode_tracks_pairs() {
     assert!(cs.is_selected(2, 1));
 }
 
-// ── Edit hooks + filter signal + row drag-drop (Phase 6) ──────────────────
+// ── Edit hooks + filter signal + row drag-drop ────────────────────────────
 
 #[test]
 fn editing_cell_signal_round_trips() {

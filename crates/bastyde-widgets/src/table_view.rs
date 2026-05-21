@@ -4,12 +4,11 @@
 //! [`ListDataSource`](bastyde_data::ListDataSource) data layer in
 //! `bastyde-data` and the `bastyde-tokens` `TableStyle`. Mirrors Qt's
 //! `QTableView`, SwiftUI's `Table`, and JavaFX's `TableView`.
-//! Phase 2 ships the core skeleton: single body pane,
-//! row-virtualized with alternating backgrounds, grid lines,
-//! `Role::Table > Role::Row > Role::Cell` accessibility, multi-row
-//! selection, and an empty-state slot. Headers, sort, filter, resize,
-//! reorder, pinning, cell selection, and editing arrive in later
-//! phases.
+//! The core skeleton: single body pane, row-virtualized with alternating
+//! backgrounds, grid lines, `Role::Table > Role::Row > Role::Cell`
+//! accessibility, multi-row selection, and an empty-state slot. Headers,
+//! sort, filter, resize, reorder, pinning, cell selection, and editing are
+//! also included.
 
 pub mod a11y;
 pub mod body;
@@ -82,7 +81,7 @@ impl PaneBoundaries {
 pub(crate) struct ColumnReorderDragData {
     pub col_id: String,
     /// Stable id of the source TableView, so dropping into a sibling
-    /// table is rejected by the on_drop matcher (Phase 6).
+    /// table is rejected by the on_drop matcher.
     pub source_table_id: usize,
 }
 
@@ -193,7 +192,7 @@ pub struct TableView<T: 'static> {
     #[allow(clippy::type_complexity)]
     on_cell_edit_request: Option<Rc<dyn Fn(usize, &str, &mut bastyde_core::widget::EventContext)>>,
     /// Per-column filter text. Updated by filter affordances in the
-    /// header (Phase 6), by `set_filter` / `clear_filters`, and by
+    /// header, by `set_filter` / `clear_filters`, and by
     /// downstream consumers binding it (e.g., `SortFilterListModel`).
     filters_signal: Signal<HashMap<String, String>>,
     /// User callback invoked on every row activation (Enter on the
@@ -539,7 +538,7 @@ impl<T: 'static> TableView<T> {
     }
 
     /// Per-column filter text. Updated by filter affordances in
-    /// header cells (Phase 6 UI) and by
+    /// header cells and by
     /// [`set_filter`](Self::set_filter) / [`clear_filters`](Self::clear_filters).
     /// Bind a `SortFilterListModel<T>` to drive the upstream data:
     ///
@@ -702,7 +701,7 @@ impl<T: 'static> TableView<T> {
 
     // ── Internals ──────────────────────────────────────────────────────
 
-    /// The configured row height (override) or — Phase 2 — a sane fallback
+    /// The configured row height (override) or a sane fallback
     /// of 28 px. Once a `BuildContext` is available we read the table
     /// style; this static helper is for paths outside `build()`.
     fn effective_row_height_static(&self) -> f32 {
@@ -1184,7 +1183,7 @@ impl<T: 'static> Widget for TableView<T> {
             self.body_pane_id = Some(ctx.add(pane));
         }
 
-        // Scrollbar (single internal vertical bar in Phase 2).
+        // Scrollbar (single internal vertical bar).
         if self.show_internal_scrollbars {
             let sb = ScrollBar::new(
                 ScrollBarOrientation::Vertical,

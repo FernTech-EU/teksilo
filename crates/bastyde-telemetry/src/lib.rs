@@ -1,6 +1,6 @@
 //! `bastyde-telemetry` — privacy-respecting product analytics for Bastyde.
 //!
-//! Phase 1 (this crate today) ships the foundational pieces:
+//! This crate ships the foundational pieces:
 //!
 //! - [`ConsentStore`] — persisted consent state atop
 //!   [`bastyde_settings::SettingsFile`].
@@ -13,11 +13,10 @@
 //!   the active one.
 //! - [`TelemetryExt`] — convenience accessors for `BuildContext` /
 //!   `EventContext` (`use bastyde_telemetry::TelemetryExt;`).
-//! - In-memory event queue (SQLite persistence deferred to Phase 2).
+//! - In-memory event queue.
 //! - [`StubReporter`] — testing-only adapter that collects events into
 //!   a `Vec`.
-//! - Hand-written framework events in [`generated`] (the YAML-driven
-//!   proc-macro codegen lands in Phase 5).
+//! - Hand-written framework events in [`generated`].
 //!
 //! Re-exports the pure trait/type surface from `bastyde_core::telemetry`
 //! so apps need only `use bastyde_telemetry::*` to access the full API.

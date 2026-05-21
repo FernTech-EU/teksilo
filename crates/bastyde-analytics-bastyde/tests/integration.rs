@@ -376,8 +376,8 @@ fn discard_pending_drops_buffer_without_sending() {
 
 #[test]
 fn events_persist_across_simulated_process_restart() {
-    // Phase 1: record against an unreachable port (events stay in
-    // the persistent queue). Phase 2: spin up a real server on the
+    // Stage 1: record against an unreachable port (events stay in
+    // the persistent queue). Stage 2: spin up a real server on the
     // same queue and confirm delivery.
     let dir = TempDir::new().unwrap();
     let queue_path = dir.path().join("bastyde-queue.redb");
@@ -414,7 +414,7 @@ fn events_persist_across_simulated_process_restart() {
 
     assert!(
         server.wait_for_events(3, Duration::from_secs(3)),
-        "all 3 events from phase 1 should flush in phase 2; got {}",
+        "all 3 events from stage 1 should flush in stage 2; got {}",
         server.received_events()
     );
 }

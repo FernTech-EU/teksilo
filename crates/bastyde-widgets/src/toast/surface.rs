@@ -191,9 +191,9 @@ impl ToastSurface {
                 registry_for_handler.dismiss_entry(entry_id, ToastDismissCause::ActionInvoked, ctx);
             }
         };
-        // `shortcut_id` is stored on the action for archive replay
-        // (Phase 4 — NotificationLog renders archived entries' actions
-        // as `ctx.send_intent(Intent::by_name(id))` buttons). For the
+        // `shortcut_id` is stored on the action for archive replay —
+        // NotificationLog renders archived entries' actions as
+        // `ctx.send_intent(Intent::by_name(id))` buttons. For the
         // live toast itself the action's own callback is the source
         // of truth, so we don't wire shortcut_id into the rendered
         // widget here.

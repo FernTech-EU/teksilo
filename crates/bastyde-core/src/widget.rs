@@ -94,7 +94,7 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// concrete name through the vtable without per-impl boilerplate.
     ///
     /// Used by [`crate::widget_tree::WidgetTree::widget_type_histogram`]
-    /// for the `widget.census` telemetry event (Phase 5.3). Custom
+    /// for the `widget.census` telemetry event. Custom
     /// widgets that wrap their state in a generic struct may
     /// override to give analytics a stable name independent of the
     /// generic parameter.

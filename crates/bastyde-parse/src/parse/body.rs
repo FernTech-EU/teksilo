@@ -12,7 +12,7 @@
 //! ```
 //!
 //! Structural forms (`if`, `for`, `match`, `let`, spread, `rust`) are
-//! out of Phase 2 scope and fall through to a targeted error.
+//! not yet implemented and fall through to a targeted error.
 
 use syn::parse::{ParseStream, Result};
 use syn::{Block, Expr, Local, Stmt, Token};

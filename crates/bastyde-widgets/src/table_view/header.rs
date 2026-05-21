@@ -7,9 +7,8 @@
 //! `column_widths` handle that body rows consume — so a resize commits
 //! in one place and reflows everywhere.
 //!
-//! Phase 3 wires sort + resize. Phase 4 will reuse `HeaderRow` across
-//! pinned panes; Phase 6 grows it to host per-column filter popovers
-//! and column-reorder drag.
+//! Supports sort, resize, reuse across pinned panes, per-column filter
+//! popovers, and column-reorder drag.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
