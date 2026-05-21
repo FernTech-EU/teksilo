@@ -28,17 +28,17 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
     let progress_h = section(
         ctx,
-        "ProgressBar — determinate",
+        tr!(ind_progress_determinate_heading()),
         ProgressBar::new(0.6).label(tr!(ind_progress_determinate_label())),
     );
     let progress_indet = section(
         ctx,
-        "ProgressBar — indeterminate",
+        tr!(ind_progress_indeterminate_heading()),
         ProgressBar::indeterminate(),
     );
     let progress_v = section(
         ctx,
-        "ProgressBar — vertical",
+        tr!(ind_progress_vertical_heading()),
         FixedSize::new().bind_height(120.0_f32).child(
             ProgressBar::new(0.4)
                 .orientation(Orientation::Vertical)
@@ -138,7 +138,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             // ProgressBar — determinate
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("ProgressBar — determinate") {
+                TextWidget::new(tr!(ind_progress_determinate_heading())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -150,7 +150,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             // ProgressBar — indeterminate
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("ProgressBar — indeterminate") {
+                TextWidget::new(tr!(ind_progress_indeterminate_heading())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -160,7 +160,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             // ProgressBar — vertical
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("ProgressBar — vertical") {
+                TextWidget::new(tr!(ind_progress_vertical_heading())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

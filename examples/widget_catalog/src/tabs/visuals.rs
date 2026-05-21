@@ -108,7 +108,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let panel_demo = section(
         ctx,
-        "Panel (visual primitive sample)",
+        tr!(vis_panel_standalone()),
         Panel::new()
             .background(SurfaceRole::Raised)
             .border_color(BorderRole::Default)
@@ -263,7 +263,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Panel (visual primitive sample)") {
+                TextWidget::new(tr!(vis_panel_standalone())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

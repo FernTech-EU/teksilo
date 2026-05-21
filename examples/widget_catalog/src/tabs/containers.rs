@@ -127,7 +127,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let sb_vp = ctx.signal(0.3_f32);
     let scrollbar = section(
         ctx,
-        "ScrollBar (standalone)",
+        tr!(cnt_scrollbar_standalone_heading()),
         FixedSize::new()
             .bind_width(280.0_f32)
             .bind_height(14.0_f32)
@@ -372,7 +372,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("ScrollBar (standalone)") {
+                TextWidget::new(tr!(cnt_scrollbar_standalone_heading())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

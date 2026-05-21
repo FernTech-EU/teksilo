@@ -62,7 +62,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let standard_list_item = section(
         ctx,
-        "StandardListItem (standalone)",
+        tr!(dat_standard_list_item_standalone()),
         VStack::new()
             .spacing(2.0)
             .child(StandardListItem::new(tr!(data_first_item())))
@@ -71,7 +71,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let standard_tree_item = section(
         ctx,
-        "StandardTreeItem (standalone)",
+        tr!(dat_standard_tree_item_standalone()),
         VStack::new()
             .spacing(2.0)
             .child(StandardTreeItem::new(tr!(dat_tree_root())).depth(0))
@@ -174,7 +174,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("StandardListItem (standalone)") {
+                TextWidget::new(tr!(dat_standard_list_item_standalone())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -188,7 +188,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("StandardTreeItem (standalone)") {
+                TextWidget::new(tr!(dat_standard_tree_item_standalone())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

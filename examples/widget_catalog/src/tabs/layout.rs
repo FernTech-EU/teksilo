@@ -184,9 +184,9 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
         "Divider",
         VStack::new()
             .spacing(4.0)
-            .child(TextWidget::new_literal("above").style(TextStyleRole::Small))
+            .child(TextWidget::new(tr!(lay_above())).style(TextStyleRole::Small))
             .child(Divider::new())
-            .child(TextWidget::new_literal("below").style(TextStyleRole::Small)),
+            .child(TextWidget::new(tr!(lay_below())).style(TextStyleRole::Small)),
     );
     let fixed_size = section(
         ctx,
@@ -522,11 +522,11 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                 }
                 VStack {
                     spacing: 4.0
-                    TextWidget::new_literal("above") {
+                    TextWidget::new(tr!(lay_above())) {
                         style: TextStyleRole::Small
                     }
                     Divider
-                    TextWidget::new_literal("below") {
+                    TextWidget::new(tr!(lay_below())) {
                         style: TextStyleRole::Small
                     }
                 }

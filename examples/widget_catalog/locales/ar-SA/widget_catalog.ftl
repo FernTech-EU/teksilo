@@ -317,3 +317,93 @@ overlays-file-saved-successfully = تم حفظ الملف بنجاح
 overlays-file-saved-successfully-2 = تم حفظ الملف بنجاح
 overlays-show-snackbar = إظهار شريط التنبيه
 overlays-card-like-surface-with-the-def = سطح يشبه البطاقة بظل اللوحة الافتراضي
+
+# ── Catalog i18n pass: translatable visual strings ──────────────────────
+# Tooltip cascade demo (shared.rs)
+tip-a-body = المستوى 1 من التسلسل. مرّر فوق [الرابط التالي](:tip-b) لفتح المستوى 2.
+tip-a-more = افتح الأكورديون لقراءة هذا النص الطويل دون مغادرة التلميح.
+tip-b-body = المستوى 2 من التسلسل. مرّر فوق [الرابط الأخير](:tip-c) لواحد إضافي.
+tip-b-more = كل تلميح متداخل يربط طبقته بالسابقة (OverlayLayer::InTree).
+tip-c-body = المستوى 3 — نهاية التسلسل. اضغط Esc أو انقر خارجًا للإغلاق.
+tip-stat-food-body = **الغذاء** يعدّل معدل نمو سكانك. مرتبط بـ[التجارة](:stat-trade).
+tip-stat-trade-body = **التجارة**: المسارات تؤثر على دخل العملات. مرتبط بـ[السعادة](:stat-happiness).
+tip-stat-happiness-body = **السعادة** تحدّ من الاضطرابات. نهاية التسلسل داخل المركّب.
+# Indicators
+ind-progress-determinate-heading = ProgressBar — محدّد
+ind-progress-indeterminate-heading = ProgressBar — غير محدّد
+ind-progress-vertical-heading = ProgressBar — عمودي
+# Styling
+sty-tier1-button-variant-heading = المستوى 1 — ButtonVariant
+sty-tier1-toggle-variant-heading = المستوى 1 — ToggleVariant
+sty-tier1-checkbox-variant-heading = المستوى 1 — CheckboxVariant
+sty-tier1-card-variant-heading = المستوى 1 — CardVariant
+sty-tier3-button-style-heading = المستوى 3 — Button::style(impl ButtonStyle)
+sty-tier3-toggle-style-heading = المستوى 3 — Toggle::style(impl ToggleStyle)
+# Containers
+cnt-scrollbar-standalone-heading = ScrollBar (مستقل)
+# Layout
+lay-above = أعلى
+lay-below = أسفل
+# Data
+dat-standard-list-item-standalone = StandardListItem (مستقل)
+dat-standard-tree-item-standalone = StandardTreeItem (مستقل)
+# Menus
+mnu-menu-list-standalone = MenuList (مستقل)
+mnu-menu-item-standalone = MenuItem (مستقل)
+# Visuals
+vis-panel-standalone = Panel (مثال على العنصر البصري الأولي)
+# Date & Time
+dt-calendar-single = Calendar — تاريخ واحد
+dt-calendar-range = Calendar — نطاق تواريخ
+# Text
+txt-password-label = كلمة المرور
+txt-password-placeholder = أدخل كلمة المرور
+txt-password-validation = استخدم 8 أحرف على الأقل
+# Buttons
+btn-heading-variants = Button — متغيرات
+btn-heading-disabled = Button — حالة معطّلة
+btn-heading-with-icon = Button — مع أيقونة
+btn-export-sample = تصدير
+# Inputs
+inp-heading-radio-group = RadioButton (في مجموعة)
+inp-heading-slider-h = Slider — أفقي
+inp-heading-slider-stepped = Slider — متدرّج
+inp-heading-slider-v = Slider — عمودي
+# Overlays
+ovr-plain-tooltips-heading = تلميحات بسيطة
+ovr-plain-tooltips-subtitle = (سطر واحد، مؤقت)
+ovr-tooltip-save-doc = حفظ المستند الحالي
+ovr-tooltip-open-file = فتح ملف
+ovr-tooltip-close-tab = إغلاق علامة التبويب
+ovr-rich-tooltips-heading = تلميحات منسّقة
+ovr-rich-tooltips-subtitle = (تسلسل :key، التمرير للتثبيت)
+ovr-hover-level-1 = مرّر للمستوى 1
+ovr-hover-level-2 = مرّر للمستوى 2
+ovr-hover-level-3 = مرّر للمستوى 3
+ovr-plain-among-rich = بسيط بين المنسّقة
+ovr-plain-among-rich-tip = تلميح بسيط في العمود المنسّق — تشخيصي.
+ovr-rich-dwell-tip = تلميح: مرّر ~2 ث للتثبيت، ثم انقر على الروابط للتسلسل.
+ovr-province-iberia = Iberia
+ovr-province-overview = نظرة عامة على المقاطعة
+ovr-stat-food-label = الغذاء: 42
+ovr-stat-trade-label = التجارة: 18
+ovr-stat-happiness-label = السعادة: 71%
+ovr-tab-stats = إحصاءات
+ovr-stat-population = السكان: 12,400
+ovr-stat-garrison = الحامية: 320
+ovr-tab-history = تاريخ
+ovr-province-history = تأسست 1247 • 3 حصارات • وباء واحد
+ovr-tabbed-details = تفاصيل بعلامات تبويب
+ovr-treasury-report = تقرير الخزينة
+ovr-treasury-subtitle = هذا الربع: +423 عملة
+ovr-open-ledger = فتح دفتر الأستاذ
+ovr-composite-tooltips-heading = تلميحات مركّبة
+ovr-composite-tooltips-subtitle = (شجرة عناصر واجهة مخصصة، على غرار CK3)
+ovr-province-info-btn = معلومات المقاطعة
+ovr-with-internal-button = مع Button داخلي
+ovr-composite-dwell-tip = تلميح: مرّر ~2 ث، ثم Tab داخل السطح، ثم فعّل Button الداخلي.
+ovr-section-tooltip-cascade = Tooltip — بسيط / منسّق / مركّب (تسلسل 3 مستويات)
+ovr-section-popover = Popover (مستقل)
+ovr-section-dialog = Dialog (عبر MessageBox)
+ovr-section-messagebox = MessageBox — متغيرات الخطورة
+ovr-section-shadow = Shadow (عنصر بصري أساسي)

@@ -141,7 +141,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // Seven variants; split across two rows so the grid stays legible.
     let button_variants = section(
         ctx,
-        "Tier 1 — ButtonVariant",
+        tr!(sty_tier1_button_variant_heading()),
         VStack::new()
             .spacing(8.0)
             .child(
@@ -185,7 +185,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // ── Tier 1: Toggle variants ─────────────────────────────────────
     let toggle_variants = section(
         ctx,
-        "Tier 1 — ToggleVariant",
+        tr!(sty_tier1_toggle_variant_heading()),
         HStack::new()
             .spacing(16.0)
             .child(labelled(
@@ -217,7 +217,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // ── Tier 1: Checkbox variants ───────────────────────────────────
     let checkbox_variants = section(
         ctx,
-        "Tier 1 — CheckboxVariant",
+        tr!(sty_tier1_checkbox_variant_heading()),
         HStack::new()
             .spacing(16.0)
             .child(labelled(
@@ -243,7 +243,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // ── Tier 1: Card variants ───────────────────────────────────────
     let card_variants = section(
         ctx,
-        "Tier 1 — CardVariant",
+        tr!(sty_tier1_card_variant_heading()),
         HStack::new()
             .spacing(12.0)
             .child(labelled(
@@ -277,7 +277,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // widget sits next to its IntUI-default sibling for comparison.
     let custom_button = section(
         ctx,
-        "Tier 3 — Button::style(impl ButtonStyle)",
+        tr!(sty_tier3_button_style_heading()),
         HStack::new()
             .spacing(12.0)
             .child(labelled(
@@ -292,7 +292,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
     let custom_toggle = section(
         ctx,
-        "Tier 3 — Toggle::style(impl ToggleStyle)",
+        tr!(sty_tier3_toggle_style_heading()),
         HStack::new()
             .spacing(16.0)
             .child(labelled(
@@ -363,7 +363,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Tier 1 — ButtonVariant") {
+                TextWidget::new(tr!(sty_tier1_button_variant_heading())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -398,7 +398,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Tier 1 — ToggleVariant") {
+                TextWidget::new(tr!(sty_tier1_toggle_variant_heading())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -425,7 +425,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Tier 1 — CheckboxVariant") {
+                TextWidget::new(tr!(sty_tier1_checkbox_variant_heading())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -448,7 +448,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Tier 3 — Button::style(impl ButtonStyle)") {
+                TextWidget::new(tr!(sty_tier3_button_style_heading())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -463,7 +463,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Tier 3 — Toggle::style(impl ToggleStyle)") {
+                TextWidget::new(tr!(sty_tier3_toggle_style_heading())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

@@ -429,9 +429,9 @@ fn editor_section_body() -> impl Widget + 'static {
 
 pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
-    let surfaces = section(ctx, "Surfaces", surfaces_grid());
-    let text = section(ctx, "Text", text_section_body());
-    let editor = section(ctx, "Editor", editor_section_body());
+    let surfaces = section(ctx, tr!(pal_surfaces()), surfaces_grid());
+    let text = section(ctx, tr!(pal_text()), text_section_body());
+    let editor = section(ctx, tr!(pal_editor()), editor_section_body());
 
     ctx.add(
         VStack::new()
@@ -622,7 +622,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             // ── Surfaces section ────────────────────────────────────
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Surfaces") {
+                TextWidget::new(tr!(pal_surfaces())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -671,7 +671,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             // ── Text section ────────────────────────────────────────
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Text") {
+                TextWidget::new(tr!(pal_text())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -731,7 +731,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             // ── Editor section ──────────────────────────────────────
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Editor") {
+                TextWidget::new(tr!(pal_editor())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

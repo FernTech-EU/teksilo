@@ -30,7 +30,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
     let variants = section(
         ctx,
-        "Button — variants",
+        tr!(btn_heading_variants()),
         HStack::new()
             .spacing(8.0)
             .child(
@@ -51,7 +51,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let states = section(
         ctx,
-        "Button — disabled state",
+        tr!(btn_heading_disabled()),
         HStack::new()
             .spacing(8.0)
             .child(
@@ -72,7 +72,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let with_icon = section(
         ctx,
-        "Button — with icon",
+        tr!(btn_heading_with_icon()),
         HStack::new()
             .spacing(8.0)
             .child(
@@ -135,7 +135,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .item(MenuItem::new(tr!(demo_save())))
             .item(MenuItem::new(tr!(buttons_save_as())))
             .separator()
-            .item(MenuItem::new_literal("Export"))
+            .item(MenuItem::new(tr!(btn_export_sample())))
             .variant(ButtonVariant::Filled),
     );
 
@@ -198,7 +198,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Button — variants") {
+                TextWidget::new(tr!(btn_heading_variants())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -221,7 +221,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Button — disabled state") {
+                TextWidget::new(tr!(btn_heading_disabled())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -244,7 +244,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Button — with icon") {
+                TextWidget::new(tr!(btn_heading_with_icon())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

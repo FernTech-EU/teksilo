@@ -28,14 +28,14 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
     let calendar_single = section(
         ctx,
-        "Calendar — single date",
+        tr!(dt_calendar_single()),
         FixedSize::new()
             .bind_width(280.0_f32)
             .child(Calendar::single(cal_single_signal).show_today_button(true)),
     );
     let calendar_range = section(
         ctx,
-        "Calendar — date range",
+        tr!(dt_calendar_range()),
         FixedSize::new()
             .bind_width(280.0_f32)
             .child(Calendar::range(cal_range_signal).show_today_button(true)),
@@ -84,7 +84,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Calendar — single date") {
+                TextWidget::new(tr!(dt_calendar_single())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -98,7 +98,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Calendar — date range") {
+                TextWidget::new(tr!(dt_calendar_range())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

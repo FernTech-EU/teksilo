@@ -29,52 +29,14 @@ pub const KEY_STAT_HAPPINESS: &str = "stat-happiness";
 /// the layout tab and any future cascading demos stay in sync.
 pub fn build_tooltip_registry() -> Vec<TooltipContent> {
     vec![
-        TooltipContent::new(
-            KEY_TIP_A,
-            LocalizedString::literal(
-                "Level 1 of the cascade. Hover the [next link](:tip-b) to open level 2.",
-            ),
-        )
-        .with_more(LocalizedString::literal(
-            "Open the Accordion to read this long-form body without leaving the tooltip.",
-        ))
-        .with_shortcut_label("F1"),
-        TooltipContent::new(
-            KEY_TIP_B,
-            LocalizedString::literal(
-                "Level 2 of the cascade. Hover the [final link](:tip-c) for one more.",
-            ),
-        )
-        .with_more(LocalizedString::literal(
-            "Each nested tooltip parents its overlay to the previous one (OverlayLayer::InTree).",
-        )),
-        TooltipContent::new(
-            KEY_TIP_C,
-            LocalizedString::literal(
-                "Level 3 — end of the cascade. Press Esc or click outside to dismiss.",
-            ),
-        )
-        .with_shortcut_label("Esc"),
-        TooltipContent::new(
-            KEY_STAT_FOOD,
-            LocalizedString::literal(
-                "**Food** modifies your population's growth rate. Linked to [trade](:stat-trade).",
-            ),
-        )
-        .with_shortcut_label("F"),
-        TooltipContent::new(
-            KEY_STAT_TRADE,
-            LocalizedString::literal(
-                "**Trade** routes affect coin income. Linked to [happiness](:stat-happiness).",
-            ),
-        )
-        .with_shortcut_label("T"),
-        TooltipContent::new(
-            KEY_STAT_HAPPINESS,
-            LocalizedString::literal(
-                "**Happiness** caps unrest. End of the inside-composite cascade.",
-            ),
-        ),
+        TooltipContent::new(KEY_TIP_A, tr!(tip_a_body()))
+            .with_more(tr!(tip_a_more()))
+            .with_shortcut_label("F1"),
+        TooltipContent::new(KEY_TIP_B, tr!(tip_b_body())).with_more(tr!(tip_b_more())),
+        TooltipContent::new(KEY_TIP_C, tr!(tip_c_body())).with_shortcut_label("Esc"),
+        TooltipContent::new(KEY_STAT_FOOD, tr!(tip_stat_food_body())).with_shortcut_label("F"),
+        TooltipContent::new(KEY_STAT_TRADE, tr!(tip_stat_trade_body())).with_shortcut_label("T"),
+        TooltipContent::new(KEY_STAT_HAPPINESS, tr!(tip_stat_happiness_body())),
     ]
 }
 
@@ -204,12 +166,14 @@ pub fn color_cell(role: impl Into<ColorProp>, label: &'static str) -> impl Widge
 
 /// Per-widget showcase section: bold mono title + the widget itself.
 ///
-/// `title` is the **widget name** as a literal (`"HStack"`, `"Button"`)
-/// — names stay untranslated since they identify a Rust type. `body`
-/// is the demo widget itself.
+/// `title` accepts either a plain `&str` (a **widget name** that stays
+/// untranslated since it identifies a Rust type, e.g. `"HStack"`,
+/// `"Button"`) or a `tr!(...)` `LocalizedString` for headings whose
+/// descriptive part should localize (e.g. `"ScrollBar (standalone)"`).
+/// `body` is the demo widget itself.
 pub fn section(
     ctx: &mut BuildContext,
-    title: &'static str,
+    title: impl Into<LocalizedString>,
     body: impl Widget + 'static,
 ) -> WidgetId {
     use bastyde::widgets::{TextWidget, VStack};
@@ -217,7 +181,7 @@ pub fn section(
         VStack::new()
             .spacing(6.0)
             .child(
-                TextWidget::new_literal(title)
+                TextWidget::new(title)
                     .style(TextStyleRole::SmallBold)
                     .color(TextRole::Accent),
             )

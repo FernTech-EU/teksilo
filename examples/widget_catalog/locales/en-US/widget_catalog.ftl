@@ -317,3 +317,93 @@ overlays-file-saved-successfully = File saved successfully
 overlays-file-saved-successfully-2 = File saved successfully
 overlays-show-snackbar = Show snackbar
 overlays-card-like-surface-with-the-def = Card-like surface with the default Panel shadow
+
+# ── Catalog i18n pass: translatable visual strings ──────────────────────
+# Tooltip cascade demo (shared.rs)
+tip-a-body = Level 1 of the cascade. Hover the [next link](:tip-b) to open level 2.
+tip-a-more = Open the Accordion to read this long-form body without leaving the tooltip.
+tip-b-body = Level 2 of the cascade. Hover the [final link](:tip-c) for one more.
+tip-b-more = Each nested tooltip parents its overlay to the previous one (OverlayLayer::InTree).
+tip-c-body = Level 3 — end of the cascade. Press Esc or click outside to dismiss.
+tip-stat-food-body = **Food** modifies your population's growth rate. Linked to [trade](:stat-trade).
+tip-stat-trade-body = **Trade** routes affect coin income. Linked to [happiness](:stat-happiness).
+tip-stat-happiness-body = **Happiness** caps unrest. End of the inside-composite cascade.
+# Indicators
+ind-progress-determinate-heading = ProgressBar — determinate
+ind-progress-indeterminate-heading = ProgressBar — indeterminate
+ind-progress-vertical-heading = ProgressBar — vertical
+# Styling
+sty-tier1-button-variant-heading = Tier 1 — ButtonVariant
+sty-tier1-toggle-variant-heading = Tier 1 — ToggleVariant
+sty-tier1-checkbox-variant-heading = Tier 1 — CheckboxVariant
+sty-tier1-card-variant-heading = Tier 1 — CardVariant
+sty-tier3-button-style-heading = Tier 3 — Button::style(impl ButtonStyle)
+sty-tier3-toggle-style-heading = Tier 3 — Toggle::style(impl ToggleStyle)
+# Containers
+cnt-scrollbar-standalone-heading = ScrollBar (standalone)
+# Layout
+lay-above = above
+lay-below = below
+# Data
+dat-standard-list-item-standalone = StandardListItem (standalone)
+dat-standard-tree-item-standalone = StandardTreeItem (standalone)
+# Menus
+mnu-menu-list-standalone = MenuList (standalone)
+mnu-menu-item-standalone = MenuItem (standalone)
+# Visuals
+vis-panel-standalone = Panel (visual primitive sample)
+# Date & Time
+dt-calendar-single = Calendar — single date
+dt-calendar-range = Calendar — date range
+# Text
+txt-password-label = Password
+txt-password-placeholder = Enter your password
+txt-password-validation = Use at least 8 characters
+# Buttons
+btn-heading-variants = Button — variants
+btn-heading-disabled = Button — disabled state
+btn-heading-with-icon = Button — with icon
+btn-export-sample = Export
+# Inputs
+inp-heading-radio-group = RadioButton (in a group)
+inp-heading-slider-h = Slider — horizontal
+inp-heading-slider-stepped = Slider — stepped
+inp-heading-slider-v = Slider — vertical
+# Overlays
+ovr-plain-tooltips-heading = Plain tooltips
+ovr-plain-tooltips-subtitle = (single-line, ephemeral)
+ovr-tooltip-save-doc = Save the current document
+ovr-tooltip-open-file = Open a file
+ovr-tooltip-close-tab = Close the tab
+ovr-rich-tooltips-heading = Rich tooltips
+ovr-rich-tooltips-subtitle = (:key cascade, dwell-to-sticky)
+ovr-hover-level-1 = Hover for level 1
+ovr-hover-level-2 = Hover for level 2
+ovr-hover-level-3 = Hover for level 3
+ovr-plain-among-rich = Plain among rich
+ovr-plain-among-rich-tip = Plain tooltip living in the rich column — diagnostic.
+ovr-rich-dwell-tip = Tip: dwell ~2 s to pin, then click links to chain.
+ovr-province-iberia = Iberia
+ovr-province-overview = Province overview
+ovr-stat-food-label = Food: 42
+ovr-stat-trade-label = Trade: 18
+ovr-stat-happiness-label = Happiness: 71%
+ovr-tab-stats = Stats
+ovr-stat-population = Population: 12,400
+ovr-stat-garrison = Garrison: 320
+ovr-tab-history = History
+ovr-province-history = Founded 1247 • 3 sieges • 1 plague
+ovr-tabbed-details = Tabbed details
+ovr-treasury-report = Treasury report
+ovr-treasury-subtitle = This quarter: +423 coins
+ovr-open-ledger = Open ledger
+ovr-composite-tooltips-heading = Composite tooltips
+ovr-composite-tooltips-subtitle = (arbitrary widget tree, CK3-style)
+ovr-province-info-btn = Province info
+ovr-with-internal-button = With internal Button
+ovr-composite-dwell-tip = Tip: dwell ~2 s, then Tab into the surface, then activate the inner Button.
+ovr-section-tooltip-cascade = Tooltip — plain / rich / composite (3-tier cascade)
+ovr-section-popover = Popover (standalone)
+ovr-section-dialog = Dialog (via MessageBox)
+ovr-section-messagebox = MessageBox — severity variants
+ovr-section-shadow = Shadow (visual primitive)

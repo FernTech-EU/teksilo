@@ -108,14 +108,17 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
         ctx,
         "PasswordField",
         PasswordField::new(password_signal)
-            .label_literal("Password")
-            .placeholder_literal("Enter your password")
-            .validator(|s| {
-                if s.chars().count() >= 8 {
-                    bastyde::widgets::ValidationOutcome::Valid
-                } else {
-                    bastyde::widgets::ValidationOutcome::Invalid {
-                        message: "Use at least 8 characters".into(),
+            .label(tr!(txt_password_label()).resolve_now())
+            .placeholder(tr!(txt_password_placeholder()).resolve_now())
+            .validator({
+                let msg = tr!(txt_password_validation()).resolve_now();
+                move |s| {
+                    if s.chars().count() >= 8 {
+                        bastyde::widgets::ValidationOutcome::Valid
+                    } else {
+                        bastyde::widgets::ValidationOutcome::Invalid {
+                            message: msg.clone(),
+                        }
                     }
                 }
             }),
@@ -170,14 +173,17 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let password_signal = ctx.signal(String::new());
     let password_id = ctx.add(
         PasswordField::new(password_signal)
-            .label_literal("Password")
-            .placeholder_literal("Enter your password")
-            .validator(|s| {
-                if s.chars().count() >= 8 {
-                    bastyde::widgets::ValidationOutcome::Valid
-                } else {
-                    bastyde::widgets::ValidationOutcome::Invalid {
-                        message: "Use at least 8 characters".into(),
+            .label(tr!(txt_password_label()).resolve_now())
+            .placeholder(tr!(txt_password_placeholder()).resolve_now())
+            .validator({
+                let msg = tr!(txt_password_validation()).resolve_now();
+                move |s| {
+                    if s.chars().count() >= 8 {
+                        bastyde::widgets::ValidationOutcome::Valid
+                    } else {
+                        bastyde::widgets::ValidationOutcome::Invalid {
+                            message: msg.clone(),
+                        }
                     }
                 }
             }),
