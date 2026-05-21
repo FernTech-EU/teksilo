@@ -188,7 +188,8 @@ pub struct SdfVertex {
 }
 
 impl SdfVertex {
-    /// Convert a shape quad to 4 vertices.
+    /// Convert a shape quad to 4 vertices with a **logical** stroke width —
+    /// the border scales with the view transform (the default).
     ///
     /// The rasterized quad is expanded outward by `stroke_width / 2 + 1` on
     /// every side. The SDF shader paints strokes **centered** on the rect
@@ -200,6 +201,35 @@ impl SdfVertex {
     /// correctly because `sd_rounded_rect` returns positive distances
     /// outside the shape.
     pub fn from_shape_quad(shape: &ShapeQuad, scale_factor: f32) -> [SdfVertex; 4] {
+        Self::shape_quad_verts(shape, scale_factor, shape.stroke_width * scale_factor)
+    }
+
+    /// Convert a shape quad to 4 vertices with a **cosmetic** stroke: the
+    /// border width is held constant in device pixels (`width × scale_factor`)
+    /// regardless of `zoom`, while the shape body still scales with the
+    /// transform. `zoom` is the uniform scale of the active view transform
+    /// (`hypot(m[0], m[1])`).
+    ///
+    /// The shader measures the SDF in `shape_params.xy = [w·sf, h·sf]` units,
+    /// and one such unit maps to `zoom` device px on screen, so baking the
+    /// stroke param as `width·sf / zoom` lands the rendered border at exactly
+    /// `width·sf` device px at every zoom. Assumes a uniform (non-anisotropic)
+    /// transform — the scene zoom is uniform and rotation preserves the column
+    /// norm.
+    pub fn from_shape_quad_cosmetic(
+        shape: &ShapeQuad,
+        scale_factor: f32,
+        zoom: f32,
+    ) -> [SdfVertex; 4] {
+        let zoom = zoom.max(1e-3);
+        Self::shape_quad_verts(shape, scale_factor, shape.stroke_width * scale_factor / zoom)
+    }
+
+    /// Shared core for [`from_shape_quad`](Self::from_shape_quad) and
+    /// [`from_shape_quad_cosmetic`](Self::from_shape_quad_cosmetic). Bakes
+    /// `stroke_px` (physical device pixels) as the SDF stroke param and
+    /// derives the rasterization pad from it.
+    fn shape_quad_verts(shape: &ShapeQuad, scale_factor: f32, stroke_px: f32) -> [SdfVertex; 4] {
         let [x, y, w, h] = shape.screen;
         let sx = x * scale_factor;
         let sy = y * scale_factor;
@@ -210,7 +240,7 @@ impl SdfVertex {
         let (paint_type, gradient_geo, colors, offsets) =
             encode_paint_data(&shape.paint_data, w, h);
 
-        let stroke = shape.stroke_width * scale_factor;
+        let stroke = stroke_px;
         // Rasterization padding: enough to contain the outer half of the
         // centered stroke plus a 1 px anti-aliasing margin. Filled shapes
         // (stroke = 0) still get the AA margin so their edges don't clip.
@@ -518,7 +548,7 @@ impl AnimQuadVertex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bastyde_canvas::{DecorationKind, GradientStop, PaintData, ShapeKind};
+    use bastyde_canvas::{DecorationKind, GradientStop, PaintData, ShapeKind, StrokeSpace};
     use bastyde_tokens::Color;
 
     #[test]
@@ -572,6 +602,7 @@ mod tests {
             color: [0.0, 0.5, 0.0, 1.0],
             shape: ShapeKind::RoundedRect,
             stroke_width: 0.0,
+            stroke_space: StrokeSpace::Logical,
             corner_radii: [6.0, 6.0, 6.0, 6.0],
             paint_data: PaintData::Solid,
         };
@@ -595,6 +626,7 @@ mod tests {
             color: [0.0, 0.0, 0.0, 1.0],
             shape: ShapeKind::RoundedRect,
             stroke_width: 2.0,
+            stroke_space: StrokeSpace::Logical,
             corner_radii: [4.0; 4],
             paint_data: PaintData::Solid,
         };
@@ -621,6 +653,7 @@ mod tests {
             color: [0.0, 0.0, 0.0, 1.0],
             shape: ShapeKind::RoundedRect,
             stroke_width: 0.0,
+            stroke_space: StrokeSpace::Logical,
             corner_radii: [9.5; 4],
             paint_data: PaintData::Solid,
         };
@@ -631,12 +664,43 @@ mod tests {
     }
 
     #[test]
+    fn cosmetic_shape_stroke_param_is_inverse_zoom() {
+        // Cosmetic border: the baked SDF stroke param = width·sf / zoom, so
+        // after the shader's per-unit ×zoom mapping the border lands at a
+        // constant width·sf device px at any zoom. The body size params stay
+        // put (the body still zooms via the view transform).
+        let shape = ShapeQuad {
+            screen: [0.0, 0.0, 100.0, 100.0],
+            color: [0.0, 0.0, 0.0, 1.0],
+            shape: ShapeKind::RoundedRect,
+            stroke_width: 2.0,
+            stroke_space: StrokeSpace::Device,
+            corner_radii: [10.0; 4],
+            paint_data: PaintData::Solid,
+        };
+        let sf = 2.0;
+        let logical = SdfVertex::from_shape_quad(&shape, sf);
+        let z1 = SdfVertex::from_shape_quad_cosmetic(&shape, sf, 1.0);
+        let z2 = SdfVertex::from_shape_quad_cosmetic(&shape, sf, 2.0);
+        // zoom 1 matches the logical bake: width·sf = 2·2 = 4.
+        assert!((z1[0].shape_params[2] - logical[0].shape_params[2]).abs() < 1e-4);
+        assert!((z1[0].shape_params[2] - 4.0).abs() < 1e-4);
+        // zoom 2 halves the param so the on-screen width stays width·sf.
+        assert!((z2[0].shape_params[2] - 2.0).abs() < 1e-4);
+        // Body size params unchanged across zoom (the quad corners zoom, not
+        // the SDF body units): width·sf = 100·2 = 200.
+        assert_eq!(z1[0].shape_params[0], z2[0].shape_params[0]);
+        assert_eq!(z2[0].shape_params[0], 200.0);
+    }
+
+    #[test]
     fn sdf_linear_gradient_encoding() {
         let shape = ShapeQuad {
             screen: [0.0, 0.0, 100.0, 50.0],
             color: [1.0, 1.0, 1.0, 1.0],
             shape: ShapeKind::RoundedRect,
             stroke_width: 0.0,
+            stroke_space: StrokeSpace::Logical,
             corner_radii: [0.0; 4],
             paint_data: PaintData::LinearGradient {
                 start: [0.0, 0.0],
@@ -681,6 +745,7 @@ mod tests {
             color: [1.0, 1.0, 1.0, 1.0],
             shape: ShapeKind::RoundedRect,
             stroke_width: 0.0,
+            stroke_space: StrokeSpace::Logical,
             corner_radii: [0.0; 4],
             paint_data: PaintData::LinearGradient {
                 start: [0.0, 0.0],

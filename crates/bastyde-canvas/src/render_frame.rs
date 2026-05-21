@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use crate::geometry::{Rect, Transform2D};
-use crate::paint::StrokeStyle;
+use crate::paint::{StrokeSpace, StrokeStyle};
 
 /// The complete render output for one frame. This is the boundary between
 /// platform-independent widget code and GPU-specific rendering code.
@@ -297,6 +297,11 @@ pub struct ShapeQuad {
     pub shape: ShapeKind,
     /// Stroke width (0.0 for filled shapes).
     pub stroke_width: f32,
+    /// Whether the stroke width is logical (scales with the view transform) or
+    /// device/cosmetic (held constant in device pixels, invariant to zoom). A
+    /// cosmetic stroke keeps a hairline border crisp at any scene zoom. Fills
+    /// (`stroke_width == 0.0`) ignore this.
+    pub stroke_space: StrokeSpace,
     /// Corner radii: [top_left, top_right, bottom_right, bottom_left].
     pub corner_radii: [f32; 4],
     /// Paint type for the shape.
@@ -547,6 +552,7 @@ mod tests {
             color: [1.0, 0.0, 0.0, 1.0],
             shape: ShapeKind::RoundedRect,
             stroke_width: 0.0,
+            stroke_space: StrokeSpace::Logical,
             corner_radii: [0.0; 4],
             paint_data: PaintData::Solid,
         });
