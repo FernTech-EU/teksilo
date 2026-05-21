@@ -884,9 +884,12 @@ impl Renderer {
                                     == bastyde_canvas::StrokeSpace::Device
                                     && shape.stroke_width > 0.0
                                 {
+                                    // Uniform scale of the linear part = view
+                                    // zoom (no scale_factor — it lives only in
+                                    // the translation column). `from_shape_quad_cosmetic`
+                                    // applies the divide-by-zero floor.
                                     let zoom = current_transform.m[0]
-                                        .hypot(current_transform.m[1])
-                                        .max(1e-3);
+                                        .hypot(current_transform.m[1]);
                                     SdfVertex::from_shape_quad_cosmetic(
                                         shape,
                                         scale_factor,

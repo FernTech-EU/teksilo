@@ -8,7 +8,7 @@
 //!   item's `local_pos`, `transform`, and parent chain).
 //! - **View transform.** Pan / zoom / rotation are four animated
 //!   `Signal<f32>`s on `SceneView`, composed into a derived
-//!   `Signal<Transform2D>` bound via `BuildContext::set_transform`
+//!   `Signal<Transform2D>` bound via `BuildContext::set_content_transform`
 //!   on the view itself. The render walker pushes that scope around
 //!   the entire subtree, so every materialised widget is visually
 //!   transformed; transform-aware hit-test routes pointer events
@@ -585,7 +585,7 @@ impl SceneView {
         let bounds_origin_signal = Signal::new(Vec2::ZERO);
         // Derived view-transform signal — composed once in `new` so
         // it's stable across rebuilds. The same instance is used by
-        // `set_transform` in `build` and exposed publicly via
+        // `set_content_transform` in `build` and exposed publicly via
         // [`view_transform_signal`](Self::view_transform_signal).
         let view_transform_signal = pan_x
             .zip3(&pan_y, &zoom)
@@ -1647,7 +1647,7 @@ impl Widget for SceneView {
         // Bind the four signals at Relayout on this node so
         // `place_children` re-runs and the viewport-cull set is
         // recomputed when pan/zoom/rotation change. The Repaint
-        // binding from `set_transform` below is kept in addition;
+        // binding from `set_content_transform` below is kept in addition;
         // it's what dirties the renderer's transform stack so
         // already-laid-out children re-paint at their new visual
         // positions.  Without this Relayout binding, a `pan` or
@@ -1667,7 +1667,7 @@ impl Widget for SceneView {
 
         // The view-transform signal is constructed once in `new`
         // (so it's stable across rebuilds and exposable via
-        // `view_transform_signal()`). Bind it as a `set_transform`
+        // `view_transform_signal()`). Bind it as a `set_content_transform`
         // scope on this widget; the render walker pushes it around
         // our entire subtree. The composition folds `bounds.origin`
         // into the final translate so a SceneView at a non-zero
@@ -2694,7 +2694,7 @@ impl Widget for SceneView {
     ) {
         // Mirror the parent's choice of `bounds.origin` into a signal
         // so the derived view-transform picks it up. The signal is
-        // bound at `BindingLevel::RepaintOnly` via `set_transform`,
+        // bound at `BindingLevel::RepaintOnly` via `set_content_transform`,
         // so changes only trigger repaint — never relayout — which
         // keeps idle behaviour intact when the SceneView is at rest.
         let new_origin = Vec2::new(bounds.x, bounds.y);
@@ -2786,7 +2786,7 @@ impl Widget for SceneView {
             self.bounds_origin_signal.set(new_origin);
         }
 
-        // The SceneView's `set_transform` scope wraps both this paint
+        // The SceneView's `set_content_transform` scope wraps both this paint
         // call and the children walk, so any `canvas.fill_*` /
         // `canvas.stroke_*` / `canvas.draw_*` call we make here lands
         // through the same view-transform projection as the heavyweight

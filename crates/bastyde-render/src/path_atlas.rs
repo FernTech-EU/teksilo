@@ -179,6 +179,17 @@ impl PathAtlas {
         scale_factor: f32,
         zoom: f32,
     ) -> Option<AtlasRegion> {
+        // Cosmetic paths rasterize the body at the current zoom (so it stays
+        // sharp 1:1 with the transform-scaled display quad). Cost: the zoom is
+        // baked into the raster dimensions, which are part of the cache key,
+        // so a CONTINUOUS zoom gesture is a cache miss every frame — each
+        // visible cosmetic path is re-rasterized per frame while zooming (the
+        // per-frame LRU keeps current-frame entries and evicts the rest, so
+        // the atlas stays bounded, but CPU rasterization scales with the
+        // visible cosmetic-path count). Cache hits resume once the zoom
+        // settles. This is the cost of "full-fidelity" cosmetic paths; coarse
+        // zoom-quantization would cut the re-raster rate but reintroduce the
+        // sub-pixel width drift the zoom-aware path was chosen to avoid.
         let (geom_scale, stroke_scale) = if style.space == StrokeSpace::Device {
             let mut g = scale_factor * zoom.max(1e-3);
             // Keep the bitmap under the atlas budget at extreme zoom.
