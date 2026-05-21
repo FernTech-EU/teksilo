@@ -153,6 +153,12 @@ pub struct WidgetTree {
     /// shortcut via `access_shortcut_id(id)` track user rebinds
     /// without any explicit signaling from the settings UI.
     last_synced_shortcut_version: u64,
+    /// Snapshot of `locale_signal` at the last `sync_accessibility`
+    /// call. When the locale differs the AT cache is dirtied, so
+    /// `access_label(tr!(...))` (stored as a locale-bound
+    /// `Prop<String>`) re-resolves into the announced node — even on a
+    /// same-direction switch that doesn't rebuild the composite.
+    last_synced_locale: Option<String>,
     /// Reverse map from synthetic (widget-emitted) AccessKit NodeIds
     /// to the WidgetId that owns them. Rebuilt on every full
     /// accessibility walk. `handle_accessibility_actions` uses this
@@ -360,6 +366,7 @@ impl WidgetTree {
             cached_a11y: None,
             a11y_dirty: true,
             last_synced_shortcut_version: 0,
+            last_synced_locale: None,
             synthetic_parent_map: std::collections::HashMap::new(),
             cached_frame: None,
             pointer_captured_by: None,

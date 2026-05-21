@@ -19,6 +19,7 @@ use bastyde_canvas::Point;
 use crate::event::{ButtonMask, EventResponse, WidgetEvent};
 use crate::event_handlers::EventHandlers;
 use crate::gesture::{DragPhase, PinchPhase, SwipeDirection, TapEvent};
+use crate::signal::Prop;
 use crate::widget::{CursorIcon, EventContext, Widget};
 use crate::widget_id::WidgetId;
 
@@ -55,20 +56,24 @@ pub enum AccessSubtreeMode {
 /// the accessibility tree walker after the inner widget's
 /// `accessibility(&self, builder)` runs.
 ///
-/// User-visible string fields store eagerly-resolved `String`. The
-/// translated path goes through `impl From<LocalizedString> for String`
-/// in `bastyde-i18n` — `.access_label(tr!(save()))` resolves the
-/// `LocalizedString` once at builder time and stores the result here.
-/// Locale changes rebuild the composite, which re-runs the builder
-/// chain and picks up new translations. The `_literal` builder
-/// variants are `#[doc(hidden)]` grep markers for explicitly
-/// untranslated call sites — same convention as `Button::new_literal`.
+/// User-visible string fields store a `Prop<String>` rather than a
+/// resolved `String`, so they stay reactive to locale changes.
+/// `bastyde-core` can't name `LocalizedString` (that lives in the
+/// downstream `bastyde-i18n` crate), but `Prop<String>` is a core type
+/// and `impl From<LocalizedString> for Prop<String>` in `bastyde-i18n`
+/// yields a `Prop::Bound` over a locale-observing `Signal<String>`. So
+/// `.access_label(tr!(save()))` stores a bound prop; the accessibility
+/// walker reads `.get()` at AT-build time, and `sync_accessibility`
+/// re-walks on locale change so the announced value follows the locale.
+/// The `_literal` builder variants store `Prop::Static` and are the
+/// `#[doc(hidden)]` grep markers for explicitly untranslated call sites
+/// (the only literal path reachable from within `bastyde-core`).
 #[derive(Default)]
 pub struct AccessibilityOverrides {
     // -- Tier 1: labeling / state -----------------------------------------
-    pub label: Option<String>,
-    pub description: Option<String>,
-    pub value: Option<String>,
+    pub label: Option<Prop<String>>,
+    pub description: Option<Prop<String>>,
+    pub value: Option<Prop<String>>,
     pub role: Option<accesskit::Role>,
     pub hidden: Option<bool>,
     pub disabled: Option<bool>,
@@ -114,10 +119,10 @@ pub struct AccessibilityOverrides {
     pub removed_actions: Vec<accesskit::Action>,
 
     /// Custom-named actions (SwiftUI `.accessibilityAction(named:_:)`).
-    /// Each entry pairs a resolved description string with a handler.
+    /// Each entry pairs a (reactive) description prop with a handler.
     /// Index in the vec is the stable `i32` `CustomAction::id` exposed
     /// to AT software.
-    pub custom_actions: Vec<(String, Box<dyn FnMut(&mut EventContext)>)>,
+    pub custom_actions: Vec<(Prop<String>, Box<dyn FnMut(&mut EventContext)>)>,
 
     /// Final escape hatch — invoked **last** in `apply()` with full
     /// `&mut AccessNodeBuilder` access (including `inner_mut()`). Used
@@ -156,14 +161,14 @@ impl AccessibilityOverrides {
     pub(crate) fn apply(&self, b: &mut crate::accessibility::AccessNodeBuilder) {
         use crate::accessibility::widget_id_to_node_id;
 
-        if let Some(ref s) = self.label {
-            b.set_name(s.clone());
+        if let Some(ref p) = self.label {
+            b.set_name(p.get());
         }
-        if let Some(ref s) = self.description {
-            b.set_description(s.clone());
+        if let Some(ref p) = self.description {
+            b.set_description(p.get());
         }
-        if let Some(ref s) = self.value {
-            b.set_value(s.clone());
+        if let Some(ref p) = self.value {
+            b.set_value(p.get());
         }
         if let Some(role) = self.role {
             b.set_role(role);
@@ -237,7 +242,7 @@ impl AccessibilityOverrides {
                 .enumerate()
                 .map(|(i, (label, _))| accesskit::CustomAction {
                     id: i as i32,
-                    description: label.clone().into(),
+                    description: label.get().into(),
                 })
                 .collect();
             b.set_custom_actions(custom);
@@ -951,71 +956,74 @@ impl<W: Widget> WidgetWithHandlers<W> {
 
     // ── Accessibility overrides ────────────────────────────────────────
     //
-    // All string-accepting methods take `impl Into<String>`. With the
-    // `i18n` feature enabled, `bastyde_i18n::LocalizedString` (the type
-    // produced by `tr!(...)`) provides `From<LocalizedString> for String`,
-    // so `.access_label(tr!(save()))` works directly — the conversion
-    // resolves the translation at builder time. The `_literal` twins
-    // are `#[doc(hidden)]` grep markers for explicitly untranslated
-    // call sites — same convention as `Button::new_literal`.
+    // The user-visible string methods take `impl Into<Prop<String>>` so
+    // they stay reactive. With the `i18n` feature, `LocalizedString`
+    // (produced by `tr!(...)`) provides `From<LocalizedString> for
+    // Prop<String>`, which yields a locale-observing `Prop::Bound`, so
+    // `.access_label(tr!(save()))` follows the locale. A bare `&str`
+    // does NOT convert to `Prop<String>`, so untranslated literals must
+    // go through `lit!(...)` (downstream crates) or the `_literal`
+    // twins (which store `Prop::Static` — the only literal path
+    // reachable from within `bastyde-core`).
 
     /// Override the accessibility label (`Node::label`) of this widget.
     /// Replaces whatever the inner widget emitted via `set_name`.
     ///
-    /// Accepts any `impl Into<String>`. With the `i18n` feature
-    /// enabled, `bastyde_i18n::LocalizedString` (the type produced by
-    /// `tr!(...)`) implements `From<LocalizedString> for String`, so
-    /// `.access_label(tr!(save()))` works directly. Translation is
-    /// resolved eagerly at builder time; the composite rebuild on
-    /// locale change re-runs the chain to pick up new translations.
-    pub fn access_label(mut self, label: impl Into<String>) -> Self {
+    /// Accepts any `impl Into<Prop<String>>`. With the `i18n` feature,
+    /// `bastyde_i18n::LocalizedString` (produced by `tr!(...)`)
+    /// implements `From<LocalizedString> for Prop<String>`, so
+    /// `.access_label(tr!(save()))` stays reactive — the announced
+    /// value re-resolves on locale change (the accessibility tree
+    /// re-walks via `sync_accessibility`).
+    pub fn access_label(mut self, label: impl Into<Prop<String>>) -> Self {
         self.handler_set.access_mut().label = Some(label.into());
         self
     }
 
     /// `#[doc(hidden)]` grep marker for explicitly-untranslated label
-    /// strings — the same convention as `Button::new_literal`.
-    /// Functionally identical to [`access_label`]; the distinct name
-    /// makes untranslated call sites greppable as a one-pass audit.
+    /// strings — the same convention as `Button::new_literal`. Stores a
+    /// `Prop::Static`. The distinct name makes untranslated call sites
+    /// greppable as a one-pass audit, and it's the literal path
+    /// reachable from within `bastyde-core` (where `lit!` isn't usable).
     #[doc(hidden)]
     pub fn access_label_literal(self, label: impl Into<String>) -> Self {
-        self.access_label(label)
+        self.access_label(Prop::Static(label.into()))
     }
 
     /// Override the accessibility description (`Node::description`).
     /// Same conversion rules as [`access_label`].
-    pub fn access_description(mut self, description: impl Into<String>) -> Self {
+    pub fn access_description(mut self, description: impl Into<Prop<String>>) -> Self {
         self.handler_set.access_mut().description = Some(description.into());
         self
     }
 
     #[doc(hidden)]
     pub fn access_description_literal(self, description: impl Into<String>) -> Self {
-        self.access_description(description)
+        self.access_description(Prop::Static(description.into()))
     }
 
     /// Long-form context hint. Alias of [`access_description`] —
     /// AccessKit has no separate hint slot (SwiftUI's split is
     /// VoiceOver-specific). Provided for SwiftUI parity.
-    pub fn access_hint(self, hint: impl Into<String>) -> Self {
+    pub fn access_hint(self, hint: impl Into<Prop<String>>) -> Self {
         self.access_description(hint)
     }
 
     #[doc(hidden)]
     pub fn access_hint_literal(self, hint: impl Into<String>) -> Self {
-        self.access_description(hint)
+        self.access_description(Prop::Static(hint.into()))
     }
 
     /// Override the accessibility value (`Node::value`).
     /// Same conversion rules as [`access_label`].
-    pub fn access_value(mut self, value: impl Into<String>) -> Self {
+    pub fn access_value(mut self, value: impl Into<Prop<String>>) -> Self {
         self.handler_set.access_mut().value = Some(value.into());
         self
     }
 
     #[doc(hidden)]
     pub fn access_value_literal(self, value: impl Into<String>) -> Self {
-        self.access_value(value)
+        self.access_value(Prop::Static(value.into()))
     }
 
     /// Override the accessibility role.
@@ -1193,9 +1201,9 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// Advertise a custom-named action (SwiftUI parity:
     /// `.accessibilityAction(named:_:)`). The label is exposed
     /// verbatim by AT software (e.g. VoiceOver's Actions rotor).
-    /// Accepts `tr!(...)` via the `LocalizedString -> String`
-    /// conversion in `bastyde-i18n`.
-    pub fn access_custom_action<F>(mut self, label: impl Into<String>, handler: F) -> Self
+    /// Accepts `tr!(...)` via `From<LocalizedString> for Prop<String>`
+    /// in `bastyde-i18n`, so the announced name follows the locale.
+    pub fn access_custom_action<F>(mut self, label: impl Into<Prop<String>>, handler: F) -> Self
     where
         F: FnMut(&mut EventContext) + 'static,
     {
@@ -1211,7 +1219,7 @@ impl<W: Widget> WidgetWithHandlers<W> {
     where
         F: FnMut(&mut EventContext) + 'static,
     {
-        self.access_custom_action(label, handler)
+        self.access_custom_action(Prop::Static(label.into()), handler)
     }
 
     /// Final escape hatch — invoked after all typed override setters,
@@ -1522,18 +1530,19 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
     // forwards to the inherent method of the same name. See
     // `WidgetWithHandlers` for full rustdoc on each method's semantics.
     // For translated strings, `LocalizedString` flows through
-    // `impl Into<String>` via `bastyde-i18n`'s `From<LocalizedString>` impl.
+    // `impl Into<Prop<String>>` via `bastyde-i18n`'s
+    // `From<LocalizedString> for Prop<String>` impl, staying reactive.
 
-    fn access_label(self, label: impl Into<String>) -> WidgetWithHandlers<Self> {
+    fn access_label(self, label: impl Into<Prop<String>>) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).access_label(label)
     }
 
     #[doc(hidden)]
     fn access_label_literal(self, label: impl Into<String>) -> WidgetWithHandlers<Self> {
-        WidgetWithHandlers::new(self).access_label(label)
+        WidgetWithHandlers::new(self).access_label_literal(label)
     }
 
-    fn access_description(self, description: impl Into<String>) -> WidgetWithHandlers<Self> {
+    fn access_description(self, description: impl Into<Prop<String>>) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).access_description(description)
     }
 
@@ -1542,25 +1551,25 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         self,
         description: impl Into<String>,
     ) -> WidgetWithHandlers<Self> {
-        WidgetWithHandlers::new(self).access_description(description)
+        WidgetWithHandlers::new(self).access_description_literal(description)
     }
 
-    fn access_hint(self, hint: impl Into<String>) -> WidgetWithHandlers<Self> {
+    fn access_hint(self, hint: impl Into<Prop<String>>) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).access_hint(hint)
     }
 
     #[doc(hidden)]
     fn access_hint_literal(self, hint: impl Into<String>) -> WidgetWithHandlers<Self> {
-        WidgetWithHandlers::new(self).access_hint(hint)
+        WidgetWithHandlers::new(self).access_hint_literal(hint)
     }
 
-    fn access_value(self, value: impl Into<String>) -> WidgetWithHandlers<Self> {
+    fn access_value(self, value: impl Into<Prop<String>>) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).access_value(value)
     }
 
     #[doc(hidden)]
     fn access_value_literal(self, value: impl Into<String>) -> WidgetWithHandlers<Self> {
-        WidgetWithHandlers::new(self).access_value(value)
+        WidgetWithHandlers::new(self).access_value_literal(value)
     }
 
     fn access_role(self, role: accesskit::Role) -> WidgetWithHandlers<Self> {
@@ -1652,7 +1661,7 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
 
     fn access_custom_action<F>(
         self,
-        label: impl Into<String>,
+        label: impl Into<Prop<String>>,
         handler: F,
     ) -> WidgetWithHandlers<Self>
     where
@@ -1670,7 +1679,7 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
     where
         F: FnMut(&mut EventContext) + 'static,
     {
-        WidgetWithHandlers::new(self).access_custom_action(label, handler)
+        WidgetWithHandlers::new(self).access_custom_action_literal(label, handler)
     }
 
     fn access_customize<F>(self, f: F) -> WidgetWithHandlers<Self>

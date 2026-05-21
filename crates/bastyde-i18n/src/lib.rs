@@ -130,3 +130,29 @@ macro_rules! compile_in_locales {
         )
     };
 }
+
+/// Wrap an intentionally **untranslated** string as a [`LocalizedString`].
+///
+/// This is the explicit marker for UI strings that are deliberately not
+/// localized — debug labels, scaffolding, developer-facing names, or
+/// runtime-formatted text that isn't part of a translated sentence. Use
+/// `tr!(...)` for anything user-facing that should follow the locale.
+///
+/// `lit!(x)` is shorthand for [`LocalizedString::literal(x)`] and accepts
+/// anything `impl Into<String>` (`&str`, `String`, `format!(...)`, …). The
+/// value is captured once and frozen — it does **not** observe locale
+/// changes. Dynamic values that must refresh belong in a `Signal<String>`
+/// bound via a widget's `bind_*` method, not in `lit!`.
+///
+/// Unlike `tr!` / `tr_widget!` (proc macros that resolve against a Fluent
+/// bundle and therefore need separate app/framework variants), `lit!` is a
+/// `macro_rules!` that resolves against no bundle and uses `$crate`, so a
+/// single macro works in framework crates and external apps alike.
+///
+/// [`LocalizedString::literal(x)`]: crate::LocalizedString::literal
+#[macro_export]
+macro_rules! lit {
+    ($e:expr) => {
+        $crate::LocalizedString::literal($e)
+    };
+}

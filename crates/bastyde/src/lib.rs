@@ -158,7 +158,7 @@ pub mod prelude {
     // i18n (architecture §12)
     #[cfg(feature = "i18n")]
     pub use bastyde_i18n::{
-        I18nConfig, LanguageIdentifier, LocalizedString, localized, tr, tr_widget,
+        I18nConfig, LanguageIdentifier, LocalizedString, lit, localized, tr, tr_widget,
     };
 
     // Debug inspector — the extension trait that adds
