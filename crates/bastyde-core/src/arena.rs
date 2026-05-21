@@ -157,6 +157,13 @@ pub struct WidgetNode {
     /// Cached paint output for this widget (excludes children).
     /// Reused when `needs_paint` is false to avoid re-running `paint()`.
     pub(crate) cached_paint: Option<RenderFrame>,
+    /// Cached foreground output for widgets that override
+    /// [`Widget::post_paint`](crate::widget::Widget::post_paint) — the
+    /// draws emitted *after* this widget's children. Separate frame from
+    /// `cached_paint` because it lands at a different position in
+    /// `draw_order` (after the child subtree). Reused on the same
+    /// `needs_paint` gate.
+    pub(crate) cached_post_paint: Option<RenderFrame>,
     /// The `WidgetTree::paint_epoch` at which this widget's bounds were
     /// last observed inside the window viewport by the paint pass.
     /// The animation scheduler uses this to pause looping animations
@@ -298,6 +305,7 @@ impl WidgetArena {
             content_transform: false,
             blur_prop: None,
             cached_paint: None,
+            cached_post_paint: None,
             last_painted_epoch: 0,
             handlers: EventHandlers::new(),
             external_handlers: EventHandlers::new(),
@@ -358,6 +366,7 @@ impl WidgetArena {
             content_transform: false,
             blur_prop: None,
             cached_paint: None,
+            cached_post_paint: None,
             last_painted_epoch: 0,
             handlers: EventHandlers::new(),
             external_handlers: EventHandlers::new(),
@@ -589,6 +598,20 @@ impl WidgetArena {
         let bounds_point = if content_transform { point } else { child_point };
         let bounds = self.bounds(id);
         if !bounds.contains(bounds_point) {
+            return None;
+        }
+        // Shape rejection: a widget with a non-rectangular silhouette (an
+        // ellipse / cloud scene node, a circular handle) can reject a point
+        // that is inside its bounding box but outside its actual shape via
+        // `Widget::hit_shape`. Returning None here lets the caller's
+        // reverse-sibling loop fall through to whatever is painted
+        // underneath — the same path `event_pass_through` takes, but
+        // shape-aware (only the rejected sub-region falls through, not the
+        // whole widget). Default `hit_shape` returns true, so rectangular
+        // widgets take this branch for free with no behavior change.
+        if let Some(node) = self.get(id)
+            && !node.widget.hit_shape(bounds_point, bounds)
+        {
             return None;
         }
         let pass_through = self.get(id).map(|n| n.event_pass_through).unwrap_or(false);
@@ -945,6 +968,7 @@ impl WidgetArena {
             node.dirty.needs_layout = true;
             node.dirty.needs_paint = true;
             node.cached_paint = None;
+            node.cached_post_paint = None;
         }
     }
 
@@ -1098,5 +1122,49 @@ mod tests {
         assert_eq!(arena.hit_test_at(Point::new(40.0, 40.0), None), Some(inner));
         // Screen (5,5) → outer-content (-15,-15) ∉ inner viewport → reaches outer.
         assert_eq!(arena.hit_test_at(Point::new(5.0, 5.0), None), Some(outer));
+    }
+
+    /// Accepts only the right half of its bounds via `hit_shape`; the left
+    /// half is rejected so a click there falls through to a sibling beneath.
+    #[derive(Debug)]
+    struct RightHalfWidget;
+
+    impl crate::widget::Widget for RightHalfWidget {
+        fn layout_response(
+            &self,
+            proposal: bastyde_canvas::SizeProposal,
+            _ctx: &crate::widget::LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn hit_shape(
+            &self,
+            local_point: bastyde_canvas::Point,
+            bounds: bastyde_canvas::Rect,
+        ) -> bool {
+            local_point.x >= bounds.x + bounds.width / 2.0
+        }
+    }
+
+    #[test]
+    fn hit_shape_rejection_falls_through_to_sibling_underneath() {
+        // Two overlapping siblings under a common parent. `lower` is a
+        // full-rect FillWidget; `upper` (inserted later → painted on top,
+        // hit-tested first) rejects its left half via `hit_shape`. A click in
+        // the rejected left half must reach `lower` underneath; a click in the
+        // accepted right half must hit `upper`.
+        use bastyde_canvas::{Point, Rect};
+        let mut arena = WidgetArena::new();
+        let parent = arena.insert(Box::new(FillWidget::new()));
+        let lower = arena.insert_child(parent, Box::new(FillWidget::new()));
+        let upper = arena.insert_child(parent, Box::new(RightHalfWidget));
+        for id in [parent, lower, upper] {
+            arena.get_mut(id).unwrap().bounds = Rect::new(0.0, 0.0, 100.0, 100.0);
+        }
+        // Right half: upper accepts → hit upper.
+        assert_eq!(arena.hit_test_at(Point::new(75.0, 50.0), None), Some(upper));
+        // Left half: upper rejects via hit_shape → falls through to lower.
+        assert_eq!(arena.hit_test_at(Point::new(25.0, 50.0), None), Some(lower));
     }
 }

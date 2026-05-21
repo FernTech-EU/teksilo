@@ -458,6 +458,59 @@ fn paint_widget_cached(
         }
     }
 
+    // Foreground pass — `post_paint` emits *after* the whole child
+    // subtree, so its draws land on top of this node's descendants. Still
+    // inside this node's clip / transform / opacity / blur scopes (their
+    // closers come below), so a foreground decoration pans, scales and
+    // clips consistently with the subtree it covers. Same `needs_paint`
+    // cache gate as the main paint above, with its own `cached_post_paint`
+    // frame. Gated on `wants_post_paint` so non-foreground widgets pay
+    // nothing.
+    let wants_post_paint = arena
+        .get(id)
+        .map(|n| n.widget.wants_post_paint())
+        .unwrap_or(false);
+    if wants_post_paint {
+        let has_post_cache = arena
+            .get(id)
+            .map(|n| n.cached_post_paint.is_some())
+            .unwrap_or(false);
+        if needs_paint || !has_post_cache {
+            let resolved_theme = arena.resolve_theme(id, base_theme);
+            let ctx = PaintContext {
+                theme: &resolved_theme,
+                scale_factor: 1.0,
+                layout_direction,
+                effective_enabled: this_effective_enabled,
+                prefers_high_contrast: a11y_prefs.high_contrast,
+                prefers_reduced_motion: a11y_prefs.reduced_motion,
+                prefers_large_text: a11y_prefs.large_text,
+            };
+            let bounds = arena.bounds(id);
+            let node = arena.get(id).expect("node id is active (guarded above)");
+            let mut canvas = match text_backend {
+                Some(tb) => Canvas::with_text_backend(tb.clone()),
+                None => Canvas::new(),
+            };
+            node.widget.post_paint(bounds, &mut canvas, &ctx);
+            let post_frame = canvas.into_render_frame();
+            frame.merge(&post_frame);
+            if let Some(node) = arena.get_mut(id) {
+                node.cached_post_paint = Some(post_frame);
+            }
+        } else if let Some(cached) = arena.get(id).and_then(|n| n.cached_post_paint.as_ref()) {
+            if !cached.layout_keys.is_empty()
+                && let Some(tb) = text_backend
+            {
+                let mut tb = tb.borrow_mut();
+                for key in &cached.layout_keys {
+                    tb.touch_layout(*key);
+                }
+            }
+            frame.merge(cached);
+        }
+    }
+
     if clips && !clip_outside_transform {
         frame.draw_order.push(bastyde_canvas::DrawCommand::ClearClip);
     }
@@ -881,6 +934,110 @@ mod tests {
         assert!(
             popt < ro,
             "transform must close before opacity: {popt} < {ro}"
+        );
+    }
+
+    /// A composing widget that paints a RED backdrop in `paint()`, hosts a
+    /// GREEN child, and paints a BLUE foreground in `post_paint()`. Pins the
+    /// P-C-AP draw order: backdrop (P) → child (C) → foreground (AP).
+    #[derive(Debug)]
+    struct Sandwich {
+        child: Option<crate::WidgetId>,
+    }
+
+    impl Widget for Sandwich {
+        fn build(
+            &mut self,
+            ctx: &mut crate::build_context::BuildContext,
+        ) -> Vec<crate::WidgetId> {
+            let c = ctx.add(FillWidget::new().background(Color::GREEN));
+            self.child = Some(c);
+            vec![c]
+        }
+
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn place_children(
+            &self,
+            bounds: bastyde_canvas::Rect,
+            _proposal: SizeProposal,
+            children: &mut [crate::widget::WidgetPlacement],
+            _ctx: &LayoutContext,
+        ) {
+            for child in children.iter_mut() {
+                child.origin = bounds.origin();
+                child.size = bounds.size();
+            }
+        }
+
+        fn children(&self) -> Vec<crate::WidgetId> {
+            self.child.iter().copied().collect()
+        }
+
+        fn paint(
+            &self,
+            bounds: bastyde_canvas::Rect,
+            canvas: &mut bastyde_canvas::Canvas,
+            _ctx: &PaintContext,
+        ) {
+            canvas.fill_rounded_rect(bounds, CornerRadius::uniform(0.0), Color::RED);
+        }
+
+        fn wants_post_paint(&self) -> bool {
+            true
+        }
+
+        fn post_paint(
+            &self,
+            bounds: bastyde_canvas::Rect,
+            canvas: &mut bastyde_canvas::Canvas,
+            _ctx: &PaintContext,
+        ) {
+            canvas.fill_rounded_rect(bounds, CornerRadius::uniform(0.0), Color::BLUE);
+        }
+    }
+
+    #[test]
+    fn post_paint_emits_after_children() {
+        // P-C-AP ordering: a composing widget's own paint() is a backdrop
+        // (before children) and post_paint() is a foreground (after the whole
+        // child subtree). Backdrop=RED, child=GREEN, foreground=BLUE; assert
+        // RED < GREEN < BLUE in draw_order.
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
+        tree.add(Sandwich { child: None });
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let frame = tree.render();
+
+        let color_of = |cmd: &bastyde_canvas::DrawCommand| -> Option<[f32; 4]> {
+            match cmd {
+                bastyde_canvas::DrawCommand::Shape(i) => frame.shapes.get(*i).map(|s| s.color),
+                bastyde_canvas::DrawCommand::Decoration(i) => {
+                    frame.decorations.get(*i).map(|d| d.color)
+                }
+                _ => None,
+            }
+        };
+        // Find the first draw whose color is dominated by `dominant` channel.
+        let find = |dominant: usize| -> Option<usize> {
+            frame.draw_order.iter().position(|cmd| {
+                color_of(cmd).is_some_and(|c| {
+                    c[dominant] > 0.5 && (0..3).all(|ch| ch == dominant || c[ch] < 0.5)
+                })
+            })
+        };
+        let red = find(0).expect("backdrop (RED) painted");
+        let green = find(1).expect("child (GREEN) painted");
+        let blue = find(2).expect("foreground (BLUE) painted");
+        assert!(
+            red < green && green < blue,
+            "expected backdrop < child < foreground; RED@{red}, GREEN@{green}, BLUE@{blue}; order={:?}",
+            frame.draw_order
         );
     }
 
