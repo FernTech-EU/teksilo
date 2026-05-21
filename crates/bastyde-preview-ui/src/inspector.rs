@@ -165,13 +165,16 @@ impl InspectorBody {
         let idx_sig = ctx.signal(initial_idx);
 
         // Forward: idx_sig change → selected_name update. The
-        // equality check is load-bearing — without it, a reverse
-        // observer below could re-enter `selected_name.set` while
-        // its inner RefCell is still borrowed, which would panic
-        // (cf. signal.rs `try_set`: callbacks fire with a shared
-        // borrow held). The chain only recurses when two widgets
-        // share a variant *name*, which is common for "default" /
-        // "primary" / "disabled" labels — so this guard is mandatory.
+        // equality check is load-bearing — without it, this and the
+        // reverse observer below ping-pong (idx → name → idx → …)
+        // and recurse until the stack overflows. (The nested
+        // `selected_name.set` is reentrancy-safe and no longer panics
+        // — cf. signal.rs `try_set`, which snapshots and releases its
+        // borrow before notifying — so this guard's sole job is to
+        // terminate that cycle.) The chain only recurses when two
+        // widgets share a variant *name*, which is common for
+        // "default" / "primary" / "disabled" labels — so this guard
+        // is mandatory.
         {
             let names_c = names.clone();
             let selected_name = selected_name.clone();
