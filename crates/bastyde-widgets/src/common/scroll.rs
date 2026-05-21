@@ -34,18 +34,11 @@ pub(crate) fn scroll_response(moved_any: bool, contain: bool) -> EventResponse {
     }
 }
 
-/// Controls whether a scrollable widget chains scroll events to its ancestor
-/// when it reaches a boundary — the equivalent of CSS `overscroll-behavior`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum OverscrollBehavior {
-    /// At a boundary, decline the event (`Ignored`) so it propagates to the
-    /// next ancestor scrollable. The default (`overscroll-behavior: auto`).
-    #[default]
-    Chain,
-    /// Always absorb the event (`Handled`), even at the boundary — no
-    /// chaining. Equivalent to `overscroll-behavior: contain`.
-    Contain,
-}
+// `OverscrollBehavior` now lives in `bastyde-core` so `bastyde-scene` can name
+// the same type without depending on `bastyde-widgets`. Re-exported here (and
+// from the crate root) so the public `bastyde_widgets::OverscrollBehavior` path
+// is unchanged.
+pub use bastyde_core::OverscrollBehavior;
 
 #[cfg(test)]
 mod tests {
