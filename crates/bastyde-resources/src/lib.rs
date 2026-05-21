@@ -112,12 +112,26 @@ fn validate_svg(data: &[u8], path: &str) -> std::result::Result<(), String> {
 }
 
 fn validate_png(data: &[u8], path: &str) -> std::result::Result<(), String> {
+    const PNG_MAGIC: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
     if data.len() < 8 {
         return Err(format!("{path}: file too small for PNG"));
     }
-    let magic = &data[..8];
-    if magic != b"\x89PNG\r\n\x1a\n" {
+    if &data[..8] != PNG_MAGIC {
         return Err(format!("{path}: invalid PNG magic bytes"));
+    }
+    // PNG chunks: 4-byte length (BE), 4-byte type, N-byte data, 4-byte CRC.
+    // The first chunk must be IHDR with exactly 13 bytes of data.
+    if data.len() < 16 {
+        return Err(format!("{path}: truncated PNG (no IHDR chunk header)"));
+    }
+    if &data[12..16] != b"IHDR" {
+        return Err(format!("{path}: first PNG chunk is not IHDR"));
+    }
+    let ihdr_len = u32::from_be_bytes([data[8], data[9], data[10], data[11]]);
+    if ihdr_len != 13 {
+        return Err(format!(
+            "{path}: PNG IHDR length is {ihdr_len}, expected 13"
+        ));
     }
     Ok(())
 }
@@ -333,5 +347,172 @@ pub fn res(input: TokenStream) -> TokenStream {
         (ResInput::Static { vis, name, .. }, None) => {
             emit_raw_static(&vis, &name, &rel_path).into()
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- validate_png -------------------------------------------------------
+
+    #[test]
+    fn png_ok() {
+        // Minimal syntactically valid bytes: magic + IHDR header (no data needed beyond the check).
+        let mut data = b"\x89PNG\r\n\x1a\n".to_vec(); // magic
+        data.extend_from_slice(&13u32.to_be_bytes()); // IHDR length = 13
+        data.extend_from_slice(b"IHDR"); // chunk type
+        data.extend_from_slice(&[0u8; 17]); // 13 bytes data + 4 bytes CRC
+        assert!(validate_png(&data, "ok.png").is_ok());
+    }
+
+    #[test]
+    fn png_too_small() {
+        let err = validate_png(b"\x89PNG", "f.png").unwrap_err();
+        assert!(err.contains("file too small"), "{err}");
+    }
+
+    #[test]
+    fn png_bad_magic() {
+        let mut data = [0u8; 16];
+        data[0] = 0xFF; // break the magic
+        let err = validate_png(&data, "f.png").unwrap_err();
+        assert!(err.contains("invalid PNG magic bytes"), "{err}");
+    }
+
+    #[test]
+    fn png_truncated_before_ihdr() {
+        // Valid magic but nothing after it.
+        let err = validate_png(b"\x89PNG\r\n\x1a\n", "f.png").unwrap_err();
+        assert!(err.contains("truncated PNG"), "{err}");
+    }
+
+    #[test]
+    fn png_wrong_first_chunk_type() {
+        let mut data = b"\x89PNG\r\n\x1a\n".to_vec();
+        data.extend_from_slice(&0u32.to_be_bytes()); // length
+        data.extend_from_slice(b"IDAT"); // wrong type
+        let err = validate_png(&data, "f.png").unwrap_err();
+        assert!(err.contains("first PNG chunk is not IHDR"), "{err}");
+    }
+
+    #[test]
+    fn png_wrong_ihdr_length() {
+        let mut data = b"\x89PNG\r\n\x1a\n".to_vec();
+        data.extend_from_slice(&5u32.to_be_bytes()); // length = 5, should be 13
+        data.extend_from_slice(b"IHDR");
+        let err = validate_png(&data, "f.png").unwrap_err();
+        assert!(err.contains("IHDR length is 5"), "{err}");
+    }
+
+    // --- validate_svg -------------------------------------------------------
+
+    #[test]
+    fn svg_ok_viewbox() {
+        let xml = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"></svg>"#;
+        assert!(validate_svg(xml, "ok.svg").is_ok());
+    }
+
+    #[test]
+    fn svg_ok_width_height() {
+        let xml = br#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"></svg>"#;
+        assert!(validate_svg(xml, "ok.svg").is_ok());
+    }
+
+    #[test]
+    fn svg_not_utf8() {
+        let bad = b"\xff\xfe not utf-8";
+        let err = validate_svg(bad, "f.svg").unwrap_err();
+        assert!(err.contains("not valid UTF-8"), "{err}");
+    }
+
+    #[test]
+    fn svg_malformed_xml() {
+        let err = validate_svg(b"<not closed", "f.svg").unwrap_err();
+        assert!(err.contains("XML parse error"), "{err}");
+    }
+
+    #[test]
+    fn svg_wrong_root() {
+        let xml = b"<html><body></body></html>";
+        let err = validate_svg(xml, "f.svg").unwrap_err();
+        assert!(err.contains("expected <svg>"), "{err}");
+    }
+
+    #[test]
+    fn svg_missing_viewbox_and_dimensions() {
+        let xml = br#"<svg xmlns="http://www.w3.org/2000/svg"></svg>"#;
+        let err = validate_svg(xml, "f.svg").unwrap_err();
+        assert!(err.contains("missing viewBox"), "{err}");
+    }
+
+    // --- validate_webp ------------------------------------------------------
+
+    #[test]
+    fn webp_ok() {
+        let mut data = b"RIFF".to_vec();
+        data.extend_from_slice(&0u32.to_le_bytes()); // file size (unused in check)
+        data.extend_from_slice(b"WEBP");
+        assert!(validate_webp(&data, "ok.webp").is_ok());
+    }
+
+    #[test]
+    fn webp_too_small() {
+        let err = validate_webp(b"RIFF", "f.webp").unwrap_err();
+        assert!(err.contains("file too small"), "{err}");
+    }
+
+    #[test]
+    fn webp_missing_riff() {
+        let data = b"XXXX\x00\x00\x00\x00WEBP";
+        let err = validate_webp(data, "f.webp").unwrap_err();
+        assert!(err.contains("missing RIFF header"), "{err}");
+    }
+
+    #[test]
+    fn webp_missing_webp_signature() {
+        let data = b"RIFF\x00\x00\x00\x00XXXX";
+        let err = validate_webp(data, "f.webp").unwrap_err();
+        assert!(err.contains("missing WEBP signature"), "{err}");
+    }
+
+    // --- webp_is_animated ---------------------------------------------------
+
+    #[test]
+    fn webp_static_has_no_anim_chunk() {
+        let mut data = b"RIFF\x00\x00\x00\x00WEBP".to_vec();
+        // Add a VP8L chunk (not ANIM)
+        data.extend_from_slice(b"VP8L");
+        data.extend_from_slice(&4u32.to_le_bytes());
+        data.extend_from_slice(&[0u8; 4]);
+        assert!(!webp_is_animated(&data));
+    }
+
+    #[test]
+    fn webp_animated_has_anim_chunk() {
+        let mut data = b"RIFF\x00\x00\x00\x00WEBP".to_vec();
+        // Prepend a dummy chunk before ANIM to exercise the walker loop
+        data.extend_from_slice(b"VP8L");
+        data.extend_from_slice(&4u32.to_le_bytes());
+        data.extend_from_slice(&[0u8; 4]);
+        // Now the real ANIM chunk
+        data.extend_from_slice(b"ANIM");
+        data.extend_from_slice(&6u32.to_le_bytes());
+        data.extend_from_slice(&[0u8; 6]);
+        assert!(webp_is_animated(&data));
+    }
+
+    #[test]
+    fn webp_animated_chunk_walker_does_not_overflow() {
+        // Chunk claiming a giant size — must not panic or loop forever.
+        let mut data = b"RIFF\x00\x00\x00\x00WEBP".to_vec();
+        data.extend_from_slice(b"VP8L");
+        data.extend_from_slice(&u32::MAX.to_le_bytes()); // huge chunk size
+        // No ANIM follows — the walker must stop cleanly.
+        assert!(!webp_is_animated(&data));
     }
 }
