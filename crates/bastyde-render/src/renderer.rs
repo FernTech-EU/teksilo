@@ -818,7 +818,29 @@ impl Renderer {
                                 let Some(shape) = frame.shapes.get(*idx) else {
                                     continue;
                                 };
-                                let verts = SdfVertex::from_shape_quad(shape, scale_factor);
+                                // Cosmetic (device-space) borders hold a
+                                // constant device-pixel width under zoom: the
+                                // body still scales via `current_transform`, but
+                                // the SDF stroke param is divided by the active
+                                // zoom (the uniform scale of the linear part,
+                                // which carries no scale_factor — see
+                                // SetTransform). Fills + logical strokes are
+                                // unchanged.
+                                let verts = if shape.stroke_space
+                                    == bastyde_canvas::StrokeSpace::Device
+                                    && shape.stroke_width > 0.0
+                                {
+                                    let zoom = current_transform.m[0]
+                                        .hypot(current_transform.m[1])
+                                        .max(1e-3);
+                                    SdfVertex::from_shape_quad_cosmetic(
+                                        shape,
+                                        scale_factor,
+                                        zoom,
+                                    )
+                                } else {
+                                    SdfVertex::from_shape_quad(shape, scale_factor)
+                                };
                                 for v in &verts {
                                     let tp = apply_transform_pixel(v.position, &current_transform);
                                     sdf_batch.push(SdfVertex {
@@ -2748,6 +2770,7 @@ mod tests {
             color: [0.2, 0.6, 0.9, 1.0],
             shape: ShapeKind::RoundedRect,
             stroke_width: 0.0,
+            stroke_space: bastyde_canvas::StrokeSpace::Logical,
             corner_radii: [0.0; 4],
             paint_data: PaintData::Solid,
         });
