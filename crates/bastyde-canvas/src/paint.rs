@@ -59,8 +59,25 @@ pub enum LineCap {
     Square,
 }
 
+/// Whether a stroke's width is interpreted in logical pixels (and so scales
+/// with the canvas transform) or held transform-invariant ("cosmetic").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StrokeSpace {
+    /// Width is in logical pixels and scales with the canvas transform
+    /// (zoom / scale / rotation). The default; matches every pre-existing
+    /// stroke.
+    #[default]
+    Logical,
+    /// "Cosmetic" stroke: the width is held constant regardless of the
+    /// canvas transform (it does not grow with a `SceneView` zoom), while
+    /// still respecting the display scale factor (HiDPI). The stroke's
+    /// *position* still follows the full transform; only its *thickness* is
+    /// invariant. Same intent as Qt's cosmetic pen / a CSS 1px border.
+    Device,
+}
+
 /// Stroke style configuration, supporting dashed/dotted strokes.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct StrokeStyle {
     pub width: f32,
     /// Alternating dash/gap lengths. `None` means solid stroke.
@@ -68,6 +85,11 @@ pub struct StrokeStyle {
     /// Phase offset for the dash pattern.
     pub dash_offset: f32,
     pub line_cap: LineCap,
+    /// Whether `width` scales with the canvas transform
+    /// ([`StrokeSpace::Logical`], default) or is held transform-invariant
+    /// ([`StrokeSpace::Device`], a cosmetic / hairline stroke). See
+    /// [`StrokeStyle::hairline`].
+    pub space: StrokeSpace,
 }
 
 impl StrokeStyle {
@@ -77,6 +99,7 @@ impl StrokeStyle {
             dash_pattern: None,
             dash_offset: 0.0,
             line_cap: LineCap::Butt,
+            space: StrokeSpace::Logical,
         }
     }
 
@@ -86,6 +109,7 @@ impl StrokeStyle {
             dash_pattern: Some(vec![dash, gap]),
             dash_offset: 0.0,
             line_cap: LineCap::Butt,
+            space: StrokeSpace::Logical,
         }
     }
 
@@ -95,6 +119,24 @@ impl StrokeStyle {
             dash_pattern: Some(vec![width, spacing]),
             dash_offset: 0.0,
             line_cap: LineCap::Round,
+            space: StrokeSpace::Logical,
+        }
+    }
+
+    /// A cosmetic / hairline stroke: `width` logical pixels of thickness held
+    /// **invariant to the canvas transform** (it does not grow with a
+    /// `SceneView` zoom), still scaled for HiDPI. Use for grid lines, 1px
+    /// borders, focus rings, and connectors that must stay crisp at any zoom.
+    /// Currently honored by [`Canvas::draw_line`](crate::Canvas::draw_line)
+    /// and [`Canvas::stroke_rect`](crate::Canvas::stroke_rect); other stroke
+    /// shapes fall back to logical width.
+    pub fn hairline(width: f32) -> Self {
+        Self {
+            width,
+            dash_pattern: None,
+            dash_offset: 0.0,
+            line_cap: LineCap::Butt,
+            space: StrokeSpace::Device,
         }
     }
 }
