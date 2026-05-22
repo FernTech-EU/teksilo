@@ -366,6 +366,27 @@ impl TabWidget {
         self
     }
 
+    /// Ergonomic shorthand for a title-only static tab:
+    /// `tab(label, content)` is `static_tab(TabInfo::new().title(label),
+    /// content)`. `label` accepts `tr!(...)` (translated) or `lit!(...)`.
+    /// This is the method the `bati!` `tab:` slot lowers to
+    /// (`tab: lit!("Overview"), Card { … }`).
+    pub fn tab(
+        self,
+        label: impl Into<bastyde_i18n::LocalizedString>,
+        content: impl Widget + 'static,
+    ) -> Self {
+        self.static_tab(TabInfo::new().title(label), content)
+    }
+
+    /// `WidgetId` twin of [`tab`](Self::tab) — `tab_id(label, id)` is
+    /// `static_tab_id(TabInfo::new().title(label), id)`. This is what the
+    /// `bati!` `tab:` slot lowers to when its content is an id binding
+    /// (`#{…}` / `name = Element`).
+    pub fn tab_id(self, label: impl Into<bastyde_i18n::LocalizedString>, id: WidgetId) -> Self {
+        self.static_tab_id(TabInfo::new().title(label), id)
+    }
+
     /// Add a static tab whose content is constructed by a factory
     /// closure. The factory is called once — on the slot's first
     /// build — and the resulting pane is memoized just like
@@ -699,99 +720,19 @@ impl TabWidget {
     }
 }
 
-impl Widget for TabWidget {
-    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let self_id = ctx.self_id();
+impl TabWidget {
+    // ── build() helpers ────────────────────────────────────────────
+    //
+    // `build()` is decomposed into three self-contained steps so the
+    // method body reads as orchestration rather than implementation.
+    // Each helper captures only `&self` (plus the build-local lookup
+    // tables it needs) and has no side effects beyond the arena
+    // registrations it performs through `ctx`.
 
-        // Bind orientation at Rebuild level — toggling the signal
-        // (e.g. via a toolbar button) rebuilds TabWidget with the
-        // new outer layout (HStack ↔ VStack) and a fresh TabBar in
-        // the new orientation. Memoized panes survive the rebuild.
-        self.orientation
-            .bind_to(self_id, ctx.binding_registry(), BindingLevel::Rebuild);
-        let orientation = self.orientation.get();
-
-        // Subscribe to dynamic-model mutations so add / remove /
-        // reorder triggers a TabWidget rebuild that picks up the
-        // new tab list.
-        if let Some(model) = &self.dynamic_model {
-            let version = ctx.signal(0_u64);
-            version.bind_to(self_id, ctx.binding_registry(), BindingLevel::Rebuild);
-            let observer = model.observe_changes({
-                let v = version.clone();
-                move |_change| v.set(v.get().wrapping_add(1))
-            });
-            ctx.own_handle(observer);
-        }
-
-        // Snapshot static + dynamic into a single ordered handle
-        // list. Static tabs come first, in declaration order.
-        let static_count = self.static_tabs.len();
-        let dyn_count = self.dynamic_model.as_ref().map(|m| m.len()).unwrap_or(0);
-        let total = static_count + dyn_count;
-
-        let mut all_handles: Vec<TabHandle> = Vec::with_capacity(total);
-        for slot in &self.static_tabs {
-            all_handles.push(slot.handle.clone());
-        }
-        if let Some(model) = &self.dynamic_model {
-            for i in 0..dyn_count {
-                if let Some(h) = model.with_item(i, |h| h.clone()) {
-                    all_handles.push(h);
-                }
-            }
-        }
-
-        // Index → id lookup table. Used by the close / reorder /
-        // pin callback wrappers below to translate the bar's
-        // index-shaped events into id-shaped app callbacks. The
-        // id ↔ selection bridge itself lives inside [`TabBar`] now;
-        // TabWidget hands the bar `selected_id` and `id_of` directly.
-        let index_to_id: Rc<Vec<TabId>> = Rc::new(all_handles.iter().map(|h| h.id).collect());
-        let id_to_index: Rc<HashMap<TabId, usize>> = Rc::new(
-            index_to_id
-                .iter()
-                .copied()
-                .enumerate()
-                .map(|(i, id)| (id, i))
-                .collect(),
-        );
-
-        // Drive `switcher_index` from `selected_id`. One-way only:
-        // the inner `Switcher` reads the index to pick which pane is
-        // visible, but never writes back — selection mutations all
-        // flow through `selected_id` (the bar updates it on click,
-        // app code may set it externally). Pre-sync handles the
-        // initial state and stale-id cases without needing a
-        // bidirectional effect.
-        if total > 0 {
-            let target_idx = self
-                .selected_id
-                .get()
-                .and_then(|id| id_to_index.get(&id).copied())
-                .unwrap_or_else(|| self.switcher_index.get().min(total - 1));
-            if self.switcher_index.get() != target_idx {
-                self.switcher_index.set(target_idx);
-            }
-        }
-        let id_to_idx = id_to_index.clone();
-        let switcher_idx = self.switcher_index.clone();
-        ctx.effect(&self.selected_id, move |maybe_id| {
-            if let Some(id) = maybe_id
-                && let Some(&i) = id_to_idx.get(id)
-                && switcher_idx.get() != i
-            {
-                switcher_idx.set(i);
-            }
-        });
-
-        // Internal model fed to the inner TabBar — a snapshot of
-        // the unified handle list. Rebuilds when dynamic_model
-        // mutates (via the version signal above).
-        let internal_model = ListModel::from_vec(all_handles.clone());
-
-        // Translate `TabInfo` fields into the TabDelegate's
-        // closure-shaped accessors.
+    /// Translate `TabInfo` fields into the [`TabDelegate`]'s
+    /// closure-shaped accessors. Pure — captures nothing from the
+    /// surrounding `build()`.
+    fn build_delegate(&self) -> TabDelegate<TabHandle> {
         let mut delegate =
             TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| lit!("")))
                 .icon(|_, h: &TabHandle| h.info.icon.as_ref().map(|f| f()))
@@ -827,75 +768,19 @@ impl Widget for TabWidget {
         delegate.composite_tooltip = Some(Box::new(|_, h: &TabHandle| {
             h.info.composite_tooltip.as_ref().map(|factory| factory())
         }));
+        delegate
+    }
 
-        // Shared panel-id buffer: the Switcher writes panel widget
-        // ids into it as panes are added; the bar's headers read
-        // it to publish the Tab → TabPanel `controls()`
-        // accessibility relation.
-        let panel_ids = Rc::new(RefCell::new(Vec::with_capacity(total)));
-
-        // Shared header-id buffer: the bar populates this with each
-        // tab header's WidgetId in tab order; each TabPane reads it
-        // to publish the TabPanel → Tab `aria-labelledby` relation.
-        let header_ids: Rc<RefCell<Vec<WidgetId>>> =
-            Rc::new(RefCell::new(Vec::with_capacity(total)));
-
-        // Build + configure the inner TabBar. Selection is plumbed
-        // through as id-based — the bar maintains its own private
-        // index-side signal and bridges the two internally.
-        let mut bar = match orientation {
-            TabBarOrientation::Horizontal => TabBar::horizontal(
-                internal_model,
-                delegate,
-                self.selected_id.clone(),
-                |_, h: &TabHandle| h.id,
-            ),
-            TabBarOrientation::Vertical => TabBar::vertical(
-                internal_model,
-                delegate,
-                self.selected_id.clone(),
-                |_, h: &TabHandle| h.id,
-            ),
-        }
-        .with_panel_ids(panel_ids.clone())
-        .with_header_ids(header_ids.clone());
-
-        if let Some(ref sizing) = self.sizing {
-            // Bind at Rebuild level so flipping the signal triggers
-            // a TabWidget rebuild that picks up the new sizing
-            // mode. Memoized panes survive — only the bar is
-            // rebuilt with the new layout.
-            sizing.bind_to(self_id, ctx.binding_registry(), BindingLevel::Rebuild);
-            bar = bar.tab_sizing(sizing.get());
-        }
-        if let Some(ref bg) = self.tab_surface_role {
-            bar = bar.tab_surface_role(bg.clone());
-        }
-        if let Some(role) = self.selected_text_role {
-            bar = bar.selected_text_role(role);
-        }
-        if let Some(role) = self.idle_text_role {
-            bar = bar.idle_text_role(role);
-        }
-        if let Some(w) = self.min_tab_width {
-            bar = bar.min_tab_width(w);
-        }
-        if let Some(w) = self.max_tab_width {
-            bar = bar.max_tab_width(w);
-        }
-        if let Some(w) = self.pinned_tab_width {
-            bar = bar.pinned_tab_width(w);
-        }
-        if let Some(s) = self.show_scroll_arrows {
-            bar = bar.show_scroll_arrows(s);
-        }
-        if let Some(s) = self.show_overflow_dropdown {
-            bar = bar.show_overflow_dropdown(s);
-        }
-        if self.reorderable {
-            bar = bar.reorderable(true);
-        }
-
+    /// Wrap the bar's index-shaped callbacks (close / reorder / pin /
+    /// cross-bar transfer / non-tab drop) into the app's id-shaped
+    /// callbacks, translating at the boundary via `index_to_id` and
+    /// `saturating_sub(static_count)` for the unified→dynamic index map.
+    fn wire_bar_callbacks(
+        &self,
+        mut bar: TabBar<TabHandle>,
+        index_to_id: &Rc<Vec<TabId>>,
+        static_count: usize,
+    ) -> TabBar<TabHandle> {
         // Wrap callbacks: bar speaks in indices, app speaks in
         // TabIds. We translate at the boundary using the
         // `index_to_id` lookup captured at build time.
@@ -1014,27 +899,26 @@ impl Widget for TabWidget {
             ));
         }
 
-        if let Some(ref mut slot) = self.bar_leading_slot {
-            let id = slot.resolve(ctx);
-            bar = bar.bar_leading_slot_id(id);
-        }
-        if let Some(ref mut slot) = self.bar_trailing_slot {
-            let id = slot.resolve(ctx);
-            bar = bar.bar_trailing_slot_id(id);
-        }
-        let bar_id = ctx.add(bar);
+        bar
+    }
 
-        // Build the content panes. Static tabs and dynamic tabs both
-        // memoize their pane WidgetId — once registered, the pane
-        // outlives sibling rebuilds (caused by dynamic-model
-        // mutations) so internal state survives.
-        //
-        // Static panes: `pane_id` lives in the slot struct; the
-        // factory runs once on first build.
-        // Dynamic panes: `dyn_pane_ids` maps `TabId → WidgetId`,
-        // populated lazily on first sighting and pruned at end of
-        // build to drop tabs no longer in the model.
-        let mut pane_ids: Vec<WidgetId> = Vec::with_capacity(total);
+    /// Build (or reuse) the content panes. Static and dynamic panes
+    /// both memoize their pane `WidgetId` — once registered, the pane
+    /// outlives sibling rebuilds (caused by dynamic-model mutations) so
+    /// internal state survives. Static panes cache in
+    /// [`StaticTabSlot::pane_id`]; dynamic panes cache in
+    /// [`Self::dyn_pane_ids`] keyed by [`TabId`], pruned at the end to
+    /// drop tabs no longer in the model.
+    fn build_panes(
+        &mut self,
+        ctx: &mut BuildContext,
+        all_handles: &[TabHandle],
+        static_count: usize,
+        dyn_count: usize,
+        panel_ids: &Rc<RefCell<Vec<WidgetId>>>,
+        header_ids: &Rc<RefCell<Vec<WidgetId>>>,
+    ) -> Vec<WidgetId> {
+        let mut pane_ids: Vec<WidgetId> = Vec::with_capacity(static_count + dyn_count);
 
         for slot in self.static_tabs.iter_mut() {
             let pane_id = match slot.pane_id {
@@ -1085,6 +969,192 @@ impl Widget for TabWidget {
         // longer carries — their widgets become unreachable from any
         // root and the arena will reap them.
         self.dyn_pane_ids.retain(|id, _| alive_dyn.contains(id));
+
+        pane_ids
+    }
+}
+
+impl Widget for TabWidget {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let self_id = ctx.self_id();
+
+        // Bind orientation at Rebuild level — toggling the signal
+        // (e.g. via a toolbar button) rebuilds TabWidget with the
+        // new outer layout (HStack ↔ VStack) and a fresh TabBar in
+        // the new orientation. Memoized panes survive the rebuild.
+        self.orientation
+            .bind_to(self_id, ctx.binding_registry(), BindingLevel::Rebuild);
+        let orientation = self.orientation.get();
+
+        // Subscribe to dynamic-model mutations so add / remove /
+        // reorder triggers a TabWidget rebuild that picks up the
+        // new tab list.
+        if let Some(model) = &self.dynamic_model {
+            let version = ctx.signal(0_u64);
+            version.bind_to(self_id, ctx.binding_registry(), BindingLevel::Rebuild);
+            let observer = model.observe_changes({
+                let v = version.clone();
+                move |_change| v.set(v.get().wrapping_add(1))
+            });
+            ctx.own_handle(observer);
+        }
+
+        // Snapshot static + dynamic into a single ordered handle
+        // list. Static tabs come first, in declaration order.
+        let static_count = self.static_tabs.len();
+        let dyn_count = self.dynamic_model.as_ref().map(|m| m.len()).unwrap_or(0);
+        let total = static_count + dyn_count;
+
+        let mut all_handles: Vec<TabHandle> = Vec::with_capacity(total);
+        for slot in &self.static_tabs {
+            all_handles.push(slot.handle.clone());
+        }
+        if let Some(model) = &self.dynamic_model {
+            for i in 0..dyn_count {
+                if let Some(h) = model.with_item(i, |h| h.clone()) {
+                    all_handles.push(h);
+                }
+            }
+        }
+
+        // Index → id lookup table. Used by the close / reorder /
+        // pin callback wrappers below to translate the bar's
+        // index-shaped events into id-shaped app callbacks. The
+        // id ↔ selection bridge itself lives inside [`TabBar`] now;
+        // TabWidget hands the bar `selected_id` and `id_of` directly.
+        let index_to_id: Rc<Vec<TabId>> = Rc::new(all_handles.iter().map(|h| h.id).collect());
+        let id_to_index: Rc<HashMap<TabId, usize>> = Rc::new(
+            index_to_id
+                .iter()
+                .copied()
+                .enumerate()
+                .map(|(i, id)| (id, i))
+                .collect(),
+        );
+
+        // Drive `switcher_index` from `selected_id`. One-way only:
+        // the inner `Switcher` reads the index to pick which pane is
+        // visible, but never writes back — selection mutations all
+        // flow through `selected_id` (the bar updates it on click,
+        // app code may set it externally). Pre-sync handles the
+        // initial state and stale-id cases without needing a
+        // bidirectional effect.
+        if total > 0 {
+            let target_idx = self
+                .selected_id
+                .get()
+                .and_then(|id| id_to_index.get(&id).copied())
+                .unwrap_or_else(|| self.switcher_index.get().min(total - 1));
+            if self.switcher_index.get() != target_idx {
+                self.switcher_index.set(target_idx);
+            }
+        }
+        let id_to_idx = id_to_index.clone();
+        let switcher_idx = self.switcher_index.clone();
+        ctx.effect(&self.selected_id, move |maybe_id| {
+            if let Some(id) = maybe_id
+                && let Some(&i) = id_to_idx.get(id)
+                && switcher_idx.get() != i
+            {
+                switcher_idx.set(i);
+            }
+        });
+
+        // Internal model fed to the inner TabBar — a snapshot of
+        // the unified handle list. Rebuilds when dynamic_model
+        // mutates (via the version signal above).
+        let internal_model = ListModel::from_vec(all_handles.clone());
+
+        // Translate `TabInfo` fields into the TabDelegate's
+        // closure-shaped accessors.
+        let delegate = self.build_delegate();
+
+        // Shared panel-id buffer: the Switcher writes panel widget
+        // ids into it as panes are added; the bar's headers read
+        // it to publish the Tab → TabPanel `controls()`
+        // accessibility relation.
+        let panel_ids = Rc::new(RefCell::new(Vec::with_capacity(total)));
+
+        // Shared header-id buffer: the bar populates this with each
+        // tab header's WidgetId in tab order; each TabPane reads it
+        // to publish the TabPanel → Tab `aria-labelledby` relation.
+        let header_ids: Rc<RefCell<Vec<WidgetId>>> =
+            Rc::new(RefCell::new(Vec::with_capacity(total)));
+
+        // Build + configure the inner TabBar. Selection is plumbed
+        // through as id-based — the bar maintains its own private
+        // index-side signal and bridges the two internally.
+        let mut bar = match orientation {
+            TabBarOrientation::Horizontal => TabBar::horizontal(
+                internal_model,
+                delegate,
+                self.selected_id.clone(),
+                |_, h: &TabHandle| h.id,
+            ),
+            TabBarOrientation::Vertical => TabBar::vertical(
+                internal_model,
+                delegate,
+                self.selected_id.clone(),
+                |_, h: &TabHandle| h.id,
+            ),
+        }
+        .with_panel_ids(panel_ids.clone())
+        .with_header_ids(header_ids.clone());
+
+        if let Some(ref sizing) = self.sizing {
+            // Bind at Rebuild level so flipping the signal triggers
+            // a TabWidget rebuild that picks up the new sizing
+            // mode. Memoized panes survive — only the bar is
+            // rebuilt with the new layout.
+            sizing.bind_to(self_id, ctx.binding_registry(), BindingLevel::Rebuild);
+            bar = bar.tab_sizing(sizing.get());
+        }
+        if let Some(ref bg) = self.tab_surface_role {
+            bar = bar.tab_surface_role(bg.clone());
+        }
+        if let Some(role) = self.selected_text_role {
+            bar = bar.selected_text_role(role);
+        }
+        if let Some(role) = self.idle_text_role {
+            bar = bar.idle_text_role(role);
+        }
+        if let Some(w) = self.min_tab_width {
+            bar = bar.min_tab_width(w);
+        }
+        if let Some(w) = self.max_tab_width {
+            bar = bar.max_tab_width(w);
+        }
+        if let Some(w) = self.pinned_tab_width {
+            bar = bar.pinned_tab_width(w);
+        }
+        if let Some(s) = self.show_scroll_arrows {
+            bar = bar.show_scroll_arrows(s);
+        }
+        if let Some(s) = self.show_overflow_dropdown {
+            bar = bar.show_overflow_dropdown(s);
+        }
+        if self.reorderable {
+            bar = bar.reorderable(true);
+        }
+
+        // Wrap the bar's index-shaped callbacks into the app's
+        // id-shaped callbacks (close / reorder / pin / transfer / drop).
+        bar = self.wire_bar_callbacks(bar, &index_to_id, static_count);
+
+        if let Some(ref mut slot) = self.bar_leading_slot {
+            let id = slot.resolve(ctx);
+            bar = bar.bar_leading_slot_id(id);
+        }
+        if let Some(ref mut slot) = self.bar_trailing_slot {
+            let id = slot.resolve(ctx);
+            bar = bar.bar_trailing_slot_id(id);
+        }
+        let bar_id = ctx.add(bar);
+
+        // Build (or reuse) the content panes — static + dynamic, both
+        // memoized so internal state survives sibling rebuilds.
+        let pane_ids =
+            self.build_panes(ctx, &all_handles, static_count, dyn_count, &panel_ids, &header_ids);
 
         let mut switcher =
             Switcher::new(self.switcher_index.clone()).capture_child_ids_into(panel_ids);
