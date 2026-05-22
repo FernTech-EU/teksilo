@@ -67,8 +67,8 @@ bytemuck = { version = "1", features = ["derive"] }
 # Default features enable tzdb + tz-system so `Zoned::now()` resolves
 # the user's local "today" from the OS.
 jiff = "0.1"
-text-document = { path = "../text-document/crates/public_api", version = "1.5.4" }
-text-typeset = { path = "../text-typeset", version = "1.4.4" }
+text-document = { path = "../text-document/crates/public_api", version = "1.5.6" }
+text-typeset = { path = "../text-typeset", version = "1.4.5" }
 
 # Internal crates
 bastyde-tokens = { path = "crates/bastyde-tokens", version = "0.4.0" }
