@@ -108,8 +108,8 @@ fn explicit_constructor() {
 
 #[test]
 fn property_with_multiple_args() {
-    let out = fmt(r#"Foo { tab_literal: "name", Card }"#);
-    assert!(out.contains("tab_literal: \"name\","), "got:\n{out}");
+    let out = fmt(r#"Foo { tab: "name", Card }"#);
+    assert!(out.contains("tab: \"name\","), "got:\n{out}");
 }
 
 #[test]

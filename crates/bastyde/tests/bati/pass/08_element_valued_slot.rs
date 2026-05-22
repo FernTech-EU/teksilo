@@ -1,5 +1,5 @@
 //! Spec §3.4: multi-argument property where the second arg is a full
-//! bati element — the TabWidget `tab_literal: "name", Card { ... }`
+//! bati element — the TabWidget `tab: "name", Card { ... }`
 //! pattern. The `Card { ... }` body uses DSL syntax (named slots via
 //! `:`), not Rust struct-literal syntax, so the parser must commit to
 //! element parsing on the `UpperCamel { ... }` prefix.
@@ -37,7 +37,7 @@ impl TabLike {
         Self::default()
     }
 
-    fn tab_literal(self, name: &'static str, page: Page) -> Self {
+    fn tab(self, name: &'static str, page: Page) -> Self {
         self.tabs
             .borrow_mut()
             .push((name.to_string(), page.caption.to_string()));
@@ -54,10 +54,10 @@ impl Widget for TabLike {
 fn main() {
     let t: TabLike = bati!(
         TabLike {
-            tab_literal: "Overview", Page("overview body") {
+            tab: "Overview", Page("overview body") {
                 label: "a"
             }
-            tab_literal: "Inspector", Page("inspector body")
+            tab: "Inspector", Page("inspector body")
         }
     );
     let tabs = t.tabs.borrow();

@@ -6,7 +6,7 @@
 //! - `name = Element` — binding, hoists a `let` and routes slots to
 //!   `.prop_id(name)`.
 //! - `TypePath [(args)] [{ body }]` — a bati element value
-//!   (`tab_literal: "name", Card { ... }`).
+//!   (`tab: "name", Card { ... }`).
 //! - Otherwise, an arbitrary Rust expression.
 //!
 //! Dispatch follows spec §3.1 "commit on distinctive prefix": the
@@ -88,7 +88,7 @@ fn comma_begins_new_body_item(input: ParseStream) -> bool {
         return true;
     }
     // An UpperCamel-starting element after the comma is kept as an
-    // arg continuation so the `tab_literal: "x", Card { ... }` pattern
+    // arg continuation so the `tab: "x", Card { ... }` pattern
     // (spec §3.4 TabWidget example) works. A comma followed by a
     // would-be new child on the next line is still treated as
     // continuation — users end a property without a trailing comma to

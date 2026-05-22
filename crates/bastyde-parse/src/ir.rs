@@ -163,7 +163,7 @@ pub struct BatiProperty {
 pub enum PropArg {
     /// A plain Rust expression (scalars, closures, method calls).
     Expr(Expr),
-    /// An embedded bati element — `tab_literal: "name", Card { ... }`.
+    /// An embedded bati element — `tab: "name", Card { ... }`.
     Element(BatiElement),
     /// `#{ expr }` — a WidgetId expression that routes to `.prop_id`.
     Escape(Expr),

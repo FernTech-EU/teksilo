@@ -15,7 +15,7 @@ Four structural changes, all driven by review of v2 against the actual widget ca
 
 **Widget categories are now two, not three.** The framework refactor (see Appendix A) dissolves the former Category C by moving primary content from constructors to setter methods on ScrollArea, Popover, Snackbar, and Dialog. ScrollArea joins Category A (has `.child()`). Popover, Snackbar, and Dialog join Category B (named slots). Wizard is not Category C and was never intended to be; v2 misclassified it.
 
-**The `*_id` convention is universal.** Every widget-accepting slot method on every container now has a twin taking a `WidgetId`, named `*_id`. The existing `.set_child(id)` methods on Panel, Padding, Expand, GroupBox, and Accordion are renamed to `.child_id(id)` / `.content_id(id)` for consistency. SplitView's existing `.first_id` / `.second_id` fits the pattern unchanged. TabWidget gets `.tab_id(label, id)` and `.tab_literal_id(label, id)` to match.
+**The `*_id` convention is universal.** Every widget-accepting slot method on every container now has a twin taking a `WidgetId`, named `*_id`. The existing `.set_child(id)` methods on Panel, Padding, Expand, GroupBox, and Accordion are renamed to `.child_id(id)` / `.content_id(id)` for consistency. SplitView's existing `.first_id` / `.second_id` fits the pattern unchanged. TabWidget gets `.tab_id(label, id)` to match.
 
 **Worked translations reflect the refactored API.** Every code example in §7 is against post-refactor builder signatures. The seven uploaded example files themselves are assumed to be migrated; the framework changes required are listed in Appendix A.
 
@@ -250,28 +250,28 @@ Each of these is a single-argument property whose value happens to contain comma
 
 ```rust
 TabWidget(selected) {
-    tab_literal: "Overview", Card {
-        header: TextWidget("Overview") { style: t.body_bold.clone() }
+    tab: lit!("Overview"), Card {
+        header: TextWidget(lit!("Overview")) { style: t.body_bold.clone() }
         content: VStack { spacing: 12.0, ... }
     }
-    tab_literal: "Inspector", Panel { padding: 20.0, ... }
+    tab: lit!("Inspector"), Panel { padding: 20.0, ... }
     trailing_slot: trailing_widget
 }
 ```
 
-The comma after `"Overview"` is at depth 0 (not inside brackets) and separates the two arguments of `tab_literal`. The next `Card { ... }` element opens a brace that may span multiple lines; the parser tracks bracket balance until the Card's closing `}`. After the Card closes, the next newline terminates the argument list and ends the `tab_literal` property.
+The comma after `lit!("Overview")` is at depth 0 (not inside brackets) and separates the two arguments of `tab`. The next `Card { ... }` element opens a brace that may span multiple lines; the parser tracks bracket balance until the Card's closing `}`. After the Card closes, the next newline terminates the argument list and ends the `tab` property.
 
-Desugars to:
+Desugars to (`TabWidget::tab(label, content)` is the title-only shorthand for `static_tab(TabInfo::new().title(label), content)`):
 
 ```rust
 TabWidget::new(selected)
-    .tab_literal(
-        "Overview",
+    .tab(
+        lit!("Overview"),
         Card::new()
-            .header(TextWidget::new("Overview").style(t.body_bold.clone()))
+            .header(TextWidget::new(lit!("Overview")).style(t.body_bold.clone()))
             .content(VStack::new().spacing(12.0)...)
     )
-    .tab_literal("Inspector", Panel::new().padding(20.0)...)
+    .tab(lit!("Inspector"), Panel::new().padding(20.0)...)
     .trailing_slot(trailing_widget)
 ```
 
@@ -843,13 +843,13 @@ let trailing = HStack::new()
 
 let tabs = ctx.add(
     TabWidget::new(selected)
-        .tab_literal("Overview", Card::new()
+        .tab(lit!("Overview"), Card::new()
             .header(TextWidget::new(lit!("Overview"))
                 .style(theme.typography.body_bold.clone())
                 .color(theme.colors.text_primary))
             .content(VStack::new().spacing(12.0)...))
-        .tab_literal("Inspector", Panel::new().padding(20.0)...)
-        .tab_literal("Activity", Panel::new().padding(20.0)...)
+        .tab(lit!("Inspector"), Panel::new().padding(20.0)...)
+        .tab(lit!("Activity"), Panel::new().padding(20.0)...)
         .tab_item(TabItem::new(lit!("Disabled"), Panel::new()...).enabled(false))
         .trailing_slot(trailing),
 );
@@ -881,7 +881,7 @@ let trailing = bati!(
 
 let tabs = bati!(ctx =>
     TabWidget(selected) {
-        tab_literal: "Overview", Card {
+        tab: lit!("Overview"), Card {
             header: TextWidget::new(lit!("Overview")) {
                 style: theme.typography.body_bold.clone()
                 color: theme.colors.text_primary
@@ -897,7 +897,7 @@ let tabs = bati!(ctx =>
                 }
             }
         }
-        tab_literal: "Inspector", Panel {
+        tab: lit!("Inspector"), Panel {
             padding: 20.0
             VStack {
                 spacing: 10.0
@@ -905,7 +905,7 @@ let tabs = bati!(ctx =>
                 TextWidget::new(lit!("Use Tab to move focus..."))
             }
         }
-        tab_literal: "Activity", Panel {
+        tab: lit!("Activity"), Panel {
             padding: 20.0
             VStack { spacing: 10.0, ... }
         }
@@ -918,7 +918,7 @@ let tabs = bati!(ctx =>
 );
 ```
 
-The `tab_literal: "name", Card { ... }` pattern is the multi-argument property form with an element-valued second argument. The `tab_item:` property takes a full `TabItem` element with its own body (`enabled: false` is a property on `TabItem`). `trailing_slot:` takes the previously-built `trailing` widget. Signals (`selected`, `selected_label`) stay as regular Rust `let` bindings because they are computed values, not widgets.
+The `tab: lit!("name"), Card { ... }` pattern is the multi-argument property form with an element-valued second argument (`tab` is `TabWidget`'s title-only shorthand for `static_tab(TabInfo::new().title(label), content)`). The `tab_item:` property takes a full `TabItem` element with its own body (`enabled: false` is a property on `TabItem`). `trailing_slot:` takes the previously-built `trailing` widget. Signals (`selected`, `selected_label`) stay as regular Rust `let` bindings because they are computed values, not widgets.
 
 ### 7.6 overlay-demo, Dialog / Popover / Snackbar (post-refactor)
 
@@ -1533,7 +1533,6 @@ pub fn trailing_slot_id(mut self, id: WidgetId) -> Self
 **TabWidget:**
 ```rust
 pub fn tab_id(mut self, label: impl Into<LocalizedString>, id: WidgetId) -> Self
-pub fn tab_literal_id(mut self, label: impl Into<String>, id: WidgetId) -> Self
 pub fn tab_item_id(mut self, item: TabItem) -> Self  // TabItem carries the id internally
 pub fn trailing_slot_id(mut self, id: WidgetId) -> Self
 ```

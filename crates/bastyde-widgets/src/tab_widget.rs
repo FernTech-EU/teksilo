@@ -1153,8 +1153,14 @@ impl Widget for TabWidget {
 
         // Build (or reuse) the content panes — static + dynamic, both
         // memoized so internal state survives sibling rebuilds.
-        let pane_ids =
-            self.build_panes(ctx, &all_handles, static_count, dyn_count, &panel_ids, &header_ids);
+        let pane_ids = self.build_panes(
+            ctx,
+            &all_handles,
+            static_count,
+            dyn_count,
+            &panel_ids,
+            &header_ids,
+        );
 
         let mut switcher =
             Switcher::new(self.switcher_index.clone()).capture_child_ids_into(panel_ids);
