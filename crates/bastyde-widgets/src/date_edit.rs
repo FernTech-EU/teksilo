@@ -135,7 +135,7 @@ pub struct DateEdit {
     min_date: Option<Date>,
     max_date: Option<Date>,
     pattern: Option<String>,
-    placeholder: String,
+    placeholder: bastyde_i18n::LocalizedString,
     first_day_of_week: Option<Weekday>,
     show_calendar_button: bool,
     calendar_popover_placement: OverlayPlacement,
@@ -148,7 +148,7 @@ pub struct DateEdit {
     /// [`WidthPolicy::Default`] — the field sizes to its natural
     /// mask-derived width and stays put.
     width_policy: WidthPolicy,
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
     on_value_changed: Option<OnValueChanged>,
     /// Live feedback signal mirrored from the inner field, owned by
     /// `DateEdit` so the wrapper's `accessibility()` and the
@@ -190,7 +190,7 @@ impl DateEdit {
             min_date: None,
             max_date: None,
             pattern: None,
-            placeholder: String::new(),
+            placeholder: bastyde_i18n::LocalizedString::literal(String::new()),
             first_day_of_week: None,
             show_calendar_button: true,
             calendar_popover_placement: OverlayPlacement::BelowPreferred,
@@ -247,7 +247,7 @@ impl DateEdit {
 
     pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.placeholder = ls.resolve_now();
+        self.placeholder = ls;
         self
     }
 
@@ -307,7 +307,7 @@ impl DateEdit {
 
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
+        self.label = Some(ls);
         self
     }
 
@@ -635,7 +635,7 @@ impl Widget for DateEdit {
         let pattern_for_filter = pattern_rc.clone();
         let mask_string = mask_for_pattern(&pattern_rc);
         let mut text_input = TextInput::new(self.text_signal.clone())
-            .placeholder(lit!(placeholder.clone()))
+            .placeholder(placeholder.clone())
             .enabled(enabled)
             .read_only(read_only)
             .input_mask(mask_string)
@@ -665,7 +665,7 @@ impl Widget for DateEdit {
                 move |ctx_evt| commit(ctx_evt)
             });
         if let Some(label) = self.label.clone() {
-            text_input = text_input.label(lit!(label));
+            text_input = text_input.label(label);
         }
         if let Some(trigger) = trigger_widget_opt {
             text_input = text_input.trailing_slot(trigger);
@@ -842,7 +842,7 @@ impl Widget for DateEdit {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(Role::DateInput);
         if let Some(ref label) = self.label {
-            builder.set_name(label);
+            builder.set_name(label.resolve_now());
         } else {
             builder.set_name(resolve_message_widget("date-edit-name", &[]));
         }
@@ -851,8 +851,8 @@ impl Widget for DateEdit {
                 builder.set_value(format!("{:04}-{:02}-{:02}", d.year(), d.month(), d.day()));
             }
             None => {
-                if !self.placeholder.is_empty() {
-                    builder.set_placeholder(self.placeholder.clone());
+                if !self.placeholder.resolve_now().is_empty() {
+                    builder.set_placeholder(self.placeholder.resolve_now());
                 } else {
                     builder.set_placeholder(resolve_message_widget("date-edit-placeholder", &[]));
                 }

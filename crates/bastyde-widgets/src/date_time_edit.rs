@@ -115,11 +115,11 @@ pub struct DateTimeEdit {
     /// (default), a thin painted middle-dot glyph is used. When set,
     /// the string is rendered as styled secondary text.
     separator: Option<String>,
-    placeholder: String,
+    placeholder: bastyde_i18n::LocalizedString,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     read_only: bool,
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
     validation_behavior: ValidationBehavior,
     /// How the trailing (time) half claims horizontal space. The
     /// leading (date) half always sizes to its mask-derived natural
@@ -168,7 +168,7 @@ impl DateTimeEdit {
             first_day_of_week: None,
             show_calendar_button: true,
             separator: None,
-            placeholder: String::new(),
+            placeholder: bastyde_i18n::LocalizedString::literal(String::new()),
             initial_enabled: true,
             read_only: false,
             label: None,
@@ -251,7 +251,7 @@ impl DateTimeEdit {
 
     pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.placeholder = ls.resolve_now();
+        self.placeholder = ls;
         self
     }
 
@@ -268,7 +268,7 @@ impl DateTimeEdit {
 
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
+        self.label = Some(ls);
         self
     }
 
@@ -747,8 +747,8 @@ impl Widget for DateTimeEdit {
                 ));
             }
             None => {
-                if !self.placeholder.is_empty() {
-                    builder.set_placeholder(self.placeholder.clone());
+                if !self.placeholder.resolve_now().is_empty() {
+                    builder.set_placeholder(self.placeholder.resolve_now());
                 } else {
                     builder
                         .set_placeholder(resolve_message_widget("date-time-edit-placeholder", &[]));
@@ -910,7 +910,7 @@ impl DateTimeEdit {
             text_signal.clone(),
             mask_string,
             validator,
-            String::new(),
+            bastyde_i18n::LocalizedString::literal(String::new()),
             commit,
             "date-time-edit-time-name",
             Role::TimeInput,
@@ -936,7 +936,7 @@ impl DateTimeEdit {
         text_signal: Signal<String>,
         mask_string: &str,
         validator: crate::primitives::text_input_field::ValidatorFn,
-        placeholder: String,
+        placeholder: bastyde_i18n::LocalizedString,
         commit: Rc<dyn Fn(&mut EventContext)>,
         a11y_label_key: &str,
         a11y_role: Role,
