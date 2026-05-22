@@ -119,7 +119,7 @@ impl A11yCategory {
 /// ```
 #[derive(Debug)]
 pub struct A11yGroupBuilder {
-    pub(crate) label: Option<String>,
+    pub(crate) label: Option<bastyde_i18n::LocalizedString>,
     pub(crate) role: accesskit::Role,
 }
 
@@ -129,7 +129,7 @@ impl A11yGroupBuilder {
     /// [`LocalizedString`](bastyde_i18n::LocalizedString).
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
+        self.label = Some(ls);
         self
     }
 
@@ -148,7 +148,7 @@ impl A11yGroupBuilder {
 #[derive(Debug)]
 pub struct A11yGroup {
     pub(crate) id: A11yGroupId,
-    pub(crate) label: Option<String>,
+    pub(crate) label: Option<bastyde_i18n::LocalizedString>,
     pub(crate) role: accesskit::Role,
 }
 
@@ -168,8 +168,8 @@ impl A11yGroup {
     }
 
     /// The label set on the builder, if any.
-    pub fn label(&self) -> Option<&str> {
-        self.label.as_deref()
+    pub fn label(&self) -> Option<String> {
+        self.label.as_ref().map(|l| l.resolve_now())
     }
 
     /// The role set on the builder. Default `Role::Group`.

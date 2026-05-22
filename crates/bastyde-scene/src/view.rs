@@ -513,7 +513,7 @@ pub struct SceneView {
     /// When set, becomes the logical region name (e.g. "Chart
     /// data area" for an inner chart SceneView). Default `None`
     /// — the SceneView has no explicit name.
-    a11y_label: Option<String>,
+    a11y_label: Option<bastyde_i18n::LocalizedString>,
     /// Coordinate space for `SceneItem` bounds reported to AT.
     /// Default `Screen` (view-projected). Apps with a logical
     /// fixed coordinate system (CAD canvases, blueprint editors)
@@ -769,7 +769,7 @@ impl SceneView {
     /// explicit AT name.
     pub fn a11y_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.a11y_label = Some(ls.resolve_now());
+        self.a11y_label = Some(ls);
         self
     }
 
@@ -3211,7 +3211,7 @@ impl Widget for SceneView {
             builder.set_role(accesskit::Role::Pane);
         }
         if let Some(label) = &self.a11y_label {
-            builder.set_name(label.clone());
+            builder.set_name(label.resolve_now());
         }
 
         // Compute screen-space viewport for the at-visible-region
@@ -3580,7 +3580,7 @@ impl SceneView {
                     |child| {
                         child.set_role(role);
                         if let Some(label) = label {
-                            child.set_name(label);
+                            child.set_name(label.resolve_now());
                         }
                     },
                 )

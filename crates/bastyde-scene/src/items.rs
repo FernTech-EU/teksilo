@@ -53,8 +53,8 @@ pub enum AccessSubtreeMode {
 /// match so muscle memory carries over.
 #[derive(Debug, Default, Clone)]
 pub struct ItemA11yOverrides {
-    pub(crate) label: Option<String>,
-    pub(crate) description: Option<String>,
+    pub(crate) label: Option<bastyde_i18n::LocalizedString>,
+    pub(crate) description: Option<bastyde_i18n::LocalizedString>,
     pub(crate) role: Option<accesskit::Role>,
     pub(crate) hidden: bool,
     pub(crate) subtree_mode: AccessSubtreeMode,
@@ -74,10 +74,10 @@ impl ItemA11yOverrides {
             builder.set_role(role);
         }
         if let Some(ref label) = self.label {
-            builder.set_name(label.clone());
+            builder.set_name(label.resolve_now());
         }
         if let Some(ref desc) = self.description {
-            builder.set_description(desc.clone());
+            builder.set_description(desc.resolve_now());
         }
         if self.hidden {
             builder.set_hidden();
@@ -99,7 +99,7 @@ macro_rules! item_a11y_builders {
         /// string (which auto-converts via `From<String>`).
         pub fn access_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
             let ls: bastyde_i18n::LocalizedString = label.into();
-            self.a11y.label = Some(ls.resolve_now());
+            self.a11y.label = Some(ls);
             self
         }
 
@@ -109,7 +109,7 @@ macro_rules! item_a11y_builders {
             description: impl Into<bastyde_i18n::LocalizedString>,
         ) -> Self {
             let ls: bastyde_i18n::LocalizedString = description.into();
-            self.a11y.description = Some(ls.resolve_now());
+            self.a11y.description = Some(ls);
             self
         }
 

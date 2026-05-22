@@ -1032,7 +1032,7 @@ fn a11y_off_screen_mode_viewport_only_excludes_grown_items() {
 fn add_a11y_group_round_trip() {
     let mut scene = Scene::new();
     let id = scene.add_a11y_group(crate::a11y::A11yGroup::builder().label(lit!("Act 1")));
-    assert_eq!(scene.a11y_group(id).map(|g| g.label()), Some(Some("Act 1")));
+    assert_eq!(scene.a11y_group(id).map(|g| g.label()), Some(Some("Act 1".to_string())));
 }
 
 #[test]
