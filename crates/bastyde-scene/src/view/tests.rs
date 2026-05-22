@@ -8,6 +8,7 @@ mod nested;
 
 use super::*;
 use bastyde_core::widget_tree::WidgetTree;
+use bastyde_i18n::lit;
 
 #[derive(Debug)]
 struct FillWidget;
@@ -883,7 +884,7 @@ fn scene_view_emits_synthetic_at_node_per_visible_item() {
     let on_screen = scene.add_item(
         RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0))
             .fill(Color::RED)
-            .access_label("nearby"),
+            .access_label(lit!("nearby")),
         Point::ZERO,
     );
     let _far_off = scene.add_item(
@@ -1030,7 +1031,7 @@ fn a11y_off_screen_mode_viewport_only_excludes_grown_items() {
 #[test]
 fn add_a11y_group_round_trip() {
     let mut scene = Scene::new();
-    let id = scene.add_a11y_group(crate::a11y::A11yGroup::builder().label("Act 1"));
+    let id = scene.add_a11y_group(crate::a11y::A11yGroup::builder().label(lit!("Act 1")));
     assert_eq!(scene.a11y_group(id).map(|g| g.label()), Some(Some("Act 1")));
 }
 
@@ -1043,9 +1044,9 @@ fn set_a11y_parent_reparents_item_under_group() {
     use bastyde_core::accessibility::{SyntheticKind, is_synthetic, synthetic_node_id};
 
     let mut scene = Scene::new();
-    let act1 = scene.add_a11y_group(A11yGroup::builder().label("Act 1"));
+    let act1 = scene.add_a11y_group(A11yGroup::builder().label(lit!("Act 1")));
     let card = scene.add_item(
-        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).access_label("Scene A"),
+        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).access_label(lit!("Scene A")),
         Point::ZERO,
     );
     scene.set_a11y_parent(A11yNode::Item(card), Some(A11yNode::Group(act1)));
@@ -1093,8 +1094,8 @@ fn nested_groups_emit_in_logical_dfs_order() {
     use bastyde_core::accessibility::{SyntheticKind, synthetic_node_id};
 
     let mut scene = Scene::new();
-    let outer = scene.add_a11y_group(A11yGroup::builder().label("Outer"));
-    let inner = scene.add_a11y_group(A11yGroup::builder().label("Inner"));
+    let outer = scene.add_a11y_group(A11yGroup::builder().label(lit!("Outer")));
+    let inner = scene.add_a11y_group(A11yGroup::builder().label(lit!("Inner")));
     let item = scene.add_item(
         RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)),
         Point::ZERO,
@@ -1233,7 +1234,7 @@ fn remove_a11y_group_drops_dependent_decorations() {
     use crate::items::RectItem;
 
     let mut scene = Scene::new();
-    let g = scene.add_a11y_group(A11yGroup::builder().label("G"));
+    let g = scene.add_a11y_group(A11yGroup::builder().label(lit!("G")));
     let item = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)), Point::ZERO);
     scene.set_a11y_parent(A11yNode::Item(item), Some(A11yNode::Group(g)));
     scene.set_a11y_live(A11yNode::Group(g), accesskit::Live::Assertive);
@@ -1264,8 +1265,8 @@ fn parent_cycle_does_not_loop_walker() {
     use crate::a11y::{A11yGroup, A11yNode};
 
     let mut scene = Scene::new();
-    let a = scene.add_a11y_group(A11yGroup::builder().label("A"));
-    let b = scene.add_a11y_group(A11yGroup::builder().label("B"));
+    let a = scene.add_a11y_group(A11yGroup::builder().label(lit!("A")));
+    let b = scene.add_a11y_group(A11yGroup::builder().label(lit!("B")));
     scene.set_a11y_parent(A11yNode::Group(a), Some(A11yNode::Group(b)));
     scene.set_a11y_parent(A11yNode::Group(b), Some(A11yNode::Group(a)));
 
@@ -1337,7 +1338,7 @@ fn strictly_parallel_suppresses_unparented_items() {
     use bastyde_core::accessibility::{is_synthetic, widget_id_to_node_id};
 
     let mut scene = Scene::new();
-    let g = scene.add_a11y_group(A11yGroup::builder().label("G"));
+    let g = scene.add_a11y_group(A11yGroup::builder().label(lit!("G")));
     let placed = scene.add_item(
         RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)),
         Point::ZERO,
@@ -1392,7 +1393,7 @@ fn auto_graft_widget_appears_under_declared_logical_group() {
     use bastyde_core::accessibility::{SyntheticKind, synthetic_node_id, widget_id_to_node_id};
 
     let mut scene = Scene::new();
-    let act_one = scene.add_a11y_group(A11yGroup::builder().label("Act 1"));
+    let act_one = scene.add_a11y_group(A11yGroup::builder().label(lit!("Act 1")));
     let card_item_id = scene.add_widget(
         LabelledFill { label: "card" },
         Rect::new(10.0, 10.0, 20.0, 20.0),
@@ -1518,7 +1519,7 @@ fn auto_graft_deep_descendant_under_scene_view_group() {
     // Stage 1: add a PlainContainer scene-entry, layout once
     // to learn the inner widget's allocated `WidgetId`.
     let mut scene = Scene::new();
-    let group = scene.add_a11y_group(A11yGroup::builder().label("Tools"));
+    let group = scene.add_a11y_group(A11yGroup::builder().label(lit!("Tools")));
     scene.add_widget(PlainContainer::new(), Rect::new(10.0, 10.0, 40.0, 40.0));
     let mut tree = WidgetTree::new();
     let view_id = tree.add(SceneView::new(scene));
@@ -1623,7 +1624,7 @@ fn ancestor_chain_walk_skips_optout_intermediate() {
     use bastyde_core::accessibility::{SyntheticKind, synthetic_node_id, widget_id_to_node_id};
 
     let mut scene = Scene::new();
-    let group = scene.add_a11y_group(A11yGroup::builder().label("G"));
+    let group = scene.add_a11y_group(A11yGroup::builder().label(lit!("G")));
     scene.add_widget(PlainContainer::new(), Rect::new(10.0, 10.0, 40.0, 40.0));
     let mut tree = WidgetTree::new();
     let view_id = tree.add(SceneView::new(scene));
@@ -1831,7 +1832,7 @@ fn text_item_label_returns_static_text_for_static_items() {
     // Existing semantic preserved: TextItem with static text
     // returns it via `label()` when no override is set.
     use crate::items::TextItem;
-    let item = TextItem::new("Hello", Rect::new(0.0, 0.0, 50.0, 20.0));
+    let item = TextItem::new(lit!("Hello"), Rect::new(0.0, 0.0, 50.0, 20.0));
     assert_eq!(
         crate::item::SceneItem::label(&item).as_deref(),
         Some("Hello")
@@ -2360,7 +2361,7 @@ fn drag_cascades_to_declared_descendants() {
         Point::ZERO,
     );
     let label = scene.add_item(
-        TextItem::new("child", Rect::new(58.0, 70.0, 64.0, 20.0)),
+        TextItem::new(lit!("child"), Rect::new(58.0, 70.0, 64.0, 20.0)),
         Point::ZERO,
     );
     scene.set_item_parent(label, Some(parent_rect));
@@ -2429,7 +2430,7 @@ fn parent_child_drag_persists_across_two_drags() {
         Point::ZERO,
     );
     let label = scene.add_item(
-        TextItem::new("child", Rect::new(58.0, 70.0, 64.0, 20.0)),
+        TextItem::new(lit!("child"), Rect::new(58.0, 70.0, 64.0, 20.0)),
         Point::ZERO,
     );
     scene.set_item_parent(label, Some(parent_rect));
@@ -3086,7 +3087,7 @@ fn a11y_label_is_announced() {
     let view_id = tree.add(
         SceneView::new(Scene::new())
             .nested_a11y(true)
-            .a11y_label("Chart data area"),
+            .a11y_label(lit!("Chart data area")),
     );
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let update = tree.sync_accessibility();

@@ -51,6 +51,8 @@
 #[cfg(test)]
 mod tests;
 
+use bastyde_i18n::lit;
+use bastyde_i18n::localized;
 use std::rc::Rc;
 
 use bastyde_canvas::{Path, Point, Rect, SizeProposal};
@@ -591,7 +593,9 @@ impl Widget for DateEdit {
                     .embedded()
                     .size(IconButtonSize::Default)
                     .enabled(enabled && !read_only)
-                    .tooltip(resolve_message_widget("date-edit-trigger-tooltip", &[]))
+                    .tooltip(localized(move || {
+                        resolve_message_widget("date-edit-trigger-tooltip", &[])
+                    }))
                     .on_activate_fn(move |ctx_evt: &mut EventContext| {
                         if popover_open.get() {
                             popover_open.set(false);
@@ -631,7 +635,7 @@ impl Widget for DateEdit {
         let pattern_for_filter = pattern_rc.clone();
         let mask_string = mask_for_pattern(&pattern_rc);
         let mut text_input = TextInput::new(self.text_signal.clone())
-            .placeholder(placeholder.clone())
+            .placeholder(lit!(placeholder.clone()))
             .enabled(enabled)
             .read_only(read_only)
             .input_mask(mask_string)
@@ -661,7 +665,7 @@ impl Widget for DateEdit {
                 move |ctx_evt| commit(ctx_evt)
             });
         if let Some(label) = self.label.clone() {
-            text_input = text_input.label(label);
+            text_input = text_input.label(lit!(label));
         }
         if let Some(trigger) = trigger_widget_opt {
             text_input = text_input.trailing_slot(trigger);

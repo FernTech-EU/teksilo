@@ -136,7 +136,9 @@ impl Widget for Root {
                 "HexColorInput bound to a live Panel background",
                 HStack::new()
                     .spacing(12.0)
-                    .child(HexColorInput::new(self.hex_only_color.clone()).label("Background"))
+                    .child(
+                        HexColorInput::new(self.hex_only_color.clone()).label(lit!("Background")),
+                    )
                     .child(live_preview(self.hex_only_color.clone())),
             ))
             // Section 8 — ColorEdit row.

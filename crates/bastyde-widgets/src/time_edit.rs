@@ -28,6 +28,7 @@
 #[cfg(test)]
 mod tests;
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Rect, SizeProposal};
@@ -431,7 +432,7 @@ impl Widget for TimeEdit {
         let pattern_for_filter = pattern_rc.clone();
         let mask_string = mask_for_pattern(&pattern_rc);
         let mut text_input = TextInput::new(self.text_signal.clone())
-            .placeholder(self.placeholder.clone())
+            .placeholder(lit!(self.placeholder.clone()))
             .enabled(enabled)
             .read_only(read_only)
             .input_mask(mask_string)
@@ -464,7 +465,7 @@ impl Widget for TimeEdit {
                 move |ctx_evt| commit(ctx_evt)
             });
         if let Some(label) = self.label.clone() {
-            text_input = text_input.label(label);
+            text_input = text_input.label(lit!(label));
         }
 
         let caret_for_step = text_input.caret_position();

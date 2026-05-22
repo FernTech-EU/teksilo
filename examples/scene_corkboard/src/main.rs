@@ -174,9 +174,9 @@ fn build_corkboard() -> SceneView {
     // landing on a card, regardless of where the card is visually
     // placed in scene coordinates. Apps changing the visual layout
     // won't disturb the AT-shape.
-    let act1 = scene.add_a11y_group(A11yGroup::builder().label("Act I — Setup"));
-    let act2 = scene.add_a11y_group(A11yGroup::builder().label("Act II — Confrontation"));
-    let act3 = scene.add_a11y_group(A11yGroup::builder().label("Act III — Resolution"));
+    let act1 = scene.add_a11y_group(A11yGroup::builder().label(lit!("Act I — Setup")));
+    let act2 = scene.add_a11y_group(A11yGroup::builder().label(lit!("Act II — Confrontation")));
+    let act3 = scene.add_a11y_group(A11yGroup::builder().label(lit!("Act III — Resolution")));
     let acts = [act1, act2, act3];
 
     // Heavyweight cards. Auto-graft places each card under its
@@ -232,7 +232,7 @@ fn build_corkboard() -> SceneView {
                 // Cosmetic stroke: the connector keeps a constant device-pixel
                 // width at any zoom (correct joins via the zoom-aware atlas).
                 .stroke_cosmetic(connector_color, stroke_w)
-                .access_label(format!("connector {} → {}", i + 1, i + 2)),
+                .access_label(lit!(format!("connector {} → {}", i + 1, i + 2))),
             Point::ZERO,
         );
         // Parent the connector under the act its source

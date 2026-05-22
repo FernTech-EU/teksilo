@@ -50,6 +50,7 @@
 mod tests;
 
 use bastyde_i18n::lit;
+use bastyde_i18n::localized;
 use std::rc::Rc;
 
 use bastyde_canvas::{Path, Point, Rect, SizeProposal};
@@ -530,10 +531,9 @@ impl Widget for DateTimeEdit {
                 .embedded()
                 .size(IconButtonSize::Default)
                 .enabled(enabled && !read_only)
-                .tooltip(resolve_message_widget(
-                    "date-time-edit-trigger-tooltip",
-                    &[],
-                ))
+                .tooltip(localized(move || {
+                    resolve_message_widget("date-time-edit-trigger-tooltip", &[])
+                }))
                 .on_activate_fn(move |ctx_evt: &mut EventContext| {
                     if popover_open.get() {
                         popover_open.set(false);

@@ -54,7 +54,7 @@ const FRUITS: &[&str] = &[
 
 fn search_field(search_text: Signal<String>) -> SearchField {
     SearchField::new(search_text.clone())
-        .placeholder(tr!(txt_search_placeholder()).resolve_now())
+        .placeholder(lit!(tr!(txt_search_placeholder()).resolve_now()))
         .with_suggestions(|prefix| {
             let p = prefix.to_lowercase();
             FRUITS
@@ -81,35 +81,39 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
     let text_input = section(
         ctx,
-        "TextInput",
+        lit!("TextInput"),
         VStack::new()
             .spacing(6.0)
             .child(
                 TextInput::new(sigs.username_text.clone())
-                    .label(tr!(txt_username_label()).resolve_now())
-                    .placeholder(tr!(txt_username_placeholder()).resolve_now()),
+                    .label(lit!(tr!(txt_username_label()).resolve_now()))
+                    .placeholder(lit!(tr!(txt_username_placeholder()).resolve_now())),
             )
             .child(
                 TextInput::new(sigs.readonly_text.clone())
-                    .label(tr!(txt_readonly_label()).resolve_now())
+                    .label(lit!(tr!(txt_readonly_label()).resolve_now()))
                     .read_only(true),
             ),
     );
     let spin_box = section(
         ctx,
-        "SpinBox",
+        lit!("SpinBox"),
         SpinBox::new(sigs.spin_value.clone(), 0.0_f64, 100.0_f64)
             .single_step(1.0)
             .decimals(2),
     );
-    let search = section(ctx, "SearchField", search_field(sigs.search_text.clone()));
+    let search = section(
+        ctx,
+        lit!("SearchField"),
+        search_field(sigs.search_text.clone()),
+    );
     let password_signal = ctx.signal(String::new());
     let password = section(
         ctx,
-        "PasswordField",
+        lit!("PasswordField"),
         PasswordField::new(password_signal)
-            .label(tr!(txt_password_label()).resolve_now())
-            .placeholder(tr!(txt_password_placeholder()).resolve_now())
+            .label(lit!(tr!(txt_password_label()).resolve_now()))
+            .placeholder(lit!(tr!(txt_password_placeholder()).resolve_now()))
             .validator({
                 let msg = tr!(txt_password_validation()).resolve_now();
                 move |s| {
@@ -126,18 +130,18 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let file_path_signal = ctx.signal(String::new());
     let file_picker = section(
         ctx,
-        "FilePickerField",
+        lit!("FilePickerField"),
         FilePickerField::new(file_path_signal)
             .kind(FilePickerKind::OpenFile)
-            .label(tr!(txt_file_label()).resolve_now())
-            .placeholder(tr!(txt_file_placeholder()).resolve_now()),
+            .label(lit!(tr!(txt_file_label()).resolve_now()))
+            .placeholder(lit!(tr!(txt_file_placeholder()).resolve_now())),
     );
     let trigger = Button::new(tr!(txt_input_dialog_trigger()))
         .variant(ButtonVariant::Filled)
         .on_activate_fn(|ctx| {
             InputDialog::new(tr!(txt_input_dialog_title()))
                 .prompt(tr!(txt_input_dialog_prompt()))
-                .placeholder(tr!(txt_input_dialog_placeholder()).resolve_now())
+                .placeholder(lit!(tr!(txt_input_dialog_placeholder()).resolve_now()))
                 .on_result(|value, _ctx| {
                     if let Some(name) = value {
                         println!("user entered: {name}");
@@ -145,7 +149,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                 })
                 .present(ctx);
         });
-    let input_dialog = section(ctx, "InputDialog", trigger);
+    let input_dialog = section(ctx, lit!("InputDialog"), trigger);
 
     ctx.add(
         VStack::new()
@@ -173,8 +177,8 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let password_signal = ctx.signal(String::new());
     let password_id = ctx.add(
         PasswordField::new(password_signal)
-            .label(tr!(txt_password_label()).resolve_now())
-            .placeholder(tr!(txt_password_placeholder()).resolve_now())
+            .label(lit!(tr!(txt_password_label()).resolve_now()))
+            .placeholder(lit!(tr!(txt_password_placeholder()).resolve_now()))
             .validator({
                 let msg = tr!(txt_password_validation()).resolve_now();
                 move |s| {
@@ -213,11 +217,11 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                 VStack {
                     spacing: 6.0
                     TextInput::new(username_sig) {
-                        label: tr!(txt_username_label()).resolve_now()
-                        placeholder: tr!(txt_username_placeholder()).resolve_now()
+                        label: lit!(tr!(txt_username_label()).resolve_now())
+                        placeholder: lit!(tr!(txt_username_placeholder()).resolve_now())
                     }
                     TextInput::new(readonly_sig) {
-                        label: tr!(txt_readonly_label()).resolve_now()
+                        label: lit!(tr!(txt_readonly_label()).resolve_now())
                         read_only: true
                     }
                 }
@@ -261,8 +265,8 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                 }
                 FilePickerField::new(file_path_signal) {
                     kind: FilePickerKind::OpenFile
-                    label: tr!(txt_file_label()).resolve_now()
-                    placeholder: tr!(txt_file_placeholder()).resolve_now()
+                    label: lit!(tr!(txt_file_label()).resolve_now())
+                    placeholder: lit!(tr!(txt_file_placeholder()).resolve_now())
                 }
             }
 
@@ -277,7 +281,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     on_activate_fn: |ctx| {
                         InputDialog::new(tr!(txt_input_dialog_title()))
                             .prompt(tr!(txt_input_dialog_prompt()))
-                            .placeholder(tr!(txt_input_dialog_placeholder()).resolve_now())
+                            .placeholder(lit!(tr!(txt_input_dialog_placeholder()).resolve_now()))
                             .on_result(|value, _ctx| {
                                 if let Some(name) = value {
                                     println!("user entered: {name}");

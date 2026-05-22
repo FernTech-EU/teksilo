@@ -6,6 +6,7 @@
 //! filtered by case-insensitive substring match against the
 //! `last_segment` of each widget's type name.
 
+use bastyde_i18n::lit;
 use std::cell::{Cell, RefCell};
 
 use bastyde_canvas::{Canvas, Rect, SizeProposal};
@@ -56,7 +57,7 @@ impl std::fmt::Debug for TreeTab {
 impl Widget for TreeTab {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let filter_input = Padding::symmetric(4.0, 4.0).child(
-            TextInput::new(self.state.tree_filter.clone()).placeholder("filter type names…"),
+            TextInput::new(self.state.tree_filter.clone()).placeholder(lit!("filter type names…")),
         );
         // Build the ScrollArea ourselves so we can capture its
         // `scroll_y_signal` and let `TreeRows` drive auto-scroll-into-view

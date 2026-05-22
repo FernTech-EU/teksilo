@@ -14,7 +14,7 @@ struct Probe {
 }
 
 impl Probe {
-    fn new_literal(label: &str) -> Self {
+    fn new(label: &str) -> Self {
         Self {
             label: label.to_string(),
             style: None,
@@ -41,7 +41,7 @@ impl Widget for Probe {
 
 fn main() {
     let w: Probe = bati!(
-        Probe::new(lit!("Click Me")) {
+        Probe::new("Click Me") {
             style: 42
             tag: "demo"
         }

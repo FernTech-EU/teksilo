@@ -40,7 +40,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
     let toolbar = section(
         ctx,
-        "Toolbar",
+        lit!("Toolbar"),
         Toolbar::new().child(
             HStack::new()
                 .spacing(6.0)
@@ -51,7 +51,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let status_bar = section(
         ctx,
-        "StatusBar",
+        lit!("StatusBar"),
         StatusBar::new().child(
             TextWidget::new(tr!(chr_status()))
                 .style(TextStyleRole::Tiny)
@@ -60,7 +60,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let banners = section(
         ctx,
-        "Banner",
+        lit!("Banner"),
         VStack::new()
             .spacing(8.0)
             .child(
@@ -81,14 +81,14 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let breadcrumb = section(
         ctx,
-        "Breadcrumb",
+        lit!("Breadcrumb"),
         Breadcrumb::new()
             .item(BreadcrumbItem::new(tr!(chr_breadcrumb_home())))
             .item(BreadcrumbItem::new(tr!(chr_breadcrumb_docs())))
             .item(BreadcrumbItem::new(tr!(chr_breadcrumb_bastyde())))
             .item(BreadcrumbItem::current(tr!(chr_breadcrumb_current()))),
     );
-    let wizard = section(ctx, "Wizard", make_wizard());
+    let wizard = section(ctx, lit!("Wizard"), make_wizard());
 
     ctx.add(
         VStack::new()

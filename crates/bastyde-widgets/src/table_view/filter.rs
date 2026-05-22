@@ -97,6 +97,7 @@ pub(crate) use rich::FilterPopoverContent;
 
 #[cfg(feature = "rich-text")]
 mod rich {
+    use bastyde_i18n::lit;
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -185,7 +186,7 @@ mod rich {
 
             let input_id = ctx.add(
                 TextInput::new(text)
-                    .placeholder(self.placeholder.clone())
+                    .placeholder(lit!(self.placeholder.clone()))
                     .trailing_slot(clear),
             );
             if let Some(slot) = &self.focus_slot {

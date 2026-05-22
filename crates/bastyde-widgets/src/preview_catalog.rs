@@ -675,10 +675,10 @@ impl WidgetCatalog for ComboBox<String> {
         let placeholder = knobs.text("placeholder").get();
         let enabled = knobs.bool_("enabled").get();
         let mut cb = ComboBox::new(items, knobs.opt_text("selected"))
-            .placeholder(placeholder)
+            .placeholder(lit!(placeholder))
             .enabled(enabled);
         if let Some(label) = knobs.opt_text("label").get() {
-            cb = cb.label(label);
+            cb = cb.label(lit!(label));
         }
         Box::new(cb)
     }
@@ -2135,8 +2135,8 @@ mod secure_input_family {
             let caps = knobs.bool_("caps_warning").get();
             Box::new(
                 PasswordField::new(Signal::new(initial))
-                    .label("Password")
-                    .placeholder(placeholder)
+                    .label(lit!("Password"))
+                    .placeholder(lit!(placeholder))
                     .echo_mode(echo)
                     .reveal_mode(reveal)
                     .enabled(enabled)

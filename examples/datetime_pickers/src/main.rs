@@ -133,7 +133,7 @@ impl Widget for Root {
         let date_edit = DateEdit::new(self.edit_date.clone())
             .min_date(Date::constant(2020, 1, 1))
             .max_date(Date::constant(2030, 12, 31))
-            .placeholder("YYYY-MM-DD");
+            .placeholder(lit!("YYYY-MM-DD"));
         let date_edit_id = ctx.add(date_edit);
         let date_edit_status_id = ctx.add(
             TextWidget::new(lit!(""))

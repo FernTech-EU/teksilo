@@ -8,7 +8,6 @@ use bastyde_core::event_source::{
 use bastyde_core::modal::{ModalCloseBehavior, ModalContent, ModalPresentation, ModalRequest};
 use bastyde_core::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
 use bastyde_core::{WidgetId, WidgetTree};
-use bastyde_i18n::lit;
 use bastyde_i18n::{I18nConfig, I18nManager, LanguageIdentifier};
 use bastyde_platform::event_translation;
 use bastyde_tokens::ColorTokens;
@@ -2517,6 +2516,7 @@ impl HeadlessApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_tokens::Color;
     use bastyde_widgets::{Button, ModalContainer};
 

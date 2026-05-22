@@ -524,7 +524,7 @@ impl Widget for TextInput {
             // intrinsic height as the rich-text engine's frame. Without
             // `single_line()` the placeholder defaults to Wrap, which
             // can report extra vertical leading space.
-            let ph = TextWidget::new(self.placeholder.clone())
+            let ph = TextWidget::new(lit!(self.placeholder.clone()))
                 .style(TextStyleRole::Body)
                 .color(TextRole::Secondary)
                 .single_line()

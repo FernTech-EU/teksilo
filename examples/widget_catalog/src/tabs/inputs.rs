@@ -21,7 +21,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
     let checkbox = section(
         ctx,
-        "Checkbox",
+        lit!("Checkbox"),
         VStack::new()
             .spacing(6.0)
             .child(
@@ -45,7 +45,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let toggle = section(
         ctx,
-        "Toggle",
+        lit!("Toggle"),
         VStack::new()
             .spacing(6.0)
             .child(Toggle::new(sigs.toggle_on.clone()).label(tr!(inp_toggle_feature())))
@@ -83,7 +83,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let segmented = section(
         ctx,
-        "SegmentedControl",
+        lit!("SegmentedControl"),
         SegmentedControl::new(
             vec![
                 tr!(inp_segment_first()).resolve_now(),
@@ -95,7 +95,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let combo = section(
         ctx,
-        "ComboBox",
+        lit!("ComboBox"),
         FixedSize::new().bind_width(220.0_f32).child(
             ComboBox::from_items(
                 vec![
@@ -106,7 +106,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                 sigs.combo_selected.clone(),
                 |s: &String| s.clone(),
             )
-            .placeholder(tr!(inp_combo_placeholder()).resolve_now()),
+            .placeholder(lit!(tr!(inp_combo_placeholder()).resolve_now())),
         ),
     );
 
@@ -147,7 +147,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
             sigs.combo_selected.clone(),
             |s: &String| s.clone(),
         )
-        .placeholder(tr!(inp_combo_placeholder()).resolve_now()),
+        .placeholder(lit!(tr!(inp_combo_placeholder()).resolve_now())),
     );
 
     let cb_checked = sigs.checkbox_checked.clone();

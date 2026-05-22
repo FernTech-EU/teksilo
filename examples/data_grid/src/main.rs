@@ -66,7 +66,7 @@ fn make_data(n: u32) -> Vec<Employee> {
 }
 
 fn id_column() -> Column<Employee> {
-    Column::<Employee>::new("id", "ID", |row, _: &CellContext| {
+    Column::<Employee>::new("id", lit!("ID"), |row, _: &CellContext| {
         Box::new(TextWidget::new(lit!(row.id.to_string())))
     })
     .width(ColumnWidth::Fixed(64.0))
@@ -83,10 +83,10 @@ fn name_column() -> Column<Employee> {
     // — the focus here is on the cell-delegate edit surface, not the
     // persistence path. A real app would forward `on_submit` to a
     // `model.set(row, ...)` call.
-    Column::<Employee>::new("name", "Name", |row, ctx: &CellContext| {
+    Column::<Employee>::new("name", lit!("Name"), |row, ctx: &CellContext| {
         if ctx.is_editing {
             let buffer = Signal::new(row.name.clone());
-            Box::new(TextInput::new(buffer).placeholder("Name"))
+            Box::new(TextInput::new(buffer).placeholder(lit!("Name")))
         } else {
             Box::new(TextWidget::new(lit!(row.name.clone())))
         }
@@ -98,7 +98,7 @@ fn name_column() -> Column<Employee> {
 }
 
 fn email_column() -> Column<Employee> {
-    Column::<Employee>::new("email", "Email", |row, _: &CellContext| {
+    Column::<Employee>::new("email", lit!("Email"), |row, _: &CellContext| {
         Box::new(TextWidget::new(lit!(row.email.clone())))
     })
     .width(ColumnWidth::Flex(2.0))
@@ -107,7 +107,7 @@ fn email_column() -> Column<Employee> {
 }
 
 fn role_column() -> Column<Employee> {
-    Column::<Employee>::new("role", "Role", |row, _: &CellContext| {
+    Column::<Employee>::new("role", lit!("Role"), |row, _: &CellContext| {
         Box::new(TextWidget::new(lit!(row.role)))
     })
     .width(ColumnWidth::Flex(1.0))
@@ -117,7 +117,7 @@ fn role_column() -> Column<Employee> {
 }
 
 fn salary_column() -> Column<Employee> {
-    Column::<Employee>::new("salary", "Salary", |row, _: &CellContext| {
+    Column::<Employee>::new("salary", lit!("Salary"), |row, _: &CellContext| {
         Box::new(TextWidget::new(lit!(format!("${}", row.salary))))
     })
     .width(ColumnWidth::Fixed(110.0))
@@ -126,7 +126,7 @@ fn salary_column() -> Column<Employee> {
 }
 
 fn active_column() -> Column<Employee> {
-    Column::<Employee>::new("active", "Active", |row, _: &CellContext| {
+    Column::<Employee>::new("active", lit!("Active"), |row, _: &CellContext| {
         let label = if row.active { "● Yes" } else { "○ No" };
         Box::new(TextWidget::new(lit!(label)))
     })

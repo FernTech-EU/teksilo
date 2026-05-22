@@ -331,7 +331,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let snackbar = section(
         ctx,
-        "Snackbar",
+        lit!("Snackbar"),
         Snackbar::new(tr!(overlays_file_saved_successfully()))
             .content(
                 TextWidget::new(tr!(overlays_file_saved_successfully_2()))

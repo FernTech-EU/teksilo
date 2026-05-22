@@ -88,7 +88,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let icon_btns = section(
         ctx,
-        "IconButton",
+        lit!("IconButton"),
         HStack::new()
             .spacing(8.0)
             .child(IconButton::add().tooltip(tr!(demo_new())))
@@ -99,7 +99,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let cmd_link = section(
         ctx,
-        "CommandLinkButton",
+        lit!("CommandLinkButton"),
         VStack::new()
             .spacing(6.0)
             .child(
@@ -113,7 +113,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let popover_btn = section(
         ctx,
-        "PopoverButton",
+        lit!("PopoverButton"),
         PopoverButton::new(Button::new(tr!(btn_popover_trigger()))).content(popover_surface(
             VStack::new()
                 .spacing(4.0)
@@ -123,14 +123,14 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let popover_icon = section(
         ctx,
-        "PopoverIconButton",
+        lit!("PopoverIconButton"),
         PopoverIconButton::new(IconButton::add()).content(popover_surface(
             TextWidget::new(tr!(btn_popover_icon_body())).style(TextStyleRole::Small),
         )),
     );
     let split = section(
         ctx,
-        "SplitButton",
+        lit!("SplitButton"),
         SplitButton::new()
             .item(MenuItem::new(tr!(demo_save())))
             .item(MenuItem::new(tr!(buttons_save_as())))

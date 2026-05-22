@@ -47,7 +47,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let spinner = section(
         ctx,
-        "Spinner",
+        lit!("Spinner"),
         HStack::new()
             .spacing(16.0)
             .child(Spinner::new(20.0))
@@ -56,7 +56,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let link = section(
         ctx,
-        "Link",
+        lit!("Link"),
         VStack::new()
             .spacing(6.0)
             .child(Link::new(tr!(ind_link_docs())).url("https://example.com"))
@@ -66,7 +66,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let badge = section(
         ctx,
-        "Badge",
+        lit!("Badge"),
         HStack::new()
             .spacing(8.0)
             .child(Badge::new(lit!("New")))
@@ -77,7 +77,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let avatar = section(
         ctx,
-        "Avatar",
+        lit!("Avatar"),
         HStack::new()
             .spacing(12.0)
             .child(Avatar::with_initials(lit!("CJ")).size(AvatarSize::Medium))

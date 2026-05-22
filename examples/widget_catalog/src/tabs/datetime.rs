@@ -40,10 +40,10 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .bind_width(280.0_f32)
             .child(Calendar::range(cal_range_signal).show_today_button(true)),
     );
-    let date_edit = section(ctx, "DateEdit", DateEdit::new(date_signal));
-    let time_edit = section(ctx, "TimeEdit", TimeEdit::new(time_signal));
-    let datetime_edit = section(ctx, "DateTimeEdit", DateTimeEdit::new(dt_signal));
-    let date_range_edit = section(ctx, "DateRangeEdit", DateRangeEdit::new(range_signal));
+    let date_edit = section(ctx, lit!("DateEdit"), DateEdit::new(date_signal));
+    let time_edit = section(ctx, lit!("TimeEdit"), TimeEdit::new(time_signal));
+    let datetime_edit = section(ctx, lit!("DateTimeEdit"), DateTimeEdit::new(dt_signal));
+    let date_range_edit = section(ctx, lit!("DateRangeEdit"), DateRangeEdit::new(range_signal));
 
     ctx.add(
         VStack::new()

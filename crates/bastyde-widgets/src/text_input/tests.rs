@@ -17,7 +17,7 @@ fn setup(
 ) {
     let text = Signal::new(initial.to_string());
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    let id = tree.add(TextInput::new(text.clone()).placeholder("Type here..."));
+    let id = tree.add(TextInput::new(text.clone()).placeholder(lit!("Type here...")));
     tree.layout(SizeProposal::exact(300.0, 40.0));
     tick(&mut tree);
     (tree, text, id)
@@ -51,7 +51,7 @@ fn placeholder_text_set() {
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
     let _id = tree.add(
         TextInput::new(text)
-            .placeholder("Search...")
+            .placeholder(lit!("Search..."))
             .show_clear_button(true),
     );
     tree.layout(SizeProposal::exact(300.0, 40.0));
@@ -64,8 +64,8 @@ fn builder_methods_chain() {
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
     let _id = tree.add(
         TextInput::new(text)
-            .placeholder("Enter value")
-            .label("Username")
+            .placeholder(lit!("Enter value"))
+            .label(lit!("Username"))
             .enabled(true)
             .read_only(false)
             .max_length(100)

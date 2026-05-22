@@ -231,6 +231,7 @@ impl SceneItem for GroupItem {
 mod tests {
     use super::*;
     use bastyde_canvas::Transform2D;
+    use bastyde_i18n::lit;
 
     #[test]
     fn group_item_does_not_hit_test_through_aabb() {
@@ -261,7 +262,7 @@ mod tests {
 
     #[test]
     fn group_item_with_label_only_is_not_visual() {
-        let g = GroupItem::new(Rect::new(0.0, 0.0, 100.0, 100.0)).label("Act 1");
+        let g = GroupItem::new(Rect::new(0.0, 0.0, 100.0, 100.0)).label(lit!("Act 1"));
         assert!(!g.is_visual());
         assert!(!g.shape_contains(Point::new(50.0, 50.0)));
     }
@@ -269,7 +270,7 @@ mod tests {
     #[test]
     fn group_item_with_show_label_is_visual() {
         let g = GroupItem::new(Rect::new(0.0, 0.0, 100.0, 100.0))
-            .label("Act 1")
+            .label(lit!("Act 1"))
             .show_label(true);
         assert!(g.is_visual());
         assert!(g.shape_contains(Point::new(50.0, 50.0)));

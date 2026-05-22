@@ -582,7 +582,7 @@ mod tests {
 
     #[test]
     fn action_primary_uses_filled_button() {
-        let a = ToastAction::primary("Retry", |_| {}).style(ToastActionStyle::Button {
+        let a = ToastAction::primary(lit!("Retry"), |_| {}).style(ToastActionStyle::Button {
             variant: crate::button::ButtonVariant::Filled,
         });
         match a.style_ref() {
@@ -1005,10 +1005,10 @@ mod tests {
         let archive = std::rc::Rc::new(NotificationArchiveModel::in_memory());
         let registry =
             ToastRegistry::with_archive(host::ToastInstallOptions::default(), archive.clone());
-        let (_h, _) = registry.enqueue(
-            Toast::error(lit!("Build failed"))
-                .action(ToastAction::primary("Retry", |_| {}).shortcut_id("app.build.retry")),
-        );
+        let (_h, _) = registry
+            .enqueue(Toast::error(lit!("Build failed")).action(
+                ToastAction::primary(lit!("Retry"), |_| {}).shortcut_id("app.build.retry"),
+            ));
         let entry = archive.entries().with_item(0, |e| e.clone()).unwrap();
         assert_eq!(entry.actions.len(), 1);
         assert_eq!(entry.actions[0].label, "Retry");

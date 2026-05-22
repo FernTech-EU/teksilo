@@ -293,6 +293,7 @@ impl std::fmt::Debug for SceneItemHandlerSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
 
     #[test]
     fn empty_handler_set_has_no_callbacks() {
@@ -308,7 +309,7 @@ mod tests {
     #[test]
     fn cursor_and_tooltip_round_trip() {
         let mut h = SceneItemHandlerSet::new();
-        h.cursor(CursorIcon::Pointer).tooltip("hello");
+        h.cursor(CursorIcon::Pointer).tooltip(lit!("hello"));
         assert_eq!(h.cursor, Some(CursorIcon::Pointer));
         assert_eq!(h.tooltip.as_deref(), Some("hello"));
     }

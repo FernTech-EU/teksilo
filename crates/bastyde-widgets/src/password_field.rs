@@ -407,7 +407,7 @@ impl Widget for PasswordField {
                     .child_id(padded_field),
             )
         } else {
-            let ph = TextWidget::new(self.placeholder.clone())
+            let ph = TextWidget::new(lit!(self.placeholder.clone()))
                 .style(TextStyleRole::Body)
                 .color(TextRole::Secondary)
                 .single_line()

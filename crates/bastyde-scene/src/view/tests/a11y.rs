@@ -19,6 +19,7 @@ use crate::items::RectItem;
 use crate::scene::Scene;
 use accesskit::{Live, Role};
 use bastyde_canvas::{Point, Rect};
+use bastyde_i18n::lit;
 
 fn rect_at(_x: f32, _y: f32) -> RectItem {
     RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)).fill(bastyde_tokens::Color::RED)
@@ -33,7 +34,7 @@ fn add_a11y_group_round_trips_label_and_role() {
     let mut scene = Scene::new();
     let id = scene.add_a11y_group(
         A11yGroup::builder()
-            .label("Inputs section")
+            .label(lit!("Inputs section"))
             .role(Role::GenericContainer),
     );
     let g = scene.a11y_group(id).expect("group must be reachable by id");
@@ -44,9 +45,9 @@ fn add_a11y_group_round_trips_label_and_role() {
 #[test]
 fn a11y_group_ids_are_unique() {
     let mut scene = Scene::new();
-    let a = scene.add_a11y_group(A11yGroup::builder().label("a"));
-    let b = scene.add_a11y_group(A11yGroup::builder().label("b"));
-    let c = scene.add_a11y_group(A11yGroup::builder().label("c"));
+    let a = scene.add_a11y_group(A11yGroup::builder().label(lit!("a")));
+    let b = scene.add_a11y_group(A11yGroup::builder().label(lit!("b")));
+    let c = scene.add_a11y_group(A11yGroup::builder().label(lit!("c")));
     assert_ne!(a, b);
     assert_ne!(b, c);
     assert_ne!(a, c);
@@ -60,9 +61,9 @@ fn remove_a11y_group_clears_referencing_state() {
     // pointing at nonexistent groups.
     let mut scene = Scene::new();
     let item_id = scene.add_item(rect_at(0.0, 0.0), Point::ZERO);
-    let group = scene.add_a11y_group(A11yGroup::builder().label("g"));
+    let group = scene.add_a11y_group(A11yGroup::builder().label(lit!("g")));
     let other_item_id = scene.add_item(rect_at(10.0, 10.0), Point::ZERO);
-    let other_group = scene.add_a11y_group(A11yGroup::builder().label("h"));
+    let other_group = scene.add_a11y_group(A11yGroup::builder().label(lit!("h")));
 
     // Wire references targeting `group`.
     scene.set_a11y_parent(A11yNode::Item(item_id), Some(A11yNode::Group(group)));
@@ -116,7 +117,7 @@ fn set_a11y_parent_separates_visual_and_logical_trees() {
     // the visual parent chain on the entry.
     let mut scene = Scene::new();
     let item_id = scene.add_item(rect_at(0.0, 0.0), Point::ZERO);
-    let group = scene.add_a11y_group(A11yGroup::builder().label("logical parent"));
+    let group = scene.add_a11y_group(A11yGroup::builder().label(lit!("logical parent")));
 
     assert_eq!(scene.a11y_parent_of(A11yNode::Item(item_id)), None);
     scene.set_a11y_parent(A11yNode::Item(item_id), Some(A11yNode::Group(group)));
@@ -135,7 +136,7 @@ fn set_a11y_parent_separates_visual_and_logical_trees() {
 fn set_a11y_parent_none_clears_redirect() {
     let mut scene = Scene::new();
     let item_id = scene.add_item(rect_at(0.0, 0.0), Point::ZERO);
-    let group = scene.add_a11y_group(A11yGroup::builder().label("g"));
+    let group = scene.add_a11y_group(A11yGroup::builder().label(lit!("g")));
     scene.set_a11y_parent(A11yNode::Item(item_id), Some(A11yNode::Group(group)));
     scene.set_a11y_parent(A11yNode::Item(item_id), None);
     assert_eq!(scene.a11y_parent_of(A11yNode::Item(item_id)), None);
@@ -225,7 +226,7 @@ fn set_a11y_categories_empty_clears_entry() {
 fn set_a11y_landmark_unknown_clears_entry() {
     // Unknown role is the documented "clear" sentinel.
     let mut scene = Scene::new();
-    let group = scene.add_a11y_group(A11yGroup::builder().label("g"));
+    let group = scene.add_a11y_group(A11yGroup::builder().label(lit!("g")));
     scene.set_a11y_landmark(A11yNode::Group(group), Role::Region);
     // Sanity: subsequent Unknown is a clear, not a no-op or panic.
     scene.set_a11y_landmark(A11yNode::Group(group), Role::Unknown);

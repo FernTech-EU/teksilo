@@ -23,7 +23,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
     let rect = section(
         ctx,
-        "RectWidget",
+        lit!("RectWidget"),
         FixedSize::new()
             .bind_width(220.0_f32)
             .bind_height(36.0_f32)
@@ -37,7 +37,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let text = section(
         ctx,
-        "TextWidget",
+        lit!("TextWidget"),
         VStack::new()
             .spacing(4.0)
             .child(TextWidget::new(tr!(vis_text_body())).style(TextStyleRole::Body))
@@ -59,7 +59,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let icon = section(
         ctx,
-        "IconWidget",
+        lit!("IconWidget"),
         HStack::new()
             .spacing(12.0)
             .child(IconWidget::checkmark(20.0))
@@ -71,7 +71,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let star_icon = bastyde::res!("resources/icons/star.png");
     let image = section(
         ctx,
-        "ImageWidget",
+        lit!("ImageWidget"),
         HStack::new()
             .spacing(12.0)
             .child(
@@ -97,7 +97,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let twist_classic = twist_expanded.clone();
     let twist = section(
         ctx,
-        "TwistArrow",
+        lit!("TwistArrow"),
         HStack::new()
             .spacing(8.0)
             .child(TwistArrow::new(16.0, true, true).on_click(move |_ctx| {

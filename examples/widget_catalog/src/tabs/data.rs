@@ -39,7 +39,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
     let repeater = section(
         ctx,
-        "Repeater",
+        lit!("Repeater"),
         Repeater::new(make_repeater_model(), |_idx, item: &String| {
             Box::new(
                 TextWidget::new(lit!(format!("• {item}")))
@@ -51,7 +51,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let list_view = section(
         ctx,
-        "ListView",
+        lit!("ListView"),
         FixedSize::new()
             .bind_width(280.0_f32)
             .bind_height(180.0_f32)
@@ -81,21 +81,21 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let tree_view_note = section(
         ctx,
-        "TreeView",
+        lit!("TreeView"),
         TextWidget::new(tr!(dat_tree_note()))
             .style(TextStyleRole::Small)
             .color(TextRole::Secondary),
     );
     let table_view_note = section(
         ctx,
-        "TableView",
+        lit!("TableView"),
         TextWidget::new(tr!(dat_table_note()))
             .style(TextStyleRole::Small)
             .color(TextRole::Secondary),
     );
     let tree_table_note = section(
         ctx,
-        "TreeTable",
+        lit!("TreeTable"),
         TextWidget::new(tr!(dat_treetable_note()))
             .style(TextStyleRole::Small)
             .color(TextRole::Secondary),

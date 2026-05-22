@@ -134,7 +134,7 @@ mod tests {
     use bastyde_i18n::lit;
 
     fn col(id: &str, w: ColumnWidth) -> Column<&'static str> {
-        Column::<&str>::new(id, "h", |_, _: &CellContext| {
+        Column::<&str>::new(id, lit!("h"), |_, _: &CellContext| {
             Box::new(TextWidget::new(lit!("x")))
         })
         .width(w)

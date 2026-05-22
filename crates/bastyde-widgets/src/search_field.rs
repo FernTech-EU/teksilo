@@ -264,7 +264,7 @@ impl Widget for SearchField {
         let dismissed_for_submit = dismissed.clone();
 
         let mut input = TextInput::new(self.text.clone())
-            .placeholder(placeholder)
+            .placeholder(lit!(placeholder))
             .show_clear_button(true)
             .leading_slot(search_glyph(sf::GLYPH_SIZE, sf::GLYPH_SLOT_WIDTH))
             .enabled(self.initial_enabled)
@@ -293,7 +293,7 @@ impl Widget for SearchField {
                 ctx.dismiss_all_except_hosts();
             });
         if let Some(label) = &self.label {
-            input = input.label(label.clone());
+            input = input.label(lit!(label.clone()));
         }
         let input_id = ctx.add(input);
 
@@ -978,7 +978,7 @@ mod tests {
     fn search_field_builds() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let q = Signal::new(String::new());
-        let id = tree.add(SearchField::new(q.clone()).placeholder("Search docs"));
+        let id = tree.add(SearchField::new(q.clone()).placeholder(lit!("Search docs")));
         tree.layout(SizeProposal {
             width: Some(320.0),
             height: None,

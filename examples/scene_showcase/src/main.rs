@@ -190,7 +190,7 @@ fn add_scene_header(scene: &mut Scene) {
 
     scene.add_item(
         TextItem::new(
-            "bastyde-scene showcase — eight labelled sections, all visible at zoom 1.0",
+            lit!("bastyde-scene showcase — eight labelled sections, all visible at zoom 1.0"),
             Rect::new(SCENE_PAD, SCENE_PAD, usable_w, 30.0),
         )
         .color(ink()),
@@ -198,10 +198,10 @@ fn add_scene_header(scene: &mut Scene) {
     );
     scene.add_item(
         TextItem::new(
-            "Scroll wheel / two-finger trackpad: PAN.   Ctrl+wheel: ZOOM about viewport center.   \
+            lit!("Scroll wheel / two-finger trackpad: PAN.   Ctrl+wheel: ZOOM about viewport center.   \
              Pinch (macOS / Win precision touchpad): ZOOM about gesture center.   \
              Click card: SELECT.   Ctrl-click: TOGGLE.   Drag empty space: MARQUEE.   \
-             Drag a 'drag me' rect: MOVE.   Other items stay put — drag is opt-in via .draggable(true).",
+             Drag a 'drag me' rect: MOVE.   Other items stay put — drag is opt-in via .draggable(true)."),
             Rect::new(SCENE_PAD, SCENE_PAD + 36.0, usable_w, 70.0),
         )
         .color(dim_ink()), Point::ZERO
@@ -216,7 +216,7 @@ fn add_section_frame(scene: &mut Scene, col: usize, row: usize, title: &str) {
     let r = section_rect(col, row);
     scene.add_item(
         GroupItem::new(r)
-            .label(title)
+            .label(lit!(title))
             .show_label(true)
             .label_inset(12.0, 6.0)
             .label_color(ink())
@@ -231,7 +231,7 @@ fn add_section_caption(scene: &mut Scene, col: usize, row: usize, body: &str) {
     let r = section_rect(col, row);
     scene.add_item(
         TextItem::new(
-            body,
+            lit!(body),
             Rect::new(r.x + 12.0, r.y + 30.0, r.width - 24.0, 90.0),
         )
         .color(dim_ink()),
@@ -285,7 +285,7 @@ fn build_lightweight_items_section(scene: &mut Scene) {
                 RectItem::new(rect)
                     .fill(color)
                     .stroke(ink(), 1.0)
-                    .access_label(format!("tile {}", i + 1)),
+                    .access_label(lit!(format!("tile {}", i + 1))),
                 Point::ZERO,
             );
         }
@@ -307,12 +307,12 @@ fn build_lightweight_items_section(scene: &mut Scene) {
         PathItem::new(zigzag, path_bounds)
             // Cosmetic stroke: crisp constant-width zigzag at any zoom.
             .stroke_cosmetic(pastel_purple(), 3.0)
-            .access_label("decorative zigzag"),
+            .access_label(lit!("decorative zigzag")),
         Point::ZERO,
     );
     scene.add_item(
         TextItem::new(
-            "Stroke-only paths get per-segment hit-test.",
+            lit!("Stroke-only paths get per-segment hit-test."),
             Rect::new(path_x - 4.0, path_y + 60.0, 130.0, 60.0),
         )
         .color(dim_ink()),
@@ -340,7 +340,7 @@ fn build_groupitem_section(scene: &mut Scene) {
     let inner = Rect::new(r.x + 16.0, r.y + 130.0, 140.0, 130.0);
     scene.add_item(
         GroupItem::new(inner)
-            .label("Visible group")
+            .label(lit!("Visible group"))
             .show_label(true)
             .label_inset(8.0, 4.0)
             .label_color(ink())
@@ -356,7 +356,7 @@ fn build_groupitem_section(scene: &mut Scene) {
             RectItem::new(dot)
                 .fill(pastel_red())
                 .stroke(ink(), 1.0)
-                .access_label(format!("inner item {}", i + 1)),
+                .access_label(lit!(format!("inner item {}", i + 1))),
             Point::ZERO,
         );
     }
@@ -368,13 +368,15 @@ fn build_groupitem_section(scene: &mut Scene) {
 
     let invisible = Rect::new(r.x + 168.0, r.y + 130.0, 138.0, 130.0);
     scene.add_item(
-        GroupItem::new(invisible).label("Logical-only group"),
+        GroupItem::new(invisible).label(lit!("Logical-only group")),
         Point::ZERO,
     );
     scene.add_item(
         TextItem::new(
-            "Same Rect as a group with NO chrome. Paints nothing, but \
-             set_a11y_parent still works.",
+            lit!(
+                "Same Rect as a group with NO chrome. Paints nothing, but \
+             set_a11y_parent still works."
+            ),
             Rect::new(
                 invisible.x + 6.0,
                 invisible.y + 6.0,
@@ -423,13 +425,13 @@ fn build_zorder_section(scene: &mut Scene) {
             RectItem::new(rect)
                 .fill(*color)
                 .stroke(ink(), 1.5)
-                .access_label(format!("z-stack rect at z={}", z)),
+                .access_label(lit!(format!("z-stack rect at z={}", z))),
             Point::ZERO,
         );
         scene.set_z(id, *z as f32);
         scene.add_item(
             TextItem::new(
-                *label,
+                lit!(*label),
                 Rect::new(rect.x + 8.0, rect.y + 6.0, rect.width - 16.0, 22.0),
             )
             .color(ink()),
@@ -551,12 +553,12 @@ fn build_drag_section(scene: &mut Scene) {
                 .fill(*color)
                 .stroke(ink(), 1.5)
                 .draggable(true)
-                .access_label(format!("draggable {}", i + 1)),
+                .access_label(lit!(format!("draggable {}", i + 1))),
             Point::ZERO,
         );
         let label_id = scene.add_item(
             TextItem::new(
-                *label,
+                lit!(*label),
                 Rect::new(rect.x + 8.0, rect.y + 24.0, rect.width - 16.0, 28.0),
             )
             .color(ink()),
@@ -584,9 +586,9 @@ fn build_a11y_groups_section(scene: &mut Scene, scroll_area_id: ItemId) {
 
     let r = section_rect(1, 1);
 
-    let act1 = scene.add_a11y_group(A11yGroup::builder().label("Act I — Setup"));
-    let act2 = scene.add_a11y_group(A11yGroup::builder().label("Act II — Confrontation"));
-    let _act3 = scene.add_a11y_group(A11yGroup::builder().label("Act III — Resolution"));
+    let act1 = scene.add_a11y_group(A11yGroup::builder().label(lit!("Act I — Setup")));
+    let act2 = scene.add_a11y_group(A11yGroup::builder().label(lit!("Act II — Confrontation")));
+    let _act3 = scene.add_a11y_group(A11yGroup::builder().label(lit!("Act III — Resolution")));
 
     // Parent the ScrollArea (and thereby its cards) under Act I.
     scene.set_a11y_parent(A11yNode::Item(scroll_area_id), Some(A11yNode::Group(act1)));
@@ -611,7 +613,7 @@ fn build_a11y_groups_section(scene: &mut Scene, scroll_area_id: ItemId) {
         let label_text = ["Act I", "Act II", "Act III"][i];
         scene.add_item(
             TextItem::new(
-                label_text,
+                lit!(label_text),
                 Rect::new(stripe.x + 8.0, stripe.y + 12.0, stripe.width - 16.0, 24.0),
             )
             .color(ink()),
@@ -621,8 +623,10 @@ fn build_a11y_groups_section(scene: &mut Scene, scroll_area_id: ItemId) {
 
     scene.add_item(
         TextItem::new(
-            "Visual placement vs logical AT tree: the cards stay in §4; \
-             the AT walker reports them under these Acts.",
+            lit!(
+                "Visual placement vs logical AT tree: the cards stay in §4; \
+             the AT walker reports them under these Acts."
+            ),
             Rect::new(r.x + 12.0, r.y + 215.0, r.width - 24.0, 60.0),
         )
         .color(dim_ink()),
@@ -675,7 +679,7 @@ fn build_inner_scene() -> impl Widget + 'static {
     inner.pan_axes(PanAxes::Horizontal);
     SceneView::new(inner)
         .nested_a11y(true)
-        .a11y_label("Inner scene")
+        .a11y_label(lit!("Inner scene"))
         .default_size(135.0, 105.0)
 }
 
@@ -697,9 +701,11 @@ fn build_nested_scene_section(scene: &mut Scene) {
 
     scene.add_item(
         TextItem::new(
-            "← This inner viewport pans horizontally only; vertical \
+            lit!(
+                "← This inner viewport pans horizontally only; vertical \
              two-finger scroll passes through to the outer scene. \
-             Per-view movement policy.",
+             Per-view movement policy."
+            ),
             Rect::new(
                 inner_rect.x + inner_rect.width + 8.0,
                 inner_rect.y,
@@ -739,8 +745,10 @@ fn build_animation_section(scene: &mut Scene) {
     }
     scene.add_item(
         TextItem::new(
-            "Idle scheduler still applies: tab-out the window, \
-             ticks pause; no CPU/GPU drain when not visible.",
+            lit!(
+                "Idle scheduler still applies: tab-out the window, \
+             ticks pause; no CPU/GPU drain when not visible."
+            ),
             Rect::new(r.x + 12.0, r.y + 240.0, r.width - 24.0, 50.0),
         )
         .color(dim_ink()),

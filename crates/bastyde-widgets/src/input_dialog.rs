@@ -220,7 +220,7 @@ impl Widget for InputDialogBody {
             Self::fire(&on_result_for_submit, &fired_for_submit, Some(value), ctx);
         });
         if let Some(ph) = &self.placeholder {
-            input = input.placeholder(ph.clone());
+            input = input.placeholder(lit!(ph.clone()));
         }
         column = column.child(input);
 

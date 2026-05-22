@@ -6,6 +6,7 @@ use bastyde_canvas::SizeProposal;
 use bastyde_core::accesskit::Role;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget_tree::WidgetTree;
+use bastyde_i18n::lit;
 
 use super::{AtRevealPolicy, EchoMode, PasswordField, RevealMode};
 
@@ -38,8 +39,8 @@ fn constructs_and_lays_out() {
     let mut t = tree();
     let id = t.add(
         PasswordField::new(pw)
-            .label("Password")
-            .placeholder("Enter…"),
+            .label(lit!("Password"))
+            .placeholder(lit!("Enter…")),
     );
     t.layout(SizeProposal::exact(320.0, 60.0));
     tick(&mut t);
@@ -51,7 +52,7 @@ fn constructs_and_lays_out() {
 fn masked_field_reports_password_role_and_bullet_value_never_plaintext() {
     let pw = Signal::new("hunter2".to_string());
     let mut t = tree();
-    t.add(PasswordField::new(pw.clone()).label("Password"));
+    t.add(PasswordField::new(pw.clone()).label(lit!("Password")));
     t.layout(SizeProposal::exact(320.0, 60.0));
     tick(&mut t);
 
@@ -85,7 +86,7 @@ fn revealed_swaps_to_text_role_with_plaintext_under_swap_policy() {
     let mut t = tree();
     t.add(
         PasswordField::new(pw.clone())
-            .label("Password")
+            .label(lit!("Password"))
             .at_reveal_policy(AtRevealPolicy::SwapRole)
             .bind_revealed(revealed.clone()),
     );
@@ -115,7 +116,7 @@ fn always_protected_keeps_password_role_when_revealed() {
     let mut t = tree();
     t.add(
         PasswordField::new(pw.clone())
-            .label("Password")
+            .label(lit!("Password"))
             .at_reveal_policy(AtRevealPolicy::AlwaysProtected)
             .bind_revealed(revealed.clone()),
     );
@@ -142,7 +143,7 @@ fn no_echo_mode_hides_even_the_length() {
     let mut t = tree();
     t.add(
         PasswordField::new(pw.clone())
-            .label("Password")
+            .label(lit!("Password"))
             .echo_mode(EchoMode::NoEcho),
     );
     t.layout(SizeProposal::exact(320.0, 60.0));
@@ -198,7 +199,7 @@ fn secure_field_composition_never_exposes_plaintext_to_at() {
 
     let pw = Signal::new(String::new());
     let mut t = tree();
-    let id = t.add(PasswordField::new(pw.clone()).label("Password"));
+    let id = t.add(PasswordField::new(pw.clone()).label(lit!("Password")));
     t.layout(SizeProposal::exact(320.0, 60.0));
     tick(&mut t);
 
@@ -238,7 +239,7 @@ fn focused_secure_field_is_a_password_ime_surface() {
 
     let pw = Signal::new(String::new());
     let mut t = tree();
-    let id = t.add(PasswordField::new(pw).label("Password"));
+    let id = t.add(PasswordField::new(pw).label(lit!("Password")));
     t.layout(SizeProposal::exact(320.0, 60.0));
     tick(&mut t);
     let field = t.first_focusable_descendant(id).unwrap();

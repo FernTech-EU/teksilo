@@ -16,6 +16,7 @@
 //!     .placeholder("Choose a file…")
 //! ```
 
+use bastyde_i18n::lit;
 use std::path::PathBuf;
 
 use bastyde_canvas::{Rect, SizeProposal};
@@ -238,10 +239,10 @@ impl Widget for FilePickerField {
             .enabled(self.initial_enabled)
             .trailing_slot(browse);
         if let Some(ph) = self.placeholder.clone() {
-            input = input.placeholder(ph);
+            input = input.placeholder(lit!(ph));
         }
         if let Some(label) = self.label.clone() {
-            input = input.label(label);
+            input = input.label(lit!(label));
         }
         self.root_child_id = Some(ctx.add(input));
         self.children()
@@ -305,7 +306,7 @@ mod tests {
         let path = Signal::new(String::new());
         let id = tree.add(
             FilePickerField::new(path)
-                .placeholder("Choose a file…")
+                .placeholder(lit!("Choose a file…"))
                 .add_filter("Images", &["png", "jpg"]),
         );
         tree.layout(SizeProposal {

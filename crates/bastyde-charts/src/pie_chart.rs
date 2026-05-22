@@ -11,7 +11,6 @@
 //! (`.center(impl Widget)` / `.center_id(WidgetId)`), and `build()`
 //! resolves the pending child via `ctx.add_boxed`.
 
-use bastyde_i18n::lit;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -829,6 +828,7 @@ mod tests {
     use super::*;
     use bastyde_canvas::SizeProposal;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     fn three_slices() -> Vec<ChartDatum<String>> {
         vec![

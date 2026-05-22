@@ -37,7 +37,7 @@ impl std::fmt::Debug for DialogShell {
 }
 
 impl DialogShell {
-    fn new_literal(title: &'static str) -> Self {
+    fn new(title: &'static str) -> Self {
         Self {
             title: Some(title),
             factory: None,
@@ -61,7 +61,7 @@ impl Widget for DialogShell {
 
 fn main() {
     let d: DialogShell = bati!(
-        DialogShell::new(lit!("Modal")) {
+        DialogShell::new("Modal") {
             content: || bati!(Body("the dialog's body"))
         }
     );

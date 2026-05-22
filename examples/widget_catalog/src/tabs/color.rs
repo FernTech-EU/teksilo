@@ -21,19 +21,19 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
     let hex = section(
         ctx,
-        "HexColorInput",
+        lit!("HexColorInput"),
         HexColorInput::new(hex_color).label(tr!(clr_brand_label())),
     );
     let edit = section(
         ctx,
-        "ColorEdit",
+        lit!("ColorEdit"),
         ColorEdit::new(edit_color)
             .alpha_enabled(true)
             .label(tr!(clr_accent_label())),
     );
     let picker = section(
         ctx,
-        "ColorPicker",
+        lit!("ColorPicker"),
         ColorPicker::new(pick_color)
             .alpha_enabled(true)
             .show_hsv_canvas(true)

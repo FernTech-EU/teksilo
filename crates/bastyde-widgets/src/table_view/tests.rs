@@ -42,14 +42,14 @@ fn rows(n: u32) -> ListModel<Row> {
 }
 
 fn id_col() -> Column<Row> {
-    Column::<Row>::new("id", "ID", |row, _: &CellContext| {
+    Column::<Row>::new("id", lit!("ID"), |row, _: &CellContext| {
         Box::new(TextWidget::new(lit!(row.id.to_string())))
     })
     .width(ColumnWidth::Fixed(60.0))
 }
 
 fn name_col() -> Column<Row> {
-    Column::<Row>::new("name", "Name", |row, _: &CellContext| {
+    Column::<Row>::new("name", lit!("Name"), |row, _: &CellContext| {
         Box::new(TextWidget::new(lit!(row.name.clone())))
     })
     .width(ColumnWidth::Flex(1.0))
@@ -581,7 +581,7 @@ fn pinned_leading_moves_to_front() {
             // Declaration: id, name. Trailing-pinned `id` should still
             // visually trail name once we mark it Trailing.
             .add_column(
-                Column::<Row>::new("id", "ID", |row, _: &CellContext| {
+                Column::<Row>::new("id", lit!("ID"), |row, _: &CellContext| {
                     Box::new(crate::primitives::TextWidget::new(lit!(row.id.to_string())))
                 })
                 .width(ColumnWidth::Fixed(60.0))
@@ -616,7 +616,7 @@ fn set_column_order_reorders_display() {
             .add_column(id_col()) // 60
             .add_column(name_col())
             .add_column(
-                Column::<Row>::new("extra", "Extra", |_row, _: &CellContext| {
+                Column::<Row>::new("extra", lit!("Extra"), |_row, _: &CellContext| {
                     Box::new(crate::primitives::TextWidget::new(lit!("…")))
                 })
                 .width(ColumnWidth::Fixed(40.0)),
@@ -1607,7 +1607,7 @@ fn header_resizing_works_in_full_data_grid_layout() {
     use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
 
     fn id_c() -> Column<Row> {
-        Column::<Row>::new("id", "ID", |r, _: &CellContext| {
+        Column::<Row>::new("id", lit!("ID"), |r, _: &CellContext| {
             Box::new(TextWidget::new(lit!(r.id.to_string())))
         })
         .width(ColumnWidth::Fixed(60.0))
@@ -1615,7 +1615,7 @@ fn header_resizing_works_in_full_data_grid_layout() {
         .sortable(true)
     }
     fn name_c() -> Column<Row> {
-        Column::<Row>::new("name", "Name", |r, _: &CellContext| {
+        Column::<Row>::new("name", lit!("Name"), |r, _: &CellContext| {
             Box::new(TextWidget::new(lit!(r.name.clone())))
         })
         .width(ColumnWidth::Flex(2.0))

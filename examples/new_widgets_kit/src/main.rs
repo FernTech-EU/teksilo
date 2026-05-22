@@ -192,7 +192,7 @@ impl Root {
             "Watermelon",
         ];
         let search = SearchField::new(self.search_text.clone())
-            .placeholder("Type a fruit — Apple, Banana, …")
+            .placeholder(lit!("Type a fruit — Apple, Banana, …"))
             .with_suggestions(|prefix| {
                 let p = prefix.to_lowercase();
                 FRUITS
@@ -224,7 +224,7 @@ impl Root {
 
         let picker = FilePickerField::new(self.path_text.clone())
             .kind(FilePickerKind::OpenFile)
-            .placeholder("No file selected")
+            .placeholder(lit!("No file selected"))
             .add_filter("Text", &["txt", "md"])
             .add_filter("Images", &["png", "jpg", "jpeg"])
             .dialog_title("Choose a file");
@@ -271,7 +271,7 @@ impl Root {
                     InputDialog::new(lit!("Rename document"))
                         .prompt(lit!("Enter the new file name:"))
                         .default_text(rename_text.get())
-                        .placeholder("filename.ext")
+                        .placeholder(lit!("filename.ext"))
                         .on_result(move |result, _ctx| match result {
                             Some(name) => {
                                 rename_text.set(name);

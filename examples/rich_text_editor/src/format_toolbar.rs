@@ -256,7 +256,7 @@ impl Widget for FormatToolbar {
             ComboBox::from_items(ALL_HEADING_LEVELS, heading_selected.clone(), |level| {
                 level.label().to_string()
             })
-            .label("Heading level")
+            .label(lit!("Heading level"))
             .max_visible_items(7),
         );
 

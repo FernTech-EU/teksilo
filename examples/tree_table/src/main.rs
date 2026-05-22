@@ -108,7 +108,7 @@ fn main() {
                 let proxy_for_table = proxy.clone();
                 let table = TreeTable::from_projection(proxy_for_table.clone())
                     .add_column(
-                        Column::<FsNode>::new("name", "Name", |row, _: &CellContext| {
+                        Column::<FsNode>::new("name", lit!("Name"), |row, _: &CellContext| {
                             Box::new(TextWidget::new(lit!(row.name.clone())))
                         })
                         .width(ColumnWidth::Flex(3.0))
@@ -116,7 +116,7 @@ fn main() {
                         .filterable(true),
                     )
                     .add_column(
-                        Column::<FsNode>::new("size", "Size", |row, _: &CellContext| {
+                        Column::<FsNode>::new("size", lit!("Size"), |row, _: &CellContext| {
                             let s = if row.size == 0 {
                                 String::new()
                             } else {
@@ -129,7 +129,7 @@ fn main() {
                         .alignment(Alignment::Trailing),
                     )
                     .add_column(
-                        Column::<FsNode>::new("kind", "Kind", |row, _: &CellContext| {
+                        Column::<FsNode>::new("kind", lit!("Kind"), |row, _: &CellContext| {
                             Box::new(TextWidget::new(lit!(row.kind)))
                         })
                         .width(ColumnWidth::Flex(1.0))

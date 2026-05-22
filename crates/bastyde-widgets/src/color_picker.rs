@@ -38,6 +38,8 @@ pub mod swatch_grid;
 #[cfg(test)]
 mod tests;
 
+use bastyde_i18n::lit;
+use bastyde_i18n::localized;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -444,16 +446,17 @@ impl Widget for ColorPicker {
                         ColorSwatch::new(value.clone())
                             .size(cp::PREVIEW_HEIGHT)
                             .corner_radius(cp::PREVIEW_CORNER_RADIUS)
-                            .label(resolve_message_widget(
-                                "color-picker-current-color-label",
-                                &[],
-                            )),
+                            .label(localized(move || {
+                                resolve_message_widget("color-picker-current-color-label", &[])
+                            })),
                     );
                 }
                 if self.show_hex_input {
                     let hex = HexColorInput::new(value.clone())
                         .alpha_enabled(alpha_enabled)
-                        .label(resolve_message_widget("color-picker-hex-label", &[]))
+                        .label(localized(move || {
+                            resolve_message_widget("color-picker-hex-label", &[])
+                        }))
                         .width(cp::HEX_FIELD_WIDTH);
                     row = row.child(hex);
                 }
@@ -562,7 +565,9 @@ impl Widget for ColorPicker {
                     ctx.add(
                         HexColorInput::new(value.clone())
                             .alpha_enabled(alpha_enabled)
-                            .label(resolve_message_widget("color-picker-hex-label", &[]))
+                            .label(localized(move || {
+                                resolve_message_widget("color-picker-hex-label", &[])
+                            }))
                             .width(cp::HEX_FIELD_WIDTH),
                     ),
                 )
@@ -603,18 +608,21 @@ impl Widget for ColorPicker {
         let footer_id: Option<WidgetId> = if self.show_footer {
             let mut row = HStack::new().spacing(cp::GAP).child(Spacer::new());
             if let Some(cb) = self.on_cancel.clone() {
-                let cancel_btn =
-                    Button::new(resolve_message_widget("color-picker-cancel-label", &[]))
-                        .variant(ButtonVariant::Plain)
-                        .enabled(enabled)
-                        .on_activate_fn(move |ctx_evt| cb(ctx_evt));
+                let cancel_btn = Button::new(localized(move || {
+                    resolve_message_widget("color-picker-cancel-label", &[])
+                }))
+                .variant(ButtonVariant::Plain)
+                .enabled(enabled)
+                .on_activate_fn(move |ctx_evt| cb(ctx_evt));
                 row = row.child(cancel_btn);
             }
             if let Some(cb) = self.on_done.clone() {
-                let done_btn = Button::new(resolve_message_widget("color-picker-done-label", &[]))
-                    .variant(ButtonVariant::Filled)
-                    .enabled(enabled)
-                    .on_activate_fn(move |ctx_evt| cb(ctx_evt));
+                let done_btn = Button::new(localized(move || {
+                    resolve_message_widget("color-picker-done-label", &[])
+                }))
+                .variant(ButtonVariant::Filled)
+                .enabled(enabled)
+                .on_activate_fn(move |ctx_evt| cb(ctx_evt));
                 row = row.child(done_btn);
             }
             Some(ctx.add(row))
@@ -845,6 +853,6 @@ fn spinner_cell(label_key: &str, spinner: impl Widget + 'static) -> HStack {
     let label = resolve_message_widget(label_key, &[]);
     HStack::new()
         .spacing(4.0)
-        .child(TextWidget::new(label))
+        .child(TextWidget::new(lit!(label)))
         .child(spinner)
 }

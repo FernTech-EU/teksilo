@@ -1,6 +1,6 @@
 //! The bati! body form replaces method chains on widgets. Instead of
-//! `item: MenuItem::new_literal("Run").on_activate(cmd).tooltip_literal("...")`,
-//! the idiomatic syntax is `item: MenuItem::new_literal("Run") { on_activate: cmd; tooltip_literal: "..." }`
+//! `item: MenuItem::new("Run").on_activate(cmd).tooltip("...")`,
+//! the idiomatic syntax is `item: MenuItem::new("Run") { on_activate: cmd; tooltip: "..." }`
 //! — each builder method becomes a body item. The result is a more
 //! uniform DSL (the same name-value shape as top-level elements) and
 //! avoids the element-vs-expression ambiguity that method chains
@@ -19,7 +19,7 @@ struct MenuItem {
 }
 
 impl MenuItem {
-    fn new_literal(label: &'static str) -> Self {
+    fn new(label: &'static str) -> Self {
         Self {
             label,
             activated: false,
@@ -32,7 +32,7 @@ impl MenuItem {
         self
     }
 
-    fn tooltip_literal(mut self, t: &'static str) -> Self {
+    fn tooltip(mut self, t: &'static str) -> Self {
         self.tooltip = Some(t);
         self
     }
@@ -71,11 +71,11 @@ impl Widget for Menu {
 fn main() {
     let m: Menu = bati!(
         Menu {
-            item: MenuItem::new(lit!("Run")) {
+            item: MenuItem::new("Run") {
                 on_activate: 1
-                tooltip: lit!("Runs the thing")
+                tooltip: "Runs the thing"
             }
-            item: MenuItem::new(lit!("Stop")) {
+            item: MenuItem::new("Stop") {
                 on_activate: 2
             }
         }

@@ -83,7 +83,7 @@ impl Widget for Root {
             .zip(&cf)
             .map(|(p, c)| p.chars().count() >= MIN_LEN && p == c);
 
-        let card = GroupBox::new("Sign in").child(
+        let card = GroupBox::new(lit!("Sign in")).child(
             VStack::new()
                 .spacing(12.0)
                 .child(labeled(
@@ -130,7 +130,7 @@ impl Widget for Root {
                 }),
         );
 
-        let showcase = GroupBox::new("Echo modes").child(
+        let showcase = GroupBox::new(lit!("Echo modes")).child(
             VStack::new()
                 .spacing(12.0)
                 .child(labeled(

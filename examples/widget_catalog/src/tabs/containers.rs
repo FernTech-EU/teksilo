@@ -23,7 +23,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
     let panel = section(
         ctx,
-        "Panel",
+        lit!("Panel"),
         Panel::new()
             .background(SurfaceRole::Raised)
             .border_color(BorderRole::Default)
@@ -33,7 +33,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let card = section(
         ctx,
-        "Card",
+        lit!("Card"),
         Card::new()
             .header(
                 TextWidget::new(tr!(cnt_card_header()))
@@ -49,7 +49,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let group_box = section(
         ctx,
-        "GroupBox",
+        lit!("GroupBox"),
         GroupBox::new(tr!(cnt_groupbox_title()))
             .checkable(sigs.group_box_notifications_on.clone())
             .child(
@@ -63,7 +63,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let group_header = section(
         ctx,
-        "GroupHeader",
+        lit!("GroupHeader"),
         VStack::new()
             .spacing(6.0)
             .child(GroupHeader::new(tr!(cnt_groupheader_title())))
@@ -71,7 +71,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let accordion = section(
         ctx,
-        "Accordion",
+        lit!("Accordion"),
         VStack::new()
             .spacing(6.0)
             .child(
@@ -91,7 +91,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let tool_box = section(
         ctx,
-        "ToolBox",
+        lit!("ToolBox"),
         FixedSize::new().bind_height(220.0_f32).child(
             ToolBox::new(sigs.tool_box_selected.clone())
                 .add(ToolBoxItem::new(
@@ -110,7 +110,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let scroll_area = section(
         ctx,
-        "ScrollArea",
+        lit!("ScrollArea"),
         FixedSize::new()
             .bind_width(280.0_f32)
             .bind_height(120.0_f32)
@@ -141,7 +141,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let split_value = ctx.signal(0.5_f32);
     let split = section(
         ctx,
-        "SplitView",
+        lit!("SplitView"),
         FixedSize::new()
             .bind_width(360.0_f32)
             .bind_height(120.0_f32)

@@ -150,10 +150,11 @@ impl SceneItem for TextItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
 
     #[test]
     fn text_item_label_falls_back_to_text() {
-        let item = TextItem::new("Hello", Rect::new(0.0, 0.0, 100.0, 30.0));
+        let item = TextItem::new(lit!("Hello"), Rect::new(0.0, 0.0, 100.0, 30.0));
         assert_eq!(SceneItem::label(&item).as_deref(), Some("Hello"));
     }
 }

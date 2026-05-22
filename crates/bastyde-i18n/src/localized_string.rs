@@ -96,23 +96,11 @@ impl LocalizedString {
     }
 }
 
-impl From<String> for LocalizedString {
-    fn from(text: String) -> Self {
-        Self::literal(text)
-    }
-}
-
-impl From<&str> for LocalizedString {
-    fn from(text: &str) -> Self {
-        Self::literal(text)
-    }
-}
-
-impl From<&String> for LocalizedString {
-    fn from(text: &String) -> Self {
-        Self::literal(text.clone())
-    }
-}
+// No `From<&str> / From<String> / From<&String> for LocalizedString`.
+// Untranslated literals must be wrapped explicitly via `lit!(...)` (or
+// `LocalizedString::literal(...)`), and translated strings via `tr!(...)`,
+// so a bare string can never silently become an untranslated label and a
+// grep for `lit!` / `tr!` finds every UI string in one pass.
 
 /// Convert a `LocalizedString` into a `Prop<String>` suitable for binding
 /// to a widget's text property. If an `I18nManager` is installed on this
@@ -129,11 +117,6 @@ impl From<LocalizedString> for Prop<String> {
         }
     }
 }
-
-// Note: deliberately no `impl From<&str>` — see §12.3 of the architecture
-// document. Untranslated literals must be wrapped explicitly via
-// `LocalizedString::literal(...)` or produced by `tr!(...)`, so that a
-// grep for those names finds every untranslated string in one pass.
 
 /// Eagerly resolve a `LocalizedString` into a plain `String`. Equivalent
 /// to calling `resolve_now()`. Enables `tr!(...)` to flow through
@@ -170,8 +153,8 @@ mod tests {
     }
 
     #[test]
-    fn from_string_produces_literal() {
-        let ls: LocalizedString = String::from("hello").into();
+    fn literal_accepts_owned_string() {
+        let ls = LocalizedString::literal(String::from("hello"));
         assert_eq!(ls.resolve_now(), "hello");
     }
 

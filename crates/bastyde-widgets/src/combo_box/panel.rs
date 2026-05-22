@@ -10,6 +10,7 @@
 //! survives each keystroke so the cursor doesn't jump.
 
 #[cfg(feature = "rich-text")]
+use bastyde_i18n::lit;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -541,7 +542,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
                     // ArrowDown/ArrowUp handler) is already correct
                     // when the user confirms.
                     let search_input = crate::text_input::TextInput::new(query.clone())
-                        .placeholder("Search…")
+                        .placeholder(lit!("Search…"))
                         .show_clear_button(true)
                         .on_submit_fn(|ctx| ctx.dismiss_top_overlay());
                     let search_id = ctx.add(search_input);

@@ -30,7 +30,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
     let hstack = section(
         ctx,
-        "HStack",
+        lit!("HStack"),
         HStack::new()
             .spacing(8.0)
             .child(color_cell(SurfaceRole::AccentSubtle, "A"))
@@ -39,7 +39,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let vstack = section(
         ctx,
-        "VStack",
+        lit!("VStack"),
         VStack::new()
             .spacing(6.0)
             .child(color_cell(SurfaceRole::AltRow, "Top"))
@@ -48,7 +48,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let zstack = section(
         ctx,
-        "ZStack",
+        lit!("ZStack"),
         FixedSize::new()
             .bind_width(120.0_f32)
             .bind_height(60.0_f32)
@@ -64,7 +64,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let grid = section(
         ctx,
-        "Grid",
+        lit!("Grid"),
         Grid::new()
             .columns(vec![
                 TrackSize::Fixed(80.0),
@@ -83,7 +83,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let wrap = section(
         ctx,
-        "Wrap",
+        lit!("Wrap"),
         Wrap::new()
             .spacing(8.0)
             .line_spacing(8.0)
@@ -97,7 +97,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let masonry = section(
         ctx,
-        "MasonryLayout",
+        lit!("MasonryLayout"),
         MasonryLayout::new(3)
             .column_spacing(8.0)
             .item_spacing(8.0)
@@ -110,7 +110,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let form = section(
         ctx,
-        "FormLayout",
+        lit!("FormLayout"),
         FormLayout::new()
             .row_spacing(6.0)
             .line(
@@ -124,7 +124,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let center = section(
         ctx,
-        "Center",
+        lit!("Center"),
         FixedSize::new()
             .bind_width(180.0_f32)
             .bind_height(60.0_f32)
@@ -138,7 +138,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let expand = section(
         ctx,
-        "Expand",
+        lit!("Expand"),
         FixedSize::new()
             .bind_width(200.0_f32)
             .bind_height(28.0_f32)
@@ -160,7 +160,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let padding = section(
         ctx,
-        "Padding",
+        lit!("Padding"),
         Panel::new().background(SurfaceRole::Raised).child(
             Padding::uniform(16.0)
                 .child(TextWidget::new(tr!(lay_padding_body())).style(TextStyleRole::Small)),
@@ -168,7 +168,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let spacer = section(
         ctx,
-        "Spacer",
+        lit!("Spacer"),
         FixedSize::new()
             .bind_width(220.0_f32)
             .bind_height(28.0_f32)
@@ -181,7 +181,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let divider = section(
         ctx,
-        "Divider",
+        lit!("Divider"),
         VStack::new()
             .spacing(4.0)
             .child(TextWidget::new(tr!(lay_above())).style(TextStyleRole::Small))
@@ -190,7 +190,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let fixed_size = section(
         ctx,
-        "FixedSize",
+        lit!("FixedSize"),
         FixedSize::new()
             .bind_width(140.0_f32)
             .bind_height(40.0_f32)
@@ -202,7 +202,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let min_size = section(
         ctx,
-        "MinSize",
+        lit!("MinSize"),
         MinSize::new(160.0, 32.0).child(
             Panel::new()
                 .background(SurfaceRole::Raised)
@@ -211,7 +211,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let max_size = section(
         ctx,
-        "MaxSize",
+        lit!("MaxSize"),
         MaxSize::new(240.0, 32.0).child(
             Panel::new()
                 .background(SurfaceRole::Sunken)
@@ -221,7 +221,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let aspect =
         section(
             ctx,
-            "AspectRatio",
+            lit!("AspectRatio"),
             FixedSize::new().bind_width(180.0_f32).child(
                 AspectRatio::widescreen().child(
                     Panel::new()
@@ -242,7 +242,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     });
     let switcher = section(
         ctx,
-        "Switcher",
+        lit!("Switcher"),
         VStack::new().spacing(6.0).child(switcher_btn).child(
             FixedSize::new()
                 .bind_width(180.0_f32)

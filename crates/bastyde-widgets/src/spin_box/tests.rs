@@ -4,6 +4,7 @@ use bastyde_canvas::SizeProposal;
 use bastyde_core::event::{Key, Modifiers};
 use bastyde_core::signal::Signal;
 use bastyde_core::widget_tree::WidgetTree;
+use bastyde_i18n::lit;
 
 use super::{SpinBox, StepType, WheelMode, WrapMode};
 
@@ -57,8 +58,8 @@ fn builder_chains_compile() {
             .wrap_mode(WrapMode::Wrap)
             .step_type(StepType::Adaptive)
             .wheel_mode(WheelMode::Hover)
-            .label("Opacity")
-            .placeholder("—")
+            .label(lit!("Opacity"))
+            .placeholder(lit!("—"))
             .enabled(true)
             .read_only(false)
             .text_from_value(|v: f64| format!("{:.1}", v))
@@ -434,7 +435,7 @@ fn a11y_numeric_value_matches_signal() {
 fn a11y_name_uses_label() {
     let value = Signal::new(0_i32);
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    let id = tree.add(SpinBox::new(value, 0, 100).label("Font size"));
+    let id = tree.add(SpinBox::new(value, 0, 100).label(lit!("Font size")));
     tree.layout(SizeProposal::exact(300.0, 60.0));
     tick(&mut tree);
     let info = tree.accessibility_node(id);
@@ -470,7 +471,7 @@ fn reactive_suffix_survives_value_transitions() {
         SpinBox::new(value.clone(), 0, 3600)
             .suffix(" s")
             .special_value_text("Never")
-            .label("Timeout"),
+            .label(lit!("Timeout")),
     );
     tree.layout(SizeProposal::exact(300.0, 60.0));
     tick(&mut tree);

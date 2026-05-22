@@ -117,7 +117,7 @@ impl Widget for Root {
                                         ],
                                         fruit_selected.clone(),
                                     )
-                                    .placeholder("Select a fruit..."),
+                                    .placeholder(lit!("Select a fruit...")),
                                 ),
                         )
                         .child(
@@ -146,7 +146,7 @@ impl Widget for Root {
                                         vec!["Small", "Medium", "Large"],
                                         size_selected.clone(),
                                     )
-                                    .placeholder("Choose size")
+                                    .placeholder(lit!("Choose size"))
                                     .enabled(false),
                                 ),
                         )
@@ -194,7 +194,7 @@ impl Widget for Root {
                                         ],
                                         country_selected.clone(),
                                     )
-                                    .placeholder("Pick a country…")
+                                    .placeholder(lit!("Pick a country…"))
                                     .search_query(country_query.clone())
                                     .max_visible_items(6),
                                 ),
@@ -209,7 +209,7 @@ impl Widget for Root {
                                 )
                                 .child(
                                     ComboBox::new(huge_items, huge_selected.clone())
-                                        .placeholder("Open me — virtualized")
+                                        .placeholder(lit!("Open me — virtualized"))
                                         .max_visible_items(10),
                                 ),
                         ),

@@ -72,7 +72,7 @@ fn toolbar(next_id: Rc<Cell<usize>>, upload_handle: Rc<Cell<Option<ToastHandle>>
                 ctx.show_toast(
                     Toast::error(lit!(format!("Build #{i} failed")))
                         .body(lit!("Three errors in src/main.rs, two warnings."))
-                        .action(ToastAction::primary("Show errors", |_| {
+                        .action(ToastAction::primary(lit!("Show errors"), |_| {
                             eprintln!("[demo] Show errors clicked");
                         })),
                 );
