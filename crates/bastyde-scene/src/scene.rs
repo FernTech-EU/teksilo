@@ -211,9 +211,10 @@ pub(crate) struct SceneEntry {
     pub(crate) transform: Transform2D,
     pub(crate) kind: SceneEntryKind,
     /// Z-order for paint — higher values paint *later* (on top).
-    /// Equal-z entries fall back to insertion order. Lightweight
-    /// tier only; heavyweight widget z-order is governed by the
-    /// arena's child order.
+    /// Equal-z entries fall back to insertion order. Applies to **both**
+    /// tiers: lightweight items sort within their band each paint, and
+    /// heavyweight widget entries restack the SceneView's arena children
+    /// by z on the next rebuild (see [`Scene::set_z`]).
     pub(crate) z: f32,
     /// Which lightweight paint band this item sits in relative to the
     /// heavyweight tier — [`SceneLayer::Under`] (default, backdrop) or

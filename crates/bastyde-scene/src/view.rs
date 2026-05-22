@@ -6,6 +6,12 @@
 //! - **Placement.** `place_children` plants each materialised
 //!   heavyweight widget at its scene-space rect (composed from the
 //!   item's `local_pos`, `transform`, and parent chain).
+//! - **Paint bands.** Three passes: `paint` draws the `Under` lightweight
+//!   items (backdrop), the arena child-walk draws the heavyweight widgets,
+//!   then `post_paint` draws the `Over` lightweight items + marquee /
+//!   foreground / debug overlays. `z` orders within each tier; the
+//!   Under/Over band ([`Scene::set_layer`](crate::Scene::set_layer))
+//!   chooses the side. See `docs/bastyde-scene.md` §"Z-order and paint bands".
 //! - **View transform.** Pan / zoom / rotation are four animated
 //!   `Signal<f32>`s on `SceneView`, composed into a derived
 //!   `Signal<Transform2D>` bound via `BuildContext::set_content_transform`
@@ -2961,12 +2967,6 @@ impl Widget for SceneView {
         // through the same view-transform projection as the heavyweight
         // children. We pass scene-coord rects directly — the renderer
         // composes pan / zoom / rotation / bounds-origin on top.
-        //
-        // Lightweight items paint *before* heavyweight children. The
-        // render walker invokes the parent's paint first, then descends
-        // into children. That's exactly what we want for the
-        // background-furniture use case (connector lines, tiled grids,
-        // decorations) — items render under the cards.
         let region = self.visible_scene_region(bounds);
 
         // App-supplied background closure: paints under all items in
