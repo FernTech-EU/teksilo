@@ -184,7 +184,7 @@ impl ToastSurface {
         let callback = action.callback();
         let closes_toast = action.closes_toast_flag();
         let label_owned = action.label().to_string();
-        let tooltip_owned = action.tooltip_ref().map(|t| t.to_string());
+        let tooltip_owned = action.tooltip_ref().cloned();
         let registry_for_handler = registry.clone();
         let activate = move |ctx: &mut bastyde_core::widget::EventContext| {
             callback(ctx);
@@ -202,7 +202,7 @@ impl ToastSurface {
             ToastActionStyle::Link => {
                 let mut link = Link::new(lit!(label_owned)).on_activate_fn(activate);
                 if let Some(tip) = tooltip_owned {
-                    link = link.tooltip(lit!(tip));
+                    link = link.tooltip(tip);
                 }
                 ctx.add(link)
             }
@@ -211,7 +211,7 @@ impl ToastSurface {
                     .variant(*variant)
                     .on_activate_fn(activate);
                 if let Some(tip) = tooltip_owned {
-                    btn = btn.tooltip(lit!(tip));
+                    btn = btn.tooltip(tip);
                 }
                 ctx.add(btn)
             }

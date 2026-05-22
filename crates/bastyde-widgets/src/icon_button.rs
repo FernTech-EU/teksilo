@@ -61,7 +61,6 @@
 //!     )
 //! ```
 
-use bastyde_i18n::lit;
 use std::rc::Rc;
 use std::sync::OnceLock;
 
@@ -97,7 +96,7 @@ type ActionFactory = Box<dyn Fn(&mut EventContext)>;
 pub struct IconButton {
     // Configuration (set via builder)
     icon: IconWidget,
-    tooltip_text: Option<String>,
+    tooltip_text: Option<bastyde_i18n::LocalizedString>,
     /// Optional rich tooltip source — registry key or inline content.
     /// Mutually exclusive with `tooltip_text` and `composite_tooltip_content`.
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
@@ -271,8 +270,7 @@ impl IconButton {
     /// Attach a tooltip that appears after a hover delay. Required —
     /// the tooltip text doubles as the AT name for icon-only buttons.
     pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
-        self.tooltip_text = Some(ls.resolve_now());
+        self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;
         self
@@ -672,8 +670,8 @@ impl bastyde_core::widget::Widget for IconButton {
                 source,
                 crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
             );
-        } else if let Some(ref tooltip_text) = self.tooltip_text {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(lit!(tooltip_text));
+        } else if let Some(tooltip_text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(tooltip_text);
             let tooltip_id = ctx.add(tooltip_widget);
             let delay = std::time::Duration::from_millis(500);
             ctx.attach_tooltip(root_id, tooltip_id, delay);
@@ -848,7 +846,7 @@ impl bastyde_core::widget::Widget for IconButton {
              For rich/composite tooltips, also pair with `.access_label(...)`."
         );
         if let Some(ref text) = self.tooltip_text {
-            builder.set_name(text.as_str());
+            builder.set_name(text.resolve_now());
         } else if let Some(ref text) = rich_name {
             builder.set_name(text.as_str());
         } else {
@@ -999,6 +997,7 @@ fn default_eye_off_icon() -> IconWidget {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_core::signal::Signal;
     use bastyde_core::widget_tree::WidgetTree;
 

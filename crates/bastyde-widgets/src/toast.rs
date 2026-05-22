@@ -118,7 +118,7 @@ pub struct ToastAction {
     style: ToastActionStyle,
     closes_toast: bool,
     shortcut_id: Option<String>,
-    tooltip: Option<String>,
+    tooltip: Option<bastyde_i18n::LocalizedString>,
 }
 
 impl ToastAction {
@@ -189,8 +189,7 @@ impl ToastAction {
 
     /// Optional tooltip text shown when the pointer hovers the action.
     pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
-        self.tooltip = Some(ls.resolve_now());
+        self.tooltip = Some(text.into());
         self
     }
 
@@ -206,8 +205,8 @@ impl ToastAction {
     pub fn shortcut_id_ref(&self) -> Option<&str> {
         self.shortcut_id.as_deref()
     }
-    pub fn tooltip_ref(&self) -> Option<&str> {
-        self.tooltip.as_deref()
+    pub fn tooltip_ref(&self) -> Option<&bastyde_i18n::LocalizedString> {
+        self.tooltip.as_ref()
     }
     pub fn callback(&self) -> ToastActionCallback {
         self.on_invoke.clone()

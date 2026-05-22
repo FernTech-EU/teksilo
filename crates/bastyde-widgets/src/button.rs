@@ -102,7 +102,7 @@ pub struct Button {
     initial_enabled: bool,
     icon: Option<IconWidget>,
     icon_location: IconLocation,
-    tooltip_text: Option<String>,
+    tooltip_text: Option<bastyde_i18n::LocalizedString>,
     /// Optional rich tooltip source (registry key or inline content).
     /// Mutually exclusive with `tooltip_text` and `composite_tooltip_content`
     /// — every tooltip setter clears the other two so last-call wins.
@@ -253,8 +253,7 @@ impl Button {
 
     /// Attach a tooltip that appears after a hover delay.
     pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
-        self.tooltip_text = Some(ls.resolve_now());
+        self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;
         self
@@ -756,8 +755,8 @@ impl bastyde_core::widget::Widget for Button {
                 source,
                 crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
             );
-        } else if let Some(ref tooltip_text) = self.tooltip_text {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(lit!(tooltip_text));
+        } else if let Some(tooltip_text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(tooltip_text);
             let tooltip_id = ctx.add(tooltip_widget);
             let delay = std::time::Duration::from_millis(200);
             ctx.attach_tooltip(root_id, tooltip_id, delay);

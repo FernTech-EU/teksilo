@@ -58,7 +58,7 @@ pub struct MenuItem {
     /// tracks user rebindings automatically (the build registers the
     /// registry's version signal as a Relayout binding on self).
     shortcut_id: Option<&'static str>,
-    tooltip_text: Option<String>,
+    tooltip_text: Option<bastyde_i18n::LocalizedString>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn bastyde_core::widget::Widget>>,
     action: Option<CommandFactory>,
@@ -184,8 +184,7 @@ impl MenuItem {
     /// Attach a tooltip that appears after a hover delay, same mechanism
     /// as [`Button::tooltip`](crate::button::Button::tooltip).
     pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
-        self.tooltip_text = Some(ls.resolve_now());
+        self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;
         self
@@ -456,8 +455,8 @@ impl Widget for MenuItem {
                 source,
                 crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
             );
-        } else if let Some(ref tooltip_text) = self.tooltip_text {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(lit!(tooltip_text));
+        } else if let Some(tooltip_text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(tooltip_text);
             let tooltip_id = ctx.add(tooltip_widget);
             let delay = std::time::Duration::from_millis(500);
             ctx.attach_tooltip(root_id, tooltip_id, delay);

@@ -43,7 +43,6 @@ pub use registry::{
 };
 pub use rich::RichTooltipWidget;
 
-use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Canvas, Rect, Size, SizeProposal};
@@ -106,7 +105,12 @@ pub(crate) fn paint_composite_tooltip_shadows(
 /// (`TooltipWidget::new(...).style(impl TooltipStyle)`) or theme-wide
 /// via `theme.style_slots.tooltip = Some(Rc::new(MyTooltip))`.
 pub struct TooltipWidget {
-    text: String,
+    /// The tooltip body. Kept as a `LocalizedString` (not an eagerly
+    /// resolved `String`) so a `tr!(...)` source stays locale-reactive:
+    /// the inner `TextWidget` receives a `Prop::Bound` that re-resolves
+    /// on locale change without a rebuild. `lit!(...)` sources resolve
+    /// to a static prop, as before.
+    text: bastyde_i18n::LocalizedString,
     style_override: Option<SharedTooltipStyle>,
     root_child_id: Option<WidgetId>,
 }
@@ -114,16 +118,15 @@ pub struct TooltipWidget {
 impl std::fmt::Debug for TooltipWidget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TooltipWidget")
-            .field("text", &self.text)
+            .field("text", &self.text.resolve_now())
             .finish()
     }
 }
 
 impl TooltipWidget {
     pub fn new(text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
         Self {
-            text: ls.resolve_now(),
+            text: text.into(),
             style_override: None,
             root_child_id: None,
         }
@@ -139,7 +142,7 @@ impl TooltipWidget {
 
 impl Widget for TooltipWidget {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let text = TextWidget::new(lit!(&self.text))
+        let text = TextWidget::new(self.text.clone())
             .style(TextStyleRole::Small)
             .color(TextRole::TooltipText)
             .single_line();
@@ -184,7 +187,9 @@ impl Widget for TooltipWidget {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::Tooltip);
-        builder.set_name(&self.text);
+        // Resolve at walk time — the AT tree re-walks on a locale change,
+        // so the announced name follows the active locale.
+        builder.set_name(self.text.resolve_now());
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -196,6 +201,7 @@ impl Widget for TooltipWidget {
 mod tests {
     use super::*;
     use bastyde_canvas::SizeProposal;
+    use bastyde_i18n::lit;
     use bastyde_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
     use bastyde_core::widget_tree::WidgetTree;
 

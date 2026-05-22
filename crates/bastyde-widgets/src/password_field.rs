@@ -106,7 +106,7 @@ pub struct PasswordField {
     at_reveal_policy: AtRevealPolicy,
 
     // ── Tooltips (mutually exclusive, last-call-wins) ───────────────
-    tooltip_text: Option<String>,
+    tooltip_text: Option<bastyde_i18n::LocalizedString>,
     rich_tooltip_source: Option<RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn Widget>>,
 
@@ -545,8 +545,8 @@ impl Widget for PasswordField {
                 source,
                 tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
             );
-        } else if let Some(ref text) = self.tooltip_text {
-            let tooltip_id = ctx.add(crate::tooltip::TooltipWidget::new(lit!(text)));
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_id = ctx.add(crate::tooltip::TooltipWidget::new(text));
             ctx.attach_tooltip(root_id, tooltip_id, std::time::Duration::from_millis(500));
         }
 

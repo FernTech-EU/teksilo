@@ -76,7 +76,7 @@ pub struct SplitButton {
     /// [`SplitButton::new`], `false` for [`SplitButton::new_static`].
     promote_on_select: bool,
     /// Tooltip shown on hover over the main (default-action) region.
-    tooltip_text: Option<String>,
+    tooltip_text: Option<bastyde_i18n::LocalizedString>,
     /// Rich tooltip source for the main region (registry key or inline
     /// content). Mutually exclusive with `tooltip_text` and
     /// `composite_tooltip_content`.
@@ -87,7 +87,7 @@ pub struct SplitButton {
     /// Tooltip shown on hover over the trailing chevron region. Falls
     /// back to a generic "Show dropdown menu" label when not explicitly
     /// set, since the chevron region has no label of its own.
-    chevron_tooltip_text: Option<String>,
+    chevron_tooltip_text: Option<bastyde_i18n::LocalizedString>,
     /// Rich tooltip source for the chevron region.
     chevron_rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     /// Composite tooltip body for the chevron region.
@@ -184,8 +184,7 @@ impl SplitButton {
     /// Attach a tooltip to the main (default-action) region. Same hover
     /// delay as [`Button::tooltip`](crate::button::Button::tooltip).
     pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
-        self.tooltip_text = Some(ls.resolve_now());
+        self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;
         self
@@ -222,8 +221,7 @@ impl SplitButton {
     /// region. When unset, the chevron gets a default "Show dropdown
     /// menu" tooltip so its affordance isn't silent.
     pub fn chevron_tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
-        self.chevron_tooltip_text = Some(ls.resolve_now());
+        self.chevron_tooltip_text = Some(text.into());
         self.chevron_rich_tooltip_source = None;
         self.chevron_composite_tooltip_content = None;
         self
@@ -568,8 +566,8 @@ impl Widget for SplitButton {
                 source,
                 crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
             );
-        } else if let Some(ref text) = self.tooltip_text {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(lit!(text));
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
             let tooltip_id = ctx.add(tooltip_widget);
             ctx.attach_tooltip(
                 main_region_id,
@@ -651,8 +649,8 @@ impl Widget for SplitButton {
             let chevron_text = self
                 .chevron_tooltip_text
                 .clone()
-                .unwrap_or_else(|| "Show dropdown menu".to_string());
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(lit!(&chevron_text));
+                .unwrap_or_else(|| lit!("Show dropdown menu"));
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(chevron_text);
             let tooltip_id = ctx.add(tooltip_widget);
             ctx.attach_tooltip(
                 chevron_region_id,

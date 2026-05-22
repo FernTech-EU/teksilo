@@ -123,7 +123,7 @@ pub struct TextInput {
     /// Set by `.bind_validation_feedback(...)`; wired via `ctx.effect`
     /// in `build()` so the bridge outlives construction.
     feedback_to_bridge: Option<Signal<ValidationFeedback>>,
-    tooltip_text: Option<String>,
+    tooltip_text: Option<bastyde_i18n::LocalizedString>,
     rich_tooltip_source: Option<RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn bastyde_core::widget::Widget>>,
 
@@ -379,8 +379,7 @@ impl TextInput {
 
     /// Attach a plain tooltip. Accepts `tr!(...)` or `lit!(...)`.
     pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
-        self.tooltip_text = Some(ls.resolve_now());
+        self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;
         self
@@ -682,8 +681,8 @@ impl Widget for TextInput {
                 source,
                 tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
             );
-        } else if let Some(ref text) = self.tooltip_text {
-            let tw = crate::tooltip::TooltipWidget::new(lit!(text));
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tw = crate::tooltip::TooltipWidget::new(text);
             let tooltip_id = ctx.add(tw);
             let delay = std::time::Duration::from_millis(500);
             ctx.attach_tooltip(root_id, tooltip_id, delay);

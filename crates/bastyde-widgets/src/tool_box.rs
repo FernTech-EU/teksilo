@@ -50,7 +50,8 @@ use crate::primitives::{
     VStack, ZStack,
 };
 use crate::tooltip::{
-    DEFAULT_RICH_TOOLTIP_DELAY, RichTooltipSource, TooltipContent, attach_rich_tooltip_source,
+    DEFAULT_RICH_TOOLTIP_DELAY, RichTooltipSource, TooltipContent, TooltipWidget,
+    attach_rich_tooltip_source,
 };
 
 // Large sentinel value used when binding `MaxSize::max_height` / `max_width`
@@ -80,7 +81,12 @@ pub struct ToolBoxItem {
     label: String,
     leading: Option<Box<dyn Widget>>,
     trailing: Option<Box<dyn Widget>>,
-    tooltip: Option<RichTooltipSource>,
+    /// Plain-text tooltip body. Mutually exclusive with `rich_tooltip`
+    /// (the last tooltip setter called wins). Kept as a `LocalizedString`
+    /// so a `tr!(...)` source stays locale-reactive.
+    tooltip_text: Option<LocalizedString>,
+    /// Rich (registry-key or inline `TooltipContent`) tooltip.
+    rich_tooltip: Option<RichTooltipSource>,
     content: PendingChild,
     /// Initial-enabled hint. Forwarded into the arena via
     /// `ctx.enabled_when(header_id, false)` at build time when `false`.
@@ -108,7 +114,8 @@ impl ToolBoxItem {
             label: ls.resolve_now(),
             leading: None,
             trailing: None,
-            tooltip: None,
+            tooltip_text: None,
+            rich_tooltip: None,
             content: PendingChild::Deferred(Box::new(content)),
             initial_enabled: true,
         }
@@ -121,7 +128,8 @@ impl ToolBoxItem {
             label: ls.resolve_now(),
             leading: None,
             trailing: None,
-            tooltip: None,
+            tooltip_text: None,
+            rich_tooltip: None,
             content: PendingChild::Id(content_id),
             initial_enabled: true,
         }
@@ -150,17 +158,31 @@ impl ToolBoxItem {
         self
     }
 
-    /// Attach a rich tooltip shown after a hover delay on the header row.
-    /// Accepts either a registry key (`"save-as"`) or inline
-    /// [`TooltipContent`].
-    pub fn tooltip(mut self, source: impl Into<RichTooltipSource>) -> Self {
-        self.tooltip = Some(source.into());
+    /// Attach a plain-text tooltip shown after a hover delay on the header
+    /// row. The text may come from `tr!(...)` (translated, locale-reactive)
+    /// or `lit!(...)`. Mirrors `.tooltip(...)` on Button / IconButton /
+    /// MenuItem. Overrides any previously set rich tooltip.
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip = None;
         self
     }
 
-    /// Attach an inline tooltip without using the registry.
-    pub fn tooltip_content(mut self, content: TooltipContent) -> Self {
-        self.tooltip = Some(RichTooltipSource::Content(content));
+    /// Attach a rich tooltip resolved from the app-wide
+    /// [`TooltipRegistry`](crate::tooltip::TooltipRegistry) by key.
+    /// Overrides any previously set plain `.tooltip(...)` text.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip = Some(RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self
+    }
+
+    /// Attach a rich tooltip driven by inline [`TooltipContent`] — for
+    /// one-offs that don't belong in the registry. Overrides any
+    /// previously set plain `.tooltip(...)` text.
+    pub fn rich_tooltip_content(mut self, content: TooltipContent) -> Self {
+        self.rich_tooltip = Some(RichTooltipSource::Content(content));
+        self.tooltip_text = None;
         self
     }
 
@@ -315,7 +337,8 @@ struct ToolBoxHeader {
     enabled_flags: Rc<Vec<bool>>,
     pending_leading: Option<Box<dyn Widget>>,
     pending_trailing: Option<Box<dyn Widget>>,
-    tooltip: Option<RichTooltipSource>,
+    tooltip_text: Option<LocalizedString>,
+    rich_tooltip: Option<RichTooltipSource>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -331,7 +354,8 @@ impl ToolBoxHeader {
         enabled_flags: Rc<Vec<bool>>,
         pending_leading: Option<Box<dyn Widget>>,
         pending_trailing: Option<Box<dyn Widget>>,
-        tooltip: Option<RichTooltipSource>,
+        tooltip_text: Option<LocalizedString>,
+        rich_tooltip: Option<RichTooltipSource>,
     ) -> Self {
         Self {
             label,
@@ -343,7 +367,8 @@ impl ToolBoxHeader {
             enabled_flags,
             pending_leading,
             pending_trailing,
-            tooltip,
+            tooltip_text,
+            rich_tooltip,
             root_child_id: None,
         }
     }
@@ -529,9 +554,14 @@ impl Widget for ToolBoxHeader {
         let root_id = ctx.add(MinSize::new(0.0, TOOL_BOX_HEADER_MIN_HEIGHT).child_id(zstack_id));
         self.root_child_id = Some(root_id);
 
-        // Attach rich tooltip if configured.
-        if let Some(source) = self.tooltip.take() {
+        // Attach tooltip if configured. Plain and rich are mutually
+        // exclusive (last setter wins); rich takes precedence if both
+        // were somehow set.
+        if let Some(source) = self.rich_tooltip.take() {
             attach_rich_tooltip_source(ctx, root_id, source, DEFAULT_RICH_TOOLTIP_DELAY);
+        } else if let Some(text) = self.tooltip_text.take() {
+            let tip_id = ctx.add(TooltipWidget::new(text));
+            ctx.attach_tooltip(root_id, tip_id, DEFAULT_RICH_TOOLTIP_DELAY);
         }
 
         // --- V2 attached handlers on the header's own node ---
@@ -856,7 +886,8 @@ impl Widget for ToolBox {
                 enabled_flags.clone(),
                 item.leading,
                 item.trailing,
-                item.tooltip,
+                item.tooltip_text,
+                item.rich_tooltip,
             ));
             header_ids.borrow_mut().push(header_id);
 
