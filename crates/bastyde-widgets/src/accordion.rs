@@ -14,7 +14,6 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_i18n::lit;
 use bastyde_tokens::{BorderRole, Color, TextRole, TextStyle, TextStyleRole};
 
 use crate::animations::collapse::Collapse;
@@ -91,7 +90,10 @@ pub const ACCORDION_CORNER_RADIUS: f32 = 4.0;
 ///
 /// Content must be pre-registered via `content_id(id)`.
 pub struct Accordion {
-    title: String,
+    /// Header title. Kept as a `LocalizedString` (not eagerly resolved)
+    /// so a `tr!(...)` / `tr_widget!(...)` source re-renders on locale
+    /// change: the title `TextWidget` binds it as a reactive prop.
+    title: bastyde_i18n::LocalizedString,
     expanded: Signal<bool>,
     content_id: Option<WidgetId>,
     pending_content: Option<Box<dyn Widget>>,
@@ -111,9 +113,8 @@ pub struct Accordion {
 
 impl Accordion {
     pub fn new(title: impl Into<bastyde_i18n::LocalizedString>, expanded: Signal<bool>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = title.into();
         Self {
-            title: ls.resolve_now(),
+            title: title.into(),
             expanded,
             content_id: None,
             pending_content: None,
@@ -192,7 +193,7 @@ impl Widget for Accordion {
 
         // Custom override wins; otherwise use the Body role so the title
         // tracks typography changes across themes.
-        let title_widget = TextWidget::new(lit!(&self.title)).bind_color(header_fg);
+        let title_widget = TextWidget::new(self.title.clone()).bind_color(header_fg);
         let title_widget = if let Some(style) = self.title_style.clone() {
             title_widget.style(style)
         } else {
@@ -242,7 +243,7 @@ impl Widget for Accordion {
         if let Some(content_id) = self.content_id {
             // Wrap content in AccordionRegion (Role::Region) so AT can navigate
             // to the content via the header's aria-controls relationship.
-            let region_id = ctx.add(AccordionRegion::new(self.title.clone(), content_id));
+            let region_id = ctx.add(AccordionRegion::new(self.title.resolve_now(), content_id));
             self.region_id = Some(region_id);
 
             // Disclosure animation is handled by `Collapse`, which
@@ -331,7 +332,8 @@ impl Widget for Accordion {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::Button);
-        builder.set_name(&self.title);
+        // Resolve at walk time — the AT tree re-walks on locale change.
+        builder.set_name(self.title.resolve_now());
         builder.set_expanded(self.expanded.get());
         builder.add_action(bastyde_core::accesskit::Action::Click);
         builder.add_action(bastyde_core::accesskit::Action::Focus);
@@ -349,6 +351,31 @@ impl Widget for Accordion {
 mod tests {
     use super::*;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
+
+    #[test]
+    fn rich_tooltip_more_label_is_a_translatable_framework_string() {
+        // Regression: the rich-tooltip "more" disclosure label used to be
+        // a hardcoded `lit!("More")` frozen by `Accordion`'s eager
+        // resolve. It must now resolve through the bastyde-widgets
+        // framework bundle (`tooltip-more`) and follow the active locale.
+        use bastyde_i18n::{I18nConfig, I18nManager};
+        let cfg = I18nConfig::new()
+            .supported_locales([
+                "en-US".parse().unwrap(),
+                "fr-FR".parse().unwrap(),
+            ])
+            .auto_detect_os_locale(false)
+            .framework_locales(crate::framework_locales());
+        let mgr = I18nManager::from_config(&cfg);
+        assert_eq!(mgr.resolve_widget("tooltip-more", &[]), "More");
+        mgr.set_locale("fr-FR".parse().unwrap());
+        assert_eq!(
+            mgr.resolve_widget("tooltip-more", &[]),
+            "Plus",
+            "tooltip-more must translate to French via the framework bundle"
+        );
+    }
 
     #[test]
     fn accordion_builds_collapsed() {

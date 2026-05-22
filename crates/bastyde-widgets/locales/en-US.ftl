@@ -315,3 +315,7 @@ hex-color-input-corrected-uppercase = Normalized to { $value }
 hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
+
+# Rich tooltip "more" disclosure label (the Accordion title revealing the
+# long-form body inside a sticky rich tooltip).
+tooltip-more = More

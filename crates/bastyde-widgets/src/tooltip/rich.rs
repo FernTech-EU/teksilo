@@ -294,7 +294,11 @@ impl Widget for RichTooltipWidget {
         // Body row: text + optional shortcut chip.
         // a11y_hidden: the tooltip root owns `set_name(body_text)`, so the
         // body TextWidget would duplicate it as a child Label node.
-        let body_widget = TextWidget::new(lit!(body_source))
+        // Bind the body to the `LocalizedString` itself (not a resolved
+        // snapshot) so a `tr!(...)` source re-renders on locale change
+        // without rebuilding the tooltip. `body_source` above is only the
+        // build-time snapshot used to pre-scan `:key` cascade links.
+        let body_widget = TextWidget::new(content.text.clone())
             .style(TextStyleRole::Small)
             .color(TextRole::TooltipText)
             .markup(true)
@@ -328,8 +332,10 @@ impl Widget for RichTooltipWidget {
 
         // Optional "more" disclosure accordion, independent of the dwell
         // indicator. `None` when the entry has no long-form body.
-        let more_accordion: Option<WidgetId> = if let Some(more_text) = more_source {
-            let more_widget = TextWidget::new(lit!(more_text))
+        let more_accordion: Option<WidgetId> = if let Some(more_ls) = content.more.clone() {
+            // Bind the long-form body reactively too (the `more_source`
+            // snapshot is only for the build-time `:key` cascade scan).
+            let more_widget = TextWidget::new(more_ls)
                 .style(TextStyleRole::Small)
                 .color(TextRole::TooltipText)
                 .markup(true)
@@ -341,7 +347,10 @@ impl Widget for RichTooltipWidget {
             // vertically with the indicator on the same baseline.
             let mut accordion_title_style = theme.typography.tiny.clone();
             accordion_title_style.line_height = theme.typography.small.line_height;
-            let accordion = Accordion::new(lit!("More"), expanded)
+            // Framework-owned chrome string → resolve against the
+            // bastyde-widgets bundle (locales/*.ftl) via tr_widget!, so it
+            // translates with the active locale and apps can override it.
+            let accordion = Accordion::new(bastyde_i18n::tr_widget!(tooltip_more()), expanded)
                 .title_color(theme.colors.tooltip_text)
                 .title_style(accordion_title_style)
                 .content(more_widget);
