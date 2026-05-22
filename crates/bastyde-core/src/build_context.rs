@@ -138,6 +138,15 @@ impl<'a> BuildContext<'a> {
         self.tree.request_frame();
     }
 
+    /// Request that the AccessKit tree be re-walked after this build pass.
+    /// Use when `build()` restructured its subtree in a way that changes the
+    /// accessibility tree (relayout alone no longer re-walks AT). `SceneView`
+    /// calls this each build, since it may have materialised or destroyed
+    /// scene widgets or applied a11y-only scene mutations.
+    pub fn request_accessibility_update(&self) {
+        self.tree.request_accessibility_update();
+    }
+
     /// Clone the shared "frame requested" flag. Stash it on widget
     /// state and call `.set(true)` from inside a frame-tick effect
     /// closure to chain-request another frame without needing
@@ -279,6 +288,21 @@ impl<'a> BuildContext<'a> {
         transform: impl Into<crate::signal::Prop<bastyde_canvas::Transform2D>>,
     ) {
         self.tree.set_transform(id, transform);
+    }
+
+    /// Bind a 2D affine **content** transform to a widget — the transform
+    /// positions the widget's content within its fixed parent-space viewport
+    /// (its bounds) rather than transforming the widget itself. Renders the
+    /// same `PushTransform` / `PopTransform` scope as
+    /// [`set_transform`](Self::set_transform), but hit-testing treats the
+    /// bounds as a fixed viewport so the whole visible area stays interactive
+    /// at any pan / zoom. Used by `SceneView` for its pan/zoom view transform.
+    pub fn set_content_transform(
+        &mut self,
+        id: WidgetId,
+        transform: impl Into<crate::signal::Prop<bastyde_canvas::Transform2D>>,
+    ) {
+        self.tree.set_content_transform(id, transform);
     }
 
     /// Bind a Gaussian-equivalent blur radius to a widget. The render

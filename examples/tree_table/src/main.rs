@@ -25,7 +25,7 @@ use bastyde::widgets::{
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -108,29 +108,29 @@ fn main() {
                 let proxy_for_table = proxy.clone();
                 let table = TreeTable::from_projection(proxy_for_table.clone())
                     .add_column(
-                        Column::<FsNode>::new("name", "Name", |row, _: &CellContext| {
-                            Box::new(TextWidget::new_literal(row.name.clone()))
+                        Column::<FsNode>::new("name", lit!("Name"), |row, _: &CellContext| {
+                            Box::new(TextWidget::new(lit!(row.name.clone())))
                         })
                         .width(ColumnWidth::Flex(3.0))
                         .sortable(true)
                         .filterable(true),
                     )
                     .add_column(
-                        Column::<FsNode>::new("size", "Size", |row, _: &CellContext| {
+                        Column::<FsNode>::new("size", lit!("Size"), |row, _: &CellContext| {
                             let s = if row.size == 0 {
                                 String::new()
                             } else {
                                 format!("{} B", row.size)
                             };
-                            Box::new(TextWidget::new_literal(s))
+                            Box::new(TextWidget::new(lit!(s)))
                         })
                         .width(ColumnWidth::Fixed(96.0))
                         .sortable(true)
                         .alignment(Alignment::Trailing),
                     )
                     .add_column(
-                        Column::<FsNode>::new("kind", "Kind", |row, _: &CellContext| {
-                            Box::new(TextWidget::new_literal(row.kind))
+                        Column::<FsNode>::new("kind", lit!("Kind"), |row, _: &CellContext| {
+                            Box::new(TextWidget::new(lit!(row.kind)))
                         })
                         .width(ColumnWidth::Flex(1.0))
                         .sortable(true)

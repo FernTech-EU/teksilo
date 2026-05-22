@@ -246,32 +246,6 @@ impl<T: 'static> Signal<T> {
         }
     }
 
-    /// Set a new value. Marks the signal as dirty and notifies observers.
-    /// Panics if called on a derived (read-only) signal.
-    pub fn set(&self, value: T) {
-        self.try_set(value)
-            .expect("cannot set() on a derived Signal — it is read-only");
-    }
-
-    pub fn try_set(&self, value: T) -> Result<(), SignalAccessError> {
-        match &self.kind {
-            SignalKind::Mutable { inner, .. } => {
-                let mut guard = inner.borrow_mut();
-                guard.value = value;
-                guard.dirty = true;
-                let callbacks: Vec<_> =
-                    guard.observers.iter().map(|e| e.callback.clone()).collect();
-                drop(guard);
-                let guard = inner.borrow();
-                for cb in &callbacks {
-                    cb(&guard.value);
-                }
-                Ok(())
-            }
-            SignalKind::Derived { .. } => Err(SignalAccessError::ReadOnly),
-        }
-    }
-
     /// Register an observer callback. Returns an `ObserverHandle` — dropping
     /// the handle removes the callback.
     pub fn observe(&self, f: impl Fn(&T) + 'static) -> ObserverHandle {
@@ -327,6 +301,49 @@ impl<T: 'static> Signal<T> {
 }
 
 impl<T: Clone + 'static> Signal<T> {
+    /// Set a new value. Marks the signal as dirty and notifies observers.
+    /// Panics if called on a derived (read-only) signal.
+    ///
+    /// Observers may freely re-enter `set`/`try_set`/`observe`, or drop their
+    /// `ObserverHandle`, on this same signal from within their callback — see
+    /// [`try_set`](Self::try_set).
+    pub fn set(&self, value: T) {
+        self.try_set(value)
+            .expect("cannot set() on a derived Signal — it is read-only");
+    }
+
+    /// Fallible [`set`](Self::set): returns [`SignalAccessError::ReadOnly`]
+    /// for a derived signal instead of panicking.
+    ///
+    /// The new value and the observer callbacks are snapshotted while the
+    /// inner `RefCell` is borrowed, then **all** borrows are released before
+    /// any callback runs. An observer is therefore free to re-enter
+    /// `set`/`try_set`/`observe`, or drop an `ObserverHandle`, on this same
+    /// signal without a `RefCell` borrow conflict — mirroring the
+    /// mutate-then-notify discipline used across `bastyde-data`. Each
+    /// notification delivers the value as written by *that* call; observer
+    /// additions or removals made during a callback take effect only on
+    /// subsequent notifications.
+    pub fn try_set(&self, value: T) -> Result<(), SignalAccessError> {
+        match &self.kind {
+            SignalKind::Mutable { inner, .. } => {
+                let (snapshot, callbacks) = {
+                    let mut guard = inner.borrow_mut();
+                    guard.value = value;
+                    guard.dirty = true;
+                    let callbacks: Vec<_> =
+                        guard.observers.iter().map(|e| e.callback.clone()).collect();
+                    (guard.value.clone(), callbacks)
+                };
+                for cb in &callbacks {
+                    cb(&snapshot);
+                }
+                Ok(())
+            }
+            SignalKind::Derived { .. } => Err(SignalAccessError::ReadOnly),
+        }
+    }
+
     /// Read the current value (cloned).
     pub fn get(&self) -> T {
         match &self.kind {
@@ -1281,5 +1298,57 @@ mod tests {
         let derived = a.map_coalesced(|v| *v * 2);
         assert_eq!(derived.get(), 14);
         assert_eq!(derived.as_sources().len(), 1);
+    }
+
+    #[test]
+    fn reentrant_set_in_observer_does_not_panic() {
+        // An observer that writes the same signal must not trip the inner
+        // RefCell: no borrow is held while callbacks run. (Before the fix,
+        // try_set held a shared borrow across the callback loop, so the
+        // nested borrow_mut panicked with BorrowMutError.)
+        let s = Signal::new(0_i32);
+        let s2 = s.clone();
+        let _handle = s.observe(move |v| {
+            // Recurse exactly once — only re-enter while the value is 1.
+            if *v == 1 {
+                s2.set(2);
+            }
+        });
+        s.set(1);
+        assert_eq!(s.get(), 2);
+    }
+
+    #[test]
+    fn detaching_observer_during_notification_does_not_panic() {
+        use std::cell::RefCell;
+        // Observer A drops observer B's handle when fired; B's remover takes
+        // borrow_mut on the same inner. Must not panic now that no borrow is
+        // held during the callback loop.
+        let s = Signal::new(0_i32);
+        let b_slot: Rc<RefCell<Option<ObserverHandle>>> = Rc::new(RefCell::new(None));
+        let b_slot_for_a = b_slot.clone();
+        let _a = s.observe(move |_| {
+            b_slot_for_a.borrow_mut().take();
+        });
+        let b = s.observe(|_| {});
+        *b_slot.borrow_mut() = Some(b);
+        s.set(1);
+    }
+
+    #[test]
+    fn registering_observer_during_notification_does_not_panic() {
+        use std::cell::RefCell;
+        // Registering a new observer mid-callback takes borrow_mut on the
+        // same inner (via try_observe). Must not panic.
+        let s = Signal::new(0_i32);
+        let s2 = s.clone();
+        let extra: Rc<RefCell<Option<ObserverHandle>>> = Rc::new(RefCell::new(None));
+        let extra2 = extra.clone();
+        let _h = s.observe(move |_| {
+            if extra2.borrow().is_none() {
+                *extra2.borrow_mut() = Some(s2.observe(|_| {}));
+            }
+        });
+        s.set(1);
     }
 }

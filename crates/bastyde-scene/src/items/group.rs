@@ -25,7 +25,7 @@ pub struct GroupItem {
     label: Option<String>,
     show_label: bool,
     fill: Option<Color>,
-    stroke: Option<(Color, f32)>,
+    stroke: Option<(Color, StrokeStyle)>,
     corner_radius: f32,
     label_inset: (f32, f32),
     label_color: Option<Color>,
@@ -58,12 +58,6 @@ impl GroupItem {
         self
     }
 
-    /// Untranslated twin of [`label`](Self::label).
-    #[doc(hidden)]
-    pub fn label_literal(self, label: impl Into<String>) -> Self {
-        self.label(bastyde_i18n::LocalizedString::literal(label))
-    }
-
     /// Render the label inline at paint time.
     pub fn show_label(mut self, show: bool) -> Self {
         self.show_label = show;
@@ -89,9 +83,18 @@ impl GroupItem {
         self
     }
 
-    /// Border stroke (color + scene-coord pixel width).
+    /// Border stroke (color + scene-coord pixel width) — scales with zoom.
     pub fn stroke(mut self, color: Color, width: f32) -> Self {
-        self.stroke = Some((color, width.max(0.0)));
+        self.stroke = Some((color, StrokeStyle::solid(width.max(0.0))));
+        self
+    }
+
+    /// Cosmetic border stroke: holds a constant **device-pixel** width at any
+    /// zoom. With `corner_radius > 0` the rounded outline goes through the SDF
+    /// cosmetic path; otherwise `stroke_rect` emits four `CosmeticLine` edges
+    /// (one per side), which are hard-edged and crisp at any zoom.
+    pub fn stroke_cosmetic(mut self, color: Color, width: f32) -> Self {
+        self.stroke = Some((color, StrokeStyle::hairline(width.max(0.0))));
         self
     }
 
@@ -134,16 +137,16 @@ impl SceneItem for GroupItem {
                 canvas.fill_rect(lb, fill);
             }
         }
-        if let Some((color, width)) = self.stroke {
+        if let Some((color, style)) = &self.stroke {
             if self.corner_radius > 0.0 {
                 canvas.stroke_rounded_rect(
                     lb,
                     bastyde_tokens::CornerRadius::uniform(self.corner_radius),
-                    color,
-                    StrokeStyle::solid(width),
+                    *color,
+                    style.clone(),
                 );
             } else {
-                canvas.stroke_rect(lb, color, StrokeStyle::solid(width));
+                canvas.stroke_rect(lb, *color, style.clone());
             }
         }
         if self.show_label
@@ -151,7 +154,7 @@ impl SceneItem for GroupItem {
         {
             let color = self
                 .label_color
-                .or_else(|| self.stroke.map(|(c, _)| c))
+                .or_else(|| self.stroke.as_ref().map(|(c, _)| *c))
                 .unwrap_or(Color::BLACK);
             let (dx, dy) = self.label_inset;
             let label_bounds = Rect::new(
@@ -185,10 +188,10 @@ impl SceneItem for GroupItem {
     /// so clicks fall through to items beneath. Without this
     /// override the snapshot would AABB-hit and capture every event
     /// over the group's rect, blocking the items it contains.
-    fn clone_shape_test(&self) -> Box<dyn Fn(Point) -> bool + 'static> {
+    fn clone_shape_test(&self) -> Box<dyn Fn(Point, f32) -> bool + 'static> {
         let is_visual = self.is_visual();
         let bounds = self.local_bounds;
-        Box::new(move |p| is_visual && bounds.contains(p))
+        Box::new(move |p, _view_scale| is_visual && bounds.contains(p))
     }
 
     fn thumbnail_color(&self) -> Color {
@@ -198,8 +201,8 @@ impl SceneItem for GroupItem {
         if let Some(c) = self.fill {
             return c;
         }
-        if let Some((c, _)) = self.stroke {
-            return c;
+        if let Some((c, _)) = &self.stroke {
+            return *c;
         }
         if self.is_visual() {
             return Color::new(0.6, 0.6, 0.6, 1.0);
@@ -228,6 +231,7 @@ impl SceneItem for GroupItem {
 mod tests {
     use super::*;
     use bastyde_canvas::Transform2D;
+    use bastyde_i18n::lit;
 
     #[test]
     fn group_item_does_not_hit_test_through_aabb() {
@@ -258,7 +262,7 @@ mod tests {
 
     #[test]
     fn group_item_with_label_only_is_not_visual() {
-        let g = GroupItem::new(Rect::new(0.0, 0.0, 100.0, 100.0)).label("Act 1");
+        let g = GroupItem::new(Rect::new(0.0, 0.0, 100.0, 100.0)).label(lit!("Act 1"));
         assert!(!g.is_visual());
         assert!(!g.shape_contains(Point::new(50.0, 50.0)));
     }
@@ -266,7 +270,7 @@ mod tests {
     #[test]
     fn group_item_with_show_label_is_visual() {
         let g = GroupItem::new(Rect::new(0.0, 0.0, 100.0, 100.0))
-            .label("Act 1")
+            .label(lit!("Act 1"))
             .show_label(true);
         assert!(g.is_visual());
         assert!(g.shape_contains(Point::new(50.0, 50.0)));

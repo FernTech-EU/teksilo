@@ -657,15 +657,15 @@ impl Widget for Root {
         // --- UI — menus, buttons, tooltips all reference shortcuts
         //     by id. Labels refresh when the user rebinds because the
         //     widgets observe `shortcut_registry.version()`.
-        let menu = MenuBar::new().menu_literal("File", || {
+        let menu = MenuBar::new().menu(lit!("File"), || {
             Box::new(MenuList::new().item(
-                MenuItem::new_literal("Save")
+                MenuItem::new(lit!("Save"))
                     .for_shortcut("app.save")
                     .on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save)),
             ))
         });
 
-        let save_button = Button::new_literal("Save")
+        let save_button = Button::new(lit!("Save"))
             .on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save));
 
         let root = ctx.add(VStack::new().child(menu).child(save_button));

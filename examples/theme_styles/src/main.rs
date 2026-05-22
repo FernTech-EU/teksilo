@@ -119,9 +119,9 @@ impl Widget for Demo {
              button slot.",
             VStack::new()
                 .spacing(12.0)
-                .child(TextWidget::new_literal("Title").style(TextStyleRole::BodyBold))
-                .child(Toggle::new(Signal::new(false)).label_literal("Notifications"))
-                .child(Toggle::new(Signal::new(true)).label_literal("Dark mode")),
+                .child(TextWidget::new(lit!("Title")).style(TextStyleRole::BodyBold))
+                .child(Toggle::new(Signal::new(false)).label(lit!("Notifications")))
+                .child(Toggle::new(Signal::new(true)).label(lit!("Dark mode"))),
         );
 
         let column2 = column_card(
@@ -131,14 +131,14 @@ impl Widget for Demo {
              `.style()` needed.",
             VStack::new()
                 .spacing(12.0)
-                .child(TextWidget::new_literal("Both glowing").style(TextStyleRole::BodyBold))
+                .child(TextWidget::new(lit!("Both glowing")).style(TextStyleRole::BodyBold))
                 .child(
-                    Button::new_literal("Save")
+                    Button::new(lit!("Save"))
                         .variant(ButtonVariant::Filled)
                         .on_activate_fn(|_| println!("save")),
                 )
                 .child(
-                    Button::new_literal("Cancel")
+                    Button::new(lit!("Cancel"))
                         .variant(ButtonVariant::Plain)
                         .on_activate_fn(|_| println!("cancel")),
                 ),
@@ -151,14 +151,14 @@ impl Widget for Demo {
              sibling button still gets the theme-wide GlowButton.",
             VStack::new()
                 .spacing(12.0)
-                .child(TextWidget::new_literal("Mixed").style(TextStyleRole::BodyBold))
+                .child(TextWidget::new(lit!("Mixed")).style(TextStyleRole::BodyBold))
                 .child(
-                    Button::new_literal("BRUTAL")
+                    Button::new(lit!("BRUTAL"))
                         .style(BrutalistButton)
                         .on_activate_fn(|_| println!("brutal")),
                 )
                 .child(
-                    Button::new_literal("glow")
+                    Button::new(lit!("glow"))
                         .variant(ButtonVariant::Plain)
                         .on_activate_fn(|_| println!("glow")),
                 ),
@@ -191,9 +191,9 @@ fn column_card(
     Padding::uniform(16.0).child(
         VStack::new()
             .spacing(10.0)
-            .child(TextWidget::new_literal(title).style(TextStyleRole::BodyBold))
+            .child(TextWidget::new(lit!(title)).style(TextStyleRole::BodyBold))
             .child(
-                TextWidget::new_literal(description)
+                TextWidget::new(lit!(description))
                     .style(TextStyleRole::Small)
                     .color(TextRole::Secondary),
             )

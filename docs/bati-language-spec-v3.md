@@ -15,7 +15,7 @@ Four structural changes, all driven by review of v2 against the actual widget ca
 
 **Widget categories are now two, not three.** The framework refactor (see Appendix A) dissolves the former Category C by moving primary content from constructors to setter methods on ScrollArea, Popover, Snackbar, and Dialog. ScrollArea joins Category A (has `.child()`). Popover, Snackbar, and Dialog join Category B (named slots). Wizard is not Category C and was never intended to be; v2 misclassified it.
 
-**The `*_id` convention is universal.** Every widget-accepting slot method on every container now has a twin taking a `WidgetId`, named `*_id`. The existing `.set_child(id)` methods on Panel, Padding, Expand, GroupBox, and Accordion are renamed to `.child_id(id)` / `.content_id(id)` for consistency. SplitView's existing `.first_id` / `.second_id` fits the pattern unchanged. TabWidget gets `.tab_id(label, id)` and `.tab_literal_id(label, id)` to match.
+**The `*_id` convention is universal.** Every widget-accepting slot method on every container now has a twin taking a `WidgetId`, named `*_id`. The existing `.set_child(id)` methods on Panel, Padding, Expand, GroupBox, and Accordion are renamed to `.child_id(id)` / `.content_id(id)` for consistency. SplitView's existing `.first_id` / `.second_id` fits the pattern unchanged. TabWidget gets `.tab_id(label, id)` to match.
 
 **Worked translations reflect the refactored API.** Every code example in §7 is against post-refactor builder signatures. The seven uploaded example files themselves are assumed to be migrated; the framework changes required are listed in Appendix A.
 
@@ -95,7 +95,7 @@ Button("Click")              desugars to   Button::new("Click")
 TextWidget("Hello")          desugars to   TextWidget::new("Hello")
 VStack                       desugars to   VStack::new()
 
-Button::new_literal("Click") desugars to   Button::new_literal("Click")
+Button::new(lit!("Click"))   desugars to   Button::new(lit!("Click"))
 Padding::uniform(24.0)       desugars to   Padding::uniform(24.0)
 Padding::symmetric(12.0, 8.0) desugars to  Padding::symmetric(12.0, 8.0)
 ProgressBar::indeterminate() desugars to   ProgressBar::indeterminate()
@@ -250,28 +250,28 @@ Each of these is a single-argument property whose value happens to contain comma
 
 ```rust
 TabWidget(selected) {
-    tab_literal: "Overview", Card {
-        header: TextWidget("Overview") { style: t.body_bold.clone() }
+    tab: lit!("Overview"), Card {
+        header: TextWidget(lit!("Overview")) { style: t.body_bold.clone() }
         content: VStack { spacing: 12.0, ... }
     }
-    tab_literal: "Inspector", Panel { padding: 20.0, ... }
+    tab: lit!("Inspector"), Panel { padding: 20.0, ... }
     trailing_slot: trailing_widget
 }
 ```
 
-The comma after `"Overview"` is at depth 0 (not inside brackets) and separates the two arguments of `tab_literal`. The next `Card { ... }` element opens a brace that may span multiple lines; the parser tracks bracket balance until the Card's closing `}`. After the Card closes, the next newline terminates the argument list and ends the `tab_literal` property.
+The comma after `lit!("Overview")` is at depth 0 (not inside brackets) and separates the two arguments of `tab`. The next `Card { ... }` element opens a brace that may span multiple lines; the parser tracks bracket balance until the Card's closing `}`. After the Card closes, the next newline terminates the argument list and ends the `tab` property.
 
-Desugars to:
+Desugars to (`TabWidget::tab(label, content)` is the title-only shorthand for `static_tab(TabInfo::new().title(label), content)`):
 
 ```rust
 TabWidget::new(selected)
-    .tab_literal(
-        "Overview",
+    .tab(
+        lit!("Overview"),
         Card::new()
-            .header(TextWidget::new("Overview").style(t.body_bold.clone()))
+            .header(TextWidget::new(lit!("Overview")).style(t.body_bold.clone()))
             .content(VStack::new().spacing(12.0)...)
     )
-    .tab_literal("Inspector", Panel::new().padding(20.0)...)
+    .tab(lit!("Inspector"), Panel::new().padding(20.0)...)
     .trailing_slot(trailing_widget)
 ```
 
@@ -647,10 +647,10 @@ Source:
 ```rust
 .root(|tree| {
     tree.add(
-        Button::new_literal("Click Me")
+        Button::new(lit!("Click Me"))
             .style(ButtonVariant::Default)
             .on_activate_fn(|ctx| ctx.send_intent(AppIntent::ButtonClicked))
-            .tooltip_literal("This is a simple button. Click it to see a message in the console."),
+            .tooltip(lit!("This is a simple button. Click it to see a message in the console.")),
     )
 })
 ```
@@ -659,7 +659,7 @@ With `bati!`:
 
 ```rust
 .root(|tree| bati!(tree =>
-    Button::new_literal("Click Me") {
+    Button::new(lit!("Click Me")) {
         style: ButtonVariant::Default
         on_activate_fn: |ctx| ctx.send_intent(AppIntent::ButtonClicked)
         tooltip_literal: "This is a simple button. Click it to see a message in the console."
@@ -681,13 +681,13 @@ let root = ctx.add(
             .child(
                 HStack::new()
                     .child(
-                        TextWidget::new_literal("Text & Layout")
+                        TextWidget::new(lit!("Text & Layout"))
                             .style(t.body_bold.clone())
                             .color(c.text_primary),
                     )
                     .child(Spacer::new())
                     .child(
-                        Button::new_literal("Toggle Dark Mode")
+                        Button::new(lit!("Toggle Dark Mode"))
                             .style(ButtonVariant::Regular)
                             .on_activate_fn(|ctx| ctx.send_intent(AppIntent::ToggleDarkMode)),
                     ),
@@ -704,12 +704,12 @@ let root = bati!(ctx =>
         VStack {
             spacing: 20.0
             HStack {
-                TextWidget::new_literal("Text & Layout") {
+                TextWidget::new(lit!("Text & Layout")) {
                     style: t.body_bold.clone()
                     color: c.text_primary
                 }
                 Spacer
-                Button::new_literal("Toggle Dark Mode") {
+                Button::new(lit!("Toggle Dark Mode")) {
                     style: ButtonVariant::Regular
                     on_activate_fn: |ctx| ctx.send_intent(AppIntent::ToggleDarkMode)
                 }
@@ -732,7 +732,7 @@ fn build_color_box(color: Color, label: &str) -> Panel {
         .corner_radius(6.0)
         .padding(8.0)
         .child(
-            TextWidget::new_literal(label)
+            TextWidget::new(lit!(label))
                 .style(TextStyle {
                     family: "sans-serif".into(),
                     size: 14.0,
@@ -754,7 +754,7 @@ fn build_color_box(color: Color, label: &str) -> impl Widget {
             background: color
             corner_radius: 6.0
             padding: 8.0
-            TextWidget::new_literal(label) {
+            TextWidget::new(lit!(label)) {
                 style: TextStyle {
                     family: "sans-serif".into(),
                     size: 14.0,
@@ -781,12 +781,12 @@ TitleBar::new(host)
     .background(theme.colors.surface_pressed)
     .border(theme.colors.text_secondary, 2.0)
     .leading(
-        TextWidget::new_literal("  Bastyde — Title Bar Demo")
+        TextWidget::new(lit!("  Bastyde — Title Bar Demo"))
             .style(theme.typography.body_bold.clone())
             .color(theme.colors.text_primary),
     )
     .center(
-        TextWidget::new_literal("drag · double-click maximize · right-click for menu  ")
+        TextWidget::new(lit!("drag · double-click maximize · right-click for menu  "))
             .style(theme.typography.small.clone())
             .color(theme.colors.text_secondary),
     )
@@ -801,11 +801,11 @@ bati!(
         height: 40.0
         background: theme.colors.surface_pressed
         border: theme.colors.text_secondary, 2.0
-        leading: TextWidget::new_literal("  Bastyde — Title Bar Demo") {
+        leading: TextWidget::new(lit!("  Bastyde — Title Bar Demo")) {
             style: theme.typography.body_bold.clone()
             color: theme.colors.text_primary
         }
-        center: TextWidget::new_literal("drag · double-click maximize · right-click for menu  ") {
+        center: TextWidget::new(lit!("drag · double-click maximize · right-click for menu  ")) {
             style: theme.typography.small.clone()
             color: theme.colors.text_secondary
         }
@@ -831,26 +831,26 @@ let selected_label = selected.map(|index| match *index {
 let trailing = HStack::new()
     .spacing(12.0)
     .child(
-        TextWidget::new_literal("")
+        TextWidget::new(lit!(""))
             .bind_text(selected_label)
             .style(theme.typography.small.clone()),
     )
     .child(
-        Button::new_literal("Toggle Theme")
+        Button::new(lit!("Toggle Theme"))
             .style(ButtonVariant::Flat)
             .on_activate_fn(|ctx| ctx.send_intent(AppIntent::ToggleTheme)),
     );
 
 let tabs = ctx.add(
     TabWidget::new(selected)
-        .tab_literal("Overview", Card::new()
-            .header(TextWidget::new_literal("Overview")
+        .tab(lit!("Overview"), Card::new()
+            .header(TextWidget::new(lit!("Overview"))
                 .style(theme.typography.body_bold.clone())
                 .color(theme.colors.text_primary))
             .content(VStack::new().spacing(12.0)...))
-        .tab_literal("Inspector", Panel::new().padding(20.0)...)
-        .tab_literal("Activity", Panel::new().padding(20.0)...)
-        .tab_item(TabItem::new_literal("Disabled", Panel::new()...).enabled(false))
+        .tab(lit!("Inspector"), Panel::new().padding(20.0)...)
+        .tab(lit!("Activity"), Panel::new().padding(20.0)...)
+        .tab_item(TabItem::new(lit!("Disabled"), Panel::new()...).enabled(false))
         .trailing_slot(trailing),
 );
 ```
@@ -868,11 +868,11 @@ let selected_label = selected.map(|index| match *index {
 let trailing = bati!(
     HStack {
         spacing: 12.0
-        TextWidget::new_literal("") {
+        TextWidget::new(lit!("")) {
             bind_text: selected_label
             style: theme.typography.small.clone()
         }
-        Button::new_literal("Toggle Theme") {
+        Button::new(lit!("Toggle Theme")) {
             style: ButtonVariant::Flat
             on_activate_fn: |ctx| ctx.send_intent(AppIntent::ToggleTheme)
         }
@@ -881,44 +881,44 @@ let trailing = bati!(
 
 let tabs = bati!(ctx =>
     TabWidget(selected) {
-        tab_literal: "Overview", Card {
-            header: TextWidget::new_literal("Overview") {
+        tab: lit!("Overview"), Card {
+            header: TextWidget::new(lit!("Overview")) {
                 style: theme.typography.body_bold.clone()
                 color: theme.colors.text_primary
             }
             content: VStack {
                 spacing: 12.0
-                TextWidget::new_literal("This first Milestone 6 slice ships a real TabWidget...")
+                TextWidget::new(lit!("This first Milestone 6 slice ships a real TabWidget..."))
                 HStack {
                     spacing: 8.0
-                    Badge::new_literal("Dormant Panes")
-                    Badge::new_literal("Arrow Navigation")
-                    Badge::new_literal("Trailing Slot")
+                    Badge::new(lit!("Dormant Panes"))
+                    Badge::new(lit!("Arrow Navigation"))
+                    Badge::new(lit!("Trailing Slot"))
                 }
             }
         }
-        tab_literal: "Inspector", Panel {
+        tab: lit!("Inspector"), Panel {
             padding: 20.0
             VStack {
                 spacing: 10.0
-                TextWidget::new_literal("Inspector") { style: theme.typography.body_bold.clone() }
-                TextWidget::new_literal("Use Tab to move focus...")
+                TextWidget::new(lit!("Inspector")) { style: theme.typography.body_bold.clone() }
+                TextWidget::new(lit!("Use Tab to move focus..."))
             }
         }
-        tab_literal: "Activity", Panel {
+        tab: lit!("Activity"), Panel {
             padding: 20.0
             VStack { spacing: 10.0, ... }
         }
-        tab_item: TabItem::new_literal("Disabled", Panel {
+        tab_item: TabItem::new(lit!("Disabled"), Panel {
             padding: 20.0
-            TextWidget::new_literal("Disabled tabs are visible but cannot be activated.")
+            TextWidget::new(lit!("Disabled tabs are visible but cannot be activated."))
         }) { enabled: false }
         trailing_slot: trailing
     }
 );
 ```
 
-The `tab_literal: "name", Card { ... }` pattern is the multi-argument property form with an element-valued second argument. The `tab_item:` property takes a full `TabItem` element with its own body (`enabled: false` is a property on `TabItem`). `trailing_slot:` takes the previously-built `trailing` widget. Signals (`selected`, `selected_label`) stay as regular Rust `let` bindings because they are computed values, not widgets.
+The `tab: lit!("name"), Card { ... }` pattern is the multi-argument property form with an element-valued second argument (`tab` is `TabWidget`'s title-only shorthand for `static_tab(TabInfo::new().title(label), content)`). The `tab_item:` property takes a full `TabItem` element with its own body (`enabled: false` is a property on `TabItem`). `trailing_slot:` takes the previously-built `trailing` widget. Signals (`selected`, `selected_label`) stay as regular Rust `let` bindings because they are computed values, not widgets.
 
 ### 7.6 overlay-demo, Dialog / Popover / Snackbar (post-refactor)
 
@@ -926,23 +926,23 @@ Source with post-refactor API:
 
 ```rust
 let modal_trigger_id = ctx.add(
-    Dialog::new_literal("Adaptive modal window")
+    Dialog::new(lit!("Adaptive modal window"))
         .content(move || {
             DialogContent::new()
-                .title_literal("Adaptive modal dialog")
-                .supporting_text_literal("The framework chooses the best modal presentation...")
-                .body(TextWidget::new_literal("The app code does not branch..."))
-                .footer(Button::new_literal("Close").on_tap(|_, ctx| ctx.dismiss_modal()))
+                .title(lit!("Adaptive modal dialog"))
+                .supporting_text(lit!("The framework chooses the best modal presentation..."))
+                .body(TextWidget::new(lit!("The app code does not branch...")))
+                .footer(Button::new(lit!("Close")).on_tap(|_, ctx| ctx.dismiss_modal()))
         })
         .style(ButtonVariant::Regular),
 );
 
-let popover = Popover::new_literal("Show popover")
+let popover = Popover::new(lit!("Show popover"))
     .content(popover_content)
     .caret_size(12.0)
     .trigger(popover_trigger);
 
-let snackbar = Snackbar::new_literal("Show snackbar")
+let snackbar = Snackbar::new(lit!("Show snackbar"))
     .content(snackbar_content)
     .auto_dismiss_after(Duration::from_millis(2500));
 ```
@@ -955,11 +955,11 @@ let root = bati!(ctx =>
         widget_resizable: true
         VStack {
             spacing: 24.0
-            TextWidget::new_literal("Dialogs and Popovers") {
+            TextWidget::new(lit!("Dialogs and Popovers")) {
                 style: t.body_bold.clone()
                 color: c.text_primary
             }
-            TextWidget::new_literal("Bastyde now resolves dialogs through a shared modal presentation pipeline, alongside anchored popovers and timed snackbars.") {
+            TextWidget::new(lit!("Bastyde now resolves dialogs through a shared modal presentation pipeline, alongside anchored popovers and timed snackbars.")) {
                 style: t.body.clone()
                 color: c.text_secondary
             }
@@ -967,19 +967,19 @@ let root = bati!(ctx =>
                 padding: 20.0
                 HStack {
                     spacing: 16.0
-                    Popover::new_literal("Show popover") {
+                    Popover::new(lit!("Show popover")) {
                         content: VStack {
                             spacing: 12.0
-                            TextWidget::new_literal("Popover") { style: t.small.clone() }
-                            TextWidget::new_literal("Use popovers for compact contextual actions without leaving the current surface.") {
+                            TextWidget::new(lit!("Popover")) { style: t.small.clone() }
+                            TextWidget::new(lit!("Use popovers for compact contextual actions without leaving the current surface.")) {
                                 style: t.body.clone()
                                 color: c.text_secondary
                             }
                             HStack {
                                 spacing: 8.0
-                                Badge::new_literal("Quick actions")
-                                Badge::new_literal("Inline help")
-                                Badge::new_literal("Inspector")
+                                Badge::new(lit!("Quick actions"))
+                                Badge::new(lit!("Inline help"))
+                                Badge::new(lit!("Inspector"))
                             }
                         }
                         caret_size: 12.0
@@ -987,23 +987,23 @@ let root = bati!(ctx =>
                             padding: 12.0
                             HStack {
                                 spacing: 10.0
-                                Badge::new_literal("Context")
-                                TextWidget::new_literal("Popover actions") {
+                                Badge::new(lit!("Context"))
+                                TextWidget::new(lit!("Popover actions")) {
                                     style: t.small.clone()
                                 }
                             }
                         }
                     }
-                    modal_trigger = Dialog::new_literal("Adaptive modal window") {
+                    modal_trigger = Dialog::new(lit!("Adaptive modal window")) {
                         content: move || bati!(
                             DialogContent {
                                 title_literal: "Adaptive modal dialog"
                                 supporting_text_literal: "The framework chooses the best modal presentation for the current backend: a native modal child window when reliable, otherwise a centered in-tree dialog."
-                                body: TextWidget::new_literal("The app code does not branch on Wayland or window-system support here; it issues one modal request and lets Bastyde resolve it.") {
+                                body: TextWidget::new(lit!("The app code does not branch on Wayland or window-system support here; it issues one modal request and lets Bastyde resolve it.")) {
                                     style: t.body.clone()
                                     color: c.text_secondary
                                 }
-                                footer: Button::new_literal("Close") {
+                                footer: Button::new(lit!("Close")) {
                                     style: ButtonVariant::Default
                                     on_tap: |_, ctx| ctx.dismiss_modal()
                                 }
@@ -1011,14 +1011,14 @@ let root = bati!(ctx =>
                         )
                         style: ButtonVariant::Regular
                     }
-                    Snackbar::new_literal("Show snackbar") {
+                    Snackbar::new(lit!("Show snackbar")) {
                         content: HStack {
                             spacing: 14.0
-                            TextWidget::new_literal("Autosave complete") {
+                            TextWidget::new(lit!("Autosave complete")) {
                                 style: t.body.clone()
                                 color: c.tooltip_text
                             }
-                            Button::new_literal("Dismiss") {
+                            Button::new(lit!("Dismiss")) {
                                 style: ButtonVariant::Regular
                                 on_tap: |_, ctx| ctx.dismiss_top_overlay()
                             }
@@ -1091,7 +1091,7 @@ let root = bati!(ctx =>
                 style: theme.typography.body.clone()
                 color: theme.colors.text_primary
             }
-            TextWidget::new_literal("") {
+            TextWidget::new(lit!("")) {
                 bind_text: direction_label
                 style: theme.typography.small.clone()
                 color: theme.colors.text_secondary
@@ -1125,7 +1125,7 @@ let root = bati!(ctx =>
 );
 ```
 
-All the hoisted `let id = ctx.add(...)` in the source collapse into declarative elements. The conditional `ctx.effect` registration goes in a side-effect `rust { }` block with a `;` on its tail. The `let` bindings for signal handles use the `let` form at body position, scoping the signals to the VStack construction. `TextWidget(tr!(...))` uses the default `::new` constructor (localized); `TextWidget::new_literal("")` uses the literal constructor where the source does.
+All the hoisted `let id = ctx.add(...)` in the source collapse into declarative elements. The conditional `ctx.effect` registration goes in a side-effect `rust { }` block with a `;` on its tail. The `let` bindings for signal handles use the `let` form at body position, scoping the signals to the VStack construction. `TextWidget(tr!(...))` uses the default `::new` constructor (localized); `TextWidget::new(lit!(""))` uses the literal constructor where the source does.
 
 ### 7.8 widget-catalog, event subscription in rust block
 
@@ -1533,7 +1533,6 @@ pub fn trailing_slot_id(mut self, id: WidgetId) -> Self
 **TabWidget:**
 ```rust
 pub fn tab_id(mut self, label: impl Into<LocalizedString>, id: WidgetId) -> Self
-pub fn tab_literal_id(mut self, label: impl Into<String>, id: WidgetId) -> Self
 pub fn tab_item_id(mut self, item: TabItem) -> Self  // TabItem carries the id internally
 pub fn trailing_slot_id(mut self, id: WidgetId) -> Self
 ```

@@ -86,13 +86,13 @@ pub struct TimeEdit {
     min_time: Option<Time>,
     max_time: Option<Time>,
     step_minutes: u32,
-    placeholder: String,
+    placeholder: bastyde_i18n::LocalizedString,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     read_only: bool,
     validation_behavior: ValidationBehavior,
     width_policy: crate::date_edit::WidthPolicy,
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
     on_value_changed: Option<OnValueChanged>,
     text_signal: Signal<String>,
     focused: Signal<bool>,
@@ -121,7 +121,7 @@ impl TimeEdit {
             min_time: None,
             max_time: None,
             step_minutes: 1,
-            placeholder: String::new(),
+            placeholder: bastyde_i18n::LocalizedString::literal(String::new()),
             initial_enabled: true,
             read_only: false,
             validation_behavior: ValidationBehavior::AutoCorrect,
@@ -185,13 +185,7 @@ impl TimeEdit {
 
     pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.placeholder = ls.resolve_now();
-        self
-    }
-
-    /// Untranslated [`placeholder`](Self::placeholder).
-    pub fn placeholder_literal(mut self, text: impl Into<String>) -> Self {
-        self.placeholder = text.into();
+        self.placeholder = ls;
         self
     }
 
@@ -228,13 +222,7 @@ impl TimeEdit {
 
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
-        self
-    }
-
-    /// Untranslated [`label`](Self::label).
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
+        self.label = Some(ls);
         self
     }
 
@@ -621,7 +609,7 @@ impl Widget for TimeEdit {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(Role::TimeInput);
         if let Some(ref label) = self.label {
-            builder.set_name(label);
+            builder.set_name(label.resolve_now());
         } else {
             builder.set_name(resolve_message_widget("time-edit-name", &[]));
         }
@@ -635,8 +623,8 @@ impl Widget for TimeEdit {
                 ));
             }
             None => {
-                if !self.placeholder.is_empty() {
-                    builder.set_placeholder(self.placeholder.clone());
+                if !self.placeholder.resolve_now().is_empty() {
+                    builder.set_placeholder(self.placeholder.resolve_now());
                 } else {
                     builder.set_placeholder(resolve_message_widget("time-edit-placeholder", &[]));
                 }

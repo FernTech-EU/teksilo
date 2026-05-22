@@ -96,7 +96,7 @@ type ActionFactory = Box<dyn Fn(&mut EventContext)>;
 pub struct IconButton {
     // Configuration (set via builder)
     icon: IconWidget,
-    tooltip_text: Option<String>,
+    tooltip_text: Option<bastyde_i18n::LocalizedString>,
     /// Optional rich tooltip source — registry key or inline content.
     /// Mutually exclusive with `tooltip_text` and `composite_tooltip_content`.
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
@@ -270,16 +270,6 @@ impl IconButton {
     /// Attach a tooltip that appears after a hover delay. Required —
     /// the tooltip text doubles as the AT name for icon-only buttons.
     pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
-        self.tooltip_text = Some(ls.resolve_now());
-        self.rich_tooltip_source = None;
-        self.composite_tooltip_content = None;
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `tooltip(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;
@@ -305,7 +295,10 @@ impl IconButton {
 
     /// Attach a composite tooltip — third tier, hosting an arbitrary
     /// widget tree. See [`Button::composite_tooltip`](crate::button::Button::composite_tooltip).
-    pub fn composite_tooltip(mut self, content: impl bastyde_core::widget::Widget + 'static) -> Self {
+    pub fn composite_tooltip(
+        mut self,
+        content: impl bastyde_core::widget::Widget + 'static,
+    ) -> Self {
         self.composite_tooltip_content = Some(Box::new(content));
         self.tooltip_text = None;
         self.rich_tooltip_source = None;
@@ -450,7 +443,8 @@ impl IconButton {
 
     /// Add button (plus icon). Adds a new entry.
     pub fn add() -> Self {
-        Self::new((BuiltInIcons::global().add)()).tooltip(bastyde_i18n::tr_widget!(a11y_builtin_add()))
+        Self::new((BuiltInIcons::global().add)())
+            .tooltip(bastyde_i18n::tr_widget!(a11y_builtin_add()))
     }
 
     /// Notification bell. Used by
@@ -663,23 +657,15 @@ impl bastyde_core::widget::Widget for IconButton {
         // Tooltip — three mutually-exclusive setters; setters clear
         // the others so exactly one branch runs.
         if let Some(content) = self.composite_tooltip_content.take() {
-            crate::tooltip::attach_composite_tooltip_boxed(
-                ctx,
-                root_id,
-                content,
-                crate::tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
         } else if let Some(source) = self.rich_tooltip_source.take() {
-            crate::tooltip::attach_rich_tooltip_source(
-                ctx,
-                root_id,
-                source,
-                crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
-            );
-        } else if let Some(ref tooltip_text) = self.tooltip_text {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new_literal(tooltip_text);
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+        } else if let Some(tooltip_text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(tooltip_text);
             let tooltip_id = ctx.add(tooltip_widget);
-            let delay = std::time::Duration::from_millis(500);
+            let delay = ctx.theme().motion.tooltip_delay;
             ctx.attach_tooltip(root_id, tooltip_id, delay);
         }
 
@@ -852,7 +838,7 @@ impl bastyde_core::widget::Widget for IconButton {
              For rich/composite tooltips, also pair with `.access_label(...)`."
         );
         if let Some(ref text) = self.tooltip_text {
-            builder.set_name(text.as_str());
+            builder.set_name(text.resolve_now());
         } else if let Some(ref text) = rich_name {
             builder.set_name(text.as_str());
         } else {
@@ -1003,6 +989,7 @@ fn default_eye_off_icon() -> IconWidget {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_core::signal::Signal;
     use bastyde_core::widget_tree::WidgetTree;
 
@@ -1022,10 +1009,7 @@ mod tests {
         tree.set_theme(theme.clone());
 
         let is_enabled = Signal::new(true);
-        let btn_id = tree.add(
-            IconButton::new(IconWidget::checkmark(24.0))
-                .tooltip_literal("test"),
-        );
+        let btn_id = tree.add(IconButton::new(IconWidget::checkmark(24.0)).tooltip(lit!("test")));
         tree.enabled_when(btn_id, is_enabled.clone());
         tree.layout(bastyde_canvas::SizeProposal::exact(100.0, 40.0));
 
@@ -1067,7 +1051,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let btn_id = tree.add(
             IconButton::new(IconWidget::checkmark(24.0))
-                .tooltip_literal("test")
+                .tooltip(lit!("test"))
                 .enabled(false),
         );
         tree.layout(bastyde_canvas::SizeProposal::exact(100.0, 40.0));

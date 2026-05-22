@@ -20,8 +20,8 @@ pub enum ColumnWidth {
     /// behaves like CSS `flex-grow`. The factor must be `> 0.0`.
     Flex(f32),
     /// Intrinsic content width (currently approximated by the table's
-    /// `min_column_width_default` token in Phase 2; refined to probe the
-    /// header label and visible cells in later phases).
+    /// `min_column_width_default` token; refined to probe the
+    /// header label and visible cells).
     Auto,
 }
 
@@ -62,7 +62,7 @@ pub enum TruncationPolicy {
     /// Don't truncate; let the cell content draw beyond the column edge
     /// (the body pane's clip will hide it).
     None,
-    /// Fade the trailing portion — gradient mask. Phase 6+.
+    /// Fade the trailing portion — gradient mask.
     Fade,
 }
 

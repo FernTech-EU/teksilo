@@ -197,13 +197,14 @@ mod tests {
     use super::*;
     use crate::primitives::TextWidget;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn pulse_starts_at_midpoint() {
         // First layout pass, before any frame tick: opacity should be
         // the midpoint between min and max.
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Pulse::opacity(0.2, 1.0).child(TextWidget::new_literal("●")));
+        tree.add(Pulse::opacity(0.2, 1.0).child(TextWidget::new(lit!("●"))));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let frame = tree.render();
         let ops: Vec<f32> = frame
@@ -228,7 +229,7 @@ mod tests {
     fn pulse_pins_to_midpoint_under_reduced_motion() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.set_accessibility_preferences(false, true, 1.0);
-        tree.add(Pulse::opacity(0.0, 1.0).child(TextWidget::new_literal("●")));
+        tree.add(Pulse::opacity(0.0, 1.0).child(TextWidget::new(lit!("●"))));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let frame = tree.render();
         let ops: Vec<f32> = frame
@@ -254,7 +255,7 @@ mod tests {
     #[test]
     fn pulse_does_not_change_layout() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let id = tree.add(Pulse::opacity(0.0, 1.0).child(TextWidget::new_literal("hello")));
+        let id = tree.add(Pulse::opacity(0.0, 1.0).child(TextWidget::new(lit!("hello"))));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -272,7 +273,7 @@ mod tests {
     fn pulse_clamps_inverted_min_max() {
         // Pulse::opacity(0.9, 0.1) should still produce a valid range.
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Pulse::opacity(0.9, 0.1).child(TextWidget::new_literal("●")));
+        tree.add(Pulse::opacity(0.9, 0.1).child(TextWidget::new(lit!("●"))));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let _ = tree.render();
         // Just confirm it didn't panic and produced a frame.

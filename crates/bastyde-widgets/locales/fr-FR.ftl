@@ -13,6 +13,7 @@
 
 a11y-status-bar-name = État
 a11y-dialog-name = Boîte de dialogue
+a11y-tooltip-name = Infobulle
 a11y-snackbar-name = Notification
 a11y-split-view-divider-name = Séparateur de vue divisée
 a11y-breadcrumb-current-page-value = page actuelle
@@ -296,3 +297,7 @@ hex-color-input-corrected-uppercase = Normalisé en { $value }
 hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
+
+# Étiquette « plus » du repli des infobulles riches (le titre de l'accordéon
+# révélant le corps détaillé dans une infobulle riche épinglée).
+tooltip-more = Plus

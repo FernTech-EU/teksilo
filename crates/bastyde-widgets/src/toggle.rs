@@ -31,7 +31,7 @@ pub use bastyde_core::styles::ToggleVariant;
 /// An animated toggle switch bound to a `Signal<bool>`.
 pub struct Toggle {
     on: Signal<bool>,
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     variant: ToggleVariant,
@@ -59,14 +59,7 @@ impl Toggle {
 
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `label(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
+        self.label = Some(ls);
         self
     }
 
@@ -142,7 +135,7 @@ impl Widget for Toggle {
         let root = if let Some(ref label) = self.label {
             use crate::primitives::{HStack, TextWidget};
             use bastyde_tokens::TextStyleRole;
-            let label_widget = TextWidget::new_literal(label.clone()).style(TextStyleRole::Body);
+            let label_widget = TextWidget::new(label.clone()).style(TextStyleRole::Body);
             let label_id = ctx.add(label_widget);
             ctx.add(
                 HStack::new()
@@ -190,19 +183,17 @@ impl Widget for Toggle {
         }
         {
             let toggle = toggle.clone();
-            handlers = handlers.on_key(move |event, _ctx| {
-                match event {
-                    WidgetEvent::KeyDown {
-                        key: Key::Space, ..
-                    } => EventResponse::Handled,
-                    WidgetEvent::KeyUp {
-                        key: Key::Space, ..
-                    } => {
-                        toggle();
-                        EventResponse::Handled
-                    }
-                    _ => EventResponse::Ignored,
+            handlers = handlers.on_key(move |event, _ctx| match event {
+                WidgetEvent::KeyDown {
+                    key: Key::Space, ..
+                } => EventResponse::Handled,
+                WidgetEvent::KeyUp {
+                    key: Key::Space, ..
+                } => {
+                    toggle();
+                    EventResponse::Handled
                 }
+                _ => EventResponse::Ignored,
             });
         }
         {
@@ -278,7 +269,7 @@ impl Widget for Toggle {
         );
         builder.set_role(bastyde_core::accesskit::Role::Switch);
         if let Some(ref label) = self.label {
-            builder.set_name(label);
+            builder.set_name(label.resolve_now());
         }
         builder.set_toggled(self.on.get());
         // Framework a11y walker sets `set_disabled` from arena state.
@@ -294,6 +285,7 @@ mod tests {
     use super::*;
     use bastyde_core::event::Modifiers;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn click_toggles_state() {
@@ -343,7 +335,7 @@ mod tests {
     fn accessibility() {
         let on = Signal::new(true);
         let mut tree = WidgetTree::new();
-        let t = tree.add(Toggle::new(on).label_literal("Dark mode"));
+        let t = tree.add(Toggle::new(on).label(lit!("Dark mode")));
         tree.layout(SizeProposal::exact(100.0, 60.0));
         let info = tree.accessibility_node(t);
         assert_eq!(info.role(), bastyde_core::accesskit::Role::Switch);
@@ -361,7 +353,7 @@ mod tests {
     fn labeled_toggle_does_not_orphan_hstack_wrapper() {
         let on = Signal::new(false);
         let mut tree = WidgetTree::new();
-        let _t = tree.add(Toggle::new(on).label_literal("Dark mode"));
+        let _t = tree.add(Toggle::new(on).label(lit!("Dark mode")));
         tree.layout(SizeProposal::exact(200.0, 60.0));
         let update = tree.sync_accessibility();
         let mut seen = std::collections::HashMap::new();
@@ -380,7 +372,7 @@ mod tests {
     fn accessibility_has_actions() {
         let on = Signal::new(false);
         let mut tree = WidgetTree::new();
-        let t = tree.add(Toggle::new(on).label_literal("Dark mode"));
+        let t = tree.add(Toggle::new(on).label(lit!("Dark mode")));
         tree.layout(SizeProposal::exact(100.0, 60.0));
         let info = tree.accessibility_node(t);
         assert!(

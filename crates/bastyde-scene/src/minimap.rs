@@ -271,6 +271,13 @@ impl Widget for SceneMinimap {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
+        // `paint` receives absolute bounds (the canvas is NOT pre-translated to
+        // the widget origin — unlike `on_tap`, which hands us widget-local
+        // coords). The minimap draws everything in its own local frame
+        // (origin 0,0), so translate the canvas to `bounds.origin` first — else
+        // it renders at the window's top-left regardless of where it's placed.
+        canvas.save();
+        canvas.translate(bounds.x, bounds.y);
         let area = Rect::new(0.0, 0.0, bounds.width, bounds.height);
         // Background fill.
         canvas.fill_rect(area, self.background);
@@ -303,6 +310,7 @@ impl Widget for SceneMinimap {
         if let Some((color, width)) = self.border {
             canvas.stroke_rect(area, color, StrokeStyle::solid(width));
         }
+        canvas.restore();
     }
 }
 

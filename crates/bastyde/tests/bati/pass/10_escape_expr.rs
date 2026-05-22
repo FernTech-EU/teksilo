@@ -1,4 +1,4 @@
-//! Spec §6.1: `#{ expr }` escape. Phase 2 semantics: the expression is
+//! Spec §6.1: `#{ expr }` escape. The expression is
 //! expected to evaluate to a `WidgetId`. At body position it lowers to
 //! `.add_child(expr)`; at slot-value position it forces the `_id`
 //! suffix on the property.

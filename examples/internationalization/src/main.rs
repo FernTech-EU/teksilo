@@ -28,7 +28,9 @@
 //! story is stable.
 
 use bastyde::core::widget::WidgetPlacement;
-use bastyde::i18n::{DateStyle, BastydeDateTime, BastydeDateTimeFormatter, NumberFormatter, tr_signal};
+use bastyde::i18n::{
+    BastydeDateTime, BastydeDateTimeFormatter, DateStyle, NumberFormatter, tr_signal,
+};
 use bastyde::prelude::*;
 use bastyde::widgets::{
     Button, ButtonVariant, Expand, HStack, Panel, Spacer, TextWidget, Toolbar, VStack,
@@ -37,7 +39,7 @@ use bastyde::widgets::{
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -122,7 +124,7 @@ impl Widget for Root {
         );
 
         let direction_note = ctx.add(
-            TextWidget::new_literal("")
+            TextWidget::new(lit!(""))
                 .bind_text(direction_label)
                 .style(theme.typography.small.clone())
                 .color(theme.colors.text_secondary),
@@ -245,7 +247,7 @@ impl Widget for Root {
         let cart_summary_signal: Signal<String> =
             tr_signal!(cart_summary(count = self.count, price = self.price,));
         let cart_summary_text = ctx.add(
-            TextWidget::new_literal("")
+            TextWidget::new(lit!(""))
                 .bind_text(cart_summary_signal)
                 .style(theme.typography.body_bold.clone())
                 .color(theme.colors.text_primary),
@@ -258,7 +260,7 @@ impl Widget for Root {
                 .color(theme.colors.text_secondary),
         );
         let price_minus = ctx.add(
-            Button::new_literal("− 100")
+            Button::new(lit!("− 100"))
                 .variant(ButtonVariant::Plain)
                 .on_activate_fn({
                     let price = self.price.clone();
@@ -266,7 +268,7 @@ impl Widget for Root {
                 }),
         );
         let price_plus = ctx.add(
-            Button::new_literal("+ 100")
+            Button::new(lit!("+ 100"))
                 .variant(ButtonVariant::Plain)
                 .on_activate_fn({
                     let price = self.price.clone();
@@ -287,7 +289,7 @@ impl Widget for Root {
                 .color(theme.colors.text_secondary),
         );
         let count_minus = ctx.add(
-            Button::new_literal("− 1")
+            Button::new(lit!("− 1"))
                 .variant(ButtonVariant::Plain)
                 .on_activate_fn({
                     let count = self.count.clone();
@@ -295,7 +297,7 @@ impl Widget for Root {
                 }),
         );
         let count_plus = ctx.add(
-            Button::new_literal("+ 1")
+            Button::new(lit!("+ 1"))
                 .variant(ButtonVariant::Plain)
                 .on_activate_fn({
                     let count = self.count.clone();
@@ -371,12 +373,12 @@ fn formatting_row(
     value: Signal<String>,
 ) -> WidgetId {
     let label_widget = ctx.add(
-        TextWidget::new_literal(label)
+        TextWidget::new(lit!(label))
             .style(theme.typography.body.clone())
             .color(theme.colors.text_secondary),
     );
     let value_widget = ctx.add(
-        TextWidget::new_literal("")
+        TextWidget::new(lit!(""))
             .bind_text(value)
             .style(theme.typography.body.clone())
             .color(theme.colors.text_primary),

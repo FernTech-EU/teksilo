@@ -53,8 +53,8 @@ pub enum AccessSubtreeMode {
 /// match so muscle memory carries over.
 #[derive(Debug, Default, Clone)]
 pub struct ItemA11yOverrides {
-    pub(crate) label: Option<String>,
-    pub(crate) description: Option<String>,
+    pub(crate) label: Option<bastyde_i18n::LocalizedString>,
+    pub(crate) description: Option<bastyde_i18n::LocalizedString>,
     pub(crate) role: Option<accesskit::Role>,
     pub(crate) hidden: bool,
     pub(crate) subtree_mode: AccessSubtreeMode,
@@ -74,10 +74,10 @@ impl ItemA11yOverrides {
             builder.set_role(role);
         }
         if let Some(ref label) = self.label {
-            builder.set_name(label.clone());
+            builder.set_name(label.resolve_now());
         }
         if let Some(ref desc) = self.description {
-            builder.set_description(desc.clone());
+            builder.set_description(desc.resolve_now());
         }
         if self.hidden {
             builder.set_hidden();
@@ -99,18 +99,8 @@ macro_rules! item_a11y_builders {
         /// string (which auto-converts via `From<String>`).
         pub fn access_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
             let ls: bastyde_i18n::LocalizedString = label.into();
-            self.a11y.label = Some(ls.resolve_now());
+            self.a11y.label = Some(ls);
             self
-        }
-
-        /// Untranslated twin of [`access_label`](Self::access_label).
-        /// Wraps a raw string in
-        /// [`LocalizedString::literal`](bastyde_i18n::LocalizedString::literal)
-        /// — a grep-marker for call sites that intentionally bypass
-        /// the i18n pipeline (debug demos, engine-internal labels).
-        #[doc(hidden)]
-        pub fn access_label_literal(self, label: impl Into<String>) -> Self {
-            self.access_label(bastyde_i18n::LocalizedString::literal(label))
         }
 
         /// Long-form context appended to the item's announcement.
@@ -119,14 +109,8 @@ macro_rules! item_a11y_builders {
             description: impl Into<bastyde_i18n::LocalizedString>,
         ) -> Self {
             let ls: bastyde_i18n::LocalizedString = description.into();
-            self.a11y.description = Some(ls.resolve_now());
+            self.a11y.description = Some(ls);
             self
-        }
-
-        /// Untranslated twin of [`access_description`](Self::access_description).
-        #[doc(hidden)]
-        pub fn access_description_literal(self, description: impl Into<String>) -> Self {
-            self.access_description(bastyde_i18n::LocalizedString::literal(description))
         }
 
         /// Override the AccessKit role for this item.
@@ -171,6 +155,7 @@ mod tests {
     use super::*;
     use crate::item::SceneItem;
     use bastyde_canvas::Rect;
+    use bastyde_i18n::lit;
 
     #[test]
     fn literal_twins_match_translated_setters_via_observable_state() {
@@ -180,20 +165,23 @@ mod tests {
         // We compare via the public `SceneItem::label` getter.
         let r = Rect::new(0.0, 0.0, 10.0, 10.0);
 
-        let translated = RectItem::new(r).label("Hello");
-        let literal = RectItem::new(r).label_literal("Hello");
+        let translated = RectItem::new(r).label(lit!("Hello"));
+        let literal = RectItem::new(r).label(lit!("Hello"));
         // The builder shadows the trait getter — disambiguate via UFCS.
         assert_eq!(SceneItem::label(&translated), SceneItem::label(&literal));
 
-        let t1 = TextItem::new("hi", r);
-        let t2 = TextItem::new_literal("hi", r);
+        let t1 = TextItem::new(lit!("hi"), r);
+        let t2 = TextItem::new(lit!("hi"), r);
         assert_eq!(t1.local_bounds(), t2.local_bounds());
 
         let mut h1 = crate::item_handlers::SceneItemHandlerSet::new();
-        h1.tooltip("Tip");
+        h1.tooltip(lit!("Tip"));
         let mut h2 = crate::item_handlers::SceneItemHandlerSet::new();
-        h2.tooltip_literal("Tip");
-        assert_eq!(h1.tooltip, h2.tooltip);
+        h2.tooltip(lit!("Tip"));
+        assert_eq!(
+            h1.tooltip.as_ref().map(|t| t.resolve_now()),
+            h2.tooltip.as_ref().map(|t| t.resolve_now())
+        );
     }
 
     #[test]

@@ -1,11 +1,13 @@
 //! `TabBar<T>` — header strip driven by a data source.
 //!
-//! Phase 1 scope: horizontal orientation only, with shared / independent
-//! sizing. Bar-leading and bar-trailing slots are wired. ScrollArea
-//! around the headers row provides overflow scroll on its own (no
-//! arrows / dropdown yet — those are Phase 2). DnD reorder, close
-//! buttons, pinned tabs, vertical and multi-line orientations land in
-//! later phases.
+//! Horizontal and vertical orientations, with shared / independent
+//! sizing. Bar-leading and bar-trailing slots are wired. Overflow is
+//! handled by a `ScrollArea` around the headers row, plus optional
+//! scroll arrows and a "show all tabs" overflow dropdown (both on by
+//! default). Closable tabs (with middle-click close), drag-to-reorder
+//! with edge auto-scroll, and a leading icon-only pinned-tab strip are
+//! all supported. Multi-line (multi-row) wrapping is the one layout
+//! mode not yet implemented.
 //!
 //! The data source is consumed via the `pub(crate)` [`ListSource`]
 //! abstraction so callers can pass either a `ListModel<T>` (clonable,
@@ -22,6 +24,7 @@
 //! [`.access_label(tr!(tab_list_name()))`](bastyde_core::widget_builder::WidgetBuilder::access_label)
 //! so screen readers can distinguish them (ARIA APG recommendation).
 
+use bastyde_i18n::lit;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -30,7 +33,7 @@ use bastyde_core::DropFeedback;
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::drag_payload::DragPayload;
+use bastyde_core::drag_payload::{DragPayload, DropOutcome};
 use bastyde_core::event::{EventResponse, ScrollDelta, WidgetEvent};
 use bastyde_core::overlay::OverlayPlacement;
 use bastyde_core::signal::Signal;
@@ -88,14 +91,37 @@ const DRAG_EDGE_ZONE: f32 = 32.0;
 const DRAG_MAX_VELOCITY: f32 = 12.0;
 
 /// Drag payload published by a tab header when the user starts
-/// dragging it. The bar's `on_drop` accepts this payload only when
-/// `source_bar_id` matches its own widget id — preventing a tab from
-/// one TabBar from being dropped into another's content area as a
-/// reorder.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct TabBarDragData {
+/// dragging it.
+///
+/// Generic over the bar's item type `T` so a `TabBar<T>` only ever
+/// downcasts (`get_typed::<TabBarDragData<T>>()`) a drag started by
+/// another `TabBar<T>` — a drag from a `TabBar<OtherT>` simply never
+/// matches, giving cross-bar transfer type-safety for free.
+///
+/// Two consumers:
+/// - **Intra-bar reorder**: the bar's own `on_drop` matches
+///   `source_bar_id == self_id` and uses `source_index` to drive
+///   `move_item`. `item` is unused on this path (and may be `None`).
+/// - **Cross-bar transfer**: a *different* bar that opted in via
+///   [`accept_external_tabs`](TabBar::accept_external_tabs) takes
+///   `item` by value and hands it to its
+///   [`on_tab_received`](TabBar::on_tab_received) callback. `item` is
+///   `Some` only when the source bar opted in *and* the per-tab
+///   transferable predicate allows it (static tabs are excluded).
+pub struct TabBarDragData<T: 'static> {
+    /// Model index of the dragged tab in the *source* bar.
     pub source_index: usize,
+    /// Widget id of the source `TabBar`. The receiving bar compares
+    /// it to its own id to tell an intra-bar reorder from a
+    /// cross-bar transfer.
     pub source_bar_id: WidgetId,
+    /// Stable id of the dragged tab — handed to the source bar's
+    /// `on_transfer_out` so the app can remove it by id.
+    pub source_id: TabId,
+    /// A clone of the dragged item, carried for cross-bar transfer.
+    /// `None` when the source bar didn't opt into transfer or the tab
+    /// is non-transferable (e.g. a static tab).
+    pub item: Option<T>,
 }
 
 /// A reactive header strip that pulls its tab list from a data source
@@ -156,6 +182,43 @@ pub struct TabBar<T: 'static> {
     reorderable: bool,
     on_reorder: Option<Rc<dyn Fn(usize, usize, &mut EventContext)>>,
     on_pin_toggle: Option<Rc<dyn Fn(usize, bool, &mut EventContext)>>,
+
+    /// Cross-bar transfer opt-in. When `true`, headers publish an
+    /// item-carrying [`TabBarDragData`] (a drag source) AND the bar
+    /// accepts foreign tabs as a drop target. Set via
+    /// [`accept_external_tabs`](Self::accept_external_tabs).
+    accept_external_tabs: bool,
+    /// Item-clone closure, installed by
+    /// [`accept_external_tabs`](Self::accept_external_tabs) where
+    /// `T: Clone`. Captures the `Clone` capability so `build()` (which
+    /// is not `T: Clone`-bounded) can produce the carried item clone.
+    /// `None` ⇒ payloads carry `item: None` (reorder-only).
+    clone_item: Option<Rc<dyn Fn(&T) -> T>>,
+    /// Target-side callback: a foreign tab was dropped here. Receives
+    /// the moved item, the model insertion index in *this* bar, and
+    /// the firing context. The app inserts into its own model.
+    on_tab_received: Option<Rc<dyn Fn(T, usize, &mut EventContext)>>,
+    /// Source-side callback: one of this bar's tabs was accepted by a
+    /// *different* bar. Receives the transferred tab's id; the app
+    /// removes it from its own model.
+    on_transfer_out: Option<Rc<dyn Fn(TabId, &mut EventContext)>>,
+    /// Drop handler for **non-tab** payloads — an in-app foreign drag
+    /// (a tree/list row carrying app data) or an OS file/text/URL
+    /// drop. Receives the raw payload, the model insertion index, and
+    /// the firing context; returns `true` if accepted. Distinct from
+    /// [`on_tab_received`](Self::on_tab_received), which only handles
+    /// tabs dragged from a peer `TabBar<T>`.
+    on_external_drop: Option<Rc<dyn Fn(&DragPayload, usize, &mut EventContext) -> bool>>,
+    /// Per-tab transferable predicate. `None` ⇒ all tabs transferable.
+    /// `TabWidget` installs one that excludes static tabs.
+    transferable_fn: Option<Rc<dyn Fn(usize, &T) -> bool>>,
+    /// Set `true` by the bar's own `on_drop` when it consumes a drag
+    /// as an intra-bar reorder; read-and-reset by the source header's
+    /// `on_drag_ended` to suppress a spurious `on_transfer_out` (which
+    /// would otherwise remove the just-reordered tab). `on_drop` runs
+    /// before `on_drag_ended` in the same dispatch, so no reset-at-
+    /// drag-start is needed.
+    self_reorder_flag: Rc<std::cell::Cell<bool>>,
 
     /// Optional shared buffer the parent `TabWidget<T>` populates with
     /// its content panel ids so the headers can publish the
@@ -347,6 +410,13 @@ impl<T: 'static> TabBar<T> {
             reorderable: false,
             on_reorder: None,
             on_pin_toggle: None,
+            accept_external_tabs: false,
+            clone_item: None,
+            on_tab_received: None,
+            on_transfer_out: None,
+            on_external_drop: None,
+            transferable_fn: None,
+            self_reorder_flag: Rc::new(std::cell::Cell::new(false)),
             panel_ids_buffer: None,
             header_ids_buffer: None,
             paint_state: PaintState::default(),
@@ -410,7 +480,10 @@ impl<T: 'static> TabBar<T> {
     /// idle, and hovered all paint the same fill. Accepts any `Color`,
     /// `SurfaceRole`, or `Signal<Color>` (via [`ColorProp`](bastyde_core::color_prop::ColorProp)).
     /// Default `None` = transparent.
-    pub fn tab_surface_role(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self {
+    pub fn tab_surface_role(
+        mut self,
+        color: impl Into<bastyde_core::color_prop::ColorProp>,
+    ) -> Self {
         self.tab_surface_role = Some(color.into());
         self
     }
@@ -561,6 +634,131 @@ impl<T: 'static> TabBar<T> {
     pub fn on_reorder(mut self, f: impl Fn(usize, usize, &mut EventContext) + 'static) -> Self {
         self.on_reorder = Some(Rc::new(f));
         self.reorderable = true;
+        self
+    }
+
+    /// Opt into cross-bar tab transfer. When enabled, this bar's
+    /// headers become transfer drag sources (their drag payload
+    /// carries a clone of the dragged item) **and** the bar accepts
+    /// tabs dragged from *other* `TabBar<T>`s, painting the same
+    /// insertion-line indicator as an intra-bar reorder.
+    ///
+    /// Requires `T: Clone` — the dragged item is cloned into the
+    /// payload (cheap for handle-like `T` whose heavy state lives
+    /// behind an `Rc`). Default: off.
+    ///
+    /// Pair with [`on_tab_received`](Self::on_tab_received) (this bar,
+    /// as a drop target — insert the item into your model) and
+    /// [`on_transfer_out`](Self::on_transfer_out) (the source bar —
+    /// remove the tab from your model).
+    pub fn accept_external_tabs(mut self, on: bool) -> Self
+    where
+        T: Clone,
+    {
+        self.accept_external_tabs = on;
+        self.clone_item = if on {
+            Some(Rc::new(|t: &T| t.clone()))
+        } else {
+            None
+        };
+        self
+    }
+
+    /// Install the target-side callback fired when a foreign tab is
+    /// dropped onto this bar. Receives `(item, insertion_index, ctx)`
+    /// — the moved item (taken by value from the drag payload), the
+    /// model index in *this* bar where it should land, and the firing
+    /// context. The app inserts the item into its own model. Implies
+    /// [`accept_external_tabs(true)`](Self::accept_external_tabs).
+    pub fn on_tab_received(mut self, f: impl Fn(T, usize, &mut EventContext) + 'static) -> Self
+    where
+        T: Clone,
+    {
+        self.on_tab_received = Some(Rc::new(f));
+        if !self.accept_external_tabs {
+            self = self.accept_external_tabs(true);
+        }
+        self
+    }
+
+    /// Install the source-side callback fired after one of this bar's
+    /// tabs has been accepted by a *different* bar. Receives the
+    /// transferred tab's [`TabId`]; the app removes it from its own
+    /// model. Not fired for intra-bar reorders (those go through
+    /// [`on_reorder`](Self::on_reorder)) or rejected / cancelled
+    /// drags. Implies [`accept_external_tabs(true)`](Self::accept_external_tabs).
+    pub fn on_transfer_out(mut self, f: impl Fn(TabId, &mut EventContext) + 'static) -> Self
+    where
+        T: Clone,
+    {
+        self.on_transfer_out = Some(Rc::new(f));
+        if !self.accept_external_tabs {
+            self = self.accept_external_tabs(true);
+        }
+        self
+    }
+
+    /// Accept **non-tab** drops onto the bar — an in-app foreign drag
+    /// (e.g. a file dragged from a `TreeView`, carrying app data) or an
+    /// OS file/text/URL drop. The bar paints the same insertion-line
+    /// indicator while such a payload hovers, and on drop calls `f`
+    /// with the raw [`DragPayload`], the model insertion index, and the
+    /// firing context. Return `true` if accepted — the app inspects the
+    /// payload (`get_typed::<T>()` / `files()` / `text()` / `uris()`)
+    /// and mints whatever it needs (e.g. opens a tab).
+    ///
+    /// Independent of [`accept_external_tabs`](Self::accept_external_tabs):
+    /// a bar can accept foreign tabs, non-tab payloads, both, or
+    /// neither. OS drops additionally require the app to have called
+    /// `BastydeAppBuilder::install_external_dnd()`.
+    ///
+    /// Note: the hover indicator is *optimistic* — it shows for any
+    /// non-tab payload while this handler is installed; `f`'s return
+    /// value is authoritative at drop time.
+    pub fn on_external_drop(
+        mut self,
+        f: impl Fn(&DragPayload, usize, &mut EventContext) -> bool + 'static,
+    ) -> Self {
+        self.on_external_drop = Some(Rc::new(f));
+        self
+    }
+
+    /// Internal hook: install the non-tab drop handler. `pub(crate)`
+    /// because `TabWidget` wires its own index-translation layer.
+    pub(crate) fn on_external_drop_rc(
+        mut self,
+        f: Rc<dyn Fn(&DragPayload, usize, &mut EventContext) -> bool>,
+    ) -> Self {
+        self.on_external_drop = Some(f);
+        self
+    }
+
+    /// Internal hook: install a per-tab transferable predicate.
+    /// `TabWidget` uses it to exclude static tabs (whose content has
+    /// no factory on a receiving bar) from cross-bar transfer. When
+    /// the predicate returns `false`, the tab's drag payload carries
+    /// `item: None` and a foreign bar rejects the drop.
+    pub(crate) fn with_transferable_predicate(
+        mut self,
+        f: impl Fn(usize, &T) -> bool + 'static,
+    ) -> Self {
+        self.transferable_fn = Some(Rc::new(f));
+        self
+    }
+
+    /// Internal hook: install the source-side transfer-out callback.
+    /// `pub(crate)` because `TabWidget` wires its own translation
+    /// layer; the public entry point is on `TabWidget`.
+    pub(crate) fn on_transfer_out_rc(mut self, f: Rc<dyn Fn(TabId, &mut EventContext)>) -> Self {
+        self.on_transfer_out = Some(f);
+        self
+    }
+
+    /// Internal hook: install the target-side received callback.
+    /// `pub(crate)` because `TabWidget` wires its own translation
+    /// layer; the public entry point is on `TabWidget`.
+    pub(crate) fn on_tab_received_rc(mut self, f: Rc<dyn Fn(T, usize, &mut EventContext)>) -> Self {
+        self.on_tab_received = Some(f);
         self
     }
 
@@ -844,6 +1042,61 @@ impl<T: 'static> Widget for TabBar<T> {
                     None
                 };
 
+                // A header is a drag source when reordering is on OR
+                // cross-bar transfer is enabled. Build the payload
+                // factory here (we have `&item` in scope): it carries
+                // the source identity always, and a clone of the item
+                // when transfer is enabled and the tab is transferable
+                // (the `clone_item` closure encapsulates `T: Clone` so
+                // `build()` need not be bounded on it).
+                let is_drag_source = reorder_handler.is_some() || self.accept_external_tabs;
+                let make_drag_payload: Option<Rc<dyn Fn() -> DragPayload>> = if is_drag_source {
+                    let tab_id = (self.id_of)(i, item);
+                    let transferable = self.transferable_fn.as_ref().is_none_or(|f| f(i, item));
+                    let item_payload: Option<(T, Rc<dyn Fn(&T) -> T>)> = if transferable {
+                        self.clone_item.as_ref().map(|cf| ((cf)(item), cf.clone()))
+                    } else {
+                        None
+                    };
+                    let src_index = i;
+                    let bar_id = self_id;
+                    Some(Rc::new(move || {
+                        let item = item_payload.as_ref().map(|(it, cf)| (cf)(it));
+                        DragPayload::typed(TabBarDragData {
+                            source_index: src_index,
+                            source_bar_id: bar_id,
+                            source_id: tab_id,
+                            item,
+                        })
+                    }) as Rc<dyn Fn() -> DragPayload>)
+                } else {
+                    None
+                };
+
+                // Source-side completion: when one of our tabs is
+                // accepted by a *different* bar, fire on_transfer_out.
+                // Suppressed for intra-bar reorders via the shared
+                // self-reorder flag (set by our own on_drop, which
+                // runs before on_drag_ended in the same dispatch).
+                let on_drag_ended: Option<Rc<dyn Fn(DropOutcome, &mut EventContext)>> =
+                    match (self.accept_external_tabs, self.on_transfer_out.clone()) {
+                        (true, Some(transfer_out)) => {
+                            let tab_id = (self.id_of)(i, item);
+                            let self_reorder = self.self_reorder_flag.clone();
+                            Some(
+                                Rc::new(move |outcome: DropOutcome, ctx: &mut EventContext| {
+                                    if matches!(outcome, DropOutcome::InApp { accepted: true })
+                                        && !self_reorder.replace(false)
+                                    {
+                                        (transfer_out)(tab_id, ctx);
+                                    }
+                                })
+                                    as Rc<dyn Fn(DropOutcome, &mut EventContext)>,
+                            )
+                        }
+                        _ => None,
+                    };
+
                 Box::new(TabHeader::new(TabHeaderConfig {
                     label,
                     icon,
@@ -858,11 +1111,8 @@ impl<T: 'static> Widget for TabBar<T> {
                     // via the context menu only.
                     on_close: if is_pinned { None } else { on_close },
                     on_reorder_to,
-                    drag_source_bar_id: if reorder_handler.is_some() {
-                        Some(self_id)
-                    } else {
-                        None
-                    },
+                    make_drag_payload,
+                    on_drag_ended,
                     index: i,
                     initial_enabled: enabled,
                     selected: selected.clone(),
@@ -893,7 +1143,7 @@ impl<T: 'static> Widget for TabBar<T> {
                 if let Some(lbl) = label_capture.borrow_mut().take() {
                     header_labels.push(lbl);
                 } else {
-                    header_labels.push(LocalizedString::literal(String::new()));
+                    header_labels.push(lit!(String::new()));
                 }
             }
         }
@@ -1191,15 +1441,28 @@ impl<T: 'static> Widget for TabBar<T> {
         );
         ctx.apply_self_handlers(handler);
 
-        // Drag-target handlers: only attached when reordering is on.
-        // The bar acts as the single drop target — we convert pointer
-        // position (delivered in bar-local coords) into a tab boundary
-        // by walking `header_bounds_buf` (world coords) translated
-        // into bar-local space via `last_bar_bounds.origin` cached by
-        // `place_children`.
-        if let Some(reorder) = reorder_handler.clone() {
+        // Drag-target handlers: attached when reordering is on OR the
+        // bar accepts cross-bar transfers. The bar acts as the single
+        // drop target — we convert pointer position (delivered in
+        // bar-local coords) into a tab boundary by walking
+        // `header_bounds_buf` (world coords) translated into bar-local
+        // space via `last_bar_bounds.origin` cached by `place_children`.
+        //
+        // Two payload consumers share this target:
+        //   - intra-bar reorder: `data.source_bar_id == self_id` →
+        //     `reorder(from, to)` (only when `reorder` is set).
+        //   - cross-bar transfer: a foreign bar's payload carrying
+        //     `item: Some(_)` → `on_tab_received(item, to_model)`
+        //     (only when `accept_external` is on).
+        if reorder_handler.is_some() || self.accept_external_tabs || self.on_external_drop.is_some()
+        {
             let bar_id_for_drop = self_id;
             let axis = self.orientation;
+            let accept_external = self.accept_external_tabs;
+            let has_external_drop = self.on_external_drop.is_some();
+            // Insertion line cross-extent used when the target bar has
+            // no unpinned headers yet (empty bar): span the bar's
+            // cross axis so the indicator is still visible.
             let drop_handler = HandlerSet::new()
                 .on_drag_hover({
                     let header_bounds = header_bounds_buf.clone();
@@ -1209,19 +1472,46 @@ impl<T: 'static> Widget for TabBar<T> {
                           position: Point,
                           _ctx: &mut EventContext|
                           -> DropFeedback {
-                        let Some(data) = payload.get_typed::<TabBarDragData>() else {
-                            drop_indicator.set(None);
-                            return DropFeedback::NoFeedback;
-                        };
-                        if data.source_bar_id != bar_id_for_drop {
-                            drop_indicator.set(None);
-                            return DropFeedback::NoFeedback;
+                        match payload.get_typed::<TabBarDragData<T>>() {
+                            Some(data) => {
+                                // Accept an intra-bar reorder, or a
+                                // foreign tab when this bar opted into
+                                // transfer and the payload carries a
+                                // transferable item.
+                                let is_intra = data.source_bar_id == bar_id_for_drop;
+                                let is_foreign_ok = accept_external && data.item.is_some();
+                                if !is_intra && !is_foreign_ok {
+                                    drop_indicator.set(None);
+                                    return DropFeedback::NoFeedback;
+                                }
+                            }
+                            None => {
+                                // Non-tab payload (foreign in-app drag
+                                // or OS drop): accepted only if a
+                                // non-tab drop handler is installed.
+                                // The indicator is optimistic — the
+                                // handler decides for real at drop.
+                                if !has_external_drop {
+                                    drop_indicator.set(None);
+                                    return DropFeedback::NoFeedback;
+                                }
+                            }
                         }
                         let bar = bar_bounds.get();
                         let bounds = header_bounds.borrow();
+                        // Empty target bar (no unpinned headers): drop
+                        // at the leading edge, indicator spans the
+                        // bar's cross axis.
                         if bounds.is_empty() {
-                            drop_indicator.set(None);
-                            return DropFeedback::NoFeedback;
+                            let cross = match axis {
+                                TabBarOrientation::Horizontal => bar.height,
+                                TabBarOrientation::Vertical => bar.width,
+                            };
+                            drop_indicator.set(Some(0.0));
+                            return DropFeedback::InsertionLine {
+                                y: 0.0,
+                                width: cross,
+                            };
                         }
                         // Layout-axis pointer position in world coords:
                         // x for horizontal bars, y for vertical bars.
@@ -1249,7 +1539,10 @@ impl<T: 'static> Widget for TabBar<T> {
                     let header_bounds = header_bounds_buf.clone();
                     let bar_bounds = self.paint_state.last_bar_bounds.clone();
                     let drop_indicator = self.paint_state.drop_indicator_x.clone();
-                    let reorder = reorder.clone();
+                    let reorder = reorder_handler.clone();
+                    let on_received = self.on_tab_received.clone();
+                    let on_external_drop = self.on_external_drop.clone();
+                    let self_reorder = self.self_reorder_flag.clone();
                     let unpinned_to_model = unpinned_to_model.clone();
                     let bar_id = bar_id_for_drop;
                     move |mut payload: DragPayload,
@@ -1257,59 +1550,88 @@ impl<T: 'static> Widget for TabBar<T> {
                           ctx: &mut EventContext|
                           -> bool {
                         drop_indicator.set(None);
-                        let Some(data) = payload.take_typed::<TabBarDragData>() else {
-                            return false;
-                        };
-                        if data.source_bar_id != bar_id {
-                            return false;
-                        }
+                        // Extract the tab payload if this is one; a
+                        // failed downcast leaves `payload` intact for
+                        // the non-tab branch below.
+                        let mut data = payload.take_typed::<TabBarDragData<T>>();
                         let bar = bar_bounds.get();
                         let bounds = header_bounds.borrow();
-                        if bounds.is_empty() {
-                            return false;
-                        }
-                        let pointer_world_main = match axis {
-                            TabBarOrientation::Horizontal => position.x + bar.x,
-                            TabBarOrientation::Vertical => position.y + bar.y,
-                        };
-                        // `insertion_index_for` returns a position
-                        // in **unpinned** space (the bounds buffer
-                        // only contains unpinned headers). Convert
-                        // to a **model** insertion index before
-                        // doing any arithmetic against
-                        // `data.source_index`, which is already in
-                        // model space.
-                        let to_unpinned = insertion_index_for(&bounds, pointer_world_main, axis);
-                        let to_model = if to_unpinned < unpinned_to_model.len() {
-                            unpinned_to_model[to_unpinned]
+                        // Resolve the model insertion index from the
+                        // pointer. `insertion_index_for` works in
+                        // **unpinned** space (the bounds buffer only
+                        // holds unpinned headers); map it to a model
+                        // index. An empty target bar inserts at 0.
+                        let to_model = if bounds.is_empty() {
+                            0
                         } else {
-                            // Past the trailing edge of the unpinned
-                            // region — insert just after the last
-                            // unpinned tab. With pinned tabs only at
-                            // the front of the model this is
-                            // `model_len`; with sprinkled pinned
-                            // tabs after the unpinned region it's
-                            // `last_unpinned_model_index + 1`.
-                            unpinned_to_model
-                                .last()
-                                .map(|&last| last + 1)
-                                .unwrap_or(model_len)
+                            let pointer_world_main = match axis {
+                                TabBarOrientation::Horizontal => position.x + bar.x,
+                                TabBarOrientation::Vertical => position.y + bar.y,
+                            };
+                            let to_unpinned =
+                                insertion_index_for(&bounds, pointer_world_main, axis);
+                            if to_unpinned < unpinned_to_model.len() {
+                                unpinned_to_model[to_unpinned]
+                            } else {
+                                // Past the trailing edge of the
+                                // unpinned region — insert just after
+                                // the last unpinned tab.
+                                unpinned_to_model
+                                    .last()
+                                    .map(|&last| last + 1)
+                                    .unwrap_or(model_len)
+                            }
                         };
-                        let from = data.source_index;
-                        // `move_item(from, to)` interprets `to` as
-                        // the **post-removal** insertion position,
-                        // so when the drag is forward (from < to)
-                        // we adjust by -1 to compensate for the
-                        // source slot disappearing.
-                        let adjusted_to = if from < to_model {
-                            to_model.saturating_sub(1)
+
+                        let Some(data) = data.as_mut() else {
+                            // ── Non-tab payload (foreign drag / OS) ─
+                            // `payload` is intact (downcast missed).
+                            drop(bounds);
+                            return match on_external_drop.as_ref() {
+                                Some(cb) => (cb)(&payload, to_model, ctx),
+                                None => false,
+                            };
+                        };
+
+                        if data.source_bar_id == bar_id {
+                            // ── Intra-bar reorder ──────────────────
+                            // Mark the drag as a self-reorder so the
+                            // source header's on_drag_ended suppresses
+                            // on_transfer_out (which would otherwise
+                            // remove the just-reordered tab).
+                            self_reorder.set(true);
+                            let Some(reorder) = reorder.as_ref() else {
+                                return true;
+                            };
+                            let from = data.source_index;
+                            // `move_item(from, to)` interprets `to` as
+                            // the **post-removal** insertion position,
+                            // so a forward drag adjusts by -1.
+                            let adjusted_to = if from < to_model {
+                                to_model.saturating_sub(1)
+                            } else {
+                                to_model
+                            };
+                            if from != adjusted_to {
+                                (reorder)(from, adjusted_to, ctx);
+                            }
+                            true
+                        } else if accept_external {
+                            // ── Cross-bar transfer ─────────────────
+                            // No `-1` correction: there is no source
+                            // slot inside *this* model to compensate
+                            // for. The app inserts the moved item at
+                            // exactly `to_model`.
+                            let Some(item) = data.item.take() else {
+                                return false;
+                            };
+                            if let Some(cb) = on_received.as_ref() {
+                                (cb)(item, to_model, ctx);
+                            }
+                            true
                         } else {
-                            to_model
-                        };
-                        if from != adjusted_to {
-                            (reorder)(from, adjusted_to, ctx);
+                            false
                         }
-                        true
                     }
                 })
                 .on_drag_tick({
@@ -1660,16 +1982,16 @@ fn build_scroll_arrow(
     };
     let tooltip = match (orientation, kind) {
         (TabBarOrientation::Horizontal, ScrollArrowKind::Leading) => {
-            LocalizedString::literal("Scroll tabs left")
+            lit!("Scroll tabs left")
         }
         (TabBarOrientation::Horizontal, ScrollArrowKind::Trailing) => {
-            LocalizedString::literal("Scroll tabs right")
+            lit!("Scroll tabs right")
         }
         (TabBarOrientation::Vertical, ScrollArrowKind::Leading) => {
-            LocalizedString::literal("Scroll tabs up")
+            lit!("Scroll tabs up")
         }
         (TabBarOrientation::Vertical, ScrollArrowKind::Trailing) => {
-            LocalizedString::literal("Scroll tabs down")
+            lit!("Scroll tabs down")
         }
     };
     let button = IconButton::new(icon)
@@ -1731,11 +2053,11 @@ fn build_overflow_dropdown(
 ) -> WidgetId {
     let _ = ctx;
     let icon_size = crate::styles::recipe_button_style::BUTTON_ICON_SIZE;
-    let trigger = Button::new(LocalizedString::literal(""))
+    let trigger = Button::new(lit!(""))
         .variant(ButtonVariant::Ghost)
         .text_role(icon_role)
         .icon(IconWidget::chevron_down(icon_size), IconLocation::Leading)
-        .tooltip(LocalizedString::literal("Show all tabs"));
+        .tooltip(lit!("Show all tabs"));
 
     // Cap each row at the dropdown height so a click still hits a
     // sensible-sized button regardless of `entries.len()`.

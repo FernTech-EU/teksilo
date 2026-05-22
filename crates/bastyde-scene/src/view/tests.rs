@@ -4,10 +4,13 @@
 // is a follow-up.
 mod a11y;
 mod edge_cases;
+mod multi_view;
 mod nested;
+mod runtime_mutation;
 
 use super::*;
 use bastyde_core::widget_tree::WidgetTree;
+use bastyde_i18n::lit;
 
 #[derive(Debug)]
 struct FillWidget;
@@ -309,6 +312,38 @@ fn on_scroll_pixels_animates_pan() {
     let view = view_handle(&tree, view_id);
     assert!((view.pan().x - 50.0).abs() < 0.5);
     assert!((view.pan().y - 30.0).abs() < 0.5);
+}
+
+#[test]
+fn panned_scene_viewport_is_fully_hittable() {
+    // A SceneView applies pan/zoom as a node transform but `clips_children`,
+    // so its bounds are a fixed screen viewport: the whole viewport must stay
+    // hittable at any pan, so a wheel / click over the visible scene reaches
+    // the SceneView instead of falling through to whatever is behind it.
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(Scene::new()).default_size(200.0, 100.0));
+    tree.layout(SizeProposal::exact(200.0, 100.0));
+    view_handle(&tree, view_id).set_pan(bastyde_canvas::Vec2::new(50.0, 30.0));
+    tree.layout(SizeProposal::exact(200.0, 100.0));
+
+    // Every point inside the screen viewport hits the panned SceneView. The
+    // near-origin points (1,1)/(10,10)/(20,10) inverse-map to negative scene
+    // coords and missed before the hit-test fix.
+    for p in [
+        (1.0, 1.0),
+        (10.0, 10.0),
+        (20.0, 10.0),
+        (100.0, 50.0),
+        (199.0, 99.0),
+    ] {
+        assert_eq!(
+            tree.hit_test(bastyde_canvas::Point::new(p.0, p.1)),
+            Some(view_id),
+            "viewport point {p:?} must hit the panned SceneView",
+        );
+    }
+    // Outside the viewport: no hit.
+    assert_eq!(tree.hit_test(bastyde_canvas::Point::new(250.0, 50.0)), None);
 }
 
 #[test]
@@ -851,7 +886,7 @@ fn scene_view_emits_synthetic_at_node_per_visible_item() {
     let on_screen = scene.add_item(
         RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0))
             .fill(Color::RED)
-            .access_label("nearby"),
+            .access_label(lit!("nearby")),
         Point::ZERO,
     );
     let _far_off = scene.add_item(
@@ -998,8 +1033,8 @@ fn a11y_off_screen_mode_viewport_only_excludes_grown_items() {
 #[test]
 fn add_a11y_group_round_trip() {
     let mut scene = Scene::new();
-    let id = scene.add_a11y_group(crate::a11y::A11yGroup::builder().label("Act 1"));
-    assert_eq!(scene.a11y_group(id).map(|g| g.label()), Some(Some("Act 1")));
+    let id = scene.add_a11y_group(crate::a11y::A11yGroup::builder().label(lit!("Act 1")));
+    assert_eq!(scene.a11y_group(id).map(|g| g.label()), Some(Some("Act 1".to_string())));
 }
 
 #[test]
@@ -1011,9 +1046,9 @@ fn set_a11y_parent_reparents_item_under_group() {
     use bastyde_core::accessibility::{SyntheticKind, is_synthetic, synthetic_node_id};
 
     let mut scene = Scene::new();
-    let act1 = scene.add_a11y_group(A11yGroup::builder().label("Act 1"));
+    let act1 = scene.add_a11y_group(A11yGroup::builder().label(lit!("Act 1")));
     let card = scene.add_item(
-        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).access_label("Scene A"),
+        RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).access_label(lit!("Scene A")),
         Point::ZERO,
     );
     scene.set_a11y_parent(A11yNode::Item(card), Some(A11yNode::Group(act1)));
@@ -1061,8 +1096,8 @@ fn nested_groups_emit_in_logical_dfs_order() {
     use bastyde_core::accessibility::{SyntheticKind, synthetic_node_id};
 
     let mut scene = Scene::new();
-    let outer = scene.add_a11y_group(A11yGroup::builder().label("Outer"));
-    let inner = scene.add_a11y_group(A11yGroup::builder().label("Inner"));
+    let outer = scene.add_a11y_group(A11yGroup::builder().label(lit!("Outer")));
+    let inner = scene.add_a11y_group(A11yGroup::builder().label(lit!("Inner")));
     let item = scene.add_item(
         RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)),
         Point::ZERO,
@@ -1201,7 +1236,7 @@ fn remove_a11y_group_drops_dependent_decorations() {
     use crate::items::RectItem;
 
     let mut scene = Scene::new();
-    let g = scene.add_a11y_group(A11yGroup::builder().label("G"));
+    let g = scene.add_a11y_group(A11yGroup::builder().label(lit!("G")));
     let item = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)), Point::ZERO);
     scene.set_a11y_parent(A11yNode::Item(item), Some(A11yNode::Group(g)));
     scene.set_a11y_live(A11yNode::Group(g), accesskit::Live::Assertive);
@@ -1232,8 +1267,8 @@ fn parent_cycle_does_not_loop_walker() {
     use crate::a11y::{A11yGroup, A11yNode};
 
     let mut scene = Scene::new();
-    let a = scene.add_a11y_group(A11yGroup::builder().label("A"));
-    let b = scene.add_a11y_group(A11yGroup::builder().label("B"));
+    let a = scene.add_a11y_group(A11yGroup::builder().label(lit!("A")));
+    let b = scene.add_a11y_group(A11yGroup::builder().label(lit!("B")));
     scene.set_a11y_parent(A11yNode::Group(a), Some(A11yNode::Group(b)));
     scene.set_a11y_parent(A11yNode::Group(b), Some(A11yNode::Group(a)));
 
@@ -1305,7 +1340,7 @@ fn strictly_parallel_suppresses_unparented_items() {
     use bastyde_core::accessibility::{is_synthetic, widget_id_to_node_id};
 
     let mut scene = Scene::new();
-    let g = scene.add_a11y_group(A11yGroup::builder().label("G"));
+    let g = scene.add_a11y_group(A11yGroup::builder().label(lit!("G")));
     let placed = scene.add_item(
         RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)),
         Point::ZERO,
@@ -1360,7 +1395,7 @@ fn auto_graft_widget_appears_under_declared_logical_group() {
     use bastyde_core::accessibility::{SyntheticKind, synthetic_node_id, widget_id_to_node_id};
 
     let mut scene = Scene::new();
-    let act_one = scene.add_a11y_group(A11yGroup::builder().label("Act 1"));
+    let act_one = scene.add_a11y_group(A11yGroup::builder().label(lit!("Act 1")));
     let card_item_id = scene.add_widget(
         LabelledFill { label: "card" },
         Rect::new(10.0, 10.0, 20.0, 20.0),
@@ -1486,7 +1521,7 @@ fn auto_graft_deep_descendant_under_scene_view_group() {
     // Stage 1: add a PlainContainer scene-entry, layout once
     // to learn the inner widget's allocated `WidgetId`.
     let mut scene = Scene::new();
-    let group = scene.add_a11y_group(A11yGroup::builder().label("Tools"));
+    let group = scene.add_a11y_group(A11yGroup::builder().label(lit!("Tools")));
     scene.add_widget(PlainContainer::new(), Rect::new(10.0, 10.0, 40.0, 40.0));
     let mut tree = WidgetTree::new();
     let view_id = tree.add(SceneView::new(scene));
@@ -1591,7 +1626,7 @@ fn ancestor_chain_walk_skips_optout_intermediate() {
     use bastyde_core::accessibility::{SyntheticKind, synthetic_node_id, widget_id_to_node_id};
 
     let mut scene = Scene::new();
-    let group = scene.add_a11y_group(A11yGroup::builder().label("G"));
+    let group = scene.add_a11y_group(A11yGroup::builder().label(lit!("G")));
     scene.add_widget(PlainContainer::new(), Rect::new(10.0, 10.0, 40.0, 40.0));
     let mut tree = WidgetTree::new();
     let view_id = tree.add(SceneView::new(scene));
@@ -1799,7 +1834,7 @@ fn text_item_label_returns_static_text_for_static_items() {
     // Existing semantic preserved: TextItem with static text
     // returns it via `label()` when no override is set.
     use crate::items::TextItem;
-    let item = TextItem::new("Hello", Rect::new(0.0, 0.0, 50.0, 20.0));
+    let item = TextItem::new(lit!("Hello"), Rect::new(0.0, 0.0, 50.0, 20.0));
     assert_eq!(
         crate::item::SceneItem::label(&item).as_deref(),
         Some("Hello")
@@ -2203,7 +2238,7 @@ fn drag_to_move_translates_lightweight_item() {
 #[test]
 fn drag_to_move_persists_via_rebuild_signal_no_snap_back() {
     // Regression: real apps don't call `flush_pending_item_move`
-    // — they rely on the `drag_dirty` rebuild signal to drain
+    // — they rely on the `reconcile_dirty` rebuild signal to drain
     // the pending commit on the next layout pass. Drive a drag
     // end and then run a layout; the position must persist.
     // Drive a SECOND drag from the new position; the position
@@ -2246,18 +2281,18 @@ fn drag_to_move_persists_via_rebuild_signal_no_snap_back() {
     });
 
     // After Ended the on_drag closure must have posted a
-    // pending move and bumped drag_dirty.
+    // pending move and bumped reconcile_dirty.
     {
         let view = view_handle(&tree, view_id);
         assert!(
             view.pending_item_move.get().is_some(),
             "drag end must post pending_item_move"
         );
-        assert!(view.drag_dirty.get() > 0, "drag end must bump drag_dirty");
+        assert!(view.reconcile_dirty.get() > 0, "drag end must bump reconcile_dirty");
     }
 
     // Real apps' layout cycle runs after event dispatch, where
-    // drag_dirty (bumped on Ended) triggers the rebuild that
+    // reconcile_dirty (bumped on Ended) triggers the rebuild that
     // drains the pending commit.
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
@@ -2328,7 +2363,7 @@ fn drag_cascades_to_declared_descendants() {
         Point::ZERO,
     );
     let label = scene.add_item(
-        TextItem::new("child", Rect::new(58.0, 70.0, 64.0, 20.0)),
+        TextItem::new(lit!("child"), Rect::new(58.0, 70.0, 64.0, 20.0)),
         Point::ZERO,
     );
     scene.set_item_parent(label, Some(parent_rect));
@@ -2397,7 +2432,7 @@ fn parent_child_drag_persists_across_two_drags() {
         Point::ZERO,
     );
     let label = scene.add_item(
-        TextItem::new("child", Rect::new(58.0, 70.0, 64.0, 20.0)),
+        TextItem::new(lit!("child"), Rect::new(58.0, 70.0, 64.0, 20.0)),
         Point::ZERO,
     );
     scene.set_item_parent(label, Some(parent_rect));
@@ -2463,7 +2498,7 @@ fn parent_child_drag_persists_across_two_drags() {
 fn looping_item_animation_survives_drag_end_rebuild() {
     // Showcase regression: dropping a draggable square in section 5
     // froze the PulsingDot animations in section 8. Cause: the
-    // `drag_dirty` rebuild cancels animations owned by SceneView,
+    // `reconcile_dirty` rebuild cancels animations owned by SceneView,
     // and the items' `register_bindings` must re-register and
     // re-arm `animate_looping` so the loop resumes on the next
     // pending-pickup pass.
@@ -2539,7 +2574,7 @@ fn looping_item_animation_survives_drag_end_rebuild() {
         );
     }
 
-    // Drag the rect — Down/Move/Up. This bumps drag_dirty, which
+    // Drag the rect — Down/Move/Up. This bumps reconcile_dirty, which
     // triggers a SceneView rebuild on the next layout pass, which
     // is where the regression bites.
     tree.pointer_move(Point::new(20.0, 20.0));
@@ -3054,7 +3089,7 @@ fn a11y_label_is_announced() {
     let view_id = tree.add(
         SceneView::new(Scene::new())
             .nested_a11y(true)
-            .a11y_label("Chart data area"),
+            .a11y_label(lit!("Chart data area")),
     );
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let update = tree.sync_accessibility();
@@ -4071,7 +4106,11 @@ impl crate::item::SceneItem for TransformRecorder {
     fn set_local_bounds(&mut self, b: Rect) {
         self.bounds = b;
     }
-    fn paint(&self, canvas: &mut bastyde_canvas::Canvas, _ctx: &crate::item::SceneItemPaintContext) {
+    fn paint(
+        &self,
+        canvas: &mut bastyde_canvas::Canvas,
+        _ctx: &crate::item::SceneItemPaintContext,
+    ) {
         self.captured.set(Some(canvas.current_transform()));
         // Emit something so the renderer doesn't elide the whole
         // item — also gives a draw_order entry to inspect if needed.
@@ -4414,14 +4453,8 @@ fn ignores_xform_debug_overlay_paints_screen_anchored_bounds() {
         "stroke_rect should emit 4 edge decorations, got {}",
         edges.len()
     );
-    let min_x = edges
-        .iter()
-        .map(|r| r[0])
-        .fold(f32::INFINITY, f32::min);
-    let min_y = edges
-        .iter()
-        .map(|r| r[1])
-        .fold(f32::INFINITY, f32::min);
+    let min_x = edges.iter().map(|r| r[0]).fold(f32::INFINITY, f32::min);
+    let min_y = edges.iter().map(|r| r[1]).fold(f32::INFINITY, f32::min);
     let max_x = edges
         .iter()
         .map(|r| r[0] + r[2])
@@ -4799,7 +4832,8 @@ fn group_item_logical_only_dispatch_passes_through_to_item_beneath() {
     // Inner RectItem at (20, 20, 30, 30); GroupItem AABB
     // (0, 0, 100, 100) overlapping it. Group is logical-only
     // (default — no fill, no stroke, no label).
-    let inner_item = RectItem::new(Rect::new(0.0, 0.0, 30.0, 30.0)).fill(bastyde_tokens::Color::RED);
+    let inner_item =
+        RectItem::new(Rect::new(0.0, 0.0, 30.0, 30.0)).fill(bastyde_tokens::Color::RED);
     let group = GroupItem::new(Rect::new(0.0, 0.0, 100.0, 100.0));
 
     let mut scene = Scene::new();
@@ -4814,15 +4848,21 @@ fn group_item_logical_only_dispatch_passes_through_to_item_beneath() {
     let inner_hits = Rc::new(Cell::new(0_u32));
     {
         let group_hits = group_hits.clone();
-        scene.handlers_mut(group_id).unwrap().on_tap(move |_pt, _ctx| {
-            group_hits.set(group_hits.get() + 1);
-        });
+        scene
+            .handlers_mut(group_id)
+            .unwrap()
+            .on_tap(move |_pt, _ctx| {
+                group_hits.set(group_hits.get() + 1);
+            });
     }
     {
         let inner_hits = inner_hits.clone();
-        scene.handlers_mut(inner_id).unwrap().on_tap(move |_pt, _ctx| {
-            inner_hits.set(inner_hits.get() + 1);
-        });
+        scene
+            .handlers_mut(inner_id)
+            .unwrap()
+            .on_tap(move |_pt, _ctx| {
+                inner_hits.set(inner_hits.get() + 1);
+            });
     }
 
     let mut tree = WidgetTree::new();
@@ -4915,9 +4955,9 @@ fn rect_item_default_clone_shape_test_aabb_hits_as_before() {
     use crate::items::RectItem;
     let item = RectItem::new(Rect::new(10.0, 10.0, 30.0, 30.0));
     let test = item.clone_shape_test();
-    assert!(test(Point::new(20.0, 20.0)));
-    assert!(!test(Point::new(5.0, 5.0)));
-    assert!(!test(Point::new(45.0, 45.0)));
+    assert!(test(Point::new(20.0, 20.0), 1.0));
+    assert!(!test(Point::new(5.0, 5.0), 1.0));
+    assert!(!test(Point::new(45.0, 45.0), 1.0));
 }
 
 // -----------------------------------------------------------------
@@ -5129,10 +5169,7 @@ fn drag_mode_signal_flips_behavior_at_runtime() {
     // marquee fires, drag does NOT pan.
     {
         let view = view_handle(&tree, view_id);
-        assert_eq!(
-            view.drag_mode_signal().get(),
-            crate::DragMode::RubberBand
-        );
+        assert_eq!(view.drag_mode_signal().get(), crate::DragMode::RubberBand);
     }
     drag(&mut tree, 50.0, 50.0, 200.0, 200.0);
     {
@@ -5148,8 +5185,7 @@ fn drag_mode_signal_flips_behavior_at_runtime() {
     // gesture — should pan now, marquee should NOT trigger.
     {
         let view = view_handle(&tree, view_id);
-        view.drag_mode_signal()
-            .set(crate::DragMode::ScrollHandDrag);
+        view.drag_mode_signal().set(crate::DragMode::ScrollHandDrag);
     }
     drag(&mut tree, 100.0, 100.0, 175.0, 150.0);
     {
@@ -5224,8 +5260,7 @@ fn drag_mode_signal_to_no_drag_disables_dispatch_at_runtime() {
 fn bind_drag_mode_shares_app_owned_signal() {
     // Caller owns a Signal<DragMode>, binds the view to it,
     // toggles it from outside — view picks up the change.
-    let app_owned: Signal<crate::DragMode> =
-        Signal::new(crate::DragMode::RubberBand);
+    let app_owned: Signal<crate::DragMode> = Signal::new(crate::DragMode::RubberBand);
     let scene = Scene::new();
     let mut tree = WidgetTree::new();
     let view_id = tree.add(
@@ -5358,7 +5393,8 @@ fn accept_tap_buttons_gates_middle_click() {
         RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)).fill(bastyde_tokens::Color::RED),
         Point::new(20.0, 20.0),
     );
-    let buttons: Rc<RefCell<Vec<bastyde_core::event::PointerButton>>> = Rc::new(RefCell::new(vec![]));
+    let buttons: Rc<RefCell<Vec<bastyde_core::event::PointerButton>>> =
+        Rc::new(RefCell::new(vec![]));
     let buttons_clone = buttons.clone();
     {
         let h = scene.handlers_mut(id).unwrap();
@@ -5525,4 +5561,131 @@ fn item_thumbnails_skips_invisible_and_logical_items() {
     );
     assert_eq!(thumbs[0].1, bastyde_tokens::Color::RED);
     let _ = visible;
+}
+
+#[test]
+fn item_thumbnails_includes_heavyweight_widget_rects() {
+    use crate::items::RectItem;
+    let mut scene = Scene::new();
+    scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)).fill(bastyde_tokens::Color::RED),
+        Point::ZERO,
+    );
+    // A heavyweight widget entry has no `SceneItem`, but the minimap must still
+    // show it (a widget-heavy scene would otherwise look empty in the minimap).
+    let _card = scene.add_widget(FillWidget::new(), Rect::new(50.0, 60.0, 100.0, 40.0));
+    let thumbs = scene.item_thumbnails();
+    assert_eq!(thumbs.len(), 2, "both tiers contribute a thumbnail");
+    assert!(
+        thumbs
+            .iter()
+            .any(|(r, _)| *r == Rect::new(50.0, 60.0, 100.0, 40.0)),
+        "the heavyweight card's scene rect appears in the thumbnails"
+    );
+}
+
+// -----------------------------------------------------------------
+// R5: lightweight-item tooltips (point-anchored overlay via hover)
+// -----------------------------------------------------------------
+
+#[test]
+fn lightweight_item_tooltip_shows_after_delay_then_dismisses_on_leave() {
+    use crate::items::RectItem;
+
+    let mut scene = Scene::new();
+    // Local rect (0,0,50,50) placed at (20,20) → scene rect (20,20)-(70,70).
+    let id = scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)).fill(bastyde_tokens::Color::RED),
+        Point::new(20.0, 20.0),
+    );
+    scene.handlers_mut(id).unwrap().tooltip(lit!("Item tip"));
+
+    let mut tree = WidgetTree::new();
+    tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // Hover over the item — nothing yet (dwell delay not elapsed).
+    tree.pointer_move(Point::new(40.0, 40.0));
+    assert!(
+        tree.active_overlays().is_empty(),
+        "tooltip must not show before the dwell delay"
+    );
+
+    // Past the delay the point-anchored overlay appears, carrying the
+    // item's resolved text.
+    tree.advance_time(bastyde_tokens::MotionTokens::default().tooltip_delay_heavy + std::time::Duration::from_millis(50));
+    assert_eq!(
+        tree.active_overlays().len(),
+        1,
+        "tooltip overlay should be shown after the dwell delay"
+    );
+    assert!(
+        tree.find_by_label("Item tip").is_some(),
+        "the reusable tooltip surface should carry the hovered item's text"
+    );
+
+    // Moving onto empty space retracts it.
+    tree.pointer_move(Point::new(300.0, 250.0));
+    assert!(
+        tree.active_overlays().is_empty(),
+        "tooltip must dismiss when the pointer leaves the item"
+    );
+}
+
+#[test]
+fn lightweight_item_without_tooltip_shows_nothing() {
+    use crate::items::RectItem;
+
+    let mut scene = Scene::new();
+    // Item carries a cursor override but no tooltip.
+    let id = scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)).fill(bastyde_tokens::Color::RED),
+        Point::new(20.0, 20.0),
+    );
+    scene
+        .handlers_mut(id)
+        .unwrap()
+        .cursor(bastyde_core::widget::CursorIcon::Pointer);
+
+    let mut tree = WidgetTree::new();
+    tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    tree.pointer_move(Point::new(40.0, 40.0));
+    tree.advance_time(bastyde_tokens::MotionTokens::default().tooltip_delay_heavy + std::time::Duration::from_millis(50));
+    assert!(
+        tree.active_overlays().is_empty(),
+        "an item without a tooltip must never show one"
+    );
+}
+
+#[test]
+fn lightweight_item_tooltip_dismissed_on_pointer_down() {
+    use crate::items::RectItem;
+
+    let mut scene = Scene::new();
+    let id = scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)).fill(bastyde_tokens::Color::RED),
+        Point::new(20.0, 20.0),
+    );
+    scene.handlers_mut(id).unwrap().tooltip(lit!("Tip"));
+
+    let mut tree = WidgetTree::new();
+    tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    tree.pointer_move(Point::new(40.0, 40.0));
+    tree.advance_time(bastyde_tokens::MotionTokens::default().tooltip_delay_heavy + std::time::Duration::from_millis(50));
+    assert_eq!(tree.active_overlays().len(), 1);
+
+    // A press retracts the hover tooltip — the user has committed.
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(40.0, 40.0),
+        button: bastyde_core::event::PointerButton::Primary,
+        modifiers: bastyde_core::event::Modifiers::NONE,
+    });
+    assert!(
+        tree.active_overlays().is_empty(),
+        "tooltip must dismiss on pointer-down"
+    );
 }

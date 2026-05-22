@@ -44,7 +44,8 @@ impl DropZoneStyle for RecipeDropZoneStyle {
                 .corner_radius(CornerRadius::uniform(DROP_ZONE_CORNER_RADIUS)),
         );
 
-        let centered = Center::new().child(Padding::uniform(DROP_ZONE_PADDING).child_id(cfg.content));
+        let centered =
+            Center::new().child(Padding::uniform(DROP_ZONE_PADDING).child_id(cfg.content));
 
         ctx.add(ZStack::new().add_child(rect).child(centered))
     }

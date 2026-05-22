@@ -31,7 +31,7 @@ use bastyde::widgets::{
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -93,7 +93,7 @@ fn build_kit(
         .child(caption(
             "Animated knob slide via AnimationSpec::fast().standard() + to_or_snap.",
         ))
-        .child(Toggle::new(toggle_state).label_literal("Animate me"))
+        .child(Toggle::new(toggle_state).label(lit!("Animate me")))
         .child(Divider::new())
         .child(section_header("Collapse"))
         .child(caption(
@@ -105,9 +105,9 @@ fn build_kit(
             Collapse::new(collapse_expanded).child(
                 VStack::new()
                     .spacing(6.0)
-                    .child(TextWidget::new_literal("Hidden content #1"))
-                    .child(TextWidget::new_literal("Hidden content #2"))
-                    .child(TextWidget::new_literal("Hidden content #3")),
+                    .child(TextWidget::new(lit!("Hidden content #1")))
+                    .child(TextWidget::new(lit!("Hidden content #2")))
+                    .child(TextWidget::new(lit!("Hidden content #3"))),
             ),
         )
         .child(Divider::new())
@@ -118,9 +118,9 @@ fn build_kit(
              natural size at all opacity values.",
         ))
         .child(toggle_button("Toggle Fade", fade_visible.clone()))
-        .child(Fade::new(fade_visible).child(TextWidget::new_literal(
-            "  ●  Faded content — opacity tweens between 0 and 1.",
-        )))
+        .child(Fade::new(fade_visible).child(TextWidget::new(lit!(
+            "  ●  Faded content — opacity tweens between 0 and 1."
+        ))))
         .child(Divider::new())
         .child(section_header("Spinner"))
         .child(caption(
@@ -145,7 +145,7 @@ fn build_kit(
             "Pre-existing AnimatedQuadKind::IndeterminateSweep — included as a regression \
              proof that the older shader path still works alongside the new SpinnerArc kind.",
         ))
-        .child(ProgressBar::indeterminate().label_literal("Loading"))
+        .child(ProgressBar::indeterminate().label(lit!("Loading")))
         .child(Divider::new())
         .child(section_header("Tooltip with fade"))
         .child(caption(
@@ -154,9 +154,11 @@ fn build_kit(
              defers the actual stack removal until the tween completes. Hover the button.",
         ))
         .child(
-            Button::new_literal("Hover me")
+            Button::new(lit!("Hover me"))
                 .variant(ButtonVariant::Filled)
-                .tooltip_literal("I fade in and out over `motion.duration_fast` (~120 ms)."),
+                .tooltip(lit!(
+                    "I fade in and out over `motion.duration_fast` (~120 ms)."
+                )),
         )
         .child(Divider::new())
         .child(section_header("Pulse"))
@@ -178,7 +180,7 @@ fn build_kit(
                             ),
                         ),
                 )
-                .child(TextWidget::new_literal("REC")),
+                .child(TextWidget::new(lit!("REC"))),
         )
         .child(Divider::new())
         .child(section_header("Cycle"))
@@ -189,9 +191,9 @@ fn build_kit(
         .child(
             Cycle::new()
                 .period(Duration::from_secs(2))
-                .child(TextWidget::new_literal("Tip 1: hold Shift to multi-select"))
-                .child(TextWidget::new_literal("Tip 2: press Cmd-K to search"))
-                .child(TextWidget::new_literal("Tip 3: drag the divider to resize")),
+                .child(TextWidget::new(lit!("Tip 1: hold Shift to multi-select")))
+                .child(TextWidget::new(lit!("Tip 2: press Cmd-K to search")))
+                .child(TextWidget::new(lit!("Tip 3: drag the divider to resize"))),
         )
         .child(Divider::new())
         .child(section_header("SmoothSize"))
@@ -210,12 +212,12 @@ fn build_kit(
                             Box::new(
                                 VStack::new()
                                     .spacing(4.0)
-                                    .child(TextWidget::new_literal("Now there's more content."))
-                                    .child(TextWidget::new_literal("The panel grows to fit it."))
-                                    .child(TextWidget::new_literal("All animated, no jumps.")),
+                                    .child(TextWidget::new(lit!("Now there's more content.")))
+                                    .child(TextWidget::new(lit!("The panel grows to fit it.")))
+                                    .child(TextWidget::new(lit!("All animated, no jumps."))),
                             )
                         } else {
-                            Box::new(TextWidget::new_literal("Short."))
+                            Box::new(TextWidget::new(lit!("Short.")))
                         }
                     },
                 ))),
@@ -227,7 +229,7 @@ fn build_kit(
              fades in — like Switcher, but smooth.",
         ))
         .child(
-            Button::new_literal("Next page")
+            Button::new(lit!("Next page"))
                 .variant(ButtonVariant::Plain)
                 .on_activate_fn({
                     let key = crossfade_key.clone();
@@ -240,9 +242,7 @@ fn build_kit(
                 1 => "📊  Page B — details",
                 _ => "🔧  Page C — settings",
             };
-            Box::new(
-                Panel::new().child(Padding::uniform(16.0).child(TextWidget::new_literal(label))),
-            )
+            Box::new(Panel::new().child(Padding::uniform(16.0).child(TextWidget::new(lit!(label)))))
         }))
         .child(Divider::new())
         .child(section_header("Slide"))
@@ -255,7 +255,7 @@ fn build_kit(
             Slide::new(slide_visible.clone())
                 .from(SlideEdge::Trailing)
                 .child(Fade::new(slide_visible).child(
-                    Card::new().content(TextWidget::new_literal("⚠  Banner — slides + fades.")),
+                    Card::new().content(TextWidget::new(lit!("⚠  Banner — slides + fades."))),
                 )),
         )
         .child(Divider::new())
@@ -268,10 +268,10 @@ fn build_kit(
             VStack::new()
                 .spacing(8.0)
                 .child(Shake::new(shake_trigger.clone()).child(
-                    Card::new().content(TextWidget::new_literal("incorrect-password-input-field")),
+                    Card::new().content(TextWidget::new(lit!("incorrect-password-input-field"))),
                 ))
                 .child(
-                    Button::new_literal("Submit")
+                    Button::new(lit!("Submit"))
                         .variant(ButtonVariant::Plain)
                         .on_activate_fn(move |_| {
                             shake_trigger.set(shake_trigger.get() + 1);
@@ -287,9 +287,9 @@ fn build_kit(
         ))
         .child(toggle_button("Toggle Scale", scale_visible.clone()))
         .child(
-            Scale::new(scale_visible).child(Card::new().content(TextWidget::new_literal(
-                "I shrink/grow visually around my center.",
-            ))),
+            Scale::new(scale_visible).child(Card::new().content(TextWidget::new(lit!(
+                "I shrink/grow visually around my center."
+            )))),
         )
         .child(Divider::new())
         .child(section_header("Scale (reflow)"))
@@ -302,14 +302,14 @@ fn build_kit(
         .child(
             HStack::new()
                 .spacing(8.0)
-                .child(TextWidget::new_literal("Before:"))
+                .child(TextWidget::new(lit!("Before:")))
                 .child(
                     Scale::new(scale_reflow_visible)
                         .reflow(true)
                         .origin(ScaleOrigin::TopLeading)
-                        .child(Card::new().content(TextWidget::new_literal("removable card"))),
+                        .child(Card::new().content(TextWidget::new(lit!("removable card")))),
                 )
-                .child(TextWidget::new_literal(":After")),
+                .child(TextWidget::new(lit!(":After"))),
         )
         .child(Divider::new())
         .child(section_header("Rotate"))
@@ -341,7 +341,7 @@ fn build_kit(
                 )
                 .child({
                     let angle = rotate_angle.clone();
-                    Button::new_literal("Rotate 90°")
+                    Button::new(lit!("Rotate 90°"))
                         .variant(ButtonVariant::Plain)
                         .on_activate_fn(move |_| {
                             let target = angle.get() + std::f32::consts::FRAC_PI_2;
@@ -367,7 +367,7 @@ fn build_kit(
             HStack::new()
                 .spacing(12.0)
                 .child(
-                    Button::new_literal("Reveal / Hide")
+                    Button::new(lit!("Reveal / Hide"))
                         .variant(ButtonVariant::Plain)
                         .on_activate_fn(move |_| {
                             let now_obscured = !obscured.get();
@@ -384,29 +384,29 @@ fn build_kit(
                     Blur::new(blur_radius.clone()).child(
                         VStack::new()
                             .spacing(2.0)
-                            .child(TextWidget::new_literal("Card balance: $42,851.07"))
-                            .child(TextWidget::new_literal("Account #: 1234-5678-9012-3456"))
-                            .child(TextWidget::new_literal("CVV: 042  ·  Exp: 12/29")),
+                            .child(TextWidget::new(lit!("Card balance: $42,851.07")))
+                            .child(TextWidget::new(lit!("Account #: 1234-5678-9012-3456")))
+                            .child(TextWidget::new(lit!("CVV: 042  ·  Exp: 12/29"))),
                     ),
                 )
         })
 }
 
 fn section_header(title: &str) -> impl Widget + 'static {
-    TextWidget::new_literal(title)
+    TextWidget::new(lit!(title))
         .style(TextStyleRole::BodyBold)
         .color(TextRole::Primary)
 }
 
 fn caption(text: &str) -> impl Widget + 'static {
-    TextWidget::new_literal(text)
+    TextWidget::new(lit!(text))
         .style(TextStyleRole::Small)
         .color(TextRole::Secondary)
 }
 
 fn toggle_button(label: &str, signal: Signal<bool>) -> impl Widget + 'static {
     let label = label.to_string();
-    Button::new_literal(label)
+    Button::new(lit!(label))
         .variant(ButtonVariant::Plain)
         .on_activate_fn(move |_ctx| {
             signal.set(!signal.get());

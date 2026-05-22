@@ -51,6 +51,7 @@
 #[cfg(test)]
 mod tests;
 
+use bastyde_i18n::localized;
 use std::rc::Rc;
 
 use bastyde_canvas::{Path, Point, Rect, SizeProposal};
@@ -133,7 +134,7 @@ pub struct DateEdit {
     min_date: Option<Date>,
     max_date: Option<Date>,
     pattern: Option<String>,
-    placeholder: String,
+    placeholder: bastyde_i18n::LocalizedString,
     first_day_of_week: Option<Weekday>,
     show_calendar_button: bool,
     calendar_popover_placement: OverlayPlacement,
@@ -146,7 +147,7 @@ pub struct DateEdit {
     /// [`WidthPolicy::Default`] — the field sizes to its natural
     /// mask-derived width and stays put.
     width_policy: WidthPolicy,
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
     on_value_changed: Option<OnValueChanged>,
     /// Live feedback signal mirrored from the inner field, owned by
     /// `DateEdit` so the wrapper's `accessibility()` and the
@@ -188,7 +189,7 @@ impl DateEdit {
             min_date: None,
             max_date: None,
             pattern: None,
-            placeholder: String::new(),
+            placeholder: bastyde_i18n::LocalizedString::literal(String::new()),
             first_day_of_week: None,
             show_calendar_button: true,
             calendar_popover_placement: OverlayPlacement::BelowPreferred,
@@ -245,13 +246,7 @@ impl DateEdit {
 
     pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.placeholder = ls.resolve_now();
-        self
-    }
-
-    /// Untranslated [`placeholder`](Self::placeholder).
-    pub fn placeholder_literal(mut self, text: impl Into<String>) -> Self {
-        self.placeholder = text.into();
+        self.placeholder = ls;
         self
     }
 
@@ -311,13 +306,7 @@ impl DateEdit {
 
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
-        self
-    }
-
-    /// Untranslated [`label`](Self::label).
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
+        self.label = Some(ls);
         self
     }
 
@@ -603,7 +592,9 @@ impl Widget for DateEdit {
                     .embedded()
                     .size(IconButtonSize::Default)
                     .enabled(enabled && !read_only)
-                    .tooltip(resolve_message_widget("date-edit-trigger-tooltip", &[]))
+                    .tooltip(localized(move || {
+                        resolve_message_widget("date-edit-trigger-tooltip", &[])
+                    }))
                     .on_activate_fn(move |ctx_evt: &mut EventContext| {
                         if popover_open.get() {
                             popover_open.set(false);
@@ -850,7 +841,7 @@ impl Widget for DateEdit {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(Role::DateInput);
         if let Some(ref label) = self.label {
-            builder.set_name(label);
+            builder.set_name(label.resolve_now());
         } else {
             builder.set_name(resolve_message_widget("date-edit-name", &[]));
         }
@@ -859,8 +850,8 @@ impl Widget for DateEdit {
                 builder.set_value(format!("{:04}-{:02}-{:02}", d.year(), d.month(), d.day()));
             }
             None => {
-                if !self.placeholder.is_empty() {
-                    builder.set_placeholder(self.placeholder.clone());
+                if !self.placeholder.resolve_now().is_empty() {
+                    builder.set_placeholder(self.placeholder.resolve_now());
                 } else {
                     builder.set_placeholder(resolve_message_widget("date-edit-placeholder", &[]));
                 }

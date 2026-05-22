@@ -18,7 +18,7 @@ fn fruits() -> Vec<&'static str> {
 fn combo_box_builds_and_lays_out() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
-    let cb = tree.add(ComboBox::new(fruits(), selected.clone()).placeholder("Select..."));
+    let cb = tree.add(ComboBox::new(fruits(), selected.clone()).placeholder(lit!("Select...")));
     tree.layout(SizeProposal::exact(300.0, 50.0));
     let bounds = tree.bounds(cb);
     assert!(bounds.width >= 120.0);
@@ -40,7 +40,8 @@ fn combo_box_accessibility_role() {
 fn accessibility_exposes_label_via_set_name() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
-    let cb = tree.add(ComboBox::new(vec!["Apple", "Banana"], selected.clone()).label("Fruit"));
+    let cb =
+        tree.add(ComboBox::new(vec!["Apple", "Banana"], selected.clone()).label(lit!("Fruit")));
     tree.layout(SizeProposal::exact(200.0, 50.0));
     let info = tree.accessibility_node(cb);
     assert_eq!(info.name(), Some("Fruit"));
@@ -318,7 +319,7 @@ fn typed_combo_box_renders_with_item_label() {
         ComboBox::from_items(fruit_list(), selected.clone(), |f: &Fruit| {
             f.name.to_string()
         })
-        .placeholder("Pick a fruit"),
+        .placeholder(lit!("Pick a fruit")),
     );
     tree.layout(SizeProposal::exact(300.0, 50.0));
     assert!(tree.bounds(cb).width >= 120.0);
@@ -1063,7 +1064,8 @@ fn accessibility_trigger_controls_popup() {
 fn accessibility_placeholder_when_no_selection() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
-    let cb = tree.add(ComboBox::new(fruits(), selected.clone()).placeholder("Select a fruit"));
+    let cb =
+        tree.add(ComboBox::new(fruits(), selected.clone()).placeholder(lit!("Select a fruit")));
     tree.layout(SizeProposal::exact(300.0, 200.0));
 
     let node = build_raw_a11y_node(&mut tree, cb);
@@ -1075,7 +1077,8 @@ fn accessibility_placeholder_when_no_selection() {
 fn accessibility_value_when_selection_present() {
     let mut tree = light_tree();
     let selected = Signal::new(Some("Banana".to_string()));
-    let cb = tree.add(ComboBox::new(fruits(), selected.clone()).placeholder("Select a fruit"));
+    let cb =
+        tree.add(ComboBox::new(fruits(), selected.clone()).placeholder(lit!("Select a fruit")));
     tree.layout(SizeProposal::exact(300.0, 200.0));
 
     let node = build_raw_a11y_node(&mut tree, cb);

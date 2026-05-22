@@ -143,13 +143,21 @@ pub trait SceneItem: std::fmt::Debug + 'static {
         self.local_bounds().contains(local_pt)
     }
 
-    /// Produce a stand-alone `Fn(Point) -> bool` that closes over
+    /// Produce a stand-alone `Fn(Point, f32) -> bool` that closes over
     /// whatever state this item needs to answer `shape_contains`
     /// without retaining a borrow on `self`. The
     /// [`SceneView`](crate::SceneView) snapshots one of these for
     /// every item at layout time and consults it on every pointer
     /// event — direct calls to `shape_contains(&self, ...)` can't
     /// be cached because `&dyn SceneItem` is not `Clone`.
+    ///
+    /// The closure's second argument is the **view scale** (zoom)
+    /// active when the pointer event arrives — passed at call time
+    /// (not baked at snapshot time) because zoom changes without
+    /// rebuilding the snapshot. Most items ignore it; stroke-distance
+    /// hit-testing ([`PathItem`](crate::items::PathItem)) uses it so a
+    /// **cosmetic** stroke (constant device-pixel width) keeps a
+    /// proportionate hit band in scene coordinates at any zoom.
     ///
     /// Default: AABB containment of `local_bounds()`. Items with a
     /// non-AABB shape (notably [`crate::items::PathItem`] for
@@ -160,9 +168,9 @@ pub trait SceneItem: std::fmt::Debug + 'static {
     /// silent dispatch bug — the eager `Scene::item_at` path still
     /// calls `shape_contains` correctly, but pointer-event routing
     /// goes through the snapshot.
-    fn clone_shape_test(&self) -> Box<dyn Fn(Point) -> bool + 'static> {
+    fn clone_shape_test(&self) -> Box<dyn Fn(Point, f32) -> bool + 'static> {
         let bounds = self.local_bounds();
-        Box::new(move |p| bounds.contains(p))
+        Box::new(move |p, _view_scale| bounds.contains(p))
     }
 
     /// Dominant color to draw as the item's representation in

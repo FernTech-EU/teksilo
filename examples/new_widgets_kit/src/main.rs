@@ -23,7 +23,7 @@ use bastyde::widgets::{
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -66,12 +66,13 @@ impl Root {
         let warn_visible = self.show_warn_banner.clone();
         let error_visible = self.show_error_banner.clone();
 
-        let info_banner = Banner::info_literal("Welcome to Bastyde")
-            .description_literal("Persistent inline status strips for app-level conditions.");
-        let warn_banner = Banner::warning_literal("Unsaved changes")
-            .description_literal("Closing the document now will discard your edits.")
+        let info_banner = Banner::info(lit!("Welcome to Bastyde")).description(lit!(
+            "Persistent inline status strips for app-level conditions."
+        ));
+        let warn_banner = Banner::warning(lit!("Unsaved changes"))
+            .description(lit!("Closing the document now will discard your edits."))
             .action(
-                Button::new_literal("Save now")
+                Button::new(lit!("Save now"))
                     .variant(ButtonVariant::Plain)
                     .on_activate_fn(|_| println!("Save now clicked")),
             )
@@ -79,8 +80,8 @@ impl Root {
                 let s = warn_visible.clone();
                 move |_| s.set(false)
             });
-        let error_banner = Banner::error_literal("Disk almost full")
-            .description_literal("Less than 200 MB remaining on /Users/you.")
+        let error_banner = Banner::error(lit!("Disk almost full"))
+            .description(lit!("Less than 200 MB remaining on /Users/you."))
             .on_dismiss({
                 let s = error_visible.clone();
                 move |_| s.set(false)
@@ -94,7 +95,7 @@ impl Root {
         let warn_id = ctx.add(Collapse::new(warn_visible).child(warn_banner));
         let error_id = ctx.add(Collapse::new(error_visible).child(error_banner));
 
-        let restore = Button::new_literal("Restore banners")
+        let restore = Button::new(lit!("Restore banners"))
             .variant(ButtonVariant::Ghost)
             .on_activate_fn({
                 let info = self.show_info_banner.clone();
@@ -110,7 +111,7 @@ impl Root {
         ctx.add(
             VStack::new()
                 .spacing(8.0)
-                .child(GroupHeader::new_literal("Banner"))
+                .child(GroupHeader::new(lit!("Banner")))
                 .add_child(info_id)
                 .add_child(warn_id)
                 .add_child(error_id)
@@ -121,7 +122,7 @@ impl Root {
     fn search_and_picker_section(&self, ctx: &mut BuildContext) -> WidgetId {
         // Live readout of what's typed in the search field — shows the
         // user that the bound signal updates on every keystroke.
-        let search_readout = TextWidget::new_literal("")
+        let search_readout = TextWidget::new(lit!(""))
             .bind_text(self.search_text.map(|s| {
                 if s.is_empty() {
                     "Type to filter — text mirrors here as you type. Press Enter to submit."
@@ -136,7 +137,7 @@ impl Root {
         // presses Enter. Reset by typing again.
         let submit_count = ctx.signal(0_usize);
         let submit_count_for_label = submit_count.clone();
-        let submit_readout = TextWidget::new_literal("")
+        let submit_readout = TextWidget::new(lit!(""))
             .bind_text(submit_count_for_label.map(|n| {
                 if *n == 0 {
                     String::new()
@@ -191,7 +192,7 @@ impl Root {
             "Watermelon",
         ];
         let search = SearchField::new(self.search_text.clone())
-            .placeholder("Type a fruit — Apple, Banana, …")
+            .placeholder(lit!("Type a fruit — Apple, Banana, …"))
             .with_suggestions(|prefix| {
                 let p = prefix.to_lowercase();
                 FRUITS
@@ -211,7 +212,7 @@ impl Root {
             });
 
         // Live readout of the picker state.
-        let path_readout = TextWidget::new_literal("")
+        let path_readout = TextWidget::new(lit!(""))
             .bind_text(self.path_text.map(|p| {
                 if p.is_empty() {
                     "No file picked yet — click the trailing Browse button.".to_string()
@@ -223,7 +224,7 @@ impl Root {
 
         let picker = FilePickerField::new(self.path_text.clone())
             .kind(FilePickerKind::OpenFile)
-            .placeholder("No file selected")
+            .placeholder(lit!("No file selected"))
             .add_filter("Text", &["txt", "md"])
             .add_filter("Images", &["png", "jpg", "jpeg"])
             .dialog_title("Choose a file");
@@ -231,7 +232,7 @@ impl Root {
         ctx.add(
             VStack::new()
                 .spacing(12.0)
-                .child(GroupHeader::new_literal("SearchField & FilePickerField"))
+                .child(GroupHeader::new(lit!("SearchField & FilePickerField")))
                 .child(search)
                 .child(search_readout)
                 .child(submit_readout)
@@ -246,11 +247,11 @@ impl Root {
         // feedback whether the modal accepted the rename or not.
         let last_action = ctx.signal::<Option<bool>>(None);
 
-        let preview = TextWidget::new_literal("")
+        let preview = TextWidget::new(lit!(""))
             .bind_text(rename_text.map(|s| format!("Current name: {}", s)))
             .style(TextStyleRole::BodyBold);
 
-        let action_readout = TextWidget::new_literal("")
+        let action_readout = TextWidget::new(lit!(""))
             .bind_text(last_action.map(|state| match state {
                 None => String::new(),
                 Some(true) => "Last result: accepted — name updated above.".to_string(),
@@ -258,7 +259,7 @@ impl Root {
             }))
             .color(TextRole::Secondary);
 
-        let trigger = Button::new_literal("Rename…")
+        let trigger = Button::new(lit!("Rename…"))
             .variant(ButtonVariant::Plain)
             .on_activate_fn({
                 let rename_text = rename_text.clone();
@@ -267,10 +268,10 @@ impl Root {
                     let rename_text = rename_text.clone();
                     let last_action = last_action.clone();
                     use bastyde::widgets::InputDialog;
-                    InputDialog::new_literal("Rename document")
-                        .prompt_literal("Enter the new file name:")
+                    InputDialog::new(lit!("Rename document"))
+                        .prompt(lit!("Enter the new file name:"))
                         .default_text(rename_text.get())
-                        .placeholder("filename.ext")
+                        .placeholder(lit!("filename.ext"))
                         .on_result(move |result, _ctx| match result {
                             Some(name) => {
                                 rename_text.set(name);
@@ -285,7 +286,7 @@ impl Root {
         ctx.add(
             VStack::new()
                 .spacing(8.0)
-                .child(GroupHeader::new_literal("InputDialog"))
+                .child(GroupHeader::new(lit!("InputDialog")))
                 .child(preview)
                 .child(action_readout)
                 .child(HStack::new().child(trigger).child(Spacer::new())),
@@ -301,17 +302,17 @@ impl Root {
         let save_icon = bastyde::res!("resources/icons/save.svg");
         let home_icon = bastyde::res!("resources/icons/home.svg");
 
-        let new_project = CommandLinkButton::new_literal("Create new project")
-            .description_literal("Start with a blank workspace.")
+        let new_project = CommandLinkButton::new(lit!("Create new project"))
+            .description(lit!("Start with a blank workspace."))
             .icon(IconWidget::from_svg_icon(save_icon))
             .on_activate_fn(|_| println!("New project clicked"));
-        let open_project = CommandLinkButton::new_literal("Open existing project")
-            .description_literal("Browse to a folder on disk.")
+        let open_project = CommandLinkButton::new(lit!("Open existing project"))
+            .description(lit!("Browse to a folder on disk."))
             .icon(IconWidget::from_svg_icon(home_icon))
             .on_activate_fn(|_| println!("Open project clicked"));
 
         Card::new()
-            .header(TextWidget::new_literal("CommandLinkButton").style(TextStyleRole::BodyBold))
+            .header(TextWidget::new(lit!("CommandLinkButton")).style(TextStyleRole::BodyBold))
             .content(
                 VStack::new()
                     .spacing(8.0)

@@ -47,6 +47,7 @@
 //! tab, a chart-only metrics tab) are unreachable by Tab key unless
 //! opted in via [`TabInfo::focusable_panel(true)`](TabInfo::focusable_panel).
 
+use bastyde_i18n::lit;
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -56,6 +57,7 @@ use bastyde_canvas::{Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
+use bastyde_core::drag_payload::DragPayload;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{
     EventContext, LayoutContext, LayoutResponse, PendingChild, Widget, WidgetPlacement,
@@ -250,6 +252,22 @@ pub struct TabWidget {
     on_close: Option<Rc<dyn Fn(TabId, &mut EventContext)>>,
     on_reorder: Option<Rc<dyn Fn(TabId, usize, &mut EventContext)>>,
     on_pin_toggle: Option<Rc<dyn Fn(TabId, bool, &mut EventContext)>>,
+    /// Cross-bar transfer opt-in. Enables this `TabWidget` to both
+    /// hand its (dynamic) tabs to other accepting `TabWidget`s and
+    /// receive tabs from them.
+    accept_external_tabs: bool,
+    /// Target-side override: insert a received tab. Receives the moved
+    /// [`TabHandle`] and the insertion index *within the dynamic
+    /// region*. Defaults to inserting into [`dynamic_model`](Self::dynamic_model).
+    on_tab_received: Option<Rc<dyn Fn(TabHandle, usize, &mut EventContext)>>,
+    /// Source-side override: one of this widget's tabs was accepted by
+    /// another `TabWidget`. Receives the transferred [`TabId`].
+    /// Defaults to removing it from [`dynamic_model`](Self::dynamic_model).
+    on_transfer_out: Option<Rc<dyn Fn(TabId, &mut EventContext)>>,
+    /// Handler for **non-tab** drops (an in-app foreign drag carrying
+    /// app data, or an OS file/text/URL drop). Receives the raw
+    /// payload and the insertion index *within the dynamic region*.
+    on_external_drop: Option<Rc<dyn Fn(&DragPayload, usize, &mut EventContext) -> bool>>,
     bar_leading_slot: Option<BarSlot>,
     bar_trailing_slot: Option<BarSlot>,
 
@@ -296,6 +314,10 @@ impl TabWidget {
             on_close: None,
             on_reorder: None,
             on_pin_toggle: None,
+            accept_external_tabs: false,
+            on_tab_received: None,
+            on_transfer_out: None,
+            on_external_drop: None,
             bar_leading_slot: None,
             bar_trailing_slot: None,
             root_child_id: None,
@@ -342,6 +364,27 @@ impl TabWidget {
             pane_id: None,
         });
         self
+    }
+
+    /// Ergonomic shorthand for a title-only static tab:
+    /// `tab(label, content)` is `static_tab(TabInfo::new().title(label),
+    /// content)`. `label` accepts `tr!(...)` (translated) or `lit!(...)`.
+    /// This is the method the `bati!` `tab:` slot lowers to
+    /// (`tab: lit!("Overview"), Card { … }`).
+    pub fn tab(
+        self,
+        label: impl Into<bastyde_i18n::LocalizedString>,
+        content: impl Widget + 'static,
+    ) -> Self {
+        self.static_tab(TabInfo::new().title(label), content)
+    }
+
+    /// `WidgetId` twin of [`tab`](Self::tab) — `tab_id(label, id)` is
+    /// `static_tab_id(TabInfo::new().title(label), id)`. This is what the
+    /// `bati!` `tab:` slot lowers to when its content is an id binding
+    /// (`#{…}` / `name = Element`).
+    pub fn tab_id(self, label: impl Into<bastyde_i18n::LocalizedString>, id: WidgetId) -> Self {
+        self.static_tab_id(TabInfo::new().title(label), id)
     }
 
     /// Add a static tab whose content is constructed by a factory
@@ -483,7 +526,10 @@ impl TabWidget {
     /// selection is conveyed only by the accent indicator and the
     /// label-color shift (Int UI editor-strip convention). Default
     /// is transparent.
-    pub fn tab_surface_role(mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> Self {
+    pub fn tab_surface_role(
+        mut self,
+        color: impl Into<bastyde_core::color_prop::ColorProp>,
+    ) -> Self {
         self.tab_surface_role = Some(color.into());
         self
     }
@@ -574,6 +620,82 @@ impl TabWidget {
         self
     }
 
+    /// Opt into cross-`TabWidget` tab transfer (app-internal
+    /// drag-and-drop between two tabbed containers). When enabled,
+    /// this widget's **dynamic** tabs can be dragged out to any other
+    /// accepting `TabWidget`, and it accepts tabs dragged in from one,
+    /// painting an insertion-line indicator between its tabs.
+    ///
+    /// The dragged [`TabHandle`] moves intact — its `Rc<dyn Any>`
+    /// payload (the heavy per-tab state) is preserved, not rebuilt —
+    /// so the receiving widget must register a content factory for the
+    /// tab's `kind` via [`dynamic_tab`](Self::dynamic_tab).
+    ///
+    /// **Static tabs are excluded**: they have no factory on a
+    /// receiving widget, so they can never be transferred out (they
+    /// still reorder in place if [`reorderable`](Self::reorderable)).
+    ///
+    /// By default, accepting a tab inserts it into this widget's
+    /// [`dynamic_model`](Self::dynamic_model) and transferring one out
+    /// removes it from this widget's model. Override either side with
+    /// [`on_tab_received`](Self::on_tab_received) /
+    /// [`on_transfer_out`](Self::on_transfer_out). Default: off.
+    pub fn accept_external_tabs(mut self, on: bool) -> Self {
+        self.accept_external_tabs = on;
+        self
+    }
+
+    /// Override the target-side behaviour when a foreign tab is
+    /// dropped onto this widget. Receives `(handle, insertion_index,
+    /// ctx)` where `insertion_index` is within the **dynamic** tab
+    /// region. The app inserts the handle into its own model. Implies
+    /// [`accept_external_tabs(true)`](Self::accept_external_tabs).
+    ///
+    /// If unset, the default inserts the handle into
+    /// [`dynamic_model`](Self::dynamic_model) at the drop position.
+    pub fn on_tab_received(
+        mut self,
+        f: impl Fn(TabHandle, usize, &mut EventContext) + 'static,
+    ) -> Self {
+        self.on_tab_received = Some(Rc::new(f));
+        self.accept_external_tabs = true;
+        self
+    }
+
+    /// Override the source-side behaviour after one of this widget's
+    /// tabs has been accepted by another `TabWidget`. Receives the
+    /// transferred [`TabId`]; the app removes it from its own model.
+    /// Implies [`accept_external_tabs(true)`](Self::accept_external_tabs).
+    ///
+    /// If unset, the default removes the tab from
+    /// [`dynamic_model`](Self::dynamic_model).
+    pub fn on_transfer_out(mut self, f: impl Fn(TabId, &mut EventContext) + 'static) -> Self {
+        self.on_transfer_out = Some(Rc::new(f));
+        self.accept_external_tabs = true;
+        self
+    }
+
+    /// Accept **non-tab** drops onto the tab bar — an in-app foreign
+    /// drag (e.g. a file dragged from a `TreeView`, carrying app data)
+    /// or an OS file/text/URL drop. The bar shows an insertion-line
+    /// indicator while such a payload hovers; on drop, `f` runs with
+    /// the raw [`DragPayload`], the insertion index *within the dynamic
+    /// region*, and the firing context. Inspect the payload
+    /// (`get_typed::<T>()` / `files()` / `text()` / `uris()`) and, e.g.,
+    /// push a new `TabHandle` into your [`dynamic_model`](Self::dynamic_model);
+    /// return `true` if accepted.
+    ///
+    /// This is the "open a dropped file as a tab" hook (VS Code style).
+    /// Independent of [`accept_external_tabs`](Self::accept_external_tabs).
+    /// OS drops also require `BastydeAppBuilder::install_external_dnd()`.
+    pub fn on_external_drop(
+        mut self,
+        f: impl Fn(&DragPayload, usize, &mut EventContext) -> bool + 'static,
+    ) -> Self {
+        self.on_external_drop = Some(Rc::new(f));
+        self
+    }
+
     pub fn bar_leading_slot(mut self, w: impl Widget + 'static) -> Self {
         self.bar_leading_slot = Some(BarSlot::new(PendingChild::Deferred(Box::new(w))));
         self
@@ -595,6 +717,260 @@ impl TabWidget {
     pub fn bar_trailing_slot_id(mut self, id: WidgetId) -> Self {
         self.bar_trailing_slot = Some(BarSlot::new(PendingChild::Id(id)));
         self
+    }
+}
+
+impl TabWidget {
+    // ── build() helpers ────────────────────────────────────────────
+    //
+    // `build()` is decomposed into three self-contained steps so the
+    // method body reads as orchestration rather than implementation.
+    // Each helper captures only `&self` (plus the build-local lookup
+    // tables it needs) and has no side effects beyond the arena
+    // registrations it performs through `ctx`.
+
+    /// Translate `TabInfo` fields into the [`TabDelegate`]'s
+    /// closure-shaped accessors. Pure — captures nothing from the
+    /// surrounding `build()`.
+    fn build_delegate(&self) -> TabDelegate<TabHandle> {
+        let mut delegate =
+            TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| lit!("")))
+                .icon(|_, h: &TabHandle| h.info.icon.as_ref().map(|f| f()))
+                .closable(|_, h: &TabHandle| h.info.closable)
+                .pinned(|_, h: &TabHandle| h.info.pinned)
+                .enabled(|_, h: &TabHandle| h.info.initial_enabled)
+                .tooltip(|_, h: &TabHandle| {
+                    // Pinned tabs render icon-only; promote `title` to the
+                    // tooltip if the caller didn't set one explicitly so
+                    // the user can still identify the tab on hover.
+                    if h.info.pinned
+                        && h.info.tooltip.is_none()
+                        && h.info.rich_tooltip.is_none()
+                        && h.info.composite_tooltip.is_none()
+                    {
+                        h.info.title.clone()
+                    } else {
+                        h.info.tooltip.clone()
+                    }
+                });
+        // Bypass the tooltip-clearing setters here: TabInfo already
+        // enforces mutual exclusion across plain / rich / composite,
+        // so each closure returns `Some` only for its flavor.
+        delegate.rich_tooltip_key = Some(Box::new(|_, h: &TabHandle| match &h.info.rich_tooltip {
+            Some(crate::tooltip::RichTooltipSource::Key(k)) => Some(k.clone()),
+            _ => None,
+        }));
+        delegate.rich_tooltip_content =
+            Some(Box::new(|_, h: &TabHandle| match &h.info.rich_tooltip {
+                Some(crate::tooltip::RichTooltipSource::Content(c)) => Some(c.clone()),
+                _ => None,
+            }));
+        delegate.composite_tooltip = Some(Box::new(|_, h: &TabHandle| {
+            h.info.composite_tooltip.as_ref().map(|factory| factory())
+        }));
+        delegate
+    }
+
+    /// Wrap the bar's index-shaped callbacks (close / reorder / pin /
+    /// cross-bar transfer / non-tab drop) into the app's id-shaped
+    /// callbacks, translating at the boundary via `index_to_id` and
+    /// `saturating_sub(static_count)` for the unified→dynamic index map.
+    fn wire_bar_callbacks(
+        &self,
+        mut bar: TabBar<TabHandle>,
+        index_to_id: &Rc<Vec<TabId>>,
+        static_count: usize,
+    ) -> TabBar<TabHandle> {
+        // Wrap callbacks: bar speaks in indices, app speaks in
+        // TabIds. We translate at the boundary using the
+        // `index_to_id` lookup captured at build time.
+        let close_cb = self.on_close.clone();
+        let dyn_model_for_close = self.dynamic_model.clone();
+        let idx_to_id_for_close = index_to_id.clone();
+        bar = bar.on_close(move |i: usize, ctx: &mut EventContext| {
+            if let Some(&id) = idx_to_id_for_close.get(i) {
+                if let Some(ref f) = close_cb {
+                    f(id, ctx);
+                } else if i >= static_count {
+                    // Default: remove from dynamic_model. Static
+                    // tabs are not auto-closable.
+                    if let Some(ref model) = dyn_model_for_close {
+                        let dyn_idx = i - static_count;
+                        if dyn_idx < model.len() {
+                            let _ = model.remove(dyn_idx);
+                        }
+                    }
+                }
+            }
+        });
+
+        // `on_reorder(...)` setter sets `reorderable = true`, so the
+        // single `self.reorderable` flag is the only gate we need.
+        let reorder_cb = self.on_reorder.clone();
+        let dyn_model_for_reorder = self.dynamic_model.clone();
+        let idx_to_id_for_reorder = index_to_id.clone();
+        if self.reorderable {
+            bar = bar.on_reorder(move |from: usize, to: usize, ctx: &mut EventContext| {
+                if let Some(&id) = idx_to_id_for_reorder.get(from) {
+                    if let Some(ref f) = reorder_cb {
+                        f(id, to, ctx);
+                    } else if from >= static_count && to >= static_count {
+                        // Default: reorder within the dynamic region
+                        // only. Static tabs are pinned in place.
+                        if let Some(ref model) = dyn_model_for_reorder {
+                            let from_dyn = from - static_count;
+                            let to_dyn = to - static_count;
+                            if from_dyn < model.len() && to_dyn < model.len() {
+                                model.move_item(from_dyn, to_dyn);
+                            }
+                        }
+                    } else {
+                        // Cross-boundary reorder: silently rejected
+                        // by the default handler. Surface it once
+                        // per process so developers don't chase a
+                        // ghost — install an explicit `on_reorder`
+                        // to interleave static and dynamic tabs.
+                        warn_cross_boundary_reorder_once(from, to, static_count);
+                    }
+                }
+            });
+        }
+
+        if let Some(f) = self.on_pin_toggle.clone() {
+            let idx_to_id = index_to_id.clone();
+            bar = bar.on_pin_toggle(move |i: usize, pinned: bool, ctx: &mut EventContext| {
+                if let Some(&id) = idx_to_id.get(i) {
+                    f(id, pinned, ctx);
+                }
+            });
+        }
+
+        // Cross-bar transfer wiring. The bar speaks in unified model
+        // indices (static tabs first, then dynamic); the app speaks in
+        // dynamic-region indices and TabIds. Static tabs are excluded
+        // from transfer — they have no factory on a receiving widget.
+        if self.accept_external_tabs {
+            bar = bar
+                .accept_external_tabs(true)
+                .with_transferable_predicate(|_, h: &TabHandle| h.kind != STATIC_KIND);
+
+            // Target side: insert the received handle. The bar's
+            // insertion index is in unified model space; translate to
+            // a dynamic-region index for the app / default model.
+            let received_cb = self.on_tab_received.clone();
+            let dyn_model_for_recv = self.dynamic_model.clone();
+            bar = bar.on_tab_received_rc(Rc::new(
+                move |handle: TabHandle, to_model: usize, ctx: &mut EventContext| {
+                    let dyn_index = to_model.saturating_sub(static_count);
+                    if let Some(ref f) = received_cb {
+                        f(handle, dyn_index, ctx);
+                    } else if let Some(ref model) = dyn_model_for_recv {
+                        let idx = dyn_index.min(model.len());
+                        model.insert(idx, handle);
+                    }
+                },
+            ));
+
+            // Source side: remove the transferred tab by id.
+            let transfer_out_cb = self.on_transfer_out.clone();
+            let dyn_model_for_out = self.dynamic_model.clone();
+            bar = bar.on_transfer_out_rc(Rc::new(move |tab_id: TabId, ctx: &mut EventContext| {
+                if let Some(ref f) = transfer_out_cb {
+                    f(tab_id, ctx);
+                } else if let Some(ref model) = dyn_model_for_out {
+                    let pos =
+                        (0..model.len()).find(|&i| model.with_item(i, |h| h.id) == Some(tab_id));
+                    if let Some(pos) = pos {
+                        let _ = model.remove(pos);
+                    }
+                }
+            }));
+        }
+
+        // Non-tab drops (foreign in-app drag / OS file drop). Translate
+        // the bar's unified model index to a dynamic-region index for
+        // the app callback. Independent of `accept_external_tabs`.
+        if let Some(external_cb) = self.on_external_drop.clone() {
+            bar = bar.on_external_drop_rc(Rc::new(
+                move |payload: &DragPayload, to_model: usize, ctx: &mut EventContext| {
+                    let dyn_index = to_model.saturating_sub(static_count);
+                    (external_cb)(payload, dyn_index, ctx)
+                },
+            ));
+        }
+
+        bar
+    }
+
+    /// Build (or reuse) the content panes. Static and dynamic panes
+    /// both memoize their pane `WidgetId` — once registered, the pane
+    /// outlives sibling rebuilds (caused by dynamic-model mutations) so
+    /// internal state survives. Static panes cache in
+    /// [`StaticTabSlot::pane_id`]; dynamic panes cache in
+    /// [`Self::dyn_pane_ids`] keyed by [`TabId`], pruned at the end to
+    /// drop tabs no longer in the model.
+    fn build_panes(
+        &mut self,
+        ctx: &mut BuildContext,
+        all_handles: &[TabHandle],
+        static_count: usize,
+        dyn_count: usize,
+        panel_ids: &Rc<RefCell<Vec<WidgetId>>>,
+        header_ids: &Rc<RefCell<Vec<WidgetId>>>,
+    ) -> Vec<WidgetId> {
+        let mut pane_ids: Vec<WidgetId> = Vec::with_capacity(static_count + dyn_count);
+
+        for slot in self.static_tabs.iter_mut() {
+            let pane_id = match slot.pane_id {
+                Some(id) => id,
+                None => {
+                    let content = slot.source.into_widget(&slot.handle);
+                    let id = ctx.add(TabPane::new(
+                        slot.handle.clone(),
+                        content,
+                        panel_ids.clone(),
+                        header_ids.clone(),
+                    ));
+                    slot.pane_id = Some(id);
+                    id
+                }
+            };
+            pane_ids.push(pane_id);
+        }
+
+        let mut alive_dyn: HashSet<TabId> = HashSet::with_capacity(dyn_count);
+        for handle in all_handles.iter().skip(static_count) {
+            alive_dyn.insert(handle.id);
+            let pane_id = match self.dyn_pane_ids.get(&handle.id) {
+                Some(&id) => id,
+                None => {
+                    let factory = self.dynamic_registry.get(handle.kind).unwrap_or_else(|| {
+                        panic!(
+                            "tab kind '{}' has no registered content factory — \
+                             add a `dynamic_tab::<S>(\"{}\", |handle, state| ...)` \
+                             registration before connecting the model",
+                            handle.kind, handle.kind,
+                        )
+                    });
+                    let content = factory(handle, handle.payload.as_ref());
+                    let id = ctx.add(TabPane::new(
+                        handle.clone(),
+                        content,
+                        panel_ids.clone(),
+                        header_ids.clone(),
+                    ));
+                    self.dyn_pane_ids.insert(handle.id, id);
+                    id
+                }
+            };
+            pane_ids.push(pane_id);
+        }
+        // Prune dynamic-pane memo entries for tabs the model no
+        // longer carries — their widgets become unreachable from any
+        // root and the arena will reap them.
+        self.dyn_pane_ids.retain(|id, _| alive_dyn.contains(id));
+
+        pane_ids
     }
 }
 
@@ -691,45 +1067,7 @@ impl Widget for TabWidget {
 
         // Translate `TabInfo` fields into the TabDelegate's
         // closure-shaped accessors.
-        let mut delegate = TabDelegate::new(|_, h: &TabHandle| {
-            h.info
-                .title
-                .clone()
-                .unwrap_or_else(|| bastyde_i18n::LocalizedString::literal(""))
-        })
-        .icon(|_, h: &TabHandle| h.info.icon.as_ref().map(|f| f()))
-        .closable(|_, h: &TabHandle| h.info.closable)
-        .pinned(|_, h: &TabHandle| h.info.pinned)
-        .enabled(|_, h: &TabHandle| h.info.initial_enabled)
-        .tooltip(|_, h: &TabHandle| {
-            // Pinned tabs render icon-only; promote `title` to the
-            // tooltip if the caller didn't set one explicitly so
-            // the user can still identify the tab on hover.
-            if h.info.pinned
-                && h.info.tooltip.is_none()
-                && h.info.rich_tooltip.is_none()
-                && h.info.composite_tooltip.is_none()
-            {
-                h.info.title.clone()
-            } else {
-                h.info.tooltip.clone()
-            }
-        });
-        // Bypass the tooltip-clearing setters here: TabInfo already
-        // enforces mutual exclusion across plain / rich / composite,
-        // so each closure returns `Some` only for its flavor.
-        delegate.rich_tooltip_key = Some(Box::new(|_, h: &TabHandle| match &h.info.rich_tooltip {
-            Some(crate::tooltip::RichTooltipSource::Key(k)) => Some(k.clone()),
-            _ => None,
-        }));
-        delegate.rich_tooltip_content =
-            Some(Box::new(|_, h: &TabHandle| match &h.info.rich_tooltip {
-                Some(crate::tooltip::RichTooltipSource::Content(c)) => Some(c.clone()),
-                _ => None,
-            }));
-        delegate.composite_tooltip = Some(Box::new(|_, h: &TabHandle| {
-            h.info.composite_tooltip.as_ref().map(|factory| factory())
-        }));
+        let delegate = self.build_delegate();
 
         // Shared panel-id buffer: the Switcher writes panel widget
         // ids into it as panes are added; the bar's headers read
@@ -799,69 +1137,9 @@ impl Widget for TabWidget {
             bar = bar.reorderable(true);
         }
 
-        // Wrap callbacks: bar speaks in indices, app speaks in
-        // TabIds. We translate at the boundary using the
-        // `index_to_id` lookup captured at build time.
-        let close_cb = self.on_close.clone();
-        let dyn_model_for_close = self.dynamic_model.clone();
-        let idx_to_id_for_close = index_to_id.clone();
-        bar = bar.on_close(move |i: usize, ctx: &mut EventContext| {
-            if let Some(&id) = idx_to_id_for_close.get(i) {
-                if let Some(ref f) = close_cb {
-                    f(id, ctx);
-                } else if i >= static_count {
-                    // Default: remove from dynamic_model. Static
-                    // tabs are not auto-closable.
-                    if let Some(ref model) = dyn_model_for_close {
-                        let dyn_idx = i - static_count;
-                        if dyn_idx < model.len() {
-                            let _ = model.remove(dyn_idx);
-                        }
-                    }
-                }
-            }
-        });
-
-        // `on_reorder(...)` setter sets `reorderable = true`, so the
-        // single `self.reorderable` flag is the only gate we need.
-        let reorder_cb = self.on_reorder.clone();
-        let dyn_model_for_reorder = self.dynamic_model.clone();
-        let idx_to_id_for_reorder = index_to_id.clone();
-        if self.reorderable {
-            bar = bar.on_reorder(move |from: usize, to: usize, ctx: &mut EventContext| {
-                if let Some(&id) = idx_to_id_for_reorder.get(from) {
-                    if let Some(ref f) = reorder_cb {
-                        f(id, to, ctx);
-                    } else if from >= static_count && to >= static_count {
-                        // Default: reorder within the dynamic region
-                        // only. Static tabs are pinned in place.
-                        if let Some(ref model) = dyn_model_for_reorder {
-                            let from_dyn = from - static_count;
-                            let to_dyn = to - static_count;
-                            if from_dyn < model.len() && to_dyn < model.len() {
-                                model.move_item(from_dyn, to_dyn);
-                            }
-                        }
-                    } else {
-                        // Cross-boundary reorder: silently rejected
-                        // by the default handler. Surface it once
-                        // per process so developers don't chase a
-                        // ghost — install an explicit `on_reorder`
-                        // to interleave static and dynamic tabs.
-                        warn_cross_boundary_reorder_once(from, to, static_count);
-                    }
-                }
-            });
-        }
-
-        if let Some(f) = self.on_pin_toggle.clone() {
-            let idx_to_id = index_to_id.clone();
-            bar = bar.on_pin_toggle(move |i: usize, pinned: bool, ctx: &mut EventContext| {
-                if let Some(&id) = idx_to_id.get(i) {
-                    f(id, pinned, ctx);
-                }
-            });
-        }
+        // Wrap the bar's index-shaped callbacks into the app's
+        // id-shaped callbacks (close / reorder / pin / transfer / drop).
+        bar = self.wire_bar_callbacks(bar, &index_to_id, static_count);
 
         if let Some(ref mut slot) = self.bar_leading_slot {
             let id = slot.resolve(ctx);
@@ -873,67 +1151,16 @@ impl Widget for TabWidget {
         }
         let bar_id = ctx.add(bar);
 
-        // Build the content panes. Static tabs and dynamic tabs both
-        // memoize their pane WidgetId — once registered, the pane
-        // outlives sibling rebuilds (caused by dynamic-model
-        // mutations) so internal state survives.
-        //
-        // Static panes: `pane_id` lives in the slot struct; the
-        // factory runs once on first build.
-        // Dynamic panes: `dyn_pane_ids` maps `TabId → WidgetId`,
-        // populated lazily on first sighting and pruned at end of
-        // build to drop tabs no longer in the model.
-        let mut pane_ids: Vec<WidgetId> = Vec::with_capacity(total);
-
-        for slot in self.static_tabs.iter_mut() {
-            let pane_id = match slot.pane_id {
-                Some(id) => id,
-                None => {
-                    let content = slot.source.into_widget(&slot.handle);
-                    let id = ctx.add(TabPane::new(
-                        slot.handle.clone(),
-                        content,
-                        panel_ids.clone(),
-                        header_ids.clone(),
-                    ));
-                    slot.pane_id = Some(id);
-                    id
-                }
-            };
-            pane_ids.push(pane_id);
-        }
-
-        let mut alive_dyn: HashSet<TabId> = HashSet::with_capacity(dyn_count);
-        for handle in all_handles.iter().skip(static_count) {
-            alive_dyn.insert(handle.id);
-            let pane_id = match self.dyn_pane_ids.get(&handle.id) {
-                Some(&id) => id,
-                None => {
-                    let factory = self.dynamic_registry.get(handle.kind).unwrap_or_else(|| {
-                        panic!(
-                            "tab kind '{}' has no registered content factory — \
-                             add a `dynamic_tab::<S>(\"{}\", |handle, state| ...)` \
-                             registration before connecting the model",
-                            handle.kind, handle.kind,
-                        )
-                    });
-                    let content = factory(handle, handle.payload.as_ref());
-                    let id = ctx.add(TabPane::new(
-                        handle.clone(),
-                        content,
-                        panel_ids.clone(),
-                        header_ids.clone(),
-                    ));
-                    self.dyn_pane_ids.insert(handle.id, id);
-                    id
-                }
-            };
-            pane_ids.push(pane_id);
-        }
-        // Prune dynamic-pane memo entries for tabs the model no
-        // longer carries — their widgets become unreachable from any
-        // root and the arena will reap them.
-        self.dyn_pane_ids.retain(|id, _| alive_dyn.contains(id));
+        // Build (or reuse) the content panes — static + dynamic, both
+        // memoized so internal state survives sibling rebuilds.
+        let pane_ids = self.build_panes(
+            ctx,
+            &all_handles,
+            static_count,
+            dyn_count,
+            &panel_ids,
+            &header_ids,
+        );
 
         let mut switcher =
             Switcher::new(self.switcher_index.clone()).capture_child_ids_into(panel_ids);
@@ -1090,7 +1317,9 @@ impl Widget for TabPane {
             // Apply self-handlers so the framework treats this pane
             // as a Tab-key stop, allowing Tab from the selected tab
             // header to land inside an otherwise-empty panel.
-            ctx.apply_self_handlers(bastyde_core::widget_builder::HandlerSet::new().focusable(true));
+            ctx.apply_self_handlers(
+                bastyde_core::widget_builder::HandlerSet::new().focusable(true),
+            );
         }
         self.child_id.into_iter().collect()
     }

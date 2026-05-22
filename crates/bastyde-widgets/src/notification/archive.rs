@@ -1,5 +1,5 @@
 //! `NotificationArchiveModel` — the persistent list backing
-//! [`NotificationLog`](Phase 4 widget) and the bell-icon badge.
+//! [`NotificationLog`](crate::notification::log::NotificationLog) and the bell-icon badge.
 //!
 //! Wraps a [`ListModel<NotificationEntry>`](bastyde_data::ListModel)
 //! with two extras:
@@ -128,8 +128,8 @@ impl ArchiveBackend {
 /// helper from `NotificationArchive` + `AppPaths`; apps reach it
 /// via `ctx.app_state::<Rc<RefCell<NotificationArchiveModel>>>()`.
 ///
-/// The Phase 4 `NotificationLog` and `NotificationCenterButton`
-/// widgets consume this model directly.
+/// `NotificationLog` and `NotificationCenterButton`
+/// consume this model directly.
 pub struct NotificationArchiveModel {
     backend: ArchiveBackend,
     limit: usize,

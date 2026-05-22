@@ -23,6 +23,7 @@ use bastyde_data::selection_model::SelectionModel;
 use bastyde_data::tree_slice::{FlatEntry, TreeSlice, TreeSliceHandle};
 use bastyde_data::{NodeId, TreeModel};
 
+use crate::common::scroll::OverscrollBehavior;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
 
 const BUFFER_ITEMS: usize = 5;
@@ -82,7 +83,7 @@ type TreeDelegate<T> = dyn Fn(&T, &FlatEntry, bool, &TreeRowContext<'_, T>) -> B
 ///     let indent = entry.depth as f32 * 20.0;
 ///     Box::new(HStack::new()
 ///         .child(Padding::new(0.0, 0.0, 0.0, indent))
-///         .child(TextWidget::new_literal(&item.title)))
+///         .child(TextWidget::new(lit!(&item.title))))
 /// })
 /// .item_height(28.0)
 /// ```
@@ -114,6 +115,8 @@ pub struct TreeView<T: 'static> {
     // Persistent scroll state
     scroll_y: Signal<f32>,
     max_scroll_y: Signal<f32>,
+    /// Scroll-chaining behavior at the boundary (default `Chain`).
+    overscroll_behavior: OverscrollBehavior,
     viewport_ratio_y: Signal<f32>,
 
     // Set during build
@@ -150,7 +153,7 @@ impl<T: 'static> TreeView<T> {
     /// ```ignore
     /// TreeView::new_with_context(model, |item, entry, selected, ctx| {
     ///     Box::new(
-    ///         StandardTreeItem::new_literal(&item.title)
+    ///         StandardTreeItem::new(lit!(&item.title))
     ///             .from_entry(entry)
     ///             .selected(selected)
     ///             .on_toggle_rc(ctx.toggle_callback())
@@ -177,6 +180,7 @@ impl<T: 'static> TreeView<T> {
             reorderable: false,
             row_click_expands: true,
             drop_feedback: Signal::new(None),
+            overscroll_behavior: OverscrollBehavior::default(),
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
             viewport_ratio_y: Signal::new(1.0),
@@ -185,6 +189,14 @@ impl<T: 'static> TreeView<T> {
             viewport_height: Rc::new(Cell::new(600.0)),
             tree_id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
         }
+    }
+
+    /// Set the scroll-chaining behavior at the boundary (default
+    /// [`OverscrollBehavior::Chain`]; [`Contain`](OverscrollBehavior::Contain)
+    /// disables chaining to an ancestor scrollable).
+    pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self {
+        self.overscroll_behavior = behavior;
+        self
     }
 
     /// Set the fixed height per row (default 28.0).
@@ -394,6 +406,7 @@ impl<T: 'static> Widget for TreeView<T> {
         let scroll_y = self.scroll_y.clone();
         let max_scroll = self.max_scroll_y.clone();
         let line_height = self.item_height;
+        let overscroll_behavior = self.overscroll_behavior;
         let mut handlers = HandlerSet::new()
             .on_scroll(move |event, _ctx| match event {
                 bastyde_core::event::WidgetEvent::Scroll { delta, .. } => {
@@ -403,9 +416,14 @@ impl<T: 'static> Widget for TreeView<T> {
                     };
                     let current = scroll_y.get();
                     let max = max_scroll.get();
-                    let new_y = (current + dy).clamp(0.0, max);
+                    let (new_y, moved) = crate::common::scroll::scroll_clamp_axis(current, dy, max);
                     scroll_y.set(new_y);
-                    bastyde_core::event::EventResponse::Handled
+                    // Chain to an ancestor scrollable when fully clamped
+                    // (unless Contain), otherwise consume.
+                    crate::common::scroll::scroll_response(
+                        moved,
+                        overscroll_behavior == OverscrollBehavior::Contain,
+                    )
                 }
                 _ => bastyde_core::event::EventResponse::Ignored,
             })
@@ -1138,6 +1156,7 @@ impl<T: 'static> Widget for TreeView<T> {
 mod tests {
     use super::*;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
@@ -1525,8 +1544,8 @@ mod tests {
                         Padding::symmetric(4.0, 12.0).child(
                             HStack::new()
                                 .spacing(8.0)
-                                .child(TextWidget::new_literal(arrow))
-                                .child(TextWidget::new_literal(name.to_string()))
+                                .child(TextWidget::new(lit!(arrow)))
+                                .child(TextWidget::new(lit!(name.to_string())))
                                 .child(Spacer::new()),
                         ),
                     ),
@@ -1574,7 +1593,7 @@ mod tests {
                             Padding::symmetric(4.0, 12.0).child(
                                 HStack::new()
                                     .spacing(8.0)
-                                    .child(TextWidget::new_literal(name.to_string()))
+                                    .child(TextWidget::new(lit!(name.to_string())))
                                     .child(Spacer::new()),
                             ),
                         ),
@@ -1939,6 +1958,93 @@ mod tests {
             model.with_item(c, |&v| v),
             Some("C"),
             "C should still be last after Alt+Down on last item"
+        );
+    }
+
+    // -- Boundary scroll chaining -------------------------------------------
+
+    /// A TreeView of 40 flat roots (20px each → 800px) in a 100px viewport,
+    /// above a filler inside an outer ScrollArea. TreeView doesn't expose its
+    /// scroll signal, so chaining is observed via the outer: the inner
+    /// absorbing the first (huge) scroll leaves the outer at 0 (the
+    /// anti-trivial guard), and the clamped second scroll then moves the
+    /// outer under `Chain` but not under `Contain`.
+    fn nested_tree_fixture(inner: OverscrollBehavior) -> (WidgetTree, Signal<f32>) {
+        use crate::ScrollArea;
+        use crate::primitives::{FixedSize, VStack};
+        let model = TreeModel::new();
+        for i in 0..40 {
+            model.insert_root(i, i as i32);
+        }
+        let mut tree = WidgetTree::new();
+        let tv = TreeView::new(model, |_item: &i32, _entry, _sel| {
+            Box::new(FixedLeaf(180.0, 20.0))
+        })
+        .item_height(20.0)
+        .overscroll_behavior(inner);
+        let tv_id = tree.add(tv);
+        let viewport = tree.add(
+            FixedSize::new()
+                .bind_width(200.0)
+                .bind_height(100.0)
+                .child_id(tv_id),
+        );
+        let filler = tree.add(FixedLeaf(200.0, 200.0));
+        let outer_content = tree.add(VStack::new().add_child(viewport).add_child(filler));
+        let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
+        let outer_y = outer.scroll_y_signal().clone();
+        let _outer = tree.add(outer);
+        tree.layout(SizeProposal::exact(200.0, 150.0));
+        (tree, outer_y)
+    }
+
+    #[test]
+    fn nested_tree_chains_to_outer_at_boundary() {
+        use bastyde_core::event::{Modifiers, ScrollDelta, WidgetEvent};
+        let (mut tree, outer_y) = nested_tree_fixture(OverscrollBehavior::Chain);
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal::exact(200.0, 150.0));
+        // The inner tree absorbed the big scroll (didn't chain) → outer at 0.
+        assert!(
+            outer_y.get() < 0.01,
+            "outer must not move while the inner absorbs"
+        );
+
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal::exact(200.0, 150.0));
+        assert!(
+            outer_y.get() > 0.01,
+            "outer scrolled because the clamped tree chained"
+        );
+    }
+
+    #[test]
+    fn nested_tree_contain_blocks_chaining() {
+        use bastyde_core::event::{Modifiers, ScrollDelta, WidgetEvent};
+        let (mut tree, outer_y) = nested_tree_fixture(OverscrollBehavior::Contain);
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal::exact(200.0, 150.0));
+        tree.pointer_move(Point::new(50.0, 40.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal::exact(200.0, 150.0));
+        assert!(
+            outer_y.get() < 0.01,
+            "Contain must prevent chaining: outer stays put"
         );
     }
 }

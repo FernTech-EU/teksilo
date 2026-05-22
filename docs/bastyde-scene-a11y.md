@@ -269,6 +269,48 @@ pan / zoom (CAD canvases, blueprint editors).
 
 ---
 
+## Runtime mutation — the AT tree follows
+
+The logical AT tree is *separate* from the visual scene, so it needs its own
+notification path when the scene changes after mount. Two channels feed the
+`SceneView`'s reconcile pass:
+
+- `Scene::item_change_signal` — every item mutation (add / remove / move /
+  transform / visibility / opacity / z / layer / reparent). The new card
+  materialises, a removed one is destroyed and its AT maps cleaned, a moved one
+  gets fresh **screen-projected** AT bounds.
+- `Scene::a11y_change_signal` — *pure* logical-AT mutations that change no item
+  geometry (`add_a11y_group`, `set_a11y_parent`, `add_a11y_relation`,
+  `set_a11y_live`, `set_a11y_landmark`, `set_a11y_categories`). Without this a
+  runtime group add or reparent would be invisible to assistive tech.
+
+A relayout no longer re-walks the AccessKit tree by itself (the walk is cached,
+gated on `a11y_dirty`). `SceneView::build()` calls
+`ctx.request_accessibility_update()` when it reconciles, which flips that flag —
+so any runtime change to the visual *or* logical tree reaches a screen reader on
+the next frame. The request is **gated on a `Scene::mutation_version` delta**:
+both channels above advance that counter, so a discrete add / remove / move /
+reparent / group / relation / live / landmark change always re-walks AT. What it
+*won't* do is re-walk AT 60×/s while an `add_item_dynamic` item animates its
+bounds — that per-frame churn is suppressed (a screen reader can't use sub-pixel
+bounds updates), and the **final** bounds are walked in once when the animation
+settles. `Scene::remove` additionally re-roots any still-alive node that was
+AT-parented under a removed item (its explicit parent mapping is dropped, exactly
+like `remove_a11y_group`). Mark a runtime-added group `Live::Polite` to have the
+addition announced. Demo: the "Add Act" button in `cargo run -p scene-corkboard`.
+
+**Multi-view.** When several `SceneView`s share one `SceneModel` (see
+[bastyde-scene.md](bastyde-scene.md) → *Shared model & multi-view*), each pane
+installs its **own** observers on these two channels and walks its **own**
+AccessKit subtree — the gate (`mutation_version` delta) is per-view, and each
+pane's synthetic AT nodes carry bounds projected through *that* pane's view
+transform. A mutation on the shared model therefore reaches assistive tech for
+every pane independently. A heavyweight item added via `add_widget_item` is a
+type-erased payload, so each pane's delegate builds its own widget — and the
+item's `accessibility()` runs once per pane, under that pane's projected bounds.
+
+---
+
 ## Worked example: story corkboard
 
 Acts contain Scene cards. Acts are virtual groups; Scene cards are

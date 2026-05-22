@@ -28,17 +28,17 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
     let progress_h = section(
         ctx,
-        "ProgressBar — determinate",
+        tr!(ind_progress_determinate_heading()),
         ProgressBar::new(0.6).label(tr!(ind_progress_determinate_label())),
     );
     let progress_indet = section(
         ctx,
-        "ProgressBar — indeterminate",
+        tr!(ind_progress_indeterminate_heading()),
         ProgressBar::indeterminate(),
     );
     let progress_v = section(
         ctx,
-        "ProgressBar — vertical",
+        tr!(ind_progress_vertical_heading()),
         FixedSize::new().bind_height(120.0_f32).child(
             ProgressBar::new(0.4)
                 .orientation(Orientation::Vertical)
@@ -47,7 +47,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let spinner = section(
         ctx,
-        "Spinner",
+        lit!("Spinner"),
         HStack::new()
             .spacing(16.0)
             .child(Spinner::new(20.0))
@@ -56,7 +56,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let link = section(
         ctx,
-        "Link",
+        lit!("Link"),
         VStack::new()
             .spacing(6.0)
             .child(Link::new(tr!(ind_link_docs())).url("https://example.com"))
@@ -66,29 +66,29 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let badge = section(
         ctx,
-        "Badge",
+        lit!("Badge"),
         HStack::new()
             .spacing(8.0)
-            .child(Badge::new_literal("New"))
-            .child(Badge::new_literal("Beta"))
-            .child(Badge::new_literal("Stable").color(SurfaceRole::AccentSubtle))
-            .child(Badge::new_literal("3"))
-            .child(Badge::new_literal("99+")),
+            .child(Badge::new(lit!("New")))
+            .child(Badge::new(lit!("Beta")))
+            .child(Badge::new(lit!("Stable")).color(SurfaceRole::AccentSubtle))
+            .child(Badge::new(lit!("3")))
+            .child(Badge::new(lit!("99+"))),
     );
     let avatar = section(
         ctx,
-        "Avatar",
+        lit!("Avatar"),
         HStack::new()
             .spacing(12.0)
-            .child(Avatar::with_initials_literal("CJ").size(AvatarSize::Medium))
+            .child(Avatar::with_initials(lit!("CJ")).size(AvatarSize::Medium))
             .child(
-                Avatar::with_initials_literal("AB")
+                Avatar::with_initials(lit!("AB"))
                     .shape(AvatarShape::RoundedSquare)
                     .seed("alice")
                     .presence(AvatarPresence::Online),
             )
             .child(
-                Avatar::with_initials_literal("MN")
+                Avatar::with_initials(lit!("MN"))
                     .size(AvatarSize::Large)
                     .seed("mallory")
                     .presence(AvatarPresence::Busy),
@@ -138,7 +138,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             // ProgressBar — determinate
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("ProgressBar — determinate") {
+                TextWidget::new(tr!(ind_progress_determinate_heading())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -150,7 +150,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             // ProgressBar — indeterminate
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("ProgressBar — indeterminate") {
+                TextWidget::new(tr!(ind_progress_indeterminate_heading())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -160,7 +160,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             // ProgressBar — vertical
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("ProgressBar — vertical") {
+                TextWidget::new(tr!(ind_progress_vertical_heading())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -176,7 +176,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             // Spinner
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Spinner") {
+                TextWidget::new(lit!("Spinner")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -193,7 +193,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             // Link
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Link") {
+                TextWidget::new(lit!("Link")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -211,40 +211,40 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             // Badge
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Badge") {
+                TextWidget::new(lit!("Badge")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
                 HStack {
                     spacing: 8.0
-                    Badge::new_literal("New")
-                    Badge::new_literal("Beta")
-                    Badge::new_literal("Stable") {
+                    Badge::new(lit!("New"))
+                    Badge::new(lit!("Beta"))
+                    Badge::new(lit!("Stable")) {
                         color: SurfaceRole::Raised
                     }
-                    Badge::new_literal("3")
-                    Badge::new_literal("99+")
+                    Badge::new(lit!("3"))
+                    Badge::new(lit!("99+"))
                 }
             }
 
             // Avatar
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Avatar") {
+                TextWidget::new(lit!("Avatar")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
                 HStack {
                     spacing: 12.0
-                    Avatar::with_initials_literal("CJ") {
+                    Avatar::with_initials(lit!("CJ")) {
                         size: AvatarSize::Medium
                     }
-                    Avatar::with_initials_literal("AB") {
+                    Avatar::with_initials(lit!("AB")) {
                         shape: AvatarShape::RoundedSquare
                         seed: "alice"
                         presence: AvatarPresence::Online
                     }
-                    Avatar::with_initials_literal("MN") {
+                    Avatar::with_initials(lit!("MN")) {
                         size: AvatarSize::Large
                         seed: "mallory"
                         presence: AvatarPresence::Busy

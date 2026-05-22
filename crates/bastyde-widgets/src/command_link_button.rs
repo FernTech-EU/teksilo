@@ -41,8 +41,8 @@ pub const COMMAND_LINK_BUTTON_MIN_HEIGHT: f32 = 64.0;
 
 /// A large two-line CTA button: icon + title + subtitle.
 pub struct CommandLinkButton {
-    title: String,
-    description: Option<String>,
+    title: bastyde_i18n::LocalizedString,
+    description: Option<bastyde_i18n::LocalizedString>,
     icon: Option<IconWidget>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
@@ -55,7 +55,7 @@ impl CommandLinkButton {
     pub fn new(title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = title.into();
         Self {
-            title: ls.resolve_now(),
+            title: ls,
             description: None,
             icon: None,
             initial_enabled: true,
@@ -65,24 +65,11 @@ impl CommandLinkButton {
         }
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw title in
-    /// `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(title: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(title))
-    }
-
     /// Optional descriptive subtitle rendered below the title.
     pub fn description(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.description = Some(ls.resolve_now());
+        self.description = Some(ls);
         self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `description(...)`.
-    #[doc(hidden)]
-    pub fn description_literal(self, text: impl Into<String>) -> Self {
-        self.description(bastyde_i18n::LocalizedString::literal(text))
     }
 
     /// Leading icon — large enough to anchor the card visually
@@ -162,7 +149,7 @@ impl Widget for CommandLinkButton {
         let corner_radius = crate::styles::recipe_button_style::BUTTON_CORNER_RADIUS;
 
         // Title + optional description column.
-        let title_widget = TextWidget::new_literal(&self.title)
+        let title_widget = TextWidget::new(self.title.clone())
             .style(TextStyleRole::BodyBold)
             .bind_color(title_role)
             .single_line()
@@ -175,7 +162,7 @@ impl Widget for CommandLinkButton {
             .add_child(title_id);
         if let Some(description) = &self.description {
             let desc = ctx.add(
-                TextWidget::new_literal(description)
+                TextWidget::new(description.clone())
                     .style(TextStyleRole::Body)
                     .bind_color(desc_role)
                     .a11y_hidden(),
@@ -241,12 +228,14 @@ impl Widget for CommandLinkButton {
         let handlers = HandlerSet::new()
             .focusable(true)
             .cursor(CursorIcon::Pointer)
-            .on_tap(move |_ev: &bastyde_core::TapEvent, ctx: &mut EventContext| {
-                if let Some(ref a) = *action_for_tap {
-                    a(ctx);
-                }
-                int_tap.set(InteractionState::Hovered);
-            })
+            .on_tap(
+                move |_ev: &bastyde_core::TapEvent, ctx: &mut EventContext| {
+                    if let Some(ref a) = *action_for_tap {
+                        a(ctx);
+                    }
+                    int_tap.set(InteractionState::Hovered);
+                },
+            )
             .on_hover(move |entered: bool, _ctx: &mut EventContext| {
                 if entered {
                     int_hover_enter.set(InteractionState::Hovered);
@@ -340,8 +329,8 @@ impl Widget for CommandLinkButton {
         // Compose the AT name as "title — description" so screen reader
         // users hear both lines without having to drill into children.
         let name = match &self.description {
-            Some(desc) => format!("{} — {}", self.title, desc),
-            None => self.title.clone(),
+            Some(desc) => format!("{} — {}", self.title.resolve_now(), desc.resolve_now()),
+            None => self.title.resolve_now(),
         };
         builder.set_name(name);
     }
@@ -354,14 +343,15 @@ impl Widget for CommandLinkButton {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_core::widget_tree::WidgetTree;
 
     #[test]
     fn builds_with_title_and_description() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
-            CommandLinkButton::new_literal("Create new project")
-                .description_literal("Start with a blank workspace."),
+            CommandLinkButton::new(lit!("Create new project"))
+                .description(lit!("Start with a blank workspace.")),
         );
         tree.layout(SizeProposal {
             width: Some(420.0),
@@ -377,8 +367,7 @@ mod tests {
     fn a11y_role_is_button_with_combined_name() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
-            CommandLinkButton::new_literal("Create new project")
-                .description_literal("Start blank."),
+            CommandLinkButton::new(lit!("Create new project")).description(lit!("Start blank.")),
         );
         tree.layout(SizeProposal::exact(400.0, 100.0));
         let info = tree.accessibility_node(id);
@@ -394,7 +383,7 @@ mod tests {
         let fired_clone = fired.clone();
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
-            CommandLinkButton::new_literal("Open existing project")
+            CommandLinkButton::new(lit!("Open existing project"))
                 .on_activate_fn(move |_| fired_clone.set(fired_clone.get() + 1)),
         );
         tree.layout(SizeProposal::exact(400.0, 100.0));

@@ -12,7 +12,7 @@
 //! - [`crate::toast::surface::ToastSurface`] — calls back into the
 //!   registry to dismiss its entry on close-click / action-invoked.
 //!
-//! Phase 2 limitation: a single shared host state. Multi-window apps
+//! Current limitation: a single shared host state. Multi-window apps
 //! that install `ToastHost` in every window share one queue; toasts
 //! show up in whichever window's host last bound. Multi-window
 //! routing is planned as a follow-up.
@@ -79,9 +79,9 @@ pub(crate) struct LiveEntry {
     pub(crate) entry_id: u64,
     pub(crate) severity: ToastSeverity,
     pub(crate) priority: ToastPriority,
-    pub(crate) title: String,
-    pub(crate) body: Option<String>,
-    pub(crate) announcement: Option<String>,
+    pub(crate) title: bastyde_i18n::LocalizedString,
+    pub(crate) body: Option<bastyde_i18n::LocalizedString>,
+    pub(crate) announcement: Option<bastyde_i18n::LocalizedString>,
     pub(crate) actions: Rc<Vec<ToastAction>>,
     pub(crate) show_close_button: bool,
     pub(crate) closable_on_escape: bool,
@@ -354,8 +354,8 @@ impl ToastRegistry {
             id: 0, // overwritten by NotificationArchiveModel::push
             severity: entry.severity,
             priority: entry.priority,
-            title: entry.title.clone(),
-            body: entry.body.clone(),
+            title: entry.title.resolve_now(),
+            body: entry.body.as_ref().map(|b| b.resolve_now()),
             actions: entry.actions.iter().map(Self::action_to_archive).collect(),
             timestamp: jiff::Timestamp::now(),
             group: None,

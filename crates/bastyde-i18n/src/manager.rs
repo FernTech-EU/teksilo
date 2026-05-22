@@ -612,7 +612,8 @@ mod tests {
 
     #[test]
     fn reload_from_path_malformed_file_returns_error_and_keeps_old_bundle() {
-        let dir = std::env::temp_dir().join(format!("bastyde-i18n-reload-bad-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("bastyde-i18n-reload-bad-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("fr-FR.ftl");
         // Deliberately malformed: missing `=` on first line.

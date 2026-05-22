@@ -136,16 +136,16 @@ impl Widget for Root {
         let root = ctx.add(
             VStack::new()
                 .spacing(16.0)
-                .child(TextWidget::new_literal(
-                    "Click a field, then press F1 (Pinyin 你好), F2 (dead-key ê), or F3 (cancel).",
-                ))
+                .child(TextWidget::new(lit!(
+                    "Click a field, then press F1 (Pinyin 你好), F2 (dead-key ê), or F3 (cancel)."
+                )))
                 .child(labeled(
                     "Single-line TextInput",
-                    TextInput::new(self.single.clone()).placeholder_literal("compose here"),
+                    TextInput::new(self.single.clone()).placeholder(lit!("compose here")),
                 ))
                 .child(labeled(
                     "Secure PasswordField (masked preedit, ImePurpose::Password)",
-                    PasswordField::new(self.secret.clone()).label_literal("Password"),
+                    PasswordField::new(self.secret.clone()).label(lit!("Password")),
                 ))
                 .child(labeled(
                     "Multi-line RichTextEditor",
@@ -168,7 +168,7 @@ impl Widget for Root {
 fn labeled(label: &str, control: impl Widget + 'static) -> impl Widget {
     VStack::new()
         .spacing(4.0)
-        .child(TextWidget::new_literal(label).style(TextStyleRole::SmallBold))
+        .child(TextWidget::new(lit!(label)).style(TextStyleRole::SmallBold))
         .child(control)
 }
 

@@ -48,7 +48,7 @@
 //! self-hosted Tempo+Loki + an HTTP-side delete API can subclass
 //! the adapter (or wait for a future user-provided
 //! `EraseEndpoint`/`QueryEndpoint` injection point — tracked under
-//! Phase 5 future work).
+//! future work).
 //!
 //! # Queue durability
 //!
@@ -96,7 +96,9 @@ use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use bastyde_core::telemetry::{ConsentScope, Event, RemoteDataExport, TelemetryError, UsageReporter};
+use bastyde_core::telemetry::{
+    ConsentScope, Event, RemoteDataExport, TelemetryError, UsageReporter,
+};
 
 use crate::worker::{WorkerCommand, WorkerStats, spawn_worker};
 
@@ -192,7 +194,7 @@ impl UsageReporter for OtlpAdapter {
     fn fetch_remote_data(&self) -> Result<RemoteDataExport, TelemetryError> {
         // OTLP has no fetch path. Self-hosted Tempo+Loki can be
         // queried via LogQL but the URL + auth shape is operator-
-        // specific. Tracked as a Phase 5 future-work item: accept
+        // specific. Future work: accept
         // a `QueryEndpoint` config that operators wire to their
         // backend's read API.
         Err(TelemetryError::FetchUnsupportedByBackend)

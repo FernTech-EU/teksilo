@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use crate::geometry::{Rect, Transform2D};
-use crate::paint::StrokeStyle;
+use crate::paint::{StrokeSpace, StrokeStyle};
 
 /// The complete render output for one frame. This is the boundary between
 /// platform-independent widget code and GPU-specific rendering code.
@@ -10,6 +10,11 @@ pub struct RenderFrame {
     pub glyphs: Vec<GlyphQuad>,
     pub images: Vec<ImageQuad>,
     pub decorations: Vec<DecorationRect>,
+    /// Transform-invariant ("cosmetic" / hairline) lines. Unlike
+    /// `decorations`, the width here is NOT baked into geometry — the
+    /// renderer applies a constant device-pixel thickness regardless of the
+    /// active transform. See [`DrawCommand::CosmeticLine`].
+    pub cosmetic_lines: Vec<CosmeticLine>,
     pub shapes: Vec<ShapeQuad>,
     pub shadows: Vec<ShadowQuad>,
     pub rasterized: Vec<RasterizedQuad>,
@@ -57,6 +62,7 @@ impl RenderFrame {
         let glyph_offset = self.glyphs.len();
         let image_offset = self.images.len();
         let decoration_offset = self.decorations.len();
+        let cosmetic_line_offset = self.cosmetic_lines.len();
         let shape_offset = self.shapes.len();
         let shadow_offset = self.shadows.len();
         let rasterized_offset = self.rasterized.len();
@@ -66,6 +72,7 @@ impl RenderFrame {
         self.glyphs.extend_from_slice(&other.glyphs);
         self.images.extend_from_slice(&other.images);
         self.decorations.extend_from_slice(&other.decorations);
+        self.cosmetic_lines.extend_from_slice(&other.cosmetic_lines);
         self.shapes.extend_from_slice(&other.shapes);
         self.shadows.extend_from_slice(&other.shadows);
         self.rasterized.extend_from_slice(&other.rasterized);
@@ -89,6 +96,7 @@ impl RenderFrame {
                 DrawCommand::Glyph(i) => DrawCommand::Glyph(i + glyph_offset),
                 DrawCommand::Image(i) => DrawCommand::Image(i + image_offset),
                 DrawCommand::Decoration(i) => DrawCommand::Decoration(i + decoration_offset),
+                DrawCommand::CosmeticLine(i) => DrawCommand::CosmeticLine(i + cosmetic_line_offset),
                 DrawCommand::Shape(i) => DrawCommand::Shape(i + shape_offset),
                 DrawCommand::Shadow(i) => DrawCommand::Shadow(i + shadow_offset),
                 DrawCommand::Rasterized(i) => DrawCommand::Rasterized(i + rasterized_offset),
@@ -257,6 +265,25 @@ pub enum DecorationKind {
     CellSelection,
 }
 
+/// A transform-invariant ("cosmetic" / hairline) line. The endpoints are in
+/// logical pixels and follow the active transform; `width` is in logical
+/// pixels but applied as a constant device thickness (× scale_factor), NOT
+/// scaled by the transform's zoom. Emitted by
+/// [`Canvas::draw_line`](crate::Canvas::draw_line) /
+/// [`Canvas::stroke_rect`](crate::Canvas::stroke_rect) when the stroke is
+/// [`StrokeSpace::Device`](crate::paint::StrokeSpace::Device).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CosmeticLine {
+    /// Start point [x, y] in logical pixels.
+    pub from: [f32; 2],
+    /// End point [x, y] in logical pixels.
+    pub to: [f32; 2],
+    /// Stroke thickness in logical pixels, held transform-invariant.
+    pub width: f32,
+    /// Color: [r, g, b, a].
+    pub color: [f32; 4],
+}
+
 /// A shape rendered via SDF (signed distance field) shaders.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShapeQuad {
@@ -268,6 +295,11 @@ pub struct ShapeQuad {
     pub shape: ShapeKind,
     /// Stroke width (0.0 for filled shapes).
     pub stroke_width: f32,
+    /// Whether the stroke width is logical (scales with the view transform) or
+    /// device/cosmetic (held constant in device pixels, invariant to zoom). A
+    /// cosmetic stroke keeps a hairline border crisp at any scene zoom. Fills
+    /// (`stroke_width == 0.0`) ignore this.
+    pub stroke_space: StrokeSpace,
     /// Corner radii: [top_left, top_right, bottom_right, bottom_left].
     pub corner_radii: [f32; 4],
     /// Paint type for the shape.
@@ -368,6 +400,9 @@ pub enum DrawCommand {
     Glyph(usize),
     Image(usize),
     Decoration(usize),
+    /// A transform-invariant cosmetic line — index into
+    /// [`RenderFrame::cosmetic_lines`].
+    CosmeticLine(usize),
     Shape(usize),
     Shadow(usize),
     Rasterized(usize),
@@ -515,6 +550,7 @@ mod tests {
             color: [1.0, 0.0, 0.0, 1.0],
             shape: ShapeKind::RoundedRect,
             stroke_width: 0.0,
+            stroke_space: StrokeSpace::Logical,
             corner_radii: [0.0; 4],
             paint_data: PaintData::Solid,
         });

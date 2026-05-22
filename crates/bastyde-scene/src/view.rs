@@ -6,9 +6,15 @@
 //! - **Placement.** `place_children` plants each materialised
 //!   heavyweight widget at its scene-space rect (composed from the
 //!   item's `local_pos`, `transform`, and parent chain).
+//! - **Paint bands.** Three passes: `paint` draws the `Under` lightweight
+//!   items (backdrop), the arena child-walk draws the heavyweight widgets,
+//!   then `post_paint` draws the `Over` lightweight items + marquee /
+//!   foreground / debug overlays. `z` orders within each tier; the
+//!   Under/Over band ([`Scene::set_layer`](crate::Scene::set_layer))
+//!   chooses the side. See `docs/bastyde-scene.md` §"Z-order and paint bands".
 //! - **View transform.** Pan / zoom / rotation are four animated
 //!   `Signal<f32>`s on `SceneView`, composed into a derived
-//!   `Signal<Transform2D>` bound via `BuildContext::set_transform`
+//!   `Signal<Transform2D>` bound via `BuildContext::set_content_transform`
 //!   on the view itself. The render walker pushes that scope around
 //!   the entire subtree, so every materialised widget is visually
 //!   transformed; transform-aware hit-test routes pointer events
@@ -48,6 +54,7 @@ use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, ScrollDelta, WidgetEvent};
 use bastyde_core::gesture::PinchPhase;
+use bastyde_core::overscroll::OverscrollBehavior;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
@@ -56,6 +63,7 @@ use bastyde_tokens::Easing;
 
 use crate::item::ItemId;
 use crate::scene::Scene;
+use crate::scene_model::SceneModel;
 use crate::transform::{anchor_pan_for_pinch, compose_view};
 
 /// Logical pixels of pan applied per `ScrollDelta::Lines` notch.
@@ -70,7 +78,6 @@ const DEFAULT_MAX_ZOOM: f32 = 10.0;
 /// Maximum movement (scene-coord pixels) between PointerDown and
 /// PointerUp for the gesture to count as a tap rather than a drag.
 const TAP_MOVEMENT_THRESHOLD: f32 = 4.0;
-
 /// Take the tightening intersection of two optional zoom ranges:
 /// `(max(lo), min(hi))`. `None` on either side leaves the other
 /// untouched; `None` on both returns `None`. Used to compose
@@ -216,8 +223,10 @@ struct HandlerSnapshotEntry {
     scene_transform: bastyde_canvas::Transform2D,
     /// Item-local hit-test predicate, cloned from the trait via a
     /// small wrapper. Returns `true` when a local point is inside
-    /// the item's exact shape.
-    shape_contains: Rc<dyn Fn(Point) -> bool>,
+    /// the item's exact shape; the second argument is the live view
+    /// scale (zoom) so cosmetic-stroke hit bands convert to scene
+    /// coordinates.
+    shape_contains: Rc<dyn Fn(Point, f32) -> bool>,
     /// z-order (used to pick topmost on overlap).
     z: f32,
     /// Item-level handler closures, cloned at snapshot time. `None`
@@ -299,7 +308,22 @@ pub enum FocusDirection {
 /// A pannable/zoomable viewport hosting a [`Scene`]'s items at scene
 /// coordinates.
 pub struct SceneView {
-    scene: Scene,
+    /// Shared, cloneable handle to the scene this view renders. Multiple
+    /// `SceneView`s can hold clones of one [`SceneModel`] and reconcile
+    /// independently on every mutation.
+    model: SceneModel,
+    /// Per-view heavyweight builder for `Delegated` items. Each view calls
+    /// its own delegate with an item's type-erased payload to build a fresh
+    /// `Widget` instance for **this** view's arena. Returns `None` to skip
+    /// an item (e.g. a downcast miss). `None` (the field) = no delegate
+    /// installed; only single-view `Once` widgets materialise.
+    delegate: Option<Rc<dyn Fn(&dyn std::any::Any, ItemId) -> Option<Box<dyn Widget>>>>,
+    /// Items whose payload changed since the last build (filled by the
+    /// `item_change` observer on [`ItemChange::PayloadChanged`]). Drained at
+    /// the top of `build`, where each is destroyed and re-materialised via the
+    /// delegate. `Rc<RefCell>` so the observer closure can push without
+    /// borrowing `model`.
+    payload_dirty: Rc<RefCell<HashSet<ItemId>>>,
     /// Materialisation map populated during `build`. Stable across
     /// rebuilds — subsequent `build` calls just return the cached
     /// widget ids.
@@ -351,7 +375,15 @@ pub struct SceneView {
     hovered_item: Rc<Cell<Option<crate::item::ItemId>>>,
     /// Last press recorded for tap detection: (scene_pt, item_id).
     /// Cleared on PointerUp / PointerLeave.
-    pending_tap: Rc<Cell<Option<(Point, crate::item::ItemId, bastyde_core::event::PointerButton)>>>,
+    pending_tap: Rc<
+        Cell<
+            Option<(
+                Point,
+                crate::item::ItemId,
+                bastyde_core::event::PointerButton,
+            )>,
+        >,
+    >,
     /// Latest viewport size observed during layout. Cached so
     /// imperative methods like [`SceneView::fit_to_content`] can
     /// reason about the visible rectangle without re-running layout.
@@ -389,6 +421,9 @@ pub struct SceneView {
     pan_anim_duration: Duration,
     zoom_anim_duration: Duration,
     line_height: f32,
+    /// Whether a wheel that the scene can't absorb (already clamped at its
+    /// `pan_bounds`) chains to an ancestor scrollable, or is contained.
+    overscroll_behavior: OverscrollBehavior,
 
     // --- A11y configuration — visual-default path ----------------------------------
     a11y_off_screen_mode: crate::a11y::A11yOffScreenMode,
@@ -453,11 +488,11 @@ pub struct SceneView {
     /// `pending_item_move`. SceneView binds to this at
     /// `BindingLevel::Rebuild` in `build`, so the next build
     /// cycle drains the pending move and calls
-    /// `Scene::move_item` (which requires `&mut self.scene`,
+    /// `Scene::set_local_pos` (which requires `&mut self.scene`,
     /// only available inside `build`). Without this signal, the
     /// move was queued but never applied — items "snapped back"
     /// to their original positions on drag release.
-    drag_dirty: Signal<u64>,
+    reconcile_dirty: Signal<u64>,
 
     /// Latest pointer position seen on the SceneView (screen-space).
     /// Updated via an on_pointer_event handler in `build`. Used by
@@ -488,7 +523,7 @@ pub struct SceneView {
     /// When set, becomes the logical region name (e.g. "Chart
     /// data area" for an inner chart SceneView). Default `None`
     /// — the SceneView has no explicit name.
-    a11y_label: Option<String>,
+    a11y_label: Option<bastyde_i18n::LocalizedString>,
     /// Coordinate space for `SceneItem` bounds reported to AT.
     /// Default `Screen` (view-projected). Apps with a logical
     /// fixed coordinate system (CAD canvases, blueprint editors)
@@ -545,6 +580,23 @@ pub struct SceneView {
     /// the SceneView's; dropping it on a fresh `build()` un-installs
     /// the previous observer before re-installing.
     _item_cache_observer: RefCell<Option<bastyde_core::signal::ObserverHandle>>,
+    /// RAII guard for the logical-AT-structure observer wired in `build()`.
+    /// Held by `Self` so a re-build un-installs the previous observer before
+    /// re-installing. Drives a reconcile pass on `Scene::a11y_change_signal`
+    /// (group / parent / relation / live / landmark / category mutations),
+    /// which don't flow through `item_change_signal`.
+    _a11y_observer: RefCell<Option<bastyde_core::signal::ObserverHandle>>,
+    /// [`Scene::mutation_version`] as of the end of the build that last
+    /// requested an AccessKit re-walk. `None` until the first build. `build()`
+    /// re-walks AT only when the version has advanced past this since the last
+    /// walk (a structural / geometry / a11y mutation), so a `build()` driven
+    /// purely by per-frame dynamic-bounds churn does not re-walk AT 60×/s.
+    last_at_version: Option<u64>,
+    /// Whether [`Scene::refresh_dynamic_bounds`] reported a change on the
+    /// *previous* build. The `true → false` edge (an animation settling) walks
+    /// the final animated bounds into AT once — the one AT update the
+    /// version-delta gate would otherwise miss while suppressing the churn.
+    dynamic_churning: bool,
 }
 
 impl std::fmt::Debug for SceneView {
@@ -552,7 +604,7 @@ impl std::fmt::Debug for SceneView {
         // Manual impl: `focus_order_callback` is `Rc<dyn Fn>` and
         // therefore not `Debug`. Render it as a presence flag instead.
         f.debug_struct("SceneView")
-            .field("scene", &self.scene)
+            .field("model", &self.model)
             .field("materialized_count", &self.materialized.len())
             .field("default_size", &self.default_size)
             .field("interactive", &self.interactive)
@@ -571,9 +623,17 @@ impl std::fmt::Debug for SceneView {
 }
 
 impl SceneView {
-    /// Wrap a [`Scene`] in a viewport. The scene is moved into the
-    /// view; query / mutate it later via [`SceneView::scene_mut`].
+    /// Wrap a [`Scene`] in a viewport (single-view sugar). The scene is moved
+    /// into a fresh [`SceneModel`]; for multi-view, build a `SceneModel`
+    /// yourself and use [`with_model`](Self::with_model).
     pub fn new(scene: Scene) -> Self {
+        Self::with_model(SceneModel::from_scene(scene))
+    }
+
+    /// Attach a viewport to a (possibly shared) [`SceneModel`]. Clone one
+    /// model into several `SceneView::with_model(model.clone())` to render the
+    /// same scene in multiple panes, each with its own camera and delegate.
+    pub fn with_model(model: SceneModel) -> Self {
         let pan_x = Signal::new_animated(0.0);
         let pan_y = Signal::new_animated(0.0);
         let zoom = Signal::new_animated(1.0);
@@ -581,23 +641,14 @@ impl SceneView {
         let bounds_origin_signal = Signal::new(Vec2::ZERO);
         // Derived view-transform signal — composed once in `new` so
         // it's stable across rebuilds. The same instance is used by
-        // `set_transform` in `build` and exposed publicly via
+        // `set_content_transform` in `build` and exposed publicly via
         // [`view_transform_signal`](Self::view_transform_signal).
-        let view_transform_signal = pan_x
-            .zip3(&pan_y, &zoom)
-            .zip(&rotation)
-            .zip(&bounds_origin_signal)
-            // Coalesce the five underlying sources into one. Without
-            // this, every animation tick that updates pan/zoom/rotation
-            // simultaneously would register five binding entries per
-            // observing widget, multiplying the per-tick dirty-poll
-            // work. `map_coalesced` collapses to a single composite
-            // source with the same dirty-on-any / clear-all semantics.
-            .map_coalesced(|(((px, py, z), r), bo)| {
-                compose_view(Vec2::new(*px + bo.x, *py + bo.y), *z, *r)
-            });
+        let view_transform_signal =
+            Self::compose_view_transform(&pan_x, &pan_y, &zoom, &rotation, &bounds_origin_signal);
         Self {
-            scene,
+            model,
+            delegate: None,
+            payload_dirty: Rc::new(RefCell::new(HashSet::new())),
             materialized: HashMap::new(),
             widget_to_item: HashMap::new(),
             default_size: Size::new(800.0, 600.0),
@@ -617,6 +668,7 @@ impl SceneView {
             pan_anim_duration: DEFAULT_PAN_DURATION,
             zoom_anim_duration: DEFAULT_ZOOM_DURATION,
             line_height: DEFAULT_LINE_HEIGHT,
+            overscroll_behavior: OverscrollBehavior::Chain,
             a11y_off_screen_mode: crate::a11y::A11yOffScreenMode::default(),
             a11y_mode: crate::a11y::A11yMode::default(),
             self_widget_id: Cell::new(None),
@@ -630,7 +682,7 @@ impl SceneView {
             drag_target: Rc::new(Cell::new(None)),
             pending_item_move: Rc::new(Cell::new(None)),
             lightweight_bounds_snapshot: Rc::new(RefCell::new(Vec::new())),
-            drag_dirty: Signal::new(0),
+            reconcile_dirty: Signal::new(0),
             cursor_pos: Rc::new(Cell::new(None)),
             focus_order_callback: None,
             a11y_nested: false,
@@ -641,6 +693,9 @@ impl SceneView {
             foreground_paint: None,
             item_cache: Rc::new(RefCell::new(crate::cache::ItemCoordinateCache::new())),
             _item_cache_observer: RefCell::new(None),
+            _a11y_observer: RefCell::new(None),
+            last_at_version: None,
+            dynamic_churning: false,
         }
     }
 
@@ -663,6 +718,62 @@ impl SceneView {
         &self.selection
     }
 
+    /// Install the per-view heavyweight builder for `Delegated` items
+    /// (those added via [`SceneModel::add_widget_item`](crate::SceneModel::add_widget_item)).
+    /// The closure receives the item's type-erased payload and its [`ItemId`]
+    /// and returns the widget to materialise in **this** view's arena.
+    /// Prefer the typed [`delegate_typed`](Self::delegate_typed) wrapper.
+    pub fn delegate(
+        mut self,
+        f: impl Fn(&dyn std::any::Any, ItemId) -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        self.delegate = Some(Rc::new(move |payload, id| Some(f(payload, id))));
+        self
+    }
+
+    /// Typed convenience over [`delegate`](Self::delegate): downcasts the
+    /// payload to `P` before calling `f`. A downcast miss debug-asserts and
+    /// skips the item (no widget is materialised) in release.
+    pub fn delegate_typed<P: 'static>(
+        mut self,
+        f: impl Fn(&P, ItemId) -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        self.delegate = Some(Rc::new(move |payload, id| match payload.downcast_ref::<P>() {
+            Some(typed) => Some(f(typed, id)),
+            None => {
+                debug_assert!(
+                    false,
+                    "SceneView delegate_typed: payload for {id:?} is not a {}",
+                    std::any::type_name::<P>()
+                );
+                None
+            }
+        }));
+        self
+    }
+
+    /// Replace this view's selection with a (typically shared) one. Pass the
+    /// same [`SceneSelection`](crate::SceneSelection) clone to several views so
+    /// they select together; capture its `selection_signal()` in your delegate
+    /// to highlight selected items reactively (no rebuild). Distinct from the
+    /// [`selection()`](Self::selection) getter; supersedes any
+    /// [`selection_mode`](Self::selection_mode) set earlier.
+    pub fn selection_model(mut self, selection: crate::selection::SceneSelection) -> Self {
+        self.selection = selection;
+        self
+    }
+
+    /// A clone of this view's [`SceneModel`] handle — for handler closures
+    /// that mutate the scene (every mutator is `&self`) or wire additional views.
+    pub fn model(&self) -> SceneModel {
+        self.model.clone()
+    }
+
+    /// Borrow this view's [`SceneModel`] handle.
+    pub fn model_ref(&self) -> &SceneModel {
+        &self.model
+    }
+
     /// Drain any pending marquee commit synchronously. Normal
     /// per-frame use never needs this — `place_children` consumes
     /// the pending commit at the start of every layout pass. Tests
@@ -670,7 +781,8 @@ impl SceneView {
     /// materialise the box-select result.
     pub fn flush_marquee_commit(&self) -> bool {
         if let Some((rect, additive)) = self.pending_marquee_commit.take() {
-            self.selection.commit_marquee(&self.scene, rect, additive);
+            self.selection
+                .commit_marquee(&self.model.0.borrow(), rect, additive);
             self.marquee.set(None);
             true
         } else {
@@ -684,9 +796,9 @@ impl SceneView {
     /// their `scene_pos` derives from the parent's chain.
     pub fn flush_pending_item_move(&mut self) -> bool {
         if let Some((target_id, delta)) = self.pending_item_move.take() {
-            if let Some(local_pos) = self.scene.local_pos(target_id) {
+            if let Some(local_pos) = self.model.local_pos(target_id) {
                 let new_local_pos = Point::new(local_pos.x + delta.x, local_pos.y + delta.y);
-                self.scene.set_local_pos(target_id, new_local_pos);
+                self.model.set_local_pos(target_id, new_local_pos);
             }
             self.drag_target.set(None);
             true
@@ -743,14 +855,8 @@ impl SceneView {
     /// explicit AT name.
     pub fn a11y_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.a11y_label = Some(ls.resolve_now());
+        self.a11y_label = Some(ls);
         self
-    }
-
-    /// Untranslated twin of [`a11y_label`](Self::a11y_label).
-    #[doc(hidden)]
-    pub fn a11y_label_literal(self, label: impl Into<String>) -> Self {
-        self.a11y_label(bastyde_i18n::LocalizedString::literal(label))
     }
 
     /// Whether the SceneView is currently marked as logically
@@ -847,9 +953,9 @@ impl SceneView {
         current: Option<ItemId>,
     ) -> Option<ItemId> {
         if let Some(cb) = &self.focus_order_callback {
-            return cb(&self.scene, direction, current);
+            return cb(&self.model.0.borrow(), direction, current);
         }
-        let ids = self.scene.ids();
+        let ids = self.scene().ids();
         if ids.is_empty() {
             return None;
         }
@@ -988,6 +1094,82 @@ impl SceneView {
         self
     }
 
+    /// Compose the derived view-transform signal from the four view-state
+    /// signals plus the bounds origin. Coalesced so a simultaneous pan/zoom/
+    /// rotation tick registers a single binding per observing widget (instead
+    /// of five). Called in `new` and re-called by
+    /// [`bind_view_state`](Self::bind_view_state) after the signals are swapped.
+    fn compose_view_transform(
+        pan_x: &Signal<f32>,
+        pan_y: &Signal<f32>,
+        zoom: &Signal<f32>,
+        rotation: &Signal<f32>,
+        bounds_origin: &Signal<Vec2>,
+    ) -> Signal<Transform2D> {
+        pan_x
+            .zip3(pan_y, zoom)
+            .zip(rotation)
+            .zip(bounds_origin)
+            .map_coalesced(|(((px, py, z), r), bo)| {
+                compose_view(Vec2::new(*px + bo.x, *py + bo.y), *z, *r)
+            })
+    }
+
+    /// Replace the view's pan / zoom / rotation signals with app-owned ones.
+    ///
+    /// The four view-state signals become the app's to hold, share, and
+    /// persist — so view state survives a *rebuild-from-state* (a wrapper that
+    /// reconstructs the `Scene` + `SceneView` keeps the same signals and the
+    /// viewport doesn't jump back to the origin), a "Reset View" button can
+    /// snap them, and two views could share one camera. The derived
+    /// [`view_transform_signal`](Self::view_transform_signal) is recomposed
+    /// from the injected signals.
+    ///
+    /// Must be called before the view is added to the tree (like the other
+    /// builder methods) — `build()` reads `view_transform_signal` once.
+    pub fn bind_view_state(
+        mut self,
+        pan_x: Signal<f32>,
+        pan_y: Signal<f32>,
+        zoom: Signal<f32>,
+        rotation: Signal<f32>,
+    ) -> Self {
+        // Recompose first (borrows the new signals), then move them into self.
+        self.view_transform_signal = Self::compose_view_transform(
+            &pan_x,
+            &pan_y,
+            &zoom,
+            &rotation,
+            &self.bounds_origin_signal,
+        );
+        self.pan_x = pan_x;
+        self.pan_y = pan_y;
+        self.zoom = zoom;
+        self.rotation = rotation;
+        self
+    }
+
+    /// Seed the initial pan offset (logical pixels). The view keeps ownership
+    /// of the signals; for app-owned signals use [`bind_view_state`](Self::bind_view_state).
+    pub fn initial_pan(self, x: f32, y: f32) -> Self {
+        self.pan_x.set(x);
+        self.pan_y.set(y);
+        self
+    }
+
+    /// Seed the initial zoom factor (clamped to the active zoom range).
+    pub fn initial_zoom(self, zoom: f32) -> Self {
+        let gated = self.gate_zoom_target(zoom);
+        self.zoom.set(gated);
+        self
+    }
+
+    /// Seed the initial rotation (radians).
+    pub fn initial_rotation(self, radians: f32) -> Self {
+        self.rotation.set(radians);
+        self
+    }
+
     /// Reactive accessor for the drag mode. Useful for toolbars
     /// that need to read the current mode (e.g. to highlight the
     /// active tool button) and write to it.
@@ -1061,7 +1243,10 @@ impl SceneView {
     pub fn min_zoom(self, v: f32) -> Self {
         let lo = v.max(0.0001);
         let current = self.zoom_range_override.get();
-        let hi = current.as_ref().map(|r| *r.end()).unwrap_or(DEFAULT_MAX_ZOOM);
+        let hi = current
+            .as_ref()
+            .map(|r| *r.end())
+            .unwrap_or(DEFAULT_MAX_ZOOM);
         self.zoom_range_override.set(Some(lo..=hi.max(lo)));
         self
     }
@@ -1070,7 +1255,10 @@ impl SceneView {
     /// bound of the override range. See [`min_zoom`](Self::min_zoom).
     pub fn max_zoom(self, v: f32) -> Self {
         let current = self.zoom_range_override.get();
-        let lo = current.as_ref().map(|r| *r.start()).unwrap_or(DEFAULT_MIN_ZOOM);
+        let lo = current
+            .as_ref()
+            .map(|r| *r.start())
+            .unwrap_or(DEFAULT_MIN_ZOOM);
         self.zoom_range_override.set(Some(lo..=v.max(lo)));
         self
     }
@@ -1117,17 +1305,47 @@ impl SceneView {
         self
     }
 
-    /// Read access to the underlying scene model.
-    pub fn scene(&self) -> &Scene {
-        &self.scene
+    /// Whether a wheel the scene can't absorb (already clamped at its
+    /// `pan_bounds`) chains to an ancestor scrollable
+    /// ([`OverscrollBehavior::Chain`], the default — matches the widget
+    /// scrollables) or is contained ([`OverscrollBehavior::Contain`]). Use
+    /// `Contain` for a tightly-bounded scene embedded in a scroll view that
+    /// should never steal the scene's wheel.
+    pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self {
+        self.overscroll_behavior = behavior;
+        self
     }
 
-    /// Mutable access to the underlying scene model. Intended for
-    /// pre-build configuration or runtime mutation
-    /// after `SceneView` has been added to the tree, fresh
-    /// `add_widget` calls take effect on the next rebuild.
-    pub fn scene_mut(&mut self) -> &mut Scene {
-        &mut self.scene
+    /// Read access to the underlying scene, as a borrow guard.
+    ///
+    /// Prefer the cloneable [`model`](Self::model) handle for multi-view
+    /// wiring and scene mutation (its methods are `&self`); this guard is the
+    /// single-view escape hatch for ad-hoc reads.
+    pub fn scene(&self) -> std::cell::Ref<'_, Scene> {
+        self.model.0.borrow()
+    }
+
+    /// Mutable access to the underlying scene, as a borrow guard.
+    ///
+    /// Single-view escape hatch. For multi-view, mutate through the shared
+    /// [`SceneModel`](crate::SceneModel) handle ([`model`](Self::model)) — every
+    /// mutator is `&self`, so a handler holding a clone can drive the scene
+    /// directly (no `with_widget_mut` needed) and **all** views reconcile:
+    ///
+    /// ```ignore
+    /// let model = view.model();          // cheap handle clone
+    /// model.add_widget_item(card_data, rect);   // every view rebuilds it
+    /// ```
+    ///
+    /// The view self-reconciles on every mutation: `add_widget_item` /
+    /// `add_item` materialise on the next rebuild, `remove` destroys the
+    /// orphaned arena widget and cleans its maps, `set_payload` rebuilds an
+    /// item's widget, and **both** the visual tree and the *separate* AccessKit
+    /// tree re-walk (geometry, reparents, and pure-a11y mutations all reach
+    /// assistive tech — `build()` requests an AT re-walk, since a relayout no
+    /// longer does so on its own).
+    pub fn scene_mut(&mut self) -> std::cell::RefMut<'_, Scene> {
+        self.model.0.borrow_mut()
     }
 
     /// The `WidgetId` an item was materialised as, if known.
@@ -1181,6 +1399,127 @@ impl SceneView {
             self.zoom.get(),
             self.rotation.get(),
         )
+    }
+
+    /// Paint one lightweight band into `canvas`, under the active view
+    /// transform. Queries the visible items, z-sorts them, keeps only those
+    /// in `band`, and paints each. Heavyweight ids are skipped (they paint
+    /// via the arena walker). Shared by [`paint`](Self::paint) (the `Under`
+    /// backdrop, before the children) and [`post_paint`](Self::post_paint)
+    /// (the `Over` foreground, after the children). Within a band, `z`
+    /// orders items among themselves.
+    fn paint_band(
+        &self,
+        canvas: &mut bastyde_canvas::Canvas,
+        bounds: Rect,
+        band: crate::scene::SceneLayer,
+    ) {
+        let region = self.visible_scene_region(bounds);
+        let view_transform = self.view_transform();
+        let item_ctx = crate::item::SceneItemPaintContext::new(view_transform, Some(region));
+        let drag_target = self.drag_target.get();
+        let mut visible_ids = self.scene().items_in_rect(region);
+        // Z-order within the band: higher z paints last (on top); equal-z
+        // preserves insertion order (stable sort). Heavyweight ids stay in the
+        // list but are skipped below — they paint via the arena walker.
+        self.scene().sort_by_z(&mut visible_ids);
+        for id in visible_ids {
+            let scene = self.model.0.borrow();
+            if scene.item(id).is_none() {
+                continue;
+            }
+            // Only this band; items default to Under.
+            if scene
+                .layer(id)
+                .unwrap_or(crate::scene::SceneLayer::Under)
+                != band
+            {
+                continue;
+            }
+            // Skip items whose chain is invisible or which carry the
+            // HAS_NO_CONTENTS flag (logical-only).
+            if !self.scene().is_effectively_visible(id) {
+                continue;
+            }
+            let flags = self.scene().flags(id).unwrap_or_default();
+            if flags.contains(crate::flags::ItemFlags::HAS_NO_CONTENTS) {
+                continue;
+            }
+            // Items that are the drag target or a declared descendant paint
+            // with a visual delta in scene coords — a child follows its
+            // dragged parent until the rebuild commits the new local_pos.
+            let drag_delta = drag_target
+                .filter(|t| t.item_id == id || self.scene().is_descendant_of(id, t.item_id))
+                .map(|t| {
+                    bastyde_canvas::Transform2D::translate(
+                        t.current_scene.x - t.anchor_scene.x,
+                        t.current_scene.y - t.anchor_scene.y,
+                    )
+                });
+
+            // Compose `local→scene`, optionally with a scene-coord drag
+            // offset baked in. Push beneath the view transform so the item's
+            // `paint` works in local coords. `save` / `restore` isolate
+            // neighbouring items' transforms.
+            let mut local_to_scene = self.scene().scene_transform(id);
+            if let Some(t) = drag_delta {
+                local_to_scene = local_to_scene.then(&t);
+            }
+            canvas.save();
+            // IGNORES_TRANSFORMATIONS items pin at their parent-relative
+            // position but render at a fixed pixel size (Qt's
+            // `ItemIgnoresTransformations`). Project the anchor through the
+            // parent chain + view transform, then push a transform that —
+            // composed with the outer view transform on the canvas —
+            // collapses to a pure `Translate(screen_anchor)`.
+            if flags.contains(crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS) {
+                let scene_anchor = local_to_scene.apply_point(Point::ZERO);
+                let screen_anchor = view_transform.apply_point(scene_anchor);
+                let view_inv = view_transform
+                    .inverse()
+                    .unwrap_or_else(Transform2D::identity);
+                let t = Transform2D::translate(screen_anchor.x, screen_anchor.y).then(&view_inv);
+                canvas.apply_transform(t);
+            } else {
+                canvas.apply_transform(local_to_scene);
+            }
+            // Effective opacity composes through the parent chain. Pushed via
+            // `set_opacity` / `restore_opacity` so the scope is balanced.
+            let alpha = self.scene().effective_opacity(id);
+            let opacity_pushed = alpha < 0.999;
+            if opacity_pushed {
+                canvas.set_opacity(alpha);
+            }
+            if let Some(item) = scene.item(id) {
+                // Item-coordinate cache: replay a cached local-coord
+                // RenderFrame instead of re-running paint when the item opted
+                // into `CacheMode::ItemCoordinate`; record on a miss.
+                match item.cache_mode() {
+                    crate::cache::CacheMode::ItemCoordinate => {
+                        let cached = self.item_cache.borrow().get(id).cloned();
+                        if let Some(frame) = cached {
+                            canvas.draw_render_frame(&frame, Point::ZERO);
+                        } else {
+                            let mut sub = match canvas.text_backend() {
+                                Some(tb) => bastyde_canvas::Canvas::with_text_backend(tb.clone()),
+                                None => bastyde_canvas::Canvas::new(),
+                            };
+                            item.paint(&mut sub, &item_ctx);
+                            let frame = sub.into_render_frame();
+                            canvas.draw_render_frame(&frame, Point::ZERO);
+                            self.item_cache.borrow_mut().insert(id, frame);
+                        }
+                    }
+                    crate::cache::CacheMode::None => {
+                        item.paint(canvas, &item_ctx);
+                    }
+                }
+            }
+            if opacity_pushed {
+                canvas.restore_opacity();
+            }
+            canvas.restore();
+        }
     }
 
     /// Project a point in **view space** (screen-pixel coords —
@@ -1271,7 +1610,7 @@ impl SceneView {
     /// `[min_zoom, max_zoom]`. No-op when the scene declares
     /// [`Scene::zoomable(false)`](crate::Scene::zoomable).
     pub fn zoom_to(&self, target: f32, duration: Duration) {
-        if !self.scene.is_zoomable() || self.adopt_scene_size {
+        if !self.scene().is_zoomable() || self.adopt_scene_size {
             return;
         }
         let clamped = self.gate_zoom_target(target);
@@ -1281,7 +1620,7 @@ impl SceneView {
     /// Snap zoom to `target` without animation, clamped. No-op when
     /// the scene declares zoom disabled.
     pub fn set_zoom(&self, target: f32) {
-        if !self.scene.is_zoomable() || self.adopt_scene_size {
+        if !self.scene().is_zoomable() || self.adopt_scene_size {
             return;
         }
         let clamped = self.gate_zoom_target(target);
@@ -1363,7 +1702,7 @@ impl SceneView {
         if self.adopt_scene_size {
             return Vec2::new(self.pan_x.get(), self.pan_y.get());
         }
-        let axes = self.scene.current_pan_axes();
+        let axes = self.scene().current_pan_axes();
         let after_axes = match axes {
             PanAxes::Both => target,
             PanAxes::None => Vec2::new(self.pan_x.get(), self.pan_y.get()),
@@ -1390,7 +1729,7 @@ impl SceneView {
     /// Effective zoom range = intersect(Scene declared, view override).
     fn effective_zoom_range(&self) -> Option<std::ops::RangeInclusive<f32>> {
         intersect_zoom_range(
-            self.scene.current_zoom_range().as_ref(),
+            self.scene().current_zoom_range().as_ref(),
             self.zoom_range_override.get().as_ref(),
         )
     }
@@ -1398,7 +1737,7 @@ impl SceneView {
     /// Effective pan bounds = intersect(Scene declared, view override).
     fn effective_pan_bounds(&self) -> Option<Rect> {
         intersect_pan_bounds(
-            self.scene.current_pan_bounds(),
+            self.scene().current_pan_bounds(),
             self.pan_bounds_override.get(),
         )
     }
@@ -1455,8 +1794,8 @@ impl SceneView {
     /// Compute the bounding rectangle (in scene coords) that encloses
     /// every item in the scene. Returns `None` for an empty scene.
     pub fn scene_content_bounds(&self) -> Option<Rect> {
-        let ids: Vec<ItemId> = self.scene.ids();
-        union_rects(ids.iter().filter_map(|id| self.scene.scene_rect(*id)))
+        let ids: Vec<ItemId> = self.scene().ids();
+        union_rects(ids.iter().filter_map(|id| self.scene().scene_rect(*id)))
     }
 
     /// Animate pan + zoom so the scene's content bounding box fits
@@ -1475,7 +1814,7 @@ impl SceneView {
     ///
     /// Use this for "zoom to selection" / "frame this subset" UX.
     pub fn fit_to_items(&self, ids: &[ItemId]) {
-        let union = union_rects(ids.iter().filter_map(|id| self.scene.scene_rect(*id)));
+        let union = union_rects(ids.iter().filter_map(|id| self.scene().scene_rect(*id)));
         if let Some(rect) = union {
             self.fit_to_rect(rect);
         }
@@ -1516,7 +1855,7 @@ impl SceneView {
 impl Widget for SceneView {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // Drain any pending drag-to-move commit. The drop closure
-        // queued `(target_id, delta)` and bumped `drag_dirty` which
+        // queued `(target_id, delta)` and bumped `reconcile_dirty` which
         // flagged this widget for rebuild. Translate the dragged
         // item's `local_pos` by the queued delta — descendants
         // follow automatically because their `local_pos` is
@@ -1526,9 +1865,9 @@ impl Widget for SceneView {
         // the move actually lands; otherwise the item would visibly
         // "snap back" between drag-end and the rebuild.
         if let Some((target_id, delta)) = self.pending_item_move.take() {
-            if let Some(local_pos) = self.scene.local_pos(target_id) {
+            if let Some(local_pos) = self.model.local_pos(target_id) {
                 let new_local_pos = Point::new(local_pos.x + delta.x, local_pos.y + delta.y);
-                self.scene.set_local_pos(target_id, new_local_pos);
+                self.model.set_local_pos(target_id, new_local_pos);
             }
             self.drag_target.set(None);
         }
@@ -1539,21 +1878,65 @@ impl Widget for SceneView {
         // this the lasso would linger on screen until something
         // else triggered a layout pass (next user drag, etc.).
         if let Some((rect, additive)) = self.pending_marquee_commit.take() {
-            self.selection.commit_marquee(&self.scene, rect, additive);
+            {
+                let scene = self.model.0.borrow();
+                self.selection.commit_marquee(&scene, rect, additive);
+            }
             self.marquee.set(None);
         }
+
+        // Drain the payload-dirty set (filled by the item_change observer on
+        // `ItemChange::PayloadChanged`). Each `Delegated` item whose payload
+        // changed is destroyed here so the materialise loop below rebuilds it
+        // via the delegate with the fresh payload. `Once` / removed ids are
+        // left untouched — a single-view widget has no source to rebuild from.
+        let payload_dirty_ids: Vec<ItemId> = self.payload_dirty.borrow_mut().drain().collect();
+        for id in payload_dirty_ids {
+            if self.model.payload(id).is_some() {
+                if let Some(wid) = self.materialized.remove(&id) {
+                    ctx.destroy_subtree(wid);
+                    self.widget_to_item.remove(&wid);
+                }
+            }
+        }
+
+        // --- AccessKit re-walk gate (version delta) ----------------------
+        // Snapshot the model mutation version *before* refreshing dynamic
+        // bounds. If it advanced since the build that last walked AT, a discrete
+        // mutation happened — an app add / remove / move / reparent, a logical-AT
+        // change, or the drag-to-move drained just above — so the (separate)
+        // AccessKit tree must be re-walked. The per-frame dynamic-bounds churn
+        // from `refresh_dynamic_bounds` below is deliberately *excluded* from
+        // this comparison: an actively-animating `add_item_dynamic` item rebuilds
+        // every frame, and re-walking AT 60×/s for sub-pixel bounds drift is
+        // pure waste a screen reader can't use. `None` (first build) compares
+        // unequal, so the initial AT population is never gated out.
+        let version_before_refresh = self.model.mutation_version();
+        let structural_at_change = self.last_at_version != Some(version_before_refresh);
 
         // Pull fresh `local_bounds` for every item flagged
         // `dynamic_bounds` (added via [`Scene::add_item_dynamic`]).
         // Static items pay nothing here; dynamic items get their
         // signal-driven AABBs read back into the entry + spatial
         // index so hit-test and viewport-cull stay correct.
-        self.scene.refresh_dynamic_bounds();
+        let dynamic_changed = self.model.refresh_dynamic_bounds();
+        // The one AT update the version gate would otherwise miss: when a
+        // dynamic-bounds animation *settles* (changing last build, steady now),
+        // walk its final bounds into AT exactly once so the resting geometry is
+        // correct for assistive tech.
+        let dynamic_settled = self.dynamic_churning && !dynamic_changed;
+        self.dynamic_churning = dynamic_changed;
+        // Baseline for the next build's `structural_at_change` test: the version
+        // *after* this build's own (excluded) dynamic-bounds churn. Every scene
+        // mutation inside build() happens at or above this point (the drains and
+        // the refresh); materialise / orphan-reap / z-sort below only touch the
+        // arena, not the Scene model — so this snapshot is stable to end-of-build.
+        self.last_at_version = Some(self.model.mutation_version());
 
         // Bind the drag-rebuild signal so the next drop triggers a
         // rebuild and the drains above run. `BindingLevel::Rebuild`
         // is the level that re-runs `build()` on signal change.
-        self.drag_dirty
+        self.reconcile_dirty
             .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
         // Wire the item-coordinate cache invalidation observer.
@@ -1568,42 +1951,156 @@ impl Widget for SceneView {
         // re-installing.
         {
             let cache = self.item_cache.clone();
-            let handle = self.scene.item_change_signal().observe(move |change| {
+            let reconcile_dirty = self.reconcile_dirty.clone();
+            let payload_dirty = self.payload_dirty.clone();
+            let handle = self.model.item_change_signal().observe(move |change| {
                 use crate::scene::ItemChange;
-                let mut c = cache.borrow_mut();
+                // The item cache holds *local-coordinate* paint output, so only
+                // a geometry change or a removal can invalidate a cached frame;
+                // pos / transform / opacity / z / layer / flags are re-applied
+                // as wrapping scopes at replay and don't bake into the cache.
                 match *change {
-                    ItemChange::LocalBoundsChanged { id, .. } | ItemChange::Removed { id } => {
-                        c.evict(id);
+                    ItemChange::Removed { id } | ItemChange::LocalBoundsChanged { id, .. } => {
+                        cache.borrow_mut().evict(id);
+                    }
+                    // A `Delegated` item's data changed: queue a targeted rebuild
+                    // so the next build re-invokes the delegate for just that id.
+                    ItemChange::PayloadChanged { id } => {
+                        payload_dirty.borrow_mut().insert(id);
                     }
                     _ => {}
                 }
+                // EVERY model mutation drives a reconcile pass. A relayout
+                // re-runs `build()` (materialise pending widgets, reap orphaned
+                // ones), re-places children (so screen-projected AccessKit
+                // bounds track moves/transforms), and — via `build()`'s
+                // `request_accessibility_update()` — forces an AT re-walk. A
+                // relayout alone no longer re-walks AT, and the visual scene
+                // and the *separate* AccessKit tree must both follow add /
+                // remove / move / reparent / visibility / opacity / z / layer:
+                // letting any variant fall through silently would desync
+                // assistive tech (and paint) from the model.
+                reconcile_dirty.set(reconcile_dirty.get().wrapping_add(1));
             });
             *self._item_cache_observer.borrow_mut() = Some(handle);
         }
 
-        // Materialise pending widgets (drained the first time, idempotent
-        // afterwards). Also keeps the reverse lookup
-        // `widget_to_item` in sync so place_children's cull is `O(1)`
-        // per child instead of scanning the entries vec.
-        let mut child_ids = Vec::with_capacity(self.scene.entries.len());
-        for entry in self.scene.entries.iter_mut() {
-            match &mut entry.kind {
-                crate::scene::SceneEntryKind::Widget { pending } => {
-                    if let Some(widget) = pending.take() {
-                        let wid = ctx.add_boxed(widget);
-                        self.materialized.insert(entry.id, wid);
-                        self.widget_to_item.insert(wid, entry.id);
-                        child_ids.push(wid);
-                    } else if let Some(wid) = self.materialized.get(&entry.id).copied() {
-                        child_ids.push(wid);
-                    }
+        // Second observer: logical-AT-structure mutations (groups, parents,
+        // relations, live, landmarks, categories) don't fire `item_change_signal`
+        // because they aren't item geometry. Drive a reconcile pass so the next
+        // `build()` calls `request_accessibility_update()` and the (separate)
+        // AccessKit tree re-walks — even for a mutation with no visual change.
+        {
+            let reconcile_dirty = self.reconcile_dirty.clone();
+            let handle = self.model.a11y_change_signal().observe(move |_| {
+                reconcile_dirty.set(reconcile_dirty.get().wrapping_add(1));
+            });
+            *self._a11y_observer.borrow_mut() = Some(handle);
+        }
+
+        // Materialise heavyweight widgets. Two paths, neither holding a model
+        // borrow across `ctx.add_boxed` or a delegate call (the reentrancy
+        // contract): both `drain_all_once` and `delegated_payloads` return owned
+        // Vecs with the model borrow already dropped.
+        //
+        // 1. Single-view `Once` widgets: drain the boxed instance. Only the
+        //    first `SceneView` over a shared model gets it; a second view's
+        //    drain returns nothing for that id (it's single-view by design).
+        for (id, widget) in self.model.drain_all_once() {
+            let wid = ctx.add_boxed(widget);
+            self.materialized.insert(id, wid);
+            self.widget_to_item.insert(wid, id);
+        }
+
+        // 2. Multi-view `Delegated` items: each view builds its OWN instance via
+        //    its delegate. Already-materialised ids are skipped (the
+        //    payload-dirty drain above destroyed any that need rebuilding, so
+        //    they fall through here as fresh).
+        let delegated = self.model.delegated_payloads();
+        if let Some(delegate) = self.delegate.clone() {
+            for (id, payload) in &delegated {
+                if self.materialized.contains_key(id) {
+                    continue;
                 }
-                crate::scene::SceneEntryKind::Item(_) => {
-                    // Lightweight items don't go in the arena. They're
-                    // painted from `SceneView::paint` directly.
+                if let Some(widget) = delegate(&**payload, *id) {
+                    let wid = ctx.add_boxed(widget);
+                    self.materialized.insert(*id, wid);
+                    self.widget_to_item.insert(wid, *id);
                 }
             }
+        } else {
+            debug_assert!(
+                delegated.iter().all(|(id, _)| self.materialized.contains_key(id)),
+                "SceneView has `Delegated` items but no delegate installed — \
+                 call `.delegate_typed::<P>(..)` (or `.delegate(..)`) before adding it to the tree"
+            );
         }
+
+        // Assemble child ids in scene (entry) order, then reap orphans — reusing
+        // one heavyweight-id snapshot. A removed entry is absent from
+        // `heavy_ids`, so it never enters `child_ids`; SceneView preserves its
+        // children on rebuild, so we must destroy our own orphan arena nodes or
+        // they (and their signal / animation / shortcut registrations) leak.
+        let heavy_ids = self.model.heavyweight_ids();
+        let mut child_ids: Vec<WidgetId> = heavy_ids
+            .iter()
+            .filter_map(|id| self.materialized.get(id).copied())
+            .collect();
+        let live_widget_ids: std::collections::HashSet<ItemId> = heavy_ids.into_iter().collect();
+        if self.materialized.len() > live_widget_ids.len() {
+            let orphans: Vec<(ItemId, WidgetId)> = self
+                .materialized
+                .iter()
+                .filter(|(item_id, _)| !live_widget_ids.contains(*item_id))
+                .map(|(item_id, wid)| (*item_id, *wid))
+                .collect();
+            for (item_id, wid) in orphans {
+                ctx.destroy_subtree(wid);
+                self.materialized.remove(&item_id);
+                self.widget_to_item.remove(&wid);
+            }
+        }
+
+        // A relayout no longer re-walks the AccessKit tree, and this build may
+        // have materialised, reaped, moved, or reparented scene content — each
+        // changes the (separate) AT tree or its screen-projected bounds. Re-walk
+        // when the model actually changed since the last walk
+        // (`structural_at_change`, computed from the mutation-version delta
+        // above) or a dynamic-bounds animation just settled (`dynamic_settled`).
+        // `build()` is otherwise interaction-driven — pan / zoom animate via
+        // relayout, not rebuild — and a per-frame `add_item_dynamic` rebuild is
+        // gated out here, so this is not a per-frame AT cost.
+        if structural_at_change || dynamic_settled {
+            ctx.request_accessibility_update();
+        }
+
+        // Heavyweight z-order: sort the arena children by their scene-entry
+        // z so higher-z cards paint later (on top). Equal-z keeps insertion
+        // order (stable sort). This is the heavyweight-tier analogue of the
+        // lightweight `sort_by_z` — `Scene::set_z` / `bring_to_front` on a
+        // widget entry restacks the cards here, on the next rebuild.
+        // Reordering `node.children` (rather than destroying / recreating the
+        // widgets) preserves each card's focus, text-edit and animation state.
+        let zmap: HashMap<ItemId, f32> = {
+            let scene = self.model.0.borrow();
+            self.widget_to_item
+                .values()
+                .map(|id| (*id, scene.z(*id).unwrap_or(0.0)))
+                .collect()
+        };
+        child_ids.sort_by(|a, b| {
+            let za = self
+                .widget_to_item
+                .get(a)
+                .and_then(|id| zmap.get(id).copied())
+                .unwrap_or(0.0);
+            let zb = self
+                .widget_to_item
+                .get(b)
+                .and_then(|id| zmap.get(id).copied())
+                .unwrap_or(0.0);
+            za.partial_cmp(&zb).unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Register the four animated signals with the scheduler so
         // they participate in idle gating (paint-epoch visibility,
@@ -1622,16 +2119,19 @@ impl Widget for SceneView {
         // walk reads the current value. Items without bindings
         // default to a no-op `register_bindings`.
         let self_id_for_items = ctx.self_id();
-        for entry in self.scene.entries.iter() {
-            if let crate::scene::SceneEntryKind::Item(item) = &entry.kind {
-                item.register_bindings(ctx, self_id_for_items);
+        {
+            let scene = self.model.0.borrow();
+            for entry in scene.entries.iter() {
+                if let crate::scene::SceneEntryKind::Item(item) = &entry.kind {
+                    item.register_bindings(ctx, self_id_for_items);
+                }
             }
         }
 
         // Bind the four signals at Relayout on this node so
         // `place_children` re-runs and the viewport-cull set is
         // recomputed when pan/zoom/rotation change. The Repaint
-        // binding from `set_transform` below is kept in addition;
+        // binding from `set_content_transform` below is kept in addition;
         // it's what dirties the renderer's transform stack so
         // already-laid-out children re-paint at their new visual
         // positions.  Without this Relayout binding, a `pan` or
@@ -1651,14 +2151,19 @@ impl Widget for SceneView {
 
         // The view-transform signal is constructed once in `new`
         // (so it's stable across rebuilds and exposable via
-        // `view_transform_signal()`). Bind it as a `set_transform`
+        // `view_transform_signal()`). Bind it as a `set_content_transform`
         // scope on this widget; the render walker pushes it around
         // our entire subtree. The composition folds `bounds.origin`
         // into the final translate so a SceneView at a non-zero
         // parent offset still maps scene-coord (sx, sy) to screen
         // (bounds.x + zoom*sx + pan.x, bounds.y + zoom*sy + pan.y).
         let self_id = ctx.self_id();
-        ctx.set_transform(self_id, self.view_transform_signal.clone());
+        // A *content* transform: the SceneView's bounds are a fixed screen
+        // viewport and this pan/zoom only moves the scene content. Marking it
+        // as such keeps the whole viewport hit-testable at any pan (a *self*
+        // transform like Scale/Rotate would shift the hittable region with the
+        // content — see `WidgetNode::content_transform`).
+        ctx.set_content_transform(self_id, self.view_transform_signal.clone());
         // Capture for the AT-redirect auto-graft hook.
         // The hook is `&self`; without a stash here it has no way
         // to derive its own `WidgetId` to compute synthetic NodeIds.
@@ -1673,6 +2178,29 @@ impl Widget for SceneView {
         let prefers_reduced = ctx.prefers_reduced_motion();
         let line_height = self.line_height;
         let pan_dur = self.pan_anim_duration;
+        let overscroll = self.overscroll_behavior;
+
+        // Reusable tooltip surface for lightweight scene items. Items
+        // have no `WidgetId`, so the per-widget `.tooltip()` attach path
+        // (arena-hover-keyed, `NearAnchor`-positioned) can't be used.
+        // Instead we keep ONE dormant `TooltipWidget` whose body is bound
+        // to a `Signal<String>`; the hover seam below sets the text and
+        // shows/dismisses it as a point-anchored (`AtPointer`) overlay,
+        // mirroring how the per-item cursor override is applied. Resolving
+        // the item's `LocalizedString` at show time keeps it locale-correct.
+        let tooltip_text = ctx.signal(String::new());
+        let tooltip_content_id =
+            ctx.add(bastyde_widgets::TooltipWidget::bound(tooltip_text.clone()));
+        ctx.set_dormant(tooltip_content_id);
+        let tooltip_fade = if prefers_reduced {
+            None
+        } else {
+            Some(ctx.theme().motion.duration_fast)
+        };
+        // Scene hover is exploratory — the pointer sweeps across many items
+        // while the eye pans — so lightweight-item tips use the heavier
+        // (longer) tooltip dwell to avoid flashing during that sweep.
+        let tooltip_delay = ctx.theme().motion.tooltip_delay_heavy;
 
         let mut handlers = HandlerSet::new();
 
@@ -1711,6 +2239,11 @@ impl Widget for SceneView {
             let drag_target_for_cursor = self.drag_target.clone();
             let hovered_item = self.hovered_item.clone();
             let pending_tap = self.pending_tap.clone();
+            let tooltip_text = tooltip_text.clone();
+            let tooltip_content_id = tooltip_content_id;
+            let tooltip_anchor_id = self_id;
+            let tooltip_fade = tooltip_fade;
+            let tooltip_delay = tooltip_delay;
             handlers = handlers.on_pointer_event(move |ev, ctx| {
                 use bastyde_core::event::PointerButton;
                 use bastyde_core::event::WidgetEvent as Ev;
@@ -1743,47 +2276,53 @@ impl Widget for SceneView {
                 // `screen_pt` against the projected screen rect;
                 // narrow-phase passes `(screen_pt - screen_anchor)`
                 // as the item-local point.
-                let hit_handler_item = |screen_pt: Point,
-                                        scene_pt: Point|
-                 -> Option<HandlerSnapshotEntry> {
-                    let snap = handler_snapshot.borrow();
-                    let view_xform = view_xform_signal.get();
-                    for entry in snap.iter() {
-                        if entry.ignores_xform {
-                            let screen_anchor = view_xform.apply_point(entry.scene_anchor);
-                            let screen_rect = Rect::new(
-                                screen_anchor.x + entry.local_bounds.x,
-                                screen_anchor.y + entry.local_bounds.y,
-                                entry.local_bounds.width,
-                                entry.local_bounds.height,
-                            );
-                            if !screen_rect.contains(screen_pt) {
+                let hit_handler_item =
+                    |screen_pt: Point, scene_pt: Point| -> Option<HandlerSnapshotEntry> {
+                        let snap = handler_snapshot.borrow();
+                        let view_xform = view_xform_signal.get();
+                        // Logical view zoom (uniform scale of the linear part) —
+                        // passed to each item's shape-test so a cosmetic
+                        // (device-pixel) stroke's clickable band is converted to
+                        // scene coordinates at the current zoom.
+                        let view_scale = view_xform.m[0].hypot(view_xform.m[1]);
+                        for entry in snap.iter() {
+                            if entry.ignores_xform {
+                                let screen_anchor = view_xform.apply_point(entry.scene_anchor);
+                                let screen_rect = Rect::new(
+                                    screen_anchor.x + entry.local_bounds.x,
+                                    screen_anchor.y + entry.local_bounds.y,
+                                    entry.local_bounds.width,
+                                    entry.local_bounds.height,
+                                );
+                                if !screen_rect.contains(screen_pt) {
+                                    continue;
+                                }
+                                let local_pt = Point::new(
+                                    screen_pt.x - screen_anchor.x,
+                                    screen_pt.y - screen_anchor.y,
+                                );
+                                // Screen-anchored items ignore the view transform,
+                                // so their hit-test runs at unit scale.
+                                if (entry.shape_contains)(local_pt, 1.0) {
+                                    return Some(entry.clone());
+                                }
                                 continue;
                             }
-                            let local_pt = Point::new(
-                                screen_pt.x - screen_anchor.x,
-                                screen_pt.y - screen_anchor.y,
-                            );
-                            if (entry.shape_contains)(local_pt) {
+                            if !entry.scene_rect.contains(scene_pt) {
+                                continue;
+                            }
+                            // Inverse-project to local for narrow-phase.
+                            let local_pt = entry
+                                .scene_transform
+                                .inverse()
+                                .map(|inv| inv.apply_point(scene_pt))
+                                .unwrap_or(Point::ZERO);
+                            if (entry.shape_contains)(local_pt, view_scale) {
                                 return Some(entry.clone());
                             }
-                            continue;
                         }
-                        if !entry.scene_rect.contains(scene_pt) {
-                            continue;
-                        }
-                        // Inverse-project to local for narrow-phase.
-                        let local_pt = entry
-                            .scene_transform
-                            .inverse()
-                            .map(|inv| inv.apply_point(scene_pt))
-                            .unwrap_or(Point::ZERO);
-                        if (entry.shape_contains)(local_pt) {
-                            return Some(entry.clone());
-                        }
-                    }
-                    None
-                };
+                        None
+                    };
 
                 match ev {
                     Ev::PointerMove { position, .. } => {
@@ -1813,6 +2352,48 @@ impl Widget for SceneView {
                                 cb(true, ctx);
                             }
                             hovered_item.set(new_id);
+
+                            // Tooltip: retract the previous item's tooltip,
+                            // then (re)schedule for the new item. We only
+                            // dismiss the *shown* overlay here (active
+                            // stack); `show_overlay_after` already replaces
+                            // any stale *pending* show for the same content,
+                            // so calling `cancel_delayed_overlay` as well
+                            // would cancel the new show (drain order:
+                            // delayed-requests apply before cancels).
+                            ctx.dismiss_overlay_by_content(tooltip_content_id);
+                            if let Some(ls) = new_hit
+                                .as_ref()
+                                .and_then(|e| e.handlers.as_deref())
+                                .and_then(|h| h.tooltip.as_ref())
+                            {
+                                tooltip_text.set(ls.resolve_now());
+                                ctx.show_overlay_after(
+                                    bastyde_core::overlay::OverlayRequest {
+                                        content_id: tooltip_content_id,
+                                        anchor: tooltip_anchor_id,
+                                        // Drop the tooltip just below-right
+                                        // of the cursor so it doesn't sit
+                                        // under the pointer.
+                                        placement: bastyde_core::overlay::OverlayPlacement::AtPointer(
+                                            Point::new(position.x + 12.0, position.y + 16.0),
+                                        ),
+                                        // Manual: every dismiss path (item
+                                        // change, pointer-down, pointer-leave)
+                                        // is driven explicitly below.
+                                        dismiss: bastyde_core::overlay::DismissBehavior::Manual,
+                                        layer: bastyde_core::overlay::OverlayLayer::InTree,
+                                        parent_overlay: None,
+                                        on_dismiss: None,
+                                        fade_duration: tooltip_fade,
+                                    },
+                                    tooltip_delay,
+                                );
+                            } else {
+                                // Moved onto an item with no tooltip (or onto
+                                // empty space): cancel any pending show.
+                                ctx.cancel_delayed_overlay(tooltip_content_id);
+                            }
                         }
 
                         // Cursor: per-item override → grab/grabbing
@@ -1840,6 +2421,10 @@ impl Widget for SceneView {
                         modifiers,
                     } => {
                         cursor_pos.set(Some(*position));
+                        // Any press retracts a hover tooltip (shown or
+                        // pending) — the user has committed to an action.
+                        ctx.cancel_delayed_overlay(tooltip_content_id);
+                        ctx.dismiss_overlay_by_content(tooltip_content_id);
                         let scene_pt = to_scene(*position);
                         let hit = hit_handler_item(*position, scene_pt);
                         match button {
@@ -1912,6 +2497,10 @@ impl Widget for SceneView {
                     }
                     Ev::PointerLeave => {
                         cursor_pos.set(None);
+                        // Pointer left the view entirely — retract the
+                        // tooltip (shown or pending).
+                        ctx.cancel_delayed_overlay(tooltip_content_id);
+                        ctx.dismiss_overlay_by_content(tooltip_content_id);
                         // Clear any pending hover.
                         if let Some(prev) = hovered_item.take()
                             && let Some(prev_entry) =
@@ -1945,11 +2534,11 @@ impl Widget for SceneView {
                 let bounds_origin_for_scroll = self.bounds_origin_signal.clone();
                 let last_viewport_for_scroll = self.last_viewport.clone();
                 let cursor_pos_for_scroll = self.cursor_pos.clone();
-                let pan_axes_sig = self.scene.pan_axes_signal();
-                let zoomable_sig = self.scene.zoomable_signal();
-                let scene_zoom_range_sig = self.scene.zoom_range_signal();
+                let pan_axes_sig = self.scene().pan_axes_signal();
+                let zoomable_sig = self.scene().zoomable_signal();
+                let scene_zoom_range_sig = self.scene().zoom_range_signal();
                 let view_zoom_range_sig = self.zoom_range_override.clone();
-                let scene_pan_bounds_sig = self.scene.pan_bounds_signal();
+                let scene_pan_bounds_sig = self.scene().pan_bounds_signal();
                 let view_pan_bounds_sig = self.pan_bounds_override.clone();
                 let adopt_scene_size = self.adopt_scene_size;
                 handlers = handlers.on_scroll(move |event, _ctx| {
@@ -2073,16 +2662,35 @@ impl Widget for SceneView {
                     let base_x = pan_x.animation_target().unwrap_or_else(|| pan_x.get());
                     let base_y = pan_y.animation_target().unwrap_or_else(|| pan_y.get());
                     // Clamp the projected pan against effective bounds.
-                    let effective_bounds = intersect_pan_bounds(
-                        scene_pan_bounds_sig.get(),
-                        view_pan_bounds_sig.get(),
-                    );
+                    let effective_bounds =
+                        intersect_pan_bounds(scene_pan_bounds_sig.get(), view_pan_bounds_sig.get());
                     let clamped = clamp_pan_to_bounds(
                         Vec2::new(base_x + dx, base_y + dy),
                         effective_bounds.as_ref(),
                         last_viewport_for_scroll.get(),
                         zoom.get(),
                     );
+                    // Boundary-based scroll chaining: if the pan can't move on
+                    // either axis (already clamped at a bound), decline so the
+                    // event bubbles to an ancestor scrollable. Mirrors the
+                    // ScrollArea / ListView / TreeView / TableView behavior.
+                    // `OverscrollBehavior::Contain` opts out — the scene keeps
+                    // the wheel even at its bound (no chaining).
+                    let moved_x =
+                        (clamped.x - base_x).abs() > bastyde_core::overscroll::SCROLL_MOVE_EPSILON;
+                    let moved_y =
+                        (clamped.y - base_y).abs() > bastyde_core::overscroll::SCROLL_MOVE_EPSILON;
+                    // Only the *total* boundary (neither axis can move) is a
+                    // chain/contain decision point. If one axis still moves the
+                    // event is consumed below (Handled) regardless of
+                    // `overscroll` — the partial-absorb / drop-the-pinned-axis
+                    // tradeoff, matching the widget scrollables and the browser.
+                    if !moved_x && !moved_y {
+                        return match overscroll {
+                            OverscrollBehavior::Contain => EventResponse::Handled,
+                            OverscrollBehavior::Chain => EventResponse::Ignored,
+                        };
+                    }
                     if prefers_reduced {
                         pan_x.set(clamped.x);
                         pan_y.set(clamped.y);
@@ -2101,11 +2709,11 @@ impl Widget for SceneView {
                 let rotation = self.rotation.clone();
                 let bounds_origin_for_pinch = self.bounds_origin_signal.clone();
                 let last_viewport_for_pinch = self.last_viewport.clone();
-                let zoomable_sig_pinch = self.scene.zoomable_signal();
-                let pan_axes_sig_pinch = self.scene.pan_axes_signal();
-                let scene_zoom_range_sig_pinch = self.scene.zoom_range_signal();
+                let zoomable_sig_pinch = self.scene().zoomable_signal();
+                let pan_axes_sig_pinch = self.scene().pan_axes_signal();
+                let scene_zoom_range_sig_pinch = self.scene().zoom_range_signal();
                 let view_zoom_range_sig_pinch = self.zoom_range_override.clone();
-                let scene_pan_bounds_sig_pinch = self.scene.pan_bounds_signal();
+                let scene_pan_bounds_sig_pinch = self.scene().pan_bounds_signal();
                 let view_pan_bounds_sig_pinch = self.pan_bounds_override.clone();
                 let adopt_scene_size_pinch = self.adopt_scene_size;
                 handlers = handlers.on_pinch(move |phase, _ctx| {
@@ -2200,11 +2808,11 @@ impl Widget for SceneView {
                 let zoom_for_xform = self.zoom.clone();
                 let rotation_for_xform = self.rotation.clone();
                 let bounds_origin_for_xform = self.bounds_origin_signal.clone();
-                let pan_axes_sig_keys = self.scene.pan_axes_signal();
-                let zoomable_sig_keys = self.scene.zoomable_signal();
-                let scene_zoom_range_sig_keys = self.scene.zoom_range_signal();
+                let pan_axes_sig_keys = self.scene().pan_axes_signal();
+                let zoomable_sig_keys = self.scene().zoomable_signal();
+                let scene_zoom_range_sig_keys = self.scene().zoom_range_signal();
                 let view_zoom_range_sig_keys = self.zoom_range_override.clone();
-                let scene_pan_bounds_sig_keys = self.scene.pan_bounds_signal();
+                let scene_pan_bounds_sig_keys = self.scene().pan_bounds_signal();
                 let view_pan_bounds_sig_keys = self.pan_bounds_override.clone();
                 let adopt_scene_size_keys = self.adopt_scene_size;
                 handlers = handlers.on_key(move |event, _ctx| {
@@ -2264,10 +2872,7 @@ impl Widget for SceneView {
                     let pan_axis = |dx: f32, dy: f32| {
                         let base_x = pan_x.animation_target().unwrap_or_else(|| pan_x.get());
                         let base_y = pan_y.animation_target().unwrap_or_else(|| pan_y.get());
-                        let target = clamp_to_pan(
-                            Vec2::new(base_x + dx, base_y + dy),
-                            zoom.get(),
-                        );
+                        let target = clamp_to_pan(Vec2::new(base_x + dx, base_y + dy), zoom.get());
                         if dx != 0.0 {
                             pan_x.animate_to(target.x, pan_dur, Easing::EaseOut);
                         }
@@ -2341,7 +2946,7 @@ impl Widget for SceneView {
             let pending_marquee_commit = self.pending_marquee_commit.clone();
             let drag_target = self.drag_target.clone();
             let pending_item_move = self.pending_item_move.clone();
-            let drag_dirty = self.drag_dirty.clone();
+            let reconcile_dirty = self.reconcile_dirty.clone();
             let view_xform_signal = self.view_transform_signal.clone();
             let bounds_snapshot = self.lightweight_bounds_snapshot.clone();
             let pan_x_for_drag = self.pan_x.clone();
@@ -2349,8 +2954,8 @@ impl Widget for SceneView {
             let drag_mode_sig = self.drag_mode.clone();
             // Live signal captures — runtime mutations to pan_axes /
             // pan_bounds take effect on the next drag event.
-            let pan_axes_sig_drag = self.scene.pan_axes_signal();
-            let scene_pan_bounds_sig_drag = self.scene.pan_bounds_signal();
+            let pan_axes_sig_drag = self.scene().pan_axes_signal();
+            let scene_pan_bounds_sig_drag = self.scene().pan_bounds_signal();
             let view_pan_bounds_sig_drag = self.pan_bounds_override.clone();
             let zoom_for_drag = self.zoom.clone();
             let last_viewport_for_drag = self.last_viewport.clone();
@@ -2490,14 +3095,14 @@ impl Widget for SceneView {
                             // Bump the rebuild signal so SceneView's
                             // `build()` runs and drains the pending
                             // move (where `&mut self.scene` is
-                            // available and `Scene::move_item` can
+                            // available and `Scene::set_local_pos` can
                             // commit + re-bucket the spatial index).
-                            drag_dirty.set(drag_dirty.get().wrapping_add(1));
+                            reconcile_dirty.set(reconcile_dirty.get().wrapping_add(1));
                             return;
                         }
                         // Marquee commit path. Same drain-via-rebuild
                         // pattern as drag-to-move: post the pending
-                        // commit, bump `drag_dirty` so `build()` runs
+                        // commit, bump `reconcile_dirty` so `build()` runs
                         // and drains it (which also clears the
                         // marquee Cell so the visual lasso disappears
                         // after release).
@@ -2512,7 +3117,7 @@ impl Widget for SceneView {
                             None => Rect::ZERO,
                         };
                         pending_marquee_commit.set(Some((scene_rect, state.additive)));
-                        drag_dirty.set(drag_dirty.get().wrapping_add(1));
+                        reconcile_dirty.set(reconcile_dirty.get().wrapping_add(1));
                     }
                 }
             });
@@ -2533,7 +3138,7 @@ impl Widget for SceneView {
         // coordinates, right/bottom is inflated by the bounding rect's
         // origin offset.
         let (default_w, default_h) = if self.adopt_scene_size {
-            match self.scene.scene_rect_extent() {
+            match self.scene().scene_rect_extent() {
                 Some(r) => (r.width, r.height),
                 None => (self.default_size.width, self.default_size.height),
             }
@@ -2573,18 +3178,18 @@ impl Widget for SceneView {
             // the drag-start hit-test. Refreshed each layout pass so
             // a parent move between drag events doesn't leave the
             // snapshot stale.
-            let ids: Vec<crate::item::ItemId> = self.scene.ids();
+            let ids: Vec<crate::item::ItemId> = self.scene().ids();
             for id in ids {
-                if self.scene.item(id).is_none() {
+                if self.scene().item(id).is_none() {
                     continue;
                 }
-                let Some(flags) = self.scene.flags(id) else {
+                let Some(flags) = self.scene().flags(id) else {
                     continue;
                 };
                 if !flags.contains(crate::flags::ItemFlags::IS_DRAGGABLE) {
                     continue;
                 }
-                if let Some(scene_rect) = self.scene.scene_rect(id) {
+                if let Some(scene_rect) = self.scene().scene_rect(id) {
                     snapshot.push((id, scene_rect));
                 }
             }
@@ -2599,16 +3204,17 @@ impl Widget for SceneView {
         {
             let mut snap = self.handler_snapshot.borrow_mut();
             snap.clear();
-            for id in self.scene.ids() {
-                let Some(item) = self.scene.item(id) else {
+            let scene = self.model.0.borrow();
+            for id in scene.ids() {
+                let Some(item) = scene.item(id) else {
                     continue;
                 };
-                let Some(scene_rect) = self.scene.scene_rect(id) else {
+                let Some(scene_rect) = scene.scene_rect(id) else {
                     continue;
                 };
-                let scene_xform = self.scene.scene_transform(id);
-                let z = self.scene.z(id).unwrap_or(0.0);
-                let handlers = self.scene.handlers(id).cloned().map(Box::new);
+                let scene_xform = scene.scene_transform(id);
+                let z = scene.z(id).unwrap_or(0.0);
+                let handlers = scene.handlers(id).cloned().map(Box::new);
                 // Capture the item's shape-test as a stand-alone
                 // closure so the snapshot can answer narrow-phase
                 // hit-test without holding a borrow on the Scene.
@@ -2616,9 +3222,9 @@ impl Widget for SceneView {
                 // GroupItem logical-only) override `clone_shape_test`
                 // to capture the data they need; default impl returns
                 // an AABB predicate over `local_bounds`.
-                let shape_contains: Rc<dyn Fn(Point) -> bool> = item.clone_shape_test().into();
-                let local_bounds = self.scene.local_bounds(id).unwrap_or(Rect::ZERO);
-                let flags = self.scene.flags(id).unwrap_or_default();
+                let shape_contains: Rc<dyn Fn(Point, f32) -> bool> = item.clone_shape_test().into();
+                let local_bounds = scene.local_bounds(id).unwrap_or(Rect::ZERO);
+                let flags = scene.flags(id).unwrap_or_default();
                 let ignores_xform =
                     flags.contains(crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS);
                 // For IGNORES items the scene_anchor is fixed across
@@ -2658,7 +3264,7 @@ impl Widget for SceneView {
     ) {
         // Mirror the parent's choice of `bounds.origin` into a signal
         // so the derived view-transform picks it up. The signal is
-        // bound at `BindingLevel::RepaintOnly` via `set_transform`,
+        // bound at `BindingLevel::RepaintOnly` via `set_content_transform`,
         // so changes only trigger repaint — never relayout — which
         // keeps idle behaviour intact when the SceneView is at rest.
         let new_origin = Vec2::new(bounds.x, bounds.y);
@@ -2674,14 +3280,15 @@ impl Widget for SceneView {
         // After commit, clear the in-flight marquee so paint stops
         // overlaying the rect.
         if let Some((rect, additive)) = self.pending_marquee_commit.take() {
-            self.selection.commit_marquee(&self.scene, rect, additive);
+            self.selection
+                .commit_marquee(&self.model.0.borrow(), rect, additive);
             self.marquee.set(None);
         }
 
         // Drain any pending drag-to-move commit, applied
         // via the public `flush_pending_mutations` helper to keep
         // the borrow tractable (`place_children` takes `&self`,
-        // and `Scene::move_item` needs `&mut Scene`). The
+        // and `Scene::set_local_pos` needs `&mut Scene`). The
         // framework calls layout from `&mut tree`, which gives
         // `&mut self` access elsewhere — but inside this trait
         // method we have only `&self`. Defer to a separate
@@ -2719,7 +3326,7 @@ impl Widget for SceneView {
             let Some(&item_id) = self.widget_to_item.get(&placement.id) else {
                 continue;
             };
-            let Some(rect) = self.scene.scene_rect(item_id) else {
+            let Some(rect) = self.scene().scene_rect(item_id) else {
                 continue;
             };
             placement.origin = Point::new(rect.x, rect.y);
@@ -2750,21 +3357,13 @@ impl Widget for SceneView {
             self.bounds_origin_signal.set(new_origin);
         }
 
-        // The SceneView's `set_transform` scope wraps both this paint
+        // The SceneView's `set_content_transform` scope wraps both this paint
         // call and the children walk, so any `canvas.fill_*` /
         // `canvas.stroke_*` / `canvas.draw_*` call we make here lands
         // through the same view-transform projection as the heavyweight
         // children. We pass scene-coord rects directly — the renderer
         // composes pan / zoom / rotation / bounds-origin on top.
-        //
-        // Lightweight items paint *before* heavyweight children. The
-        // render walker invokes the parent's paint first, then descends
-        // into children. That's exactly what we want for the
-        // background-furniture use case (connector lines, tiled grids,
-        // decorations) — items render under the cards.
         let region = self.visible_scene_region(bounds);
-        let view_transform = self.view_transform();
-        let item_ctx = crate::item::SceneItemPaintContext::new(view_transform, Some(region));
 
         // App-supplied background closure: paints under all items in
         // scene coords, with the visible scene region passed so the
@@ -2772,141 +3371,44 @@ impl Widget for SceneView {
         if let Some(bg) = &self.background_paint {
             bg(canvas, ctx, region);
         }
-        // `items_in_rect` returns both widget and item entries that
-        // intersect the visible region. We filter to the lightweight
-        // tier here — heavyweights are painted by the arena walker via
-        // their own widget paint methods.
-        //
-        // Drag-to-move: if an item is being dragged, paint
-        // it at its in-flight scene-coord offset by translating
-        // the canvas. Restored after.
-        let drag_target = self.drag_target.get();
-        let mut visible_ids = self.scene.items_in_rect(region);
-        // Z-order: sort visible ids by z so higher-z items
-        // paint last (on top). Equal-z preserves insertion order
-        // (sort is stable). Heavyweight ids stay in the list but
-        // are filtered out below — their z is honored only as a
-        // sort key for any lightweight neighbours interleaved with
-        // them, which is the right semantic: a lightweight item
-        // with z > 0 paints atop preceding lightweights, not atop
-        // heavyweight widgets (heavyweights paint via the arena
-        // walker after SceneView's paint method).
-        self.scene.sort_by_z(&mut visible_ids);
-        for id in visible_ids {
-            if self.scene.item(id).is_none() {
-                continue;
-            }
-            // Skip items whose chain is invisible or which carry the
-            // HAS_NO_CONTENTS flag (logical-only).
-            if !self.scene.is_effectively_visible(id) {
-                continue;
-            }
-            let flags = self.scene.flags(id).unwrap_or_default();
-            if flags.contains(crate::flags::ItemFlags::HAS_NO_CONTENTS) {
-                continue;
-            }
-            // Items that are either the drag target or a declared
-            // descendant paint with a visual delta in scene coords —
-            // a child follows its dragged parent until the rebuild
-            // commits the new local_pos.
-            let drag_delta = drag_target
-                .filter(|t| t.item_id == id || self.scene.is_descendant_of(id, t.item_id))
-                .map(|t| {
-                    bastyde_canvas::Transform2D::translate(
-                        t.current_scene.x - t.anchor_scene.x,
-                        t.current_scene.y - t.anchor_scene.y,
-                    )
-                });
 
-            // Compose `local→scene`, optionally with a scene-coord
-            // drag offset baked in. Push beneath the view transform
-            // so the item's `paint` works in local coords. `save` /
-            // `restore` isolate neighbouring items' transforms.
-            let mut local_to_scene = self.scene.scene_transform(id);
-            if let Some(t) = drag_delta {
-                local_to_scene = local_to_scene.then(&t);
-            }
-            canvas.save();
-            // IGNORES_TRANSFORMATIONS items pin at their parent-relative
-            // position but render at a fixed pixel size — they don't
-            // grow with zoom and don't rotate with the view. (Same
-            // semantic as Qt's `ItemIgnoresTransformations`.) We compute
-            // the screen-projected anchor through the full parent chain
-            // + view transform, then push a transform that — when
-            // composed with the outer view transform already on the
-            // canvas — collapses to a pure `Translate(screen_anchor)`.
-            // For the common case (no rotation, identity bounds_origin
-            // adjust) this is `Translate(screen_anchor) ∘
-            // view_transform_inverse`; we don't special-case to keep
-            // the math simple and correct under rotation.
-            if flags.contains(crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS) {
-                let scene_anchor = local_to_scene.apply_point(Point::ZERO);
-                let screen_anchor = view_transform.apply_point(scene_anchor);
-                let view_inv = view_transform
-                    .inverse()
-                    .unwrap_or_else(Transform2D::identity);
-                let t = Transform2D::translate(screen_anchor.x, screen_anchor.y)
-                    .then(&view_inv);
-                canvas.apply_transform(t);
-            } else {
-                canvas.apply_transform(local_to_scene);
-            }
-            // Effective opacity composes through the parent chain.
-            // Pushed via `Canvas::set_opacity` / `restore_opacity`
-            // so the scope is balanced regardless of paint paths.
-            let alpha = self.scene.effective_opacity(id);
-            let opacity_pushed = alpha < 0.999;
-            if opacity_pushed {
-                canvas.set_opacity(alpha);
-            }
-            if let Some(item) = self.scene.item(id) {
-                // Item-coordinate cache: when the item opted in via
-                // `cache_mode() == ItemCoordinate`, replay a cached
-                // local-coord RenderFrame instead of re-running its
-                // paint. On a miss, record into a sub-canvas, store
-                // the result, and splice into the main canvas — the
-                // first frame is a tiny overhead, every subsequent
-                // frame is just a memcpy of the recorded commands.
-                match item.cache_mode() {
-                    crate::cache::CacheMode::ItemCoordinate => {
-                        let cached = self.item_cache.borrow().get(id).cloned();
-                        if let Some(frame) = cached {
-                            canvas.draw_render_frame(&frame, Point::ZERO);
-                        } else {
-                            let mut sub = match canvas.text_backend() {
-                                Some(tb) => bastyde_canvas::Canvas::with_text_backend(tb.clone()),
-                                None => bastyde_canvas::Canvas::new(),
-                            };
-                            item.paint(&mut sub, &item_ctx);
-                            let frame = sub.into_render_frame();
-                            canvas.draw_render_frame(&frame, Point::ZERO);
-                            self.item_cache.borrow_mut().insert(id, frame);
-                        }
-                    }
-                    crate::cache::CacheMode::None => {
-                        item.paint(canvas, &item_ctx);
-                    }
-                }
-            }
-            if opacity_pushed {
-                canvas.restore_opacity();
-            }
-            canvas.restore();
-        }
+        // Under band: lightweight items below the heavyweight children
+        // (background furniture — connector lines, tiled grids, decorations).
+        // The render walker invokes the parent's paint first, then descends
+        // into children, so these render under the cards. The Over band and
+        // the marquee / foreground / debug overlays paint in `post_paint`
+        // (after the children) so they sit on top.
+        self.paint_band(canvas, bounds, crate::scene::SceneLayer::Under);
+    }
 
-        // Marquee overlay — semi-transparent fill plus a
-        // single-pixel stroke. The marquee state is in screen
-        // coords (set by the on_drag closure). The view-transform
-        // scope is on the canvas, so to paint at screen coords we
-        // inverse-apply the transform. For a non-rotated identity-
-        // ish transform that's just `inv * screen_rect`. We project
-        // the screen-rect to scene coords and paint there — same
-        // visual position because the transform applies to scene
-        // coords back the other way.
+    fn wants_post_paint(&self) -> bool {
+        // SceneView has a foreground pass (post_paint) only when something
+        // must render over the heavyweight children: a selection marquee, an
+        // app-supplied foreground closure, debug overlays, or any lightweight
+        // item raised to the Over band.
+        self.marquee.get().is_some()
+            || self.foreground_paint.is_some()
+            || self.debug_overlay.is_active()
+            || self.scene().has_over_layer_items()
+    }
+
+    fn post_paint(&self, bounds: Rect, canvas: &mut bastyde_canvas::Canvas, ctx: &PaintContext) {
+        // Foreground pass — runs after the heavyweight children, inside the
+        // same view-transform / clip scope as `paint`. Everything here sits
+        // on top of the cards: the Over-band lightweight items, then the
+        // selection marquee, then the app foreground hook, then debug overlays.
+        let view_transform = self.view_transform();
+
+        // Over band: lightweight items explicitly raised above the cards
+        // (highlighted connectors, selection halos, annotations).
+        self.paint_band(canvas, bounds, crate::scene::SceneLayer::Over);
+
+        // Marquee overlay — semi-transparent fill plus a single-pixel
+        // stroke. The marquee state is in screen coords (set by the on_drag
+        // closure); the view-transform scope is on the canvas, so we project
+        // the screen-rect back to scene coords and paint there.
         if let Some(state) = self.marquee.get() {
             let screen_rect = state.rect();
-            // Project to scene coords so the paint commands land
-            // through the view-transform stack to the right pixels.
             if let Some(inv) = view_transform.inverse() {
                 let scene_rect = inv.apply_rect(screen_rect);
                 let fill = bastyde_tokens::Color::new(0.40, 0.55, 0.85, 0.18);
@@ -2916,15 +3418,14 @@ impl Widget for SceneView {
             }
         }
 
-        // App-supplied foreground closure: paints over all items
-        // (and the marquee), under the debug overlay. Same coordinate
-        // conventions as the background hook.
+        // App-supplied foreground closure: paints over all items (and the
+        // marquee), under the debug overlay.
         if let Some(fg) = &self.foreground_paint {
+            let region = self.visible_scene_region(bounds);
             fg(canvas, ctx, region);
         }
 
-        // Visual-debug overlays. All paint in scene coords
-        // so they ride the same view-transform projection as items.
+        // Visual-debug overlays, on top of everything.
         if self.debug_overlay.is_active() {
             self.paint_debug_overlay(bounds, canvas);
         }
@@ -2944,7 +3445,7 @@ impl Widget for SceneView {
         // SceneView's children come from `Scene::add_widget` calls,
         // materialised once on the first build via
         // `ctx.add_boxed(pending.take())`. Subsequent rebuilds —
-        // triggered by `drag_dirty` to drain pending drag-to-move /
+        // triggered by `reconcile_dirty` to drain pending drag-to-move /
         // marquee commits — re-push the same `WidgetId`s without
         // calling `ctx.add_boxed` again (the `pending` slot is
         // already taken). The default rebuild semantics would
@@ -2988,8 +3489,8 @@ impl Widget for SceneView {
         let parent = self
             .widget_to_item
             .get(&descendant)
-            .and_then(|item_id| self.scene.a11y_parent_of(A11yNode::Item(*item_id)))
-            .or_else(|| self.scene.a11y_parent_of(A11yNode::Widget(descendant)))?;
+            .and_then(|item_id| self.scene().a11y_parent_of(A11yNode::Item(*item_id)))
+            .or_else(|| self.scene().a11y_parent_of(A11yNode::Widget(descendant)))?;
         match parent {
             A11yNode::Item(item_id) => Some(synthetic_node_id(
                 owner,
@@ -3029,7 +3530,7 @@ impl Widget for SceneView {
             builder.set_role(accesskit::Role::Pane);
         }
         if let Some(label) = &self.a11y_label {
-            builder.set_name(label.clone());
+            builder.set_name(label.resolve_now());
         }
 
         // Compute screen-space viewport for the at-visible-region
@@ -3055,8 +3556,8 @@ impl Widget for SceneView {
         // The set of items the off-screen-mode policy says are
         // AT-visible. Used to filter the second pass.
         let visible_item_ids: HashSet<ItemId> = match at_region {
-            Some(r) => self.scene.items_in_rect(r).into_iter().collect(),
-            None => self.scene.ids().into_iter().collect(),
+            Some(r) => self.scene().items_in_rect(r).into_iter().collect(),
+            None => self.scene().ids().into_iter().collect(),
         };
 
         // Build a `parent → ordered children` map of the logical
@@ -3070,9 +3571,9 @@ impl Widget for SceneView {
         // Place groups. Groups always emit — they have no
         // visual default to fall back to. A group with no declared
         // parent goes to SceneView root, regardless of mode.
-        for group in &self.scene.a11y_groups {
+        for group in &self.scene().a11y_groups {
             let node = A11yNode::Group(group.id);
-            let parent = self.scene.a11y_parent_of(node);
+            let parent = self.scene().a11y_parent_of(node);
             logical_children.entry(parent).or_default().push(node);
         }
 
@@ -3091,12 +3592,12 @@ impl Widget for SceneView {
         //   - StrictlyParallel: lightweight item without a parent
         //     is suppressed; heavyweight without a parent stays
         //     at SceneView root via the framework walker.
-        for entry in &self.scene.entries {
+        for entry in &self.scene().entries {
             if !visible_item_ids.contains(&entry.id) {
                 continue;
             }
             let node = A11yNode::Item(entry.id);
-            let parent = self.scene.a11y_parent_of(node);
+            let parent = self.scene().a11y_parent_of(node);
             let is_widget = matches!(&entry.kind, SceneEntryKind::Widget { .. });
             match (parent, is_widget, self.a11y_mode) {
                 (Some(p), _, _) => {
@@ -3122,7 +3623,7 @@ impl Widget for SceneView {
         // item that should belong elsewhere logically). Widgets
         // referenced via `A11yNode::Item(item_id)` are already
         // handled by the visible-entries pass.
-        for (child_node, parent_node) in &self.scene.a11y_parents {
+        for (child_node, parent_node) in &self.scene().a11y_parents {
             if matches!(child_node, A11yNode::Widget(_)) {
                 logical_children
                     .entry(Some(*parent_node))
@@ -3162,17 +3663,17 @@ impl Widget for SceneView {
                 A11yNode::Widget(id) => Some(bastyde_core::accessibility::widget_id_to_node_id(id)),
             }
         };
-        for (from, kind, to) in self.scene.a11y_relations() {
+        for (from, kind, to) in self.scene().a11y_relations() {
             let (Some(from_id), Some(to_id)) = (resolve(*from), resolve(*to)) else {
                 continue;
             };
             self.apply_relation_to_collected(builder, from_id, *kind, to_id);
         }
-        for (node, live) in &self.scene.a11y_live {
+        for (node, live) in &self.scene().a11y_live {
             let Some(id) = resolve(*node) else { continue };
             self.set_collected_live(builder, id, *live);
         }
-        for (node, role) in &self.scene.a11y_landmarks {
+        for (node, role) in &self.scene().a11y_landmarks {
             let Some(id) = resolve(*node) else { continue };
             self.set_collected_role(builder, id, *role);
         }
@@ -3211,7 +3712,7 @@ impl SceneView {
 
     fn compute_visible_ids(&self, bounds: Rect) -> HashSet<ItemId> {
         let region = self.visible_scene_region(bounds);
-        self.scene.items_in_rect(region).into_iter().collect()
+        self.scene().items_in_rect(region).into_iter().collect()
     }
 
     /// Paint enabled debug overlays on top of the scene rendering.
@@ -3240,13 +3741,13 @@ impl SceneView {
         // view transform is degenerate.
         let view_transform = self.view_transform();
         let visible_bounds = |id: crate::item::ItemId| -> Option<Rect> {
-            let scene_rect = self.scene.scene_rect(id)?;
-            let flags = self.scene.flags(id).unwrap_or_default();
+            let scene_rect = self.scene().scene_rect(id)?;
+            let flags = self.scene().flags(id).unwrap_or_default();
             if !flags.contains(crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS) {
                 return Some(scene_rect);
             }
-            let local_bounds = self.scene.local_bounds(id)?;
-            let scene_xform = self.scene.scene_transform(id);
+            let local_bounds = self.scene().local_bounds(id)?;
+            let scene_xform = self.scene().scene_transform(id);
             let scene_anchor = scene_xform.apply_point(Point::ZERO);
             let screen_anchor = view_transform.apply_point(scene_anchor);
             let screen_rect = Rect::new(
@@ -3262,7 +3763,7 @@ impl SceneView {
         };
 
         if cfg.item_bounds {
-            for id in self.scene.ids() {
+            for id in self.scene().ids() {
                 if let Some(rect) = visible_bounds(id) {
                     canvas.stroke_rect(
                         rect,
@@ -3327,15 +3828,16 @@ impl SceneView {
         }
 
         let view_transform = self.view_transform();
+        let scene = self.model.0.borrow();
         let synthetic_id = match node {
             A11yNode::Item(item_id) => {
                 // Discriminate by entry kind: lightweight items
                 // emit a synthetic AT node; heavyweight items
                 // attach the framework-emitted widget node under
                 // the declared parent (auto-graft).
-                if let Some(item) = self.scene.item(item_id) {
+                if let Some(item) = scene.item(item_id) {
                     let _ = item; // borrowed below for accessibility() call
-                    let scene_bounds = self.scene.scene_rect(item_id).unwrap_or(Rect::ZERO);
+                    let scene_bounds = scene.scene_rect(item_id).unwrap_or(Rect::ZERO);
                     let screen_bounds = view_transform.apply_rect(scene_bounds);
                     // Choose which space to advertise to AT clients
                     // per `a11y_bounds_space`. The `SceneItemA11yContext`
@@ -3375,7 +3877,8 @@ impl SceneView {
                         );
                         return;
                     };
-                    let widget_node_id = bastyde_core::accessibility::widget_id_to_node_id(widget_id);
+                    let widget_node_id =
+                        bastyde_core::accessibility::widget_id_to_node_id(widget_id);
                     builder.attach_scene_child_under(parent, widget_node_id);
                     widget_node_id
                 } else {
@@ -3385,7 +3888,7 @@ impl SceneView {
                 }
             }
             A11yNode::Group(group_id) => {
-                let Some(group) = self.scene.a11y_group(group_id) else {
+                let Some(group) = scene.a11y_group(group_id) else {
                     return;
                 };
                 let role = group.role;
@@ -3397,7 +3900,7 @@ impl SceneView {
                     |child| {
                         child.set_role(role);
                         if let Some(label) = label {
-                            child.set_name(label);
+                            child.set_name(label.resolve_now());
                         }
                     },
                 )

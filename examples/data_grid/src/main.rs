@@ -66,8 +66,8 @@ fn make_data(n: u32) -> Vec<Employee> {
 }
 
 fn id_column() -> Column<Employee> {
-    Column::<Employee>::new("id", "ID", |row, _: &CellContext| {
-        Box::new(TextWidget::new_literal(row.id.to_string()))
+    Column::<Employee>::new("id", lit!("ID"), |row, _: &CellContext| {
+        Box::new(TextWidget::new(lit!(row.id.to_string())))
     })
     .width(ColumnWidth::Fixed(64.0))
     .sortable(true)
@@ -83,12 +83,12 @@ fn name_column() -> Column<Employee> {
     // — the focus here is on the cell-delegate edit surface, not the
     // persistence path. A real app would forward `on_submit` to a
     // `model.set(row, ...)` call.
-    Column::<Employee>::new("name", "Name", |row, ctx: &CellContext| {
+    Column::<Employee>::new("name", lit!("Name"), |row, ctx: &CellContext| {
         if ctx.is_editing {
             let buffer = Signal::new(row.name.clone());
-            Box::new(TextInput::new(buffer).placeholder("Name"))
+            Box::new(TextInput::new(buffer).placeholder(lit!("Name")))
         } else {
-            Box::new(TextWidget::new_literal(row.name.clone()))
+            Box::new(TextWidget::new(lit!(row.name.clone())))
         }
     })
     .width(ColumnWidth::Flex(2.0))
@@ -98,8 +98,8 @@ fn name_column() -> Column<Employee> {
 }
 
 fn email_column() -> Column<Employee> {
-    Column::<Employee>::new("email", "Email", |row, _: &CellContext| {
-        Box::new(TextWidget::new_literal(row.email.clone()))
+    Column::<Employee>::new("email", lit!("Email"), |row, _: &CellContext| {
+        Box::new(TextWidget::new(lit!(row.email.clone())))
     })
     .width(ColumnWidth::Flex(2.0))
     .sortable(true)
@@ -107,8 +107,8 @@ fn email_column() -> Column<Employee> {
 }
 
 fn role_column() -> Column<Employee> {
-    Column::<Employee>::new("role", "Role", |row, _: &CellContext| {
-        Box::new(TextWidget::new_literal(row.role))
+    Column::<Employee>::new("role", lit!("Role"), |row, _: &CellContext| {
+        Box::new(TextWidget::new(lit!(row.role)))
     })
     .width(ColumnWidth::Flex(1.0))
     .sortable(true)
@@ -117,8 +117,8 @@ fn role_column() -> Column<Employee> {
 }
 
 fn salary_column() -> Column<Employee> {
-    Column::<Employee>::new("salary", "Salary", |row, _: &CellContext| {
-        Box::new(TextWidget::new_literal(format!("${}", row.salary)))
+    Column::<Employee>::new("salary", lit!("Salary"), |row, _: &CellContext| {
+        Box::new(TextWidget::new(lit!(format!("${}", row.salary))))
     })
     .width(ColumnWidth::Fixed(110.0))
     .sortable(true)
@@ -126,9 +126,9 @@ fn salary_column() -> Column<Employee> {
 }
 
 fn active_column() -> Column<Employee> {
-    Column::<Employee>::new("active", "Active", |row, _: &CellContext| {
+    Column::<Employee>::new("active", lit!("Active"), |row, _: &CellContext| {
         let label = if row.active { "● Yes" } else { "○ No" };
-        Box::new(TextWidget::new_literal(label))
+        Box::new(TextWidget::new(lit!(label)))
     })
     .width(ColumnWidth::Fixed(80.0))
     .alignment(Alignment::Center)
@@ -163,7 +163,7 @@ fn main() {
     fn dark_mode_toolbar() -> impl Widget {
         let is_dark = Signal::new(false);
         Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-            Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+            Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
                 let next = !is_dark.get();
                 is_dark.set(next);
                 ctx.set_theme(if next {
@@ -206,15 +206,15 @@ fn main() {
                 let table_id = tree.add(table);
 
                 // Status bar showing row count + selection count.
-                let status = TextWidget::new_literal(format!(
+                let status = TextWidget::new(lit!(format!(
                     "{} rows  ·  selection: {}",
                     proxy.len(),
                     selection.count()
-                ));
+                )));
                 let toolbar = HStack::new()
                     .spacing(8.0)
-                    .child(Button::new_literal("Reset filters"))
-                    .child(Button::new_literal("Reset sort"))
+                    .child(Button::new(lit!("Reset filters")))
+                    .child(Button::new(lit!("Reset sort")))
                     .child(Spacer::new())
                     .child(status);
 

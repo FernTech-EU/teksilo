@@ -19,7 +19,9 @@ use bastyde_core::shortcut::{KeyStroke, Shortcut};
 use bastyde_core::widget::{LayoutContext, Widget};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_settings::{AppPaths, SettingsBundle};
-use bastyde_telemetry::{ConsentScope, StubReporter, TelemetryBundle, TelemetryMode, UsageReporter};
+use bastyde_telemetry::{
+    ConsentScope, StubReporter, TelemetryBundle, TelemetryMode, UsageReporter,
+};
 use tempfile::tempdir;
 
 /// Probe widget that registers a global shortcut + matching action so

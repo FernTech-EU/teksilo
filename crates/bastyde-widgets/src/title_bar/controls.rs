@@ -15,6 +15,7 @@
 //! button always shows the `□` glyph. M3+ will add a `Signal<bool>`-driven
 //! glyph swap once the host can update it from `WindowEvent::Resized`.
 
+use bastyde_i18n::lit;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -154,7 +155,7 @@ impl Widget for ControlButton {
 
         let bg_rect = ctx.add(RectWidget::new().bind_background(bg_signal.clone()));
 
-        let glyph_text = TextWidget::new_literal(self.glyph)
+        let glyph_text = TextWidget::new(lit!(self.glyph))
             .style(TextStyleRole::Body)
             .color(self.fg)
             .single_line()
@@ -370,12 +371,18 @@ impl Widget for WindowControls {
         let minimize_hover = Signal::new(false);
         let maximize_hover = Signal::new(false);
         let close_hover_signal = Signal::new(false);
-        self.host
-            .register_hover_signal(bastyde_core::ControlTarget::Minimize, minimize_hover.clone());
-        self.host
-            .register_hover_signal(bastyde_core::ControlTarget::Maximize, maximize_hover.clone());
-        self.host
-            .register_hover_signal(bastyde_core::ControlTarget::Close, close_hover_signal.clone());
+        self.host.register_hover_signal(
+            bastyde_core::ControlTarget::Minimize,
+            minimize_hover.clone(),
+        );
+        self.host.register_hover_signal(
+            bastyde_core::ControlTarget::Maximize,
+            maximize_hover.clone(),
+        );
+        self.host.register_hover_signal(
+            bastyde_core::ControlTarget::Close,
+            close_hover_signal.clone(),
+        );
 
         let minimize = ControlButton::new("\u{2014}", cell_w, cell_h, fg)
             .hover_background(hover_bg)

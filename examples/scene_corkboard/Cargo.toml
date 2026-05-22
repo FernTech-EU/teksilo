@@ -9,3 +9,4 @@ publish = false
 [dependencies]
 bastyde = { workspace = true }
 bastyde-scene = { workspace = true }
+accesskit = { workspace = true }

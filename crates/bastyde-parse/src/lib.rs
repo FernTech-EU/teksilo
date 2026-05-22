@@ -23,7 +23,7 @@ pub mod ir;
 mod parse;
 
 pub use ir::{
-    BodyItem, BatiElement, BatiElse, BatiFor, BatiIf, BatiMatch, BatiMatchArm, BatiProperty,
-    BatiRoot, PropArg, RustShape,
+    BatiElement, BatiElse, BatiFor, BatiIf, BatiMatch, BatiMatchArm, BatiProperty, BatiRoot,
+    BodyItem, PropArg, RustShape,
 };
 pub use parse::parse_root;

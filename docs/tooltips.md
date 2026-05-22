@@ -49,7 +49,7 @@ Button::new(tr!(save()))
 ```
 
 `.tooltip(...)` accepts `impl Into<LocalizedString>`. The grep-marker
-`.tooltip_literal("...")` exists as a `#[doc(hidden)]` shim for tests and
+`.tooltip(lit!("..."))` exists as a `#[doc(hidden)]` shim for tests and
 scaffolding.
 
 ### Rich tooltip from the registry
@@ -98,9 +98,9 @@ Button::new(tr!(province_info()))
                 Grid::new()
                     .columns(vec![TrackSize::Auto, TrackSize::Auto])
                     .child(TextWidget::new(tr!(food())))
-                    .child(TextWidget::new_literal(food_value))
+                    .child(TextWidget::new(lit!(food_value)))
                     .child(TextWidget::new(tr!(trade())))
-                    .child(TextWidget::new_literal(trade_value)),
+                    .child(TextWidget::new(lit!(trade_value))),
             ),
     );
 ```
@@ -110,9 +110,10 @@ flips `Tooltip → Dialog`, dismiss swaps to `EscapeOrClickOutside`, and the
 surface becomes Tab-reachable. Rare interactive descendants (a "Pin"
 button, an internal `TabWidget`) work cleanly post-promotion.
 
-The default delay is `DEFAULT_COMPOSITE_TOOLTIP_DELAY` (400 ms — slower than
-the 200 ms rich-tooltip delay because composite surfaces are heavier and
-shouldn't pop on transient hover). Default `max_width` × `max_height` are
+The default delay is `theme.motion.tooltip_delay_heavy` (400 ms — slower than
+the 200 ms `tooltip_delay` used by plain/rich tooltips, because composite
+surfaces are heavier and shouldn't pop on transient hover). Default
+`max_width` × `max_height` are
 both 480 dp (`COMPOSITE_TOOLTIP_MAX_WIDTH` / `COMPOSITE_TOOLTIP_MAX_HEIGHT`
 constants in `bastyde-widgets/src/styles/recipe_tooltip_style.rs`),
 configurable per-instance with `.max_width(f32)` / `.max_height(f32)` on
@@ -138,7 +139,7 @@ The three setters are mutually exclusive — every setter clears the other two.
 
 | Setter | Sets | Clears |
 | --- | --- | --- |
-| `.tooltip(text)` / `.tooltip_literal(text)` | plain text | rich source, composite body |
+| `.tooltip(text)` / `.tooltip(lit!(text))` | plain text | rich source, composite body |
 | `.rich_tooltip(key)` / `.rich_tooltip_content(c)` | rich source | plain text, composite body |
 | `.composite_tooltip(w)` | composite body | plain text, rich source |
 
@@ -192,7 +193,7 @@ pub struct TooltipContent {
 | `.has_more()` / `.has_shortcut()` | Predicates used by the layout |
 
 The body is a `LocalizedString`, so production code uses `tr!(...)`; literal
-strings only show up in tests and demos via `LocalizedString::literal(...)`.
+strings only show up in tests and demos via `lit!(...)`.
 
 ### URL scheme inside the body
 
@@ -216,13 +217,22 @@ so unit tests don't actually launch external apps.
 When a body contains `[label](:key)` links, the rich tooltip widget
 **pre-creates** dormant `RichTooltipWidget` children for every registered
 target during its `build()` (matching the menu-submenu pattern in
-`menu_item.rs`). Clicking a link activates the matching child and calls
-`ctx.show_overlay(...)` anchored to the parent tooltip's own widget id,
-positioned 8 px below it, with dismiss behavior `EscapeOrClickOutside`.
-Nested overlays are registered with `parent_overlay: None`, so each is
-independent from the manager's perspective — Escape / click-outside
-dismisses each level on its own behavior, and a deep cascade unwinds as
-the user clicks away.
+`menu_item.rs`). Each child is marked a *cascade child*, which **suppresses
+its dwell-to-sticky indicator** and reads as a persistent, focusable
+`Role::Dialog` (advertising `Focus`) straight away — it's opened by an
+explicit click and is already persistent, so the hover-to-sticky affordance
+and the ephemeral `Role::Tooltip` don't apply.
+Clicking a link activates the matching child and calls `ctx.show_overlay(...)`
+anchored to the parent tooltip's own widget id, positioned 8 px below it,
+with dismiss behavior `EscapeOrClickOutside`.
+
+The request passes `parent_overlay: None`, but the event dispatcher fills it
+in with the containing tooltip's overlay (`overlay_ancestor_for_widget`), so
+the child is linked to its parent: dismissing the parent cascade-closes the
+whole subtree (`OverlayManager::dismiss_immediate`'s BFS), while Escape
+dismisses the top-most level first. A runaway cascade — e.g. a cyclic
+`A → B → A` `:key` loop — is bounded by `MAX_OVERLAY_NESTING_DEPTH`, so the
+overlay stack can't grow without limit.
 
 ---
 
@@ -235,30 +245,29 @@ the same machinery through `BuildContext`:
 ```rust
 // Plain tooltip — caller-managed delay.
 let tooltip_id = ctx.add(TooltipWidget::new(tr!(save_hint())));
-ctx.attach_tooltip(anchor_id, tooltip_id, Duration::from_millis(500));
+let delay = ctx.theme().motion.tooltip_delay;
+ctx.attach_tooltip(anchor_id, tooltip_id, delay);
 
 // Rich tooltip from the registry — recommended path.
-crate::tooltip::attach_rich_tooltip(
-    ctx,
-    anchor_id,
-    "save-as",
-    crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
-);
+let delay = ctx.theme().motion.tooltip_delay;
+crate::tooltip::attach_rich_tooltip(ctx, anchor_id, "save-as", delay);
 
 // Rich tooltip from inline content (no registry lookup).
+let delay = ctx.theme().motion.tooltip_delay;
 crate::tooltip::attach_rich_tooltip_content(
     ctx,
     anchor_id,
     TooltipContent::new("inline", tr!(inline_body())),
-    crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
+    delay,
 );
 
 // Source-driven — accepts either a key or an inline content.
+let delay = ctx.theme().motion.tooltip_delay;
 crate::tooltip::attach_rich_tooltip_source(
     ctx,
     anchor_id,
-    source,                                       // RichTooltipSource
-    crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
+    source, // RichTooltipSource
+    delay,
 );
 ```
 
@@ -285,11 +294,15 @@ The attach helpers do three things:
 
 ### Default delays
 
-| Path | Delay | Where it's defined |
-|------|-------|--------------------|
-| Rich tooltip | `200 ms` | `DEFAULT_RICH_TOOLTIP_DELAY` in [tooltip/attach.rs](../crates/bastyde-widgets/src/tooltip/attach.rs) |
-| `Button` plain tooltip | `200 ms` | inline literal in [button.rs](../crates/bastyde-widgets/src/button.rs) |
-| `Checkbox`, `RadioButton`, `MenuItem`, `SplitButton`, `Link`, `IconButton`, `TextInput` plain tooltip | `500 ms` | inline literal in each widget |
+All tooltip dwell delays are theme-defined on `MotionTokens`
+([motion.rs](../crates/bastyde-tokens/src/motion.rs)), so apps retune the feel
+in one place. Each widget reads the value at `build()` time via
+`ctx.theme().motion.*`.
+
+| Path | Field | Default |
+|------|-------|---------|
+| Plain + rich tooltips (all widgets) | `motion.tooltip_delay` | `200 ms` |
+| Composite tooltips + scene-item tips | `motion.tooltip_delay_heavy` | `400 ms` |
 
 There is no token for plain-tooltip delay yet; widgets that need a custom
 value pass an explicit `Duration` to `attach_tooltip`.
@@ -333,7 +346,10 @@ delayed-overlay deadline so the idle-event loop knows when to wake (see
 ## Sticky-on-dwell (rich tooltips)
 
 Rich tooltips opt into a 2-second dwell timer that promotes a hover-shown
-tooltip into a focusable, click-through Dialog. The threshold lives in
+tooltip into a focusable, click-through Dialog. Promotion advertises focus
+but does **not** steal it: the panel becomes focusable and AT-reachable and
+the user Tabs in (the correct non-modal-panel pattern) — whatever the user
+was doing keeps keyboard focus. The threshold lives in
 [`DWELL_PROMOTION`](../crates/bastyde-widgets/src/tooltip/rich.rs) and is
 `Duration::from_secs(2)`; it's split into 4 visible quarters of 500 ms each,
 driving the [`DwellIndicator`](../crates/bastyde-widgets/src/tooltip/dwell_indicator.rs)
@@ -493,7 +509,7 @@ the rich source, and vice versa.
 | [`RadioButton`](../crates/bastyde-widgets/src/radio_button.rs) | `tooltip(text)` | — | — |
 | [`SplitButton`](../crates/bastyde-widgets/src/split_button.rs) | `tooltip(text)` | — | — |
 | [`IconButton`](../crates/bastyde-widgets/src/icon_button.rs) | `tooltip(text)` | — | — |
-| [`TextInput`](../crates/bastyde-widgets/src/text_input.rs) | `tooltip_literal(text)` | `rich_tooltip_key(key)` | `rich_tooltip(content)` |
+| [`TextInput`](../crates/bastyde-widgets/src/text_input.rs) | `tooltip(lit!(text))` | `rich_tooltip_key(key)` | `rich_tooltip(content)` |
 | [`ToolBox`](../crates/bastyde-widgets/src/tool_box.rs) | — | `tooltip(impl Into<RichTooltipSource>)` | `tooltip_content(content)` |
 
 `tooltip_literal` is a permanent `#[doc(hidden)]` shim that wraps a raw
@@ -513,7 +529,7 @@ fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
     let root = ctx.add(/* visible subtree */);
 
     if let Some(text) = self.tooltip_text.as_deref() {
-        let tooltip = ctx.add(TooltipWidget::new_literal(text));
+        let tooltip = ctx.add(TooltipWidget::new(lit!(text)));
         ctx.attach_tooltip(root, tooltip, Duration::from_millis(500));
     }
 

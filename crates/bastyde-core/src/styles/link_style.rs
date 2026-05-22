@@ -11,13 +11,17 @@
 use std::rc::Rc;
 
 use crate::build_context::BuildContext;
-use crate::signal::Signal;
+use crate::signal::{Prop, Signal};
 use crate::widget_id::WidgetId;
 
 #[derive(Clone, Debug)]
 pub struct LinkStyleConfig {
-    /// Resolved label text (already localised at the widget level).
-    pub text: String,
+    /// Label text as a reactive `Prop<String>`. The widget converts its
+    /// `LocalizedString` via `.into()` (a `tr!` source yields a bound,
+    /// locale-reactive prop); the style binds it to the label widget.
+    /// `bastyde-core` can't name `LocalizedString` (i18n depends on core,
+    /// not the reverse), so the i18n type is erased to `Prop<String>` here.
+    pub text: Prop<String>,
     /// `true` while the pointer is over the link.
     pub is_hovered: Signal<bool>,
     /// `true` while the link is being pressed (mouse-down or Space/Enter).

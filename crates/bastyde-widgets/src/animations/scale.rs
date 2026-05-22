@@ -357,6 +357,7 @@ mod tests {
     use super::*;
     use crate::primitives::TextWidget;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn starts_visible_when_signal_true_emits_identity_skip() {
@@ -364,7 +365,7 @@ mod tests {
         // walker should NOT emit a PushTransform pair (identity skip).
         let visible = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Scale::new(visible).child(TextWidget::new_literal("hello")));
+        tree.add(Scale::new(visible).child(TextWidget::new(lit!("hello"))));
         tree.layout(SizeProposal {
             width: Some(200.0),
             height: None,
@@ -389,7 +390,7 @@ mod tests {
         // matrix.
         let visible = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Scale::new(visible).child(TextWidget::new_literal("hello")));
+        tree.add(Scale::new(visible).child(TextWidget::new(lit!("hello"))));
         tree.layout(SizeProposal {
             width: Some(200.0),
             height: None,
@@ -419,7 +420,7 @@ mod tests {
             Scale::new(visible.clone())
                 .reflow(true)
                 .duration(Duration::from_millis(100))
-                .child(TextWidget::new_literal("content")),
+                .child(TextWidget::new(lit!("content"))),
         );
         tree.layout(SizeProposal {
             width: Some(300.0),
@@ -463,7 +464,7 @@ mod tests {
         let id = tree.add(
             Scale::new(visible.clone())
                 .duration(Duration::from_millis(100))
-                .child(TextWidget::new_literal("content")),
+                .child(TextWidget::new(lit!("content"))),
         );
         tree.layout(SizeProposal {
             width: Some(300.0),
@@ -493,7 +494,7 @@ mod tests {
         let visible = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.set_accessibility_preferences(false, true, 1.0);
-        tree.add(Scale::new(visible.clone()).child(TextWidget::new_literal("x")));
+        tree.add(Scale::new(visible.clone()).child(TextWidget::new(lit!("x"))));
         tree.layout(SizeProposal {
             width: Some(200.0),
             height: None,

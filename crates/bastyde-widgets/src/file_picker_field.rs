@@ -24,7 +24,9 @@ use bastyde_core::build_context::BuildContext;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
-use bastyde_platform::file_dialog::{EventContextFileDialogExt, FileDialogRequest, FileDialogResult};
+use bastyde_platform::file_dialog::{
+    EventContextFileDialogExt, FileDialogRequest, FileDialogResult,
+};
 
 use crate::icon_button::IconButton;
 use crate::text_input::TextInput;
@@ -52,8 +54,8 @@ pub struct FilePickerField {
     default_file_name: Option<String>,
     filters: Vec<FilterEntry>,
     on_pick: Option<Box<dyn Fn(&FileDialogResult, &mut EventContext)>>,
-    placeholder: Option<String>,
-    label: Option<String>,
+    placeholder: Option<bastyde_i18n::LocalizedString>,
+    label: Option<bastyde_i18n::LocalizedString>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     root_child_id: Option<WidgetId>,
@@ -125,26 +127,14 @@ impl FilePickerField {
     /// Placeholder text shown when the field is empty.
     pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.placeholder = Some(ls.resolve_now());
-        self
-    }
-
-    /// Untranslated [`placeholder`](Self::placeholder).
-    pub fn placeholder_literal(mut self, text: impl Into<String>) -> Self {
-        self.placeholder = Some(text.into());
+        self.placeholder = Some(ls);
         self
     }
 
     /// Accessible name for the path field.
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
-        self
-    }
-
-    /// Untranslated [`label`](Self::label).
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
+        self.label = Some(ls);
         self
     }
 
@@ -307,6 +297,7 @@ fn apply_result(result: &FileDialogResult, text: &Signal<String>, kind: FilePick
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_core::widget_tree::WidgetTree;
 
     #[test]
@@ -315,7 +306,7 @@ mod tests {
         let path = Signal::new(String::new());
         let id = tree.add(
             FilePickerField::new(path)
-                .placeholder("Choose a file…")
+                .placeholder(lit!("Choose a file…"))
                 .add_filter("Images", &["png", "jpg"]),
         );
         tree.layout(SizeProposal {

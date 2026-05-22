@@ -92,12 +92,6 @@ impl FormLayout {
         self
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) for `label(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn label_literal(self, label: impl Into<String>) -> Self {
-        self.label(bastyde_i18n::LocalizedString::literal(label))
-    }
-
     /// Add a label/field pair row.
     pub fn line(mut self, label: impl Widget + 'static, field: impl Widget + 'static) -> Self {
         self.pending_rows.push(PendingFormRow::Pair(
@@ -161,7 +155,10 @@ impl FormLayout {
     }
 }
 
-fn resolve_pending(p: PendingChild, ctx: &mut bastyde_core::build_context::BuildContext) -> WidgetId {
+fn resolve_pending(
+    p: PendingChild,
+    ctx: &mut bastyde_core::build_context::BuildContext,
+) -> WidgetId {
     match p {
         PendingChild::Id(id) => id,
         PendingChild::Deferred(w) => ctx.add_boxed(w),

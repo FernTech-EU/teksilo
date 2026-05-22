@@ -15,7 +15,9 @@ use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::signal::Signal;
-use bastyde_core::styles::{CheckboxState, CheckboxStyleConfig, CheckboxVariant, SharedCheckboxStyle};
+use bastyde_core::styles::{
+    CheckboxState, CheckboxStyleConfig, CheckboxVariant, SharedCheckboxStyle,
+};
 use bastyde_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
@@ -96,8 +98,8 @@ impl std::fmt::Debug for CheckKind {
 
 /// A checkbox that toggles a `Signal<bool>` or cycles a `Signal<CheckState>`.
 pub struct Checkbox {
-    label: Option<String>,
-    caption: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
+    caption: Option<bastyde_i18n::LocalizedString>,
     kind: CheckKind,
     /// Initial enabled-state; forwarded into the arena at build time.
     /// After build the arena is the single source of truth — see
@@ -110,7 +112,7 @@ pub struct Checkbox {
     /// or an `access_label*` override). Used by `StandardListItem` /
     /// `StandardTreeItem`.
     labels_hidden: bool,
-    tooltip_text: Option<String>,
+    tooltip_text: Option<bastyde_i18n::LocalizedString>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn bastyde_core::widget::Widget>>,
     variant: CheckboxVariant,
@@ -182,14 +184,7 @@ impl Checkbox {
 
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `label(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
+        self.label = Some(ls);
         self
     }
 
@@ -198,14 +193,7 @@ impl Checkbox {
     /// style. Has no effect unless `label(...)` is also set.
     pub fn caption(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.caption = Some(ls.resolve_now());
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `caption(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn caption_literal(mut self, text: impl Into<String>) -> Self {
-        self.caption = Some(text.into());
+        self.caption = Some(ls);
         self
     }
 
@@ -237,16 +225,6 @@ impl Checkbox {
     }
 
     pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
-        self.tooltip_text = Some(ls.resolve_now());
-        self.rich_tooltip_source = None;
-        self.composite_tooltip_content = None;
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `tooltip(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;
@@ -272,7 +250,10 @@ impl Checkbox {
 
     /// Attach a composite tooltip — third tier, hosting an arbitrary
     /// widget tree. See [`Button::composite_tooltip`](crate::button::Button::composite_tooltip).
-    pub fn composite_tooltip(mut self, content: impl bastyde_core::widget::Widget + 'static) -> Self {
+    pub fn composite_tooltip(
+        mut self,
+        content: impl bastyde_core::widget::Widget + 'static,
+    ) -> Self {
         self.composite_tooltip_content = Some(Box::new(content));
         self.tooltip_text = None;
         self.rich_tooltip_source = None;
@@ -368,7 +349,7 @@ impl Widget for Checkbox {
         if !self.labels_hidden
             && let Some(ref label) = self.label
         {
-            let label_widget = TextWidget::new_literal(label)
+            let label_widget = TextWidget::new(label.clone())
                 .style(TextStyleRole::Body)
                 .color(TextRole::Primary)
                 .single_line()
@@ -376,7 +357,7 @@ impl Widget for Checkbox {
             let label_id = ctx.add(label_widget);
 
             let label_column_id = if let Some(ref caption) = self.caption {
-                let caption_widget = TextWidget::new_literal(caption)
+                let caption_widget = TextWidget::new(caption.clone())
                     .style(TextStyleRole::Small)
                     .color(TextRole::Secondary)
                     .a11y_hidden();
@@ -408,23 +389,16 @@ impl Widget for Checkbox {
         );
 
         if let Some(content) = self.composite_tooltip_content.take() {
-            crate::tooltip::attach_composite_tooltip_boxed(
-                ctx,
-                root_id,
-                content,
-                crate::tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
         } else if let Some(source) = self.rich_tooltip_source.take() {
-            crate::tooltip::attach_rich_tooltip_source(
-                ctx,
-                root_id,
-                source,
-                crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
-            );
-        } else if let Some(ref tooltip_text) = self.tooltip_text {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new_literal(tooltip_text);
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+        } else if let Some(tooltip_text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(tooltip_text);
             let tooltip_id = ctx.add(tooltip_widget);
-            ctx.attach_tooltip(root_id, tooltip_id, std::time::Duration::from_millis(500));
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root_id, tooltip_id, delay);
         }
 
         self.root_child_id = Some(root_id);
@@ -547,10 +521,10 @@ impl Widget for Checkbox {
         );
         builder.set_role(bastyde_core::accesskit::Role::CheckBox);
         if let Some(ref label) = self.label {
-            builder.set_name(label);
+            builder.set_name(label.resolve_now());
         }
         if let Some(ref caption) = self.caption {
-            builder.set_description(caption);
+            builder.set_description(caption.resolve_now());
         }
         match self.check_state() {
             CheckState::Checked => builder.set_toggled(true),
@@ -580,6 +554,7 @@ impl Widget for Checkbox {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_core::event::Modifiers;
     use bastyde_core::widget_tree::WidgetTree;
 
@@ -589,7 +564,7 @@ mod tests {
     fn click_toggles_bool_state() {
         let checked = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let cb = tree.add(Checkbox::new(checked.clone()).label_literal("Accept"));
+        let cb = tree.add(Checkbox::new(checked.clone()).label(lit!("Accept")));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
         assert!(!checked.get());
@@ -603,7 +578,7 @@ mod tests {
     fn space_toggles_bool_state() {
         let checked = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let cb = tree.add(Checkbox::new(checked.clone()).label_literal("Accept"));
+        let cb = tree.add(Checkbox::new(checked.clone()).label(lit!("Accept")));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
         tree.focus(cb);
@@ -619,7 +594,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let cb = tree.add(
             Checkbox::new(checked.clone())
-                .label_literal("Accept")
+                .label(lit!("Accept"))
                 .enabled(false),
         );
         tree.layout(SizeProposal::exact(200.0, 80.0));
@@ -632,7 +607,7 @@ mod tests {
     fn two_state_accessibility() {
         let checked = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let cb = tree.add(Checkbox::new(checked).label_literal("Accept"));
+        let cb = tree.add(Checkbox::new(checked).label(lit!("Accept")));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
         let info = tree.accessibility_node(cb);
@@ -651,7 +626,7 @@ mod tests {
         // folder-checkbox semantic.
         let state = Signal::new(CheckState::Unchecked);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let cb = tree.add(Checkbox::tristate(state.clone()).label_literal("Select All"));
+        let cb = tree.add(Checkbox::tristate(state.clone()).label(lit!("Select All")));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
         assert_eq!(state.get(), CheckState::Unchecked);
@@ -670,7 +645,7 @@ mod tests {
     fn tristate_space_toggles_two_states() {
         let state = Signal::new(CheckState::Unchecked);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let cb = tree.add(Checkbox::tristate(state.clone()).label_literal("Select All"));
+        let cb = tree.add(Checkbox::tristate(state.clone()).label(lit!("Select All")));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
         tree.focus(cb);
@@ -685,10 +660,13 @@ mod tests {
         // Indeterminate is_filled() == true, so it should have a primary background
         let state = Signal::new(CheckState::Indeterminate);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Checkbox::tristate(state).label_literal("Partial"));
+        tree.add(Checkbox::tristate(state).label(lit!("Partial")));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let frame = tree.render();
-        let primary = bastyde_core::presets::intui::light().colors.accent.to_array();
+        let primary = bastyde_core::presets::intui::light()
+            .colors
+            .accent
+            .to_array();
         assert!(
             frame.shapes.iter().any(|s| s.color == primary),
             "indeterminate checkbox should have primary-colored background"
@@ -710,7 +688,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(
             Checkbox::new(checked)
-                .label_literal("Disabled")
+                .label(lit!("Disabled"))
                 .enabled(false),
         );
         tree.layout(SizeProposal::exact(200.0, 80.0));
@@ -729,7 +707,7 @@ mod tests {
     fn accessibility_has_actions() {
         let checked = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let cb = tree.add(Checkbox::new(checked).label_literal("Accept"));
+        let cb = tree.add(Checkbox::new(checked).label(lit!("Accept")));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let info = tree.accessibility_node(cb);
         assert!(

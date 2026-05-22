@@ -28,7 +28,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let fade_visible = ctx.signal(true);
     let fade = section(
         ctx,
-        "Fade",
+        lit!("Fade"),
         VStack::new()
             .spacing(6.0)
             .child(drive_box(tr!(anim_visible()), fade_visible.clone()))
@@ -36,14 +36,14 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let pulse = section(
         ctx,
-        "Pulse",
+        lit!("Pulse"),
         Pulse::opacity(0.3, 1.0)
             .period(Duration::from_millis(900))
             .child(color_cell(SurfaceRole::Raised, "REC")),
     );
     let cycle = section(
         ctx,
-        "Cycle",
+        lit!("Cycle"),
         Cycle::new()
             .period(Duration::from_millis(1500))
             .child(TextWidget::new(tr!(anim_tip_1())).style(TextStyleRole::Body))
@@ -57,7 +57,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     });
     let crossfade = section(
         ctx,
-        "Crossfade",
+        lit!("Crossfade"),
         VStack::new()
             .spacing(6.0)
             .child(crossfade_btn)
@@ -68,7 +68,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let collapse_open = ctx.signal(true);
     let collapse = section(
         ctx,
-        "Collapse",
+        lit!("Collapse"),
         VStack::new()
             .spacing(6.0)
             .child(drive_box(tr!(anim_expanded()), collapse_open.clone()))
@@ -85,7 +85,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let smooth_size = section(
         ctx,
-        "SmoothSize",
+        lit!("SmoothSize"),
         SmoothSize::new().child(
             Panel::new()
                 .background(SurfaceRole::AccentSubtle)
@@ -96,7 +96,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let slide_visible = ctx.signal(true);
     let slide = section(
         ctx,
-        "Slide",
+        lit!("Slide"),
         VStack::new()
             .spacing(6.0)
             .child(drive_box(tr!(anim_visible()), slide_visible.clone()))
@@ -118,7 +118,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     });
     let shake = section(
         ctx,
-        "Shake",
+        lit!("Shake"),
         HStack::new()
             .spacing(8.0)
             .child(shake_btn)
@@ -127,7 +127,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let scale_visible = ctx.signal(true);
     let scale = section(
         ctx,
-        "Scale",
+        lit!("Scale"),
         VStack::new()
             .spacing(6.0)
             .child(drive_box(tr!(anim_visible()), scale_visible.clone()))
@@ -140,7 +140,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     });
     let rotate = section(
         ctx,
-        "Rotate",
+        lit!("Rotate"),
         HStack::new().spacing(8.0).child(rotate_btn).child(
             FixedSize::new()
                 .bind_width(60.0_f32)
@@ -155,7 +155,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     });
     let blur = section(
         ctx,
-        "Blur",
+        lit!("Blur"),
         VStack::new().spacing(6.0).child(blur_btn).child(
             Blur::new(blur_radius).child(
                 Panel::new()
@@ -229,7 +229,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Fade") {
+                TextWidget::new(lit!("Fade")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -244,7 +244,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Pulse") {
+                TextWidget::new(lit!("Pulse")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -256,7 +256,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Cycle") {
+                TextWidget::new(lit!("Cycle")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -276,7 +276,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Crossfade") {
+                TextWidget::new(lit!("Crossfade")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -291,7 +291,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Collapse") {
+                TextWidget::new(lit!("Collapse")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -312,7 +312,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("SmoothSize") {
+                TextWidget::new(lit!("SmoothSize")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -329,7 +329,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Slide") {
+                TextWidget::new(lit!("Slide")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -349,7 +349,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Shake") {
+                TextWidget::new(lit!("Shake")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -366,7 +366,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Scale") {
+                TextWidget::new(lit!("Scale")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -381,7 +381,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Rotate") {
+                TextWidget::new(lit!("Rotate")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -402,7 +402,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Blur") {
+                TextWidget::new(lit!("Blur")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

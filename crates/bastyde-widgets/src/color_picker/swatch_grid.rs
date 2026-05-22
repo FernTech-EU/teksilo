@@ -126,63 +126,62 @@ impl Widget for SwatchGrid {
         let focused_index = self.focused_index.clone();
         let on_select_keys = self.on_select.clone();
         let swatches_for_keys = self.swatches.clone();
-        let handlers =
-            HandlerSet::new()
-                // Framework gates events on `arena.is_enabled` and
-                // the focus walker skips disabled subtrees; we still
-                // refuse to focus an empty grid.
-                .focusable(count > 0)
-                .on_key(move |event, ctx_evt| {
-                    if count == 0 {
-                        return EventResponse::Ignored;
+        let handlers = HandlerSet::new()
+            // Framework gates events on `arena.is_enabled` and
+            // the focus walker skips disabled subtrees; we still
+            // refuse to focus an empty grid.
+            .focusable(count > 0)
+            .on_key(move |event, ctx_evt| {
+                if count == 0 {
+                    return EventResponse::Ignored;
+                }
+                let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
+                    return EventResponse::Ignored;
+                };
+                let mut idx = focused_index.get().min(count.saturating_sub(1));
+                let last = count.saturating_sub(1);
+                let row = idx / columns_for_keys;
+                let col = idx % columns_for_keys;
+                let row_start = row * columns_for_keys;
+                let row_end = ((row + 1) * columns_for_keys - 1).min(last);
+                match key {
+                    Key::ArrowLeft => {
+                        idx = idx.saturating_sub(1);
                     }
-                    let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
-                        return EventResponse::Ignored;
-                    };
-                    let mut idx = focused_index.get().min(count.saturating_sub(1));
-                    let last = count.saturating_sub(1);
-                    let row = idx / columns_for_keys;
-                    let col = idx % columns_for_keys;
-                    let row_start = row * columns_for_keys;
-                    let row_end = ((row + 1) * columns_for_keys - 1).min(last);
-                    match key {
-                        Key::ArrowLeft => {
-                            idx = idx.saturating_sub(1);
+                    Key::ArrowRight => {
+                        if idx < last {
+                            idx += 1;
                         }
-                        Key::ArrowRight => {
-                            if idx < last {
-                                idx += 1;
-                            }
-                        }
-                        Key::ArrowUp => {
-                            if idx >= columns_for_keys {
-                                idx -= columns_for_keys;
-                            }
-                        }
-                        Key::ArrowDown => {
-                            if idx + columns_for_keys <= last {
-                                idx += columns_for_keys;
-                            }
-                        }
-                        Key::Home => {
-                            idx = if modifiers.ctrl() { 0 } else { row_start };
-                        }
-                        Key::End => {
-                            idx = if modifiers.ctrl() { last } else { row_end };
-                        }
-                        Key::Enter | Key::Space => {
-                            let list = swatches_for_keys.get();
-                            if let Some(c) = list.get(idx) {
-                                (on_select_keys)(*c, ctx_evt);
-                            }
-                            return EventResponse::Handled;
-                        }
-                        _ => return EventResponse::Ignored,
                     }
-                    let _ = (row, col);
-                    focused_index.set(idx);
-                    EventResponse::Handled
-                });
+                    Key::ArrowUp => {
+                        if idx >= columns_for_keys {
+                            idx -= columns_for_keys;
+                        }
+                    }
+                    Key::ArrowDown => {
+                        if idx + columns_for_keys <= last {
+                            idx += columns_for_keys;
+                        }
+                    }
+                    Key::Home => {
+                        idx = if modifiers.ctrl() { 0 } else { row_start };
+                    }
+                    Key::End => {
+                        idx = if modifiers.ctrl() { last } else { row_end };
+                    }
+                    Key::Enter | Key::Space => {
+                        let list = swatches_for_keys.get();
+                        if let Some(c) = list.get(idx) {
+                            (on_select_keys)(*c, ctx_evt);
+                        }
+                        return EventResponse::Handled;
+                    }
+                    _ => return EventResponse::Ignored,
+                }
+                let _ = (row, col);
+                focused_index.set(idx);
+                EventResponse::Handled
+            });
         ctx.apply_self_handlers(handlers);
 
         vec![root]

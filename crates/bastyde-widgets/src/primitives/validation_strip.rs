@@ -21,6 +21,7 @@ use bastyde_core::build_context::BuildContext;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
+use bastyde_i18n::lit;
 use bastyde_tokens::{TextRole, TextStyleRole};
 
 use super::TextWidget;
@@ -70,7 +71,7 @@ impl Widget for ValidationStrip {
             _ => TextRole::Secondary,
         });
 
-        let label = TextWidget::new_literal("")
+        let label = TextWidget::new(lit!(""))
             .style(TextStyleRole::Small)
             .bind_text(text_signal)
             .bind_color(bastyde_core::color_prop::ColorProp::DynamicTextRole(

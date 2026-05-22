@@ -50,14 +50,14 @@ impl Widget for RootContent {
                     .child(
                         HStack::new()
                             .child(
-                                TextWidget::new_literal("Text & Layout")
+                                TextWidget::new(lit!("Text & Layout"))
                                     .style(TextStyleRole::BodyBold)
                                     .color(TextRole::Primary),
                             )
                             .child(Spacer::new())
                             .child({
                                 let is_dark = std::rc::Rc::new(std::cell::Cell::new(false));
-                                Button::new_literal("Toggle Dark Mode")
+                                Button::new(lit!("Toggle Dark Mode"))
                                     .variant(ButtonVariant::Plain)
                                     .on_activate_fn(move |ctx: &mut EventContext| {
                                         let next = !is_dark.get();
@@ -75,35 +75,35 @@ impl Widget for RootContent {
                         VStack::new()
                             .spacing(6.0)
                             .child(
-                                TextWidget::new_literal("Typography Styles")
+                                TextWidget::new(lit!("Typography Styles"))
                                     .style(TextStyleRole::BodyBold)
                                     .color(TextRole::Primary),
                             )
                             .child(
-                                TextWidget::new_literal(
-                                    "Body text (14px) — the default reading style for content.",
-                                )
+                                TextWidget::new(lit!(
+                                    "Body text (14px) — the default reading style for content."
+                                ))
                                 .style(TextStyleRole::Body)
                                 .color(TextRole::Primary),
                             )
                             .child(
-                                TextWidget::new_literal(
-                                    "Body small (12px) — secondary information and descriptions.",
-                                )
+                                TextWidget::new(lit!(
+                                    "Body small (12px) — secondary information and descriptions."
+                                ))
                                 .style(TextStyleRole::Small)
                                 .color(TextRole::Primary),
                             )
                             .child(
-                                TextWidget::new_literal(
-                                    "Caption (11px) — timestamps, footnotes, and fine print.",
-                                )
+                                TextWidget::new(lit!(
+                                    "Caption (11px) — timestamps, footnotes, and fine print."
+                                ))
                                 .style(TextStyleRole::Tiny)
                                 .color(TextRole::Primary),
                             )
                             .child(
-                                TextWidget::new_literal(
-                                    "LABEL (12px medium, +0.5 tracking) — form labels and tags.",
-                                )
+                                TextWidget::new(lit!(
+                                    "LABEL (12px medium, +0.5 tracking) — form labels and tags."
+                                ))
                                 .style(TextStyleRole::Small)
                                 .color(TextRole::Primary),
                             ),
@@ -113,7 +113,7 @@ impl Widget for RootContent {
                         VStack::new()
                             .spacing(6.0)
                             .child(
-                                TextWidget::new_literal("Layout Primitives")
+                                TextWidget::new(lit!("Layout Primitives"))
                                     .style(TextStyleRole::BodyBold)
                                     .color(TextRole::Primary),
                             )
@@ -125,28 +125,26 @@ impl Widget for RootContent {
                                     .child(build_color_box(TextRole::Error, "C")),
                             )
                             .child(
-                                TextWidget::new_literal(
-                                    "HStack with spacing — three colored boxes",
-                                )
-                                .style(TextStyleRole::Tiny)
-                                .color(TextRole::Primary),
+                                TextWidget::new(lit!("HStack with spacing — three colored boxes"))
+                                    .style(TextStyleRole::Tiny)
+                                    .color(TextRole::Primary),
                             )
                             .child(
                                 HStack::new()
                                     .child(
-                                        TextWidget::new_literal("Leading")
+                                        TextWidget::new(lit!("Leading"))
                                             .style(TextStyleRole::Body)
                                             .color(TextRole::Primary),
                                     )
                                     .child(Spacer::new())
                                     .child(
-                                        TextWidget::new_literal("Trailing")
+                                        TextWidget::new(lit!("Trailing"))
                                             .style(TextStyleRole::Body)
                                             .color(TextRole::Primary),
                                     ),
                             )
                             .child(
-                                TextWidget::new_literal("Spacer pushing items to edges")
+                                TextWidget::new(lit!("Spacer pushing items to edges"))
                                     .style(TextStyleRole::Tiny)
                                     .color(TextRole::Primary),
                             ),
@@ -176,7 +174,7 @@ fn build_color_box(color: impl Into<bastyde::core::ColorProp>, label: &str) -> P
         .corner_radius(6.0)
         .padding(8.0)
         .child(
-            TextWidget::new_literal(label)
+            TextWidget::new(lit!(label))
                 .style(TextStyle {
                     family: "sans-serif".into(),
                     size: 14.0,
@@ -241,7 +239,7 @@ mod tests {
     #[test]
     fn text_widget_measures_correctly_without_backend() {
         let theme = bastyde::presets::intui::light();
-        let w = TextWidget::new_literal("Hello World").style(theme.typography.body.clone());
+        let w = TextWidget::new(lit!("Hello World")).style(theme.typography.body.clone());
         let ctx = LayoutContext::for_testing(&theme);
         let size = w.layout_response(SizeProposal::unspecified(), &ctx).size;
         assert!((size.width - 88.0).abs() < 0.01);

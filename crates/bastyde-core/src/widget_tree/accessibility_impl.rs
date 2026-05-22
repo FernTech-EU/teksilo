@@ -8,6 +8,13 @@ impl WidgetTree {
     /// the result to the `accesskit_winit::Adapter`.
     /// Caches the result and only rebuilds when layout has changed.
     pub fn sync_accessibility(&mut self) -> accesskit::TreeUpdate {
+        // Explicit re-walk request (e.g. `SceneView` materialised / destroyed a
+        // scene widget, or an a11y-only scene mutation). A relayout no longer
+        // sets `a11y_dirty` on its own, so this is the lever; drain it before
+        // the cache check below.
+        if self.a11y_update_requested.replace(false) {
+            self.a11y_dirty = true;
+        }
         // Shortcut registry rebinds bump
         // `ShortcutRegistry::version()`. The `access_shortcut_id`
         // resolution in the walker reads the live registry, so any
@@ -19,6 +26,20 @@ impl WidgetTree {
         if current_shortcut_version != self.last_synced_shortcut_version {
             self.a11y_dirty = true;
             self.last_synced_shortcut_version = current_shortcut_version;
+        }
+
+        // Locale switches make `access_label(tr!(...))` (stored as a
+        // locale-bound `Prop<String>`) resolve to a new value. The
+        // override props are read in `apply()` during the walk, so the
+        // tree must re-walk for the new announcement to surface —
+        // otherwise the screen reader keeps the old-locale string until
+        // something else dirties the tree. Mirror the shortcut-version
+        // guard above. (Same-direction switches don't rebuild the
+        // composite, so this is the only thing that refreshes AT labels.)
+        let current_locale = self.locale_signal.get();
+        if current_locale != self.last_synced_locale {
+            self.a11y_dirty = true;
+            self.last_synced_locale = current_locale;
         }
 
         if !self.a11y_dirty
@@ -1339,7 +1360,7 @@ mod tests {
     #[test]
     fn access_custom_action_uses_localized_label() {
         let mut tree = WidgetTree::new();
-        let id = tree.add(FillWidget::new().access_custom_action("Reply", |_ctx| {}));
+        let id = tree.add(FillWidget::new().access_custom_action_literal("Reply", |_ctx| {}));
         tree.layout(SizeProposal::exact(50.0, 50.0));
         let update = tree.sync_accessibility();
         let node = find_node(&update, id).unwrap();
@@ -1360,8 +1381,8 @@ mod tests {
         let mut tree = WidgetTree::new();
         let id = tree.add(
             FillWidget::new()
-                .access_custom_action("First", move |_| f.set(true))
-                .access_custom_action("Second", move |_| s.set(true)),
+                .access_custom_action_literal("First", move |_| f.set(true))
+                .access_custom_action_literal("Second", move |_| s.set(true)),
         );
         tree.layout(SizeProposal::exact(50.0, 50.0));
         tree.dispatch_event(crate::event::WidgetEvent::AccessAction {
@@ -1403,20 +1424,19 @@ mod tests {
     }
 
     // Test 26 — i18n integration via bastyde_i18n's
-    // `From<LocalizedString> for String` impl. We don't import
+    // `From<LocalizedString> for Prop<String>` impl. We don't import
     // bastyde-i18n here (it depends on bastyde-core), but the conversion
-    // works the same way for any `Into<String>` that resolves to a
-    // string at builder-call time. This stand-in test covers the
-    // same code path the FTL-bundle case takes.
+    // works the same way for any `Into<Prop<String>>`. This stand-in
+    // covers the same code path the FTL-bundle case takes.
     #[test]
     fn access_label_accepts_resolved_string_via_into() {
         // Simulate a `LocalizedString`-like wrapper: any type that
-        // `impl Into<String>`. The override surface receives the
-        // resolved String regardless of source.
+        // `impl Into<Prop<String>>`. The override surface stores the
+        // prop and the walker reads its current value.
         struct ResolvedAtCall(String);
-        impl From<ResolvedAtCall> for String {
-            fn from(v: ResolvedAtCall) -> String {
-                v.0
+        impl From<ResolvedAtCall> for crate::signal::Prop<String> {
+            fn from(v: ResolvedAtCall) -> crate::signal::Prop<String> {
+                crate::signal::Prop::Static(v.0)
             }
         }
         let mut tree = WidgetTree::new();

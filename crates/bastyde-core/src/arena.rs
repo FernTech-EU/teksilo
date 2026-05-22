@@ -127,6 +127,20 @@ pub struct WidgetNode {
     /// widget). The `Scale` and `Rotate` widgets set this on their own
     /// node.
     pub(crate) transform_prop: Option<Prop<bastyde_canvas::Transform2D>>,
+    /// Whether [`transform_prop`](Self::transform_prop) transforms this node's
+    /// **content** within a fixed parent-space viewport (`true`), versus
+    /// transforming the **node itself** (`false`, the default).
+    ///
+    /// `Scale` / `Rotate` are *self* transforms: the node's own bounds move
+    /// with the transform, so hit-testing inverse-applies the transform before
+    /// the bounds test (a click lands where the scaled/rotated visual is).
+    ///
+    /// `SceneView` is a *content* transform: its bounds are a fixed screen
+    /// viewport and the pan/zoom only moves its content, so hit-testing must
+    /// test the bounds in parent space (keeping the whole visible viewport
+    /// interactive at any pan) and apply the transform only when descending
+    /// into children. Set via `BuildContext::set_content_transform`.
+    pub(crate) content_transform: bool,
     /// Optional Gaussian-equivalent blur radius applied to this widget's
     /// entire subtree during paint. The render walker emits
     /// `BeginBlurredSubtree { bounds, radius }` before walking the
@@ -143,6 +157,13 @@ pub struct WidgetNode {
     /// Cached paint output for this widget (excludes children).
     /// Reused when `needs_paint` is false to avoid re-running `paint()`.
     pub(crate) cached_paint: Option<RenderFrame>,
+    /// Cached foreground output for widgets that override
+    /// [`Widget::post_paint`](crate::widget::Widget::post_paint) — the
+    /// draws emitted *after* this widget's children. Separate frame from
+    /// `cached_paint` because it lands at a different position in
+    /// `draw_order` (after the child subtree). Reused on the same
+    /// `needs_paint` gate.
+    pub(crate) cached_post_paint: Option<RenderFrame>,
     /// The `WidgetTree::paint_epoch` at which this widget's bounds were
     /// last observed inside the window viewport by the paint pass.
     /// The animation scheduler uses this to pause looping animations
@@ -281,8 +302,10 @@ impl WidgetArena {
             event_pass_through: false,
             opacity_prop: None,
             transform_prop: None,
+            content_transform: false,
             blur_prop: None,
             cached_paint: None,
+            cached_post_paint: None,
             last_painted_epoch: 0,
             handlers: EventHandlers::new(),
             external_handlers: EventHandlers::new(),
@@ -340,8 +363,10 @@ impl WidgetArena {
             event_pass_through: false,
             opacity_prop: None,
             transform_prop: None,
+            content_transform: false,
             blur_prop: None,
             cached_paint: None,
+            cached_post_paint: None,
             last_painted_epoch: 0,
             handlers: EventHandlers::new(),
             external_handlers: EventHandlers::new(),
@@ -505,6 +530,19 @@ impl WidgetArena {
         self.hit_test_recursive(start, point, None)
     }
 
+    /// Like [`hit_test_in_subtree`](Self::hit_test_in_subtree) but also
+    /// excludes a widget (and its descendants) from the walk. Lets the
+    /// overlay / drag-and-drop hit-test reuse the single canonical recursion
+    /// in [`hit_test_recursive`] instead of duplicating it.
+    pub fn hit_test_in_subtree_excluding(
+        &self,
+        start: WidgetId,
+        point: bastyde_canvas::Point,
+        exclude: Option<WidgetId>,
+    ) -> Option<WidgetId> {
+        self.hit_test_recursive(start, point, exclude)
+    }
+
     fn hit_test_recursive(
         &self,
         id: WidgetId,
@@ -514,20 +552,38 @@ impl WidgetArena {
         if !self.is_active(id) || Some(id) == exclude {
             return None;
         }
-        // If this node carries a `set_transform` scope, the render walker
-        // pushes that transform onto its stack around this node's own
-        // paint AND its subtree. Hit-testing must mirror that composition:
-        // the input point arrives in this node's parent-effective space;
-        // apply this node's transform inverse once, then both the node's
-        // own bounds test and the recursion into children operate in the
-        // new local space. Identity transforms (and missing transform_prop)
-        // are skipped so the hot path stays scalar.
-        let local_point = match self
+        // The input point arrives in this node's parent-effective space. A
+        // `set_transform` scope is composed by the render walker around this
+        // node's subtree, so hit-testing mirrors it by inverse-applying the
+        // transform once. *Which* rectangle the transform applies to depends
+        // on whether it's a **content** transform or a **self** transform
+        // (see `WidgetNode::content_transform`):
+        //
+        // * A **content** transform (`content_transform`, e.g. `SceneView`) is
+        //   a fixed viewport: its bounds are a rectangle in PARENT space and
+        //   the transform pans / zooms only its CONTENT. Test the bounds
+        //   against the parent-space point; inverse-transform only for
+        //   descending into children, so the whole visible viewport stays
+        //   interactive regardless of pan / zoom. (Without this, panning the
+        //   content shifts the hittable region off the viewport — clicks /
+        //   wheel over the visible scene fall through to whatever is behind.)
+        // * A **self** transform (`Scale` / `Rotate`, whose own bounds move
+        //   with the transform) inverse-transforms first, then tests its
+        //   bounds in the resulting local space (a click lands where the
+        //   scaled / rotated visual actually is).
+        //
+        // Identity / missing transforms collapse both paths to the scalar
+        // case, so the hot path stays cheap. `content_transform` is
+        // `SceneView`-only today, so this only changes SceneView hit-testing;
+        // `Scale` / `Rotate` (also `clips_children`) keep the self-transform
+        // path.
+        let transform = self
             .get(id)
             .and_then(|n| n.transform_prop.as_ref())
             .map(|p| p.get())
-            .filter(|t| !t.is_identity())
-        {
+            .filter(|t| !t.is_identity());
+        let content_transform = self.get(id).map(|n| n.content_transform).unwrap_or(false);
+        let child_point = match transform {
             Some(t) => match t.inverse() {
                 Some(inv) => inv.apply_point(point),
                 // A degenerate transform (collapsed axis) hides the
@@ -536,14 +592,36 @@ impl WidgetArena {
             },
             None => point,
         };
+        // Content-transform nodes test their (parent-space) viewport against
+        // the incoming point; everything else tests in the inverse-transformed
+        // local space.
+        let bounds_point = if content_transform {
+            point
+        } else {
+            child_point
+        };
         let bounds = self.bounds(id);
-        if !bounds.contains(local_point) {
+        if !bounds.contains(bounds_point) {
+            return None;
+        }
+        // Shape rejection: a widget with a non-rectangular silhouette (an
+        // ellipse / cloud scene node, a circular handle) can reject a point
+        // that is inside its bounding box but outside its actual shape via
+        // `Widget::hit_shape`. Returning None here lets the caller's
+        // reverse-sibling loop fall through to whatever is painted
+        // underneath — the same path `event_pass_through` takes, but
+        // shape-aware (only the rejected sub-region falls through, not the
+        // whole widget). Default `hit_shape` returns true, so rectangular
+        // widgets take this branch for free with no behavior change.
+        if let Some(node) = self.get(id)
+            && !node.widget.hit_shape(bounds_point, bounds)
+        {
             return None;
         }
         let pass_through = self.get(id).map(|n| n.event_pass_through).unwrap_or(false);
         let children: Vec<WidgetId> = self.children(id).to_vec();
         for &child in children.iter().rev() {
-            if let Some(hit) = self.hit_test_recursive(child, local_point, exclude) {
+            if let Some(hit) = self.hit_test_recursive(child, child_point, exclude) {
                 return Some(hit);
             }
         }
@@ -894,6 +972,7 @@ impl WidgetArena {
             node.dirty.needs_layout = true;
             node.dirty.needs_paint = true;
             node.cached_paint = None;
+            node.cached_post_paint = None;
         }
     }
 
@@ -963,5 +1042,133 @@ mod tests {
         let roots = arena.roots();
         assert_eq!(roots.len(), 1);
         assert_eq!(roots[0], root);
+    }
+
+    #[test]
+    fn content_transform_node_claims_viewport_in_parent_space() {
+        // A content-transform node (the SceneView pattern) is a fixed
+        // viewport: its bounds are tested in PARENT space and the transform
+        // only positions its content, so the whole visible viewport stays
+        // hittable regardless of the content pan/zoom. Before the fix, the
+        // bounds were tested in content space, so a content pan shifted the
+        // hittable region off the viewport.
+        use bastyde_canvas::{Point, Rect, Transform2D};
+        let mut arena = WidgetArena::new();
+        let id = arena.insert(Box::new(FillWidget::new()));
+        {
+            let node = arena.get_mut(id).unwrap();
+            node.bounds = Rect::new(0.0, 0.0, 200.0, 100.0);
+            node.clips_children = true;
+            node.content_transform = true;
+            // Content panned by (50, 30).
+            node.transform_prop = Some(Prop::Static(Transform2D::translate(50.0, 30.0)));
+        }
+        // Points across the whole parent-space viewport hit, regardless of the
+        // pan (these all missed before the fix).
+        assert_eq!(arena.hit_test_at(Point::new(10.0, 10.0), None), Some(id));
+        assert_eq!(arena.hit_test_at(Point::new(100.0, 50.0), None), Some(id));
+        assert_eq!(arena.hit_test_at(Point::new(199.0, 99.0), None), Some(id));
+        // Outside the viewport: miss.
+        assert_eq!(arena.hit_test_at(Point::new(250.0, 50.0), None), None);
+    }
+
+    #[test]
+    fn self_transform_node_tests_bounds_in_local_space() {
+        // Regression guard: a *self* transform wrapper (Scale / Rotate, NOT a
+        // content transform) keeps the original semantics — its own bounds
+        // move with the transform, so the point is inverse-transformed before
+        // the bounds test. `clips_children` is irrelevant here (Scale clips
+        // too); only `content_transform` selects the viewport path.
+        use bastyde_canvas::{Point, Rect, Transform2D};
+        let mut arena = WidgetArena::new();
+        let id = arena.insert(Box::new(FillWidget::new()));
+        {
+            let node = arena.get_mut(id).unwrap();
+            node.bounds = Rect::new(0.0, 0.0, 100.0, 100.0);
+            node.clips_children = true; // Scale clips, but is NOT content_transform.
+            node.content_transform = false;
+            // Visually scaled to 50x50 around the origin.
+            node.transform_prop = Some(Prop::Static(Transform2D::scale(0.5, 0.5)));
+        }
+        // Inside the scaled-down 50x50 visual → hit.
+        assert_eq!(arena.hit_test_at(Point::new(25.0, 25.0), None), Some(id));
+        // Past the scaled-down visual (but inside the un-scaled 100x100 bounds
+        // in parent space) → miss, because the bounds test is in local space.
+        assert_eq!(arena.hit_test_at(Point::new(75.0, 75.0), None), None);
+    }
+
+    #[test]
+    fn nested_content_transform_nodes_each_claim_their_viewport() {
+        // A content-transform node embedded inside another (the nested-
+        // SceneView case): each level tests its own viewport bounds in its
+        // parent's space, and only the transform is applied when descending.
+        // The inner viewport stays hittable regardless of either node's pan.
+        use bastyde_canvas::{Point, Rect, Transform2D};
+        let mut arena = WidgetArena::new();
+        let outer = arena.insert(Box::new(FillWidget::new()));
+        let inner = arena.insert_child(outer, Box::new(FillWidget::new()));
+        {
+            let n = arena.get_mut(outer).unwrap();
+            n.bounds = Rect::new(0.0, 0.0, 200.0, 200.0);
+            n.clips_children = true;
+            n.content_transform = true;
+            n.transform_prop = Some(Prop::Static(Transform2D::translate(20.0, 20.0)));
+        }
+        {
+            let n = arena.get_mut(inner).unwrap();
+            // Inner viewport expressed in the OUTER's content space.
+            n.bounds = Rect::new(10.0, 10.0, 50.0, 50.0);
+            n.clips_children = true;
+            n.content_transform = true;
+            n.transform_prop = Some(Prop::Static(Transform2D::translate(5.0, 5.0)));
+        }
+        // Screen (40,40) → outer-content (20,20) ∈ inner viewport → reaches inner.
+        assert_eq!(arena.hit_test_at(Point::new(40.0, 40.0), None), Some(inner));
+        // Screen (5,5) → outer-content (-15,-15) ∉ inner viewport → reaches outer.
+        assert_eq!(arena.hit_test_at(Point::new(5.0, 5.0), None), Some(outer));
+    }
+
+    /// Accepts only the right half of its bounds via `hit_shape`; the left
+    /// half is rejected so a click there falls through to a sibling beneath.
+    #[derive(Debug)]
+    struct RightHalfWidget;
+
+    impl crate::widget::Widget for RightHalfWidget {
+        fn layout_response(
+            &self,
+            proposal: bastyde_canvas::SizeProposal,
+            _ctx: &crate::widget::LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn hit_shape(
+            &self,
+            local_point: bastyde_canvas::Point,
+            bounds: bastyde_canvas::Rect,
+        ) -> bool {
+            local_point.x >= bounds.x + bounds.width / 2.0
+        }
+    }
+
+    #[test]
+    fn hit_shape_rejection_falls_through_to_sibling_underneath() {
+        // Two overlapping siblings under a common parent. `lower` is a
+        // full-rect FillWidget; `upper` (inserted later → painted on top,
+        // hit-tested first) rejects its left half via `hit_shape`. A click in
+        // the rejected left half must reach `lower` underneath; a click in the
+        // accepted right half must hit `upper`.
+        use bastyde_canvas::{Point, Rect};
+        let mut arena = WidgetArena::new();
+        let parent = arena.insert(Box::new(FillWidget::new()));
+        let lower = arena.insert_child(parent, Box::new(FillWidget::new()));
+        let upper = arena.insert_child(parent, Box::new(RightHalfWidget));
+        for id in [parent, lower, upper] {
+            arena.get_mut(id).unwrap().bounds = Rect::new(0.0, 0.0, 100.0, 100.0);
+        }
+        // Right half: upper accepts → hit upper.
+        assert_eq!(arena.hit_test_at(Point::new(75.0, 50.0), None), Some(upper));
+        // Left half: upper rejects via hit_shape → falls through to lower.
+        assert_eq!(arena.hit_test_at(Point::new(25.0, 50.0), None), Some(lower));
     }
 }

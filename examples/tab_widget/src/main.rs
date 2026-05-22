@@ -93,8 +93,8 @@ fn new_doc_tab(n: u32) -> TabHandle {
         TabId::fresh(),
         "doc",
         TabInfo::new()
-            .title(LocalizedString::literal(title.clone()))
-            .tooltip(LocalizedString::literal(format!("Document #{n}")))
+            .title(lit!(title.clone()))
+            .tooltip(lit!(format!("Document #{n}")))
             .closable(true),
         DocState {
             title,
@@ -117,7 +117,7 @@ impl Widget for Root {
         //
         // Bar leading slot: a small breadcrumb-style label so the
         // bar visually anchors at a recognizable position.
-        let leading_slot = TextWidget::new_literal(" Showcase ")
+        let leading_slot = TextWidget::new(lit!(" Showcase "))
             .style(TextStyleRole::SmallBold)
             .color(TextRole::Secondary);
 
@@ -129,9 +129,9 @@ impl Widget for Root {
         // The + glyph isn't a built-in icon yet; a small text Button
         // with a literal "+" glyph reads cleanly in the trailing
         // slot.
-        let new_tab_btn = Button::new_literal("+ New tab")
+        let new_tab_btn = Button::new(lit!("+ New tab"))
             .variant(ButtonVariant::Ghost)
-            .tooltip(LocalizedString::literal("Open new document tab"))
+            .tooltip(lit!("Open new document tab"))
             .on_activate_fn(move |_ctx: &mut EventContext| {
                 let n = new_tab_n.get();
                 new_tab_n.set(n + 1);
@@ -139,9 +139,9 @@ impl Widget for Root {
             });
 
         let is_dark = self.is_dark.clone();
-        let theme_btn = Button::new_literal("Theme")
+        let theme_btn = Button::new(lit!("Theme"))
             .variant(ButtonVariant::Ghost)
-            .tooltip(LocalizedString::literal("Toggle theme"))
+            .tooltip(lit!("Toggle theme"))
             .on_activate_fn(move |ctx: &mut EventContext| {
                 let next = !is_dark.get();
                 is_dark.set(next);
@@ -153,9 +153,9 @@ impl Widget for Root {
             });
 
         let orientation_for_btn = self.orientation.clone();
-        let orient_btn = Button::new_literal("Orient")
+        let orient_btn = Button::new(lit!("Orient"))
             .variant(ButtonVariant::Ghost)
-            .tooltip(LocalizedString::literal("Toggle bar orientation"))
+            .tooltip(lit!("Toggle bar orientation"))
             .on_activate_fn(move |_ctx: &mut EventContext| {
                 let next = match orientation_for_btn.get() {
                     TabBarOrientation::Horizontal => TabBarOrientation::Vertical,
@@ -165,9 +165,9 @@ impl Widget for Root {
             });
 
         let sizing_for_btn = self.sizing.clone();
-        let size_btn = Button::new_literal("Sizing")
+        let size_btn = Button::new(lit!("Sizing"))
             .variant(ButtonVariant::Ghost)
-            .tooltip(LocalizedString::literal(
+            .tooltip(lit!(
                 "Toggle Shared (uniform tab widths) ↔ Independent (size to content)",
             ))
             .on_activate_fn(move |_ctx: &mut EventContext| {
@@ -211,8 +211,8 @@ impl Widget for Root {
             .static_tab_with_id(
                 self.welcome_id,
                 TabInfo::new()
-                    .title(LocalizedString::literal("Welcome"))
-                    .tooltip(LocalizedString::literal("Welcome — start here"))
+                    .title(lit!("Welcome"))
+                    .tooltip(lit!("Welcome — start here"))
                     .icon(|| IconWidget::checkmark(16.0))
                     .pinned(true),
                 welcome,
@@ -221,7 +221,7 @@ impl Widget for Root {
             .static_tab_with_id(
                 self.settings_id,
                 TabInfo::new()
-                    .title(LocalizedString::literal("Settings"))
+                    .title(lit!("Settings"))
                     .icon(|| IconWidget::checkmark(16.0)),
                 settings,
             )
@@ -229,10 +229,8 @@ impl Widget for Root {
             .static_tab_with_id(
                 self.locked_id,
                 TabInfo::new()
-                    .title(LocalizedString::literal("Locked"))
-                    .tooltip(LocalizedString::literal(
-                        "Disabled tabs cannot be activated",
-                    ))
+                    .title(lit!("Locked"))
+                    .tooltip(lit!("Disabled tabs cannot be activated",))
                     .enabled(false),
                 locked,
             )
@@ -261,9 +259,9 @@ impl Widget for Root {
                         })
                         .unwrap_or_else(|| "this tab".to_string());
                     let model_for_cb = model.clone();
-                    MessageBox::question_literal("Close tab?")
-                        .text_literal(format!("Are you sure you want to close \"{title}\"?"))
-                        .informative_text_literal("Unsaved changes in the tab will be lost.")
+                    MessageBox::question(lit!("Close tab?"))
+                        .text(lit!(format!("Are you sure you want to close \"{title}\"?")))
+                        .informative_text(lit!("Unsaved changes in the tab will be lost."))
                         .buttons(MessageBoxButtons::YesNo)
                         .default_button(StandardButton::No)
                         .escape_button(StandardButton::No)
@@ -319,9 +317,9 @@ impl Widget for Root {
 
         let breadcrumb = ctx.add(
             Breadcrumb::new()
-                .item(BreadcrumbItem::new_literal("Library"))
-                .item(BreadcrumbItem::new_literal("Components"))
-                .item(BreadcrumbItem::current_literal("TabWidget")),
+                .item(BreadcrumbItem::new(lit!("Library")))
+                .item(BreadcrumbItem::new(lit!("Components")))
+                .item(BreadcrumbItem::current(lit!("TabWidget"))),
         );
 
         let header = ctx.add(
@@ -329,15 +327,15 @@ impl Widget for Root {
                 .spacing(8.0)
                 .add_child(breadcrumb)
                 .child(
-                    TextWidget::new_literal("TabWidget — full showcase")
+                    TextWidget::new(lit!("TabWidget — full showcase"))
                         .style(TextStyleRole::BodyBold)
                         .color(TextRole::Primary),
                 )
                 .child(
-                    TextWidget::new_literal(
+                    TextWidget::new(lit!(
                         "Pinned + closable + dynamic + drag-reorder + overflow dropdown + \
-                         orientation toggle + per-tab tooltip + accessibility custom actions.",
-                    )
+                         orientation toggle + per-tab tooltip + accessibility custom actions."
+                    ))
                     .style(TextStyleRole::Body)
                     .color(TextRole::Secondary),
                 ),
@@ -347,12 +345,12 @@ impl Widget for Root {
             HStack::new()
                 .spacing(12.0)
                 .child(
-                    TextWidget::new_literal("Active:")
+                    TextWidget::new(lit!("Active:"))
                         .style(TextStyleRole::Small)
                         .color(TextRole::Secondary),
                 )
                 .child(
-                    TextWidget::new_literal("")
+                    TextWidget::new(lit!(""))
                         .bind_text(selected_summary)
                         .style(TextStyleRole::Small)
                         .color(TextRole::Primary),
@@ -433,7 +431,7 @@ impl TabHandleExt for TabHandle {
 fn static_welcome_tab() -> impl Widget + 'static {
     Card::new()
         .header(
-            TextWidget::new_literal("Welcome to TabWidget")
+            TextWidget::new(lit!("Welcome to TabWidget"))
                 .style(TextStyleRole::BodyBold)
                 .color(TextRole::Primary),
         )
@@ -441,20 +439,20 @@ fn static_welcome_tab() -> impl Widget + 'static {
             VStack::new()
                 .spacing(10.0)
                 .child(
-                    TextWidget::new_literal(
+                    TextWidget::new(lit!(
                         "This first tab is pinned: icon-only, fixed-width, no close \
                          button. Drag a non-pinned tab into the leading strip to pin \
-                         it (the bar will fire `on_pin_toggle`).",
-                    )
+                         it (the bar will fire `on_pin_toggle`)."
+                    ))
                     .style(TextStyleRole::Body)
                     .color(TextRole::Primary),
                 )
                 .child(
                     HStack::new()
                         .spacing(8.0)
-                        .child(Badge::new_literal("Pinned"))
-                        .child(Badge::new_literal("Icon-only"))
-                        .child(Badge::new_literal("No close")),
+                        .child(Badge::new(lit!("Pinned")))
+                        .child(Badge::new(lit!("Icon-only")))
+                        .child(Badge::new(lit!("No close"))),
                 ),
         )
 }
@@ -464,16 +462,16 @@ fn static_locked_tab() -> impl Widget + 'static {
         VStack::new()
             .spacing(10.0)
             .child(
-                TextWidget::new_literal("Locked")
+                TextWidget::new(lit!("Locked"))
                     .style(TextStyleRole::BodyBold)
                     .color(TextRole::Primary),
             )
             .child(
-                TextWidget::new_literal(
+                TextWidget::new(lit!(
                     "Disabled tabs are visible but cannot be activated. Keyboard \
                      arrow nav skips over them — try Tab + ArrowRight from the \
-                     active tab.",
-                )
+                     active tab."
+                ))
                 .style(TextStyleRole::Body)
                 .color(TextRole::Secondary),
             ),
@@ -483,7 +481,7 @@ fn static_locked_tab() -> impl Widget + 'static {
 fn static_settings_tab(orientation: Signal<TabBarOrientation>) -> impl Widget + 'static {
     let toggle_orient = {
         let o = orientation.clone();
-        Button::new_literal("Toggle orientation")
+        Button::new(lit!("Toggle orientation"))
             .variant(ButtonVariant::Ghost)
             .on_activate_fn(move |_ctx: &mut EventContext| {
                 let next = match o.get() {
@@ -498,18 +496,18 @@ fn static_settings_tab(orientation: Signal<TabBarOrientation>) -> impl Widget + 
         VStack::new()
             .spacing(12.0)
             .child(
-                TextWidget::new_literal("Settings")
+                TextWidget::new(lit!("Settings"))
                     .style(TextStyleRole::BodyBold)
                     .color(TextRole::Primary),
             )
             .child(
-                TextWidget::new_literal(
+                TextWidget::new(lit!(
                     "Bar configuration knobs are forwarded from `TabWidget` to the \
                      inner `TabBar`. Try the orientation toggle below — the bar \
                      flips between top (Horizontal) and leading edge (Vertical), \
                      and per-tab state survives the rebuild because content panes \
-                     are memoized.",
-                )
+                     are memoized."
+                ))
                 .style(TextStyleRole::Body)
                 .color(TextRole::Primary),
             )
@@ -517,10 +515,10 @@ fn static_settings_tab(orientation: Signal<TabBarOrientation>) -> impl Widget + 
             .child(
                 HStack::new()
                     .spacing(8.0)
-                    .child(Badge::new_literal("Reorderable"))
-                    .child(Badge::new_literal("Closable docs"))
-                    .child(Badge::new_literal("Overflow dropdown"))
-                    .child(Badge::new_literal("Custom AT actions")),
+                    .child(Badge::new(lit!("Reorderable")))
+                    .child(Badge::new(lit!("Closable docs")))
+                    .child(Badge::new(lit!("Overflow dropdown")))
+                    .child(Badge::new(lit!("Custom AT actions"))),
             ),
     )
 }
@@ -531,7 +529,7 @@ fn doc_pane(state: &DocState) -> impl Widget + 'static {
     let edits = state.edits.clone();
     let title = state.title.clone();
 
-    let edit_btn = Button::new_literal("Make an edit")
+    let edit_btn = Button::new(lit!("Make an edit"))
         .variant(ButtonVariant::Filled)
         .on_activate_fn({
             let edits = edits.clone();
@@ -540,7 +538,7 @@ fn doc_pane(state: &DocState) -> impl Widget + 'static {
 
     Card::new()
         .header(
-            TextWidget::new_literal(title.clone())
+            TextWidget::new(lit!(title.clone()))
                 .style(TextStyleRole::BodyBold)
                 .color(TextRole::Primary),
         )
@@ -548,12 +546,12 @@ fn doc_pane(state: &DocState) -> impl Widget + 'static {
             VStack::new()
                 .spacing(10.0)
                 .child(
-                    TextWidget::new_literal(
+                    TextWidget::new(lit!(
                         "Heavy state (here: an `edits: Signal<usize>` counter) lives \
                          on the `TabHandle::payload`, not in the widget. The pane \
                          widget reads the payload via the registered factory — \
-                         reorders and pin toggles preserve the count.",
-                    )
+                         reorders and pin toggles preserve the count."
+                    ))
                     .style(TextStyleRole::Body)
                     .color(TextRole::Primary),
                 )
@@ -561,12 +559,12 @@ fn doc_pane(state: &DocState) -> impl Widget + 'static {
                     HStack::new()
                         .spacing(8.0)
                         .child(
-                            TextWidget::new_literal("Edits:")
+                            TextWidget::new(lit!("Edits:"))
                                 .style(TextStyleRole::Small)
                                 .color(TextRole::Secondary),
                         )
                         .child(
-                            TextWidget::new_literal("")
+                            TextWidget::new(lit!(""))
                                 .bind_text(edits.map(|n| n.to_string()))
                                 .style(TextStyleRole::BodyBold)
                                 .color(TextRole::Accent),

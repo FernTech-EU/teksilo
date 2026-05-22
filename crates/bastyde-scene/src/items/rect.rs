@@ -17,7 +17,7 @@ use crate::items::{AccessSubtreeMode, ItemA11yOverrides};
 pub struct RectItem {
     local_bounds: Rect,
     fill: Option<Color>,
-    stroke: Option<(Color, f32)>,
+    stroke: Option<(Color, StrokeStyle)>,
     label: Option<String>,
     flags: ItemFlags,
     a11y: ItemA11yOverrides,
@@ -45,10 +45,18 @@ impl RectItem {
         self
     }
 
-    /// Stroke color and width (scene-coord pixels — they scale with
-    /// the view zoom).
+    /// Stroke color and width in **scene-coordinate** pixels — the border
+    /// scales with the view zoom (a 1px border becomes 2px at 2× zoom).
     pub fn stroke(mut self, color: Color, width: f32) -> Self {
-        self.stroke = Some((color, width.max(0.0)));
+        self.stroke = Some((color, StrokeStyle::solid(width.max(0.0))));
+        self
+    }
+
+    /// Cosmetic stroke: the border holds a constant **device-pixel** width at
+    /// any zoom (a hairline that never thins out or thickens). Ideal for grid
+    /// cells and card outlines in a pannable/zoomable scene.
+    pub fn stroke_cosmetic(mut self, color: Color, width: f32) -> Self {
+        self.stroke = Some((color, StrokeStyle::hairline(width.max(0.0))));
         self
     }
 
@@ -59,12 +67,6 @@ impl RectItem {
         let ls: bastyde_i18n::LocalizedString = label.into();
         self.label = Some(ls.resolve_now());
         self
-    }
-
-    /// Untranslated twin of [`label`](Self::label).
-    #[doc(hidden)]
-    pub fn label_literal(self, label: impl Into<String>) -> Self {
-        self.label(bastyde_i18n::LocalizedString::literal(label))
     }
 
     /// Opt the rectangle into drag-to-move.
@@ -89,8 +91,8 @@ impl SceneItem for RectItem {
         if let Some(fill) = self.fill {
             canvas.fill_rect(self.local_bounds, fill);
         }
-        if let Some((color, width)) = self.stroke {
-            canvas.stroke_rect(self.local_bounds, color, StrokeStyle::solid(width));
+        if let Some((color, style)) = &self.stroke {
+            canvas.stroke_rect(self.local_bounds, *color, style.clone());
         }
     }
 
@@ -98,7 +100,7 @@ impl SceneItem for RectItem {
         // Fill dominates; fall through to stroke; fall through to
         // the default grey if the rect has no visible chrome.
         self.fill
-            .or_else(|| self.stroke.map(|(c, _)| c))
+            .or_else(|| self.stroke.as_ref().map(|(c, _)| *c))
             .unwrap_or_else(|| bastyde_tokens::Color::new(0.6, 0.6, 0.6, 1.0))
     }
 

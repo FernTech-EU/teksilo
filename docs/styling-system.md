@@ -378,6 +378,7 @@ across six families:
 | `ListView` / `TreeView` (container chrome) | `ListContainerStyle` | `RecipeListContainerStyle` | `style_slots.list_container` |
 | `TableView` / `TreeTable` (header + sort + row chrome) | `TableStyle` ¹ | `RecipeTableStyle` | `style_slots.table` |
 | `DropZone` | `DropZoneStyle` | `RecipeDropZoneStyle` | `style_slots.drop_zone` |
+| `DropTarget` | `DropTargetStyle` | `RecipeDropTargetStyle` | `style_slots.drop_target` |
 
 **Overlays**
 

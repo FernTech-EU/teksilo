@@ -229,19 +229,6 @@ impl Avatar {
         self.style_override = Some(Rc::new(style));
         self
     }
-
-    /// Permanent `#[doc(hidden)]` shim for tests — wraps in
-    /// `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn with_initials_literal(initials: &str) -> Self {
-        Self::with_initials(bastyde_i18n::LocalizedString::literal(initials))
-    }
-
-    /// Permanent `#[doc(hidden)]` shim for tests.
-    #[doc(hidden)]
-    pub fn with_name_literal(name: &str) -> Self {
-        Self::with_name(bastyde_i18n::LocalizedString::literal(name))
-    }
 }
 
 // ─── Builder methods ───────────────────────────────────────────────────────
@@ -268,13 +255,6 @@ impl Avatar {
         let ls: bastyde_i18n::LocalizedString = initials.into();
         let raw = ls.resolve_now();
         self.initials = normalize_initials(&raw);
-        self
-    }
-
-    /// Permanent `#[doc(hidden)]` shim.
-    #[doc(hidden)]
-    pub fn fallback_initials_literal(mut self, initials: &str) -> Self {
-        self.initials = normalize_initials(initials);
         self
     }
 
@@ -343,26 +323,12 @@ impl Avatar {
         self
     }
 
-    /// Permanent `#[doc(hidden)]` shim.
-    #[doc(hidden)]
-    pub fn label_literal(mut self, label: &str) -> Self {
-        self.label = Some(label.to_string());
-        self
-    }
-
     /// Image alt text — distinct from `label` so a clickable avatar
     /// can have a button label like "Open user menu" while still
     /// describing the image as "Jane Doe".
     pub fn alt(mut self, alt: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = alt.into();
         self.alt = Some(ls.resolve_now());
-        self
-    }
-
-    /// Permanent `#[doc(hidden)]` shim.
-    #[doc(hidden)]
-    pub fn alt_literal(mut self, alt: &str) -> Self {
-        self.alt = Some(alt.to_string());
         self
     }
 
@@ -414,7 +380,7 @@ impl Avatar {
     ///
     /// ```ignore
     /// let user_name: Signal<String> = ctx.signal(String::new());
-    /// Avatar::with_initials_literal("?")        // logged-out fallback
+    /// Avatar::with_initials(lit!("?"))        // logged-out fallback
     ///     .bind_name(user_name.clone())
     ///     .bind_image(user_avatar_signal)
     /// ```
@@ -657,13 +623,25 @@ impl Widget for Avatar {
         // 3. Wire reactive content signals so flips re-run build().
         let registry = ctx.binding_registry();
         if let Some(sig) = &self.name_signal {
-            sig.bind_to(self_id, registry, bastyde_core::binding::BindingLevel::Rebuild);
+            sig.bind_to(
+                self_id,
+                registry,
+                bastyde_core::binding::BindingLevel::Rebuild,
+            );
         }
         if let Some(sig) = &self.image_signal {
-            sig.bind_to(self_id, registry, bastyde_core::binding::BindingLevel::Rebuild);
+            sig.bind_to(
+                self_id,
+                registry,
+                bastyde_core::binding::BindingLevel::Rebuild,
+            );
         }
         if let Some(sig) = &self.presence_signal {
-            sig.bind_to(self_id, registry, bastyde_core::binding::BindingLevel::Rebuild);
+            sig.bind_to(
+                self_id,
+                registry,
+                bastyde_core::binding::BindingLevel::Rebuild,
+            );
         }
         if let Some(sig) = &self.alt_signal {
             sig.bind_to(
@@ -953,6 +931,7 @@ mod tests {
     use crate::styles::recipe_avatar_style::fnv1a_64;
     use bastyde_core::widget::LayoutContext;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     // ── helpers ────────────────────────────────────────────────────────
 
@@ -1051,7 +1030,7 @@ mod tests {
     #[test]
     fn size_default_is_medium_32px() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let id = tree.add(Avatar::with_initials_literal("JD"));
+        let id = tree.add(Avatar::with_initials(lit!("JD")));
         tree.layout(SizeProposal {
             width: None,
             height: None,
@@ -1064,7 +1043,7 @@ mod tests {
     #[test]
     fn size_custom_passes_through() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let id = tree.add(Avatar::with_initials_literal("JD").size(AvatarSize::Custom(40.0)));
+        let id = tree.add(Avatar::with_initials(lit!("JD")).size(AvatarSize::Custom(40.0)));
         tree.layout(SizeProposal {
             width: None,
             height: None,
@@ -1081,7 +1060,7 @@ mod tests {
         // size variant. (`tree.layout(exact(...))` would clamp the
         // root's bounds to the proposal regardless, so we exercise
         // `size_that_fits` directly.)
-        let widget = Avatar::with_initials_literal("JD");
+        let widget = Avatar::with_initials(lit!("JD"));
         let theme = bastyde_core::presets::intui::light();
         let ctx = LayoutContext::for_testing(&theme);
         let s = widget
@@ -1103,7 +1082,7 @@ mod tests {
         ];
         for (variant, expected) in cases {
             let mut tree = WidgetTree::new().with_theme(theme.clone());
-            let id = tree.add(Avatar::with_initials_literal("X").size(variant));
+            let id = tree.add(Avatar::with_initials(lit!("X")).size(variant));
             tree.layout(SizeProposal {
                 width: None,
                 height: None,
@@ -1140,7 +1119,7 @@ mod tests {
 
     #[test]
     fn paint_initials_emits_a_shape_quad() {
-        let frame = render_avatar(Avatar::with_initials_literal("JD"));
+        let frame = render_avatar(Avatar::with_initials(lit!("JD")));
         assert!(
             count_shapes(&frame) >= 1,
             "expected at least one ShapeQuad (the bg circle)"
@@ -1149,8 +1128,8 @@ mod tests {
 
     #[test]
     fn paint_with_border_adds_extra_shape() {
-        let plain = render_avatar(Avatar::with_initials_literal("JD"));
-        let bordered = render_avatar(Avatar::with_initials_literal("JD").border(2.0));
+        let plain = render_avatar(Avatar::with_initials(lit!("JD")));
+        let bordered = render_avatar(Avatar::with_initials(lit!("JD")).border(2.0));
         assert!(
             count_shapes(&bordered) > count_shapes(&plain),
             "border path should add at least one extra Shape (the stroked ring)"
@@ -1159,9 +1138,9 @@ mod tests {
 
     #[test]
     fn paint_presence_adds_two_shapes() {
-        let plain = render_avatar(Avatar::with_initials_literal("JD"));
+        let plain = render_avatar(Avatar::with_initials(lit!("JD")));
         let with_dot =
-            render_avatar(Avatar::with_initials_literal("JD").presence(AvatarPresence::Online));
+            render_avatar(Avatar::with_initials(lit!("JD")).presence(AvatarPresence::Online));
         // Outline + dot.
         assert_eq!(count_shapes(&with_dot), count_shapes(&plain) + 2);
     }
@@ -1171,20 +1150,20 @@ mod tests {
         // `fill_rounded_rect` lands on the SDF Shape pipeline same
         // as `fill_circle`. Both shapes paint via Shape quads.
         let frame =
-            render_avatar(Avatar::with_initials_literal("JD").shape(AvatarShape::RoundedSquare));
+            render_avatar(Avatar::with_initials(lit!("JD")).shape(AvatarShape::RoundedSquare));
         assert!(count_shapes(&frame) >= 1);
     }
 
     #[test]
     fn paint_square_emits_shape() {
-        let frame = render_avatar(Avatar::with_initials_literal("JD").shape(AvatarShape::Square));
+        let frame = render_avatar(Avatar::with_initials(lit!("JD")).shape(AvatarShape::Square));
         assert!(count_shapes(&frame) >= 1);
     }
 
     #[test]
     fn paint_image_uses_image_pipeline() {
         let icon = rgba_solid(8, [50, 100, 200, 255]);
-        let frame = render_avatar(Avatar::with_image(&icon).alt_literal("avatar"));
+        let frame = render_avatar(Avatar::with_image(&icon).alt(lit!("avatar")));
         assert!(
             !frame.images.is_empty(),
             "image avatar should render an image"
@@ -1210,7 +1189,7 @@ mod tests {
     #[test]
     fn accessibility_initials_default_role_is_label() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let id = tree.add(Avatar::with_initials_literal("JD"));
+        let id = tree.add(Avatar::with_initials(lit!("JD")));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         let info = tree.accessibility_node(id);
         assert_eq!(info.role(), bastyde_core::accesskit::Role::Label);
@@ -1221,7 +1200,7 @@ mod tests {
     fn accessibility_image_default_role_is_image() {
         let icon = rgba_solid(8, [10, 20, 30, 255]);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let id = tree.add(Avatar::with_image(&icon).alt_literal("Jane Doe"));
+        let id = tree.add(Avatar::with_image(&icon).alt(lit!("Jane Doe")));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         let info = tree.accessibility_node(id);
         assert_eq!(info.role(), bastyde_core::accesskit::Role::Image);
@@ -1232,8 +1211,8 @@ mod tests {
     fn accessibility_clickable_becomes_button() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
-            Avatar::with_initials_literal("JD")
-                .label_literal("Open user menu")
+            Avatar::with_initials(lit!("JD"))
+                .label(lit!("Open user menu"))
                 .on_activate_fn(|_ctx| {}),
         );
         tree.layout(SizeProposal::exact(32.0, 32.0));
@@ -1253,7 +1232,7 @@ mod tests {
     #[test]
     fn accessibility_a11y_hidden_does_not_set_role() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let id = tree.add(Avatar::with_initials_literal("JD").a11y_hidden());
+        let id = tree.add(Avatar::with_initials(lit!("JD")).a11y_hidden());
         tree.layout(SizeProposal::exact(32.0, 32.0));
         let info = tree.accessibility_node(id);
         // Hidden nodes carry no name (the leaf-hidden path returned
@@ -1264,7 +1243,7 @@ mod tests {
     #[test]
     fn accessibility_label_overrides_initials() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let id = tree.add(Avatar::with_initials_literal("JD").label_literal("Jane Doe (offline)"));
+        let id = tree.add(Avatar::with_initials(lit!("JD")).label(lit!("Jane Doe (offline)")));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         let info = tree.accessibility_node(id);
         assert_eq!(info.name(), Some("Jane Doe (offline)"));
@@ -1273,7 +1252,7 @@ mod tests {
     #[test]
     fn accessibility_presence_appears_in_description() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let id = tree.add(Avatar::with_initials_literal("JD").presence(AvatarPresence::Online));
+        let id = tree.add(Avatar::with_initials(lit!("JD")).presence(AvatarPresence::Online));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         // Just verify it builds — `description` isn't surfaced by the
         // test introspection helper, but that the avatar accepts the
@@ -1295,8 +1274,8 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
             Avatar::with_image(&icon)
-                .alt_literal("Jane")
-                .fallback_initials_literal("JD")
+                .alt(lit!("Jane"))
+                .fallback_initials(lit!("JD"))
                 .image_visible(visible.clone()),
         );
         tree.layout(SizeProposal::exact(32.0, 32.0));
@@ -1341,7 +1320,7 @@ mod tests {
         // hash bg it'll be white, for others near-black. We force a
         // specific colour and verify it ends up in glyph metadata.
         let frame = render_avatar(
-            Avatar::with_initials_literal("JD").foreground(Color::from_rgb(1.0, 0.0, 0.5)),
+            Avatar::with_initials(lit!("JD")).foreground(Color::from_rgb(1.0, 0.0, 0.5)),
         );
         let target = Color::from_rgb(1.0, 0.0, 0.5);
         assert!(
@@ -1355,7 +1334,7 @@ mod tests {
     #[test]
     fn background_override_sets_bg_shape_color() {
         let frame = render_avatar(
-            Avatar::with_initials_literal("JD").background(Color::from_rgb(0.1, 0.7, 0.2)),
+            Avatar::with_initials(lit!("JD")).background(Color::from_rgb(0.1, 0.7, 0.2)),
         );
         let target = Color::from_rgb(0.1, 0.7, 0.2);
         assert!(
@@ -1371,7 +1350,7 @@ mod tests {
         // With a near-white background override and no foreground
         // override, auto-contrast should pick a dark text colour.
         let frame = render_avatar(
-            Avatar::with_initials_literal("JD").background(Color::from_rgb(0.95, 0.95, 0.95)),
+            Avatar::with_initials(lit!("JD")).background(Color::from_rgb(0.95, 0.95, 0.95)),
         );
         let glyphs = glyph_colors(&frame);
         assert!(
@@ -1391,7 +1370,7 @@ mod tests {
     #[test]
     fn auto_contrast_uses_overridden_bg_against_dark() {
         let frame = render_avatar(
-            Avatar::with_initials_literal("JD").background(Color::from_rgb(0.05, 0.05, 0.05)),
+            Avatar::with_initials(lit!("JD")).background(Color::from_rgb(0.05, 0.05, 0.05)),
         );
         let glyphs = glyph_colors(&frame);
         assert!(!glyphs.is_empty());
@@ -1410,8 +1389,8 @@ mod tests {
         // full names must pick distinct palette buckets — proving the
         // hash uses the seed (full name), not the initials.
         // ("Jane Doe" → JD, "Jules Dupont" → JD: identical initials.)
-        let a = render_avatar(Avatar::with_name_literal("Jane Doe"));
-        let b = render_avatar(Avatar::with_name_literal("Jules Dupont"));
+        let a = render_avatar(Avatar::with_name(lit!("Jane Doe")));
+        let b = render_avatar(Avatar::with_name(lit!("Jules Dupont")));
         let bg_a = shape_colors(&a)
             .into_iter()
             .next()
@@ -1440,8 +1419,8 @@ mod tests {
                 bastyde_canvas::MockTextBackend::new(),
             )));
         let id = tree.add(
-            Avatar::with_initials_literal("JD")
-                .label_literal("Open user menu")
+            Avatar::with_initials(lit!("JD"))
+                .label(lit!("Open user menu"))
                 .has_popup(bastyde_core::accesskit::HasPopup::Menu)
                 .expanded_when(open.clone())
                 .on_activate_fn(|_ctx| {}),
@@ -1465,7 +1444,7 @@ mod tests {
         // wrappers that supply external state.
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
-            Avatar::with_initials_literal("JD").has_popup(bastyde_core::accesskit::HasPopup::Menu),
+            Avatar::with_initials(lit!("JD")).has_popup(bastyde_core::accesskit::HasPopup::Menu),
         );
         tree.layout(SizeProposal::exact(32.0, 32.0));
         // Role stays Label since there's no on_activate_fn.
@@ -1488,8 +1467,8 @@ mod tests {
                 bastyde_canvas::MockTextBackend::new(),
             )));
         let id = tree.add(
-            Avatar::with_initials_literal("JD")
-                .label_literal("Open user menu")
+            Avatar::with_initials(lit!("JD"))
+                .label(lit!("Open user menu"))
                 .on_activate_fn(|_ctx| {}),
         );
         tree.layout(SizeProposal::exact(64.0, 64.0));
@@ -1516,8 +1495,8 @@ mod tests {
                 bastyde_canvas::MockTextBackend::new(),
             )));
         let id = tree.add(
-            Avatar::with_initials_literal("JD")
-                .label_literal("Click")
+            Avatar::with_initials(lit!("JD"))
+                .label(lit!("Click"))
                 .on_activate_fn(|_ctx| {}),
         );
         tree.layout(SizeProposal::exact(64.0, 64.0));
@@ -1543,7 +1522,7 @@ mod tests {
             .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
                 bastyde_canvas::MockTextBackend::new(),
             )));
-        let id = tree.add(Avatar::with_initials_literal("JD"));
+        let id = tree.add(Avatar::with_initials(lit!("JD")));
         tree.layout(SizeProposal::exact(64.0, 64.0));
         let baseline = tree.render().shapes.len();
         // Even if some test harness wrongly tried to focus a
@@ -1564,7 +1543,7 @@ mod tests {
         // announced once. The parent carries the canonical name.
         let icon = rgba_solid(8, [10, 20, 30, 255]);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let parent = tree.add(Avatar::with_image(&icon).alt_literal("Jane"));
+        let parent = tree.add(Avatar::with_image(&icon).alt(lit!("Jane")));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         let info = tree.accessibility_node(parent);
         assert_eq!(info.role(), bastyde_core::accesskit::Role::Image);
@@ -1578,7 +1557,7 @@ mod tests {
         // ImageWidget, but the test still exercises the builder-time
         // ordering: setting the shape after `with_image` works.
         let icon = rgba_solid(16, [10, 20, 30, 255]);
-        let a = Avatar::with_image(&icon).alt_literal("X");
+        let a = Avatar::with_image(&icon).alt(lit!("X"));
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let _ = tree.add(a.shape(AvatarShape::Square));
         tree.layout(SizeProposal::exact(32.0, 32.0));
@@ -1597,7 +1576,7 @@ mod tests {
         let mut tree = WidgetTree::new()
             .with_theme(bastyde_core::presets::intui::light())
             .with_text_backend(StdRc::new(RefCell::new(MockTextBackend::new())));
-        let id = tree.add(Avatar::with_initials_literal("?").bind_name(name.clone()));
+        let id = tree.add(Avatar::with_initials(lit!("?")).bind_name(name.clone()));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         // Empty name ⇒ derived initials = "?".
         assert_eq!(tree.accessibility_node(id).name(), Some("?"));
@@ -1622,8 +1601,8 @@ mod tests {
             .with_theme(bastyde_core::presets::intui::light())
             .with_text_backend(StdRc::new(RefCell::new(MockTextBackend::new())));
         let _id = tree.add(
-            Avatar::with_initials_literal("JD")
-                .alt_literal("Jane")
+            Avatar::with_initials(lit!("JD"))
+                .alt(lit!("Jane"))
                 .bind_image(image.clone()),
         );
         tree.layout(SizeProposal::exact(32.0, 32.0));
@@ -1666,8 +1645,8 @@ mod tests {
             .with_text_backend(StdRc::new(RefCell::new(MockTextBackend::new())));
         let _id = tree.add(
             Avatar::with_image(&icon)
-                .alt_literal("anything")
-                .fallback_initials_literal("XX")
+                .alt(lit!("anything"))
+                .fallback_initials(lit!("XX"))
                 .bind_image(image.clone()),
         );
         tree.layout(SizeProposal::exact(32.0, 32.0));
@@ -1700,7 +1679,7 @@ mod tests {
         use bastyde_core::signal::Signal;
         let label = Signal::new(Some("Profile".to_string()));
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let id = tree.add(Avatar::with_initials_literal("JD").bind_label(label.clone()));
+        let id = tree.add(Avatar::with_initials(lit!("JD")).bind_label(label.clone()));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         assert_eq!(tree.accessibility_node(id).name(), Some("Profile"));
 
@@ -1718,9 +1697,11 @@ mod tests {
             .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
                 bastyde_canvas::MockTextBackend::new(),
             )));
-        let id = tree.add(Avatar::with_initials_literal("JD").bind_presence(presence.clone()));
+        let id = tree.add(Avatar::with_initials(lit!("JD")).bind_presence(presence.clone()));
         tree.layout(SizeProposal::exact(32.0, 32.0));
-        let online_color = bastyde_core::presets::intui::light().colors.status_success_fg;
+        let online_color = bastyde_core::presets::intui::light()
+            .colors
+            .status_success_fg;
         assert!(
             shape_colors(&tree.render())
                 .iter()
@@ -1766,7 +1747,7 @@ mod tests {
         let mut tree = WidgetTree::new()
             .with_theme(bastyde_core::presets::intui::light())
             .with_text_backend(StdRc::new(RefCell::new(MockTextBackend::new())));
-        let _id = tree.add(Avatar::with_initials_literal("?").bind_name(name.clone()));
+        let _id = tree.add(Avatar::with_initials(lit!("?")).bind_name(name.clone()));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         let bg_jd = shape_colors(&tree.render())
             .into_iter()

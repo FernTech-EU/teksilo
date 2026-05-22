@@ -313,3 +313,93 @@ overlays-file-saved-successfully = File saved successfully
 overlays-file-saved-successfully-2 = File saved successfully
 overlays-show-snackbar = Show snackbar
 overlays-card-like-surface-with-the-def = Card-like surface with the default Panel shadow
+
+# ── Catalog i18n pass: translatable visual strings ──────────────────────
+# Tooltip cascade demo (shared.rs)
+tip-a-body = Niveau 1 de la cascade. Survolez le [lien suivant](:tip-b) pour ouvrir le niveau 2.
+tip-a-more = Ouvrez l'accordéon pour lire ce texte long sans quitter l'infobulle.
+tip-b-body = Niveau 2 de la cascade. Survolez le [dernier lien](:tip-c) pour en ouvrir un de plus.
+tip-b-more = Chaque infobulle imbriquée rattache sa surcouche à la précédente (OverlayLayer::InTree).
+tip-c-body = Niveau 3 — fin de la cascade. Appuyez sur Échap ou cliquez à l'extérieur pour fermer.
+tip-stat-food-body = **Nourriture** modifie le taux de croissance de votre population. Lié au [commerce](:stat-trade).
+tip-stat-trade-body = **Commerce** : les routes affectent les revenus en pièces. Lié au [bonheur](:stat-happiness).
+tip-stat-happiness-body = **Bonheur** limite les troubles. Fin de la cascade interne au composite.
+# Indicators
+ind-progress-determinate-heading = ProgressBar — déterminée
+ind-progress-indeterminate-heading = ProgressBar — indéterminée
+ind-progress-vertical-heading = ProgressBar — verticale
+# Styling
+sty-tier1-button-variant-heading = Niveau 1 — ButtonVariant
+sty-tier1-toggle-variant-heading = Niveau 1 — ToggleVariant
+sty-tier1-checkbox-variant-heading = Niveau 1 — CheckboxVariant
+sty-tier1-card-variant-heading = Niveau 1 — CardVariant
+sty-tier3-button-style-heading = Niveau 3 — Button::style(impl ButtonStyle)
+sty-tier3-toggle-style-heading = Niveau 3 — Toggle::style(impl ToggleStyle)
+# Containers
+cnt-scrollbar-standalone-heading = ScrollBar (autonome)
+# Layout
+lay-above = au-dessus
+lay-below = en-dessous
+# Data
+dat-standard-list-item-standalone = StandardListItem (autonome)
+dat-standard-tree-item-standalone = StandardTreeItem (autonome)
+# Menus
+mnu-menu-list-standalone = MenuList (autonome)
+mnu-menu-item-standalone = MenuItem (autonome)
+# Visuals
+vis-panel-standalone = Panel (exemple de primitive visuelle)
+# Date & Time
+dt-calendar-single = Calendar — date unique
+dt-calendar-range = Calendar — plage de dates
+# Text
+txt-password-label = Mot de passe
+txt-password-placeholder = Entrez votre mot de passe
+txt-password-validation = Utilisez au moins 8 caractères
+# Buttons
+btn-heading-variants = Button — variantes
+btn-heading-disabled = Button — état désactivé
+btn-heading-with-icon = Button — avec icône
+btn-export-sample = Exporter
+# Inputs
+inp-heading-radio-group = RadioButton (dans un groupe)
+inp-heading-slider-h = Slider — horizontal
+inp-heading-slider-stepped = Slider — avec pas
+inp-heading-slider-v = Slider — vertical
+# Overlays
+ovr-plain-tooltips-heading = Infobulles simples
+ovr-plain-tooltips-subtitle = (une ligne, éphémère)
+ovr-tooltip-save-doc = Enregistrer le document actuel
+ovr-tooltip-open-file = Ouvrir un fichier
+ovr-tooltip-close-tab = Fermer l'onglet
+ovr-rich-tooltips-heading = Infobulles enrichies
+ovr-rich-tooltips-subtitle = (cascade :key, maintien pour épingler)
+ovr-hover-level-1 = Survolez pour le niveau 1
+ovr-hover-level-2 = Survolez pour le niveau 2
+ovr-hover-level-3 = Survolez pour le niveau 3
+ovr-plain-among-rich = Simple parmi les enrichies
+ovr-plain-among-rich-tip = Infobulle simple dans la colonne enrichie — diagnostic.
+ovr-rich-dwell-tip = Astuce : maintenez ~2 s pour épingler, puis cliquez sur les liens pour enchaîner.
+ovr-province-iberia = Iberia
+ovr-province-overview = Aperçu de la province
+ovr-stat-food-label = Nourriture : 42
+ovr-stat-trade-label = Commerce : 18
+ovr-stat-happiness-label = Bonheur : 71 %
+ovr-tab-stats = Statistiques
+ovr-stat-population = Population : 12 400
+ovr-stat-garrison = Garnison : 320
+ovr-tab-history = Histoire
+ovr-province-history = Fondée en 1247 • 3 sièges • 1 épidémie
+ovr-tabbed-details = Détails à onglets
+ovr-treasury-report = Rapport du trésor
+ovr-treasury-subtitle = Ce trimestre : +423 pièces
+ovr-open-ledger = Ouvrir le grand livre
+ovr-composite-tooltips-heading = Infobulles composites
+ovr-composite-tooltips-subtitle = (arbre de widgets arbitraire, style CK3)
+ovr-province-info-btn = Infos sur la province
+ovr-with-internal-button = Avec Button interne
+ovr-composite-dwell-tip = Astuce : maintenez ~2 s, puis Tab dans la surface, puis activez le Button interne.
+ovr-section-tooltip-cascade = Tooltip — simple / enrichi / composite (cascade à 3 niveaux)
+ovr-section-popover = Popover (autonome)
+ovr-section-dialog = Dialog (via MessageBox)
+ovr-section-messagebox = MessageBox — variantes de gravité
+ovr-section-shadow = Shadow (primitive visuelle)

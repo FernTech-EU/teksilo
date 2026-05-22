@@ -1,6 +1,6 @@
 //! Inspector state and installation logic — debug builds only.
 
-use bastyde_app::{DefaultPostRoot, BastydeAppBuilder};
+use bastyde_app::{BastydeAppBuilder, DefaultPostRoot};
 use bastyde_canvas::{Point, Rect};
 use bastyde_core::event::{Key, Modifiers};
 use bastyde_core::intent::Intent;

@@ -3,6 +3,7 @@
 //! Non-generic, closure-based command erasure (same pattern as Button).
 //! Supports icons, shortcut labels, disabled state, and submenu triggers.
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -48,7 +49,7 @@ const DEFAULT_SUBMENU_CLOSE_DELAY: Duration = Duration::from_millis(150);
 
 /// A single menu item: icon + label + shortcut label + optional submenu chevron.
 pub struct MenuItem {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     icon: Option<IconWidget>,
     shortcut_label: Option<String>,
     /// Optional shortcut id. When set and [`shortcut_label`] is not,
@@ -57,7 +58,7 @@ pub struct MenuItem {
     /// tracks user rebindings automatically (the build registers the
     /// registry's version signal as a Relayout binding on self).
     shortcut_id: Option<&'static str>,
-    tooltip_text: Option<String>,
+    tooltip_text: Option<bastyde_i18n::LocalizedString>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn bastyde_core::widget::Widget>>,
     action: Option<CommandFactory>,
@@ -91,7 +92,7 @@ impl MenuItem {
     pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: ls,
             icon: None,
             shortcut_label: None,
             shortcut_id: None,
@@ -111,12 +112,6 @@ impl MenuItem {
         }
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(label))
-    }
-
     /// Closure invoked on activation.
     /// See architecture Section 9.2.6.
     /// Note: shortcut label auto-lookup is not available with this variant
@@ -129,8 +124,8 @@ impl MenuItem {
     /// Read the item's display label. Exposed so SplitButton (and any other
     /// compound widget that embeds a MenuItem) can mirror the label in its
     /// own chrome.
-    pub fn label(&self) -> &str {
-        &self.label
+    pub fn label(&self) -> String {
+        self.label.resolve_now()
     }
 
     /// Clone out a shared handle to the activation closure. Returns `None`
@@ -189,16 +184,6 @@ impl MenuItem {
     /// Attach a tooltip that appears after a hover delay, same mechanism
     /// as [`Button::tooltip`](crate::button::Button::tooltip).
     pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
-        self.tooltip_text = Some(ls.resolve_now());
-        self.rich_tooltip_source = None;
-        self.composite_tooltip_content = None;
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `tooltip(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;
@@ -242,7 +227,7 @@ impl MenuItem {
     ) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: ls,
             icon: None,
             shortcut_label: None,
             shortcut_id: None,
@@ -260,15 +245,6 @@ impl MenuItem {
             root_child_id: None,
             submenu_content_id: None,
         }
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `submenu(...)` accepting a raw label.
-    #[doc(hidden)]
-    pub fn submenu_literal(
-        label: impl Into<String>,
-        factory: impl Fn() -> Box<dyn Widget> + 'static,
-    ) -> Self {
-        Self::submenu(bastyde_i18n::LocalizedString::literal(label), factory)
     }
 
     /// Set a custom submenu open delay (default: 200ms).
@@ -328,9 +304,13 @@ impl Widget for MenuItem {
         // muted on hover-while-disabled too (defense in depth — the
         // leaves' `ColorProp::resolve(theme, ctx.effective_enabled)`
         // would substitute Disabled anyway).
-        let text_role = interaction
-            .zip(&effective_enabled)
-            .map(|(s, on)| if !*on { TextRole::Disabled } else { resolve_text_role(*s) });
+        let text_role = interaction.zip(&effective_enabled).map(|(s, on)| {
+            if !*on {
+                TextRole::Disabled
+            } else {
+                resolve_text_role(*s)
+            }
+        });
 
         // Build the three slots fed to the active `MenuItemStyle`.
         // The style decides the row layout (and chrome); the widget
@@ -355,7 +335,7 @@ impl Widget for MenuItem {
 
         // Label.
         let label = ctx.add(
-            TextWidget::new_literal(&self.label)
+            TextWidget::new(self.label.clone())
                 .style(TextStyleRole::Body)
                 .bind_color(text_role.clone())
                 .single_line()
@@ -400,7 +380,7 @@ impl Widget for MenuItem {
             let mut trailing_row = HStack::new().spacing(0.0);
             if let Some(ref shortcut_text) = resolved_shortcut {
                 let shortcut_role = interaction.map(|s| resolve_shortcut_role(*s));
-                let shortcut = TextWidget::new_literal(shortcut_text)
+                let shortcut = TextWidget::new(lit!(shortcut_text))
                     .style(TextStyleRole::Body)
                     .bind_color(shortcut_role)
                     .single_line()
@@ -462,23 +442,15 @@ impl Widget for MenuItem {
         // mutually exclusive — setters clear the other two so at most
         // one branch runs.
         if let Some(content) = self.composite_tooltip_content.take() {
-            crate::tooltip::attach_composite_tooltip_boxed(
-                ctx,
-                root_id,
-                content,
-                crate::tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
         } else if let Some(source) = self.rich_tooltip_source.take() {
-            crate::tooltip::attach_rich_tooltip_source(
-                ctx,
-                root_id,
-                source,
-                crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
-            );
-        } else if let Some(ref tooltip_text) = self.tooltip_text {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new_literal(tooltip_text);
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+        } else if let Some(tooltip_text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(tooltip_text);
             let tooltip_id = ctx.add(tooltip_widget);
-            let delay = std::time::Duration::from_millis(500);
+            let delay = ctx.theme().motion.tooltip_delay;
             ctx.attach_tooltip(root_id, tooltip_id, delay);
         }
 
@@ -741,7 +713,7 @@ impl Widget for MenuItem {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::MenuItem);
-        builder.set_name(&self.label);
+        builder.set_name(self.label.resolve_now());
         // A submenu trigger exposes `has_popup(Menu)` so screen
         // readers announce the item as leading into a nested menu,
         // and `set_expanded` reflects whether the submenu is

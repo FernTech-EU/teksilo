@@ -1,6 +1,7 @@
 use bastyde_canvas::{Size, SizeProposal};
 use bastyde_core::widget::{LayoutContext, Widget};
 use bastyde_core::widget_tree::WidgetTree;
+use bastyde_i18n::lit;
 use bastyde_tokens::{Alignment, HAlignment};
 
 use crate::primitives::{
@@ -209,7 +210,7 @@ fn demo_layout_no_overlap_between_sections() {
     let mut tree = WidgetTree::new();
 
     // -- Toolbar --
-    let title = tree.add(TextWidget::new_literal("Title text here")); // 15*8=120 wide
+    let title = tree.add(TextWidget::new(lit!("Title text here"))); // 15*8=120 wide
     let toolbar_spacer = tree.add(Spacer::new());
     let btn = tree.add(FixedLeaf(140.0, 36.0)); // mock button
     let toolbar = tree.add(
@@ -220,9 +221,9 @@ fn demo_layout_no_overlap_between_sections() {
     );
 
     // -- Typography section --
-    let typo_heading = tree.add(TextWidget::new_literal("Typography")); // 10*8=80
-    let typo_body1 = tree.add(TextWidget::new_literal("Body line one")); // 13*8=104
-    let typo_body2 = tree.add(TextWidget::new_literal("Body line two")); // 13*8=104
+    let typo_heading = tree.add(TextWidget::new(lit!("Typography"))); // 10*8=80
+    let typo_body1 = tree.add(TextWidget::new(lit!("Body line one"))); // 13*8=104
+    let typo_body2 = tree.add(TextWidget::new(lit!("Body line two"))); // 13*8=104
     let typography = tree.add(
         VStack::new()
             .spacing(6.0)
@@ -232,7 +233,7 @@ fn demo_layout_no_overlap_between_sections() {
     );
 
     // -- Layout showcase section --
-    let section_heading = tree.add(TextWidget::new_literal("Layout Primitives")); // 17*8=136
+    let section_heading = tree.add(TextWidget::new(lit!("Layout Primitives"))); // 17*8=136
     let box_a = tree.add(FixedLeaf(40.0, 32.0));
     let box_b = tree.add(FixedLeaf(40.0, 32.0));
     let box_c = tree.add(FixedLeaf(40.0, 32.0));
@@ -243,17 +244,17 @@ fn demo_layout_no_overlap_between_sections() {
             .add_child(box_b)
             .add_child(box_c),
     );
-    let caption1 = tree.add(TextWidget::new_literal("Three colored boxes")); // 19*8=152
-    let leading = tree.add(TextWidget::new_literal("Leading")); // 7*8=56
+    let caption1 = tree.add(TextWidget::new(lit!("Three colored boxes"))); // 19*8=152
+    let leading = tree.add(TextWidget::new(lit!("Leading"))); // 7*8=56
     let inner_spacer = tree.add(Spacer::new());
-    let trailing = tree.add(TextWidget::new_literal("Trailing")); // 8*8=64
+    let trailing = tree.add(TextWidget::new(lit!("Trailing"))); // 8*8=64
     let spacer_row = tree.add(
         HStack::new()
             .add_child(leading)
             .add_child(inner_spacer)
             .add_child(trailing),
     );
-    let caption2 = tree.add(TextWidget::new_literal("Spacer pushing items to edges")); // 30*8=240
+    let caption2 = tree.add(TextWidget::new(lit!("Spacer pushing items to edges"))); // 30*8=240
 
     let showcase = tree.add(
         VStack::new()

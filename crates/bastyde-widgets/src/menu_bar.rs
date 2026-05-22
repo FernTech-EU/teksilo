@@ -3,18 +3,18 @@
 //! # Bastyde
 //! ```ignore
 //! MenuBar::new()
-//!     .menu_literal("File", || Box::new(
+//!     .menu(lit!("File"), || Box::new(
 //!         MenuList::new()
-//!             .item(MenuItem::new_literal("New").on_activate_fn(|ctx| ctx.send_intent(AppIntent::New)))
+//!             .item(MenuItem::new(lit!("New")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::New)))
 //!             .separator()
-//!             .item(MenuItem::new_literal("Quit").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Quit)))
+//!             .item(MenuItem::new(lit!("Quit")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Quit)))
 //!     ))
-//!     .menu_literal("Edit", || Box::new(
+//!     .menu(lit!("Edit"), || Box::new(
 //!         MenuList::new()
-//!             .item(MenuItem::new_literal("Cut").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Cut)))
-//!             .item(MenuItem::new_literal("Copy").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Copy)))
+//!             .item(MenuItem::new(lit!("Cut")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Cut)))
+//!             .item(MenuItem::new(lit!("Copy")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Copy)))
 //!     ))
-//!     .trailing_slot(Button::new_literal("Settings").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Settings)))
+//!     .trailing_slot(Button::new(lit!("Settings")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Settings)))
 //! ```
 
 use bastyde_canvas::{Rect, Size, SizeProposal};
@@ -37,7 +37,7 @@ use crate::primitives::{HStack, Padding, RectWidget, Spacer, TextWidget, ZStack}
 // ---------------------------------------------------------------------------
 
 struct MenuBarEntry {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     factory: Box<dyn Fn() -> Box<dyn Widget>>,
 }
 
@@ -74,20 +74,10 @@ impl MenuBar {
     ) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
         self.entries.push(MenuBarEntry {
-            label: ls.resolve_now(),
+            label: ls,
             factory: Box::new(factory),
         });
         self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `menu(...)` accepting a raw label.
-    #[doc(hidden)]
-    pub fn menu_literal(
-        self,
-        label: impl Into<String>,
-        factory: impl Fn() -> Box<dyn Widget> + 'static,
-    ) -> Self {
-        self.menu(bastyde_i18n::LocalizedString::literal(label), factory)
     }
 
     pub fn leading_slot(mut self, widget: impl Widget + 'static) -> Self {
@@ -123,7 +113,7 @@ impl std::fmt::Debug for MenuBar {
 
 #[derive(Debug)]
 struct MenuBarTrigger {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     index: usize,
     menu_ctx: MenuContext,
     root_child_id: Option<WidgetId>,
@@ -164,7 +154,7 @@ impl Widget for MenuBarTrigger {
                 }
             });
 
-        let label = TextWidget::new_literal(&self.label)
+        let label = TextWidget::new(self.label.clone())
             .style(TextStyleRole::Small)
             .bind_color(text_color)
             .single_line()
@@ -283,7 +273,7 @@ impl Widget for MenuBarTrigger {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::MenuItem);
-        builder.set_name(&self.label);
+        builder.set_name(self.label.resolve_now());
         // Every top-level menu bar entry opens a dropdown Menu.
         builder.set_has_popup(bastyde_core::accesskit::HasPopup::Menu);
         builder.set_expanded(self.menu_ctx.open_index.get() == Some(self.index));

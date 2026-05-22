@@ -20,6 +20,70 @@ pub enum DragOrigin {
     External,
 }
 
+/// How a drag the source widget started ended. Delivered to the source's
+/// `on_drag_ended` handler so it can react (e.g. remove the item on a move).
+///
+/// One unified completion outcome for *every* drag a widget starts — whether
+/// it dropped on an in-app target, was exported to another application via the
+/// OS, or was cancelled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DropOutcome {
+    /// Dropped on an in-app target. `accepted` is what the target's `on_drop`
+    /// returned.
+    InApp {
+        /// Whether the drop target accepted the payload.
+        accepted: bool,
+    },
+    /// Exported to another application via the OS as a copy.
+    OsCopy,
+    /// Exported to another application via the OS as a move — the source
+    /// should remove the dragged item.
+    OsMove,
+    /// No drop happened: Escape, dropped on nothing, or the OS rejected it.
+    Cancelled,
+}
+
+/// Flattened, OS-exportable view of a [`DragPayload`], handed to the platform
+/// backend when an in-app drag escalates to an OS drag at the window boundary.
+///
+/// Plain data with no GUI dependency so [`crate::window::WindowOps`] can name
+/// it without bastyde-core depending on bastyde-platform.
+#[derive(Debug, Clone, Default)]
+pub struct OutboundDragData {
+    /// MIME-typed byte representations to advertise to the OS.
+    pub mime: HashMap<String, Vec<u8>>,
+    /// Filesystem paths, if the payload represents files.
+    pub files: Vec<PathBuf>,
+    /// Plain text, if any.
+    pub text: Option<String>,
+    /// Non-file URLs, if any.
+    pub uris: Vec<String>,
+}
+
+impl OutboundDragData {
+    /// True when there is nothing to hand the OS.
+    pub fn is_empty(&self) -> bool {
+        self.mime.is_empty() && self.files.is_empty() && self.text.is_none() && self.uris.is_empty()
+    }
+}
+
+/// Optional drag image for an OS drag (RGBA8, top-left origin, premultiplied
+/// alpha not assumed). `None` lets the platform draw a default. `hot_x` /
+/// `hot_y` are the cursor hotspot in logical pixels from the image's top-left.
+#[derive(Debug, Clone)]
+pub struct DragImageData {
+    /// Pixel data, `width * height * 4` bytes (RGBA8, row-major, top-left).
+    pub rgba: Vec<u8>,
+    /// Image width in pixels.
+    pub width: u32,
+    /// Image height in pixels.
+    pub height: u32,
+    /// Cursor hotspot X in logical pixels from the top-left.
+    pub hot_x: f32,
+    /// Cursor hotspot Y in logical pixels from the top-left.
+    pub hot_y: f32,
+}
+
 /// Data delivered by an external (OS) drag-and-drop.
 ///
 /// Platform backends populate the fields they can extract from the native
@@ -258,6 +322,46 @@ impl DragPayload {
         self
     }
 
+    /// Populate the structured external view (`files` / `text` / `uris`) from
+    /// this payload's MIME data, so a drag that round-tripped through the OS
+    /// and re-entered the app satisfies file/text drop targets (e.g. a
+    /// `DropZone`) **as well as** typed in-app targets. The typed value is
+    /// preserved, so `get_typed::<T>()` still works.
+    ///
+    /// **Origin is deliberately left `Internal`.** A round-tripped drag still
+    /// *originated from this app*, so `is_external()` stays `false` — an in-app
+    /// reorder target that rejects external drags via `!is_external()` must
+    /// still accept its own drag coming back. `is_external()` means "came from
+    /// another application", not "carries file/text data". Consumers that want
+    /// content should test `files()` / `text()` / `uris()` (or `has_typed`),
+    /// which is what `DropZone` does. So a payload here can legitimately have
+    /// `origin == Internal` *and* a populated external view.
+    ///
+    /// No-op if an external view is already present or no recognizable MIME is
+    /// carried.
+    pub fn enrich_external_from_mime(&mut self) {
+        if self.external.is_some() {
+            return;
+        }
+        let mut ext = ExternalDropData::default();
+        if let Some(bytes) = self.mime_data.get("text/uri-list") {
+            let parsed = ExternalDropData::from_uri_list(&String::from_utf8_lossy(bytes));
+            ext.files = parsed.files;
+            ext.uris = parsed.uris;
+        }
+        if let Some(bytes) = self
+            .mime_data
+            .get("text/plain")
+            .or_else(|| self.mime_data.get("text/plain;charset=utf-8"))
+        {
+            ext.text = Some(String::from_utf8_lossy(bytes).into_owned());
+        }
+        ext.formats = self.mime_data.keys().cloned().collect();
+        if !ext.is_empty() {
+            self.external = Some(ext);
+        }
+    }
+
     /// Extract the typed payload by type. Returns `None` if the type doesn't match
     /// or no typed payload was set.
     pub fn get_typed<T: 'static>(&self) -> Option<&T> {
@@ -297,6 +401,57 @@ impl DragPayload {
     /// List all MIME types in this payload.
     pub fn mime_types(&self) -> Vec<&str> {
         self.mime_data.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Whether this payload carries anything an OS drag could export. A drag
+    /// becomes OS-exportable simply by populating `mime_data` (via
+    /// [`Self::with_mime`]) or by carrying external file / text / URI data.
+    pub fn is_os_exportable(&self) -> bool {
+        !self.mime_data.is_empty()
+            || self
+                .external
+                .as_ref()
+                .is_some_and(|e| !e.files.is_empty() || e.text.is_some() || !e.uris.is_empty())
+    }
+
+    /// Extract the flattened, OS-exportable view used when an in-app drag
+    /// escalates to an OS drag at the window boundary.
+    ///
+    /// Internal drags populate only `mime_data` (via [`Self::with_mime`]); the
+    /// `files` / `text` / `uris` fields come from [`ExternalDropData`] and are
+    /// empty for them. So when those structured fields are absent, derive them
+    /// from the canonical `text/uri-list` / `text/plain` MIME entries — the
+    /// platform backends (NSURL items, etc.) need the structured form.
+    pub fn to_outbound(&self) -> OutboundDragData {
+        let ext = self.external.as_ref();
+        let mut files = ext.map(|e| e.files.clone()).unwrap_or_default();
+        let mut uris = ext.map(|e| e.uris.clone()).unwrap_or_default();
+        let mut text = ext.and_then(|e| e.text.clone());
+
+        if files.is_empty()
+            && uris.is_empty()
+            && let Some(bytes) = self.mime_data.get("text/uri-list")
+        {
+            let parsed = ExternalDropData::from_uri_list(&String::from_utf8_lossy(bytes));
+            files = parsed.files;
+            uris = parsed.uris;
+        }
+        if text.is_none() {
+            if let Some(bytes) = self
+                .mime_data
+                .get("text/plain")
+                .or_else(|| self.mime_data.get("text/plain;charset=utf-8"))
+            {
+                text = Some(String::from_utf8_lossy(bytes).into_owned());
+            }
+        }
+
+        OutboundDragData {
+            mime: self.mime_data.clone(),
+            files,
+            text,
+            uris,
+        }
     }
 }
 

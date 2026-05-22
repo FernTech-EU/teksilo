@@ -41,7 +41,7 @@ pub struct Slider {
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     /// Accessible name, announced by screen readers as the control's label.
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
     variant: SliderVariant,
     tick_count: Option<u32>,
     style_override: Option<SharedSliderStyle>,
@@ -121,14 +121,7 @@ impl Slider {
     /// caller is responsible for labelling via a wrapping element.
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `label(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
+        self.label = Some(ls);
         self
     }
 }
@@ -262,23 +255,21 @@ impl Widget for Slider {
         {
             let dragging = dragging.clone();
             let set_value = set_value_from_position.clone();
-            handlers = handlers.on_drag(move |phase, _ctx| {
-                match phase {
-                    DragPhase::Started {
-                        position,
-                        button: PointerButton::Primary,
-                    } => {
-                        dragging.set(true);
-                        set_value(position.x, position.y);
-                    }
-                    DragPhase::Moved { position, .. } if dragging.get() => {
-                        set_value(position.x, position.y);
-                    }
-                    DragPhase::Ended { .. } => {
-                        dragging.set(false);
-                    }
-                    _ => {}
+            handlers = handlers.on_drag(move |phase, _ctx| match phase {
+                DragPhase::Started {
+                    position,
+                    button: PointerButton::Primary,
+                } => {
+                    dragging.set(true);
+                    set_value(position.x, position.y);
                 }
+                DragPhase::Moved { position, .. } if dragging.get() => {
+                    set_value(position.x, position.y);
+                }
+                DragPhase::Ended { .. } => {
+                    dragging.set(false);
+                }
+                _ => {}
             });
         }
 
@@ -302,29 +293,27 @@ impl Widget for Slider {
         {
             let adjust = adjust_by_step.clone();
             let value = value.clone();
-            handlers = handlers.on_key(move |event, _ctx| {
-                match event {
-                    WidgetEvent::KeyDown { key, .. } => match key {
-                        Key::ArrowRight | Key::ArrowUp => {
-                            adjust(true);
-                            EventResponse::Handled
-                        }
-                        Key::ArrowLeft | Key::ArrowDown => {
-                            adjust(false);
-                            EventResponse::Handled
-                        }
-                        Key::Home => {
-                            value.set(min);
-                            EventResponse::Handled
-                        }
-                        Key::End => {
-                            value.set(max);
-                            EventResponse::Handled
-                        }
-                        _ => EventResponse::Ignored,
-                    },
+            handlers = handlers.on_key(move |event, _ctx| match event {
+                WidgetEvent::KeyDown { key, .. } => match key {
+                    Key::ArrowRight | Key::ArrowUp => {
+                        adjust(true);
+                        EventResponse::Handled
+                    }
+                    Key::ArrowLeft | Key::ArrowDown => {
+                        adjust(false);
+                        EventResponse::Handled
+                    }
+                    Key::Home => {
+                        value.set(min);
+                        EventResponse::Handled
+                    }
+                    Key::End => {
+                        value.set(max);
+                        EventResponse::Handled
+                    }
                     _ => EventResponse::Ignored,
-                }
+                },
+                _ => EventResponse::Ignored,
             });
         }
 
@@ -396,7 +385,7 @@ impl Widget for Slider {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::Slider);
         if let Some(ref label) = self.label {
-            builder.set_name(label);
+            builder.set_name(label.resolve_now());
         }
         builder.set_numeric_value(self.value.get() as f64);
         builder.set_min_numeric_value(self.min as f64);

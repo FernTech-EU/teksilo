@@ -32,7 +32,7 @@ enum AppIntent {
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -98,7 +98,7 @@ impl Widget for MainRoot {
                     .size(360, 220)
                     .root(|tree, _state| {
                         tree.add(
-                            Button::new_literal("Close help")
+                            Button::new(lit!("Close help"))
                                 .variant(ButtonVariant::Filled)
                                 .on_activate_fn(|ctx| ctx.close_window()),
                         )
@@ -117,7 +117,7 @@ impl Widget for MainRoot {
         }));
 
         let btn = ctx.add(
-            Button::new_literal("Open help (F1) / Toggle fullscreen (F11)")
+            Button::new(lit!("Open help (F1) / Toggle fullscreen (F11)"))
                 .variant(ButtonVariant::Filled)
                 .on_activate_fn(|ctx| ctx.send_intent(AppIntent::ShowHelp)),
         );

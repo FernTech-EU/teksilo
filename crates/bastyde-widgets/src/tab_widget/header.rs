@@ -20,6 +20,7 @@
 //!   rect, and only on keyboard focus (pointer focus does not paint
 //!   the ring — IntelliJ / VS Code convention).
 
+use bastyde_i18n::lit;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -27,6 +28,7 @@ use bastyde_canvas::{Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
+use bastyde_core::drag_payload::{DragPayload, DropOutcome};
 use bastyde_core::event::{EventResponse, Key, PointerButton, WidgetEvent};
 use bastyde_core::focus::FocusOrigin;
 use bastyde_core::signal::Signal;
@@ -103,10 +105,16 @@ pub(crate) struct TabHeader {
     /// "Move Right" / "Move Up" / "Move Down" so screen-reader
     /// users can reorder tabs without dragging.
     on_reorder_to: Option<Rc<dyn Fn(usize, &mut EventContext)>>,
-    /// `Some(bar_id)` when the bar enables drag-to-reorder and this
-    /// tab is therefore a drag source. The header attaches `on_drag`
-    /// that emits a `TabBarDragData` payload with this `bar_id`.
-    drag_source_bar_id: Option<WidgetId>,
+    /// `Some(factory)` when this tab is a drag source (reordering on,
+    /// or cross-bar transfer enabled). The header attaches `on_drag`
+    /// that publishes the factory's `DragPayload` on drag-start. The
+    /// bar builds the factory (it has the item and its identity in
+    /// scope), so the header stays non-generic.
+    make_drag_payload: Option<Rc<dyn Fn() -> DragPayload>>,
+    /// `Some(handler)` when this header should react to drag
+    /// completion (cross-bar transfer-out). Fired by the framework on
+    /// the drag source with the final [`DropOutcome`].
+    on_drag_ended: Option<Rc<dyn Fn(DropOutcome, &mut EventContext)>>,
 
     index: usize,
     /// Structural per-tab enabled flag. Forwarded into the arena at
@@ -183,7 +191,8 @@ pub(crate) struct TabHeaderConfig {
     pub context_menu_factory: Option<super::delegate::ContextMenuFactory>,
     pub on_close: Option<Rc<dyn Fn(&mut EventContext)>>,
     pub on_reorder_to: Option<Rc<dyn Fn(usize, &mut EventContext)>>,
-    pub drag_source_bar_id: Option<WidgetId>,
+    pub make_drag_payload: Option<Rc<dyn Fn() -> DragPayload>>,
+    pub on_drag_ended: Option<Rc<dyn Fn(DropOutcome, &mut EventContext)>>,
     pub index: usize,
     pub initial_enabled: bool,
     pub selected: Signal<usize>,
@@ -212,7 +221,8 @@ impl TabHeader {
             context_menu_factory: cfg.context_menu_factory,
             on_close: cfg.on_close,
             on_reorder_to: cfg.on_reorder_to,
-            drag_source_bar_id: cfg.drag_source_bar_id,
+            make_drag_payload: cfg.make_drag_payload,
+            on_drag_ended: cfg.on_drag_ended,
             index: cfg.index,
             initial_enabled: cfg.initial_enabled,
             selected: cfg.selected,
@@ -316,7 +326,7 @@ impl Widget for TabHeader {
         // Locale signal binding for the reorder CustomAction
         // descriptions ("Move Left" / "Move Right" / "Move Up" /
         // "Move Down"). They're resolved inside `accessibility()`
-        // via `LocalizedString::literal(...).resolve_now()`; binding
+        // via `lit!(...).resolve_now()`; binding
         // the locale signal at `AccessibilityOnly` dirties the AT
         // cache when the locale flips so the descriptions refresh.
         ctx.locale_signal()
@@ -416,7 +426,7 @@ impl Widget for TabHeader {
                     .embedded()
                     .size(IconButtonSize::Compact)
                     .focusable(false)
-                    .tooltip(LocalizedString::literal("Close tab"))
+                    .tooltip(lit!("Close tab"))
                     .on_activate_fn(move |ctx| (close_fn)(ctx));
                 let close_id = ctx.add(close_button);
                 // Hover-only: the button is hidden when the
@@ -674,22 +684,16 @@ impl Widget for TabHeader {
             .focusable(true)
             .cursor(CursorIcon::Pointer);
 
-        // Drag source: emit a `TabBarDragData` payload when the
-        // user starts dragging this header. The bar's `on_drop`
-        // accepts the payload only if its `source_bar_id` matches —
-        // a tab from another TabBar that happens to be in the same
-        // window can't accidentally reorder into ours.
-        if let Some(bar_id) = self.drag_source_bar_id {
-            let index = self.index;
+        // Drag source: publish the bar-built payload when the user
+        // starts dragging this header. The factory carries the source
+        // identity (and, for cross-bar transfer, a clone of the item).
+        // The bar's `on_drop` matches `source_bar_id` to tell an
+        // intra-bar reorder from a foreign drop.
+        if let Some(make_payload) = self.make_drag_payload.clone() {
             let label_for_preview = self.label.clone();
             handler_set = handler_set.on_drag(move |phase, ctx| {
                 if let bastyde_core::gesture::DragPhase::Started { .. } = phase {
-                    let payload = bastyde_core::drag_payload::DragPayload::typed(
-                        crate::tab_widget::bar::TabBarDragData {
-                            source_index: index,
-                            source_bar_id: bar_id,
-                        },
-                    );
+                    let payload = (make_payload)();
                     let preview_inner: Box<dyn bastyde_core::widget::Widget> = Box::new(
                         crate::Padding::symmetric(HEADER_PADDING_V, INNER_GAP * 2.0)
                             .child(TextWidget::new(label_for_preview.clone()).single_line()),
@@ -702,6 +706,15 @@ impl Widget for TabHeader {
                     ctx.start_drag_with_preview(self_id, payload, Box::new(preview));
                 }
             });
+        }
+
+        // Drag completion (cross-bar transfer-out): fire the bar's
+        // on_transfer_out when one of our tabs was accepted by another
+        // bar. The bar-built handler already filters on the outcome
+        // and suppresses intra-bar reorders.
+        if let Some(on_drag_ended) = self.on_drag_ended.clone() {
+            handler_set =
+                handler_set.on_drag_ended(move |outcome, ctx| (on_drag_ended)(outcome, ctx));
         }
 
         // Middle-click closes the tab on Up (Firefox / Chrome
@@ -732,23 +745,16 @@ impl Widget for TabHeader {
         // Attach tooltip via the framework helper. Three
         // mutually-exclusive sources (composite > rich > plain).
         if let Some(content) = self.composite_tooltip.take() {
-            crate::tooltip::attach_composite_tooltip_boxed(
-                ctx,
-                self_id,
-                content,
-                crate::tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, self_id, content, delay);
         } else if let Some(source) = self.rich_tooltip.take() {
-            crate::tooltip::attach_rich_tooltip_source(
-                ctx,
-                self_id,
-                source,
-                crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, self_id, source, delay);
         } else if let Some(tip) = self.tooltip.take() {
             let tip_widget = crate::tooltip::TooltipWidget::new(tip);
             let tip_id = ctx.add(tip_widget);
-            ctx.attach_tooltip(self_id, tip_id, std::time::Duration::from_millis(400));
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(self_id, tip_id, delay);
         }
 
         vec![root_id]
@@ -841,12 +847,12 @@ impl Widget for TabHeader {
             // dirties the AT cache on locale change so these refresh.
             let (prev_label, next_label) = match self.orientation {
                 super::delegate::TabBarOrientation::Horizontal => (
-                    LocalizedString::literal("Move Left").resolve_now(),
-                    LocalizedString::literal("Move Right").resolve_now(),
+                    lit!("Move Left").resolve_now(),
+                    lit!("Move Right").resolve_now(),
                 ),
                 super::delegate::TabBarOrientation::Vertical => (
-                    LocalizedString::literal("Move Up").resolve_now(),
-                    LocalizedString::literal("Move Down").resolve_now(),
+                    lit!("Move Up").resolve_now(),
+                    lit!("Move Down").resolve_now(),
                 ),
             };
             let mut actions = Vec::with_capacity(2);

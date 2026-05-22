@@ -21,10 +21,10 @@ type CommandFactory = Box<dyn Fn(&mut EventContext)>;
 
 /// A clickable text link with underline.
 pub struct Link {
-    text: String,
+    text: bastyde_i18n::LocalizedString,
     url: Option<String>,
     action: Option<CommandFactory>,
-    tooltip_text: Option<String>,
+    tooltip_text: Option<bastyde_i18n::LocalizedString>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn bastyde_core::widget::Widget>>,
     interaction: Option<Signal<InteractionState>>,
@@ -45,7 +45,7 @@ impl Link {
     pub fn new(text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
         Self {
-            text: ls.resolve_now(),
+            text: ls,
             url: None,
             action: None,
             tooltip_text: None,
@@ -74,12 +74,6 @@ impl Link {
         self
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw string in `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(text: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(text))
-    }
-
     /// Closure invoked on activation.
     pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.action = Some(Box::new(f));
@@ -93,16 +87,6 @@ impl Link {
     }
 
     pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
-        self.tooltip_text = Some(ls.resolve_now());
-        self.rich_tooltip_source = None;
-        self.composite_tooltip_content = None;
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `tooltip(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;
@@ -128,7 +112,10 @@ impl Link {
 
     /// Attach a composite tooltip — third tier, hosting an arbitrary
     /// widget tree. See [`Button::composite_tooltip`](crate::button::Button::composite_tooltip).
-    pub fn composite_tooltip(mut self, content: impl bastyde_core::widget::Widget + 'static) -> Self {
+    pub fn composite_tooltip(
+        mut self,
+        content: impl bastyde_core::widget::Widget + 'static,
+    ) -> Self {
         self.composite_tooltip_content = Some(Box::new(content));
         self.tooltip_text = None;
         self.rich_tooltip_source = None;
@@ -182,7 +169,7 @@ impl Widget for Link {
             .unwrap_or_else(|| Rc::new(crate::styles::RecipeLinkStyle));
         let root_id = style.make_body(
             &LinkStyleConfig {
-                text: self.text.clone(),
+                text: self.text.clone().into(),
                 is_hovered,
                 is_pressed,
                 is_focused,
@@ -193,23 +180,16 @@ impl Widget for Link {
         );
 
         if let Some(content) = self.composite_tooltip_content.take() {
-            crate::tooltip::attach_composite_tooltip_boxed(
-                ctx,
-                root_id,
-                content,
-                crate::tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
         } else if let Some(source) = self.rich_tooltip_source.take() {
-            crate::tooltip::attach_rich_tooltip_source(
-                ctx,
-                root_id,
-                source,
-                crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
-            );
-        } else if let Some(ref tooltip_text) = self.tooltip_text {
-            let tw = crate::tooltip::TooltipWidget::new_literal(tooltip_text);
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+        } else if let Some(tooltip_text) = self.tooltip_text.clone() {
+            let tw = crate::tooltip::TooltipWidget::new(tooltip_text);
             let tid = ctx.add(tw);
-            ctx.attach_tooltip(root_id, tid, std::time::Duration::from_millis(500));
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root_id, tid, delay);
         }
 
         self.root_child_id = Some(root_id);
@@ -331,7 +311,7 @@ impl Widget for Link {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::Link);
-        builder.set_name(&self.text);
+        builder.set_name(self.text.resolve_now());
         if let Some(ref url) = self.url {
             builder.set_url(url.clone());
         }

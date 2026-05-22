@@ -153,6 +153,12 @@ pub struct WidgetTree {
     /// shortcut via `access_shortcut_id(id)` track user rebinds
     /// without any explicit signaling from the settings UI.
     last_synced_shortcut_version: u64,
+    /// Snapshot of `locale_signal` at the last `sync_accessibility`
+    /// call. When the locale differs the AT cache is dirtied, so
+    /// `access_label(tr!(...))` (stored as a locale-bound
+    /// `Prop<String>`) re-resolves into the announced node — even on a
+    /// same-direction switch that doesn't rebuild the composite.
+    last_synced_locale: Option<String>,
     /// Reverse map from synthetic (widget-emitted) AccessKit NodeIds
     /// to the WidgetId that owns them. Rebuilt on every full
     /// accessibility walk. `handle_accessibility_actions` uses this
@@ -200,6 +206,19 @@ pub struct WidgetTree {
     text_scale_factor: f64,
     /// Active drag-and-drop session, if any.
     pub(crate) active_drag: Option<crate::drag_state::DragSession>,
+    /// Source widget of an in-flight OS (outbound) drag that escalated past
+    /// the window boundary. Set only on the window that *started* the drag.
+    /// The in-app `active_drag` session is torn down at escalation (the OS owns
+    /// the pointer); this remembers who started it so the eventual `DragEnded`
+    /// can fire the source's `on_drag_ended`.
+    pub(crate) outbound_drag_source: Option<WidgetId>,
+    /// True while *this* window currently holds the re-entered internal session
+    /// for an in-flight app-originated OS drag (the OS drag wandered back over
+    /// this window — possibly a different window than the source — and we
+    /// restored the original typed payload). Distinguishes that session from a
+    /// plain internal drag so leaving again re-stashes instead of starting a
+    /// second OS drag, and dropping doesn't double-fire `on_drag_ended`.
+    pub(crate) os_drag_reentered: bool,
     /// Optional platform host for custom window chrome (set when the
     /// application opts in via `WindowConfig::custom_chrome(true)`). Stored
     /// here so that the root-builder closure has access during widget
@@ -231,6 +250,16 @@ pub struct WidgetTree {
     /// `frame_tick`) can chain-request without needing &mut access
     /// to the tree — see [`FrameRequestHandle`].
     pub(crate) frame_tick_requested: std::rc::Rc<std::cell::Cell<bool>>,
+    /// Shared "accessibility re-walk requested" flag. Set via
+    /// [`request_accessibility_update`](Self::request_accessibility_update)
+    /// (or its `BuildContext` / `EventContext` wrappers) and drained at the
+    /// top of [`sync_accessibility`](Self::sync_accessibility) into
+    /// `a11y_dirty`. A relayout no longer re-walks the AT tree on its own, so
+    /// widgets that restructure their subtree in an AT-affecting way (e.g.
+    /// `SceneView` materialising / destroying scene widgets) need this lever.
+    /// `Rc<Cell>` so the shared `&self` paths can toggle it like
+    /// `frame_tick_requested`.
+    pub(crate) a11y_update_requested: std::rc::Rc<std::cell::Cell<bool>>,
     /// Delayed frame wake-up deadline. Widgets that need to schedule
     /// a future frame without pumping at full framerate (caret blink,
     /// etc.) store the target instant here via
@@ -347,6 +376,7 @@ impl WidgetTree {
             cached_a11y: None,
             a11y_dirty: true,
             last_synced_shortcut_version: 0,
+            last_synced_locale: None,
             synthetic_parent_map: std::collections::HashMap::new(),
             cached_frame: None,
             pointer_captured_by: None,
@@ -358,12 +388,15 @@ impl WidgetTree {
             prefers_reduced_motion: false,
             text_scale_factor: 1.0,
             active_drag: None,
+            outbound_drag_source: None,
+            os_drag_reentered: false,
             title_bar_host: None,
             app_context: Rc::new(crate::event_source::TreeAppContext::empty()),
             locale: None,
             locale_signal: crate::signal::Signal::new(None),
             frame_tick: crate::signal::Signal::new(0.0_f32),
             frame_tick_requested: std::rc::Rc::new(std::cell::Cell::new(false)),
+            a11y_update_requested: std::rc::Rc::new(std::cell::Cell::new(false)),
             pending_wake_at: std::rc::Rc::new(std::cell::Cell::new(None)),
             last_frame_time: None,
             close_window_requested: false,
@@ -480,6 +513,21 @@ impl WidgetTree {
     /// those shared paths can toggle it without ceremony.
     pub fn request_frame(&self) {
         self.frame_tick_requested.set(true);
+    }
+
+    /// Request that the AccessKit tree be re-walked on the next
+    /// [`sync_accessibility`](Self::sync_accessibility). Takes `&self` (the
+    /// flag is a `Cell`) so handlers and `build()` closures reaching the tree
+    /// through a shared reference can request a re-walk without `&mut` access.
+    /// The drain at the top of `sync_accessibility` flips `a11y_dirty`.
+    pub fn request_accessibility_update(&self) {
+        self.a11y_update_requested.set(true);
+    }
+
+    /// Clone the shared "accessibility re-walk requested" flag, for the same
+    /// stash-and-toggle pattern as [`frame_request_handle`](Self::frame_request_handle).
+    pub fn a11y_request_handle(&self) -> std::rc::Rc<std::cell::Cell<bool>> {
+        self.a11y_update_requested.clone()
     }
 
     /// Whether a frame was explicitly requested. Exposed for tests and
@@ -825,7 +873,10 @@ impl WidgetTree {
         self
     }
 
-    pub fn with_text_backend(mut self, backend: Rc<RefCell<dyn bastyde_canvas::TextBackend>>) -> Self {
+    pub fn with_text_backend(
+        mut self,
+        backend: Rc<RefCell<dyn bastyde_canvas::TextBackend>>,
+    ) -> Self {
         self.text_backend = Some(backend);
         self
     }
@@ -2046,6 +2097,33 @@ impl WidgetTree {
         );
         if let Some(node) = self.arena.get_mut(id) {
             node.transform_prop = Some(prop);
+            // A plain transform is a *self* transform — clear any prior
+            // content-transform marker so the flag can never go stale if a
+            // node switches from `set_content_transform` to `set_transform`.
+            node.content_transform = false;
+        }
+    }
+
+    /// Like [`set_transform`](Self::set_transform), but marks the transform as
+    /// a **content** transform: it positions the node's content within a fixed
+    /// parent-space viewport (the node's bounds) rather than transforming the
+    /// node itself. Hit-testing then keeps the whole viewport interactive at
+    /// any pan / zoom. Used by `SceneView`; see
+    /// [`WidgetNode::content_transform`](crate::arena::WidgetNode::content_transform).
+    pub fn set_content_transform(
+        &mut self,
+        id: WidgetId,
+        transform: impl Into<crate::signal::Prop<bastyde_canvas::Transform2D>>,
+    ) {
+        let prop = transform.into();
+        prop.register_if_bound(
+            id,
+            &self.binding_registry,
+            crate::binding::BindingLevel::RepaintOnly,
+        );
+        if let Some(node) = self.arena.get_mut(id) {
+            node.transform_prop = Some(prop);
+            node.content_transform = true;
         }
     }
 
@@ -2122,10 +2200,7 @@ impl WidgetTree {
     /// chain (including itself) has no `enabled_state` bound. Captures
     /// the ancestor chain at call time; re-parenting a widget afterwards
     /// will not retroactively update the derived signal.
-    pub fn effective_enabled_signal(
-        &self,
-        id: WidgetId,
-    ) -> crate::signal::Signal<bool> {
+    pub fn effective_enabled_signal(&self, id: WidgetId) -> crate::signal::Signal<bool> {
         use crate::signal::{Prop, Signal};
         // Walk this node's ancestor chain, collecting every bound
         // `enabled_state` signal. Static `Prop::Static(b)` and unbound

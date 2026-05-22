@@ -29,7 +29,7 @@ use bastyde::widgets::{
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -95,15 +95,15 @@ impl Root {
                 VStack::new()
                     .spacing(12.0)
                     .child(
-                        TextWidget::new_literal("Dynamic Tags (Repeater)")
+                        TextWidget::new(lit!("Dynamic Tags (Repeater)"))
                             .style(theme.typography.body_bold.clone())
                             .color(theme.colors.text_primary),
                     )
                     .child(
-                        TextWidget::new_literal(
+                        TextWidget::new(lit!(
                             "Non-virtualized: one widget per item. \
-                             Add uses on_activate_fn, Remove uses on_activate.",
-                        )
+                             Add uses on_activate_fn, Remove uses on_activate."
+                        ))
                         .style(theme.typography.body.clone())
                         .color(theme.colors.text_primary),
                     )
@@ -111,7 +111,7 @@ impl Root {
                         HStack::new()
                             .spacing(8.0)
                             .child(
-                                Button::new_literal("+ Add Tag")
+                                Button::new(lit!("+ Add Tag"))
                                     .variant(ButtonVariant::Filled)
                                     .on_activate_fn(move |_ctx| {
                                         let n = counter.get();
@@ -121,7 +121,7 @@ impl Root {
                             )
                             .child({
                                 let tags = tags_remove.clone();
-                                Button::new_literal("- Remove Last")
+                                Button::new(lit!("- Remove Last"))
                                     .variant(ButtonVariant::Plain)
                                     .on_activate_fn(move |_ctx| {
                                         if !tags.is_empty() {
@@ -139,12 +139,12 @@ impl Root {
                                             HStack::new()
                                                 .spacing(8.0)
                                                 .child(
-                                                    TextWidget::new_literal(
-                                                        format!("{}.", i + 1).leak() as &str,
-                                                    )
+                                                    TextWidget::new(lit!(
+                                                        format!("{}.", i + 1).leak() as &str
+                                                    ))
                                                     .color(Color::from_rgba(0.5, 0.5, 0.5, 1.0)),
                                                 )
-                                                .child(TextWidget::new_literal(tag.as_str())),
+                                                .child(TextWidget::new(lit!(tag.as_str()))),
                                         ),
                                     ),
                                 ),
@@ -173,16 +173,16 @@ impl Root {
                     VStack::new()
                         .spacing(12.0)
                         .child(
-                            TextWidget::new_literal("Virtualized List (ListView)")
+                            TextWidget::new(lit!("Virtualized List (ListView)"))
                                 .style(theme.typography.body_bold.clone())
                                 .color(theme.colors.text_primary),
                         )
                         .child(
-                            TextWidget::new_literal(
+                            TextWidget::new(lit!(
                                 "200 items, only visible ones have widgets. \
                                  Multi-select: click, Ctrl+click, Shift+click. \
-                                 Drag to reorder. Alt+Arrow to reorder via keyboard.",
-                            )
+                                 Drag to reorder. Alt+Arrow to reorder via keyboard."
+                            ))
                             .style(theme.typography.body.clone())
                             .color(theme.colors.text_primary),
                         )
@@ -190,7 +190,7 @@ impl Root {
                             HStack::new()
                                 .spacing(8.0)
                                 .child(
-                                    Button::new_literal("+ Add Item")
+                                    Button::new(lit!("+ Add Item"))
                                         .variant(ButtonVariant::Filled)
                                         .on_activate_fn(move |_ctx| {
                                             let n = counter.get();
@@ -199,7 +199,7 @@ impl Root {
                                         }),
                                 )
                                 .child(
-                                    Button::new_literal("- Remove First")
+                                    Button::new(lit!("- Remove First"))
                                         .variant(ButtonVariant::Plain)
                                         .on_activate_fn(move |_ctx| {
                                             if !items_remove.is_empty() {
@@ -219,20 +219,20 @@ impl Root {
                     // and selection-highlight rendering are both
                     // visible at once.
                     let is_two_line = index % 2 == 0;
-                    let mut row = StandardListItem::new_literal(item.clone())
+                    let mut row = StandardListItem::new(lit!(item.clone()))
                         .selected(selected)
                         .leading_slot(
-                            TextWidget::new_literal(format!("{:>4}", index + 1).leak() as &str)
+                            TextWidget::new(lit!(format!("{:>4}", index + 1).leak() as &str))
                                 .color(TextRole::Secondary),
                         );
                     if is_two_line {
                         row = row
-                            .subtitle_literal(format!("Item #{} · category", index + 1))
+                            .subtitle(lit!(format!("Item #{} · category", index + 1)))
                             .subtitle_leading_slot(
-                                TextWidget::new_literal("•").color(TextRole::Accent),
+                                TextWidget::new(lit!("•")).color(TextRole::Accent),
                             )
                             .subtitle_trailing_slot(
-                                TextWidget::new_literal("just now").color(TextRole::Secondary),
+                                TextWidget::new(lit!("just now")).color(TextRole::Secondary),
                             );
                     } else {
                         row = row.checkbox(checks.signal_for(index));
@@ -262,16 +262,16 @@ impl Root {
                     VStack::new()
                         .spacing(12.0)
                         .child(
-                            TextWidget::new_literal("File Tree (TreeView)")
+                            TextWidget::new(lit!("File Tree (TreeView)"))
                                 .style(theme.typography.body_bold.clone())
                                 .color(theme.colors.text_primary),
                         )
                         .child(
-                            TextWidget::new_literal(
+                            TextWidget::new(lit!(
                                 "Hierarchical tree with expand/collapse. \
                                  Click to select, Right/Left expand/collapse. \
-                                 Drag to reparent (top=before, middle=into, bottom=after).",
-                            )
+                                 Drag to reparent (top=before, middle=into, bottom=after)."
+                            ))
                             .style(theme.typography.body.clone())
                             .color(theme.colors.text_primary),
                         )
@@ -279,7 +279,7 @@ impl Root {
                             HStack::new()
                                 .spacing(8.0)
                                 .child(
-                                    Button::new_literal("+ Add Root")
+                                    Button::new(lit!("+ Add Root"))
                                         .variant(ButtonVariant::Filled)
                                         .on_activate_fn(move |_ctx| {
                                             let n = counter.get();
@@ -290,7 +290,7 @@ impl Root {
                                         }),
                                 )
                                 .child(
-                                    Button::new_literal("- Remove Last Root")
+                                    Button::new(lit!("- Remove Last Root"))
                                         .variant(ButtonVariant::Plain)
                                         .on_activate_fn(move |_ctx| {
                                             let count = tree_remove.root_count();
@@ -305,7 +305,7 @@ impl Root {
             )
             .child(
                 TreeView::new_with_context(tree, move |item, entry, selected, ctx| {
-                    let mut row = StandardTreeItem::new_literal(item.clone())
+                    let mut row = StandardTreeItem::new(lit!(item.clone()))
                         .from_entry(entry)
                         .selected(selected)
                         .on_toggle_rc(ctx.toggle_callback());
@@ -341,18 +341,9 @@ impl Widget for Root {
         let root = ctx.add(
             Panel::new().child(
                 TabWidget::new(selected_tab)
-                    .static_tab(
-                        TabInfo::new().title(bastyde::i18n::LocalizedString::literal("Repeater")),
-                        repeater_tab,
-                    )
-                    .static_tab(
-                        TabInfo::new().title(bastyde::i18n::LocalizedString::literal("ListView")),
-                        listview_tab,
-                    )
-                    .static_tab(
-                        TabInfo::new().title(bastyde::i18n::LocalizedString::literal("TreeView")),
-                        treeview_tab,
-                    ),
+                    .static_tab(TabInfo::new().title(lit!("Repeater")), repeater_tab)
+                    .static_tab(TabInfo::new().title(lit!("ListView")), listview_tab)
+                    .static_tab(TabInfo::new().title(lit!("TreeView")), treeview_tab),
             ),
         );
 

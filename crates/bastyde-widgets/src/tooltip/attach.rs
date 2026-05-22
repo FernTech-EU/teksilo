@@ -27,15 +27,6 @@ use crate::tooltip::composite::CompositeTooltipWidget;
 use crate::tooltip::registry::TooltipContent;
 use crate::tooltip::rich::{DWELL_PROMOTION, RichTooltipWidget};
 
-/// Default hover-to-show delay for rich tooltips — matches the plain
-/// tooltip delay used by Button, Link, and MenuItem today.
-pub const DEFAULT_RICH_TOOLTIP_DELAY: Duration = Duration::from_millis(200);
-
-/// Default hover-to-show delay for composite tooltips. Slower than the
-/// rich-tooltip delay because composite surfaces are heavier-weight
-/// (charts, grids, tabbed content) and shouldn't pop on transient hover.
-pub const DEFAULT_COMPOSITE_TOOLTIP_DELAY: Duration = Duration::from_millis(400);
-
 /// Source resolution for a rich tooltip — either a registry key (the
 /// common path) or an inline [`TooltipContent`] entry (one-offs that
 /// don't belong in the app-wide registry).
@@ -63,7 +54,8 @@ impl<T: Into<String>> From<T> for RichTooltipSource {
 ///
 /// ```ignore
 /// let root = ctx.add(/* visible subtree */);
-/// attach_rich_tooltip(ctx, root, "save-as-details", DEFAULT_RICH_TOOLTIP_DELAY);
+/// let delay = ctx.theme().motion.tooltip_delay;
+/// attach_rich_tooltip(ctx, root, "save-as-details", delay);
 /// ```
 pub fn attach_rich_tooltip(
     ctx: &mut BuildContext,
@@ -155,7 +147,7 @@ mod tests {
     };
     use bastyde_canvas::{MockTextBackend, SizeProposal};
     use bastyde_core::widget_tree::WidgetTree;
-    use bastyde_i18n::LocalizedString;
+    use bastyde_i18n::lit;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -168,11 +160,11 @@ mod tests {
         _reset_tooltip_registry();
         install_tooltip_registry(vec![TooltipContent::new(
             "save-as",
-            LocalizedString::literal("Save the current file under a new name"),
+            lit!("Save the current file under a new name"),
         )]);
 
         let mut tree = tree_with_backend();
-        let btn = tree.add(Button::new_literal("Save As").rich_tooltip("save-as"));
+        let btn = tree.add(Button::new(lit!("Save As")).rich_tooltip("save-as"));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         // No tooltip visible before hover.
@@ -184,7 +176,7 @@ mod tests {
             "tooltip should not appear instantly — waits for delay"
         );
 
-        tree.advance_time(DEFAULT_RICH_TOOLTIP_DELAY + Duration::from_millis(50));
+        tree.advance_time(Duration::from_millis(200) + Duration::from_millis(50));
 
         assert_eq!(
             tree.active_overlays().len(),
@@ -198,22 +190,19 @@ mod tests {
     #[test]
     fn button_rich_tooltip_overrides_plain_tooltip() {
         _reset_tooltip_registry();
-        install_tooltip_registry(vec![TooltipContent::new(
-            "help",
-            LocalizedString::literal("Help body"),
-        )]);
+        install_tooltip_registry(vec![TooltipContent::new("help", lit!("Help body"))]);
 
         let mut tree = tree_with_backend();
         // Plain set first, then rich: rich should win (latest setter
         // clears the other field).
         let btn = tree.add(
-            Button::new_literal("Help")
-                .tooltip_literal("stale plain text")
+            Button::new(lit!("Help"))
+                .tooltip(lit!("stale plain text"))
                 .rich_tooltip("help"),
         );
         tree.layout(SizeProposal::exact(400.0, 200.0));
         tree.pointer_move(tree.bounds(btn).center());
-        tree.advance_time(DEFAULT_RICH_TOOLTIP_DELAY + Duration::from_millis(50));
+        tree.advance_time(Duration::from_millis(200) + Duration::from_millis(50));
 
         assert_eq!(tree.active_overlays().len(), 1);
         // The stale plain text must NOT be reachable — the rich tooltip
@@ -231,11 +220,11 @@ mod tests {
         _reset_tooltip_registry();
         install_tooltip_registry(vec![TooltipContent::new(
             "focus-key",
-            LocalizedString::literal("Focus-shown body"),
+            lit!("Focus-shown body"),
         )]);
 
         let mut tree = tree_with_backend();
-        let btn = tree.add(Button::new_literal("Focus me").rich_tooltip("focus-key"));
+        let btn = tree.add(Button::new(lit!("Focus me")).rich_tooltip("focus-key"));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         assert!(tree.active_overlays().is_empty());
@@ -255,14 +244,11 @@ mod tests {
     #[test]
     fn focus_promoted_tooltip_dismisses_when_focus_leaves_scope() {
         _reset_tooltip_registry();
-        install_tooltip_registry(vec![TooltipContent::new(
-            "leave-key",
-            LocalizedString::literal("Goes away"),
-        )]);
+        install_tooltip_registry(vec![TooltipContent::new("leave-key", lit!("Goes away"))]);
 
         let mut tree = tree_with_backend();
-        let btn = tree.add(Button::new_literal("Anchor").rich_tooltip("leave-key"));
-        let other = tree.add(Button::new_literal("Elsewhere"));
+        let btn = tree.add(Button::new(lit!("Anchor")).rich_tooltip("leave-key"));
+        let other = tree.add(Button::new(lit!("Elsewhere")));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         tree.focus(btn);
@@ -283,7 +269,7 @@ mod tests {
     #[test]
     fn button_plain_tooltip_appears_after_hover_delay() {
         let mut tree = tree_with_backend();
-        let btn = tree.add(Button::new_literal("Save").tooltip_literal("Save the document"));
+        let btn = tree.add(Button::new(lit!("Save")).tooltip(lit!("Save the document")));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         assert!(tree.active_overlays().is_empty());
@@ -306,12 +292,11 @@ mod tests {
         _reset_tooltip_registry();
         // No install_tooltip_registry — we rely on inline content.
         let mut tree = tree_with_backend();
-        let content =
-            TooltipContent::new("inline-only", LocalizedString::literal("Inline content"));
-        let btn = tree.add(Button::new_literal("Go").rich_tooltip_content(content));
+        let content = TooltipContent::new("inline-only", lit!("Inline content"));
+        let btn = tree.add(Button::new(lit!("Go")).rich_tooltip_content(content));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         tree.pointer_move(tree.bounds(btn).center());
-        tree.advance_time(DEFAULT_RICH_TOOLTIP_DELAY + Duration::from_millis(50));
+        tree.advance_time(Duration::from_millis(200) + Duration::from_millis(50));
 
         assert_eq!(tree.active_overlays().len(), 1);
 

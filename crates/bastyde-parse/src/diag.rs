@@ -100,7 +100,7 @@ fn category_b_slot_hint(ident: &str) -> &'static str {
         "TitleBar" => "leading",
         "DialogContent" => "body",
         "Breadcrumb" => "item",
-        "TabWidget" => "tab_literal",
+        "TabWidget" => "tab",
         "Popover" => "content",
         "Snackbar" => "content",
         "Dialog" => "content",

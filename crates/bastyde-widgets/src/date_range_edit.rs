@@ -47,6 +47,7 @@
 #[cfg(test)]
 mod tests;
 
+use bastyde_i18n::localized;
 use std::rc::Rc;
 
 use bastyde_canvas::{Path, Point, Rect, SizeProposal};
@@ -94,13 +95,13 @@ pub struct DateRangeEdit {
     min_date: Option<Date>,
     max_date: Option<Date>,
     pattern: Option<String>,
-    placeholder_start: String,
-    placeholder_end: String,
+    placeholder_start: bastyde_i18n::LocalizedString,
+    placeholder_end: bastyde_i18n::LocalizedString,
     first_day_of_week: Option<Weekday>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     read_only: bool,
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
     validation_behavior: ValidationBehavior,
     /// How the trailing (end) half claims horizontal space. The
     /// leading (start) half always sizes to its mask-derived
@@ -142,8 +143,8 @@ impl DateRangeEdit {
             min_date: None,
             max_date: None,
             pattern: None,
-            placeholder_start: String::new(),
-            placeholder_end: String::new(),
+            placeholder_start: bastyde_i18n::LocalizedString::literal(String::new()),
+            placeholder_end: bastyde_i18n::LocalizedString::literal(String::new()),
             first_day_of_week: None,
             initial_enabled: true,
             read_only: false,
@@ -180,12 +181,12 @@ impl DateRangeEdit {
         self
     }
 
-    pub fn placeholder_start(mut self, text: impl Into<String>) -> Self {
+    pub fn placeholder_start(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         self.placeholder_start = text.into();
         self
     }
 
-    pub fn placeholder_end(mut self, text: impl Into<String>) -> Self {
+    pub fn placeholder_end(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         self.placeholder_end = text.into();
         self
     }
@@ -208,13 +209,7 @@ impl DateRangeEdit {
 
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
-        self
-    }
-
-    /// Untranslated [`label`](Self::label).
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
+        self.label = Some(ls);
         self
     }
 
@@ -394,10 +389,9 @@ impl Widget for DateRangeEdit {
             .embedded()
             .size(IconButtonSize::Default)
             .enabled(enabled && !read_only)
-            .tooltip(resolve_message_widget(
-                "date-range-edit-trigger-tooltip",
-                &[],
-            ))
+            .tooltip(localized(move || {
+                resolve_message_widget("date-range-edit-trigger-tooltip", &[])
+            }))
             .on_activate_fn(move |ctx_evt: &mut EventContext| {
                 if popover_open.get() {
                     popover_open.set(false);

@@ -4,13 +4,20 @@ use bastyde_canvas::SizeProposal;
 use bastyde_core::event::{Key, Modifiers};
 use bastyde_core::signal::Signal;
 use bastyde_core::widget_tree::WidgetTree;
+use bastyde_i18n::lit;
 
 use super::TextInput;
 
-fn setup(initial: &str) -> (WidgetTree, Signal<String>, bastyde_core::widget_id::WidgetId) {
+fn setup(
+    initial: &str,
+) -> (
+    WidgetTree,
+    Signal<String>,
+    bastyde_core::widget_id::WidgetId,
+) {
     let text = Signal::new(initial.to_string());
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    let id = tree.add(TextInput::new(text.clone()).placeholder("Type here..."));
+    let id = tree.add(TextInput::new(text.clone()).placeholder(lit!("Type here...")));
     tree.layout(SizeProposal::exact(300.0, 40.0));
     tick(&mut tree);
     (tree, text, id)
@@ -44,7 +51,7 @@ fn placeholder_text_set() {
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
     let _id = tree.add(
         TextInput::new(text)
-            .placeholder("Search...")
+            .placeholder(lit!("Search..."))
             .show_clear_button(true),
     );
     tree.layout(SizeProposal::exact(300.0, 40.0));
@@ -57,13 +64,13 @@ fn builder_methods_chain() {
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
     let _id = tree.add(
         TextInput::new(text)
-            .placeholder("Enter value")
-            .label("Username")
+            .placeholder(lit!("Enter value"))
+            .label(lit!("Username"))
             .enabled(true)
             .read_only(false)
             .max_length(100)
             .show_clear_button(true)
-            .tooltip_literal("A text input field"),
+            .tooltip(lit!("A text input field")),
     );
     tree.layout(SizeProposal::exact(300.0, 40.0));
 }
@@ -199,7 +206,7 @@ fn on_blur_fires_when_focus_is_lost() {
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
     let id = tree.add(TextInput::new(text).on_blur_fn(move |_| fired_c.set(fired_c.get() + 1)));
     // A focusable sibling button we can park focus on to force blur.
-    let sink = tree.add(crate::button::Button::new_literal("sink").on_activate_fn(|_| {}));
+    let sink = tree.add(crate::button::Button::new(lit!("sink")).on_activate_fn(|_| {}));
     tree.layout(SizeProposal::exact(300.0, 40.0));
     tick(&mut tree);
 
@@ -232,7 +239,7 @@ fn on_blur_and_on_submit_coexist() {
             .on_submit_fn(move |_| s.set(true))
             .on_blur_fn(move |_| b.set(true)),
     );
-    let sink = tree.add(crate::button::Button::new_literal("sink").on_activate_fn(|_| {}));
+    let sink = tree.add(crate::button::Button::new(lit!("sink")).on_activate_fn(|_| {}));
     tree.layout(SizeProposal::exact(300.0, 40.0));
     tick(&mut tree);
 
@@ -312,7 +319,11 @@ fn ime_composition_then_commit_inserts_finalised_text() {
     });
     tick(&mut tree);
     tick(&mut tree);
-    assert_eq!(text.get(), "你好", "commit replaces the preedit with the final text");
+    assert_eq!(
+        text.get(),
+        "你好",
+        "commit replaces the preedit with the final text"
+    );
 }
 
 #[test]
@@ -342,7 +353,7 @@ fn ime_preedit_removed_on_focus_loss() {
     let text = Signal::new(String::new());
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
     let id = tree.add(TextInput::new(text.clone()));
-    let sink = tree.add(crate::button::Button::new_literal("sink").on_activate_fn(|_| {}));
+    let sink = tree.add(crate::button::Button::new(lit!("sink")).on_activate_fn(|_| {}));
     tree.layout(SizeProposal::exact(300.0, 40.0));
     tick(&mut tree);
     focus_field(&mut tree, id);
@@ -376,7 +387,11 @@ fn ime_commit_respects_char_filter() {
     });
     tick(&mut tree);
     tick(&mut tree);
-    assert_eq!(text.get(), "42", "commit goes through the char_filter like typed input");
+    assert_eq!(
+        text.get(),
+        "42",
+        "commit goes through the char_filter like typed input"
+    );
 }
 
 #[test]
@@ -393,7 +408,7 @@ fn focused_text_field_is_an_ime_text_surface() {
 #[test]
 fn focused_button_is_not_an_ime_surface() {
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    let btn = tree.add(crate::button::Button::new_literal("ok").on_activate_fn(|_| {}));
+    let btn = tree.add(crate::button::Button::new(lit!("ok")).on_activate_fn(|_| {}));
     tree.layout(SizeProposal::exact(300.0, 40.0));
     tick(&mut tree);
     tree.focus(tree.first_focusable_descendant(btn).unwrap());
@@ -421,7 +436,11 @@ fn composing_field_exposes_the_composition_as_an_at_selection() {
         .iter()
         .find(|(_, n)| n.role() == bastyde_core::accesskit::Role::TextInput)
         .expect("a text-input node is present");
-    assert_eq!(node.value(), Some("nihao"), "composing text is in the value");
+    assert_eq!(
+        node.value(),
+        Some("nihao"),
+        "composing text is in the value"
+    );
     let sel = node
         .text_selection()
         .expect("composing field exposes a text selection");

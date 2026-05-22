@@ -16,9 +16,9 @@
 //! use bastyde::widgets::{MessageBox, MessageBoxButtons, StandardButton};
 //!
 //! fn on_close(ctx: &mut EventContext) {
-//!     MessageBox::question_literal("Save changes?")
-//!         .text_literal("You have unsaved changes in report.skrib.")
-//!         .informative_text_literal("Your changes will be lost if you don't save them.")
+//!     MessageBox::question(lit!("Save changes?"))
+//!         .text(lit!("You have unsaved changes in report.skrib."))
+//!         .informative_text(lit!("Your changes will be lost if you don't save them."))
 //!         .buttons(MessageBoxButtons::SaveDiscardCancel)
 //!         .default_button(StandardButton::Save)
 //!         .escape_button(StandardButton::Cancel)
@@ -270,13 +270,6 @@ impl MessageBoxButton {
         self
     }
 
-    /// Raw-string label override — mirrors `Button::new_literal`.
-    #[doc(hidden)]
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label_override = Some(LocalizedString::literal(label));
-        self
-    }
-
     fn resolved_label(&self) -> LocalizedString {
         self.label_override
             .clone()
@@ -489,15 +482,15 @@ impl State {
 /// [`MessageBox::present`].
 pub struct MessageBox {
     severity: MessageBoxSeverity,
-    title: String,
-    text: Option<String>,
-    informative_text: Option<String>,
-    detailed_text: Option<String>,
+    title: bastyde_i18n::LocalizedString,
+    text: Option<bastyde_i18n::LocalizedString>,
+    informative_text: Option<bastyde_i18n::LocalizedString>,
+    detailed_text: Option<bastyde_i18n::LocalizedString>,
     buttons_config: Option<MessageBoxButtons>,
     extra_buttons: Vec<MessageBoxButton>,
     default_button: Option<StandardButton>,
     escape_button: Option<StandardButton>,
-    show_again_label: Option<String>,
+    show_again_label: Option<bastyde_i18n::LocalizedString>,
     show_again_state: Option<Signal<bool>>,
     on_result: Option<Box<dyn Fn(MessageBoxResult, &mut EventContext)>>,
     default_button_id: Cell<Option<WidgetId>>,
@@ -521,7 +514,7 @@ impl std::fmt::Debug for MessageBox {
 
 impl MessageBox {
     fn new_with_severity(severity: MessageBoxSeverity, title: impl Into<LocalizedString>) -> Self {
-        let title = title.into().resolve_now();
+        let title = title.into();
         Self {
             severity,
             title,
@@ -569,61 +562,28 @@ impl MessageBox {
         Self::new_with_severity(MessageBoxSeverity::None, title)
     }
 
-    #[doc(hidden)]
-    pub fn information_literal(title: impl Into<String>) -> Self {
-        Self::information(LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn warning_literal(title: impl Into<String>) -> Self {
-        Self::warning(LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn critical_literal(title: impl Into<String>) -> Self {
-        Self::critical(LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn question_literal(title: impl Into<String>) -> Self {
-        Self::question(LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn plain_literal(title: impl Into<String>) -> Self {
-        Self::plain(LocalizedString::literal(title))
-    }
-
     /// Primary message line, rendered in `typography.body` with
     /// `text_primary`. Prefer a short, self-contained sentence —
     /// details belong in `informative_text`.
     pub fn text(mut self, text: impl Into<LocalizedString>) -> Self {
-        self.text = Some(text.into().resolve_now());
+        self.text = Some(text.into());
         self
-    }
-    #[doc(hidden)]
-    pub fn text_literal(self, text: impl Into<String>) -> Self {
-        self.text(LocalizedString::literal(text))
     }
 
     /// Secondary, explanatory text rendered below the primary text in
     /// `typography.body` with `text_secondary`. Matches Qt's
     /// `setInformativeText`.
     pub fn informative_text(mut self, text: impl Into<LocalizedString>) -> Self {
-        self.informative_text = Some(text.into().resolve_now());
+        self.informative_text = Some(text.into());
         self
-    }
-    #[doc(hidden)]
-    pub fn informative_text_literal(self, text: impl Into<String>) -> Self {
-        self.informative_text(LocalizedString::literal(text))
     }
 
     /// Detailed text hidden behind a "Show details" [`Accordion`] —
     /// for technical diagnostics (stack traces, error codes). Matches
     /// Qt's `setDetailedText`.
     pub fn detailed_text(mut self, text: impl Into<LocalizedString>) -> Self {
-        self.detailed_text = Some(text.into().resolve_now());
+        self.detailed_text = Some(text.into());
         self
-    }
-    #[doc(hidden)]
-    pub fn detailed_text_literal(self, text: impl Into<String>) -> Self {
-        self.detailed_text(LocalizedString::literal(text))
     }
 
     /// Apply a preset button bundle. Implicitly sets default and
@@ -670,12 +630,8 @@ impl MessageBox {
     /// For external observation, use
     /// [`MessageBox::show_again_checkbox_state`] instead.
     pub fn show_again_checkbox(mut self, label: impl Into<LocalizedString>) -> Self {
-        self.show_again_label = Some(label.into().resolve_now());
+        self.show_again_label = Some(label.into());
         self
-    }
-    #[doc(hidden)]
-    pub fn show_again_checkbox_literal(self, label: impl Into<String>) -> Self {
-        self.show_again_checkbox(LocalizedString::literal(label))
     }
 
     /// Like [`MessageBox::show_again_checkbox`], but with a
@@ -711,7 +667,7 @@ impl MessageBox {
                 let mb = inner
                     .take()
                     .expect("MessageBox present closure called twice");
-                tree.add(ModalContainer::new(mb).title_literal(dialog_title.clone()))
+                tree.add(ModalContainer::new(mb).title(dialog_title.clone()))
             })
             .presentation(ModalPresentation::Auto)
             .close_behavior(close_behavior)
@@ -758,20 +714,20 @@ impl Widget for MessageBox {
 
         let mut header_text_stack = VStack::new().spacing(6.0);
         header_text_stack = header_text_stack.child(
-            TextWidget::new_literal(self.title.clone())
+            TextWidget::new(self.title.clone())
                 .style(theme.typography.body_bold.clone())
                 .color(theme.colors.text_primary),
         );
         if let Some(text) = self.text.clone() {
             header_text_stack = header_text_stack.child(
-                TextWidget::new_literal(text)
+                TextWidget::new(text)
                     .style(theme.typography.body.clone())
                     .color(theme.colors.text_primary),
             );
         }
         if let Some(info) = self.informative_text.clone() {
             header_text_stack = header_text_stack.child(
-                TextWidget::new_literal(info)
+                TextWidget::new(info)
                     .style(theme.typography.body.clone())
                     .color(theme.colors.text_secondary),
             );
@@ -802,17 +758,17 @@ impl Widget for MessageBox {
         let detailed_child: Option<Box<dyn Widget>> = self.detailed_text.clone().map(|text| {
             let expanded = ctx.signal(false);
             let label: LocalizedString = bastyde_i18n::tr_widget!(messagebox_show_details());
-            let body = TextWidget::new_literal(text)
+            let body = TextWidget::new(text)
                 .style(theme.typography.small.clone())
                 .color(theme.colors.text_secondary);
             let accordion: Box<dyn Widget> =
-                Box::new(Accordion::new_literal(label.resolve_now(), expanded).content(body));
+                Box::new(Accordion::new(label, expanded).content(body));
             accordion
         });
 
         let checkbox_child: Option<Box<dyn Widget>> = self.show_again_label.clone().map(|label| {
             let cb: Box<dyn Widget> =
-                Box::new(Checkbox::new(checkbox_signal.clone()).label_literal(label));
+                Box::new(Checkbox::new(checkbox_signal.clone()).label(label));
             cb
         });
 
@@ -939,7 +895,7 @@ impl Widget for MessageBox {
     }
 
     fn accessible_title_hint(&self) -> Option<String> {
-        Some(self.title.clone())
+        Some(self.title.resolve_now())
     }
 
     fn initial_focus_hint(&self) -> Option<WidgetId> {
@@ -953,10 +909,13 @@ impl Widget for MessageBox {
 
 impl MessageBox {
     fn accessible_description(&self) -> Option<String> {
-        match (self.text.as_deref(), self.informative_text.as_deref()) {
+        match (
+            self.text.as_ref().map(|t| t.resolve_now()),
+            self.informative_text.as_ref().map(|i| i.resolve_now()),
+        ) {
             (None, None) => None,
-            (Some(t), None) => Some(t.to_string()),
-            (None, Some(i)) => Some(i.to_string()),
+            (Some(t), None) => Some(t),
+            (None, Some(i)) => Some(i),
             (Some(t), Some(i)) => Some(format!("{t}\n{i}")),
         }
     }
@@ -979,6 +938,7 @@ impl EventContextMessageBoxExt for EventContext<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_core::ModalContent;
     use bastyde_core::event::WidgetEvent;
     use bastyde_core::widget_tree::WidgetTree;
@@ -990,7 +950,7 @@ mod tests {
         use crate::button::Button as Btn;
         let mb_cell: Rc<RefCell<Option<MessageBox>>> = Rc::new(RefCell::new(Some(mb)));
         let mb_for_closure = mb_cell.clone();
-        let trigger = tree.add(Btn::new_literal("Open").on_activate_fn(move |ctx| {
+        let trigger = tree.add(Btn::new(lit!("Open")).on_activate_fn(move |ctx| {
             if let Some(mb) = mb_for_closure.borrow_mut().take() {
                 mb.present(ctx);
             }
@@ -1022,8 +982,8 @@ mod tests {
     #[test]
     fn present_queues_modal_request() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let mb = MessageBox::information_literal("t")
-            .text_literal("x")
+        let mb = MessageBox::information(lit!("t"))
+            .text(lit!("x"))
             .buttons(MessageBoxButtons::Ok);
         let _content = present_and_lay_out(&mut tree, mb);
         assert!(tree.find_by_label("t").is_some());
@@ -1034,12 +994,12 @@ mod tests {
         use crate::button::Button as Btn;
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let mb_cell: Rc<RefCell<Option<MessageBox>>> = Rc::new(RefCell::new(Some(
-            MessageBox::critical_literal("Fatal")
-                .text_literal("Boom")
+            MessageBox::critical(lit!("Fatal"))
+                .text(lit!("Boom"))
                 .buttons(MessageBoxButtons::Ok),
         )));
         let mb_for_closure = mb_cell.clone();
-        let trigger = tree.add(Btn::new_literal("Open").on_activate_fn(move |ctx| {
+        let trigger = tree.add(Btn::new(lit!("Open")).on_activate_fn(move |ctx| {
             if let Some(mb) = mb_for_closure.borrow_mut().take() {
                 mb.present(ctx);
             }
@@ -1058,8 +1018,8 @@ mod tests {
     #[test]
     fn alert_dialog_role_exposed() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let mb = MessageBox::warning_literal("Title")
-            .text_literal("Body")
+        let mb = MessageBox::warning(lit!("Title"))
+            .text(lit!("Body"))
             .buttons(MessageBoxButtons::Ok);
         let content = present_and_lay_out(&mut tree, mb);
         // `content` is the `ModalContainer`; its child is now the
@@ -1077,8 +1037,8 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let captured: Rc<RefCell<Option<MessageBoxResult>>> = Rc::new(RefCell::new(None));
         let captured_for_handler = captured.clone();
-        let mb = MessageBox::information_literal("t")
-            .text_literal("x")
+        let mb = MessageBox::information(lit!("t"))
+            .text(lit!("x"))
             .buttons(MessageBoxButtons::Ok)
             .on_result(move |r, _ctx| {
                 *captured_for_handler.borrow_mut() = Some(r);
@@ -1102,8 +1062,8 @@ mod tests {
     #[test]
     fn default_button_is_focused_on_open() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let mb = MessageBox::question_literal("t")
-            .text_literal("x")
+        let mb = MessageBox::question(lit!("t"))
+            .text(lit!("x"))
             .buttons(MessageBoxButtons::YesNoCancel)
             .default_button(StandardButton::No);
         let _content = present_and_lay_out(&mut tree, mb);
@@ -1118,8 +1078,8 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let captured: Rc<RefCell<Option<MessageBoxResult>>> = Rc::new(RefCell::new(None));
         let captured_for_handler = captured.clone();
-        let mb = MessageBox::question_literal("t")
-            .text_literal("x")
+        let mb = MessageBox::question(lit!("t"))
+            .text(lit!("x"))
             .buttons(MessageBoxButtons::OkCancel)
             .on_result(move |r, _ctx| {
                 *captured_for_handler.borrow_mut() = Some(r);
@@ -1140,8 +1100,8 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let captured: Rc<RefCell<Option<MessageBoxResult>>> = Rc::new(RefCell::new(None));
         let captured_for_handler = captured.clone();
-        let mb = MessageBox::question_literal("t")
-            .text_literal("x")
+        let mb = MessageBox::question(lit!("t"))
+            .text(lit!("x"))
             .buttons(MessageBoxButtons::YesNoCancel)
             .on_result(move |r, _ctx| {
                 *captured_for_handler.borrow_mut() = Some(r);
@@ -1159,11 +1119,11 @@ mod tests {
         let shared_state = Signal::new(false);
         let captured: Rc<RefCell<Option<MessageBoxResult>>> = Rc::new(RefCell::new(None));
         let captured_for_handler = captured.clone();
-        let mb = MessageBox::information_literal("t")
-            .text_literal("x")
+        let mb = MessageBox::information(lit!("t"))
+            .text(lit!("x"))
             .buttons(MessageBoxButtons::Ok)
             .show_again_checkbox_state(shared_state.clone())
-            .show_again_checkbox_literal("Don't show again")
+            .show_again_checkbox(lit!("Don't show again"))
             .on_result(move |r, _ctx| {
                 *captured_for_handler.borrow_mut() = Some(r);
             });
@@ -1184,8 +1144,8 @@ mod tests {
     #[test]
     fn accessible_title_hint_propagates_to_container() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let mb = MessageBox::information_literal("Title propagation test")
-            .text_literal("Body")
+        let mb = MessageBox::information(lit!("Title propagation test"))
+            .text(lit!("Body"))
             .buttons(MessageBoxButtons::Ok);
         let content = present_and_lay_out(&mut tree, mb);
         let info = tree.accessibility_node(content);

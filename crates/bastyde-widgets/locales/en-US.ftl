@@ -26,6 +26,7 @@
 
 a11y-status-bar-name = Status
 a11y-dialog-name = Dialog
+a11y-tooltip-name = Tooltip
 a11y-snackbar-name = Snackbar
 a11y-split-view-divider-name = Split view divider
 a11y-breadcrumb-current-page-value = current page
@@ -314,3 +315,7 @@ hex-color-input-corrected-uppercase = Normalized to { $value }
 hex-color-input-placeholder = #RRGGBB
 hex-color-input-placeholder-with-alpha = #RRGGBBAA
 color-edit-trigger-empty-placeholder = —
+
+# Rich tooltip "more" disclosure label (the Accordion title revealing the
+# long-form body inside a sticky rich tooltip).
+tooltip-more = More

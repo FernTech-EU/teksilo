@@ -4,12 +4,11 @@
 //! [`ListDataSource`](bastyde_data::ListDataSource) data layer in
 //! `bastyde-data` and the `bastyde-tokens` `TableStyle`. Mirrors Qt's
 //! `QTableView`, SwiftUI's `Table`, and JavaFX's `TableView`.
-//! Phase 2 ships the core skeleton: single body pane,
-//! row-virtualized with alternating backgrounds, grid lines,
-//! `Role::Table > Role::Row > Role::Cell` accessibility, multi-row
-//! selection, and an empty-state slot. Headers, sort, filter, resize,
-//! reorder, pinning, cell selection, and editing arrive in later
-//! phases.
+//! The core skeleton: single body pane, row-virtualized with alternating
+//! backgrounds, grid lines, `Role::Table > Role::Row > Role::Cell`
+//! accessibility, multi-row selection, and an empty-state slot. Headers,
+//! sort, filter, resize, reorder, pinning, cell selection, and editing are
+//! also included.
 
 pub mod a11y;
 pub mod body;
@@ -44,6 +43,7 @@ use bastyde_tokens::{BorderRole, SurfaceRole};
 
 use crate::styles::recipe_table_style as cp;
 
+use crate::common::scroll::OverscrollBehavior;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
 
 pub use self::column::{
@@ -82,7 +82,7 @@ impl PaneBoundaries {
 pub(crate) struct ColumnReorderDragData {
     pub col_id: String,
     /// Stable id of the source TableView, so dropping into a sibling
-    /// table is rejected by the on_drop matcher (Phase 6).
+    /// table is rejected by the on_drop matcher.
     pub source_table_id: usize,
 }
 
@@ -170,6 +170,8 @@ pub struct TableView<T: 'static> {
     // Public reactive signals
     scroll_y: Signal<f32>,
     max_scroll_y: Signal<f32>,
+    /// Scroll-chaining behavior at the boundary (default `Chain`).
+    overscroll_behavior: OverscrollBehavior,
     viewport_ratio_y: Signal<f32>,
     sort_signal: Signal<Option<(String, SortDirection)>>,
     column_widths_signal: Signal<HashMap<String, f32>>,
@@ -193,7 +195,7 @@ pub struct TableView<T: 'static> {
     #[allow(clippy::type_complexity)]
     on_cell_edit_request: Option<Rc<dyn Fn(usize, &str, &mut bastyde_core::widget::EventContext)>>,
     /// Per-column filter text. Updated by filter affordances in the
-    /// header (Phase 6), by `set_filter` / `clear_filters`, and by
+    /// header, by `set_filter` / `clear_filters`, and by
     /// downstream consumers binding it (e.g., `SortFilterListModel`).
     filters_signal: Signal<HashMap<String, String>>,
     /// User callback invoked on every row activation (Enter on the
@@ -283,6 +285,7 @@ impl<T: 'static> TableView<T> {
             show_internal_scrollbars: true,
             empty_view: None,
             column_resize_policy: ColumnResizePolicy::default(),
+            overscroll_behavior: OverscrollBehavior::default(),
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
             viewport_ratio_y: Signal::new(1.0),
@@ -313,6 +316,14 @@ impl<T: 'static> TableView<T> {
     }
 
     // ── Builder ────────────────────────────────────────────────────────
+
+    /// Set the scroll-chaining behavior at the boundary (default
+    /// [`OverscrollBehavior::Chain`]; [`Contain`](OverscrollBehavior::Contain)
+    /// disables chaining to an ancestor scrollable).
+    pub fn overscroll_behavior(mut self, behavior: OverscrollBehavior) -> Self {
+        self.overscroll_behavior = behavior;
+        self
+    }
 
     pub fn add_column(mut self, col: Column<T>) -> Self {
         self.columns.push(col);
@@ -539,7 +550,7 @@ impl<T: 'static> TableView<T> {
     }
 
     /// Per-column filter text. Updated by filter affordances in
-    /// header cells (Phase 6 UI) and by
+    /// header cells and by
     /// [`set_filter`](Self::set_filter) / [`clear_filters`](Self::clear_filters).
     /// Bind a `SortFilterListModel<T>` to drive the upstream data:
     ///
@@ -702,7 +713,7 @@ impl<T: 'static> TableView<T> {
 
     // ── Internals ──────────────────────────────────────────────────────
 
-    /// The configured row height (override) or — Phase 2 — a sane fallback
+    /// The configured row height (override) or a sane fallback
     /// of 28 px. Once a `BuildContext` is available we read the table
     /// style; this static helper is for paths outside `build()`.
     fn effective_row_height_static(&self) -> f32 {
@@ -949,6 +960,7 @@ impl<T: 'static> Widget for TableView<T> {
         let scroll_y_for_wheel = self.scroll_y.clone();
         let max_scroll_for_wheel = self.max_scroll_y.clone();
         let line_height = row_h;
+        let overscroll_behavior = self.overscroll_behavior;
 
         // Bind focused_cell at RepaintOnly — its update redraws the
         // focus ring without rebuilding the row tree.
@@ -1019,9 +1031,14 @@ impl<T: 'static> Widget for TableView<T> {
                     };
                     let current = scroll_y_for_wheel.get();
                     let max = max_scroll_for_wheel.get();
-                    let new_y = (current + dy).clamp(0.0, max);
+                    let (new_y, moved) = crate::common::scroll::scroll_clamp_axis(current, dy, max);
                     scroll_y_for_wheel.set(new_y);
-                    bastyde_core::event::EventResponse::Handled
+                    // Chain to an ancestor scrollable when fully clamped
+                    // (unless Contain), otherwise consume.
+                    crate::common::scroll::scroll_response(
+                        moved,
+                        overscroll_behavior == OverscrollBehavior::Contain,
+                    )
                 }
                 _ => bastyde_core::event::EventResponse::Ignored,
             })
@@ -1184,7 +1201,7 @@ impl<T: 'static> Widget for TableView<T> {
             self.body_pane_id = Some(ctx.add(pane));
         }
 
-        // Scrollbar (single internal vertical bar in Phase 2).
+        // Scrollbar (single internal vertical bar).
         if self.show_internal_scrollbars {
             let sb = ScrollBar::new(
                 ScrollBarOrientation::Vertical,

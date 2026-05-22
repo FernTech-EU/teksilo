@@ -72,7 +72,7 @@ pub enum ValidationState {
 pub struct TextInput {
     // ── Configuration forwarded to the inner TextInputField ─────────
     text: Signal<String>,
-    placeholder: String,
+    placeholder: bastyde_i18n::LocalizedString,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     read_only: bool,
@@ -106,7 +106,7 @@ pub struct TextInput {
     feedback_signal: Signal<ValidationFeedback>,
 
     // ── Configuration owned by this composite only ──────────────────
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
     /// Optional override for the frame's intrinsic minimum width
     /// (default 65 dp). Composing widgets like `DateEdit` /
     /// `TimeEdit` raise this so the frame stays at the design
@@ -122,7 +122,7 @@ pub struct TextInput {
     /// Set by `.bind_validation_feedback(...)`; wired via `ctx.effect`
     /// in `build()` so the bridge outlives construction.
     feedback_to_bridge: Option<Signal<ValidationFeedback>>,
-    tooltip_text: Option<String>,
+    tooltip_text: Option<bastyde_i18n::LocalizedString>,
     rich_tooltip_source: Option<RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn bastyde_core::widget::Widget>>,
 
@@ -152,7 +152,7 @@ impl TextInput {
     pub fn new(text: Signal<String>) -> Self {
         Self {
             text,
-            placeholder: String::new(),
+            placeholder: bastyde_i18n::LocalizedString::literal(String::new()),
             initial_enabled: true,
             read_only: false,
             max_length: None,
@@ -210,14 +210,7 @@ impl TextInput {
 
     pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.placeholder = ls.resolve_now();
-        self
-    }
-
-    /// Untranslated [`placeholder`](Self::placeholder) — the explicit
-    /// escape hatch (and grep marker) for strings that bypass i18n.
-    pub fn placeholder_literal(mut self, text: impl Into<String>) -> Self {
-        self.placeholder = text.into();
+        self.placeholder = ls;
         self
     }
 
@@ -226,13 +219,7 @@ impl TextInput {
     /// carries `Role::TextInput` with the document's value.
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
-        self
-    }
-
-    /// Untranslated [`label`](Self::label).
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
+        self.label = Some(ls);
         self
     }
 
@@ -389,7 +376,8 @@ impl TextInput {
         self
     }
 
-    pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
+    /// Attach a plain tooltip. Accepts `tr!(...)` or `lit!(...)`.
+    pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;
@@ -412,7 +400,10 @@ impl TextInput {
 
     /// Attach a composite tooltip — third tier, hosting an arbitrary
     /// widget tree. See [`Button::composite_tooltip`](crate::button::Button::composite_tooltip).
-    pub fn composite_tooltip(mut self, content: impl bastyde_core::widget::Widget + 'static) -> Self {
+    pub fn composite_tooltip(
+        mut self,
+        content: impl bastyde_core::widget::Widget + 'static,
+    ) -> Self {
         self.composite_tooltip_content = Some(Box::new(content));
         self.tooltip_text = None;
         self.rich_tooltip_source = None;
@@ -525,7 +516,7 @@ impl Widget for TextInput {
         // parent's offered width never reaches the `HStack` during
         // measurement — without auto-basis the column reports 0 dp and
         // the whole composite collapses to `MinSize`'s 65 dp floor.
-        let text_column_id = if !self.placeholder.is_empty() {
+        let text_column_id = if !self.placeholder.resolve_now().is_empty() {
             // Match the inner TextInputField's text style + single-line
             // behaviour so the placeholder layout box has the same
             // intrinsic height as the rich-text engine's frame. Without
@@ -676,23 +667,15 @@ impl Widget for TextInput {
         // Tooltip — three mutually-exclusive setters; setters clear
         // the others so exactly one branch runs.
         if let Some(content) = self.composite_tooltip_content.take() {
-            tooltip::attach_composite_tooltip_boxed(
-                ctx,
-                root_id,
-                content,
-                tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
         } else if let Some(source) = self.rich_tooltip_source.take() {
-            tooltip::attach_rich_tooltip_source(
-                ctx,
-                root_id,
-                source,
-                tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
-            );
-        } else if let Some(ref text) = self.tooltip_text {
-            let tw = crate::tooltip::TooltipWidget::new_literal(text);
+            let delay = ctx.theme().motion.tooltip_delay;
+            tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tw = crate::tooltip::TooltipWidget::new(text);
             let tooltip_id = ctx.add(tw);
-            let delay = std::time::Duration::from_millis(500);
+            let delay = ctx.theme().motion.tooltip_delay;
             ctx.attach_tooltip(root_id, tooltip_id, delay);
         }
 
@@ -786,7 +769,7 @@ impl Widget for TextInput {
         // pass-through label.
         builder.set_role(bastyde_core::accesskit::Role::GenericContainer);
         if let Some(ref label) = self.label {
-            builder.set_name(label);
+            builder.set_name(label.resolve_now());
         }
         // Framework a11y walker sets `set_disabled` from arena state.
     }

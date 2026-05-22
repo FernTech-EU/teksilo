@@ -5,7 +5,7 @@
 //! line workhorse).
 
 use accesskit::Role;
-use bastyde_canvas::{Canvas, Path, Point, Rect, StrokeStyle};
+use bastyde_canvas::{Canvas, Path, Point, Rect, StrokeSpace, StrokeStyle};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_tokens::Color;
 
@@ -16,16 +16,18 @@ use crate::items::{AccessSubtreeMode, ItemA11yOverrides};
 /// An arbitrary vector path with optional fill and stroke, in local
 /// item coordinates.
 ///
-/// The path's commands are evaluated in local space. Stroke widths
-/// scale with view zoom. The caller-provided `local_bounds` AABB is
-/// what the spatial index buckets on; it must enclose the path's
-/// strokes (including stroke half-width on each side).
+/// The path's commands are evaluated in local space. A logical stroke scales
+/// with the view zoom; a [`stroke_cosmetic`](Self::stroke_cosmetic) stroke
+/// holds a constant device-pixel width at any zoom (crisp connectors). The
+/// caller-provided `local_bounds` AABB is what the spatial index buckets on;
+/// it must enclose the path's strokes (including stroke half-width on each
+/// side).
 #[derive(Debug)]
 pub struct PathItem {
     path: Path,
     local_bounds: Rect,
     fill: Option<Color>,
-    stroke: Option<(Color, f32)>,
+    stroke: Option<(Color, StrokeStyle)>,
     label: Option<String>,
     flags: ItemFlags,
     a11y: ItemA11yOverrides,
@@ -53,9 +55,18 @@ impl PathItem {
         self
     }
 
-    /// Stroke color and width (scene-coord pixels).
+    /// Stroke color and width in **scene-coordinate** pixels — the stroke
+    /// scales with the view zoom.
     pub fn stroke(mut self, color: Color, width: f32) -> Self {
-        self.stroke = Some((color, width.max(0.0)));
+        self.stroke = Some((color, StrokeStyle::solid(width.max(0.0))));
+        self
+    }
+
+    /// Cosmetic stroke: the connector holds a constant **device-pixel** width
+    /// at any zoom (it never thins out or thickens). The renderer keeps the
+    /// path body sharp at the current zoom, so joins/caps stay correct.
+    pub fn stroke_cosmetic(mut self, color: Color, width: f32) -> Self {
+        self.stroke = Some((color, StrokeStyle::hairline(width.max(0.0))));
         self
     }
 
@@ -64,12 +75,6 @@ impl PathItem {
         let ls: bastyde_i18n::LocalizedString = label.into();
         self.label = Some(ls.resolve_now());
         self
-    }
-
-    /// Untranslated twin of [`label`](Self::label).
-    #[doc(hidden)]
-    pub fn label_literal(self, label: impl Into<String>) -> Self {
-        self.label(bastyde_i18n::LocalizedString::literal(label))
     }
 
     /// Opt the path into drag-to-move.
@@ -98,8 +103,8 @@ impl SceneItem for PathItem {
         if let Some(fill) = self.fill {
             canvas.fill_path(&self.path, fill);
         }
-        if let Some((color, width)) = self.stroke {
-            canvas.stroke_path(&self.path, color, StrokeStyle::solid(width));
+        if let Some((color, style)) = &self.stroke {
+            canvas.stroke_path(&self.path, *color, style.clone());
         }
     }
 
@@ -108,12 +113,12 @@ impl SceneItem for PathItem {
             &self.path,
             self.local_bounds,
             self.fill.is_some(),
-            self.stroke,
+            self.stroke.as_ref().map(|(_, s)| s.width),
             local_pt,
         )
     }
 
-    fn clone_shape_test(&self) -> Box<dyn Fn(Point) -> bool + 'static> {
+    fn clone_shape_test(&self) -> Box<dyn Fn(Point, f32) -> bool + 'static> {
         // Capture the data needed for hit-test without holding a
         // borrow on `self`. The `SceneView` snapshot stores the
         // returned closure and consults it on every pointer event,
@@ -122,9 +127,24 @@ impl SceneItem for PathItem {
         let path = self.path.clone();
         let local_bounds = self.local_bounds;
         let has_fill = self.fill.is_some();
-        let stroke = self.stroke;
-        Box::new(move |local_pt| {
-            path_shape_contains(&path, local_bounds, has_fill, stroke, local_pt)
+        // (stroke width, is-cosmetic). A cosmetic stroke's width is in DEVICE
+        // pixels, so its visual half-width in scene coordinates shrinks as the
+        // view zooms in (and grows as it zooms out). Convert per-event using
+        // the live view scale so the clickable band tracks the rendered line
+        // at any zoom; a logical stroke's width is already in scene units.
+        let stroke = self
+            .stroke
+            .as_ref()
+            .map(|(_, s)| (s.width, s.space == StrokeSpace::Device));
+        Box::new(move |local_pt, view_scale| {
+            let scene_width = stroke.map(|(w, cosmetic)| {
+                if cosmetic && view_scale > 1e-3 {
+                    w / view_scale
+                } else {
+                    w
+                }
+            });
+            path_shape_contains(&path, local_bounds, has_fill, scene_width, local_pt)
         })
     }
 
@@ -132,7 +152,7 @@ impl SceneItem for PathItem {
         // Connector-line and outline use cases dominate stroke-only
         // paths; fill takes precedence when present.
         self.fill
-            .or_else(|| self.stroke.map(|(c, _)| c))
+            .or_else(|| self.stroke.as_ref().map(|(c, _)| *c))
             .unwrap_or_else(|| Color::new(0.6, 0.6, 0.6, 1.0))
     }
 
@@ -168,11 +188,11 @@ fn path_shape_contains(
     path: &Path,
     local_bounds: Rect,
     has_fill: bool,
-    stroke: Option<(Color, f32)>,
+    stroke_width: Option<f32>,
     local_pt: Point,
 ) -> bool {
-    let stroke_width = match stroke {
-        Some((_, w)) => w,
+    let stroke_width = match stroke_width {
+        Some(w) => w,
         None => return local_bounds.contains(local_pt),
     };
     if has_fill {
@@ -283,5 +303,39 @@ mod tests {
             .quad_to(Point::new(50.0, 100.0), Point::new(100.0, 0.0));
         let item = PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 100.0)).stroke(Color::BLACK, 2.0);
         assert!(item.shape_contains(Point::new(50.0, 99.0)));
+    }
+
+    #[test]
+    fn cosmetic_path_hit_band_tracks_zoom() {
+        // A cosmetic stroke's width is in device px, so its scene-coord hit
+        // band must shrink as the view zooms in. A point 3 scene-units off a
+        // cosmetic 4px line is inside the band at 1× but outside at 4×.
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 0.0))
+            .line_to(Point::new(100.0, 0.0));
+        let item =
+            PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 8.0)).stroke_cosmetic(Color::BLACK, 4.0);
+        let test = item.clone_shape_test();
+        let p = Point::new(50.0, 3.0);
+        assert!(
+            test(p, 1.0),
+            "cosmetic band at 1x: width 4 → tolerance 4 → hit"
+        );
+        assert!(
+            !test(p, 4.0),
+            "cosmetic band shrinks at 4x: width 1 → tolerance 2.5 → miss"
+        );
+
+        // A LOGICAL stroke's width is already in scene units, so its band is
+        // unaffected by the view scale (regression guard).
+        let mut path2 = Path::new();
+        path2
+            .move_to(Point::new(0.0, 0.0))
+            .line_to(Point::new(100.0, 0.0));
+        let logical =
+            PathItem::new(path2, Rect::new(0.0, 0.0, 100.0, 8.0)).stroke(Color::BLACK, 4.0);
+        let test_l = logical.clone_shape_test();
+        assert!(test_l(p, 1.0), "logical band hit at 1x");
+        assert!(test_l(p, 4.0), "logical band unchanged by zoom");
     }
 }

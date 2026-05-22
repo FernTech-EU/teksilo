@@ -113,7 +113,7 @@ fn labelled(label: &'static str, body: impl Widget + 'static) -> impl Widget + '
     VStack::new()
         .spacing(4.0)
         .child(
-            TextWidget::new_literal(label)
+            TextWidget::new(lit!(label))
                 .style(TextStyleRole::Small)
                 .color(TextRole::Secondary),
         )
@@ -141,7 +141,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // Seven variants; split across two rows so the grid stays legible.
     let button_variants = section(
         ctx,
-        "Tier 1 — ButtonVariant",
+        tr!(sty_tier1_button_variant_heading()),
         VStack::new()
             .spacing(8.0)
             .child(
@@ -149,19 +149,19 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     .spacing(8.0)
                     .child(labelled(
                         "Filled",
-                        Button::new_literal("Filled").variant(ButtonVariant::Filled),
+                        Button::new(lit!("Filled")).variant(ButtonVariant::Filled),
                     ))
                     .child(labelled(
                         "Tinted",
-                        Button::new_literal("Tinted").variant(ButtonVariant::Tinted),
+                        Button::new(lit!("Tinted")).variant(ButtonVariant::Tinted),
                     ))
                     .child(labelled(
                         "Outlined",
-                        Button::new_literal("Outlined").variant(ButtonVariant::Outlined),
+                        Button::new(lit!("Outlined")).variant(ButtonVariant::Outlined),
                     ))
                     .child(labelled(
                         "Plain",
-                        Button::new_literal("Plain").variant(ButtonVariant::Plain),
+                        Button::new(lit!("Plain")).variant(ButtonVariant::Plain),
                     )),
             )
             .child(
@@ -169,15 +169,15 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     .spacing(8.0)
                     .child(labelled(
                         "Ghost",
-                        Button::new_literal("Ghost").variant(ButtonVariant::Ghost),
+                        Button::new(lit!("Ghost")).variant(ButtonVariant::Ghost),
                     ))
                     .child(labelled(
                         "Link",
-                        Button::new_literal("Link").variant(ButtonVariant::Link),
+                        Button::new(lit!("Link")).variant(ButtonVariant::Link),
                     ))
                     .child(labelled(
                         "Destructive",
-                        Button::new_literal("Delete").variant(ButtonVariant::Destructive),
+                        Button::new(lit!("Delete")).variant(ButtonVariant::Destructive),
                     )),
             ),
     );
@@ -185,90 +185,90 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // ── Tier 1: Toggle variants ─────────────────────────────────────
     let toggle_variants = section(
         ctx,
-        "Tier 1 — ToggleVariant",
+        tr!(sty_tier1_toggle_variant_heading()),
         HStack::new()
             .spacing(16.0)
             .child(labelled(
                 "Switch",
                 Toggle::new(tog_switch)
                     .variant(ToggleVariant::Switch)
-                    .label_literal("Switch"),
+                    .label(lit!("Switch")),
             ))
             .child(labelled(
                 "Pill",
                 Toggle::new(tog_pill)
                     .variant(ToggleVariant::Pill)
-                    .label_literal("Pill"),
+                    .label(lit!("Pill")),
             ))
             .child(labelled(
                 "Square",
                 Toggle::new(tog_square)
                     .variant(ToggleVariant::Square)
-                    .label_literal("Square"),
+                    .label(lit!("Square")),
             ))
             .child(labelled(
                 "Inset",
                 Toggle::new(tog_inset)
                     .variant(ToggleVariant::Inset)
-                    .label_literal("Inset"),
+                    .label(lit!("Inset")),
             )),
     );
 
     // ── Tier 1: Checkbox variants ───────────────────────────────────
     let checkbox_variants = section(
         ctx,
-        "Tier 1 — CheckboxVariant",
+        tr!(sty_tier1_checkbox_variant_heading()),
         HStack::new()
             .spacing(16.0)
             .child(labelled(
                 "Square",
                 Checkbox::new(cb_square)
                     .variant(CheckboxVariant::Square)
-                    .label_literal("Square"),
+                    .label(lit!("Square")),
             ))
             .child(labelled(
                 "Rounded",
                 Checkbox::new(cb_rounded)
                     .variant(CheckboxVariant::Rounded)
-                    .label_literal("Rounded"),
+                    .label(lit!("Rounded")),
             ))
             .child(labelled(
                 "Circle",
                 Checkbox::new(cb_circle)
                     .variant(CheckboxVariant::Circle)
-                    .label_literal("Circle"),
+                    .label(lit!("Circle")),
             )),
     );
 
     // ── Tier 1: Card variants ───────────────────────────────────────
     let card_variants = section(
         ctx,
-        "Tier 1 — CardVariant",
+        tr!(sty_tier1_card_variant_heading()),
         HStack::new()
             .spacing(12.0)
             .child(labelled(
                 "Plain",
                 Card::new()
                     .variant(CardVariant::Plain)
-                    .content(TextWidget::new_literal("Plain").style(TextStyleRole::Small)),
+                    .content(TextWidget::new(lit!("Plain")).style(TextStyleRole::Small)),
             ))
             .child(labelled(
                 "Elevated",
                 Card::new()
                     .variant(CardVariant::Elevated)
-                    .content(TextWidget::new_literal("Elevated").style(TextStyleRole::Small)),
+                    .content(TextWidget::new(lit!("Elevated")).style(TextStyleRole::Small)),
             ))
             .child(labelled(
                 "Outlined",
                 Card::new()
                     .variant(CardVariant::Outlined)
-                    .content(TextWidget::new_literal("Outlined").style(TextStyleRole::Small)),
+                    .content(TextWidget::new(lit!("Outlined")).style(TextStyleRole::Small)),
             ))
             .child(labelled(
                 "Filled",
                 Card::new()
                     .variant(CardVariant::Filled)
-                    .content(TextWidget::new_literal("Filled").style(TextStyleRole::Small)),
+                    .content(TextWidget::new(lit!("Filled")).style(TextStyleRole::Small)),
             )),
     );
 
@@ -277,33 +277,33 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // widget sits next to its IntUI-default sibling for comparison.
     let custom_button = section(
         ctx,
-        "Tier 3 — Button::style(impl ButtonStyle)",
+        tr!(sty_tier3_button_style_heading()),
         HStack::new()
             .spacing(12.0)
             .child(labelled(
                 "default",
-                Button::new_literal("Default").variant(ButtonVariant::Filled),
+                Button::new(lit!("Default")).variant(ButtonVariant::Filled),
             ))
             .child(labelled(
                 ".style(GlowButton)",
-                Button::new_literal("Glow").style(GlowButton),
+                Button::new(lit!("Glow")).style(GlowButton),
             )),
     );
 
     let custom_toggle = section(
         ctx,
-        "Tier 3 — Toggle::style(impl ToggleStyle)",
+        tr!(sty_tier3_toggle_style_heading()),
         HStack::new()
             .spacing(16.0)
             .child(labelled(
                 "default",
-                Toggle::new(tog_default).label_literal("Default"),
+                Toggle::new(tog_default).label(lit!("Default")),
             ))
             .child(labelled(
                 ".style(SquareToggle)",
                 Toggle::new(tog_custom)
                     .style(SquareToggle)
-                    .label_literal("Square"),
+                    .label(lit!("Square")),
             )),
     );
 
@@ -339,11 +339,11 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // Tier-3 rows: the per-call `.style(impl FooStyle)` override takes
     // a value the `bati!` property grammar can't express directly, so
     // these are built with the plain builder API and spliced in.
-    let glow_button = ctx.add(Button::new_literal("Glow").style(GlowButton));
+    let glow_button = ctx.add(Button::new(lit!("Glow")).style(GlowButton));
     let square_toggle = ctx.add(
         Toggle::new(tog_custom)
             .style(SquareToggle)
-            .label_literal("Square"),
+            .label(lit!("Square")),
     );
 
     bati!(ctx => VStack {
@@ -363,34 +363,34 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Tier 1 — ButtonVariant") {
+                TextWidget::new(tr!(sty_tier1_button_variant_heading())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
                 HStack {
                     spacing: 8.0
-                    Button::new_literal("Filled") {
+                    Button::new(lit!("Filled")) {
                         variant: ButtonVariant::Filled
                     }
-                    Button::new_literal("Tinted") {
+                    Button::new(lit!("Tinted")) {
                         variant: ButtonVariant::Tinted
                     }
-                    Button::new_literal("Outlined") {
+                    Button::new(lit!("Outlined")) {
                         variant: ButtonVariant::Outlined
                     }
-                    Button::new_literal("Plain") {
+                    Button::new(lit!("Plain")) {
                         variant: ButtonVariant::Plain
                     }
                 }
                 HStack {
                     spacing: 8.0
-                    Button::new_literal("Ghost") {
+                    Button::new(lit!("Ghost")) {
                         variant: ButtonVariant::Ghost
                     }
-                    Button::new_literal("Link") {
+                    Button::new(lit!("Link")) {
                         variant: ButtonVariant::Link
                     }
-                    Button::new_literal("Delete") {
+                    Button::new(lit!("Delete")) {
                         variant: ButtonVariant::Destructive
                     }
                 }
@@ -398,7 +398,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Tier 1 — ToggleVariant") {
+                TextWidget::new(tr!(sty_tier1_toggle_variant_heading())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -406,26 +406,26 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     spacing: 16.0
                     Toggle::new(tog_switch) {
                         variant: ToggleVariant::Switch
-                        label_literal: "Switch"
+                        label: lit!("Switch")
                     }
                     Toggle::new(tog_pill) {
                         variant: ToggleVariant::Pill
-                        label_literal: "Pill"
+                        label: lit!("Pill")
                     }
                     Toggle::new(tog_square) {
                         variant: ToggleVariant::Square
-                        label_literal: "Square"
+                        label: lit!("Square")
                     }
                     Toggle::new(tog_inset) {
                         variant: ToggleVariant::Inset
-                        label_literal: "Inset"
+                        label: lit!("Inset")
                     }
                 }
             }
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Tier 1 — CheckboxVariant") {
+                TextWidget::new(tr!(sty_tier1_checkbox_variant_heading())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -433,28 +433,28 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     spacing: 16.0
                     Checkbox::new(cb_square) {
                         variant: CheckboxVariant::Square
-                        label_literal: "Square"
+                        label: lit!("Square")
                     }
                     Checkbox::new(cb_rounded) {
                         variant: CheckboxVariant::Rounded
-                        label_literal: "Rounded"
+                        label: lit!("Rounded")
                     }
                     Checkbox::new(cb_circle) {
                         variant: CheckboxVariant::Circle
-                        label_literal: "Circle"
+                        label: lit!("Circle")
                     }
                 }
             }
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Tier 3 — Button::style(impl ButtonStyle)") {
+                TextWidget::new(tr!(sty_tier3_button_style_heading())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
                 HStack {
                     spacing: 12.0
-                    Button::new_literal("Default") {
+                    Button::new(lit!("Default")) {
                         variant: ButtonVariant::Filled
                     }
                     #{ glow_button }
@@ -463,14 +463,14 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Tier 3 — Toggle::style(impl ToggleStyle)") {
+                TextWidget::new(tr!(sty_tier3_toggle_style_heading())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
                 HStack {
                     spacing: 16.0
                     Toggle::new(tog_default) {
-                        label_literal: "Default"
+                        label: lit!("Default")
                     }
                     #{ square_toggle }
                 }

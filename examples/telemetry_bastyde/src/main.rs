@@ -36,7 +36,7 @@
 //!   `bastyde-collector` → Parquet on disk.
 //!
 //! Watch the live update in the `PrivacySettings` "Inspect data
-//! sent" accordion — Phase 3.2 added a revision signal so the
+//! sent" accordion — a revision signal was added so the
 //! accordion refreshes as events land.
 //!
 //! ## Pseudonymous mode
@@ -69,7 +69,7 @@ use std::rc::Rc;
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -94,17 +94,17 @@ impl Widget for DemoRoot {
             ));
         }
 
-        let click_btn = Button::new_literal("Fire 'click' intent")
+        let click_btn = Button::new(lit!("Fire 'click' intent"))
             .variant(ButtonVariant::Filled)
             .on_activate_fn(|ctx| {
                 ctx.send_intent(bastyde::core::Intent::new("app.demo.click"));
             });
-        let save_btn = Button::new_literal("Fire 'save' intent")
+        let save_btn = Button::new(lit!("Fire 'save' intent"))
             .variant(ButtonVariant::Filled)
             .on_activate_fn(|ctx| {
                 ctx.send_intent(bastyde::core::Intent::new("app.demo.save"));
             });
-        let about_btn = Button::new_literal("Fire 'about' intent")
+        let about_btn = Button::new(lit!("Fire 'about' intent"))
             .variant(ButtonVariant::Filled)
             .on_activate_fn(|ctx| {
                 ctx.send_intent(bastyde::core::Intent::new("app.demo.about"));
@@ -112,16 +112,14 @@ impl Widget for DemoRoot {
 
         let column = VStack::new()
             .spacing(16.0)
-            .child(TextWidget::new_literal("bastyde-collector telemetry demo"))
-            .child(TextWidget::new_literal(
-                "Each click fires an intent through the dispatch tap → \
+            .child(TextWidget::new(lit!("bastyde-collector telemetry demo")))
+            .child(TextWidget::new(lit!("Each click fires an intent through the dispatch tap → \
                  bastyde-analytics-bastyde adapter → gRPC → your local \
                  bastyde-collector. The 'Inspect data sent' accordion \
-                 below auto-refreshes as events land (Phase 3.2 \
-                 revision signal). In pseudonymous mode (set \
-                 BASTYDE_INSTALL_ID), 'Get my data' opens a Save-as-JSON \
-                 dialog and 'Erase my data' round-trips through \
-                 Telemetry.Erase.",
+                 below auto-refreshes as events land. In pseudonymous \
+                 mode (set BASTYDE_INSTALL_ID), 'Get my data' opens a \
+                 Save-as-JSON dialog and 'Erase my data' round-trips \
+                 through Telemetry.Erase."),
             ))
             .child(click_btn)
             .child(save_btn)

@@ -8,7 +8,6 @@ pub mod avatar_style;
 pub mod badge_style;
 pub mod banner_style;
 pub mod button_style;
-pub mod drop_zone_style;
 pub mod calendar_style;
 pub mod card_style;
 pub mod checkbox_style;
@@ -17,6 +16,8 @@ pub mod combo_box_style;
 pub mod component_style_slots;
 pub mod date_edit_style;
 pub mod dialog_style;
+pub mod drop_target_style;
+pub mod drop_zone_style;
 pub mod icon_button_style;
 pub mod link_style;
 pub mod list_container_style;
@@ -50,9 +51,6 @@ pub use avatar_style::{
 };
 pub use badge_style::{BadgeStyle, BadgeStyleConfig, SharedBadgeStyle};
 pub use banner_style::{BannerSeverity, BannerStyle, BannerStyleConfig, SharedBannerStyle};
-pub use drop_zone_style::{
-    DropZoneStyle, DropZoneStyleConfig, DropZoneVisualState, SharedDropZoneStyle,
-};
 pub use button_style::{
     ButtonRecipe, ButtonStyle, ButtonStyleConfig, ButtonVariant, SharedButtonStyle,
 };
@@ -73,6 +71,13 @@ pub use combo_box_style::{
 pub use component_style_slots::ComponentStyleSlots;
 pub use date_edit_style::{DateEditStyle, DateEditStyleConfig, SharedDateEditStyle};
 pub use dialog_style::{DialogStyle, DialogStyleConfig, SharedDialogStyle};
+pub use drop_target_style::{
+    DropTargetDragState, DropTargetStyle, DropTargetStyleConfig, DropTargetVariant,
+    SharedDropTargetStyle,
+};
+pub use drop_zone_style::{
+    DropZoneStyle, DropZoneStyleConfig, DropZoneVisualState, SharedDropZoneStyle,
+};
 pub use icon_button_style::{
     IconButtonSize, IconButtonStyle, IconButtonStyleConfig, SharedIconButtonStyle,
 };

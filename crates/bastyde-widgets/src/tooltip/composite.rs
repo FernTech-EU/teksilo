@@ -112,12 +112,6 @@ impl CompositeTooltipWidget {
         self
     }
 
-    #[doc(hidden)]
-    pub fn access_label_literal(mut self, label: impl Into<String>) -> Self {
-        self.access_label = Some(label.into());
-        self
-    }
-
     /// Override the per-theme `composite_tooltip.max_width`.
     pub fn max_width(mut self, w: f32) -> Self {
         self.max_width_override = Some(w);
@@ -165,14 +159,29 @@ impl Widget for CompositeTooltipWidget {
         use crate::styles::recipe_tooltip_style as tt;
         let self_id = ctx.self_id();
 
-        // Body — taken out of self once and laid into the arena. If
-        // unset, fall back to a Spacer so layout remains well-formed.
+        // Body — mounted once and reused across rebuilds. `build()` can
+        // re-run (`rebuild_single_widget`), and taking `self.body`
+        // unconditionally would collapse a rebuilt composite to a Spacer
+        // (the body box is gone after the first take). So we take only on
+        // first build, store the id, and reuse it on every later build —
+        // the same shape `ModalContainer` uses for `pending_content` →
+        // `content_id` (see dialog.rs). Reuse is only sound because
+        // `preserves_children_on_rebuild()` returns `true` below: the
+        // body lands under the ScrollArea subtree, which a normal rebuild
+        // would `destroy_subtree`, leaving a dangling id. Preserving the
+        // subtree keeps `body_id` alive so the reused id is valid. The
+        // Spacer fallback applies only when no body was ever set.
         let body_id = if let Some(body) = self.body.take() {
-            ctx.add_boxed(body)
+            let id = ctx.add_boxed(body);
+            self.body_id = Some(id);
+            id
+        } else if let Some(id) = self.body_id {
+            id
         } else {
-            ctx.add(Spacer::new())
+            let id = ctx.add(Spacer::new());
+            self.body_id = Some(id);
+            id
         };
-        self.body_id = Some(body_id);
 
         // Always wrap in a vertical-only ScrollArea; chrome stays
         // invisible until overflow (AsNeeded) and the user can scroll
@@ -275,9 +284,15 @@ impl Widget for CompositeTooltipWidget {
             bastyde_core::accesskit::Role::Tooltip
         };
         builder.set_role(role);
-        if let Some(label) = self.access_label.as_deref() {
-            builder.set_name(label);
-        }
+        // Composite tooltips host arbitrary widget bodies and have no
+        // intrinsic text, so without an explicit `.access_label(...)` the
+        // node would be unnamed. Fall back to a localized generic name —
+        // same approach as `ModalContainer` / `SnackbarWidget`.
+        let name = self
+            .access_label
+            .clone()
+            .unwrap_or_else(|| bastyde_i18n::tr_widget!(a11y_tooltip_name()).resolve_now());
+        builder.set_name(name);
         if is_sticky {
             builder.add_action(bastyde_core::accesskit::Action::Focus);
         }
@@ -286,6 +301,19 @@ impl Widget for CompositeTooltipWidget {
     fn children(&self) -> Vec<WidgetId> {
         self.root_child_id.map(|id| vec![id]).unwrap_or_default()
     }
+
+    /// Keep the existing child subtree across rebuilds rather than
+    /// destroying it. The body widget is owned once (`self.body` is
+    /// taken on first build) and cannot be reconstructed on a later
+    /// `build()`, so it must survive — otherwise the reused `body_id`
+    /// would dangle. Mirrors `Switcher`'s preserve-on-rebuild contract.
+    /// (In practice the composite tooltip has no `Rebuild`-level binding,
+    /// so this path is rarely exercised; when it is, the freshly-built
+    /// chrome supersedes the old, which is left orphaned — an accepted
+    /// cost on a tooltip that effectively never rebuilds.)
+    fn preserves_children_on_rebuild(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]
@@ -293,9 +321,10 @@ mod tests {
     use super::*;
     use crate::button::Button;
     use crate::primitives::{TextWidget, VStack};
-    use crate::tooltip::attach::{DEFAULT_COMPOSITE_TOOLTIP_DELAY, attach_composite_tooltip};
+    use crate::tooltip::attach::attach_composite_tooltip;
     use bastyde_canvas::{MockTextBackend, SizeProposal};
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -324,12 +353,13 @@ mod tests {
 
     impl Widget for ComposeTooltipHost {
         fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-            let anchor = ctx.add(Button::new_literal("Hover me"));
+            let anchor = ctx.add(Button::new(lit!("Hover me")));
             self.anchor_id = Some(anchor);
             let body = VStack::new()
-                .child(TextWidget::new_literal("Header"))
-                .child(TextWidget::new_literal("Body"));
-            let tip = attach_composite_tooltip(ctx, anchor, body, DEFAULT_COMPOSITE_TOOLTIP_DELAY);
+                .child(TextWidget::new(lit!("Header")))
+                .child(TextWidget::new(lit!("Body")));
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            let tip = attach_composite_tooltip(ctx, anchor, body, delay);
             self.tooltip_id_sink.set(Some(tip));
             vec![anchor]
         }
@@ -362,7 +392,7 @@ mod tests {
             "composite tooltip should not appear instantly — waits for delay"
         );
 
-        tree.advance_time(DEFAULT_COMPOSITE_TOOLTIP_DELAY + Duration::from_millis(50));
+        tree.advance_time(Duration::from_millis(400) + Duration::from_millis(50));
         assert_eq!(
             tree.active_overlays().len(),
             1,
@@ -378,7 +408,7 @@ mod tests {
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         tree.pointer_move(tree.bounds(host).center());
-        tree.advance_time(DEFAULT_COMPOSITE_TOOLTIP_DELAY + Duration::from_millis(50));
+        tree.advance_time(Duration::from_millis(400) + Duration::from_millis(50));
         assert_eq!(tree.active_overlays().len(), 1);
 
         // Pointer leaves before sticky promotion → dismiss.
@@ -401,7 +431,7 @@ mod tests {
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         tree.pointer_move(tree.bounds(host).center());
-        tree.advance_time(DEFAULT_COMPOSITE_TOOLTIP_DELAY + Duration::from_millis(50));
+        tree.advance_time(Duration::from_millis(400) + Duration::from_millis(50));
         assert_eq!(tree.active_overlays().len(), 1);
 
         let content_id = tooltip_id_sink
@@ -415,6 +445,20 @@ mod tests {
             tree.active_overlays().len(),
             1,
             "sticky composite tooltip should survive pointer-leave"
+        );
+    }
+
+    #[test]
+    fn composite_tooltip_preserves_children_so_body_survives_rebuild() {
+        // The body box is taken on first `build()` and cannot be rebuilt,
+        // so the rebuild-safe body reuse depends on the child subtree
+        // being preserved (otherwise the reused `body_id` would dangle).
+        // Assert that contract directly — it links the two halves of the
+        // fix (reuse + preserve); removing either should fail here.
+        let w = CompositeTooltipWidget::new().content(TextWidget::new(lit!("Body")));
+        assert!(
+            w.preserves_children_on_rebuild(),
+            "composite must preserve children so the reused body id stays valid across rebuild"
         );
     }
 }

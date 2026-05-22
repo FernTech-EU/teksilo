@@ -219,8 +219,8 @@ pub struct SpinBox<T: SpinValue> {
     /// [`width`](SpinBox::width), [`width_chars`](SpinBox::width_chars),
     /// and [`fill_width`](SpinBox::fill_width) builder methods.
     width_policy: WidthPolicy,
-    label: Option<String>,
-    placeholder: String,
+    label: Option<bastyde_i18n::LocalizedString>,
+    placeholder: bastyde_i18n::LocalizedString,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     read_only: bool,
@@ -293,7 +293,7 @@ impl<T: SpinValue> SpinBox<T> {
             wheel_mode: WheelMode::Focused,
             width_policy: WidthPolicy::Pixels(DEFAULT_PREFERRED_WIDTH),
             label: None,
-            placeholder: String::new(),
+            placeholder: bastyde_i18n::LocalizedString::literal(String::new()),
             initial_enabled: true,
             read_only: false,
             text_from_value: None,
@@ -438,25 +438,13 @@ impl<T: SpinValue> SpinBox<T> {
 
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
-        self
-    }
-
-    /// Untranslated [`label`](Self::label).
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
+        self.label = Some(ls);
         self
     }
 
     pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.placeholder = ls.resolve_now();
-        self
-    }
-
-    /// Untranslated [`placeholder`](Self::placeholder).
-    pub fn placeholder_literal(mut self, text: impl Into<String>) -> Self {
-        self.placeholder = text.into();
+        self.placeholder = ls;
         self
     }
 
@@ -1176,7 +1164,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
 
         builder.set_role(Role::SpinButton);
         if let Some(ref label) = self.label {
-            builder.set_name(label);
+            builder.set_name(label.resolve_now());
         }
         builder.set_numeric_value(self.value.get().to_f64());
         builder.set_min_numeric_value(self.min.to_f64());

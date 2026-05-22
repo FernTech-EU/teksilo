@@ -11,7 +11,7 @@ use bastyde::widgets::{
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -55,16 +55,14 @@ impl OverlayDemo {
 
         // --- unsaved-changes triad (question severity) ---
         let record_save = record.clone();
-        let save_btn = Button::new_literal("Save changes?")
+        let save_btn = Button::new(lit!("Save changes?"))
             .variant(ButtonVariant::Plain)
             .on_activate_fn(move |ctx| {
                 let record = record_save.clone();
                 ctx.present_message_box(
-                    MessageBox::question_literal("Save changes?")
-                        .text_literal("You have unsaved changes in report.skrib.")
-                        .informative_text_literal(
-                            "Your changes will be lost if you don't save them.",
-                        )
+                    MessageBox::question(lit!("Save changes?"))
+                        .text(lit!("You have unsaved changes in report.skrib."))
+                        .informative_text(lit!("Your changes will be lost if you don't save them."))
                         .buttons(MessageBoxButtons::SaveDiscardCancel)
                         .default_button(StandardButton::Save)
                         .escape_button(StandardButton::Cancel)
@@ -79,15 +77,15 @@ impl OverlayDemo {
 
         // --- destructive confirmation (critical severity, safe default) ---
         let record_delete = record.clone();
-        let delete_btn = Button::new_literal("Delete file?")
+        let delete_btn = Button::new(lit!("Delete file?"))
             .variant(ButtonVariant::Plain)
             .on_activate_fn(move |ctx| {
                 let record = record_delete.clone();
                 ctx.present_message_box(
-                    MessageBox::critical_literal("Delete file?")
-                        .text_literal(
-                            "Permanently delete report.skrib? This action cannot be undone.",
-                        )
+                    MessageBox::critical(lit!("Delete file?"))
+                        .text(lit!(
+                            "Permanently delete report.skrib? This action cannot be undone."
+                        ))
                         .buttons(MessageBoxButtons::YesNo)
                         .default_button(StandardButton::No)
                         .escape_button(StandardButton::No)
@@ -102,18 +100,18 @@ impl OverlayDemo {
 
         // --- error-with-retry triad (critical + detailed_text) ---
         let record_open = record.clone();
-        let open_btn = Button::new_literal("Could not open file")
+        let open_btn = Button::new(lit!("Could not open file"))
             .variant(ButtonVariant::Plain)
             .on_activate_fn(move |ctx| {
                 let record = record_open.clone();
                 ctx.present_message_box(
-                    MessageBox::critical_literal("Could not open file")
-                        .text_literal("report.skrib could not be opened.")
-                        .informative_text_literal("You may not have permission.")
-                        .detailed_text_literal(
+                    MessageBox::critical(lit!("Could not open file"))
+                        .text(lit!("report.skrib could not be opened."))
+                        .informative_text(lit!("You may not have permission."))
+                        .detailed_text(lit!(
                             "Underlying OS error: EACCES (permission denied)\n\
-                             open(\"report.skrib\", O_RDWR) → errno 13",
-                        )
+                             open(\"report.skrib\", O_RDWR) → errno 13"
+                        ))
                         .buttons(MessageBoxButtons::RetryIgnoreAbort)
                         .default_button(StandardButton::Retry)
                         .escape_button(StandardButton::Abort)
@@ -128,16 +126,16 @@ impl OverlayDemo {
 
         // --- informational + don't-show-again ---
         let record_welcome = record.clone();
-        let welcome_btn = Button::new_literal("Welcome")
+        let welcome_btn = Button::new(lit!("Welcome"))
             .variant(ButtonVariant::Plain)
             .on_activate_fn(move |ctx| {
                 let record = record_welcome.clone();
                 ctx.present_message_box(
-                    MessageBox::information_literal("Welcome to Bastyde")
-                        .text_literal(
-                            "This demo showcases the MessageBox pipeline across severities.",
-                        )
-                        .show_again_checkbox_literal("Don't show this again")
+                    MessageBox::information(lit!("Welcome to Bastyde"))
+                        .text(lit!(
+                            "This demo showcases the MessageBox pipeline across severities."
+                        ))
+                        .show_again_checkbox(lit!("Don't show this again"))
                         .buttons(MessageBoxButtons::Ok)
                         .on_result(move |r, _| {
                             record(format!(
@@ -150,13 +148,13 @@ impl OverlayDemo {
 
         // --- custom button row (question + Help + Ok) ---
         let record_help = record.clone();
-        let help_btn = Button::new_literal("Custom buttons")
+        let help_btn = Button::new(lit!("Custom buttons"))
             .variant(ButtonVariant::Plain)
             .on_activate_fn(move |ctx| {
                 let record = record_help.clone();
                 ctx.present_message_box(
-                    MessageBox::question_literal("How do I…?")
-                        .text_literal("Open help or dismiss with OK.")
+                    MessageBox::question(lit!("How do I…?"))
+                        .text(lit!("Open help or dismiss with OK."))
                         .buttons(MessageBoxButtons::Custom(vec![
                             MessageBoxButton::standard(StandardButton::Help),
                             MessageBoxButton::standard(StandardButton::Ok),
@@ -172,12 +170,12 @@ impl OverlayDemo {
                 );
             });
 
-        let result_readout = TextWidget::new_literal("Last result:")
+        let result_readout = TextWidget::new(lit!("Last result:"))
             .style(TextStyleRole::Small)
             .color(TextRole::Secondary);
 
         let result_signal = self.last_message_box_result.clone();
-        let result_value = TextWidget::new_literal(result_signal.get())
+        let result_value = TextWidget::new(lit!(result_signal.get()))
             .bind_text(result_signal)
             .style(TextStyleRole::BodyBold)
             .color(TextRole::Primary);
@@ -186,13 +184,12 @@ impl OverlayDemo {
             VStack::new()
                 .spacing(14.0)
                 .child(
-                    TextWidget::new_literal("MessageBox")
+                    TextWidget::new(lit!("MessageBox"))
                         .style(TextStyleRole::BodyBold)
                         .color(TextRole::Primary),
                 )
                 .child(
-                    TextWidget::new_literal(
-                        "Higher-level alert surface built on ModalContainer. Each trigger below exercises a different severity and button set; the result is reported under the row.",
+                    TextWidget::new(lit!("Higher-level alert surface built on ModalContainer. Each trigger below exercises a different severity and button set; the result is reported under the row."),
                     )
                     .style(TextStyleRole::Body)
                     .color(TextRole::Secondary),
@@ -218,13 +215,12 @@ impl Widget for OverlayDemo {
         let popover_content = VStack::new()
             .spacing(12.0)
             .child(
-                TextWidget::new_literal("Popover")
+                TextWidget::new(lit!("Popover"))
                     .style(TextStyleRole::Small)
                     .color(TextRole::Primary),
             )
             .child(
-                TextWidget::new_literal(
-                    "Use popovers for compact contextual actions without leaving the current surface.",
+                TextWidget::new(lit!("Use popovers for compact contextual actions without leaving the current surface."),
                 )
                 .style(TextStyleRole::Body)
                 .color(TextRole::Secondary),
@@ -232,20 +228,20 @@ impl Widget for OverlayDemo {
             .child(
                 HStack::new()
                     .spacing(8.0)
-                    .child(Badge::new_literal("Quick actions"))
-                    .child(Badge::new_literal("Inline help"))
-                    .child(Badge::new_literal("Inspector")),
+                    .child(Badge::new(lit!("Quick actions")))
+                    .child(Badge::new(lit!("Inline help")))
+                    .child(Badge::new(lit!("Inspector"))),
             );
 
         let snackbar_content = HStack::new()
             .spacing(14.0)
             .child(
-                TextWidget::new_literal("Autosave complete")
+                TextWidget::new(lit!("Autosave complete"))
                     .style(TextStyleRole::Body)
                     .color(TextRole::TooltipText),
             )
             .child(
-                Button::new_literal("Dismiss")
+                Button::new(lit!("Dismiss"))
                     .variant(ButtonVariant::Plain)
                     .on_activate_fn(|ctx| ctx.dismiss_top_overlay()),
             );
@@ -253,9 +249,9 @@ impl Widget for OverlayDemo {
         let popover_trigger = Panel::new().padding(12.0).child(
             HStack::new()
                 .spacing(10.0)
-                .child(Badge::new_literal("Context"))
+                .child(Badge::new(lit!("Context")))
                 .child(
-                    TextWidget::new_literal("Popover actions")
+                    TextWidget::new(lit!("Popover actions"))
                         .style(TextStyleRole::Small)
                         .color(TextRole::Primary),
                 ),
@@ -264,30 +260,28 @@ impl Widget for OverlayDemo {
         let dialog_trigger = Panel::new().padding(12.0).child(
             HStack::new()
                 .spacing(10.0)
-                .child(Badge::new_literal("Modal"))
+                .child(Badge::new(lit!("Modal")))
                 .child(
-                    TextWidget::new_literal("Review changes")
+                    TextWidget::new(lit!("Review changes"))
                         .style(TextStyleRole::Small)
                         .color(TextRole::Primary),
                 ),
         );
         let modal_trigger_id = ctx.add(
-            Dialog::new_literal("Adaptive modal window")
+            Dialog::new(lit!("Adaptive modal window"))
                 .content(move || {
                     DialogContent::new()
-                        .title_literal("Adaptive modal dialog")
-                        .supporting_text_literal(
-                            "The framework chooses the best modal presentation for the current backend: a native modal child window when reliable, otherwise a centered in-tree dialog.",
+                        .title(lit!("Adaptive modal dialog"))
+                        .supporting_text(lit!("The framework chooses the best modal presentation for the current backend: a native modal child window when reliable, otherwise a centered in-tree dialog."),
                         )
                         .body(
-                            TextWidget::new_literal(
-                                "The app code does not branch on Wayland or window-system support here; it issues one modal request and lets Bastyde resolve it.",
+                            TextWidget::new(lit!("The app code does not branch on Wayland or window-system support here; it issues one modal request and lets Bastyde resolve it."),
                             )
                             .style(TextStyleRole::Body)
                             .color(TextRole::Secondary),
                         )
                         .footer(
-                            Button::new_literal("Close")
+                            Button::new(lit!("Close"))
                                 .variant(ButtonVariant::Filled)
                                 .on_activate_fn(|ctx| ctx.dismiss_modal()),
                         )
@@ -300,13 +294,12 @@ impl Widget for OverlayDemo {
                 VStack::new()
                     .spacing(24.0)
                     .child(
-                        TextWidget::new_literal("Dialogs and Popovers")
+                        TextWidget::new(lit!("Dialogs and Popovers"))
                             .style(TextStyleRole::BodyBold)
                             .color(TextRole::Primary),
                     )
                     .child(
-                        TextWidget::new_literal(
-                            "Bastyde now resolves dialogs through a shared modal presentation pipeline, alongside anchored popovers and timed snackbars.",
+                        TextWidget::new(lit!("Bastyde now resolves dialogs through a shared modal presentation pipeline, alongside anchored popovers and timed snackbars."),
                         )
                         .style(TextStyleRole::Body)
                         .color(TextRole::Secondary),
@@ -316,22 +309,20 @@ impl Widget for OverlayDemo {
                             HStack::new()
                                 .spacing(16.0)
                                 .child(
-                                    Popover::new_literal("Show popover")
+                                    Popover::new(lit!("Show popover"))
                                         .content(popover_content)
                                         .caret_size(12.0)
                                         .trigger(popover_trigger),
                                 )
                                 .child(
-                                    Dialog::new_literal("Open dialog")
+                                    Dialog::new(lit!("Open dialog"))
                                         .content(move || {
                                             DialogContent::new()
-                                                .title_literal("Review Changes")
-                                                .supporting_text_literal(
-                                                    "Dialogs open centered, dismiss on Escape or outside click, and can host structured body and action sections.",
+                                                .title(lit!("Review Changes"))
+                                                .supporting_text(lit!("Dialogs open centered, dismiss on Escape or outside click, and can host structured body and action sections."),
                                                 )
                                                 .body(
-                                                    TextWidget::new_literal(
-                                                        "This helper gives dialogs a consistent header, content spacing, and footer separation without forcing a single action-row layout.",
+                                                    TextWidget::new(lit!("This helper gives dialogs a consistent header, content spacing, and footer separation without forcing a single action-row layout."),
                                                     )
                                                     .style(TextStyleRole::Body)
                                                     .color(TextRole::Secondary),
@@ -340,12 +331,12 @@ impl Widget for OverlayDemo {
                                                     HStack::new()
                                                         .spacing(12.0)
                                                         .child(
-                                                            Button::new_literal("Cancel")
+                                                            Button::new(lit!("Cancel"))
                                                                 .variant(ButtonVariant::Plain)
                                                                 .on_activate_fn(|ctx| ctx.dismiss_modal()),
                                                         )
                                                         .child(
-                                                            Button::new_literal("Apply")
+                                                            Button::new(lit!("Apply"))
                                                                 .variant(ButtonVariant::Filled)
                                                                 .on_activate_fn(|ctx| ctx.dismiss_modal()),
                                                         ),
@@ -354,7 +345,7 @@ impl Widget for OverlayDemo {
                                         .trigger(dialog_trigger),
                                 )
                                 .child(
-                                    Snackbar::new_literal("Show snackbar")
+                                    Snackbar::new(lit!("Show snackbar"))
                                         .content(snackbar_content)
                                         .auto_dismiss_after(Duration::from_millis(2500)),
                                 )
@@ -367,20 +358,18 @@ impl Widget for OverlayDemo {
                             VStack::new()
                                 .spacing(10.0)
                                 .child(
-                                    TextWidget::new_literal("Notes")
+                                    TextWidget::new(lit!("Notes"))
                                         .style(TextStyleRole::BodyBold)
                                         .color(TextRole::Primary),
                                 )
                                 .child(
-                                    TextWidget::new_literal(
-                                        "Dialogs now share one modal request API. Footer actions can dismiss the current modal without knowing whether Bastyde resolved it to an in-tree overlay or a native modal child window.",
+                                    TextWidget::new(lit!("Dialogs now share one modal request API. Footer actions can dismiss the current modal without knowing whether Bastyde resolved it to an in-tree overlay or a native modal child window."),
                                     )
                                     .style(TextStyleRole::Body)
                                     .color(TextRole::Secondary),
                                 )
                                 .child(
-                                    TextWidget::new_literal(
-                                        "MessageBox is the higher-level alert surface: severity ↔ icon ↔ color, standard Qt-style button sets (Ok/Cancel/Yes/No/Save/Discard/…), default-on-Enter + escape-on-Escape keyboard handling, and an `on_result` closure that receives which button fired plus the state of the optional don't-show-again checkbox. Critical severity disables click-outside dismissal and uses EscapeKey-only close behavior — matching Qt's critical dialog convention. Initial focus lands on the default button via `ModalRequest::focus_target` + `Widget::initial_focus_hint`, so platform-native button orderings (Cancel-left, Default-right) work even when the default isn't the first focusable descendant.",
+                                    TextWidget::new(lit!("MessageBox is the higher-level alert surface: severity ↔ icon ↔ color, standard Qt-style button sets (Ok/Cancel/Yes/No/Save/Discard/…), default-on-Enter + escape-on-Escape keyboard handling, and an `on_result` closure that receives which button fired plus the state of the optional don't-show-again checkbox. Critical severity disables click-outside dismissal and uses EscapeKey-only close behavior — matching Qt's critical dialog convention. Initial focus lands on the default button via `ModalRequest::focus_target` + `Widget::initial_focus_hint`, so platform-native button orderings (Cancel-left, Default-right) work even when the default isn't the first focusable descendant."),
                                     )
                                     .style(TextStyleRole::Body)
                                     .color(TextRole::Secondary),

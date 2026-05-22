@@ -4,11 +4,12 @@ use std::rc::Rc;
 use bastyde_tokens::{Color, CornerRadius, Shadow, TextStyle};
 
 use crate::geometry::{Point, Rect, Transform2D};
-use crate::paint::{Paint, StrokeStyle};
+use crate::paint::{Paint, StrokeSpace, StrokeStyle};
 use crate::path::Path;
 use crate::render_frame::{
-    AnimatedQuadClass, AnimatedQuadDraw, BlendMode, DecorationKind, DecorationRect, DrawCommand,
-    GlyphQuad, ImageQuad, PaintData, PathEntry, RenderFrame, ShadowQuad, ShapeKind, ShapeQuad,
+    AnimatedQuadClass, AnimatedQuadDraw, BlendMode, CosmeticLine, DecorationKind, DecorationRect,
+    DrawCommand, GlyphQuad, ImageQuad, PaintData, PathEntry, RenderFrame, ShadowQuad, ShapeKind,
+    ShapeQuad,
 };
 use crate::text_backend::TextBackend;
 
@@ -94,6 +95,19 @@ impl Canvas {
         style: impl Into<StrokeStyle>,
     ) {
         let style = style.into();
+        if style.space == StrokeSpace::Device {
+            // Cosmetic / hairline: keep the width un-baked so the renderer can
+            // apply a transform-invariant device-pixel thickness.
+            let idx = self.frame.cosmetic_lines.len();
+            self.frame.cosmetic_lines.push(CosmeticLine {
+                from: [from.x, from.y],
+                to: [to.x, to.y],
+                width: style.width,
+                color: color.to_array(),
+            });
+            self.frame.draw_order.push(DrawCommand::CosmeticLine(idx));
+            return;
+        }
         let width = style.width;
         let rect = if (from.y - to.y).abs() < 0.001 {
             // Horizontal line
@@ -118,34 +132,35 @@ impl Canvas {
     /// Stroke the outline of an axis-aligned rectangle.
     pub fn stroke_rect(&mut self, rect: Rect, color: Color, style: impl Into<StrokeStyle>) {
         let style = style.into();
-        let width = style.width;
+        // Pass the full style (not just the width) so `StrokeSpace::Device`
+        // (cosmetic) propagates to each edge line.
         // Top
         self.draw_line(
             Point::new(rect.x, rect.y),
             Point::new(rect.right(), rect.y),
             color,
-            width,
+            style.clone(),
         );
         // Bottom
         self.draw_line(
             Point::new(rect.x, rect.bottom()),
             Point::new(rect.right(), rect.bottom()),
             color,
-            width,
+            style.clone(),
         );
         // Left
         self.draw_line(
             Point::new(rect.x, rect.y),
             Point::new(rect.x, rect.bottom()),
             color,
-            width,
+            style.clone(),
         );
         // Right
         self.draw_line(
             Point::new(rect.right(), rect.y),
             Point::new(rect.right(), rect.bottom()),
             color,
-            width,
+            style,
         );
     }
 
@@ -166,6 +181,7 @@ impl Canvas {
             color,
             shape: ShapeKind::RoundedRect,
             stroke_width: 0.0,
+            stroke_space: StrokeSpace::Logical,
             corner_radii: clamped.to_array(),
             paint_data,
         });
@@ -173,6 +189,10 @@ impl Canvas {
     }
 
     /// Stroke a rounded rectangle outline using SDF rendering.
+    ///
+    /// A [`StrokeSpace::Device`] style renders a cosmetic (hairline) border:
+    /// its width stays constant in device pixels regardless of the view
+    /// transform's zoom, while the shape body still zooms.
     pub fn stroke_rounded_rect(
         &mut self,
         rect: Rect,
@@ -180,6 +200,7 @@ impl Canvas {
         paint: impl Into<Paint>,
         style: impl Into<StrokeStyle>,
     ) {
+        let style = style.into();
         let (color, paint_data) = paint_to_data(&paint.into());
         let clamped = corner_radius.clamped(rect.width, rect.height);
         let idx = self.frame.shapes.len();
@@ -187,7 +208,8 @@ impl Canvas {
             screen: rect.to_array(),
             color,
             shape: ShapeKind::RoundedRect,
-            stroke_width: style.into().width,
+            stroke_width: style.width,
+            stroke_space: style.space,
             corner_radii: clamped.to_array(),
             paint_data,
         });
@@ -208,6 +230,7 @@ impl Canvas {
             color,
             shape: ShapeKind::Circle,
             stroke_width: 0.0,
+            stroke_space: StrokeSpace::Logical,
             corner_radii: [radius; 4],
             paint_data,
         });
@@ -215,6 +238,9 @@ impl Canvas {
     }
 
     /// Stroke a circle outline using SDF rendering.
+    ///
+    /// A [`StrokeSpace::Device`] style renders a cosmetic (hairline) border —
+    /// see [`stroke_rounded_rect`](Self::stroke_rounded_rect).
     pub fn stroke_circle(
         &mut self,
         center: Point,
@@ -222,6 +248,7 @@ impl Canvas {
         paint: impl Into<Paint>,
         style: impl Into<StrokeStyle>,
     ) {
+        let style = style.into();
         let (color, paint_data) = paint_to_data(&paint.into());
         let idx = self.frame.shapes.len();
         self.frame.shapes.push(ShapeQuad {
@@ -233,7 +260,8 @@ impl Canvas {
             ],
             color,
             shape: ShapeKind::Circle,
-            stroke_width: style.into().width,
+            stroke_width: style.width,
+            stroke_space: style.space,
             corner_radii: [radius; 4],
             paint_data,
         });
@@ -249,6 +277,7 @@ impl Canvas {
             color,
             shape: ShapeKind::Ellipse,
             stroke_width: 0.0,
+            stroke_space: StrokeSpace::Logical,
             corner_radii: [0.0; 4],
             paint_data,
         });
@@ -256,19 +285,24 @@ impl Canvas {
     }
 
     /// Stroke an ellipse outline using SDF rendering.
+    ///
+    /// A [`StrokeSpace::Device`] style renders a cosmetic (hairline) border —
+    /// see [`stroke_rounded_rect`](Self::stroke_rounded_rect).
     pub fn stroke_ellipse(
         &mut self,
         rect: Rect,
         paint: impl Into<Paint>,
         style: impl Into<StrokeStyle>,
     ) {
+        let style = style.into();
         let (color, paint_data) = paint_to_data(&paint.into());
         let idx = self.frame.shapes.len();
         self.frame.shapes.push(ShapeQuad {
             screen: rect.to_array(),
             color,
             shape: ShapeKind::Ellipse,
-            stroke_width: style.into().width,
+            stroke_width: style.width,
+            stroke_space: style.space,
             corner_radii: [0.0; 4],
             paint_data,
         });
@@ -293,6 +327,11 @@ impl Canvas {
 
     /// Stroke an arbitrary path outline with a solid color.
     /// The path will be CPU-rasterized (Tier 3) and cached in the shape atlas.
+    ///
+    /// A [`StrokeSpace::Device`] style renders a cosmetic (hairline) stroke:
+    /// the renderer rasterizes the path body at the current view zoom while
+    /// baking the stroke at a constant device-pixel width, so connectors stay
+    /// crisp and uniform at any scene zoom.
     pub fn stroke_path(&mut self, path: &Path, color: Color, style: impl Into<StrokeStyle>) {
         let style = style.into();
         let bounds = path.bounds().expand(style.width);
@@ -739,6 +778,12 @@ impl Canvas {
         for d in &mut shifted.decorations {
             d.rect[0] += offset.x;
             d.rect[1] += offset.y;
+        }
+        for c in &mut shifted.cosmetic_lines {
+            c.from[0] += offset.x;
+            c.from[1] += offset.y;
+            c.to[0] += offset.x;
+            c.to[1] += offset.y;
         }
         for s in &mut shifted.shapes {
             s.screen[0] += offset.x;
@@ -1304,5 +1349,133 @@ mod tests {
         assert_eq!(frame.shapes.len(), 1);
         assert_eq!(frame.shapes[0].shape, ShapeKind::Ellipse);
         assert!(frame.shapes[0].stroke_width > 0.0);
+    }
+
+    #[test]
+    fn cosmetic_draw_line_emits_unbaked_line() {
+        let mut canvas = Canvas::new();
+        canvas.draw_line(
+            Point::new(0.0, 50.0),
+            Point::new(200.0, 50.0),
+            Color::BLACK,
+            StrokeStyle::hairline(1.0),
+        );
+        let frame = canvas.into_render_frame();
+        // Routed to the cosmetic path, NOT baked into a decoration rect.
+        assert_eq!(frame.cosmetic_lines.len(), 1);
+        assert!(frame.decorations.is_empty());
+        assert!(matches!(frame.draw_order[0], DrawCommand::CosmeticLine(0)));
+        assert_eq!(frame.cosmetic_lines[0].width, 1.0);
+    }
+
+    #[test]
+    fn cosmetic_line_width_is_unbaked_under_transform() {
+        // A canvas transform must not bake into the cosmetic width: the
+        // stored width is identical regardless of any prior scale (the
+        // transform-invariance is realized later, in the renderer).
+        let mut canvas = Canvas::new();
+        canvas.draw_line(
+            Point::new(0.0, 0.0),
+            Point::new(10.0, 0.0),
+            Color::BLACK,
+            StrokeStyle::hairline(1.0),
+        );
+        canvas.scale(4.0, 4.0);
+        canvas.draw_line(
+            Point::new(0.0, 0.0),
+            Point::new(10.0, 0.0),
+            Color::BLACK,
+            StrokeStyle::hairline(1.0),
+        );
+        let frame = canvas.into_render_frame();
+        assert_eq!(frame.cosmetic_lines.len(), 2);
+        assert_eq!(frame.cosmetic_lines[0].width, frame.cosmetic_lines[1].width);
+        assert_eq!(frame.cosmetic_lines[1].width, 1.0);
+    }
+
+    #[test]
+    fn logical_draw_line_still_bakes_decoration() {
+        let mut canvas = Canvas::new();
+        canvas.draw_line(
+            Point::new(0.0, 10.0),
+            Point::new(100.0, 10.0),
+            Color::BLACK,
+            1.0_f32, // From<f32> => logical solid
+        );
+        let frame = canvas.into_render_frame();
+        assert_eq!(frame.decorations.len(), 1);
+        assert!(frame.cosmetic_lines.is_empty());
+        assert!(matches!(frame.draw_order[0], DrawCommand::Decoration(0)));
+    }
+
+    #[test]
+    fn cosmetic_stroke_rect_emits_four_cosmetic_lines() {
+        let mut canvas = Canvas::new();
+        canvas.stroke_rect(
+            Rect::new(0.0, 0.0, 50.0, 30.0),
+            Color::BLACK,
+            StrokeStyle::hairline(1.0),
+        );
+        let frame = canvas.into_render_frame();
+        assert_eq!(frame.cosmetic_lines.len(), 4);
+        assert!(frame.decorations.is_empty());
+    }
+
+    #[test]
+    fn cosmetic_stroke_rounded_rect_marks_shape_device() {
+        // A cosmetic rounded-rect border tags its ShapeQuad as Device so the
+        // renderer holds the width constant under zoom; the width is carried
+        // un-baked.
+        let mut canvas = Canvas::new();
+        canvas.stroke_rounded_rect(
+            Rect::new(0.0, 0.0, 80.0, 40.0),
+            CornerRadius::uniform(8.0),
+            Color::BLACK,
+            StrokeStyle::hairline(1.5),
+        );
+        let frame = canvas.into_render_frame();
+        assert_eq!(frame.shapes.len(), 1);
+        assert_eq!(frame.shapes[0].stroke_space, StrokeSpace::Device);
+        assert_eq!(frame.shapes[0].stroke_width, 1.5);
+        assert!(matches!(frame.draw_order[0], DrawCommand::Shape(0)));
+    }
+
+    #[test]
+    fn logical_stroke_rounded_rect_marks_shape_logical() {
+        // The default (solid) stroke stays Logical (scales with the transform).
+        let mut canvas = Canvas::new();
+        canvas.stroke_rounded_rect(
+            Rect::new(0.0, 0.0, 80.0, 40.0),
+            CornerRadius::uniform(8.0),
+            Color::BLACK,
+            StrokeStyle::solid(1.5),
+        );
+        let frame = canvas.into_render_frame();
+        assert_eq!(frame.shapes[0].stroke_space, StrokeSpace::Logical);
+    }
+
+    #[test]
+    fn cosmetic_stroke_circle_and_ellipse_mark_device() {
+        let mut canvas = Canvas::new();
+        canvas.stroke_circle(
+            Point::new(50.0, 50.0),
+            20.0,
+            Color::BLACK,
+            StrokeStyle::hairline(1.0),
+        );
+        canvas.stroke_ellipse(
+            Rect::new(0.0, 0.0, 60.0, 30.0),
+            Color::BLACK,
+            StrokeStyle::hairline(2.0),
+        );
+        let frame = canvas.into_render_frame();
+        assert_eq!(frame.shapes.len(), 2);
+        assert_eq!(frame.shapes[0].stroke_space, StrokeSpace::Device);
+        assert_eq!(frame.shapes[1].stroke_space, StrokeSpace::Device);
+        // Fills remain Logical (the default).
+        canvas = Canvas::new();
+        canvas.fill_circle(Point::new(10.0, 10.0), 5.0, Color::RED);
+        let fill_frame = canvas.into_render_frame();
+        assert_eq!(fill_frame.shapes[0].stroke_space, StrokeSpace::Logical);
     }
 }

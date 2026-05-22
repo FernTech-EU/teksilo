@@ -68,6 +68,25 @@ pub trait WindowOps {
     ///
     /// No-op on the standalone / test sink.
     fn set_ime_cursor_area(&mut self, _area: bastyde_canvas::Rect) {}
+
+    /// Hand an OS-level drag to the platform when an in-app drag escalates at
+    /// the window boundary (the pointer left the window carrying an
+    /// OS-exportable payload). The platform backend
+    /// (`bastyde_platform::external_dnd`) starts a native drag session
+    /// (`NSDraggingSource` / `wl_data_source` / OLE `IDropSource`) using
+    /// `data`, optionally drawing `image` as the drag cursor.
+    ///
+    /// Returns `true` if a native drag session actually started. The default
+    /// (standalone / test sink, and platforms without an outbound backend,
+    /// e.g. X11) returns `false`, in which case the framework cancels the drag
+    /// — the pre-existing "pointer left the window ⇒ drag cancels" behavior.
+    fn begin_os_drag(
+        &mut self,
+        _data: crate::drag_payload::OutboundDragData,
+        _image: Option<crate::drag_payload::DragImageData>,
+    ) -> bool {
+        false
+    }
 }
 
 /// No-op implementation used by standalone `WidgetTree`s constructed

@@ -3,7 +3,7 @@
 //! For row selection (`SingleRow` / `MultiRow`) the table re-uses the
 //! existing `bastyde_data::SelectionModel` keyed by visible row index.
 //!
-//! For cell selection (`SingleCell` / `MultiCell`, Phase 5+) the table uses
+//! For cell selection (`SingleCell` / `MultiCell`) the table uses
 //! [`CellSelectionModel`] which tracks `(row, col)` pairs as a
 //! `Signal<BTreeSet<(usize, usize)>>`. Anchor-rectangle extension supports
 //! Excel-style Shift-Arrow / Shift-Click semantics.

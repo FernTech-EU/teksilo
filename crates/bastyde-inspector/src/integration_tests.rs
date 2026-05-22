@@ -9,6 +9,7 @@
 
 #![cfg(test)]
 
+use bastyde_i18n::lit;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -26,7 +27,7 @@ fn click_passes_through_inspector_shell_to_user_button() {
 
     let clicked = Rc::new(Cell::new(false));
     let c = clicked.clone();
-    let button = tree.add(Button::new_literal("Click Me").on_activate_fn(move |_| c.set(true)));
+    let button = tree.add(Button::new(lit!("Click Me")).on_activate_fn(move |_| c.set(true)));
 
     let state = InspectorState::new(false);
     let shell_id = tree.add(InspectorShell::new(button, state.clone()));
@@ -54,7 +55,7 @@ fn click_passes_through_inspector_shell_to_user_button() {
 #[test]
 fn picker_click_populates_chain_with_button_ancestor() {
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    let button = tree.add(Button::new_literal("Click Me").on_activate_fn(|_| {}));
+    let button = tree.add(Button::new(lit!("Click Me")).on_activate_fn(|_| {}));
     let state = InspectorState::new(false);
     let shell_id = tree.add(InspectorShell::new(button, state.clone()));
     let mut ids = state.user_root_ids.get();
@@ -160,7 +161,7 @@ fn picker_click_populates_chain_with_button_ancestor() {
 #[test]
 fn panel_fills_window_width_when_open() {
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    let button = tree.add(Button::new_literal("X").on_activate_fn(|_| {}));
+    let button = tree.add(Button::new(lit!("X")).on_activate_fn(|_| {}));
     let state = InspectorState::new(true); // start with panel open
     let shell_id = tree.add(InspectorShell::new(button, state.clone()));
     let mut ids = state.user_root_ids.get();
@@ -200,7 +201,7 @@ fn panel_fills_window_width_when_open() {
 #[test]
 fn tab_content_fills_panel_width() {
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    let button = tree.add(Button::new_literal("X").on_activate_fn(|_| {}));
+    let button = tree.add(Button::new(lit!("X")).on_activate_fn(|_| {}));
     let state = InspectorState::new(true);
     let shell_id = tree.add(InspectorShell::new(button, state.clone()));
     let mut ids = state.user_root_ids.get();
@@ -297,7 +298,7 @@ fn panel_resize_handle_tracks_cursor_one_to_one() {
     use bastyde_core::event::PointerButton;
 
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    let button = tree.add(Button::new_literal("X").on_activate_fn(|_| {}));
+    let button = tree.add(Button::new(lit!("X")).on_activate_fn(|_| {}));
     let state = InspectorState::new(true);
     let shell_id = tree.add(InspectorShell::new(button, state.clone()));
     let mut ids = state.user_root_ids.get();
@@ -368,7 +369,7 @@ fn panel_resize_handle_tracks_cursor_one_to_one() {
 #[test]
 fn tree_tab_renders_rows_for_user_root() {
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    let button = tree.add(Button::new_literal("X").on_activate_fn(|_| {}));
+    let button = tree.add(Button::new(lit!("X")).on_activate_fn(|_| {}));
     let state = InspectorState::new(true); // panel open
     let shell_id = tree.add(InspectorShell::new(button, state.clone()));
     let mut ids = state.user_root_ids.get();
@@ -419,7 +420,7 @@ fn click_at_window_center_reaches_button_bounds() {
 
     let clicked = Rc::new(Cell::new(false));
     let c = clicked.clone();
-    let button = tree.add(Button::new_literal("Click Me").on_activate_fn(move |_| c.set(true)));
+    let button = tree.add(Button::new(lit!("Click Me")).on_activate_fn(move |_| c.set(true)));
 
     let state = InspectorState::new(false);
     let shell_id = tree.add(InspectorShell::new(button, state.clone()));

@@ -176,12 +176,12 @@ impl Widget for HighlightControls {
         // width — the placeholder paints past the box but the clickable area is
         // gone (still Tab-reachable). Give it an explicit width floor.
         let search = MinSize::width(260.0)
-            .child(SearchField::new(query.clone()).placeholder_literal("Find in document…"));
+            .child(SearchField::new(query.clone()).placeholder(lit!("Find in document…")));
 
         let root = ctx.add(
             Toolbar::new()
-                .label_literal("Highlighter")
-                .child(TextWidget::new_literal("Highlighter:"))
+                .label(lit!("Highlighter"))
+                .child(TextWidget::new(lit!("Highlighter:")))
                 .child(segmented)
                 .child(Divider::vertical())
                 .child(search),
@@ -260,7 +260,10 @@ mod tests {
         let root = tree.add(HighlightControls::new(&doc));
         tree.layout(SizeProposal::exact(1100.0, 48.0));
 
-        assert!(!first_block_has_color(&doc), "no highlight before interaction");
+        assert!(
+            !first_block_has_color(&doc),
+            "no highlight before interaction"
+        );
 
         let mut nodes = Vec::new();
         all_descendants(&tree, root, &mut nodes);
@@ -292,7 +295,10 @@ mod tests {
             applied_via_click,
             "clicking the Syntax segment should highlight the document"
         );
-        assert!(got_focus, "clicking a control should move focus into the row");
+        assert!(
+            got_focus,
+            "clicking a control should move focus into the row"
+        );
         assert!(
             requested_frame,
             "switching highlighter must request a frame so editors repaint immediately"

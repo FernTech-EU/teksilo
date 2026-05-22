@@ -41,7 +41,7 @@ let model: ListModel<TabHandle> = ListModel::from_vec(vec![
         TabId::fresh(),
         "doc",
         TabInfo::new()
-            .title(LocalizedString::literal("Doc 1"))
+            .title(lit!("Doc 1"))
             .closable(true),
         DocState { title: "Doc 1".into(), edits: Signal::new(0) },
     ),
@@ -50,14 +50,14 @@ let model: ListModel<TabHandle> = ListModel::from_vec(vec![
 let tw = TabWidget::new(selected.clone())
     .static_tab(
         TabInfo::new()
-            .title(LocalizedString::literal("Welcome"))
+            .title(lit!("Welcome"))
             .pinned(true),
-        TextWidget::new_literal("Welcome page"),
+        TextWidget::new(lit!("Welcome page")),
     )
     .dynamic_tab::<DocState>("doc", |_handle, state| {
         Box::new(VStack::new()
-            .child(TextWidget::new_literal(state.title.clone()))
-            .child(TextWidget::new_literal("…"))) as Box<dyn Widget>
+            .child(TextWidget::new(lit!(state.title.clone())))
+            .child(TextWidget::new(lit!("…")))) as Box<dyn Widget>
     })
     .dynamic_model(model.clone())
     .reorderable(true)
@@ -77,7 +77,7 @@ struct DocItem { id: TabId, title: String, closable: bool, pinned: bool }
 
 let bar = TabBar::horizontal(
     model,   // ListModel<DocItem>
-    TabDelegate::new(|_, item: &DocItem| LocalizedString::literal(item.title.clone()))
+    TabDelegate::new(|_, item: &DocItem| lit!(item.title.clone()))
         .closable(|_, item| item.closable)
         .pinned(|_, item| item.pinned),
     selected,
@@ -218,6 +218,8 @@ The split is data flow, not features. `TabBar` owns:
 - the "show all tabs" overflow dropdown
 - per-tab close button (suppressed on pinned tabs)
 - drag-to-reorder + insertion-line drop indicator + edge auto-scroll
+- cross-bar tab transfer (`accept_external_tabs` / `on_tab_received` /
+  `on_transfer_out`) and non-tab / OS drops (`on_external_drop`)
 - per-tab tooltip via `WidgetBuilder::tooltip`
 - bar-leading and bar-trailing slots
 - accessibility for the header tree (`Tab` role + `controls()` relation)
@@ -424,10 +426,14 @@ Pinned tabs suppress the close button regardless of `closable`.
 Drag-reorder follows the same pattern `ListView` uses. Each tab header
 is a drag source; the bar is the drop target.
 
-- **Payload.** `TabBarDragData { source_index, source_bar_id }`. The
-  `source_bar_id` field is checked on drop — drops from a different
-  `TabBar` are rejected so a tab from one bar can't be dropped into
-  another's content area as a reorder.
+- **Payload.** `TabBarDragData<T> { source_index, source_bar_id,
+  source_id, item }`, generic over the bar's item type. `source_bar_id`
+  distinguishes an intra-bar reorder (matches the bar's own id) from a
+  cross-bar transfer (see below); being generic over `T` means a
+  `TabBar<T>` only ever downcasts a drag started by a peer `TabBar<T>`,
+  so unrelated drags never match. `item` carries a clone of the dragged
+  item for cross-bar transfer (`None` for reorder-only / non-transferable
+  tabs).
 - **Insertion math.** `on_drag_hover` computes the insertion boundary
   from pointer position relative to tab boundaries (per-axis: x for
   horizontal, y for vertical when wired). The boundary is published
@@ -447,6 +453,116 @@ is a drag source; the bar is the drop target.
   vice versa) fire `on_pin_toggle` instead of `on_reorder`.
 
 Drag-reorder is fully wired in both orientations.
+
+---
+
+## Cross-`TabWidget` transfer — migrating tabs between containers
+
+Opt-in app-internal drag-and-drop **between two tabbed containers**: drag
+a tab out of one `TabWidget` and drop it between the tabs of another. The
+dragged `TabHandle` moves intact — its `Rc<dyn Any>` payload (the heavy
+per-tab state) is preserved, not rebuilt — so a half-edited document
+keeps its scroll position, undo stack, and so on after the move.
+
+```rust
+let model_a: ListModel<TabHandle> = ...;
+let model_b: ListModel<TabHandle> = ...;
+
+let group_a = TabWidget::new(sel_a)
+    .dynamic_model(model_a.clone())
+    .dynamic_tab::<DocState>("doc", |_h, s| Box::new(doc_pane(s)))
+    .accept_external_tabs(true);   // both send and receive
+
+let group_b = TabWidget::new(sel_b)
+    .dynamic_model(model_b.clone())
+    .dynamic_tab::<DocState>("doc", |_h, s| Box::new(doc_pane(s)))
+    .accept_external_tabs(true);
+```
+
+`accept_external_tabs(true)` makes a widget both a transfer **source**
+(its dynamic tabs become draggable to other accepting widgets) and a
+**target** (it accepts tabs dragged in, painting the usual insertion-line
+indicator). With the defaults above, accepting a tab inserts it into the
+receiver's `dynamic_model` and the source removes it from its own — each
+container mutates **only its own model**.
+
+Override either side:
+
+```rust
+.on_tab_received(|handle: TabHandle, dyn_index: usize, ctx| {
+    // target side: insert `handle` into our model at the dynamic-region index
+})
+.on_transfer_out(|tab_id: TabId, ctx| {
+    // source side: one of our tabs landed elsewhere — remove it
+})
+```
+
+How it works (the "split, each bar owns its model" model):
+
+- The source publishes a payload carrying a **clone** of the `TabHandle`
+  (cheap — the heavy state is behind an `Rc`).
+- On drop in a different bar, the target's `on_drop` calls
+  `on_tab_received` with the moved handle and the model insertion index
+  (no `-1` correction — there's no source slot in *this* model).
+- The source is notified via the framework's native
+  `on_drag_ended(DropOutcome::InApp { accepted: true })` hook, which fires
+  `on_transfer_out`. A self-reorder flag (set by the source bar's own
+  `on_drop`, which runs before `on_drag_ended`) suppresses
+  `on_transfer_out` on intra-bar reorders so a just-reordered tab is
+  never wrongly removed.
+
+Constraints:
+
+- **Static tabs are excluded** — they have no content factory on a
+  receiving widget, so they're never transferable (they still reorder in
+  place). `TabWidget` installs the predicate that enforces this.
+- **Type-safe interop only**: `TabWidget` ↔ `TabWidget` (both are
+  `TabBar<TabHandle>` underneath). A `TabBar<OtherT>` never matches.
+- **Same-window only.** Cross-*window* transfer is feasible via the DnD
+  layer's typed re-entry but needs `mime_data` on the payload to escalate
+  at the window boundary — not wired here.
+- Requires `T: Clone` (`TabHandle` is). Stand-alone `TabBar<T>` exposes
+  the same `accept_external_tabs` / `on_tab_received` / `on_transfer_out`
+  methods, index-based.
+
+## Non-tab drops — `on_external_drop` (open a dropped file as a tab)
+
+Accept payloads that **aren't** tabs: an in-app foreign drag (a row
+dragged from a `TreeView` / `ListView` carrying app data) or an OS
+file / text / URL drop. This is the "drag a file onto the tab bar to open
+it" gesture (VS Code style).
+
+```rust
+TabWidget::new(sel)
+    .dynamic_model(model.clone())
+    .dynamic_tab::<DocState>("doc", |_h, s| Box::new(doc_pane(s)))
+    .on_external_drop(move |payload, dyn_index, _ctx| {
+        if let Some(node) = payload.get_typed::<TreeFileNode>() {   // in-app drag
+            model.insert(dyn_index, open_doc(node));
+            return true;
+        }
+        if let Some(path) = payload.files().first() {              // OS file drop
+            model.insert(dyn_index, open_path(path));
+            return true;
+        }
+        false   // not interested → rejected
+    });
+```
+
+- The bar branches its drop handler three ways: tab-payload intra-bar
+  reorder → tab-payload cross-bar transfer → **non-tab payload →
+  `on_external_drop`** (a failed `TabBarDragData<T>` downcast leaves the
+  payload intact for inspection).
+- OS drops reuse the same `on_drop` path, so installing the handler makes
+  the bar an OS-drop target automatically — the app must still call
+  `BastydeAppBuilder::install_external_dnd()` for the OS pipeline.
+- Independent of `accept_external_tabs`: a bar can do tab-migration,
+  file-opening, both, or neither.
+- The hover insertion-line is **optimistic** (shown for any non-tab
+  payload while the handler is installed); the closure's `bool` return is
+  authoritative at drop time.
+
+Demo: `cargo run -p tab-migration`.
 
 ---
 
@@ -678,25 +794,6 @@ TabWidget::new(selected)
 
 ---
 
-## Migration from the legacy `TabWidget::new(...).tab(...)` API
-
-The pre-rewrite `.tab(label, content)` chain is preserved as a thin
-shim — existing code keeps compiling. New work should prefer the
-data-source-driven shape:
-
-| Old                                     | New                                                    |
-|-----------------------------------------|--------------------------------------------------------|
-| `TabWidget::new(idx).tab(label, w)`     | `TabWidget::new(selected_id).static_tab(info, w)`      |
-| `TabWidget::new(idx).tab_id(label, id)` | `TabWidget::new(selected_id).static_tab_id(info, id)`  |
-| `selected: Signal<usize>`               | `selected: Signal<Option<TabId>>`                      |
-| `.trailing_slot(w)`                     | `.bar_trailing_slot(w)`                                |
-
-The new shape unlocks add/remove/reorder at runtime, locale-reactive
-labels, drag-drop, pinning, and the overflow dropdown — none of which
-the index-based shim could express.
-
----
-
 ## Demos
 
 - `cargo run -p tab-widget` — full showcase: static tabs (pinned,
@@ -705,5 +802,5 @@ the index-based shim could express.
   button, theme / orientation / sizing toggle buttons, drag-reorder,
   overflow dropdown, pinned-tab tooltip promotion, status bar showing
   the resolved selection.
-- `cargo run -p widget-catalog` — TabWidget appears in the catalog with
-  the legacy shim demo for visual regression checks.
+- `cargo run -p widget-catalog` — TabWidget appears in the catalog for
+  visual regression checks.

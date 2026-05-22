@@ -48,11 +48,11 @@ fn make_menu_list() -> MenuList {
 
 pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
-    let menu_bar = section(ctx, "MenuBar", make_menu_bar());
-    let menu_list = section(ctx, "MenuList (standalone)", make_menu_list());
+    let menu_bar = section(ctx, lit!("MenuBar"), make_menu_bar());
+    let menu_list = section(ctx, tr!(mnu_menu_list_standalone()), make_menu_list());
     let menu_item = section(
         ctx,
-        "MenuItem (standalone)",
+        tr!(mnu_menu_item_standalone()),
         VStack::new()
             .spacing(2.0)
             .child(MenuItem::new(tr!(mnu_standalone_a())))
@@ -93,7 +93,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("MenuBar") {
+                TextWidget::new(lit!("MenuBar")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -102,7 +102,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("MenuList (standalone)") {
+                TextWidget::new(tr!(mnu_menu_list_standalone())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -111,7 +111,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("MenuItem (standalone)") {
+                TextWidget::new(tr!(mnu_menu_item_standalone())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

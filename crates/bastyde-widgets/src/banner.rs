@@ -84,8 +84,8 @@ impl Widget for SeverityGlyph {
 /// A persistent inline status strip.
 pub struct Banner {
     severity: BannerSeverity,
-    title: String,
-    description: Option<String>,
+    title: bastyde_i18n::LocalizedString,
+    description: Option<bastyde_i18n::LocalizedString>,
     action: Option<Box<dyn Widget>>,
     on_dismiss: Option<Box<dyn Fn(&mut EventContext)>>,
     /// Per-call override for the banner strip chrome.
@@ -98,7 +98,7 @@ impl Banner {
         let ls: bastyde_i18n::LocalizedString = title.into();
         Self {
             severity,
-            title: ls.resolve_now(),
+            title: ls,
             description: None,
             action: None,
             on_dismiss: None,
@@ -134,36 +134,11 @@ impl Banner {
         Self::new(BannerSeverity::Error, title)
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw title in
-    /// `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn info_literal(title: impl Into<String>) -> Self {
-        Self::info(bastyde_i18n::LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn success_literal(title: impl Into<String>) -> Self {
-        Self::success(bastyde_i18n::LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn warning_literal(title: impl Into<String>) -> Self {
-        Self::warning(bastyde_i18n::LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn error_literal(title: impl Into<String>) -> Self {
-        Self::error(bastyde_i18n::LocalizedString::literal(title))
-    }
-
     /// Optional secondary line of text rendered below the title.
     pub fn description(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.description = Some(ls.resolve_now());
+        self.description = Some(ls);
         self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `description(...)`.
-    #[doc(hidden)]
-    pub fn description_literal(self, text: impl Into<String>) -> Self {
-        self.description(bastyde_i18n::LocalizedString::literal(text))
     }
 
     /// Trailing widget — typically a [`Button`](crate::button::Button) or
@@ -205,7 +180,7 @@ impl Widget for Banner {
 
         // Title + optional description column.
         let title = ctx.add(
-            TextWidget::new_literal(&self.title)
+            TextWidget::new(self.title.clone())
                 .style(TextStyleRole::BodyBold)
                 .bind_color(TextRole::Primary)
                 .single_line(),
@@ -215,7 +190,7 @@ impl Widget for Banner {
             .add_child(title);
         if let Some(description) = &self.description {
             let desc = ctx.add(
-                TextWidget::new_literal(description)
+                TextWidget::new(description.clone())
                     .style(TextStyleRole::Body)
                     .bind_color(TextRole::Secondary),
             );
@@ -324,14 +299,15 @@ impl Widget for Banner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_core::widget_tree::WidgetTree;
 
     #[test]
     fn banner_builds_and_lays_out() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         let id = tree.add(
-            Banner::warning_literal("Unsaved changes")
-                .description_literal("Close will discard your edits."),
+            Banner::warning(lit!("Unsaved changes"))
+                .description(lit!("Close will discard your edits.")),
         );
         tree.layout(SizeProposal {
             width: Some(640.0),
@@ -345,7 +321,7 @@ mod tests {
     #[test]
     fn banner_a11y_role_and_name() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let id = tree.add(Banner::info_literal("Heads up"));
+        let id = tree.add(Banner::info(lit!("Heads up")));
         tree.layout(SizeProposal {
             width: Some(400.0),
             height: None,
@@ -363,8 +339,8 @@ mod tests {
         // Banner's `layout_response` overrides the width to the proposal.
         use crate::primitives::VStack;
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let banner = Banner::warning_literal("Unsaved changes")
-            .description_literal("Close will discard your edits.");
+        let banner = Banner::warning(lit!("Unsaved changes"))
+            .description(lit!("Close will discard your edits."));
         let stack_id = tree.add(VStack::new().spacing(8.0).child(banner));
         tree.layout(SizeProposal {
             width: Some(640.0),
@@ -399,8 +375,7 @@ mod tests {
         let dismissed_clone = dismissed.clone();
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(
-            Banner::error_literal("Disk almost full")
-                .on_dismiss(move |_| dismissed_clone.set(true)),
+            Banner::error(lit!("Disk almost full")).on_dismiss(move |_| dismissed_clone.set(true)),
         );
         tree.layout(SizeProposal {
             width: Some(640.0),

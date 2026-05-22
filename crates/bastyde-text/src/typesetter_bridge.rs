@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
 use bastyde_canvas::GlyphQuad;
-use bastyde_canvas::text_backend::{AtlasInfo, TextBackend, TextLayout, TextLayoutSpan, TextSpanKind};
+use bastyde_canvas::text_backend::{
+    AtlasInfo, TextBackend, TextLayout, TextLayoutSpan, TextSpanKind,
+};
 use bastyde_tokens::TextStyle;
 use text_typeset::atlas::cache::GlyphCacheKey;
 use text_typeset::{

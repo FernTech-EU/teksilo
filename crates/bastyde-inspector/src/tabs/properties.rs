@@ -9,6 +9,7 @@
 //! returns `Some(menu)`. Returning `None` (e.g. when the click missed
 //! the row strip) falls through to the parent factory.
 
+use bastyde_i18n::lit;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -62,7 +63,7 @@ impl std::fmt::Debug for PropertiesTab {
 impl Widget for PropertiesTab {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let dump = self.state.properties_dump.clone();
-        let copy_button = Button::new_literal("Copy").on_activate_fn(move |ctx| {
+        let copy_button = Button::new(lit!("Copy")).on_activate_fn(move |ctx| {
             if let Some(cb) = ctx.app_state::<ClipboardHandle>() {
                 let _ = cb.set_text(&dump.get());
             }
@@ -153,7 +154,7 @@ impl Widget for PropertiesRows {
             // activate closure — no need to thread through Signals
             // for menu actions.
             let value = row.value.clone();
-            let copy_item = MenuItem::new_literal("Copy value").on_activate_fn(move |c| {
+            let copy_item = MenuItem::new(lit!("Copy value")).on_activate_fn(move |c| {
                 if let Some(cb) = c.app_state::<ClipboardHandle>() {
                     let _ = cb.set_text(&value);
                 }

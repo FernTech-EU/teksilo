@@ -49,7 +49,7 @@ part is optional — the macro emits `::new(args)` when you omit it:
 
 ```rust
 Button("Click")                 // → Button::new("Click")
-Button::new_literal("Click")    // → Button::new_literal("Click")
+Button::new(lit!("Click"))    // → Button::new(lit!("Click"))
 VStack                          // → VStack::new()
 Padding::uniform(24.0)          // → Padding::uniform(24.0)
 ```
@@ -108,7 +108,7 @@ A comma followed by a `name:` property, a structural keyword (`if`,
 `for`, `match`, `let`), a spread `..`, an escape `#{`, or a binding
 `name =` terminates the arg list — those tokens start a new body item.
 An UpperCamel element after a comma stays as a continuation argument (so
-`tab_literal: "Overview", Card { ... }` works).
+`tab: "Overview", Card { ... }` works).
 
 ### Argument-free bare-lowercase property
 

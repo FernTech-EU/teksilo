@@ -35,6 +35,7 @@ pub mod date_range_edit;
 pub mod date_time_edit;
 pub mod dialog;
 pub(crate) mod drag_preview;
+pub mod drop_target;
 pub mod drop_zone;
 #[cfg(feature = "rich-text")]
 pub mod file_picker_field;
@@ -119,6 +120,11 @@ pub use animations::{
 pub use avatar::{Avatar, AvatarCorner, AvatarPresence, AvatarShape, AvatarSize};
 pub use badge::Badge;
 pub use banner::{Banner, BannerSeverity};
+pub use bastyde_core::styles::{
+    DropTargetDragState, DropTargetStyle, DropTargetStyleConfig, DropTargetVariant,
+    SharedDropTargetStyle,
+};
+pub use bastyde_data::CheckState;
 pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
 pub use button::{Button, ButtonVariant, IconLocation};
 pub use calendar::{Calendar, DateRange, WeekNumberDisplay};
@@ -130,6 +136,7 @@ pub use color_edit::ColorEdit;
 pub use color_picker::{ColorPicker, ColorPickerLayout, ColorSwatch, DEFAULT_SWATCHES};
 pub use combo_box::ComboBox;
 pub use command_link_button::CommandLinkButton;
+pub use common::scroll::OverscrollBehavior;
 #[cfg(feature = "rich-text")]
 pub use date_edit::DateEdit;
 #[cfg(feature = "rich-text")]
@@ -137,8 +144,8 @@ pub use date_range_edit::DateRangeEdit;
 #[cfg(feature = "rich-text")]
 pub use date_time_edit::DateTimeEdit;
 pub use dialog::{Dialog, DialogContent, ModalContainer, ModalScrim};
+pub use drop_target::DropTarget;
 pub use drop_zone::DropZone;
-pub use bastyde_data::CheckState;
 #[cfg(feature = "rich-text")]
 pub use file_picker_field::{FilePickerField, FilePickerKind};
 pub use group_box::GroupBox;
@@ -170,6 +177,8 @@ pub use popover_button::PopoverButton;
 pub use popover_icon_button::PopoverIconButton;
 #[cfg(feature = "rich-text")]
 pub use primitives::TextInputField;
+#[cfg(feature = "rich-text")]
+pub use primitives::text_input_field::{ValidationFeedback, ValidationOutcome};
 pub use primitives::{
     AspectRatio, Center, Divider, Expand, FixedSize, FormLayout, Grid, HStack, IconWidget,
     ImageFit, ImageWidget, MasonryLayout, MaxSize, MinSize, Padding, RectWidget, Spacer, Switcher,
@@ -209,8 +218,6 @@ pub use table_view::{
 };
 #[cfg(feature = "rich-text")]
 pub use text_input::{TextInput, ValidationState};
-#[cfg(feature = "rich-text")]
-pub use primitives::text_input_field::{ValidationFeedback, ValidationOutcome};
 #[cfg(feature = "rich-text")]
 pub use time_edit::{SecondsMode, TimeEdit, TimeFormat};
 pub use title_bar::{DragRegion, ResizeStrip, TitleBar, WindowControls, WindowFrame};

@@ -19,6 +19,11 @@
 //! - **Z-order:** explicit `Scene::set_z` for overlapping items.
 //! - **Selection:** `SceneSelectionMode::Multi` — click + Ctrl-click +
 //!   marquee box-select.
+//! - **Movement policy:** the outer view clamps pan to the scene
+//!   extent (`Scene::set_pan_bounds`) and zoom to a readable band
+//!   (`Scene::set_zoom_range`); the toolbar toggles
+//!   `DragMode::RubberBand` ⇄ `ScrollHandDrag`; the §7 inner view is
+//!   locked to horizontal pan (`Scene::pan_axes`).
 //! - **Nested SceneView:** an inner SceneView inside the outer one.
 //! - **Logical a11y groups:** `Scene::add_a11y_group` + `set_a11y_parent`
 //!   place cards under named "Acts" so screen readers announce a logical
@@ -33,16 +38,18 @@
 
 use std::time::Duration;
 
-use bastyde_scene::{
-    A11yGroup, A11yNode, GroupItem, ItemId, PathItem, RectItem, Scene, SceneItem,
-    SceneItemPaintContext, SceneSelectionMode, SceneView, TextItem, register_animated_item_signal,
-};
 use bastyde::canvas::{Canvas, Path, Point, Rect, StrokeStyle};
 use bastyde::core::binding::BindingLevel;
 use bastyde::prelude::*;
-use bastyde::tokens::Easing;
+use bastyde::tokens::{Alignment, Easing};
 use bastyde::widgets::{
-    Button, ComboBox, Expand, HStack, Panel, ScrollArea, Spacer, TextWidget, Toolbar, VStack,
+    Button, ComboBox, Expand, HStack, Padding, Panel, ScrollArea, Spacer, TextWidget, Toolbar,
+    VStack, ZStack,
+};
+use bastyde_scene::{
+    A11yGroup, A11yNode, DragMode, GroupItem, ItemId, PanAxes, PathItem, RectItem, Scene,
+    SceneItem, SceneItemPaintContext, SceneMinimap, SceneSelectionMode, SceneView, TextItem,
+    register_animated_item_signal,
 };
 
 // ---------------------------------------------------------------------------
@@ -184,7 +191,7 @@ fn add_scene_header(scene: &mut Scene) {
 
     scene.add_item(
         TextItem::new(
-            "bastyde-scene showcase — eight labelled sections, all visible at zoom 1.0",
+            lit!("bastyde-scene showcase — eight labelled sections, all visible at zoom 1.0"),
             Rect::new(SCENE_PAD, SCENE_PAD, usable_w, 30.0),
         )
         .color(ink()),
@@ -192,10 +199,10 @@ fn add_scene_header(scene: &mut Scene) {
     );
     scene.add_item(
         TextItem::new(
-            "Scroll wheel / two-finger trackpad: PAN.   Ctrl+wheel: ZOOM about viewport center.   \
+            lit!("Scroll wheel / two-finger trackpad: PAN.   Ctrl+wheel: ZOOM about viewport center.   \
              Pinch (macOS / Win precision touchpad): ZOOM about gesture center.   \
              Click card: SELECT.   Ctrl-click: TOGGLE.   Drag empty space: MARQUEE.   \
-             Drag a 'drag me' rect: MOVE.   Other items stay put — drag is opt-in via .draggable(true).",
+             Drag a 'drag me' rect: MOVE.   Other items stay put — drag is opt-in via .draggable(true)."),
             Rect::new(SCENE_PAD, SCENE_PAD + 36.0, usable_w, 70.0),
         )
         .color(dim_ink()), Point::ZERO
@@ -210,7 +217,7 @@ fn add_section_frame(scene: &mut Scene, col: usize, row: usize, title: &str) {
     let r = section_rect(col, row);
     scene.add_item(
         GroupItem::new(r)
-            .label(title)
+            .label(lit!(title))
             .show_label(true)
             .label_inset(12.0, 6.0)
             .label_color(ink())
@@ -225,7 +232,7 @@ fn add_section_caption(scene: &mut Scene, col: usize, row: usize, body: &str) {
     let r = section_rect(col, row);
     scene.add_item(
         TextItem::new(
-            body,
+            lit!(body),
             Rect::new(r.x + 12.0, r.y + 30.0, r.width - 24.0, 90.0),
         )
         .color(dim_ink()),
@@ -279,7 +286,7 @@ fn build_lightweight_items_section(scene: &mut Scene) {
                 RectItem::new(rect)
                     .fill(color)
                     .stroke(ink(), 1.0)
-                    .access_label(format!("tile {}", i + 1)),
+                    .access_label(lit!(format!("tile {}", i + 1))),
                 Point::ZERO,
             );
         }
@@ -299,13 +306,14 @@ fn build_lightweight_items_section(scene: &mut Scene) {
     let path_bounds = Rect::new(path_x - 2.0, path_y - 2.0, 22.0 * 5.0, 54.0);
     scene.add_item(
         PathItem::new(zigzag, path_bounds)
-            .stroke(pastel_purple(), 3.0)
-            .access_label("decorative zigzag"),
+            // Cosmetic stroke: crisp constant-width zigzag at any zoom.
+            .stroke_cosmetic(pastel_purple(), 3.0)
+            .access_label(lit!("decorative zigzag")),
         Point::ZERO,
     );
     scene.add_item(
         TextItem::new(
-            "Stroke-only paths get per-segment hit-test.",
+            lit!("Stroke-only paths get per-segment hit-test."),
             Rect::new(path_x - 4.0, path_y + 60.0, 130.0, 60.0),
         )
         .color(dim_ink()),
@@ -333,7 +341,7 @@ fn build_groupitem_section(scene: &mut Scene) {
     let inner = Rect::new(r.x + 16.0, r.y + 130.0, 140.0, 130.0);
     scene.add_item(
         GroupItem::new(inner)
-            .label("Visible group")
+            .label(lit!("Visible group"))
             .show_label(true)
             .label_inset(8.0, 4.0)
             .label_color(ink())
@@ -349,7 +357,7 @@ fn build_groupitem_section(scene: &mut Scene) {
             RectItem::new(dot)
                 .fill(pastel_red())
                 .stroke(ink(), 1.0)
-                .access_label(format!("inner item {}", i + 1)),
+                .access_label(lit!(format!("inner item {}", i + 1))),
             Point::ZERO,
         );
     }
@@ -361,13 +369,15 @@ fn build_groupitem_section(scene: &mut Scene) {
 
     let invisible = Rect::new(r.x + 168.0, r.y + 130.0, 138.0, 130.0);
     scene.add_item(
-        GroupItem::new(invisible).label("Logical-only group"),
+        GroupItem::new(invisible).label(lit!("Logical-only group")),
         Point::ZERO,
     );
     scene.add_item(
         TextItem::new(
-            "Same Rect as a group with NO chrome. Paints nothing, but \
-             set_a11y_parent still works.",
+            lit!(
+                "Same Rect as a group with NO chrome. Paints nothing, but \
+             set_a11y_parent still works."
+            ),
             Rect::new(
                 invisible.x + 6.0,
                 invisible.y + 6.0,
@@ -416,13 +426,13 @@ fn build_zorder_section(scene: &mut Scene) {
             RectItem::new(rect)
                 .fill(*color)
                 .stroke(ink(), 1.5)
-                .access_label(format!("z-stack rect at z={}", z)),
+                .access_label(lit!(format!("z-stack rect at z={}", z))),
             Point::ZERO,
         );
         scene.set_z(id, *z as f32);
         scene.add_item(
             TextItem::new(
-                *label,
+                lit!(*label),
                 Rect::new(rect.x + 8.0, rect.y + 6.0, rect.width - 16.0, 22.0),
             )
             .color(ink()),
@@ -439,12 +449,12 @@ fn build_card_with_button() -> impl Widget + 'static {
     Panel::new().child(
         VStack::new()
             .spacing(8.0)
-            .child(TextWidget::new_literal("Card with Button").style(TextStyleRole::BodyBold))
+            .child(TextWidget::new(lit!("Card with Button")).style(TextStyleRole::BodyBold))
             .child(
-                TextWidget::new_literal("Real widget machinery: focus, keyboard, a11y.")
+                TextWidget::new(lit!("Real widget machinery: focus, keyboard, a11y."))
                     .style(TextStyleRole::Body),
             )
-            .child(Button::new_literal("Click me").on_activate_fn(|_ctx| {
+            .child(Button::new(lit!("Click me")).on_activate_fn(|_ctx| {
                 eprintln!("[scene-showcase] button clicked");
             })),
     )
@@ -455,10 +465,8 @@ fn build_card_with_combo() -> impl Widget + 'static {
     Panel::new().child(
         VStack::new()
             .spacing(8.0)
-            .child(TextWidget::new_literal("Card with ComboBox").style(TextStyleRole::BodyBold))
-            .child(
-                TextWidget::new_literal("Pick a fruit from the list:").style(TextStyleRole::Body),
-            )
+            .child(TextWidget::new(lit!("Card with ComboBox")).style(TextStyleRole::BodyBold))
+            .child(TextWidget::new(lit!("Pick a fruit from the list:")).style(TextStyleRole::Body))
             .child(ComboBox::new(
                 vec!["Apple", "Banana", "Cherry", "Date"],
                 selected,
@@ -470,8 +478,8 @@ fn build_card_plain(title: &str, body: &str) -> impl Widget + 'static {
     Panel::new().child(
         VStack::new()
             .spacing(8.0)
-            .child(TextWidget::new_literal(title).style(TextStyleRole::BodyBold))
-            .child(TextWidget::new_literal(body).style(TextStyleRole::Body)),
+            .child(TextWidget::new(lit!(title)).style(TextStyleRole::BodyBold))
+            .child(TextWidget::new(lit!(body)).style(TextStyleRole::Body)),
     )
 }
 
@@ -528,7 +536,7 @@ fn build_drag_section(scene: &mut Scene) {
         0,
         1,
         "Items default to NOT draggable. Apps opt in with \
-         .draggable(true). Drag end calls Scene::move_item which \
+         .draggable(true). Drag end calls Scene::set_local_pos which \
          re-buckets the spatial index — the new position persists.",
     );
 
@@ -546,12 +554,12 @@ fn build_drag_section(scene: &mut Scene) {
                 .fill(*color)
                 .stroke(ink(), 1.5)
                 .draggable(true)
-                .access_label(format!("draggable {}", i + 1)),
+                .access_label(lit!(format!("draggable {}", i + 1))),
             Point::ZERO,
         );
         let label_id = scene.add_item(
             TextItem::new(
-                *label,
+                lit!(*label),
                 Rect::new(rect.x + 8.0, rect.y + 24.0, rect.width - 16.0, 28.0),
             )
             .color(ink()),
@@ -579,9 +587,9 @@ fn build_a11y_groups_section(scene: &mut Scene, scroll_area_id: ItemId) {
 
     let r = section_rect(1, 1);
 
-    let act1 = scene.add_a11y_group(A11yGroup::builder().label("Act I — Setup"));
-    let act2 = scene.add_a11y_group(A11yGroup::builder().label("Act II — Confrontation"));
-    let _act3 = scene.add_a11y_group(A11yGroup::builder().label("Act III — Resolution"));
+    let act1 = scene.add_a11y_group(A11yGroup::builder().label(lit!("Act I — Setup")));
+    let act2 = scene.add_a11y_group(A11yGroup::builder().label(lit!("Act II — Confrontation")));
+    let _act3 = scene.add_a11y_group(A11yGroup::builder().label(lit!("Act III — Resolution")));
 
     // Parent the ScrollArea (and thereby its cards) under Act I.
     scene.set_a11y_parent(A11yNode::Item(scroll_area_id), Some(A11yNode::Group(act1)));
@@ -606,7 +614,7 @@ fn build_a11y_groups_section(scene: &mut Scene, scroll_area_id: ItemId) {
         let label_text = ["Act I", "Act II", "Act III"][i];
         scene.add_item(
             TextItem::new(
-                label_text,
+                lit!(label_text),
                 Rect::new(stripe.x + 8.0, stripe.y + 12.0, stripe.width - 16.0, 24.0),
             )
             .color(ink()),
@@ -616,8 +624,10 @@ fn build_a11y_groups_section(scene: &mut Scene, scroll_area_id: ItemId) {
 
     scene.add_item(
         TextItem::new(
-            "Visual placement vs logical AT tree: the cards stay in §4; \
-             the AT walker reports them under these Acts.",
+            lit!(
+                "Visual placement vs logical AT tree: the cards stay in §4; \
+             the AT walker reports them under these Acts."
+            ),
             Rect::new(r.x + 12.0, r.y + 215.0, r.width - 24.0, 60.0),
         )
         .color(dim_ink()),
@@ -639,8 +649,8 @@ fn build_inner_scene() -> impl Widget + 'static {
         pastel_purple(),
     ];
     for row in 0..3 {
-        for col in 0..4 {
-            let color = palette[(row * 4 + col) % palette.len()];
+        for col in 0..8 {
+            let color = palette[(row * 8 + col) % palette.len()];
             let dot = Rect::new(
                 15.0 + col as f32 * 28.0,
                 14.0 + row as f32 * 26.0,
@@ -660,12 +670,17 @@ fn build_inner_scene() -> impl Widget + 'static {
         .line_to(Point::new(26.0, 77.0))
         .close();
     inner.add_item(
-        PathItem::new(path, Rect::new(24.0, 22.0, 90.0, 60.0)).stroke(connector_color(), 2.0),
+        PathItem::new(path, Rect::new(24.0, 22.0, 90.0, 60.0))
+            .stroke_cosmetic(connector_color(), 2.0),
         Point::ZERO,
     );
+    // Movement policy demo: this nested view is locked to horizontal
+    // pan. The dot grid overflows its 135 px width, so left/right scroll
+    // pans it; vertical scroll deltas fall through to the outer view.
+    inner.pan_axes(PanAxes::Horizontal);
     SceneView::new(inner)
         .nested_a11y(true)
-        .a11y_label("Inner scene")
+        .a11y_label(lit!("Inner scene"))
         .default_size(135.0, 105.0)
 }
 
@@ -675,8 +690,10 @@ fn build_nested_scene_section(scene: &mut Scene) {
         scene,
         2,
         1,
-        "A second SceneView placed inside via Scene::add_widget runs \
-         its own pan/zoom. nested_a11y(true) flips Pane → Region.",
+        "A nested SceneView with its own movement policy: locked to \
+         horizontal pan via Scene::pan_axes(Horizontal). Vertical \
+         scroll falls through to the outer view. nested_a11y(true) \
+         flips Pane → Region.",
     );
 
     let r = section_rect(2, 1);
@@ -685,8 +702,11 @@ fn build_nested_scene_section(scene: &mut Scene) {
 
     scene.add_item(
         TextItem::new(
-            "← Pan inside that inner viewport — independent of the \
-             outer one. Chart-style pattern.",
+            lit!(
+                "← This inner viewport pans horizontally only; vertical \
+             two-finger scroll passes through to the outer scene. \
+             Per-view movement policy."
+            ),
             Rect::new(
                 inner_rect.x + inner_rect.width + 8.0,
                 inner_rect.y,
@@ -726,8 +746,10 @@ fn build_animation_section(scene: &mut Scene) {
     }
     scene.add_item(
         TextItem::new(
-            "Idle scheduler still applies: tab-out the window, \
-             ticks pause; no CPU/GPU drain when not visible.",
+            lit!(
+                "Idle scheduler still applies: tab-out the window, \
+             ticks pause; no CPU/GPU drain when not visible."
+            ),
             Rect::new(r.x + 12.0, r.y + 240.0, r.width - 24.0, 50.0),
         )
         .color(dim_ink()),
@@ -766,27 +788,9 @@ fn add_section_connector(
         (from.y.max(to.y) - from.y.min(to.y)).max(stroke_w) + 2.0 * pad,
     );
     scene.add_item(
-        PathItem::new(path, bounds).stroke(connector_color(), stroke_w),
+        PathItem::new(path, bounds).stroke_cosmetic(connector_color(), stroke_w),
         Point::ZERO,
     );
-}
-
-// ---------------------------------------------------------------------------
-// Background grid
-// ---------------------------------------------------------------------------
-
-fn add_background_grid(scene: &mut Scene) {
-    let (w, h) = scene_extent();
-    let tile = 60.0;
-    let cols = (w / tile).ceil() as i32;
-    let rows = (h / tile).ceil() as i32;
-    for r in 0..rows {
-        for c in 0..cols {
-            let cell = Rect::new(c as f32 * tile, r as f32 * tile, tile, tile);
-            let id = scene.add_item(RectItem::new(cell).stroke(faint_grid(), 1.0), Point::ZERO);
-            scene.set_z(id, -100.0);
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -796,7 +800,6 @@ fn add_background_grid(scene: &mut Scene) {
 fn build_showcase_view() -> SceneView {
     let mut scene = Scene::new();
 
-    add_background_grid(&mut scene);
     add_scene_header(&mut scene);
 
     build_lightweight_items_section(&mut scene);
@@ -816,6 +819,11 @@ fn build_showcase_view() -> SceneView {
     add_section_connector(&mut scene, (2, 1), (3, 1));
 
     let (w, h) = scene_extent();
+    // Movement policy demo: clamp the visible viewport to the scene
+    // extent so the user can't pan into empty space, and keep zoom in a
+    // readable band. Both are reactive Scene-level signals.
+    scene.set_pan_bounds(Some(Rect::new(0.0, 0.0, w, h)));
+    scene.set_zoom_range(Some(0.5_f32..=3.0_f32));
     SceneView::new(scene)
         .selection_mode(SceneSelectionMode::Multi)
         .default_size(w, h)
@@ -823,9 +831,12 @@ fn build_showcase_view() -> SceneView {
         // scene coords. The closure receives the visible scene region,
         // so off-screen lines are skipped — at zoom 0.1× over a
         // 50,000-unit scene we still emit only the lines on screen.
+        // The grid uses a HAIRLINE stroke (StrokeStyle::hairline): a
+        // transform-invariant 1px line that stays crisp at every zoom
+        // instead of thinning out and vanishing.
         .background(|canvas, _ctx, region| {
             let step = 50.0_f32;
-            let color = bastyde::tokens::Color::new(0.85, 0.85, 0.88, 0.5);
+            let color = faint_grid();
             let x0 = (region.x / step).floor() * step;
             let y0 = (region.y / step).floor() * step;
             let x_end = region.x + region.width;
@@ -836,7 +847,7 @@ fn build_showcase_view() -> SceneView {
                     bastyde::canvas::Point::new(x, region.y),
                     bastyde::canvas::Point::new(x, y_end),
                     color,
-                    0.5_f32,
+                    StrokeStyle::hairline(1.0),
                 );
                 x += step;
             }
@@ -846,7 +857,7 @@ fn build_showcase_view() -> SceneView {
                     bastyde::canvas::Point::new(region.x, y),
                     bastyde::canvas::Point::new(x_end, y),
                     color,
-                    0.5_f32,
+                    StrokeStyle::hairline(1.0),
                 );
                 y += step;
             }
@@ -862,56 +873,113 @@ fn build_status_row(view: &SceneView) -> impl Widget + 'static {
     let pan_y = view.pan_y_signal();
     let zoom = view.zoom_signal();
     let selection = view.selection().selection_signal();
+    let drag = view.drag_mode_signal();
 
     let pan_text = pan_x
         .zip(&pan_y)
         .map(|(x, y)| format!("Pan: ({:>6.1}, {:>6.1})", x, y));
     let zoom_text = zoom.map(|z| format!("Zoom: ×{:.2}", z));
     let sel_text = selection.map(|s| format!("Selected items: {}", s.len()));
+    let drag_text = drag.map(|m| {
+        let label = match m {
+            DragMode::RubberBand => "Marquee",
+            DragMode::ScrollHandDrag => "Pan",
+            DragMode::NoDrag => "None",
+        };
+        format!("Drag: {label}")
+    });
 
     HStack::new()
         .spacing(28.0)
         .child(
-            TextWidget::new_literal("")
+            TextWidget::new(lit!(""))
                 .bind_text(pan_text)
                 .style(TextStyleRole::Body),
         )
         .child(
-            TextWidget::new_literal("")
+            TextWidget::new(lit!(""))
                 .bind_text(zoom_text)
                 .style(TextStyleRole::Body),
         )
         .child(
-            TextWidget::new_literal("")
+            TextWidget::new(lit!(""))
                 .bind_text(sel_text)
+                .style(TextStyleRole::Body),
+        )
+        .child(
+            TextWidget::new(lit!(""))
+                .bind_text(drag_text)
                 .style(TextStyleRole::Body),
         )
 }
 
-fn dark_mode_toolbar() -> impl Widget {
+fn build_toolbar(drag_mode: Signal<DragMode>) -> impl Widget {
     let is_dark = Signal::new(false);
-    Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
-            let next = !is_dark.get();
-            is_dark.set(next);
-            ctx.set_theme(if next {
-                bastyde::presets::intui::dark()
-            } else {
-                bastyde::presets::intui::light()
-            });
-        }),
-    ))
+    Toolbar::new().child(
+        HStack::new()
+            .spacing(12.0)
+            .child(
+                Button::new(lit!("Drag mode: Marquee ⇄ Pan")).on_activate_fn(move |_ctx| {
+                    // Flip between marquee box-select and scroll-hand pan.
+                    let next = match drag_mode.get() {
+                        DragMode::ScrollHandDrag => DragMode::RubberBand,
+                        _ => DragMode::ScrollHandDrag,
+                    };
+                    drag_mode.set(next);
+                }),
+            )
+            .child(Spacer::new())
+            .child(
+                Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
+                    let next = !is_dark.get();
+                    is_dark.set(next);
+                    ctx.set_theme(if next {
+                        bastyde::presets::intui::dark()
+                    } else {
+                        bastyde::presets::intui::light()
+                    });
+                }),
+            ),
+    )
 }
 
 fn build_root() -> impl Widget + 'static {
     let view = build_showcase_view();
+    let drag_mode = view.drag_mode_signal();
     let status = build_status_row(&view);
+
+    // Minimap: a bottom-trailing thumbnail of the whole scene with a live
+    // viewport rectangle. Read its inputs from the view *before* moving `view`
+    // into the ZStack. `item_thumbnails()` snapshots both tiers (cards + the
+    // lightweight grid/connectors); the viewport rect is reactive on its own,
+    // tracking pan / zoom with no extra plumbing. (A live "items as they move"
+    // minimap would re-snapshot on mutation; this showcase scene is static.)
+    let content = view.scene_content_bounds().unwrap_or_else(|| {
+        let (w, h) = scene_extent();
+        Rect::new(0.0, 0.0, w, h)
+    });
+    let minimap = SceneMinimap::new(content, view.viewport_in_scene_signal())
+        .items(view.scene().item_thumbnails())
+        .size(240.0, 160.0)
+        .background(Color::new(0.10, 0.11, 0.15, 0.82))
+        .border(Some((Color::new(1.0, 1.0, 1.0, 0.35), 1.0)))
+        .content_outline(Some((Color::new(1.0, 1.0, 1.0, 0.18), 1.0)))
+        .viewport_color(Color::new(0.40, 0.66, 1.0, 0.95));
 
     VStack::new()
         .spacing(8.0)
-        .child(TextWidget::new_literal("bastyde-scene showcase").style(TextStyleRole::BodyBold))
+        .child(build_toolbar(drag_mode))
+        .child(TextWidget::new(lit!("bastyde-scene showcase")).style(TextStyleRole::BodyBold))
         .child(status)
-        .child(view)
+        .child(
+            // Overlay the minimap on the viewport's bottom-trailing corner.
+            Expand::new().child(
+                ZStack::new()
+                    .alignment(Alignment::BOTTOM_TRAILING)
+                    .child(Expand::new().child(view))
+                    .child(Padding::new(12.0, 12.0, 12.0, 12.0).child(minimap)),
+            ),
+        )
 }
 
 fn main() {
@@ -922,13 +990,7 @@ fn main() {
             WindowConfig::new()
                 .title("Bastyde — bastyde-scene showcase")
                 .size(1500, 950)
-                .root(|tree, _state| {
-                    tree.add(
-                        VStack::new()
-                            .child(dark_mode_toolbar())
-                            .child(Expand::new().child(build_root())),
-                    )
-                }),
+                .root(|tree, _state| tree.add(build_root())),
         )
         .run();
 }

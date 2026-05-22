@@ -15,7 +15,7 @@ use crate::primitives::TextWidget;
 
 /// A pill-shaped label for displaying tags, counts, or status.
 pub struct Badge {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     color: Option<ColorProp>,
     text_color: Option<ColorProp>,
     /// Per-call override for the pill chrome.
@@ -25,9 +25,8 @@ pub struct Badge {
 
 impl Badge {
     pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: label.into(),
             color: None,
             text_color: None,
             style_override: None,
@@ -40,12 +39,6 @@ impl Badge {
     pub fn style(mut self, style: impl bastyde_core::styles::BadgeStyle) -> Self {
         self.style_override = Some(Rc::new(style));
         self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw string in `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(label))
     }
 
     /// Override the badge background. Accepts `Color`, a
@@ -84,7 +77,7 @@ impl Widget for Badge {
             .take()
             .unwrap_or_else(|| ColorProp::Bound(theme_signal.map(|t| t.colors.status_info_fg)));
 
-        let text_widget = TextWidget::new_literal(&self.label)
+        let text_widget = TextWidget::new(self.label.clone())
             .style(TextStyleRole::Tiny)
             .color(text)
             .single_line()
@@ -137,7 +130,7 @@ impl Widget for Badge {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::Label);
-        builder.set_name(&self.label);
+        builder.set_name(self.label.resolve_now());
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -149,11 +142,12 @@ impl Widget for Badge {
 mod tests {
     use super::*;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn badge_builds_and_renders() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let badge = tree.add(Badge::new_literal("New"));
+        let badge = tree.add(Badge::new(lit!("New")));
         tree.layout(SizeProposal::exact(200.0, 50.0));
         let b = tree.bounds(badge);
         assert!(b.width > 0.0);
@@ -163,7 +157,7 @@ mod tests {
     #[test]
     fn badge_accessibility() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let badge = tree.add(Badge::new_literal("3"));
+        let badge = tree.add(Badge::new(lit!("3")));
         tree.layout(SizeProposal::exact(200.0, 50.0));
         let info = tree.accessibility_node(badge);
         assert_eq!(info.role(), bastyde_core::accesskit::Role::Label);

@@ -22,7 +22,7 @@ use bastyde_data::SortDirection;
 /// Wrapper that announces a `Role::Row` with positional metadata for
 /// callers that build their row as a single composed widget rather than
 /// the column-laid-out [`BodyRow`](crate::table_view::body::BodyRow).
-/// Reserved for `TreeTable`'s tree column and Phase 6 row-overrides.
+/// Reserved for `TreeTable`'s tree column and row-overrides.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub(crate) struct RowA11y {
@@ -110,15 +110,14 @@ impl CellA11y {
         }
     }
 
-    /// Promote to `Role::RowHeader` (Phase 5+ — `row_header_column`
-    /// support).
+    /// Promote to `Role::RowHeader` (`row_header_column` support).
     #[allow(dead_code)]
     pub(crate) fn with_role_row_header(mut self, is_row_header: bool) -> Self {
         self.is_row_header = is_row_header;
         self
     }
 
-    /// Override the cell's accessible name (Phase 5+ — `cell_label_fn`).
+    /// Override the cell's accessible name (`cell_label_fn`).
     #[allow(dead_code)]
     pub(crate) fn with_name(mut self, name: Option<String>) -> Self {
         self.name = name;
@@ -184,7 +183,7 @@ pub(crate) struct TreeRowA11y {
     selected: bool,
 }
 
-#[allow(dead_code)] // wired up by TreeTable in Phase 7
+#[allow(dead_code)] // wired up by TreeTable
 impl TreeRowA11y {
     pub(crate) fn new(
         child: WidgetId,
@@ -246,7 +245,7 @@ impl Widget for TreeRowA11y {
 }
 
 /// Header column wrapper — `Role::ColumnHeader` with sort direction
-/// when this is the active sort column. Wired up in Phase 3.
+/// when this is the active sort column.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub(crate) struct ColumnHeaderA11y {
@@ -256,7 +255,7 @@ pub(crate) struct ColumnHeaderA11y {
     sort: Option<SortDirection>,
 }
 
-#[allow(dead_code)] // wired up by HeaderRow in Phase 3
+#[allow(dead_code)] // wired up by HeaderRow
 impl ColumnHeaderA11y {
     pub(crate) fn new(
         child: WidgetId,

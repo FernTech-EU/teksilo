@@ -3,8 +3,15 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-use bastyde_canvas::paint::{LineCap, StrokeStyle};
+use bastyde_canvas::paint::{LineCap, StrokeSpace, StrokeStyle};
 use bastyde_canvas::path::{Path, PathCommand};
+
+/// Upper bound on a cosmetic path's rasterized dimension (device px). At
+/// extreme zoom the body would otherwise exceed the atlas; beyond this the
+/// body softens and the stroke drifts slightly off-cosmetic — an accepted
+/// degradation far past normal zoom. Kept well under [`PathAtlas::max_size`]
+/// (4096) to leave room for shelf packing.
+const MAX_COSMETIC_RASTER_DIM: f32 = 2048.0;
 
 /// A region within the atlas texture.
 #[derive(Debug, Clone, Copy)]
@@ -74,6 +81,9 @@ impl PathCacheKey {
             }
         }
         style.dash_offset.to_bits().hash(&mut hasher);
+        // Cosmetic vs logical strokes bake differently (constant device width
+        // vs zoom-scaled), so they must not share a cache entry.
+        std::mem::discriminant(&style.space).hash(&mut hasher);
         // Hash color (rasterization depends on it)
         color[0].to_bits().hash(&mut hasher);
         color[1].to_bits().hash(&mut hasher);
@@ -152,6 +162,14 @@ impl PathAtlas {
     }
 
     /// Look up or rasterize a path, returning its atlas region.
+    ///
+    /// `zoom` is the uniform scale of the view transform active where the path
+    /// is drawn. For a **cosmetic** stroke ([`StrokeSpace::Device`]) the body
+    /// is rasterized at the current zoom (so it stays sharp, matching the
+    /// transform-scaled display quad 1:1) while the stroke is baked at a
+    /// zoom-independent device width — the border holds a constant
+    /// device-pixel thickness at any zoom. **Logical** strokes ignore `zoom`
+    /// (the body bitmap is stretched by the display quad, as before).
     pub fn lookup_or_rasterize(
         &mut self,
         path: &Path,
@@ -159,9 +177,33 @@ impl PathAtlas {
         style: &StrokeStyle,
         bounds: [f32; 4],
         scale_factor: f32,
+        zoom: f32,
     ) -> Option<AtlasRegion> {
-        let raster_w = (bounds[2] * scale_factor).ceil() as u32;
-        let raster_h = (bounds[3] * scale_factor).ceil() as u32;
+        // Cosmetic paths rasterize the body at the current zoom (so it stays
+        // sharp 1:1 with the transform-scaled display quad). Cost: the zoom is
+        // baked into the raster dimensions, which are part of the cache key,
+        // so a CONTINUOUS zoom gesture is a cache miss every frame — each
+        // visible cosmetic path is re-rasterized per frame while zooming (the
+        // per-frame LRU keeps current-frame entries and evicts the rest, so
+        // the atlas stays bounded, but CPU rasterization scales with the
+        // visible cosmetic-path count). Cache hits resume once the zoom
+        // settles. This is the cost of "full-fidelity" cosmetic paths; coarse
+        // zoom-quantization would cut the re-raster rate but reintroduce the
+        // sub-pixel width drift the zoom-aware path was chosen to avoid.
+        let (geom_scale, stroke_scale) = if style.space == StrokeSpace::Device {
+            let mut g = scale_factor * zoom.max(1e-3);
+            // Keep the bitmap under the atlas budget at extreme zoom.
+            let cap = MAX_COSMETIC_RASTER_DIM / bounds[2].max(bounds[3]).max(1.0);
+            if g > cap {
+                g = cap;
+            }
+            (g, scale_factor)
+        } else {
+            (scale_factor, scale_factor)
+        };
+
+        let raster_w = (bounds[2] * geom_scale).ceil() as u32;
+        let raster_h = (bounds[3] * geom_scale).ceil() as u32;
         if raster_w == 0 || raster_h == 0 {
             return None;
         }
@@ -175,7 +217,7 @@ impl PathAtlas {
         }
 
         // Rasterize
-        let pixels = rasterize_path(path, color, style, bounds, scale_factor)?;
+        let pixels = rasterize_path(path, color, style, bounds, geom_scale, stroke_scale)?;
         let region = self.allocate_and_write(key, raster_w, raster_h, &pixels)?;
         Some(region)
     }
@@ -398,15 +440,22 @@ impl PathAtlas {
 }
 
 /// Rasterize a path to RGBA pixels using tiny-skia.
+///
+/// `geom_scale` scales the path **geometry** into the bitmap (= `scale_factor`
+/// for logical strokes, `scale_factor × zoom` for cosmetic ones so the body is
+/// sharp at the current zoom). `stroke_scale` scales the **stroke width** (=
+/// `scale_factor` always; for cosmetic strokes this bakes a zoom-independent
+/// device-pixel thickness). The two are equal for the logical/fill path.
 fn rasterize_path(
     path: &Path,
     color: [f32; 4],
     style: &StrokeStyle,
     bounds: [f32; 4],
-    scale_factor: f32,
+    geom_scale: f32,
+    stroke_scale: f32,
 ) -> Option<Vec<u8>> {
-    let w = (bounds[2] * scale_factor).ceil() as u32;
-    let h = (bounds[3] * scale_factor).ceil() as u32;
+    let w = (bounds[2] * geom_scale).ceil() as u32;
+    let h = (bounds[3] * geom_scale).ceil() as u32;
     if w == 0 || h == 0 {
         return None;
     }
@@ -419,22 +468,22 @@ fn rasterize_path(
         match *cmd {
             PathCommand::MoveTo(p) => {
                 pb.move_to(
-                    (p.x - bounds[0]) * scale_factor,
-                    (p.y - bounds[1]) * scale_factor,
+                    (p.x - bounds[0]) * geom_scale,
+                    (p.y - bounds[1]) * geom_scale,
                 );
             }
             PathCommand::LineTo(p) => {
                 pb.line_to(
-                    (p.x - bounds[0]) * scale_factor,
-                    (p.y - bounds[1]) * scale_factor,
+                    (p.x - bounds[0]) * geom_scale,
+                    (p.y - bounds[1]) * geom_scale,
                 );
             }
             PathCommand::QuadTo { control, to } => {
                 pb.quad_to(
-                    (control.x - bounds[0]) * scale_factor,
-                    (control.y - bounds[1]) * scale_factor,
-                    (to.x - bounds[0]) * scale_factor,
-                    (to.y - bounds[1]) * scale_factor,
+                    (control.x - bounds[0]) * geom_scale,
+                    (control.y - bounds[1]) * geom_scale,
+                    (to.x - bounds[0]) * geom_scale,
+                    (to.y - bounds[1]) * geom_scale,
                 );
             }
             PathCommand::CubicTo {
@@ -443,12 +492,12 @@ fn rasterize_path(
                 to,
             } => {
                 pb.cubic_to(
-                    (control1.x - bounds[0]) * scale_factor,
-                    (control1.y - bounds[1]) * scale_factor,
-                    (control2.x - bounds[0]) * scale_factor,
-                    (control2.y - bounds[1]) * scale_factor,
-                    (to.x - bounds[0]) * scale_factor,
-                    (to.y - bounds[1]) * scale_factor,
+                    (control1.x - bounds[0]) * geom_scale,
+                    (control1.y - bounds[1]) * geom_scale,
+                    (control2.x - bounds[0]) * geom_scale,
+                    (control2.y - bounds[1]) * geom_scale,
+                    (to.x - bounds[0]) * geom_scale,
+                    (to.y - bounds[1]) * geom_scale,
                 );
             }
             PathCommand::ArcTo {
@@ -465,7 +514,7 @@ fn rasterize_path(
                     rect.height,
                     start_angle,
                     sweep_angle,
-                    scale_factor,
+                    geom_scale,
                 );
             }
             PathCommand::Close => {
@@ -496,7 +545,7 @@ fn rasterize_path(
             .as_ref()
             .and_then(|pattern| tiny_skia::StrokeDash::new(pattern.clone(), style.dash_offset));
         let stroke = tiny_skia::Stroke {
-            width: style.width * scale_factor,
+            width: style.width * stroke_scale,
             line_cap,
             dash,
             ..Default::default()
@@ -604,7 +653,7 @@ mod tests {
 
         let style = StrokeStyle::solid(0.0);
         let bounds = [0.0, 0.0, 10.0, 10.0];
-        let pixels = rasterize_path(&path, [1.0, 0.0, 0.0, 1.0], &style, bounds, 1.0);
+        let pixels = rasterize_path(&path, [1.0, 0.0, 0.0, 1.0], &style, bounds, 1.0, 1.0);
         assert!(pixels.is_some());
         let px = pixels.unwrap();
         assert_eq!(px.len(), 10 * 10 * 4);
@@ -623,7 +672,7 @@ mod tests {
 
         let style = StrokeStyle::solid(2.0);
         let bounds = [0.0, 0.0, 10.0, 10.0];
-        let pixels = rasterize_path(&path, [0.0, 1.0, 0.0, 1.0], &style, bounds, 1.0);
+        let pixels = rasterize_path(&path, [0.0, 1.0, 0.0, 1.0], &style, bounds, 1.0, 1.0);
         assert!(pixels.is_some());
     }
 
@@ -645,10 +694,10 @@ mod tests {
         let bounds = [0.0, 0.0, 10.0, 10.0];
 
         let r1 = atlas
-            .lookup_or_rasterize(&path, [1.0, 0.0, 0.0, 1.0], &style, bounds, 1.0)
+            .lookup_or_rasterize(&path, [1.0, 0.0, 0.0, 1.0], &style, bounds, 1.0, 1.0)
             .unwrap();
         let r2 = atlas
-            .lookup_or_rasterize(&path, [1.0, 0.0, 0.0, 1.0], &style, bounds, 1.0)
+            .lookup_or_rasterize(&path, [1.0, 0.0, 0.0, 1.0], &style, bounds, 1.0, 1.0)
             .unwrap();
 
         // Same region (cache hit)
@@ -682,7 +731,7 @@ mod tests {
         let bounds = [0.0, 0.0, 8.0, 8.0];
 
         atlas.begin_frame(); // frame 1
-        atlas.lookup_or_rasterize(&path, [1.0, 0.0, 0.0, 1.0], &style, bounds, 1.0);
+        atlas.lookup_or_rasterize(&path, [1.0, 0.0, 0.0, 1.0], &style, bounds, 1.0, 1.0);
 
         // Advance well past the entry
         atlas.begin_frame(); // frame 2
@@ -726,6 +775,7 @@ mod tests {
                 &style,
                 [0.0, 0.0, 40.0, 40.0],
                 1.0,
+                1.0,
             )
             .expect("p1 fits");
 
@@ -737,6 +787,7 @@ mod tests {
             &style,
             [0.0, 0.0, 50.0, 50.0],
             1.0,
+            1.0,
         );
 
         // Looking up p1 again must still hit cache (with possibly a new
@@ -747,6 +798,7 @@ mod tests {
                 [1.0, 0.0, 0.0, 1.0],
                 &style,
                 [0.0, 0.0, 40.0, 40.0],
+                1.0,
                 1.0,
             )
             .expect("p1 still cached after eviction");
@@ -803,6 +855,7 @@ mod tests {
                 &style,
                 [0.0, 0.0, 50.0, 50.0],
                 1.0,
+                1.0,
             )
             .expect("p1 fits");
 
@@ -816,6 +869,7 @@ mod tests {
                 &style,
                 [0.0, 0.0, 60.0, 60.0],
                 1.0,
+                1.0,
             )
             .expect("p2 fits after grow");
 
@@ -826,9 +880,63 @@ mod tests {
                 &style,
                 [0.0, 0.0, 50.0, 50.0],
                 1.0,
+                1.0,
             )
             .expect("p1 still cached");
         assert_eq!(r1.x, r1_after.x, "p1 must not move when atlas grows");
         assert_eq!(r1.y, r1_after.y, "p1 must not move when atlas grows");
+    }
+
+    #[test]
+    fn cosmetic_path_raster_is_zoom_aware_logical_is_not() {
+        // A cosmetic stroke rasterizes its body at the view zoom (so it stays
+        // sharp and matches the transform-scaled display quad 1:1) — the
+        // raster dimensions scale with zoom. A logical stroke ignores zoom
+        // (one bitmap, stretched by the quad), so its raster size and cache
+        // entry are zoom-independent.
+        let mut atlas = PathAtlas::new(512, 512);
+        atlas.begin_frame();
+        let mut path = Path::new();
+        path.commands
+            .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.commands
+            .push(PathCommand::LineTo(Point::new(40.0, 0.0)));
+        let bounds = [0.0, 0.0, 40.0, 4.0];
+        let color = [0.0, 0.0, 0.0, 1.0];
+
+        let cosmetic = StrokeStyle::hairline(2.0);
+        let r1 = atlas
+            .lookup_or_rasterize(&path, color, &cosmetic, bounds, 1.0, 1.0)
+            .unwrap();
+        let r2 = atlas
+            .lookup_or_rasterize(&path, color, &cosmetic, bounds, 1.0, 2.0)
+            .unwrap();
+        assert_eq!(r1.w, 40, "cosmetic body at zoom 1: 40·sf1·zoom1");
+        assert_eq!(
+            r2.w, 80,
+            "cosmetic body at zoom 2: 40·sf1·zoom2 (zoom-aware)"
+        );
+
+        let logical = StrokeStyle::solid(2.0);
+        let l1 = atlas
+            .lookup_or_rasterize(&path, color, &logical, bounds, 1.0, 1.0)
+            .unwrap();
+        let l2 = atlas
+            .lookup_or_rasterize(&path, color, &logical, bounds, 1.0, 4.0)
+            .unwrap();
+        assert_eq!(l1.w, l2.w, "logical raster size ignores zoom");
+        assert_eq!(
+            (l1.x, l1.y),
+            (l2.x, l2.y),
+            "logical hits the same cache entry"
+        );
+
+        // Same width/color/dims but different stroke space must not collide.
+        let k_cos = PathCacheKey::new(&path, color, &cosmetic, 40, 4);
+        let k_log = PathCacheKey::new(&path, color, &logical, 40, 4);
+        assert_ne!(
+            k_cos, k_log,
+            "cache key must distinguish cosmetic vs logical"
+        );
     }
 }

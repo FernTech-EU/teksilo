@@ -23,7 +23,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
     let rect = section(
         ctx,
-        "RectWidget",
+        lit!("RectWidget"),
         FixedSize::new()
             .bind_width(220.0_f32)
             .bind_height(36.0_f32)
@@ -37,7 +37,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let text = section(
         ctx,
-        "TextWidget",
+        lit!("TextWidget"),
         VStack::new()
             .spacing(4.0)
             .child(TextWidget::new(tr!(vis_text_body())).style(TextStyleRole::Body))
@@ -59,7 +59,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let icon = section(
         ctx,
-        "IconWidget",
+        lit!("IconWidget"),
         HStack::new()
             .spacing(12.0)
             .child(IconWidget::checkmark(20.0))
@@ -71,7 +71,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let star_icon = bastyde::res!("resources/icons/star.png");
     let image = section(
         ctx,
-        "ImageWidget",
+        lit!("ImageWidget"),
         HStack::new()
             .spacing(12.0)
             .child(
@@ -97,7 +97,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let twist_classic = twist_expanded.clone();
     let twist = section(
         ctx,
-        "TwistArrow",
+        lit!("TwistArrow"),
         HStack::new()
             .spacing(8.0)
             .child(TwistArrow::new(16.0, true, true).on_click(move |_ctx| {
@@ -108,7 +108,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let panel_demo = section(
         ctx,
-        "Panel (visual primitive sample)",
+        tr!(vis_panel_standalone()),
         Panel::new()
             .background(SurfaceRole::Raised)
             .border_color(BorderRole::Default)
@@ -154,7 +154,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("RectWidget") {
+                TextWidget::new(lit!("RectWidget")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -172,7 +172,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("TextWidget") {
+                TextWidget::new(lit!("TextWidget")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -198,7 +198,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("IconWidget") {
+                TextWidget::new(lit!("IconWidget")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -214,7 +214,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("ImageWidget") {
+                TextWidget::new(lit!("ImageWidget")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -243,7 +243,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("TwistArrow") {
+                TextWidget::new(lit!("TwistArrow")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -263,7 +263,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Panel (visual primitive sample)") {
+                TextWidget::new(tr!(vis_panel_standalone())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

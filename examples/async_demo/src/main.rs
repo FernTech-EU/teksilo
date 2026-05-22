@@ -46,7 +46,7 @@ impl Widget for Root {
         let load_btn = {
             let busy = self.busy.clone();
             let status = self.status.clone();
-            Button::new_literal("Load data (spawn_blocking)")
+            Button::new(lit!("Load data (spawn_blocking)"))
                 .variant(ButtonVariant::Filled)
                 .on_activate_fn(move |ctx| {
                     if busy.get() {
@@ -76,7 +76,7 @@ impl Widget for Root {
         // EventContext, used here to open a new window.
         let open_btn = {
             let status = self.status.clone();
-            Button::new_literal("Fetch + open result window (spawn_local_with)")
+            Button::new(lit!("Fetch + open result window (spawn_local_with)"))
                 .variant(ButtonVariant::Tinted)
                 .on_activate_fn(move |ctx| {
                     status.set("Fetching for a new window…".to_string());
@@ -98,9 +98,9 @@ impl Widget for Root {
                                     .size(360, 160)
                                     .root(move |tree, _state| {
                                         tree.add(VStack::new().spacing(8.0).child(
-                                            TextWidget::new_literal(format!(
+                                            TextWidget::new(lit!(format!(
                                                 "Delivered with a fresh EventContext — value {value}."
-                                            )),
+                                            ))),
                                         ))
                                     }),
                             );
@@ -113,8 +113,8 @@ impl Widget for Root {
         let root = ctx.add(
             VStack::new()
                 .spacing(14.0)
-                .child(TextWidget::new_literal("bastyde-async demo").style(TextStyleRole::BodyBold))
-                .child(TextWidget::new_literal("").bind_text(self.status.clone()))
+                .child(TextWidget::new(lit!("bastyde-async demo")).style(TextStyleRole::BodyBold))
+                .child(TextWidget::new(lit!("")).bind_text(self.status.clone()))
                 .child(load_btn)
                 .child(open_btn),
         );

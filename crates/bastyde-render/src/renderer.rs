@@ -313,18 +313,69 @@ impl Renderer {
             }
         }
 
-        // Pre-rasterize all paths in this frame into the path atlas
+        // Pre-rasterize all paths in this frame into the path atlas. Cosmetic
+        // (device-space) strokes must rasterize the body at the view zoom
+        // active *where the path is drawn* so the border holds a constant
+        // device-pixel width (see PathAtlas::lookup_or_rasterize). Zoom is only
+        // known by replaying the transform commands, so we walk `draw_order`
+        // with the same SetTransform / PushTransform / PopTransform bookkeeping
+        // the main render loop uses and rasterize each path at its effective
+        // zoom. `path_regions` is indexed by path index (one Path command per
+        // entry). Logical strokes ignore the zoom; a path inside a blurred
+        // subtree may get a slightly off zoom estimate (acceptably rare —
+        // positioning is unaffected, only raster sharpness).
         let mut path_regions: Vec<Option<crate::path_atlas::AtlasRegion>> =
-            Vec::with_capacity(frame.paths.len());
-        for entry in &frame.paths {
-            let region = self.path_atlas.lookup_or_rasterize(
-                &entry.path,
-                entry.color,
-                &entry.stroke_style,
-                entry.bounds,
-                scale_factor,
-            );
-            path_regions.push(region);
+            vec![None; frame.paths.len()];
+        {
+            let mut ptf_stack: Vec<Transform2D> = vec![Transform2D::IDENTITY];
+            let mut ptf_current = Transform2D::IDENTITY;
+            let device_t = |t: &Transform2D| Transform2D {
+                m: [
+                    t.m[0],
+                    t.m[1],
+                    t.m[2],
+                    t.m[3],
+                    t.m[4] * scale_factor,
+                    t.m[5] * scale_factor,
+                ],
+            };
+            for cmd in &frame.draw_order {
+                match cmd {
+                    bastyde_canvas::DrawCommand::SetTransform(t) => {
+                        let stack_top = ptf_stack.last().copied().unwrap_or(Transform2D::IDENTITY);
+                        ptf_current = device_t(t).then(&stack_top);
+                    }
+                    bastyde_canvas::DrawCommand::PushTransform(t) => {
+                        let prev_top = ptf_stack.last().copied().unwrap_or(Transform2D::IDENTITY);
+                        let new_top = device_t(t).then(&prev_top);
+                        ptf_stack.push(new_top);
+                        ptf_current = new_top;
+                    }
+                    bastyde_canvas::DrawCommand::PopTransform => {
+                        if ptf_stack.len() > 1 {
+                            ptf_stack.pop();
+                        }
+                        ptf_current = ptf_stack.last().copied().unwrap_or(Transform2D::IDENTITY);
+                    }
+                    bastyde_canvas::DrawCommand::Path(idx) => {
+                        if let Some(entry) = frame.paths.get(*idx) {
+                            // Uniform scale of the linear part = view zoom
+                            // (no scale_factor — it lives only in the
+                            // translation column, see SetTransform handling).
+                            let zoom = ptf_current.m[0].hypot(ptf_current.m[1]);
+                            path_regions[*idx] = self.path_atlas.lookup_or_rasterize(
+                                &entry.path,
+                                entry.color,
+                                &entry.stroke_style,
+                                entry.bounds,
+                                scale_factor,
+                                zoom,
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
 
         // Upload path atlas to GPU if dirty
@@ -339,7 +390,14 @@ impl Renderer {
         // drawable produces exactly 4 vertices. The shared index buffer
         // sizes to the largest per-pipeline quad count so one index stream
         // serves all pipelines.
-        let rect_quads = frame.decorations.len();
+        // The rect pipeline draws both `DrawCommand::Decoration` (Tier-1
+        // rects) AND `DrawCommand::CosmeticLine` (each hairline emits one
+        // 4-vertex quad through the same rect stream — see the CosmeticLine
+        // arm in the draw walk). Both must be counted here or the rect stream
+        // is under-sized and overflows on the first cosmetic-line-heavy frame
+        // (e.g. a tiled hairline grid). GPU-path + debug-assert only, so
+        // headless RenderFrame tests don't catch it.
+        let rect_quads = frame.decorations.len() + frame.cosmetic_lines.len();
         let sdf_quads = frame.shapes.len();
         // Each blur scope produces one composite-blit quad on End,
         // emitted via the quad pipeline. Account for it in the stream
@@ -724,6 +782,82 @@ impl Renderer {
                                     });
                                 }
                             }
+                            bastyde_canvas::DrawCommand::CosmeticLine(idx) => {
+                                flush_all!(
+                                    pass,
+                                    &self.queue,
+                                    self.streams,
+                                    &self.rect_pipeline,
+                                    &self.sdf_pipeline,
+                                    &self.quad_pipeline,
+                                    &self.shadow_pipeline,
+                                    rect_batch,
+                                    sdf_batch,
+                                    quad_batch,
+                                    shadow_batch,
+                                    self.atlas_texture,
+                                    self.path_atlas_texture,
+                                    quad_source,
+                                    index_binding
+                                );
+                                quad_source = None;
+                                let Some(line) = frame.cosmetic_lines.get(*idx) else {
+                                    continue;
+                                };
+                                // Transform the endpoints (premultiplied by the
+                                // HiDPI scale_factor) through the active
+                                // transform, then apply a device-pixel thickness
+                                // that does NOT scale with the transform's zoom.
+                                let p0 = apply_transform_pixel(
+                                    [line.from[0] * scale_factor, line.from[1] * scale_factor],
+                                    &current_transform,
+                                );
+                                let p1 = apply_transform_pixel(
+                                    [line.to[0] * scale_factor, line.to[1] * scale_factor],
+                                    &current_transform,
+                                );
+                                let thickness = (line.width * scale_factor).max(1.0);
+                                let half = thickness * 0.5;
+                                let dx = p1[0] - p0[0];
+                                let dy = p1[1] - p0[1];
+                                let len = (dx * dx + dy * dy).sqrt();
+                                if len < 1e-3 {
+                                    continue;
+                                }
+                                // Perpendicular unit normal in device space.
+                                let nx = -dy / len;
+                                let ny = dx / len;
+                                // Pixel-snap axis-aligned lines (edge-aligned
+                                // center) for crispness; leave diagonals as-is.
+                                let (mut a0, mut a1) = (p0, p1);
+                                if dy.abs() < 0.5 {
+                                    let cy = ((p0[1] + p1[1]) * 0.5 - half).round() + half;
+                                    a0 = [p0[0], cy];
+                                    a1 = [p1[0], cy];
+                                } else if dx.abs() < 0.5 {
+                                    let cx = ((p0[0] + p1[0]) * 0.5 - half).round() + half;
+                                    a0 = [cx, p0[1]];
+                                    a1 = [cx, p1[1]];
+                                }
+                                let lin = crate::vertex::srgb_to_linear_rgba(line.color);
+                                let color = [lin[0], lin[1], lin[2], lin[3] * current_opacity];
+                                let corners = [
+                                    [a0[0] + nx * half, a0[1] + ny * half],
+                                    [a1[0] + nx * half, a1[1] + ny * half],
+                                    [a1[0] - nx * half, a1[1] - ny * half],
+                                    [a0[0] - nx * half, a0[1] - ny * half],
+                                ];
+                                for pos in corners {
+                                    rect_batch.push(RectVertex {
+                                        position: pixel_to_ndc(
+                                            pos,
+                                            viewport_width,
+                                            viewport_height,
+                                        ),
+                                        color,
+                                    });
+                                }
+                            }
                             bastyde_canvas::DrawCommand::Shape(idx) => {
                                 flush_all!(
                                     pass,
@@ -746,7 +880,27 @@ impl Renderer {
                                 let Some(shape) = frame.shapes.get(*idx) else {
                                     continue;
                                 };
-                                let verts = SdfVertex::from_shape_quad(shape, scale_factor);
+                                // Cosmetic (device-space) borders hold a
+                                // constant device-pixel width under zoom: the
+                                // body still scales via `current_transform`, but
+                                // the SDF stroke param is divided by the active
+                                // zoom (the uniform scale of the linear part,
+                                // which carries no scale_factor — see
+                                // SetTransform). Fills + logical strokes are
+                                // unchanged.
+                                let verts = if shape.stroke_space
+                                    == bastyde_canvas::StrokeSpace::Device
+                                    && shape.stroke_width > 0.0
+                                {
+                                    // Uniform scale of the linear part = view
+                                    // zoom (no scale_factor — it lives only in
+                                    // the translation column). `from_shape_quad_cosmetic`
+                                    // applies the divide-by-zero floor.
+                                    let zoom = current_transform.m[0].hypot(current_transform.m[1]);
+                                    SdfVertex::from_shape_quad_cosmetic(shape, scale_factor, zoom)
+                                } else {
+                                    SdfVertex::from_shape_quad(shape, scale_factor)
+                                };
                                 for v in &verts {
                                     let tp = apply_transform_pixel(v.position, &current_transform);
                                     sdf_batch.push(SdfVertex {
@@ -1195,8 +1349,9 @@ impl Renderer {
                                 current_blend = *mode;
                             }
                             bastyde_canvas::DrawCommand::RestoreBlendMode => {
-                                current_blend =
-                                    blend_stack.pop().unwrap_or(bastyde_canvas::BlendMode::Normal);
+                                current_blend = blend_stack
+                                    .pop()
+                                    .unwrap_or(bastyde_canvas::BlendMode::Normal);
                             }
                             bastyde_canvas::DrawCommand::SetTransform(t) => {
                                 flush_all!(
@@ -2676,6 +2831,7 @@ mod tests {
             color: [0.2, 0.6, 0.9, 1.0],
             shape: ShapeKind::RoundedRect,
             stroke_width: 0.0,
+            stroke_space: bastyde_canvas::StrokeSpace::Logical,
             corner_radii: [0.0; 4],
             paint_data: PaintData::Solid,
         });

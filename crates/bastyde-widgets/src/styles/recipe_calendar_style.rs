@@ -25,6 +25,7 @@ use bastyde_core::styles::{
     CalendarDayConfig, CalendarDayFill, CalendarHeaderConfig, CalendarStyle, CalendarZoomCellConfig,
 };
 use bastyde_core::widget_id::WidgetId;
+use bastyde_i18n::lit;
 use bastyde_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::primitives::{Center, Expand, FixedSize, HStack, RectWidget, TextWidget, ZStack};
@@ -120,7 +121,7 @@ impl CalendarStyle for RecipeCalendarStyle {
             });
             ColorProp::DynamicTextRole(role_signal)
         };
-        let label = TextWidget::new_literal(cfg.label.clone())
+        let label = TextWidget::new(lit!(cfg.label.clone()))
             .style(TextStyleRole::Body)
             .bind_color(text_color)
             .single_line()
@@ -175,7 +176,7 @@ impl CalendarStyle for RecipeCalendarStyle {
             .corner_radius(CornerRadius::uniform(CALENDAR_ZOOM_CELL_RADIUS));
         let bg_id = ctx.add(bg);
 
-        let text = TextWidget::new_literal(cfg.label.clone())
+        let text = TextWidget::new(lit!(cfg.label.clone()))
             .style(TextStyleRole::Body)
             .color(ColorProp::DynamicTextRole(text_role))
             .single_line();

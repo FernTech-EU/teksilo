@@ -25,7 +25,7 @@ use quote::{quote, quote_spanned};
 
 use bastyde_parse::diag;
 use bastyde_parse::{
-    BodyItem, BatiElement, BatiElse, BatiFor, BatiIf, BatiMatch, BatiProperty, BatiRoot, PropArg,
+    BatiElement, BatiElse, BatiFor, BatiIf, BatiMatch, BatiProperty, BatiRoot, BodyItem, PropArg,
     RustShape,
 };
 

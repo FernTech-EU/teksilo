@@ -27,18 +27,20 @@ use bastyde_core::window::BastydeWindowId;
 
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObjectProtocol, ProtocolObject};
-use objc2::{ClassType, DefinedClass, MainThreadMarker, define_class, msg_send};
+use objc2::{AnyThread, ClassType, DefinedClass, MainThreadMarker, define_class, msg_send};
 use objc2_app_kit::{
-    NSAutoresizingMaskOptions, NSDragOperation, NSDraggingDestination, NSDraggingInfo,
-    NSPasteboardTypeFileURL, NSPasteboardTypeString, NSPasteboardTypeURL, NSView,
+    NSApplication, NSAutoresizingMaskOptions, NSDragOperation, NSDraggingContext,
+    NSDraggingDestination, NSDraggingInfo, NSDraggingItem, NSDraggingSession, NSDraggingSource,
+    NSImage, NSPasteboardTypeFileURL, NSPasteboardTypeString, NSPasteboardTypeURL,
+    NSPasteboardWriting, NSView, NSWorkspace,
 };
-use objc2_foundation::{NSArray, NSPoint, NSURL};
+use objc2_foundation::{NSArray, NSPoint, NSRect, NSSize, NSString, NSURL};
 use raw_window_handle::RawWindowHandle;
 
 use super::{
-    ExternalDndBackend, ExternalDndGuard, ExternalDndEventPayload, ExternalDragEvent, NoopDndGuard,
+    ExternalDndBackend, ExternalDndEventPayload, ExternalDndGuard, ExternalDragEvent, NoopDndGuard,
 };
-use bastyde_core::ExternalDropData;
+use bastyde_core::{DragImageData, DropOutcome, ExternalDropData, OutboundDragData};
 
 /// Per-view state for the overlay drop target.
 struct DropViewIvars {
@@ -109,6 +111,43 @@ define_class!(
             accepted
         }
     }
+
+    // The drag-*source* side (outbound, app → OS). The overlay is the source
+    // object for any drag this window starts via `begin_drag`.
+    unsafe impl NSDraggingSource for DropView {
+        // Advertise Copy only. Allowing Move would let the destination (e.g.
+        // Finder) physically relocate a dragged file off disk — a dangerous
+        // implicit default. Move-out should be an explicit opt-in, not the
+        // baseline behavior.
+        #[unsafe(method(draggingSession:sourceOperationMaskForDraggingContext:))]
+        fn dragging_source_operation_mask(
+            &self,
+            _session: &NSDraggingSession,
+            _context: NSDraggingContext,
+        ) -> NSDragOperation {
+            NSDragOperation::Copy
+        }
+
+        // The OS drag finished. Map the operation the destination performed to
+        // our outcome and post it so the framework fires the source widget's
+        // `on_drag_ended`.
+        #[unsafe(method(draggingSession:endedAtPoint:operation:))]
+        fn dragging_source_ended(
+            &self,
+            _session: &NSDraggingSession,
+            _screen_point: NSPoint,
+            operation: NSDragOperation,
+        ) {
+            let outcome = if operation.is_empty() {
+                DropOutcome::Cancelled
+            } else if operation.contains(NSDragOperation::Move) {
+                DropOutcome::OsMove
+            } else {
+                DropOutcome::OsCopy
+            };
+            self.post(ExternalDragEvent::DragEnded { outcome });
+        }
+    }
 );
 
 impl DropView {
@@ -135,11 +174,92 @@ impl DropView {
 
     fn post(&self, event: ExternalDragEvent) {
         let ivars = self.ivars();
-        ivars.poster.post_external(Box::new(ExternalDndEventPayload {
-            window_id_owner: ivars.window_id,
-            event,
-        }));
+        ivars
+            .poster
+            .post_external(Box::new(ExternalDndEventPayload {
+                window_id_owner: ivars.window_id,
+                event,
+            }));
     }
+
+    /// Start a native OS drag exporting `data`. Called on the AppKit main
+    /// thread synchronously from the framework's escalation path (winit is
+    /// still dispatching the mouse-drag event), so `NSApp.currentEvent` is the
+    /// live drag event that `beginDraggingSessionWithItems:event:source:`
+    /// requires. Returns `true` if a session started.
+    ///
+    /// The `image` parameter is reserved for a future caller-supplied drag
+    /// bitmap; today the framework passes `None` and we use the file icon (for
+    /// file drags) or a small placeholder.
+    fn begin_drag(&self, data: &OutboundDragData, _image: Option<&DragImageData>) -> bool {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return false;
+        };
+        let app = NSApplication::sharedApplication(mtm);
+        let Some(event) = app.currentEvent() else {
+            return false;
+        };
+
+        // A drag item carries its origin frame in the source view's (flipped)
+        // coordinates; anchor it at the current pointer so the drag image
+        // tracks naturally.
+        let origin = self.convertPoint_fromView(event.locationInWindow(), None);
+        let frame = NSRect::new(origin, NSSize::new(32.0, 32.0));
+
+        let workspace = NSWorkspace::sharedWorkspace();
+        let mut items: Vec<Retained<NSDraggingItem>> = Vec::new();
+
+        for path in &data.files {
+            let s = NSString::from_str(&path.to_string_lossy());
+            let url = NSURL::fileURLWithPath(&s);
+            let writer: &ProtocolObject<dyn NSPasteboardWriting> = ProtocolObject::from_ref(&*url);
+            let item = NSDraggingItem::initWithPasteboardWriter(NSDraggingItem::alloc(), writer);
+            let icon = workspace.iconForFile(&s);
+            unsafe {
+                item.setDraggingFrame_contents(frame, Some(AsRef::<AnyObject>::as_ref(&*icon)));
+            }
+            items.push(item);
+        }
+        for uri in &data.uris {
+            let s = NSString::from_str(uri);
+            let Some(url) = NSURL::URLWithString(&s) else {
+                continue;
+            };
+            let writer: &ProtocolObject<dyn NSPasteboardWriting> = ProtocolObject::from_ref(&*url);
+            let item = NSDraggingItem::initWithPasteboardWriter(NSDraggingItem::alloc(), writer);
+            let img = placeholder_image(mtm);
+            unsafe {
+                item.setDraggingFrame_contents(frame, Some(AsRef::<AnyObject>::as_ref(&*img)));
+            }
+            items.push(item);
+        }
+        if let Some(text) = &data.text {
+            let s = NSString::from_str(text);
+            let writer: &ProtocolObject<dyn NSPasteboardWriting> = ProtocolObject::from_ref(&*s);
+            let item = NSDraggingItem::initWithPasteboardWriter(NSDraggingItem::alloc(), writer);
+            let img = placeholder_image(mtm);
+            unsafe {
+                item.setDraggingFrame_contents(frame, Some(AsRef::<AnyObject>::as_ref(&*img)));
+            }
+            items.push(item);
+        }
+
+        if items.is_empty() {
+            return false;
+        }
+
+        let array = NSArray::from_retained_slice(&items);
+        let source: &ProtocolObject<dyn NSDraggingSource> = ProtocolObject::from_ref(self);
+        self.beginDraggingSessionWithItems_event_source(&array, &event, source);
+        true
+    }
+}
+
+/// A small blank drag image for non-file items (text / URLs), where there is
+/// no natural file icon. Functional placeholder until caller-supplied
+/// `DragImageData` rasterization lands.
+fn placeholder_image(_mtm: MainThreadMarker) -> Retained<NSImage> {
+    NSImage::initWithSize(NSImage::alloc(), NSSize::new(16.0, 16.0))
 }
 
 /// Extract files / URLs / text from the drag's pasteboard.
@@ -182,7 +302,11 @@ pub struct MacOsDndGuard {
     overlay: Retained<DropView>,
 }
 
-impl ExternalDndGuard for MacOsDndGuard {}
+impl ExternalDndGuard for MacOsDndGuard {
+    fn begin_drag(&self, data: &OutboundDragData, image: Option<&DragImageData>) -> bool {
+        self.overlay.begin_drag(data, image)
+    }
+}
 
 impl Drop for MacOsDndGuard {
     fn drop(&mut self) {

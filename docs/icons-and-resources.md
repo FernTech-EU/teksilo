@@ -55,18 +55,18 @@ The macro validates known formats at compile time (XML structure for SVG, magic 
 let save = bastyde::res!("resources/icons/save.svg");
 
 // Leading icon — most common
-Button::new_literal("Save")
+Button::new(lit!("Save"))
     .icon(IconWidget::from_svg_icon(save), IconLocation::Leading)
     .style(ButtonVariant::Plain)
 
 // Icon only — toolbars
-Button::new_literal("Save")
+Button::new(lit!("Save"))
     .icon(IconWidget::from_svg_icon(save), IconLocation::IconOnly)
     .style(ButtonVariant::Ghost)
 
 // Raster icon
 let star = bastyde::res!("resources/icons/star.png");
-Button::new_literal("Favorite")
+Button::new(lit!("Favorite"))
     .icon(IconWidget::from_raster(star, 24.0), IconLocation::Leading)
 ```
 

@@ -20,7 +20,7 @@ and the direction note at the top updates accordingly.
 - RTL layout flip via `rtl_from_locale` + `HAlignment::resolve(rtl)`
 - `EventContext::set_locale(...)` broadcasting to every tree
 - `bastyde_widgets::framework_locales()` registration so a11y strings
-  like *Dialog* and *Status* are available in fr-FR (Phase E / Step 4)
+  like *Dialog* and *Status* are available in fr-FR
 
 ## Translator hot-reload
 

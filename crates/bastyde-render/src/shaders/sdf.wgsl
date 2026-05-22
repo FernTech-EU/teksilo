@@ -136,11 +136,22 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         fill_color = in.color;
     }
 
+    // Screen-space antialiasing band. `dist` is in shape units; under a
+    // SceneView's view transform one shape unit maps to ~`zoom` device px, so
+    // a fixed band (`smoothstep(-0.5, 0.5, …)`) would widen to ~zoom px and
+    // blur edges (notably cosmetic strokes, which hold a constant device
+    // width). `fwidth(dist)` is the on-screen gradient of `dist`, so a band of
+    // `±0.5·fwidth` tracks ~1 device px at any scale. Capped at 0.5 so it
+    // never EXCEEDS the previous fixed band: at zoom ≤ 1 (every non-scene
+    // widget) `fwidth ≥ 1` ⇒ `aa = 0.5`, byte-identical to before; only
+    // zoomed-in shapes get the sharper (smaller) band. The 1e-4 floor avoids a
+    // hard step in flat regions.
+    let aa = min(max(fwidth(dist), 1e-4) * 0.5, 0.5);
     if (stroke_width > 0.0) {
-        let alpha = 1.0 - smoothstep(-0.5, 0.5, abs(dist) - stroke_width * 0.5);
+        let alpha = 1.0 - smoothstep(-aa, aa, abs(dist) - stroke_width * 0.5);
         return vec4<f32>(fill_color.rgb, fill_color.a * alpha);
     } else {
-        let alpha = 1.0 - smoothstep(-0.5, 0.5, dist);
+        let alpha = 1.0 - smoothstep(-aa, aa, dist);
         return vec4<f32>(fill_color.rgb, fill_color.a * alpha);
     }
 }

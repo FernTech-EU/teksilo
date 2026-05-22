@@ -22,13 +22,13 @@ use crate::primitives::{HStack, MinSize, TextWidget, VStack};
 
 /// A radio button that sets a shared `Signal<usize>` to its value when selected.
 pub struct RadioButton {
-    label: Option<String>,
-    caption: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
+    caption: Option<bastyde_i18n::LocalizedString>,
     value: usize,
     selected: Signal<usize>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
-    tooltip_text: Option<String>,
+    tooltip_text: Option<bastyde_i18n::LocalizedString>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn bastyde_core::widget::Widget>>,
     variant: RadioVariant,
@@ -71,14 +71,7 @@ impl RadioButton {
 
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `label(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
+        self.label = Some(ls);
         self
     }
 
@@ -87,14 +80,7 @@ impl RadioButton {
     /// `text_secondary` style. Has no effect unless `label(...)` is also set.
     pub fn caption(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.caption = Some(ls.resolve_now());
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `caption(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn caption_literal(mut self, text: impl Into<String>) -> Self {
-        self.caption = Some(text.into());
+        self.caption = Some(ls);
         self
     }
 
@@ -121,16 +107,6 @@ impl RadioButton {
     }
 
     pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
-        self.tooltip_text = Some(ls.resolve_now());
-        self.rich_tooltip_source = None;
-        self.composite_tooltip_content = None;
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `tooltip(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;
@@ -156,7 +132,10 @@ impl RadioButton {
 
     /// Attach a composite tooltip — third tier, hosting an arbitrary
     /// widget tree. See [`Button::composite_tooltip`](crate::button::Button::composite_tooltip).
-    pub fn composite_tooltip(mut self, content: impl bastyde_core::widget::Widget + 'static) -> Self {
+    pub fn composite_tooltip(
+        mut self,
+        content: impl bastyde_core::widget::Widget + 'static,
+    ) -> Self {
         self.composite_tooltip_content = Some(Box::new(content));
         self.tooltip_text = None;
         self.rich_tooltip_source = None;
@@ -232,7 +211,7 @@ impl Widget for RadioButton {
             .spacing(radio_dims::RADIO_LABEL_GAP)
             .add_child(body_id);
         if let Some(ref label) = self.label {
-            let label_widget = TextWidget::new_literal(label)
+            let label_widget = TextWidget::new(label.clone())
                 .style(TextStyleRole::Body)
                 .color(TextRole::Primary)
                 .single_line()
@@ -240,7 +219,7 @@ impl Widget for RadioButton {
             let label_id = ctx.add(label_widget);
 
             let label_column_id = if let Some(ref caption) = self.caption {
-                let caption_widget = TextWidget::new_literal(caption)
+                let caption_widget = TextWidget::new(caption.clone())
                     .style(TextStyleRole::Small)
                     .color(TextRole::Secondary)
                     .a11y_hidden();
@@ -268,23 +247,16 @@ impl Widget for RadioButton {
         );
 
         if let Some(content) = self.composite_tooltip_content.take() {
-            crate::tooltip::attach_composite_tooltip_boxed(
-                ctx,
-                root_id,
-                content,
-                crate::tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
         } else if let Some(source) = self.rich_tooltip_source.take() {
-            crate::tooltip::attach_rich_tooltip_source(
-                ctx,
-                root_id,
-                source,
-                crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
-            );
-        } else if let Some(ref tooltip_text) = self.tooltip_text {
-            let tw = crate::tooltip::TooltipWidget::new_literal(tooltip_text);
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+        } else if let Some(tooltip_text) = self.tooltip_text.clone() {
+            let tw = crate::tooltip::TooltipWidget::new(tooltip_text);
             let tid = ctx.add(tw);
-            ctx.attach_tooltip(root_id, tid, std::time::Duration::from_millis(500));
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root_id, tid, delay);
         }
 
         self.root_child_id = Some(root_id);
@@ -396,10 +368,10 @@ impl Widget for RadioButton {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::RadioButton);
         if let Some(ref label) = self.label {
-            builder.set_name(label);
+            builder.set_name(label.resolve_now());
         }
         if let Some(ref caption) = self.caption {
-            builder.set_description(caption);
+            builder.set_description(caption.resolve_now());
         }
         // ARIA role="radio" uses aria-checked (→ AccessKit `toggled`),
         // not aria-selected. `selected` is for options, tabs, and grid cells.
@@ -425,6 +397,7 @@ impl Widget for RadioButton {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_core::event::Modifiers;
     use bastyde_core::widget_tree::WidgetTree;
 
@@ -433,9 +406,9 @@ mod tests {
         use crate::primitives::VStack;
         let selected = Signal::new(0_usize);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let r0 = tree.add(RadioButton::new(0, selected.clone()).label_literal("A"));
-        let r1 = tree.add(RadioButton::new(1, selected.clone()).label_literal("B"));
-        let r2 = tree.add(RadioButton::new(2, selected.clone()).label_literal("C"));
+        let r0 = tree.add(RadioButton::new(0, selected.clone()).label(lit!("A")));
+        let r1 = tree.add(RadioButton::new(1, selected.clone()).label(lit!("B")));
+        let r2 = tree.add(RadioButton::new(2, selected.clone()).label(lit!("C")));
         let _root = tree.add(VStack::new().add_child(r0).add_child(r1).add_child(r2));
         tree.layout(SizeProposal::exact(200.0, 300.0));
 
@@ -452,8 +425,8 @@ mod tests {
     fn space_selects() {
         let selected = Signal::new(0_usize);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let _r0 = tree.add(RadioButton::new(0, selected.clone()).label_literal("A"));
-        let r1 = tree.add(RadioButton::new(1, selected.clone()).label_literal("B"));
+        let _r0 = tree.add(RadioButton::new(0, selected.clone()).label(lit!("A")));
+        let r1 = tree.add(RadioButton::new(1, selected.clone()).label(lit!("B")));
         tree.layout(SizeProposal::exact(200.0, 200.0));
 
         tree.focus(r1);
@@ -465,8 +438,8 @@ mod tests {
     fn accessibility() {
         let selected = Signal::new(1_usize);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let r0 = tree.add(RadioButton::new(0, selected.clone()).label_literal("A"));
-        let r1 = tree.add(RadioButton::new(1, selected.clone()).label_literal("B"));
+        let r0 = tree.add(RadioButton::new(0, selected.clone()).label(lit!("A")));
+        let r1 = tree.add(RadioButton::new(1, selected.clone()).label(lit!("B")));
         tree.layout(SizeProposal::exact(200.0, 200.0));
 
         let info0 = tree.accessibility_node(r0);
@@ -481,7 +454,7 @@ mod tests {
     fn accessibility_has_actions() {
         let selected = Signal::new(0_usize);
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let r0 = tree.add(RadioButton::new(0, selected).label_literal("A"));
+        let r0 = tree.add(RadioButton::new(0, selected).label(lit!("A")));
         tree.layout(SizeProposal::exact(200.0, 200.0));
         let info = tree.accessibility_node(r0);
         assert!(

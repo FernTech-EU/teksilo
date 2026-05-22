@@ -13,7 +13,9 @@ use std::time::{Duration, SystemTime};
 
 use bastyde_core::telemetry::{ConsentScope, ConsentState, Event, EventCategory, TelemetryError};
 use bastyde_settings::{AppPaths, SettingsStore};
-use bastyde_telemetry::{StubReporter, TelemetryBundle, TelemetryExt, TelemetryMode, UsageReporter};
+use bastyde_telemetry::{
+    StubReporter, TelemetryBundle, TelemetryExt, TelemetryMode, UsageReporter,
+};
 use tempfile::tempdir;
 
 fn make_settings(paths: &AppPaths) -> SettingsStore {

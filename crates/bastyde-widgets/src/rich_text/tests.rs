@@ -7,6 +7,7 @@
 
 use bastyde_canvas::{Point, SizeProposal};
 use bastyde_core::widget_tree::WidgetTree;
+use bastyde_i18n::lit;
 use bastyde_text::text_document::TextDocument;
 
 use super::{ContextTarget, RichTextEditor, ScrollPolicy};
@@ -487,7 +488,11 @@ fn tick_past_debounce(tree: &mut WidgetTree) {
     tree.layout(SizeProposal::exact(400.0, 300.0));
 }
 
-fn press_key(tree: &mut WidgetTree, key: bastyde_core::event::Key, mods: bastyde_core::event::Modifiers) {
+fn press_key(
+    tree: &mut WidgetTree,
+    key: bastyde_core::event::Key,
+    mods: bastyde_core::event::Modifiers,
+) {
     use bastyde_core::event::WidgetEvent;
     tree.dispatch_event(WidgetEvent::KeyDown {
         key,
@@ -851,7 +856,9 @@ fn context_target_variants_compile_out_of_the_box() {
 // Phase B tests — clipboard, double/triple tap, drag-select, Ctrl+A ladder.
 // ---------------------------------------------------------------------------
 
-fn ctx_with_memory_clipboard(tree: &mut WidgetTree) -> bastyde_platform::clipboard::ClipboardHandle {
+fn ctx_with_memory_clipboard(
+    tree: &mut WidgetTree,
+) -> bastyde_platform::clipboard::ClipboardHandle {
     use bastyde_core::event_source::TreeAppContext;
     use bastyde_platform::clipboard::{ClipboardHandle, MemoryClipboard};
     use std::any::TypeId;
@@ -2132,12 +2139,10 @@ fn editor_context_menu_slot_replaces_default_entirely() {
         Some(Box::new(
             crate::menu_list::MenuList::new()
                 .item(
-                    crate::menu_item::MenuItem::new_literal("Custom Action A")
-                        .on_activate_fn(|_| ()),
+                    crate::menu_item::MenuItem::new(lit!("Custom Action A")).on_activate_fn(|_| ()),
                 )
                 .item(
-                    crate::menu_item::MenuItem::new_literal("Custom Action B")
-                        .on_activate_fn(|_| ()),
+                    crate::menu_item::MenuItem::new(lit!("Custom Action B")).on_activate_fn(|_| ()),
                 ),
         ))
     });
@@ -3377,8 +3382,7 @@ mod affinity_tests {
     /// Long single paragraph that definitely wraps at the test
     /// viewport width of 400 px. NotoSans at 16px produces multiple
     /// visual lines for this content.
-    const WRAPPING_TEXT: &str =
-        "The quick brown fox jumps over the lazy dog. \
+    const WRAPPING_TEXT: &str = "The quick brown fox jumps over the lazy dog. \
          A long paragraph that absolutely positively must wrap across \
          multiple visual lines so the soft-wrap-boundary affinity \
          tests have something concrete to assert against.";
@@ -3701,10 +3705,8 @@ mod affinity_tests {
         // does internally (see rich_text.rs).
         {
             let mut st = state.borrow_mut();
-            st.cursor.set_position(
-                0,
-                bastyde_text::text_document::MoveMode::MoveAnchor,
-            );
+            st.cursor
+                .set_position(0, bastyde_text::text_document::MoveMode::MoveAnchor);
             st.cursor_affinity = CursorAffinity::Downstream;
         }
 
@@ -3733,7 +3735,9 @@ mod affinity_tests {
 
     #[test]
     fn paint_only_highlight_recolors_without_full_layout() {
-        use bastyde_text::text_document::{Color, HighlightContext, HighlightFormat, SyntaxHighlighter};
+        use bastyde_text::text_document::{
+            Color, HighlightContext, HighlightFormat, SyntaxHighlighter,
+        };
         use std::sync::Arc;
 
         // Background-only = paint-only (no metric change).
@@ -3771,7 +3775,10 @@ mod affinity_tests {
         let (had, single) = state.borrow_mut().drain_events();
         assert!(had, "attaching a highlighter should produce an event");
         let st = state.borrow();
-        assert!(st.pending_recolor, "paint-only change must request a recolor");
+        assert!(
+            st.pending_recolor,
+            "paint-only change must request a recolor"
+        );
         assert!(
             !st.needs_full_layout,
             "paint-only change must NOT trigger a full relayout"
@@ -3821,7 +3828,10 @@ mod affinity_tests {
             st.needs_full_layout,
             "metric highlight must trigger a full relayout"
         );
-        assert!(!st.pending_recolor, "metric highlight is not a recolor-only change");
+        assert!(
+            !st.pending_recolor,
+            "metric highlight is not a recolor-only change"
+        );
     }
 
     #[test]

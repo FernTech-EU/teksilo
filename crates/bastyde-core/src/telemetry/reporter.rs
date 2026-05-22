@@ -1,6 +1,6 @@
 //! `UsageReporter` trait and consent enums.
 //!
-//! The trait is **synchronous** in Phase 1. Adapters that perform
+//! The trait is **synchronous**. Adapters that perform
 //! HTTP transport spawn their own worker threads or use blocking
 //! clients; the dispatch tap MUST NOT block the UI thread, so
 //! [`UsageReporter::record`] queues and returns. Async upgrade is
@@ -184,9 +184,9 @@ pub struct ConsentScope {
     /// Anonymous mode always uses this scope — no other scope makes
     /// sense without a stable id.
     pub anonymous_metrics: bool,
-    /// Crash reports. Reserved — no transport in Phase 1.
+    /// Crash reports. Reserved — no transport yet.
     pub crash_reports: bool,
-    /// Feature-flag fetches. Reserved — no transport in Phase 1.
+    /// Feature-flag fetches. Reserved — no transport yet.
     pub feature_flags: bool,
     /// Session recording. Reserved; not implemented (PII risk).
     pub session_recording: bool,

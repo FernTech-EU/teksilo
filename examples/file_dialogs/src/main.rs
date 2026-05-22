@@ -21,7 +21,7 @@ use bastyde::widgets::{
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -76,7 +76,7 @@ impl Widget for FileDialogShowcase {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let status_for_open = self.status.clone();
         let spinning_for_open = self.spinning.clone();
-        let open_btn = Button::new_literal("Open file…")
+        let open_btn = Button::new(lit!("Open file…"))
             .variant(ButtonVariant::Filled)
             .on_activate_fn(move |ctx| {
                 spinning_for_open.set(true);
@@ -97,7 +97,7 @@ impl Widget for FileDialogShowcase {
 
         let status_for_multi = self.status.clone();
         let spinning_for_multi = self.spinning.clone();
-        let multi_btn = Button::new_literal("Open multiple files…").on_activate_fn(move |ctx| {
+        let multi_btn = Button::new(lit!("Open multiple files…")).on_activate_fn(move |ctx| {
             spinning_for_multi.set(true);
             let status = status_for_multi.clone();
             let spinning = spinning_for_multi.clone();
@@ -127,7 +127,7 @@ impl Widget for FileDialogShowcase {
 
         let status_for_folder = self.status.clone();
         let spinning_for_folder = self.spinning.clone();
-        let folder_btn = Button::new_literal("Pick folder…").on_activate_fn(move |ctx| {
+        let folder_btn = Button::new(lit!("Pick folder…")).on_activate_fn(move |ctx| {
             spinning_for_folder.set(true);
             let status = status_for_folder.clone();
             let spinning = spinning_for_folder.clone();
@@ -146,7 +146,7 @@ impl Widget for FileDialogShowcase {
 
         let status_for_save = self.status.clone();
         let spinning_for_save = self.spinning.clone();
-        let save_btn = Button::new_literal("Save file…").on_activate_fn(move |ctx| {
+        let save_btn = Button::new(lit!("Save file…")).on_activate_fn(move |ctx| {
             spinning_for_save.set(true);
             let status = status_for_save.clone();
             let spinning = spinning_for_save.clone();
@@ -173,11 +173,11 @@ impl Widget for FileDialogShowcase {
             });
         });
 
-        let header = TextWidget::new_literal("Native File Dialogs").style(TextStyleRole::BodyBold);
-        let intro = TextWidget::new_literal(
+        let header = TextWidget::new(lit!("Native File Dialogs")).style(TextStyleRole::BodyBold);
+        let intro = TextWidget::new(lit!(
             "Each button opens a real OS dialog. The spinner keeps animating \
-             while the dialog is up — the event loop is not blocked.",
-        )
+             while the dialog is up — the event loop is not blocked."
+        ))
         .style(TextStyleRole::Body);
 
         let buttons = HStack::new()
@@ -187,7 +187,7 @@ impl Widget for FileDialogShowcase {
             .child(folder_btn)
             .child(save_btn);
 
-        let status_text = TextWidget::new_literal("status")
+        let status_text = TextWidget::new(lit!("status"))
             .bind_text(self.status.clone())
             .style(TextStyleRole::Small);
 
@@ -196,7 +196,7 @@ impl Widget for FileDialogShowcase {
         // `spinning` swaps an empty placeholder for the live spinner.
         let switch = self.spinning.map(|b| if *b { 1_usize } else { 0_usize });
         let spinner = Switcher::new(switch)
-            .child(TextWidget::new_literal(""))
+            .child(TextWidget::new(lit!("")))
             .child(Spinner::new(20.0));
 
         let id = ctx.add(

@@ -14,8 +14,8 @@
 //!
 //! PopoverIconButton::new(IconButton::add().toolbar())
 //!     .content(MenuList::new()
-//!         .item(MenuItem::new_literal("New file"))
-//!         .item(MenuItem::new_literal("New folder")))
+//!         .item(MenuItem::new(lit!("New file")))
+//!         .item(MenuItem::new(lit!("New folder"))))
 //! ```
 //!
 //! # Disclosure caret

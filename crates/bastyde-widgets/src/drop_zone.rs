@@ -36,6 +36,7 @@
 //! ARIA's `aria-grabbed` / `aria-dropeffect` are deprecated, so live-region
 //! announcements plus the Browse fallback are the supported pattern.
 
+use bastyde_i18n::lit;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -51,7 +52,9 @@ use bastyde_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, 
 use bastyde_core::widget_builder::{HandlerSet, WidgetBuilder};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_core::{DragPayload, DropFeedback};
-use bastyde_platform::file_dialog::{EventContextFileDialogExt, FileDialogRequest, FileDialogResult};
+use bastyde_platform::file_dialog::{
+    EventContextFileDialogExt, FileDialogRequest, FileDialogResult,
+};
 use bastyde_tokens::{HAlignment, TextRole};
 
 use crate::button::Button;
@@ -63,9 +66,9 @@ type UrlsCallback = Box<dyn FnMut(Vec<String>, &mut EventContext)>;
 
 /// A drop target for external (OS) drag-and-drop. See the module docs.
 pub struct DropZone {
-    label: String,
-    subtitle: Option<String>,
-    browse_label: String,
+    label: bastyde_i18n::LocalizedString,
+    subtitle: Option<bastyde_i18n::LocalizedString>,
+    browse_label: bastyde_i18n::LocalizedString,
     extensions: Vec<String>,
     allow_multiple: bool,
     show_browse_button: bool,
@@ -80,15 +83,15 @@ pub struct DropZone {
 impl DropZone {
     /// Build a drop zone with the given prompt (e.g. `tr!("drop_files_here")`).
     /// The label may come from `tr!(...)` (translated) or
-    /// `LocalizedString::literal(...)`; it is resolved eagerly at construction
+    /// `lit!(...)`; it is resolved eagerly at construction
     /// and stored as a `String`. Locale changes rebuild the composite parent,
     /// which re-creates the `DropZone` with a fresh translation — the same
     /// model as [`Button::new`](crate::button::Button::new).
     pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         Self {
-            label: label.into().resolve_now(),
+            label: label.into(),
             subtitle: None,
-            browse_label: bastyde_i18n::LocalizedString::literal("Browse…").resolve_now(),
+            browse_label: lit!("Browse…"),
             extensions: Vec::new(),
             allow_multiple: true,
             show_browse_button: true,
@@ -101,25 +104,10 @@ impl DropZone {
         }
     }
 
-    /// Shim (`#[doc(hidden)]`) — wraps a raw label in
-    /// `LocalizedString::literal` for tests and scaffolding. Production code
-    /// uses `new(tr!(...))`; the `_literal` suffix is the grep marker for
-    /// untranslated strings.
-    #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(label))
-    }
-
     /// Secondary line under the prompt (e.g. `tr!("png_or_jpeg")`).
     pub fn subtitle(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        self.subtitle = Some(text.into().resolve_now());
+        self.subtitle = Some(text.into());
         self
-    }
-
-    /// `#[doc(hidden)]` untranslated twin of [`Self::subtitle`].
-    #[doc(hidden)]
-    pub fn subtitle_literal(self, text: impl Into<String>) -> Self {
-        self.subtitle(bastyde_i18n::LocalizedString::literal(text))
     }
 
     /// Restrict accepted files to these extensions (without leading dots,
@@ -154,14 +142,8 @@ impl DropZone {
 
     /// Override the Browse button's label (e.g. `tr!("browse")`).
     pub fn browse_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        self.browse_label = label.into().resolve_now();
+        self.browse_label = label.into();
         self
-    }
-
-    /// `#[doc(hidden)]` untranslated twin of [`Self::browse_label`].
-    #[doc(hidden)]
-    pub fn browse_label_literal(self, label: impl Into<String>) -> Self {
-        self.browse_label(bastyde_i18n::LocalizedString::literal(label))
     }
 
     /// An icon widget shown above the prompt (any widget — typically an
@@ -318,16 +300,16 @@ impl Widget for DropZone {
             content = content.add_child(icon_id);
         }
 
-        content = content.child(TextWidget::new_literal(self.label.clone()));
+        content = content.child(TextWidget::new(self.label.clone()));
 
         if let Some(subtitle) = &self.subtitle {
             content =
-                content.child(TextWidget::new_literal(subtitle.clone()).color(TextRole::Secondary));
+                content.child(TextWidget::new(subtitle.clone()).color(TextRole::Secondary));
         }
 
         // Live-region status line: empty at rest, narrates hover / drop.
         content = content.child(
-            TextWidget::new_literal(String::new())
+            TextWidget::new(lit!(String::new()))
                 .bind_text(announce.clone())
                 .color(TextRole::Secondary)
                 .access_live(Live::Polite),
@@ -338,7 +320,7 @@ impl Widget for DropZone {
             let allow_multiple_browse = self.allow_multiple;
             let on_files_browse = on_files.clone();
             let announce_browse = announce.clone();
-            let browse = Button::new_literal(self.browse_label.clone()).on_activate_fn(
+            let browse = Button::new(self.browse_label.clone()).on_activate_fn(
                 move |ctx: &mut EventContext| {
                     let mut request = FileDialogRequest::pick_file();
                     if !browse_extensions.is_empty() {
@@ -508,7 +490,7 @@ mod tests {
     #[test]
     fn builds_with_nonzero_size() {
         let mut tree = tree();
-        let id = tree.add(DropZone::new_literal("Drop files here"));
+        let id = tree.add(DropZone::new(lit!("Drop files here")));
         tree.layout(SizeProposal::exact(400.0, 300.0));
         let b = tree.bounds(id);
         assert!(b.width > 0.0 && b.height > 0.0);
@@ -520,7 +502,7 @@ mod tests {
         let got: Rc<RefCell<Vec<PathBuf>>> = Rc::new(RefCell::new(Vec::new()));
         let g = got.clone();
         tree.add(
-            DropZone::new_literal("Images")
+            DropZone::new(lit!("Images"))
                 .accept_extensions(["png", "jpg"])
                 .on_files_dropped(move |paths, _ctx| *g.borrow_mut() = paths),
         );
@@ -544,7 +526,7 @@ mod tests {
         let got: Rc<RefCell<Vec<PathBuf>>> = Rc::new(RefCell::new(Vec::new()));
         let g = got.clone();
         tree.add(
-            DropZone::new_literal("Images")
+            DropZone::new(lit!("Images"))
                 .accept_extensions(["png"])
                 .on_files_dropped(move |paths, _ctx| *g.borrow_mut() = paths),
         );
@@ -568,7 +550,7 @@ mod tests {
         let got: Rc<RefCell<Vec<PathBuf>>> = Rc::new(RefCell::new(Vec::new()));
         let g = got.clone();
         tree.add(
-            DropZone::new_literal("One file")
+            DropZone::new(lit!("One file"))
                 .allow_multiple(false)
                 .on_files_dropped(move |paths, _ctx| *g.borrow_mut() = paths),
         );
@@ -592,7 +574,7 @@ mod tests {
         let got: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
         let g = got.clone();
         tree.add(
-            DropZone::new_literal("Notes").on_text_dropped(move |t, _ctx| *g.borrow_mut() = Some(t)),
+            DropZone::new(lit!("Notes")).on_text_dropped(move |t, _ctx| *g.borrow_mut() = Some(t)),
         );
         tree.layout(SizeProposal::exact(400.0, 300.0));
 

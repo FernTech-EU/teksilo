@@ -47,7 +47,7 @@ pub struct Spinner {
     arc_fraction: f32,
     stroke_fraction: f32,
     color: ColorProp,
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
     handle: Option<AnimatedQuadHandle>,
 }
 
@@ -101,15 +101,7 @@ impl Spinner {
     /// with no context.
     pub fn label(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.label = Some(ls.resolve_now());
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `label(...)` accepting
-    /// a raw string.
-    #[doc(hidden)]
-    pub fn label_literal(mut self, text: impl Into<String>) -> Self {
-        self.label = Some(text.into());
+        self.label = Some(ls);
         self
     }
 }
@@ -204,6 +196,7 @@ mod tests {
     use super::*;
     use bastyde_canvas::DrawCommand;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn spinner_size() {
@@ -287,10 +280,13 @@ mod tests {
     #[test]
     fn accessibility_role_and_live_region() {
         let mut tree = WidgetTree::new();
-        let id = tree.add(Spinner::new(24.0).label_literal("Loading"));
+        let id = tree.add(Spinner::new(24.0).label(lit!("Loading")));
         tree.layout(SizeProposal::exact(64.0, 64.0));
         let info = tree.accessibility_node(id);
-        assert_eq!(info.role(), bastyde_core::accesskit::Role::ProgressIndicator);
+        assert_eq!(
+            info.role(),
+            bastyde_core::accesskit::Role::ProgressIndicator
+        );
         assert_eq!(info.name(), Some("Loading"));
     }
 }

@@ -8,7 +8,6 @@ use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
 use bastyde_core::styles::{SharedSnackbarStyle, SnackbarStyleConfig};
 use bastyde_core::widget::{LayoutContext, PendingChild, Widget, WidgetPlacement};
-use bastyde_core::widget_builder::WidgetBuilder;
 use bastyde_core::widget_id::WidgetId;
 
 use crate::button::{Button, ButtonVariant};
@@ -51,7 +50,7 @@ struct SnackbarSurface {
     /// so screen readers read out the caller-provided message
     /// the moment the snackbar appears. Falls back to the
     /// generic `a11y_snackbar_name` when unset.
-    announcement: Option<String>,
+    announcement: Option<bastyde_i18n::LocalizedString>,
     /// Per-call override for the snackbar surface chrome.
     style_override: Option<SharedSnackbarStyle>,
     /// Build state — the `SnackbarStyle::make_body` root.
@@ -69,7 +68,7 @@ impl SnackbarSurface {
         }
     }
 
-    fn with_announcement(mut self, text: Option<String>) -> Self {
+    fn with_announcement(mut self, text: Option<bastyde_i18n::LocalizedString>) -> Self {
         self.announcement = text;
         self
     }
@@ -151,7 +150,8 @@ impl Widget for SnackbarSurface {
         builder.set_live(bastyde_core::accesskit::Live::Polite);
         let name = self
             .announcement
-            .clone()
+            .as_ref()
+            .map(|a| a.resolve_now())
             .unwrap_or_else(|| bastyde_i18n::tr_widget!(a11y_snackbar_name()).resolve_now());
         builder.set_name(name);
     }
@@ -162,7 +162,7 @@ impl Widget for SnackbarSurface {
 }
 
 pub struct Snackbar {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     variant: ButtonVariant,
     enabled: bool,
     dismiss: DismissBehavior,
@@ -172,7 +172,7 @@ pub struct Snackbar {
     /// Optional explicit announcement string threaded through to
     /// the `SnackbarSurface`'s a11y node. When set, screen readers
     /// read this as the Alert's name when the snackbar appears.
-    announcement: Option<String>,
+    announcement: Option<bastyde_i18n::LocalizedString>,
     /// Per-call override for the snackbar surface chrome.
     style_override: Option<SharedSnackbarStyle>,
     root_child_id: Option<WidgetId>,
@@ -182,7 +182,7 @@ impl Snackbar {
     pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: ls,
             variant: ButtonVariant::Plain,
             enabled: true,
             dismiss: DismissBehavior::ClickOutside,
@@ -203,12 +203,17 @@ impl Snackbar {
         self
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(label))
-    }
-
+    /// The snackbar body — the message (and optional inline action)
+    /// shown on the floating surface.
+    ///
+    /// The default surface is the high-contrast (dark) `tooltip_bg`,
+    /// the same one tooltips use, and it stays dark in light theme.
+    /// So any `TextWidget` you pass here must set
+    /// `.color(TextRole::TooltipText)` (and actions can use
+    /// `TooltipText` / `TooltipShortcut`) — the default `TextRole::Primary`
+    /// is dark and renders nearly invisible on the dark surface in light
+    /// theme. If you install a light-surface `SnackbarStyle`, color the
+    /// content to match that instead.
     pub fn content(mut self, content: impl Widget + 'static) -> Self {
         self.pending_content = Some(PendingChild::Deferred(Box::new(content)));
         self
@@ -263,14 +268,7 @@ impl Snackbar {
     /// confirmations, status changes).
     pub fn announcement(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.announcement = Some(ls.resolve_now());
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `announcement(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn announcement_literal(mut self, text: impl Into<String>) -> Self {
-        self.announcement = Some(text.into());
+        self.announcement = Some(ls);
         self
     }
 }
@@ -313,24 +311,28 @@ impl Widget for Snackbar {
         );
         ctx.set_dormant(content_id);
 
-        let open_on_tap = {
-            let dismiss = dismiss.clone();
-            move |_event: &bastyde_core::TapEvent, ctx: &mut bastyde_core::widget::EventContext| {
-                if !enabled {
-                    return;
-                }
-                present_snackbar(
-                    ctx,
-                    self_id,
-                    content_id,
-                    dismiss.clone(),
-                    auto_dismiss_after,
-                    fade_duration,
-                );
-            }
-        };
-
         let root_id = if let Some(trigger) = self.pending_trigger.take() {
+            // A custom trigger is an arbitrary widget with no built-in
+            // activation, so we wire pointer / keyboard / AT activation
+            // by hand. (The default-Button branch below delegates all
+            // three to `Button::on_activate_fn`.)
+            let open_on_tap = {
+                let dismiss = dismiss.clone();
+                move |_event: &bastyde_core::TapEvent,
+                      ctx: &mut bastyde_core::widget::EventContext| {
+                    if !enabled {
+                        return;
+                    }
+                    present_snackbar(
+                        ctx,
+                        self_id,
+                        content_id,
+                        dismiss.clone(),
+                        auto_dismiss_after,
+                        fade_duration,
+                    );
+                }
+            };
             let handlers = bastyde_core::widget_builder::HandlerSet::new()
                 .focusable(true)
                 .cursor(bastyde_core::widget::CursorIcon::Pointer)
@@ -379,47 +381,22 @@ impl Widget for Snackbar {
             .name(label);
             ctx.add(overlay_trigger)
         } else {
+            // `Button::on_activate_fn` already fires on pointer tap,
+            // Space/Enter (with the matched-KeyDown guard), and AccessKit
+            // Click — so one handler covers all three activation paths.
             ctx.add(
-                Button::new_literal(label)
+                Button::new(label)
                     .variant(style)
                     .enabled(enabled)
-                    .on_tap(open_on_tap)
-                    .on_key({
-                        let dismiss = dismiss.clone();
-                        move |event, ctx| match event {
-                            WidgetEvent::KeyUp {
-                                key: Key::Enter | Key::Space,
-                                ..
-                            } if enabled => {
-                                present_snackbar(
-                                    ctx,
-                                    self_id,
-                                    content_id,
-                                    dismiss.clone(),
-                                    auto_dismiss_after,
-                                    fade_duration,
-                                );
-                                EventResponse::Handled
-                            }
-                            _ => EventResponse::Ignored,
-                        }
-                    })
-                    .on_access_action({
-                        move |action, ctx| {
-                            if action == bastyde_core::accesskit::Action::Click && enabled {
-                                present_snackbar(
-                                    ctx,
-                                    self_id,
-                                    content_id,
-                                    dismiss.clone(),
-                                    auto_dismiss_after,
-                                    fade_duration,
-                                );
-                                EventResponse::Handled
-                            } else {
-                                EventResponse::Ignored
-                            }
-                        }
+                    .on_activate_fn(move |ctx| {
+                        present_snackbar(
+                            ctx,
+                            self_id,
+                            content_id,
+                            dismiss.clone(),
+                            auto_dismiss_after,
+                            fade_duration,
+                        );
                     }),
             )
         };
@@ -469,6 +446,7 @@ impl Widget for Snackbar {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_canvas::Size;
     use bastyde_core::widget_tree::WidgetTree;
 
@@ -488,7 +466,7 @@ mod tests {
     #[test]
     fn access_click_opens_bottom_center_snackbar() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Snackbar::new_literal("Show snackbar").content(FixedLeaf(220.0, 40.0)));
+        tree.add(Snackbar::new(lit!("Show snackbar")).content(FixedLeaf(220.0, 40.0)));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Show snackbar").unwrap();
@@ -509,10 +487,46 @@ mod tests {
     }
 
     #[test]
+    fn default_button_keyboard_activation_opens_snackbar() {
+        // The default-Button branch delegates all activation to
+        // `Button::on_activate_fn`, so a matched KeyDown + KeyUp pair on
+        // the focused trigger must present the snackbar — and inherits
+        // Button's lone-KeyUp guard for free.
+        use bastyde_core::event::Modifiers;
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        tree.add(Snackbar::new(lit!("Show snackbar")).content(FixedLeaf(220.0, 40.0)));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let trigger = tree.find_by_label("Show snackbar").unwrap();
+        tree.focus(trigger);
+
+        // A lone KeyUp (no matching KeyDown) must not activate.
+        tree.dispatch_event(WidgetEvent::KeyUp {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert!(tree.active_overlays().is_empty());
+
+        // A matched KeyDown + KeyUp pair presents the snackbar.
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+            text: None,
+        });
+        tree.dispatch_event(WidgetEvent::KeyUp {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert_eq!(tree.active_overlays().len(), 1);
+    }
+
+    #[test]
     fn custom_trigger_opens_snackbar() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(
-            Snackbar::new_literal("Show snackbar")
+            Snackbar::new(lit!("Show snackbar"))
                 .content(FixedLeaf(180.0, 36.0))
                 .trigger(FixedLeaf(132.0, 36.0)),
         );
@@ -531,7 +545,7 @@ mod tests {
     fn snackbar_auto_dismisses_after_duration() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(
-            Snackbar::new_literal("Show snackbar")
+            Snackbar::new(lit!("Show snackbar"))
                 .content(FixedLeaf(220.0, 40.0))
                 .auto_dismiss_after(Duration::from_millis(300)),
         );
@@ -557,7 +571,7 @@ mod tests {
     #[should_panic(expected = "Snackbar requires .content(...)")]
     fn snackbar_without_content_panics_on_build() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Snackbar::new_literal("Show snackbar"));
+        tree.add(Snackbar::new(lit!("Show snackbar")));
         tree.layout(SizeProposal::exact(800.0, 600.0));
     }
 }

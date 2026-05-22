@@ -30,7 +30,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
     let variants = section(
         ctx,
-        "Button — variants",
+        tr!(btn_heading_variants()),
         HStack::new()
             .spacing(8.0)
             .child(
@@ -51,7 +51,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let states = section(
         ctx,
-        "Button — disabled state",
+        tr!(btn_heading_disabled()),
         HStack::new()
             .spacing(8.0)
             .child(
@@ -72,7 +72,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let with_icon = section(
         ctx,
-        "Button — with icon",
+        tr!(btn_heading_with_icon()),
         HStack::new()
             .spacing(8.0)
             .child(
@@ -88,7 +88,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let icon_btns = section(
         ctx,
-        "IconButton",
+        lit!("IconButton"),
         HStack::new()
             .spacing(8.0)
             .child(IconButton::add().tooltip(tr!(demo_new())))
@@ -99,7 +99,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let cmd_link = section(
         ctx,
-        "CommandLinkButton",
+        lit!("CommandLinkButton"),
         VStack::new()
             .spacing(6.0)
             .child(
@@ -113,7 +113,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let popover_btn = section(
         ctx,
-        "PopoverButton",
+        lit!("PopoverButton"),
         PopoverButton::new(Button::new(tr!(btn_popover_trigger()))).content(popover_surface(
             VStack::new()
                 .spacing(4.0)
@@ -123,19 +123,19 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let popover_icon = section(
         ctx,
-        "PopoverIconButton",
+        lit!("PopoverIconButton"),
         PopoverIconButton::new(IconButton::add()).content(popover_surface(
             TextWidget::new(tr!(btn_popover_icon_body())).style(TextStyleRole::Small),
         )),
     );
     let split = section(
         ctx,
-        "SplitButton",
+        lit!("SplitButton"),
         SplitButton::new()
             .item(MenuItem::new(tr!(demo_save())))
             .item(MenuItem::new(tr!(buttons_save_as())))
             .separator()
-            .item(MenuItem::new_literal("Export"))
+            .item(MenuItem::new(tr!(btn_export_sample())))
             .variant(ButtonVariant::Filled),
     );
 
@@ -198,7 +198,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Button — variants") {
+                TextWidget::new(tr!(btn_heading_variants())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -221,7 +221,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Button — disabled state") {
+                TextWidget::new(tr!(btn_heading_disabled())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -244,7 +244,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Button — with icon") {
+                TextWidget::new(tr!(btn_heading_with_icon())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -257,7 +257,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("IconButton") {
+                TextWidget::new(lit!("IconButton")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -283,7 +283,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("CommandLinkButton") {
+                TextWidget::new(lit!("CommandLinkButton")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -300,7 +300,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("PopoverButton") {
+                TextWidget::new(lit!("PopoverButton")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -309,7 +309,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("PopoverIconButton") {
+                TextWidget::new(lit!("PopoverIconButton")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -318,7 +318,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("SplitButton") {
+                TextWidget::new(lit!("SplitButton")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

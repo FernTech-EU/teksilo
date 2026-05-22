@@ -8,7 +8,9 @@
 //! composes those up the parent chain to derive each item's
 //! `scene_transform` and AABB for hit-test, paint and culling.
 
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::a11y::{A11yCategory, A11yGroup, A11yGroupBuilder, A11yGroupId, A11yNode, A11yRelation};
 use crate::flags::ItemFlags;
@@ -45,6 +47,12 @@ pub enum ItemChange {
     OpacityChanged { id: ItemId, old: f32, new: f32 },
     /// `set_z`: paint z-order changed.
     ZChanged { id: ItemId, old: f32, new: f32 },
+    /// `set_layer`: the Under/Over paint band changed.
+    LayerChanged {
+        id: ItemId,
+        old: SceneLayer,
+        new: SceneLayer,
+    },
     /// `set_item_parent`: logical parent changed.
     ParentChanged {
         id: ItemId,
@@ -55,6 +63,38 @@ pub enum ItemChange {
     Removed { id: ItemId },
     /// `add_item` / `add_widget`: item was inserted.
     Added { id: ItemId },
+    /// `set_payload`: the type-erased payload of a `Delegated` heavyweight
+    /// entry was replaced. A `SceneView` rebuilds that entry's widget
+    /// (re-invokes its delegate) on the next build. Routed through
+    /// `emit_item_change`, so `mutation_seq` advances and the AT-walk gate
+    /// notices.
+    PayloadChanged { id: ItemId },
+}
+
+/// Which paint band a lightweight [`SceneItem`] sits in, relative to
+/// the heavyweight widget tier.
+///
+/// A `SceneView` paints in three passes: lightweight `Under` items
+/// (its `paint`, a backdrop), then the heavyweight widget children
+/// (the arena child-walk), then lightweight `Over` items (its
+/// `post_paint`, a foreground). Within each band, `z` still orders
+/// items among themselves.
+///
+/// This is a binary band, not a continuous z across the tiers, because
+/// the render walker offers exactly two lightweight paint positions
+/// (before and after the child subtree). The heavyweight tier is one
+/// contiguous block in between — to interleave a lightweight item
+/// *between* two specific heavyweight nodes you must promote it to a
+/// heavyweight widget. `Under` is the default (background furniture:
+/// connectors, grids, decorations); `Over` is for foreground overlays
+/// that must sit above the cards (selection halos, highlighted edges).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SceneLayer {
+    /// Painted under the heavyweight widget children (the default).
+    #[default]
+    Under,
+    /// Painted over the heavyweight widget children.
+    Over,
 }
 
 /// Which axes a [`SceneView`](crate::SceneView) is allowed to pan
@@ -179,10 +219,16 @@ pub(crate) struct SceneEntry {
     pub(crate) transform: Transform2D,
     pub(crate) kind: SceneEntryKind,
     /// Z-order for paint — higher values paint *later* (on top).
-    /// Equal-z entries fall back to insertion order. Lightweight
-    /// tier only; heavyweight widget z-order is governed by the
-    /// arena's child order.
+    /// Equal-z entries fall back to insertion order. Applies to **both**
+    /// tiers: lightweight items sort within their band each paint, and
+    /// heavyweight widget entries restack the SceneView's arena children
+    /// by z on the next rebuild (see [`Scene::set_z`]).
     pub(crate) z: f32,
+    /// Which lightweight paint band this item sits in relative to the
+    /// heavyweight tier — [`SceneLayer::Under`] (default, backdrop) or
+    /// [`SceneLayer::Over`] (foreground). Lightweight tier only; ignored
+    /// for heavyweight widget entries (they paint via the arena).
+    pub(crate) layer: SceneLayer,
     /// Logical parent. `None` means the item is rooted directly in
     /// the Scene. Composes coordinate frames: a child's `local_pos`
     /// is in the parent's local frame, and the child's
@@ -211,12 +257,28 @@ pub(crate) struct SceneEntry {
     pub(crate) dynamic_bounds: bool,
 }
 
+/// How a heavyweight `Widget` entry makes its instance available to a
+/// [`SceneView`]. The two variants are the single-view and multi-view
+/// production paths.
+pub(crate) enum WidgetSource {
+    /// Single-view sugar ([`Scene::add_widget`]). The first `SceneView` to
+    /// build drains the `Option` via `take()`; subsequent views (sharing the
+    /// same [`SceneModel`](crate::SceneModel)) find `None` and produce no
+    /// arena child for this entry. Use [`Scene::add_widget_delegated`] +
+    /// a view delegate for multi-view content.
+    Once(Option<Box<dyn Widget>>),
+    /// Multi-view path ([`Scene::add_widget_delegated`], surfaced as
+    /// [`SceneModel::add_widget_item`](crate::SceneModel::add_widget_item)).
+    /// Each view calls its own delegate with this type-erased `payload`
+    /// to build a fresh `Widget` instance. The payload is `Rc` so a view
+    /// can clone it out of a model borrow before invoking the delegate.
+    Delegated { payload: Rc<dyn std::any::Any> },
+}
+
 pub(crate) enum SceneEntryKind {
-    /// A heavyweight `Widget` to materialise into the arena. `Some`
-    /// until `SceneView::build` consumes it via
-    /// [`bastyde_core::build_context::BuildContext::add_boxed`]; `None`
-    /// afterwards.
-    Widget { pending: Option<Box<dyn Widget>> },
+    /// A heavyweight `Widget` materialised into the arena, via either the
+    /// single-view `Once` slot or the multi-view `Delegated` payload.
+    Widget(WidgetSource),
     /// A lightweight `SceneItem` that lives in the scene
     /// permanently; painted by the SceneView's paint walk.
     Item(Box<dyn SceneItem>),
@@ -256,6 +318,21 @@ pub struct Scene {
     /// [`ItemChange`] through this signal so apps can observe
     /// geometry / visibility / parent / z / opacity changes.
     item_change_signal: Signal<ItemChange>,
+    /// Reactive change counter for the *logical AT structure* (groups,
+    /// parents, relations, live, landmarks, categories). These mutations are
+    /// not item geometry, so they do not flow through `item_change_signal`;
+    /// `SceneView` observes this separately to re-walk the AccessKit tree. The
+    /// AT tree is fully separate from the visual scene, so it needs its own
+    /// notification channel.
+    a11y_change_signal: Signal<u64>,
+    /// Monotonic counter of *every* model mutation — item geometry / visibility
+    /// / structure (each [`ItemChange`] fire) **and** logical-AT structure (each
+    /// `bump_a11y_change`). Read via [`Scene::mutation_version`]. `SceneView`
+    /// gates its (expensive) AccessKit re-walk on this advancing, so a `build()`
+    /// triggered purely by dynamic-bounds churn it already accounted for doesn't
+    /// re-walk the AT tree every frame. A plain `Cell` because the bump path
+    /// (`bump_mutation`) is `&self` (shared with `bump_a11y_change`).
+    mutation_seq: Cell<u64>,
 
     // --- logical AT structure ----------------------------------------
     pub(crate) a11y_groups: Vec<A11yGroup>,
@@ -282,6 +359,8 @@ impl Scene {
             user_scene_rect: None,
             constraints: SceneConstraints::new(),
             item_change_signal: Signal::new(ItemChange::Added { id: ItemId(0) }),
+            a11y_change_signal: Signal::new(0),
+            mutation_seq: Cell::new(0),
             a11y_groups: Vec::new(),
             a11y_group_index: HashMap::new(),
             a11y_parents: HashMap::new(),
@@ -310,10 +389,9 @@ impl Scene {
             local_pos,
             local_bounds,
             transform: Transform2D::identity(),
-            kind: SceneEntryKind::Widget {
-                pending: Some(Box::new(widget)),
-            },
+            kind: SceneEntryKind::Widget(WidgetSource::Once(Some(Box::new(widget)))),
             z: 0.0,
+            layer: SceneLayer::Under,
             parent: None,
             flags: ItemFlags::default(),
             opacity: 1.0,
@@ -321,6 +399,108 @@ impl Scene {
             dynamic_bounds: false,
         };
         self.push_entry(entry)
+    }
+
+    /// Multi-view heavyweight insertion: store a type-erased `payload`; each
+    /// [`SceneView`](crate::SceneView) builds its own instance via its
+    /// delegate. Surfaced publicly as
+    /// [`SceneModel::add_widget_item`](crate::SceneModel::add_widget_item).
+    pub(crate) fn add_widget_delegated(
+        &mut self,
+        payload: Rc<dyn std::any::Any>,
+        local_rect: Rect,
+    ) -> ItemId {
+        let id = ItemId::next();
+        let local_pos = Point::new(local_rect.x, local_rect.y);
+        let local_bounds = Rect::new(0.0, 0.0, local_rect.width, local_rect.height);
+        let entry = SceneEntry {
+            id,
+            local_pos,
+            local_bounds,
+            transform: Transform2D::identity(),
+            kind: SceneEntryKind::Widget(WidgetSource::Delegated { payload }),
+            z: 0.0,
+            layer: SceneLayer::Under,
+            parent: None,
+            flags: ItemFlags::default(),
+            opacity: 1.0,
+            handlers: None,
+            dynamic_bounds: false,
+        };
+        self.push_entry(entry)
+    }
+
+    /// Replace the type-erased payload of a `Delegated` heavyweight entry and
+    /// fire [`ItemChange::PayloadChanged`]. Debug-asserts (no-op in release)
+    /// for an unknown id, a `Once` widget entry, or a lightweight item.
+    pub(crate) fn set_payload(&mut self, id: ItemId, payload: Rc<dyn std::any::Any>) {
+        let Some(&pos) = self.entry_index.get(&id) else {
+            debug_assert!(false, "set_payload: unknown ItemId {id:?}");
+            return;
+        };
+        match &mut self.entries[pos].kind {
+            SceneEntryKind::Widget(WidgetSource::Delegated { payload: slot }) => *slot = payload,
+            _ => {
+                debug_assert!(false, "set_payload: {id:?} is not a Delegated widget entry");
+                return;
+            }
+        }
+        // Entry borrow dropped above; `emit_item_change` is `&self`.
+        self.emit_item_change(ItemChange::PayloadChanged { id });
+    }
+
+    /// The current type-erased payload of a `Delegated` heavyweight entry.
+    /// `None` for unknown ids, `Once` widget entries, and lightweight items.
+    pub(crate) fn payload(&self, id: ItemId) -> Option<Rc<dyn std::any::Any>> {
+        let pos = *self.entry_index.get(&id)?;
+        match &self.entries[pos].kind {
+            SceneEntryKind::Widget(WidgetSource::Delegated { payload }) => Some(payload.clone()),
+            _ => None,
+        }
+    }
+
+    /// Drain every still-pending `Once` heavyweight widget, in entry order.
+    /// Each is `take()`n from its slot, so a second `SceneView` over the same
+    /// model returns nothing for it — `Once` widgets are single-view. Called
+    /// by `SceneView::build`.
+    pub(crate) fn drain_all_once(&mut self) -> Vec<(ItemId, Box<dyn Widget>)> {
+        let mut out = Vec::new();
+        for entry in self.entries.iter_mut() {
+            if let SceneEntryKind::Widget(WidgetSource::Once(pending)) = &mut entry.kind {
+                if let Some(w) = pending.take() {
+                    out.push((entry.id, w));
+                }
+            }
+        }
+        out
+    }
+
+    /// `(id, payload)` for every `Delegated` heavyweight entry, in entry order.
+    /// The payload `Rc` is cloned so the caller can drop the model borrow before
+    /// invoking its delegate (the reentrancy contract). Called by `SceneView::build`.
+    pub(crate) fn delegated_payloads(&self) -> Vec<(ItemId, Rc<dyn std::any::Any>)> {
+        self.entries
+            .iter()
+            .filter_map(|e| match &e.kind {
+                SceneEntryKind::Widget(WidgetSource::Delegated { payload }) => {
+                    Some((e.id, payload.clone()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Ids of every heavyweight `Widget` entry (`Once` and `Delegated`), in
+    /// entry order. Used by `SceneView::build` for child ordering and the
+    /// orphan-reap live-set.
+    pub(crate) fn heavyweight_ids(&self) -> Vec<ItemId> {
+        self.entries
+            .iter()
+            .filter_map(|e| match &e.kind {
+                SceneEntryKind::Widget(_) => Some(e.id),
+                SceneEntryKind::Item(_) => None,
+            })
+            .collect()
     }
 
     /// Place a lightweight [`SceneItem`] at `local_pos`. The item's
@@ -368,6 +548,7 @@ impl Scene {
             transform: Transform2D::identity(),
             kind: SceneEntryKind::Item(Box::new(item)),
             z: 0.0,
+            layer: SceneLayer::Under,
             parent: None,
             flags,
             opacity: 1.0,
@@ -383,7 +564,12 @@ impl Scene {
     /// Called by [`SceneView`](crate::SceneView) at the start of each
     /// `build()` so signal-driven bounds propagate to bucketing
     /// without explicit app-side calls.
-    pub fn refresh_dynamic_bounds(&mut self) {
+    ///
+    /// Returns `true` if at least one dynamic entry's bounds changed this call.
+    /// `SceneView` uses the `true → false` transition (an animation settling) as
+    /// the one moment to walk the final animated bounds into the AccessKit tree,
+    /// since it otherwise suppresses per-frame AT re-walks during the animation.
+    pub fn refresh_dynamic_bounds(&mut self) -> bool {
         // Snapshot ids first to avoid borrow conflicts.
         let dynamic_ids: Vec<ItemId> = self
             .entries
@@ -391,6 +577,7 @@ impl Scene {
             .filter(|e| e.dynamic_bounds)
             .map(|e| e.id)
             .collect();
+        let mut changed = false;
         for id in dynamic_ids {
             let Some(&pos) = self.entry_index.get(&id) else {
                 continue;
@@ -401,8 +588,10 @@ impl Scene {
             let new = item.local_bounds();
             if new != self.entries[pos].local_bounds {
                 self.set_local_bounds(id, new);
+                changed = true;
             }
         }
+        changed
     }
 
     fn push_entry(&mut self, entry: SceneEntry) -> ItemId {
@@ -412,7 +601,7 @@ impl Scene {
         self.entry_index.insert(id, pos);
         let aabb = self.compute_scene_aabb(id).unwrap_or(Rect::ZERO);
         self.index.insert(id, aabb);
-        self.item_change_signal.set(ItemChange::Added { id });
+        self.emit_item_change(ItemChange::Added { id });
         id
     }
 
@@ -424,6 +613,59 @@ impl Scene {
     /// the Scene already reflects the new state.
     pub fn item_change_signal(&self) -> Signal<ItemChange> {
         self.item_change_signal.clone()
+    }
+
+    /// Reactive notification for logical-AT-structure mutations
+    /// (`add_a11y_group` / `remove_a11y_group` / `set_a11y_parent` /
+    /// `add_a11y_relation` / `set_a11y_live` / `set_a11y_landmark` /
+    /// `set_a11y_categories`). A monotonic counter bumped after each such
+    /// mutation. `SceneView` observes this to re-walk the AccessKit tree —
+    /// these changes don't flow through [`item_change_signal`](Self::item_change_signal)
+    /// because they aren't item geometry, and the AT tree is separate from the
+    /// visual scene.
+    pub fn a11y_change_signal(&self) -> Signal<u64> {
+        self.a11y_change_signal.clone()
+    }
+
+    /// Bump the logical-AT-structure change counter. Called at the end of every
+    /// a11y-structure mutator so observers re-walk AccessKit. Also advances the
+    /// unified [`mutation_version`](Self::mutation_version) so a logical-AT
+    /// mutation (which never fires `item_change_signal`) still un-gates the
+    /// SceneView's AT re-walk.
+    fn bump_a11y_change(&self) {
+        self.a11y_change_signal
+            .set(self.a11y_change_signal.get().wrapping_add(1));
+        self.bump_mutation();
+    }
+
+    /// Fire an [`ItemChange`] through `item_change_signal` and advance the
+    /// unified [`mutation_version`](Self::mutation_version). The single choke
+    /// point every geometry / visibility / structure mutation routes through, so
+    /// the version counts each one without per-site bookkeeping.
+    fn emit_item_change(&self, change: ItemChange) {
+        self.bump_mutation();
+        self.item_change_signal.set(change);
+    }
+
+    /// Advance the unified model-mutation counter (wrapping). Shared by
+    /// `emit_item_change` and `bump_a11y_change`; `&self` because both notify
+    /// paths are `&self`.
+    fn bump_mutation(&self) {
+        self.mutation_seq.set(self.mutation_seq.get().wrapping_add(1));
+    }
+
+    /// Monotonic counter of every model mutation applied so far — item geometry
+    /// / visibility / structure (each [`ItemChange`]) **and** logical-AT
+    /// structure (groups, parents, relations, live, landmarks, categories).
+    ///
+    /// [`SceneView`](crate::SceneView) snapshots this each `build()` and only
+    /// re-walks the (separate, expensive) AccessKit tree when it has advanced
+    /// since the previous walk — so an actively-animating
+    /// [`add_item_dynamic`](Self::add_item_dynamic) item, which rebuilds every
+    /// frame, does not issue an AT re-walk per frame. The counter wraps; compare
+    /// for equality, not ordering.
+    pub fn mutation_version(&self) -> u64 {
+        self.mutation_seq.get()
     }
 
     // -----------------------------------------------------------------
@@ -448,7 +690,7 @@ impl Scene {
             }
             self.entries[pos].local_pos = local_pos;
             self.rebucket_subtree(id);
-            self.item_change_signal.set(ItemChange::LocalPosChanged {
+            self.emit_item_change(ItemChange::LocalPosChanged {
                 id,
                 old,
                 new: local_pos,
@@ -481,7 +723,7 @@ impl Scene {
             // descendants' local frames are unchanged.
             let aabb = self.compute_scene_aabb(id).unwrap_or(Rect::ZERO);
             self.index.insert(id, aabb);
-            self.item_change_signal.set(ItemChange::LocalBoundsChanged {
+            self.emit_item_change(ItemChange::LocalBoundsChanged {
                 id,
                 old,
                 new: local_bounds,
@@ -502,8 +744,7 @@ impl Scene {
         if let Some(&pos) = self.entry_index.get(&id) {
             self.entries[pos].transform = transform;
             self.rebucket_subtree(id);
-            self.item_change_signal
-                .set(ItemChange::TransformChanged { id });
+            self.emit_item_change(ItemChange::TransformChanged { id });
         }
     }
 
@@ -611,7 +852,7 @@ impl Scene {
                 return;
             }
             self.entries[pos].flags = flags;
-            self.item_change_signal.set(ItemChange::FlagsChanged {
+            self.emit_item_change(ItemChange::FlagsChanged {
                 id,
                 old,
                 new: flags,
@@ -627,11 +868,9 @@ impl Scene {
             let new = self.entries[pos].flags;
             if old != new {
                 if flag == ItemFlags::IS_VISIBLE {
-                    self.item_change_signal
-                        .set(ItemChange::VisibilityChanged { id, visible: on });
+                    self.emit_item_change(ItemChange::VisibilityChanged { id, visible: on });
                 }
-                self.item_change_signal
-                    .set(ItemChange::FlagsChanged { id, old, new });
+                self.emit_item_change(ItemChange::FlagsChanged { id, old, new });
             }
         }
     }
@@ -681,8 +920,7 @@ impl Scene {
                 return;
             }
             self.entries[pos].opacity = new;
-            self.item_change_signal
-                .set(ItemChange::OpacityChanged { id, old, new });
+            self.emit_item_change(ItemChange::OpacityChanged { id, old, new });
         }
     }
 
@@ -856,8 +1094,15 @@ impl Scene {
     // Z-order and parenting
     // -----------------------------------------------------------------
 
-    /// Set z-order for a lightweight entry. Higher z paints later
-    /// (on top); equal-z falls back to insertion order. Default 0.0.
+    /// Set paint z-order for an entry. Higher z paints later (on top);
+    /// equal-z falls back to insertion order. Default 0.0.
+    ///
+    /// Works for **both** tiers: lightweight items re-sort within their
+    /// band on the next paint, and heavyweight widget entries restack the
+    /// arena children on the next rebuild (the SceneView reorders
+    /// `node.children` by z without recreating the widgets, so focus /
+    /// text-edit / animation state survives the restack). No-op for
+    /// unknown ids.
     pub fn set_z(&mut self, id: ItemId, z: f32) {
         if let Some(&pos) = self.entry_index.get(&id) {
             let old = self.entries[pos].z;
@@ -865,15 +1110,82 @@ impl Scene {
                 return;
             }
             self.entries[pos].z = z;
-            self.item_change_signal
-                .set(ItemChange::ZChanged { id, old, new: z });
+            self.emit_item_change(ItemChange::ZChanged { id, old, new: z });
         }
+    }
+
+    /// Raise an entry above all current entries by giving it a z one
+    /// greater than the current maximum. The drag-to-front primitive —
+    /// call it on drag-start so the grabbed card (and its text) renders
+    /// over the others. Works for both tiers (see [`set_z`](Self::set_z)).
+    pub fn bring_to_front(&mut self, id: ItemId) {
+        if !self.entry_index.contains_key(&id) {
+            return;
+        }
+        let max_z = self
+            .entries
+            .iter()
+            .map(|e| e.z)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let target = if max_z.is_finite() { max_z + 1.0 } else { 1.0 };
+        self.set_z(id, target);
+    }
+
+    /// Lower an entry below all current entries by giving it a z one less
+    /// than the current minimum. Works for both tiers (see
+    /// [`set_z`](Self::set_z)).
+    pub fn send_to_back(&mut self, id: ItemId) {
+        if !self.entry_index.contains_key(&id) {
+            return;
+        }
+        let min_z = self
+            .entries
+            .iter()
+            .map(|e| e.z)
+            .fold(f32::INFINITY, f32::min);
+        let target = if min_z.is_finite() { min_z - 1.0 } else { -1.0 };
+        self.set_z(id, target);
     }
 
     /// Read an entry's z-order.
     pub fn z(&self, id: ItemId) -> Option<f32> {
         let pos = *self.entry_index.get(&id)?;
         Some(self.entries[pos].z)
+    }
+
+    /// Set the Under/Over paint band for a lightweight entry. `Over`
+    /// items paint *after* the heavyweight widget children (in the
+    /// SceneView's `post_paint`), so they sit on top of the cards;
+    /// `Under` items (the default) paint before them. Within a band,
+    /// [`set_z`](Self::set_z) still orders items among themselves.
+    /// No-op for unknown ids.
+    pub fn set_layer(&mut self, id: ItemId, layer: SceneLayer) {
+        if let Some(&pos) = self.entry_index.get(&id) {
+            let old = self.entries[pos].layer;
+            if old == layer {
+                return;
+            }
+            self.entries[pos].layer = layer;
+            self.emit_item_change(ItemChange::LayerChanged {
+                id,
+                old,
+                new: layer,
+            });
+        }
+    }
+
+    /// Read an entry's Under/Over paint band. `None` for unknown ids.
+    pub fn layer(&self, id: ItemId) -> Option<SceneLayer> {
+        let pos = *self.entry_index.get(&id)?;
+        Some(self.entries[pos].layer)
+    }
+
+    /// Whether any entry is in the [`SceneLayer::Over`] band. The
+    /// SceneView consults this in `wants_post_paint` to skip the
+    /// foreground pass entirely when nothing is raised above the cards.
+    /// Linear in entry count, called once per frame.
+    pub(crate) fn has_over_layer_items(&self) -> bool {
+        self.entries.iter().any(|e| e.layer == SceneLayer::Over)
     }
 
     /// Declare a parent/child relationship. `child`'s `local_pos`
@@ -904,7 +1216,7 @@ impl Scene {
             }
             self.entries[pos].parent = parent;
             self.rebucket_subtree(child);
-            self.item_change_signal.set(ItemChange::ParentChanged {
+            self.emit_item_change(ItemChange::ParentChanged {
                 id: child,
                 old,
                 new: parent,
@@ -961,7 +1273,7 @@ impl Scene {
         let pos = *self.entry_index.get(&id)?;
         match &self.entries[pos].kind {
             SceneEntryKind::Item(item) => Some(item.as_ref()),
-            SceneEntryKind::Widget { .. } => None,
+            SceneEntryKind::Widget(_) => None,
         }
     }
 
@@ -1008,10 +1320,30 @@ impl Scene {
         for (pos, entry) in self.entries.iter().enumerate() {
             self.entry_index.insert(entry.id, pos);
         }
+        // The AT tree is separate from the visual tree, but a visually-removed
+        // item must also vanish from AccessKit. Drop every logical-structure
+        // entry that targets a removed item. For `a11y_parents` this also
+        // re-roots any *still-alive* node that was AT-parented under a removed
+        // item — dropping the `(child → removed)` mapping makes the child fall
+        // back to the SceneView root (mirrors `remove_a11y_group`). Removal
+        // itself fires `ItemChange::Removed`, so `SceneView` already re-walks
+        // AT through the item-change observer; no `a11y_change_signal` bump
+        // is needed here.
+        let is_removed = |n: &A11yNode| matches!(n, A11yNode::Item(i) if removal_set.contains(i));
+        self.a11y_parents
+            .retain(|child, parent| !is_removed(child) && !is_removed(parent));
+        self.a11y_relations
+            .retain(|(from, _, to)| !is_removed(from) && !is_removed(to));
+        for removed_id in &removal_set {
+            let node = A11yNode::Item(*removed_id);
+            self.a11y_live.remove(&node);
+            self.a11y_landmarks.remove(&node);
+            self.a11y_categories.remove(&node);
+        }
+
         for removed_id in to_remove {
             self.index.remove(removed_id);
-            self.item_change_signal
-                .set(ItemChange::Removed { id: removed_id });
+            self.emit_item_change(ItemChange::Removed { id: removed_id });
         }
     }
 
@@ -1048,7 +1380,7 @@ impl Scene {
                 // so spatial-index AABBs are stale. Subtree-walk
                 // because grandchildren depend on the chain too.
                 self.rebucket_subtree(child);
-                self.item_change_signal.set(ItemChange::ParentChanged {
+                self.emit_item_change(ItemChange::ParentChanged {
                     id: child,
                     old: Some(id),
                     new: None,
@@ -1081,25 +1413,21 @@ impl Scene {
             .collect()
     }
 
-    /// Snapshot every visible lightweight item as a `(scene_rect,
-    /// color)` pair suitable for a minimap thumbnail. Filters out
-    /// items with `HAS_NO_CONTENTS` (logical-only) and items hidden
-    /// by `IS_VISIBLE` / a hidden ancestor — the visible-effective
-    /// set matches what the SceneView's paint walk renders.
-    /// Heavyweight widget entries are skipped (they paint via the
-    /// arena walker and don't have a `thumbnail_color`).
+    /// Snapshot every visible item — **both tiers** — as a `(scene_rect,
+    /// color)` pair suitable for a minimap thumbnail. Filters out items with
+    /// `HAS_NO_CONTENTS` (logical-only) and items hidden by `IS_VISIBLE` / a
+    /// hidden ancestor — the visible-effective set matches what the SceneView's
+    /// paint walk renders.
     ///
-    /// Ordered by insertion (low z first). The color comes from
-    /// [`SceneItem::thumbnail_color`]; built-in items return their
-    /// fill / stroke / a neutral grey.
+    /// Ordered by insertion (low z first). A lightweight item's color comes
+    /// from [`SceneItem::thumbnail_color`] (its fill / stroke / a neutral grey);
+    /// a heavyweight widget entry has no `SceneItem`, so it's shown in a neutral
+    /// tint — a minimap that omitted the heavyweight tier would misrepresent a
+    /// widget-heavy scene (cards, nodes), so both tiers are included.
     pub fn item_thumbnails(&self) -> Vec<(Rect, bastyde_tokens::Color)> {
         let mut out = Vec::new();
         for entry in &self.entries {
-            // Skip heavyweight items.
-            let SceneEntryKind::Item(item) = &entry.kind else {
-                continue;
-            };
-            // Skip invisible / logical-only items.
+            // Skip invisible / logical-only items (either tier).
             if !self.is_effectively_visible(entry.id) {
                 continue;
             }
@@ -1109,7 +1437,12 @@ impl Scene {
             let Some(rect) = self.scene_rect(entry.id) else {
                 continue;
             };
-            out.push((rect, item.thumbnail_color()));
+            let color = match &entry.kind {
+                SceneEntryKind::Item(item) => item.thumbnail_color(),
+                // Heavyweight widget: no `thumbnail_color`, so use a neutral tint.
+                SceneEntryKind::Widget(_) => bastyde_tokens::Color::new(0.45, 0.52, 0.65, 0.85),
+            };
+            out.push((rect, color));
         }
         out
     }
@@ -1243,6 +1576,7 @@ impl Scene {
         let pos = self.a11y_groups.len();
         self.a11y_groups.push(group);
         self.a11y_group_index.insert(id, pos);
+        self.bump_a11y_change();
         id
     }
 
@@ -1266,6 +1600,7 @@ impl Scene {
         self.a11y_live.remove(&target);
         self.a11y_landmarks.remove(&target);
         self.a11y_categories.remove(&target);
+        self.bump_a11y_change();
     }
 
     /// Borrow a logical group by id.
@@ -1285,6 +1620,7 @@ impl Scene {
                 self.a11y_parents.remove(&child);
             }
         }
+        self.bump_a11y_change();
     }
 
     /// The currently-declared logical parent of a node.
@@ -1295,6 +1631,7 @@ impl Scene {
     /// Declare an AT relationship between two nodes.
     pub fn add_a11y_relation(&mut self, from: A11yNode, kind: A11yRelation, to: A11yNode) {
         self.a11y_relations.push((from, kind, to));
+        self.bump_a11y_change();
     }
 
     /// All declared AT relations.
@@ -1309,6 +1646,7 @@ impl Scene {
         } else {
             self.a11y_live.insert(node, live);
         }
+        self.bump_a11y_change();
     }
 
     /// Mark a node as a landmark by overriding its role. Pass
@@ -1319,6 +1657,7 @@ impl Scene {
         } else {
             self.a11y_landmarks.insert(node, role);
         }
+        self.bump_a11y_change();
     }
 
     /// Tag a node with rotor / quick-nav categories.
@@ -1328,6 +1667,7 @@ impl Scene {
         } else {
             self.a11y_categories.insert(node, categories.to_vec());
         }
+        self.bump_a11y_change();
     }
 
     /// Read declared categories for a node.

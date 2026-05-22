@@ -12,7 +12,7 @@
 //! ```
 //!
 //! Structural forms (`if`, `for`, `match`, `let`, spread, `rust`) are
-//! out of Phase 2 scope and fall through to a targeted error.
+//! not yet implemented and fall through to a targeted error.
 
 use syn::parse::{ParseStream, Result};
 use syn::{Block, Expr, Local, Stmt, Token};
@@ -111,7 +111,7 @@ fn parse_body_item(input: ParseStream) -> Result<BodyItem> {
 
     // `ident :` → property. `peek2(Token![::])` goes first because
     // syn's `peek2(Token![:])` also matches the first colon of `::`,
-    // which would misroute `Widget::new_literal(...)` as a property
+    // which would misroute `Widget::new(lit!(...))` as a property
     // named `Widget`. Paths fall through to the element branch.
     if input.peek2(Token![:]) && !input.peek2(Token![::]) {
         return parse_property(input).map(BodyItem::Property);

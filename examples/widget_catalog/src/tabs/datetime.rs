@@ -28,22 +28,22 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
     let calendar_single = section(
         ctx,
-        "Calendar — single date",
+        tr!(dt_calendar_single()),
         FixedSize::new()
             .bind_width(280.0_f32)
             .child(Calendar::single(cal_single_signal).show_today_button(true)),
     );
     let calendar_range = section(
         ctx,
-        "Calendar — date range",
+        tr!(dt_calendar_range()),
         FixedSize::new()
             .bind_width(280.0_f32)
             .child(Calendar::range(cal_range_signal).show_today_button(true)),
     );
-    let date_edit = section(ctx, "DateEdit", DateEdit::new(date_signal));
-    let time_edit = section(ctx, "TimeEdit", TimeEdit::new(time_signal));
-    let datetime_edit = section(ctx, "DateTimeEdit", DateTimeEdit::new(dt_signal));
-    let date_range_edit = section(ctx, "DateRangeEdit", DateRangeEdit::new(range_signal));
+    let date_edit = section(ctx, lit!("DateEdit"), DateEdit::new(date_signal));
+    let time_edit = section(ctx, lit!("TimeEdit"), TimeEdit::new(time_signal));
+    let datetime_edit = section(ctx, lit!("DateTimeEdit"), DateTimeEdit::new(dt_signal));
+    let date_range_edit = section(ctx, lit!("DateRangeEdit"), DateRangeEdit::new(range_signal));
 
     ctx.add(
         VStack::new()
@@ -84,7 +84,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Calendar — single date") {
+                TextWidget::new(tr!(dt_calendar_single())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -98,7 +98,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Calendar — date range") {
+                TextWidget::new(tr!(dt_calendar_range())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -112,7 +112,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("DateEdit") {
+                TextWidget::new(lit!("DateEdit")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -121,7 +121,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("TimeEdit") {
+                TextWidget::new(lit!("TimeEdit")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -130,7 +130,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("DateTimeEdit") {
+                TextWidget::new(lit!("DateTimeEdit")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -139,7 +139,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("DateRangeEdit") {
+                TextWidget::new(lit!("DateRangeEdit")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

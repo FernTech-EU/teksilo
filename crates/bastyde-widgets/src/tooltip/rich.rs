@@ -25,8 +25,20 @@
 //!   `attach_tooltip_with_sticky`) auto-promotes the overlay on
 //!   the same 2 s timer: removes the entry from the hover tracker
 //!   and swaps the dismiss behavior to `EscapeOrClickOutside`. The
-//!   widget's a11y role flips from `Tooltip` to `Dialog`.
+//!   widget's a11y role flips from `Tooltip` to `Dialog` and a
+//!   `Focus` action is advertised on the node. Promotion does **not**
+//!   move keyboard focus into the panel — the user Tabs in. This is
+//!   the correct pattern for a non-modal sticky panel (it never steals
+//!   focus from whatever the user was doing).
+//! - Cascade children (tooltips opened from a `[label](:key)` link via
+//!   [`RichTooltipWidget::cascade_child`]) **omit the indicator
+//!   entirely**: they're shown by an explicit click and are already
+//!   persistent, so there's no hover dwell-to-sticky path to visualize.
+//!   They also skip straight to the persistent a11y treatment — a
+//!   non-modal `Dialog` advertising `Focus`, same as a dwell-promoted
+//!   tooltip — rather than reading as an ephemeral `Tooltip`.
 
+use bastyde_i18n::lit;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -40,7 +52,6 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, PaintContext, Widget};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_i18n::LocalizedString;
 use bastyde_tokens::{CornerRadius, TextRole, TextStyleRole};
 
 use crate::accordion::Accordion;
@@ -81,6 +92,13 @@ pub struct RichTooltipWidget {
     /// dismissed. The widget reads it from `paint()` to compute the
     /// authoritative elapsed dwell time — no paint-gap heuristic.
     shown_at_sink: Rc<Cell<Option<Instant>>>,
+    /// True when this tooltip was opened as a *child* of another tooltip
+    /// via a `[label](:key)` cascade link. Cascade children are shown by
+    /// an explicit click and are already persistent
+    /// (`EscapeOrClickOutside`), so the hover dwell-to-sticky affordance
+    /// — and its [`DwellIndicator`] — don't apply: the indicator is
+    /// suppressed in `build()`.
+    is_cascade_child: bool,
 }
 
 impl std::fmt::Debug for RichTooltipWidget {
@@ -104,6 +122,7 @@ impl RichTooltipWidget {
             dwell_step: Signal::new(0),
             sticky: Signal::new(false),
             shown_at_sink: Rc::new(Cell::new(None)),
+            is_cascade_child: false,
         }
     }
 
@@ -120,7 +139,18 @@ impl RichTooltipWidget {
             dwell_step: Signal::new(0),
             sticky: Signal::new(false),
             shown_at_sink: Rc::new(Cell::new(None)),
+            is_cascade_child: false,
         }
+    }
+
+    /// Mark this tooltip as a cascade child — one opened from another
+    /// tooltip's `[label](:key)` link rather than by hover. Suppresses
+    /// the dwell-to-sticky [`DwellIndicator`], which is meaningless on a
+    /// tooltip that's already persistent. Internal to the cascade
+    /// mechanism (`RichTooltipWidget::build` pre-creates these).
+    pub(crate) fn cascade_child(mut self) -> Self {
+        self.is_cascade_child = true;
+        self
     }
 
     /// Clone of the tooltip's `shown_at` sink — used by the attach
@@ -210,7 +240,7 @@ impl Widget for RichTooltipWidget {
             .filter(|k| with_tooltip_registry(|r| r.get(k).is_some()).unwrap_or(false))
             .collect();
         for key in &registered {
-            let nested = RichTooltipWidget::from_key(key.clone());
+            let nested = RichTooltipWidget::from_key(key.clone()).cascade_child();
             let nested_id = ctx.add(nested);
             // Mark dormant immediately. `ctx.add` inserts widgets at
             // arena top-level (not as children of `self`), so without
@@ -264,7 +294,11 @@ impl Widget for RichTooltipWidget {
         // Body row: text + optional shortcut chip.
         // a11y_hidden: the tooltip root owns `set_name(body_text)`, so the
         // body TextWidget would duplicate it as a child Label node.
-        let body_widget = TextWidget::new_literal(body_source)
+        // Bind the body to the `LocalizedString` itself (not a resolved
+        // snapshot) so a `tr!(...)` source re-renders on locale change
+        // without rebuilding the tooltip. `body_source` above is only the
+        // build-time snapshot used to pre-scan `:key` cascade links.
+        let body_widget = TextWidget::new(content.text.clone())
             .style(TextStyleRole::Small)
             .color(TextRole::TooltipText)
             .markup(true)
@@ -273,7 +307,7 @@ impl Widget for RichTooltipWidget {
         let body_id = ctx.add(body_widget);
 
         let header: WidgetId = if let Some(shortcut) = shortcut_text {
-            let shortcut_widget = TextWidget::new_literal(shortcut)
+            let shortcut_widget = TextWidget::new(lit!(shortcut))
                 .style(TextStyleRole::Small)
                 .color(TextRole::TooltipShortcut)
                 .single_line()
@@ -296,29 +330,12 @@ impl Widget for RichTooltipWidget {
             body_id
         };
 
-        // Dwell indicator — created up front so we can drop it into
-        // either the Accordion header row (when there is a "more"
-        // body) or a dedicated footer row (no "more" body).
-        let indicator = ctx.add(DwellIndicator::new(
-            self.dwell_step.clone(),
-            self.sticky.clone(),
-            theme.colors.tooltip_text,
-        ));
-
-        // Footer row uses a Grid (Fractional + Auto columns) so the
-        // accordion column receives an explicit width proposal during
-        // Grid's pass-2 measurement. This lets the accordion's
-        // expanded "more" content wrap correctly inside the tooltip,
-        // and keeps the indicator right-anchored on the same row as
-        // the accordion's disclosure label.
-        //
-        // - Column 0 (Fractional 1.0): accordion (or empty Spacer
-        //   when no "more" body) — receives `tooltip_max_width
-        //   - indicator_width - column_gap`.
-        // - Column 1 (Auto): the dwell indicator — sized to its
-        //   intrinsic 14×14.
-        let footer_left: WidgetId = if let Some(more_text) = more_source {
-            let more_widget = TextWidget::new_literal(more_text)
+        // Optional "more" disclosure accordion, independent of the dwell
+        // indicator. `None` when the entry has no long-form body.
+        let more_accordion: Option<WidgetId> = if let Some(more_ls) = content.more.clone() {
+            // Bind the long-form body reactively too (the `more_source`
+            // snapshot is only for the build-time `:key` cascade scan).
+            let more_widget = TextWidget::new(more_ls)
                 .style(TextStyleRole::Small)
                 .color(TextRole::TooltipText)
                 .markup(true)
@@ -330,30 +347,61 @@ impl Widget for RichTooltipWidget {
             // vertically with the indicator on the same baseline.
             let mut accordion_title_style = theme.typography.tiny.clone();
             accordion_title_style.line_height = theme.typography.small.line_height;
-            let accordion = Accordion::new(LocalizedString::literal("More"), expanded)
+            // Framework-owned chrome string → resolve against the
+            // bastyde-widgets bundle (locales/*.ftl) via tr_widget!, so it
+            // translates with the active locale and apps can override it.
+            let accordion = Accordion::new(bastyde_i18n::tr_widget!(tooltip_more()), expanded)
                 .title_color(theme.colors.tooltip_text)
                 .title_style(accordion_title_style)
                 .content(more_widget);
-            ctx.add(accordion)
+            Some(ctx.add(accordion))
         } else {
-            ctx.add(Spacer::new())
+            None
         };
 
-        let footer_row = ctx.add(
-            Grid::new()
-                .columns(vec![TrackSize::Fractional(1.0), TrackSize::Auto])
-                .rows(vec![TrackSize::Auto])
-                .column_gap(8.0)
-                .add_child(footer_left)
-                .add_child(indicator),
-        );
+        let mut root_vstack = VStack::new().spacing(6.0).add_child(header);
 
-        let root_content = ctx.add(
-            VStack::new()
-                .spacing(6.0)
-                .add_child(header)
-                .add_child(footer_row),
-        );
+        if self.is_cascade_child {
+            // Cascade children are opened by an explicit click and are
+            // already persistent (`EscapeOrClickOutside`) — there's no
+            // hover dwell-to-sticky path, so the `DwellIndicator` would
+            // be meaningless. Drop it; keep only the "more" accordion
+            // when the entry has one.
+            if let Some(accordion) = more_accordion {
+                root_vstack = root_vstack.add_child(accordion);
+            }
+        } else {
+            // Dwell indicator, right-anchored in a footer row.
+            let indicator = ctx.add(DwellIndicator::new(
+                self.dwell_step.clone(),
+                self.sticky.clone(),
+                theme.colors.tooltip_text,
+            ));
+            // Footer row uses a Grid (Fractional + Auto columns) so the
+            // accordion column receives an explicit width proposal during
+            // Grid's pass-2 measurement. This lets the accordion's
+            // expanded "more" content wrap correctly inside the tooltip,
+            // and keeps the indicator right-anchored on the same row as
+            // the accordion's disclosure label.
+            //
+            // - Column 0 (Fractional 1.0): accordion (or empty Spacer
+            //   when no "more" body) — receives `tooltip_max_width
+            //   - indicator_width - column_gap`.
+            // - Column 1 (Auto): the dwell indicator — sized to its
+            //   intrinsic 14×14.
+            let footer_left = more_accordion.unwrap_or_else(|| ctx.add(Spacer::new()));
+            let footer_row = ctx.add(
+                Grid::new()
+                    .columns(vec![TrackSize::Fractional(1.0), TrackSize::Auto])
+                    .rows(vec![TrackSize::Auto])
+                    .column_gap(8.0)
+                    .add_child(footer_left)
+                    .add_child(indicator),
+            );
+            root_vstack = root_vstack.add_child(footer_row);
+        }
+
+        let root_content = ctx.add(root_vstack);
 
         // Wrap everything in padding matching the existing TooltipStyle
         // tokens so RichTooltipWidget drops into the same chrome the
@@ -415,11 +463,13 @@ impl Widget for RichTooltipWidget {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        // Role flips from Tooltip to Dialog (non-modal) once the
-        // tooltip is sticky, since a sticky tooltip behaves like a
-        // persistent panel rather than an ephemeral hover hint.
-        let is_sticky = self.sticky.get();
-        let role = if is_sticky {
+        // A tooltip reads as a persistent, focusable panel (non-modal
+        // `Role::Dialog` + advertised `Focus`) rather than an ephemeral
+        // hover hint when either: it has dwell-promoted to sticky, or it
+        // is a cascade child — opened by an explicit click and already
+        // persistent (`EscapeOrClickOutside`) from the moment it shows.
+        let persistent = self.sticky.get() || self.is_cascade_child;
+        let role = if persistent {
             bastyde_core::accesskit::Role::Dialog
         } else {
             bastyde_core::accesskit::Role::Tooltip
@@ -428,7 +478,7 @@ impl Widget for RichTooltipWidget {
         if let Some(content) = self.content.as_ref() {
             builder.set_name(content.text.resolve_now());
         }
-        if is_sticky {
+        if persistent {
             builder.add_action(bastyde_core::accesskit::Action::Focus);
         }
     }
@@ -469,6 +519,15 @@ fn make_link_click_handler(
                     },
                     dismiss: DismissBehavior::EscapeOrClickOutside,
                     layer: OverlayLayer::InTree,
+                    // `None` is intentional and correct: the handler
+                    // can't know its own overlay id, so the dispatch
+                    // layer injects the real parent
+                    // (`overlay_ancestor_for_widget(source_widget)` in
+                    // event_dispatch_impl.rs). That links this nested
+                    // tooltip to the one it was opened from, so
+                    // dismissing the parent cascade-closes it
+                    // (`OverlayManager::dismiss_immediate` BFS). Same
+                    // mechanism MenuItem submenus rely on.
                     parent_overlay: None,
                     on_dismiss: None,
                     fade_duration: None,
@@ -565,5 +624,78 @@ mod tests {
         let mut out = Vec::new();
         scan_tooltip_key_urls("no links here at all", &mut out);
         assert!(out.is_empty());
+    }
+
+    fn rich_tooltip_height(content: TooltipContent, cascade: bool) -> f32 {
+        use bastyde_canvas::MockTextBackend;
+        use bastyde_core::widget_tree::WidgetTree;
+        use std::cell::RefCell;
+
+        let mut tree =
+            WidgetTree::new().with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
+        let mut w = RichTooltipWidget::new(content);
+        if cascade {
+            w = w.cascade_child();
+        }
+        let id = tree.add(w);
+        // Loose height (width-only) proposal so the tooltip sizes to its
+        // natural content height — an exact height would just be echoed
+        // back as the root's bounds. The VStack has no flexible children,
+        // so the measured height reflects the real layout.
+        tree.layout(SizeProposal::with_width(400.0));
+        tree.bounds(id).height
+    }
+
+    #[test]
+    fn cascade_child_omits_dwell_indicator() {
+        // A normal rich tooltip carries the dwell-to-sticky indicator in
+        // a footer row; a cascade child (opened from a `[label](:key)`
+        // link) suppresses it, since it's already persistent and has no
+        // hover-to-sticky path. With identical content, the cascade
+        // child therefore lays out shorter — no indicator footer row.
+        let make = || TooltipContent::new("k", lit!("Tooltip body"));
+        let normal_h = rich_tooltip_height(make(), false);
+        let cascade_h = rich_tooltip_height(make(), true);
+        assert!(
+            cascade_h < normal_h,
+            "cascade child should be shorter without the dwell-indicator footer \
+             (cascade = {cascade_h}, normal = {normal_h})"
+        );
+    }
+
+    #[test]
+    fn cascade_child_announces_as_persistent_dialog() {
+        use bastyde_core::accessibility::AccessNodeBuilder;
+        use bastyde_core::accesskit::{Action, Role};
+
+        // A cascade child is persistent and focusable from the moment it
+        // shows, so it reads as a non-modal `Dialog` advertising `Focus`
+        // — not an ephemeral `Tooltip`.
+        let child = RichTooltipWidget::new(TooltipContent::new("k", lit!("Body"))).cascade_child();
+        let mut cb = AccessNodeBuilder::new();
+        child.accessibility(&mut cb);
+        assert_eq!(
+            cb.role(),
+            Role::Dialog,
+            "cascade child should read as Dialog"
+        );
+        assert!(
+            cb.actions().contains(&Action::Focus),
+            "cascade child should advertise the Focus action"
+        );
+
+        // A normal tooltip stays an ephemeral Tooltip until it dwell-promotes.
+        let normal = RichTooltipWidget::new(TooltipContent::new("k", lit!("Body")));
+        let mut nb = AccessNodeBuilder::new();
+        normal.accessibility(&mut nb);
+        assert_eq!(
+            nb.role(),
+            Role::Tooltip,
+            "non-cascade tooltip stays a Tooltip when not sticky"
+        );
+        assert!(
+            !nb.actions().contains(&Action::Focus),
+            "non-sticky tooltip should not advertise Focus"
+        );
     }
 }

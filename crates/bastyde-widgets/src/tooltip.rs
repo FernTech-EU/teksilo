@@ -8,8 +8,10 @@
 //!   long-form "more" disclosure + shortcut chip), inline-markup body
 //!   so `[label](:key)` cascade links resolve against
 //!   [`TooltipRegistry`]. Attached via `.rich_tooltip(key)` /
-//!   `.rich_tooltip_content(content)`. Promotes to a focusable
-//!   `Role::Dialog` on dwell.
+//!   `.rich_tooltip_content(content)`. On dwell it flips its AT role
+//!   to `Role::Dialog` and advertises a `Focus` action — keyboard
+//!   focus is not auto-transferred; the user Tabs in (the correct
+//!   non-modal-panel a11y pattern).
 //! - [`composite::CompositeTooltipWidget`] — hosts an arbitrary
 //!   `impl Widget + 'static` body inside the same chrome with a
 //!   larger surface budget. Crusader Kings 3-style: tabbed sections,
@@ -31,9 +33,8 @@ pub mod registry;
 pub mod rich;
 
 pub use attach::{
-    DEFAULT_COMPOSITE_TOOLTIP_DELAY, DEFAULT_RICH_TOOLTIP_DELAY, RichTooltipSource,
-    attach_composite_tooltip, attach_composite_tooltip_boxed, attach_rich_tooltip,
-    attach_rich_tooltip_content, attach_rich_tooltip_source,
+    RichTooltipSource, attach_composite_tooltip, attach_composite_tooltip_boxed,
+    attach_rich_tooltip, attach_rich_tooltip_content, attach_rich_tooltip_source,
 };
 pub use composite::CompositeTooltipWidget;
 pub use registry::{
@@ -41,13 +42,13 @@ pub use registry::{
 };
 pub use rich::RichTooltipWidget;
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
 
 use bastyde_canvas::{Canvas, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::overlay::OverlayId;
+use bastyde_core::signal::Prop;
 use bastyde_core::styles::{SharedTooltipStyle, TooltipStyleConfig};
 use bastyde_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
@@ -105,7 +106,15 @@ pub(crate) fn paint_composite_tooltip_shadows(
 /// (`TooltipWidget::new(...).style(impl TooltipStyle)`) or theme-wide
 /// via `theme.style_slots.tooltip = Some(Rc::new(MyTooltip))`.
 pub struct TooltipWidget {
-    text: String,
+    /// The tooltip body as a `Prop<String>`. A `tr!(...)` / `lit!(...)`
+    /// source enters via [`TooltipWidget::new`] (locale-reactive when an
+    /// `I18nManager` is installed); a `Signal<String>` source enters via
+    /// [`TooltipWidget::bound`] for callers that swap the text at runtime
+    /// (e.g. a single reusable tooltip surface reused across many
+    /// hover targets, as `bastyde-scene` does for lightweight items).
+    /// Either way the inner `TextWidget` re-renders on change without a
+    /// rebuild.
+    text: Prop<String>,
     style_override: Option<SharedTooltipStyle>,
     root_child_id: Option<WidgetId>,
 }
@@ -113,25 +122,37 @@ pub struct TooltipWidget {
 impl std::fmt::Debug for TooltipWidget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TooltipWidget")
-            .field("text", &self.text)
+            .field("text", &self.text.get())
             .finish()
     }
 }
 
 impl TooltipWidget {
+    /// Construct a tooltip from a localized string. With an `I18nManager`
+    /// installed the body stays locale-reactive (re-resolves on locale
+    /// change); otherwise it's a static snapshot.
     pub fn new(text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
         Self {
-            text: ls.resolve_now(),
+            text: Prop::from(ls),
             style_override: None,
             root_child_id: None,
         }
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw string in `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(text: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(text))
+    /// Construct a tooltip whose body is driven by a `Signal<String>`
+    /// (or any `Prop<String>`). Mutating the signal re-renders the
+    /// tooltip in place — used when a single dormant tooltip surface is
+    /// reused across many anchors and its text is set just before each
+    /// show. Callers wanting locale reactivity should resolve their
+    /// `LocalizedString` against the active locale when setting the
+    /// signal.
+    pub fn bound(text: impl Into<Prop<String>>) -> Self {
+        Self {
+            text: text.into(),
+            style_override: None,
+            root_child_id: None,
+        }
     }
 
     /// Per-call style override. Replaces the theme-wide default
@@ -144,7 +165,8 @@ impl TooltipWidget {
 
 impl Widget for TooltipWidget {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let text = TextWidget::new_literal(&self.text)
+        let text = TextWidget::new(lit!(""))
+            .bind_text(self.text.clone())
             .style(TextStyleRole::Small)
             .color(TextRole::TooltipText)
             .single_line();
@@ -189,39 +211,14 @@ impl Widget for TooltipWidget {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::Tooltip);
-        builder.set_name(&self.text);
+        // Read the current value at walk time — the AT tree re-walks on a
+        // locale change (Bound text) and on signal mutation (scene reuse),
+        // so the announced name stays in sync with what's painted.
+        builder.set_name(self.text.get());
     }
 
     fn children(&self) -> Vec<WidgetId> {
         self.root_child_id.into_iter().collect()
-    }
-}
-
-/// Tracks tooltip hover state for a widget.
-/// Stored on the WidgetTree and processed during event dispatch.
-#[allow(dead_code)] // Part of tooltip system, used when tooltip overlays are wired up
-pub(crate) struct TooltipState {
-    /// The widget this tooltip is attached to.
-    pub anchor_id: WidgetId,
-    /// The pre-created tooltip content widget ID (starts dormant).
-    pub content_id: WidgetId,
-    /// The tooltip text.
-    pub text: String,
-    /// Hover delay before showing.
-    pub delay: Duration,
-    /// When the pointer entered the anchor (None if not hovering).
-    pub hover_start: Option<Instant>,
-    /// Active overlay ID (Some if tooltip is currently shown).
-    pub overlay_id: Option<OverlayId>,
-}
-
-impl std::fmt::Debug for TooltipState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TooltipState")
-            .field("anchor_id", &self.anchor_id)
-            .field("text", &self.text)
-            .field("is_shown", &self.overlay_id.is_some())
-            .finish()
     }
 }
 
@@ -235,7 +232,7 @@ mod tests {
     #[test]
     fn tooltip_widget_emits_shadow() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let _ = tree.add(TooltipWidget::new_literal("hello"));
+        let _ = tree.add(TooltipWidget::new(lit!("hello")));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let frame = tree.render();
         assert!(
@@ -250,8 +247,8 @@ mod tests {
         // applied (the production overlay path). Shadow must still
         // land in the rendered frame.
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let anchor = tree.add(TooltipWidget::new_literal("anchor"));
-        let tip = tree.add(TooltipWidget::new_literal("hello"));
+        let anchor = tree.add(TooltipWidget::new(lit!("anchor")));
+        let tip = tree.add(TooltipWidget::new(lit!("hello")));
         tree.set_dormant(tip);
         tree.layout(SizeProposal::exact(800.0, 600.0));
 

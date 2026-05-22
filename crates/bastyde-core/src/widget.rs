@@ -1,4 +1,4 @@
-use bastyde_canvas::{Canvas, Rect, Size, SizeProposal};
+use bastyde_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 
 use crate::accessibility::AccessNodeBuilder;
 use crate::widget_id::WidgetId;
@@ -94,7 +94,7 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// concrete name through the vtable without per-impl boilerplate.
     ///
     /// Used by [`crate::widget_tree::WidgetTree::widget_type_histogram`]
-    /// for the `widget.census` telemetry event (Phase 5.3). Custom
+    /// for the `widget.census` telemetry event. Custom
     /// widgets that wrap their state in a generic struct may
     /// override to give analytics a stable name independent of the
     /// generic parameter.
@@ -166,6 +166,38 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// [`wants_after_paint`](Self::wants_after_paint) and return `true`
     /// see this called.
     fn after_paint(&self, _view: &WidgetTreeView<'_>, _ctx: &PaintContext) {}
+
+    /// Whether this widget wants its [`post_paint`](Self::post_paint)
+    /// hook to fire each frame. Returning `false` (the default) saves a
+    /// virtual call per widget per frame for the vast majority of widgets
+    /// that don't draw a foreground over their children.
+    ///
+    /// Same opt-in pattern as [`wants_after_paint`](Self::wants_after_paint).
+    fn wants_post_paint(&self) -> bool {
+        false
+    }
+
+    /// Draw a foreground layer *over* this widget's children.
+    ///
+    /// The normal [`paint`](Self::paint) emits a widget's draws *before*
+    /// its children — a backdrop. `post_paint` emits *after* the entire
+    /// child subtree, so its draws land on top. This is the supported way
+    /// for a composing widget to paint over its own descendants:
+    /// inset shadows, a focus ring that must overlay content, a scrim, or
+    /// `SceneView`'s "over" lightweight band (selection lasso, highlighted
+    /// connectors).
+    ///
+    /// Runs inside the same clip / transform / opacity / blur scopes as
+    /// the widget and its children, so a foreground decoration pans,
+    /// scales and clips consistently with the subtree it covers. It is
+    /// paint-only — no hit-testing and no accessibility node; for
+    /// interactive overlays that must escape the widget's bounds, use the
+    /// overlay system instead.
+    ///
+    /// Default: empty. Only widgets that override
+    /// [`wants_post_paint`](Self::wants_post_paint) and return `true` see
+    /// this called.
+    fn post_paint(&self, _bounds: Rect, _canvas: &mut Canvas, _ctx: &PaintContext) {}
 
     /// Declare this widget's accessibility identity.
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
@@ -294,6 +326,27 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// Whether this widget clips its children to its bounds.
     fn clips_children(&self) -> bool {
         false
+    }
+
+    /// Whether the point lies inside this widget's *actual* shape, not
+    /// just its rectangular bounds. Consulted by hit-testing right after
+    /// the bounds check: returning `false` for a point that *is* inside
+    /// the bounding box makes the widget transparent to the click there,
+    /// so it **falls through** to whatever sibling is painted underneath
+    /// (the same machinery as a fully pass-through node, but shape-aware).
+    ///
+    /// Both arguments are in the widget's bounds space: `local_point` is
+    /// the point being tested and `bounds` is this widget's rectangle, so
+    /// a non-rectangular widget can test the point against its silhouette.
+    ///
+    /// The default returns `true` for any in-bounds point (a plain
+    /// rectangle), so every existing widget is unaffected. Override for
+    /// irregular shapes — an ellipse / cloud scene node, a circular
+    /// handle — so a click lands on the shape you see, not its bounding
+    /// box, and clicks in the transparent corners reach the node beneath.
+    /// This mirrors the lightweight tier's `SceneItem::shape_contains`.
+    fn hit_shape(&self, _local_point: Point, _bounds: Rect) -> bool {
+        true
     }
 
     /// Whether `rebuild_single_widget` should **preserve** existing

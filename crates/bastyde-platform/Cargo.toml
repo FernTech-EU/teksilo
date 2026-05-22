@@ -61,6 +61,14 @@ objc2-app-kit = { version = "0.3", features = [
     # NSDragOperation, and NSPasteboard + NSPasteboardType constants.
     "NSDragging",
     "NSPasteboard",
+    # External drag-and-drop *source* (outbound, app → OS): NSDraggingSource /
+    # NSDraggingItem / NSDraggingSession, the drag image (NSImage), the
+    # triggering event (NSApplication::currentEvent → NSEvent).
+    "NSDraggingItem",
+    "NSDraggingSession",
+    "NSImage",
+    "NSApplication",
+    "NSEvent",
 ] }
 objc2-foundation = { version = "0.3", features = [
     "NSArray",

@@ -7,7 +7,7 @@
 //! caption" between groups of related controls.
 //!
 //! ```ignore
-//! GroupHeader::new_literal("Appearance")
+//! GroupHeader::new(lit!("Appearance"))
 //! ```
 //!
 //! Trivially composed from existing primitives:
@@ -25,7 +25,7 @@ use crate::primitives::{Divider, Expand, HStack, TextWidget};
 
 /// A labelled section header with a trailing rule line.
 pub struct GroupHeader {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     /// Optional text-style override for the label. Defaults to
     /// `theme.typography.body` — IntelliJ/Jewel group headers render at
     /// normal body size, not as a smaller caption.
@@ -43,20 +43,12 @@ impl GroupHeader {
     pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: ls,
             style: None,
             color: None,
             gap: 8.0,
             root_child_id: None,
         }
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in
-    /// `LocalizedString::literal` for tests and scaffolding where
-    /// translation is overkill.
-    #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(label))
     }
 
     /// Override the label's text style (font, size, weight, …).
@@ -101,7 +93,7 @@ impl Widget for GroupHeader {
             None => TextRole::Primary.into(),
         };
 
-        let label = TextWidget::new_literal(&self.label)
+        let label = TextWidget::new(self.label.clone())
             .style(style)
             .bind_color(color)
             .single_line()
@@ -157,7 +149,7 @@ impl Widget for GroupHeader {
         // is the closest accesskit role — screen readers read it as a
         // non-interactive caption.
         builder.set_role(bastyde_core::accesskit::Role::Label);
-        builder.set_name(&self.label);
+        builder.set_name(self.label.resolve_now());
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -171,12 +163,13 @@ impl Widget for GroupHeader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_core::widget_tree::WidgetTree;
 
     #[test]
     fn builds_and_lays_out_with_proposed_width() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let header = tree.add(GroupHeader::new_literal("Appearance"));
+        let header = tree.add(GroupHeader::new(lit!("Appearance")));
         tree.layout(SizeProposal {
             width: Some(400.0),
             height: None,
@@ -200,7 +193,7 @@ mod tests {
         // Walk the tree to the Expand and verify its bounds consume the
         // remaining width, not the natural 0-width of a bare Divider.
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let header = tree.add(GroupHeader::new_literal("X"));
+        let header = tree.add(GroupHeader::new(lit!("X")));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -230,7 +223,7 @@ mod tests {
     #[test]
     fn accessibility_role_and_name() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let header = tree.add(GroupHeader::new_literal("Appearance"));
+        let header = tree.add(GroupHeader::new(lit!("Appearance")));
         tree.layout(SizeProposal {
             width: Some(400.0),
             height: None,
@@ -257,14 +250,14 @@ mod tests {
         }
 
         let mut tree_default = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let h0 = tree_default.add(GroupHeader::new_literal("Section").gap(0.0));
+        let h0 = tree_default.add(GroupHeader::new(lit!("Section")).gap(0.0));
         tree_default.layout(SizeProposal {
             width: Some(400.0),
             height: None,
         });
 
         let mut tree_wide = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let h60 = tree_wide.add(GroupHeader::new_literal("Section").gap(60.0));
+        let h60 = tree_wide.add(GroupHeader::new(lit!("Section")).gap(60.0));
         tree_wide.layout(SizeProposal {
             width: Some(400.0),
             height: None,

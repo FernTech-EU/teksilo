@@ -52,7 +52,7 @@ pub struct ProgressBar {
     thickness: f32,
     track_color: Option<ColorProp>,
     fill_color: Option<ColorProp>,
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
     /// Per-call override for the stationary chrome (track + determinate fill).
     style_override: Option<SharedProgressBarStyle>,
     root_child_id: Option<WidgetId>,
@@ -132,14 +132,7 @@ impl ProgressBar {
     /// Accessible name for the progress bar.
     pub fn label(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.label = Some(ls.resolve_now());
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `label(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn label_literal(mut self, text: impl Into<String>) -> Self {
-        self.label = Some(text.into());
+        self.label = Some(ls);
         self
     }
 }
@@ -452,7 +445,10 @@ mod tests {
         let pb = tree.add(ProgressBar::new(0.75));
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let info = tree.accessibility_node(pb);
-        assert_eq!(info.role(), bastyde_core::accesskit::Role::ProgressIndicator);
+        assert_eq!(
+            info.role(),
+            bastyde_core::accesskit::Role::ProgressIndicator
+        );
     }
 
     #[test]

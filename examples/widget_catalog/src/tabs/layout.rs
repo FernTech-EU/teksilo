@@ -22,7 +22,7 @@ fn masonry_tile(height: f32) -> impl Widget + 'static {
     FixedSize::new().bind_height(height).child(
         Panel::new()
             .background(SurfaceRole::AccentSubtle)
-            .child(Center::new().child(TextWidget::new_literal("·").style(TextStyleRole::Small))),
+            .child(Center::new().child(TextWidget::new(lit!("·")).style(TextStyleRole::Small))),
     )
 }
 
@@ -30,7 +30,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
     let hstack = section(
         ctx,
-        "HStack",
+        lit!("HStack"),
         HStack::new()
             .spacing(8.0)
             .child(color_cell(SurfaceRole::AccentSubtle, "A"))
@@ -39,7 +39,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let vstack = section(
         ctx,
-        "VStack",
+        lit!("VStack"),
         VStack::new()
             .spacing(6.0)
             .child(color_cell(SurfaceRole::AltRow, "Top"))
@@ -48,7 +48,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let zstack = section(
         ctx,
-        "ZStack",
+        lit!("ZStack"),
         FixedSize::new()
             .bind_width(120.0_f32)
             .bind_height(60.0_f32)
@@ -64,7 +64,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let grid = section(
         ctx,
-        "Grid",
+        lit!("Grid"),
         Grid::new()
             .columns(vec![
                 TrackSize::Fixed(80.0),
@@ -83,21 +83,21 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let wrap = section(
         ctx,
-        "Wrap",
+        lit!("Wrap"),
         Wrap::new()
             .spacing(8.0)
             .line_spacing(8.0)
-            .child(Badge::new_literal("Rust"))
-            .child(Badge::new_literal("GUI"))
-            .child(Badge::new_literal("Reactive"))
-            .child(Badge::new_literal("Accessible"))
-            .child(Badge::new_literal("Fast"))
+            .child(Badge::new(lit!("Rust")))
+            .child(Badge::new(lit!("GUI")))
+            .child(Badge::new(lit!("Reactive")))
+            .child(Badge::new(lit!("Accessible")))
+            .child(Badge::new(lit!("Fast")))
             .child(Badge::new(tr!(layout_cross_platform())))
-            .child(Badge::new_literal("wgpu")),
+            .child(Badge::new(lit!("wgpu"))),
     );
     let masonry = section(
         ctx,
-        "MasonryLayout",
+        lit!("MasonryLayout"),
         MasonryLayout::new(3)
             .column_spacing(8.0)
             .item_spacing(8.0)
@@ -110,7 +110,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let form = section(
         ctx,
-        "FormLayout",
+        lit!("FormLayout"),
         FormLayout::new()
             .row_spacing(6.0)
             .line(
@@ -124,7 +124,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let center = section(
         ctx,
-        "Center",
+        lit!("Center"),
         FixedSize::new()
             .bind_width(180.0_f32)
             .bind_height(60.0_f32)
@@ -138,7 +138,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let expand = section(
         ctx,
-        "Expand",
+        lit!("Expand"),
         FixedSize::new()
             .bind_width(200.0_f32)
             .bind_height(28.0_f32)
@@ -160,7 +160,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let padding = section(
         ctx,
-        "Padding",
+        lit!("Padding"),
         Panel::new().background(SurfaceRole::Raised).child(
             Padding::uniform(16.0)
                 .child(TextWidget::new(tr!(lay_padding_body())).style(TextStyleRole::Small)),
@@ -168,7 +168,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let spacer = section(
         ctx,
-        "Spacer",
+        lit!("Spacer"),
         FixedSize::new()
             .bind_width(220.0_f32)
             .bind_height(28.0_f32)
@@ -181,16 +181,16 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let divider = section(
         ctx,
-        "Divider",
+        lit!("Divider"),
         VStack::new()
             .spacing(4.0)
-            .child(TextWidget::new_literal("above").style(TextStyleRole::Small))
+            .child(TextWidget::new(tr!(lay_above())).style(TextStyleRole::Small))
             .child(Divider::new())
-            .child(TextWidget::new_literal("below").style(TextStyleRole::Small)),
+            .child(TextWidget::new(tr!(lay_below())).style(TextStyleRole::Small)),
     );
     let fixed_size = section(
         ctx,
-        "FixedSize",
+        lit!("FixedSize"),
         FixedSize::new()
             .bind_width(140.0_f32)
             .bind_height(40.0_f32)
@@ -202,7 +202,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let min_size = section(
         ctx,
-        "MinSize",
+        lit!("MinSize"),
         MinSize::new(160.0, 32.0).child(
             Panel::new()
                 .background(SurfaceRole::Raised)
@@ -211,7 +211,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let max_size = section(
         ctx,
-        "MaxSize",
+        lit!("MaxSize"),
         MaxSize::new(240.0, 32.0).child(
             Panel::new()
                 .background(SurfaceRole::Sunken)
@@ -221,7 +221,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let aspect =
         section(
             ctx,
-            "AspectRatio",
+            lit!("AspectRatio"),
             FixedSize::new().bind_width(180.0_f32).child(
                 AspectRatio::widescreen().child(
                     Panel::new()
@@ -242,7 +242,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     });
     let switcher = section(
         ctx,
-        "Switcher",
+        lit!("Switcher"),
         VStack::new().spacing(6.0).child(switcher_btn).child(
             FixedSize::new()
                 .bind_width(180.0_f32)
@@ -318,7 +318,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("HStack") {
+                TextWidget::new(lit!("HStack")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -332,7 +332,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("VStack") {
+                TextWidget::new(lit!("VStack")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -346,7 +346,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("ZStack") {
+                TextWidget::new(lit!("ZStack")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -367,7 +367,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Grid") {
+                TextWidget::new(lit!("Grid")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -391,26 +391,26 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Wrap") {
+                TextWidget::new(lit!("Wrap")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
                 Wrap {
                     spacing: 8.0
                     line_spacing: 8.0
-                    Badge::new_literal("Rust")
-                    Badge::new_literal("GUI")
-                    Badge::new_literal("Reactive")
-                    Badge::new_literal("Accessible")
-                    Badge::new_literal("Fast")
+                    Badge::new(lit!("Rust"))
+                    Badge::new(lit!("GUI"))
+                    Badge::new(lit!("Reactive"))
+                    Badge::new(lit!("Accessible"))
+                    Badge::new(lit!("Fast"))
                     Badge::new(tr!(layout_cross_platform()))
-                    Badge::new_literal("wgpu")
+                    Badge::new(lit!("wgpu"))
                 }
             }
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("MasonryLayout") {
+                TextWidget::new(lit!("MasonryLayout")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -428,7 +428,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("FormLayout") {
+                TextWidget::new(lit!("FormLayout")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -437,7 +437,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Center") {
+                TextWidget::new(lit!("Center")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -459,7 +459,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Expand") {
+                TextWidget::new(lit!("Expand")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -483,7 +483,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Padding") {
+                TextWidget::new(lit!("Padding")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -499,7 +499,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Spacer") {
+                TextWidget::new(lit!("Spacer")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -516,17 +516,17 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Divider") {
+                TextWidget::new(lit!("Divider")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
                 VStack {
                     spacing: 4.0
-                    TextWidget::new_literal("above") {
+                    TextWidget::new(tr!(lay_above())) {
                         style: TextStyleRole::Small
                     }
                     Divider
-                    TextWidget::new_literal("below") {
+                    TextWidget::new(tr!(lay_below())) {
                         style: TextStyleRole::Small
                     }
                 }
@@ -534,7 +534,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("FixedSize") {
+                TextWidget::new(lit!("FixedSize")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -552,7 +552,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("MinSize") {
+                TextWidget::new(lit!("MinSize")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -568,7 +568,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("MaxSize") {
+                TextWidget::new(lit!("MaxSize")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -584,7 +584,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("AspectRatio") {
+                TextWidget::new(lit!("AspectRatio")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -605,7 +605,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Switcher") {
+                TextWidget::new(lit!("Switcher")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

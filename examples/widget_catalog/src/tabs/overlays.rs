@@ -32,18 +32,18 @@ fn cascade_plain_column() -> impl Widget + 'static {
             VStack::new()
                 .spacing(8.0)
                 .child(
-                    TextWidget::new_literal("Plain tooltips")
+                    TextWidget::new(tr!(ovr_plain_tooltips_heading()))
                         .style(TextStyleRole::BodyBold)
                         .color(TextRole::Primary),
                 )
                 .child(
-                    TextWidget::new_literal("(single-line, ephemeral)")
+                    TextWidget::new(tr!(ovr_plain_tooltips_subtitle()))
                         .style(TextStyleRole::Small)
                         .color(TextRole::Secondary),
                 )
-                .child(Button::new_literal("Save").tooltip_literal("Save the current document"))
-                .child(Button::new_literal("Open").tooltip_literal("Open a file"))
-                .child(Button::new_literal("Close").tooltip_literal("Close the tab"))
+                .child(Button::new(lit!("Save")).tooltip(tr!(ovr_tooltip_save_doc())))
+                .child(Button::new(lit!("Open")).tooltip(tr!(ovr_tooltip_open_file())))
+                .child(Button::new(lit!("Close")).tooltip(tr!(ovr_tooltip_close_tab())))
                 .child(Spacer::new()),
         )
 }
@@ -59,24 +59,24 @@ fn cascade_rich_column() -> impl Widget + 'static {
             VStack::new()
                 .spacing(8.0)
                 .child(
-                    TextWidget::new_literal("Rich tooltips")
+                    TextWidget::new(tr!(ovr_rich_tooltips_heading()))
                         .style(TextStyleRole::BodyBold)
                         .color(TextRole::Primary),
                 )
                 .child(
-                    TextWidget::new_literal("(:key cascade, dwell-to-sticky)")
+                    TextWidget::new(tr!(ovr_rich_tooltips_subtitle()))
                         .style(TextStyleRole::Small)
                         .color(TextRole::Secondary),
                 )
-                .child(Button::new_literal("Hover for level 1").rich_tooltip(KEY_TIP_A))
-                .child(Button::new_literal("Hover for level 2").rich_tooltip(KEY_TIP_B))
-                .child(Button::new_literal("Hover for level 3").rich_tooltip(KEY_TIP_C))
+                .child(Button::new(tr!(ovr_hover_level_1())).rich_tooltip(KEY_TIP_A))
+                .child(Button::new(tr!(ovr_hover_level_2())).rich_tooltip(KEY_TIP_B))
+                .child(Button::new(tr!(ovr_hover_level_3())).rich_tooltip(KEY_TIP_C))
                 .child(
-                    Button::new_literal("Plain among rich")
-                        .tooltip_literal("Plain tooltip living in the rich column — diagnostic."),
+                    Button::new(tr!(ovr_plain_among_rich()))
+                        .tooltip(tr!(ovr_plain_among_rich_tip())),
                 )
                 .child(
-                    TextWidget::new_literal("Tip: dwell ~2 s to pin, then click links to chain.")
+                    TextWidget::new(tr!(ovr_rich_dwell_tip()))
                         .style(TextStyleRole::Tiny)
                         .color(TextRole::Secondary),
                 ),
@@ -94,12 +94,12 @@ fn province_composite_body() -> impl Widget + 'static {
     VStack::new()
         .spacing(8.0)
         .child(
-            TextWidget::new_literal("Iberia")
+            TextWidget::new(tr!(ovr_province_iberia()))
                 .style(TextStyleRole::BodyBold)
                 .color(TextRole::TooltipText),
         )
         .child(
-            TextWidget::new_literal("Province overview")
+            TextWidget::new(tr!(ovr_province_overview()))
                 .style(TextStyleRole::Small)
                 .color(TextRole::TooltipShortcut),
         )
@@ -107,9 +107,11 @@ fn province_composite_body() -> impl Widget + 'static {
         .child(
             HStack::new()
                 .spacing(12.0)
-                .child(Button::new_literal("Food: 42").rich_tooltip(KEY_STAT_FOOD))
-                .child(Button::new_literal("Trade: 18").rich_tooltip(KEY_STAT_TRADE))
-                .child(Button::new_literal("Happiness: 71%").rich_tooltip(KEY_STAT_HAPPINESS)),
+                .child(Button::new(tr!(ovr_stat_food_label())).rich_tooltip(KEY_STAT_FOOD))
+                .child(Button::new(tr!(ovr_stat_trade_label())).rich_tooltip(KEY_STAT_TRADE))
+                .child(
+                    Button::new(tr!(ovr_stat_happiness_label())).rich_tooltip(KEY_STAT_HAPPINESS),
+                ),
         )
 }
 
@@ -127,21 +129,20 @@ fn tabbed_composite_body() -> impl Widget + 'static {
         .selected_text_role(TextRole::TooltipText)
         .idle_text_role(TextRole::TooltipShortcut)
         .static_tab(
-            TabInfo::new().title(LocalizedString::literal("Stats")),
+            TabInfo::new().title(tr!(ovr_tab_stats())),
             VStack::new()
                 .spacing(4.0)
-                .child(TextWidget::new_literal("Population: 12,400").color(TextRole::TooltipText))
-                .child(TextWidget::new_literal("Garrison: 320").color(TextRole::TooltipText)),
+                .child(TextWidget::new(tr!(ovr_stat_population())).color(TextRole::TooltipText))
+                .child(TextWidget::new(tr!(ovr_stat_garrison())).color(TextRole::TooltipText)),
         )
         .static_tab(
-            TabInfo::new().title(LocalizedString::literal("History")),
-            TextWidget::new_literal("Founded 1247 • 3 sieges • 1 plague")
-                .color(TextRole::TooltipText),
+            TabInfo::new().title(tr!(ovr_tab_history())),
+            TextWidget::new(tr!(ovr_province_history())).color(TextRole::TooltipText),
         );
     VStack::new()
         .spacing(8.0)
         .child(
-            TextWidget::new_literal("Tabbed details")
+            TextWidget::new(tr!(ovr_tabbed_details()))
                 .style(TextStyleRole::BodyBold)
                 .color(TextRole::TooltipText),
         )
@@ -154,17 +155,17 @@ fn interactive_composite_body() -> impl Widget + 'static {
     VStack::new()
         .spacing(8.0)
         .child(
-            TextWidget::new_literal("Treasury report")
+            TextWidget::new(tr!(ovr_treasury_report()))
                 .style(TextStyleRole::BodyBold)
                 .color(TextRole::TooltipText),
         )
         .child(
-            TextWidget::new_literal("This quarter: +423 coins")
+            TextWidget::new(tr!(ovr_treasury_subtitle()))
                 .style(TextStyleRole::Small)
                 .color(TextRole::TooltipShortcut),
         )
         .child(ProgressBar::new(0.42))
-        .child(Button::new_literal("Open ledger").on_activate_fn(|_ctx| {
+        .child(Button::new(tr!(ovr_open_ledger())).on_activate_fn(|_ctx| {
             println!("Open ledger pressed from inside a composite tooltip!");
         }))
 }
@@ -180,33 +181,31 @@ fn cascade_composite_column() -> impl Widget + 'static {
             VStack::new()
                 .spacing(8.0)
                 .child(
-                    TextWidget::new_literal("Composite tooltips")
+                    TextWidget::new(tr!(ovr_composite_tooltips_heading()))
                         .style(TextStyleRole::BodyBold)
                         .color(TextRole::Primary),
                 )
                 .child(
-                    TextWidget::new_literal("(arbitrary widget tree, CK3-style)")
+                    TextWidget::new(tr!(ovr_composite_tooltips_subtitle()))
                         .style(TextStyleRole::Small)
                         .color(TextRole::Secondary),
                 )
                 .child(
-                    Button::new_literal("Province info")
+                    Button::new(tr!(ovr_province_info_btn()))
                         .composite_tooltip(province_composite_body()),
                 )
                 .child(
-                    Button::new_literal("Tabbed details")
+                    Button::new(tr!(ovr_tabbed_details()))
                         .composite_tooltip(tabbed_composite_body()),
                 )
                 .child(
-                    Button::new_literal("With internal Button")
+                    Button::new(tr!(ovr_with_internal_button()))
                         .composite_tooltip(interactive_composite_body()),
                 )
                 .child(
-                    TextWidget::new_literal(
-                        "Tip: dwell ~2 s, then Tab into the surface, then activate the inner Button.",
-                    )
-                    .style(TextStyleRole::Tiny)
-                    .color(TextRole::Secondary),
+                    TextWidget::new(tr!(ovr_composite_dwell_tip()))
+                        .style(TextStyleRole::Tiny)
+                        .color(TextRole::Secondary),
                 ),
         )
 }
@@ -254,14 +253,10 @@ pub fn refs() -> LocalizedString {
 
 pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
-    let tooltip = section(
-        ctx,
-        "Tooltip — plain / rich / composite (3-tier cascade)",
-        cascade_showcase(),
-    );
+    let tooltip = section(ctx, tr!(ovr_section_tooltip_cascade()), cascade_showcase());
     let popover = section(
         ctx,
-        "Popover (standalone)",
+        tr!(ovr_section_popover()),
         Popover::new(tr!(ovr_popover_anchor())).content(
             VStack::new()
                 .spacing(4.0)
@@ -283,10 +278,10 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     .buttons(MessageBoxButtons::Ok),
             );
         });
-    let dialog = section(ctx, "Dialog (via MessageBox)", dialog_btn);
+    let dialog = section(ctx, tr!(ovr_section_dialog()), dialog_btn);
     let messagebox = section(
         ctx,
-        "MessageBox — severity variants",
+        tr!(ovr_section_messagebox()),
         HStack::new()
             .spacing(8.0)
             .child(
@@ -336,18 +331,21 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let snackbar = section(
         ctx,
-        "Snackbar",
+        lit!("Snackbar"),
         Snackbar::new(tr!(overlays_file_saved_successfully()))
             .content(
+                // The snackbar surface is the dark `tooltip_bg`, so content
+                // text must use `TooltipText` to stay legible in light theme.
                 TextWidget::new(tr!(overlays_file_saved_successfully_2()))
-                    .style(TextStyleRole::Body),
+                    .style(TextStyleRole::Body)
+                    .color(TextRole::TooltipText),
             )
             .trigger(Button::new(tr!(overlays_show_snackbar())).variant(ButtonVariant::Filled))
             .auto_dismiss_after(std::time::Duration::from_secs(3)),
     );
     let shadow = section(
         ctx,
-        "Shadow (visual primitive)",
+        tr!(ovr_section_shadow()),
         Panel::new()
             .background(SurfaceRole::Raised)
             .padding(16.0)
@@ -391,8 +389,10 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let snackbar_widget = ctx.add(
         Snackbar::new(tr!(overlays_file_saved_successfully()))
             .content(
+                // Dark `tooltip_bg` surface — content text needs `TooltipText`.
                 TextWidget::new(tr!(overlays_file_saved_successfully_2()))
-                    .style(TextStyleRole::Body),
+                    .style(TextStyleRole::Body)
+                    .color(TextRole::TooltipText),
             )
             .trigger(Button::new(tr!(overlays_show_snackbar())).variant(ButtonVariant::Filled))
             .auto_dismiss_after(Duration::from_secs(3)),
@@ -415,7 +415,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Tooltip — plain / rich / composite (3-tier cascade)") {
+                TextWidget::new(tr!(ovr_section_tooltip_cascade())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -441,7 +441,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Popover (standalone)") {
+                TextWidget::new(tr!(ovr_section_popover())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -450,7 +450,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Dialog (via MessageBox)") {
+                TextWidget::new(tr!(ovr_section_dialog())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -468,7 +468,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("MessageBox — severity variants") {
+                TextWidget::new(tr!(ovr_section_messagebox())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -519,7 +519,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Snackbar") {
+                TextWidget::new(lit!("Snackbar")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -528,7 +528,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Shadow (visual primitive)") {
+                TextWidget::new(tr!(ovr_section_shadow())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

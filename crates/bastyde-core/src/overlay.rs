@@ -254,6 +254,14 @@ impl std::fmt::Debug for ActiveOverlay {
     }
 }
 
+/// Maximum overlay nesting depth. Bounds runaway cascades: a rich-tooltip
+/// `[label](:key)` link loop (A→B→A) keeps minting fresh nested overlays
+/// (and dormant widgets) on each hop with no natural ceiling. A real
+/// menu-submenu or tooltip cascade never gets close to this — once a new
+/// overlay would exceed it, `OverlayManager::show*` drops the request
+/// instead of growing the stack without bound.
+pub(crate) const MAX_OVERLAY_NESTING_DEPTH: usize = 12;
+
 /// Manages the overlay stack — creation, positioning, dismissal, cascading.
 pub struct OverlayManager {
     pub(crate) stack: Vec<ActiveOverlay>,
@@ -320,6 +328,18 @@ impl OverlayManager {
     ) -> OverlayId {
         let id = OverlayId::new(self.next_id);
         self.next_id += 1;
+
+        // Bound cascade depth — see `MAX_OVERLAY_NESTING_DEPTH`. If this
+        // overlay would nest deeper than the cap, drop it silently: don't
+        // push, and return the (now unused) id so callers' follow-ups
+        // (`set_shown_at_sim`, `set_top_focus_restore`) safely no-op on
+        // the absent overlay. This is reachable by degenerate-but-real
+        // user action (a cyclic tooltip `:key` cascade), so it must not
+        // panic — graceful drop is the whole point.
+        if self.ancestor_depth(request.parent_overlay) >= MAX_OVERLAY_NESTING_DEPTH {
+            return id;
+        }
+
         let now = std::time::Instant::now();
 
         let overlay = ActiveOverlay {
@@ -441,6 +461,30 @@ impl OverlayManager {
         if let Some(overlay) = self.stack.iter_mut().find(|overlay| overlay.id == id) {
             overlay.shown_at_sim = shown_at_sim;
         }
+    }
+
+    /// Count the ancestor chain length for an overlay whose parent is
+    /// `parent` — i.e. the nesting depth the *new* overlay would have.
+    /// A root (`parent == None`) is depth 0; a child of a root is depth
+    /// 1; and so on. The walk is bounded by the stack length so a
+    /// malformed parent cycle can't loop forever.
+    fn ancestor_depth(&self, parent: Option<OverlayId>) -> usize {
+        let mut depth = 0;
+        let mut current = parent;
+        while let Some(p) = current {
+            depth += 1;
+            if depth > self.stack.len() {
+                // Defensive: malformed parent cycle. Report a depth that
+                // trips the guard rather than spinning.
+                break;
+            }
+            current = self
+                .stack
+                .iter()
+                .find(|overlay| overlay.id == p)
+                .and_then(|overlay| overlay.parent_overlay);
+        }
+        depth
     }
 
     pub(crate) fn is_descendant_of(&self, child: OverlayId, ancestor: OverlayId) -> bool {
@@ -981,9 +1025,18 @@ impl OverlayManager {
                         let above_y = anchor.y - content_size.height - offset.y - 4.0;
                         above_y.max(0.0)
                     };
-                    // Clamp horizontally so the content stays in view
-                    // when the anchor is near the leading/trailing edge.
-                    let x = (anchor.x + offset.x).min(vw - content_size.width).max(0.0);
+                    // Horizontal anchoring is direction-aware: LTR aligns
+                    // the content's leading (left) edge to the anchor's
+                    // left edge + offset; RTL mirrors it, aligning the
+                    // content's trailing (right) edge to the anchor's
+                    // right edge - offset. The clamp then keeps it in view
+                    // when the anchor is near a viewport edge.
+                    let unclamped_x = if rtl {
+                        anchor.x + anchor.width - content_size.width - offset.x
+                    } else {
+                        anchor.x + offset.x
+                    };
+                    let x = unclamped_x.min(vw - content_size.width).max(0.0);
                     Rect::new(x, y, content_size.width, content_size.height)
                 }
                 OverlayPlacement::Centered => Rect::new(
@@ -1192,6 +1245,66 @@ mod tests {
         // Dismissing parent cascades to child
         mgr.dismiss(parent);
         assert!(mgr.is_empty());
+    }
+
+    #[test]
+    fn cascade_depth_is_bounded() {
+        // A cyclic tooltip `:key` cascade (A→B→A) keeps minting nested
+        // overlays with no natural ceiling. `MAX_OVERLAY_NESTING_DEPTH`
+        // bounds it: once a new overlay would nest at the cap, `show`
+        // drops it rather than growing the stack forever — and must not
+        // panic, since this is reachable by real user clicking.
+        let mut mgr = OverlayManager::new();
+        let mut parent = mgr.show(OverlayRequest {
+            content_id: fake_id(100),
+            anchor: fake_id(1),
+            placement: OverlayPlacement::Below,
+            dismiss: DismissBehavior::Manual,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        // Root is depth 0; fill the chain so MAX overlays exist, the
+        // deepest at depth MAX-1.
+        for i in 1..MAX_OVERLAY_NESTING_DEPTH {
+            parent = mgr.show(OverlayRequest {
+                content_id: fake_id(100 + i as u64),
+                anchor: fake_id(1),
+                placement: OverlayPlacement::Below,
+                dismiss: DismissBehavior::Manual,
+                layer: OverlayLayer::InTree,
+                parent_overlay: Some(parent),
+                on_dismiss: None,
+                fade_duration: None,
+            });
+        }
+        assert_eq!(
+            mgr.len(),
+            MAX_OVERLAY_NESTING_DEPTH,
+            "chain should fill exactly to the cap"
+        );
+
+        // The next child would nest at depth == MAX → dropped.
+        let dropped = mgr.show(OverlayRequest {
+            content_id: fake_id(999),
+            anchor: fake_id(1),
+            placement: OverlayPlacement::Below,
+            dismiss: DismissBehavior::Manual,
+            layer: OverlayLayer::InTree,
+            parent_overlay: Some(parent),
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        assert_eq!(
+            mgr.len(),
+            MAX_OVERLAY_NESTING_DEPTH,
+            "over-cap overlay must not be pushed"
+        );
+        assert!(
+            mgr.stack.iter().all(|o| o.id != dropped),
+            "the dropped overlay id must not appear in the stack"
+        );
     }
 
     #[test]
@@ -1733,6 +1846,46 @@ mod tests {
         );
         let b = overlay_bounds(&mgr, id);
         assert_eq!((b.x, b.y), (700.0, 500.0));
+    }
+
+    #[test]
+    fn near_anchor_horizontal_is_direction_aware() {
+        // NearAnchor (used by tooltips): LTR aligns the content's leading
+        // (left) edge to the anchor's left edge; RTL mirrors it, aligning
+        // the content's trailing (right) edge to the anchor's right edge.
+        // Anchor x=600, w=100 (right edge 700); content w=200; offset 0.
+        // Viewport 800×600 — wide enough that the clamp doesn't bite.
+        let anchor = Rect::new(600.0, 100.0, 100.0, 20.0);
+        let resolved_x = |dir: LayoutDirection| {
+            let mut mgr = OverlayManager::new();
+            let id = mgr.show(OverlayRequest {
+                content_id: fake_id(10),
+                anchor: fake_id(1),
+                placement: OverlayPlacement::NearAnchor {
+                    offset: Vec2::new(0.0, 8.0),
+                },
+                dismiss: DismissBehavior::Manual,
+                layer: OverlayLayer::InTree,
+                parent_overlay: None,
+                on_dismiss: None,
+                fade_duration: None,
+            });
+            mgr.set_content_bounds(id, Size::new(200.0, 50.0));
+            mgr.position_overlays(|_| Some(anchor), (800.0, 600.0), dir);
+            overlay_bounds(&mgr, id).x
+        };
+        // LTR: anchor.x + offset.x = 600.
+        assert!(
+            (resolved_x(LayoutDirection::LeftToRight) - 600.0).abs() < 0.01,
+            "LTR x = {}",
+            resolved_x(LayoutDirection::LeftToRight)
+        );
+        // RTL: anchor.x + anchor.width - content.w - offset.x = 500.
+        assert!(
+            (resolved_x(LayoutDirection::RightToLeft) - 500.0).abs() < 0.01,
+            "RTL x = {}",
+            resolved_x(LayoutDirection::RightToLeft)
+        );
     }
 
     // --- Auto-dismiss pause / resume ---

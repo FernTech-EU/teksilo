@@ -18,8 +18,10 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_core::widget_tree::WidgetTree;
 use bastyde_data::{ListModel, SelectionMode, SelectionModel};
+use bastyde_i18n::lit;
 
 use super::{CellContext, Column, ColumnWidth, SortDirection, TableSelectionMode, TableView};
+use crate::OverscrollBehavior;
 use crate::primitives::TextWidget;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -40,15 +42,15 @@ fn rows(n: u32) -> ListModel<Row> {
 }
 
 fn id_col() -> Column<Row> {
-    Column::<Row>::new("id", "ID", |row, _: &CellContext| {
-        Box::new(TextWidget::new_literal(row.id.to_string()))
+    Column::<Row>::new("id", lit!("ID"), |row, _: &CellContext| {
+        Box::new(TextWidget::new(lit!(row.id.to_string())))
     })
     .width(ColumnWidth::Fixed(60.0))
 }
 
 fn name_col() -> Column<Row> {
-    Column::<Row>::new("name", "Name", |row, _: &CellContext| {
-        Box::new(TextWidget::new_literal(row.name.clone()))
+    Column::<Row>::new("name", lit!("Name"), |row, _: &CellContext| {
+        Box::new(TextWidget::new(lit!(row.name.clone())))
     })
     .width(ColumnWidth::Flex(1.0))
 }
@@ -291,7 +293,7 @@ fn root_role_is_table_with_row_and_col_count() {
     let row_count = count_role(&tree, table, Role::Row);
     let header_count = count_role(&tree, table, Role::ColumnHeader);
     let cell_count = count_role(&tree, table, Role::Cell);
-    // Phase 3: header is on by default. Each body row carries 2
+    // Header is on by default. Each body row carries 2
     // `Role::Cell` children; the header row carries 2 `Role::ColumnHeader`
     // children. row_count includes the header row.
     assert!(row_count >= 2);
@@ -372,7 +374,7 @@ fn cells_carry_role_cell_under_row() {
     );
 }
 
-// ── Header / Sort / Resize (Phase 3) ───────────────────────────────────────
+// ── Header / Sort / Resize ─────────────────────────────────────────────────
 
 #[test]
 fn header_strip_renders_one_column_header_per_column() {
@@ -556,7 +558,7 @@ fn header_row_carries_role_row_with_index_one() {
     );
 }
 
-// ── Reorder + pinned-side (Phase 4) ────────────────────────────────────────
+// ── Reorder + pinned-side ──────────────────────────────────────────────────
 
 #[test]
 fn declared_order_is_default_display_order() {
@@ -579,10 +581,8 @@ fn pinned_leading_moves_to_front() {
             // Declaration: id, name. Trailing-pinned `id` should still
             // visually trail name once we mark it Trailing.
             .add_column(
-                Column::<Row>::new("id", "ID", |row, _: &CellContext| {
-                    Box::new(crate::primitives::TextWidget::new_literal(
-                        row.id.to_string(),
-                    ))
+                Column::<Row>::new("id", lit!("ID"), |row, _: &CellContext| {
+                    Box::new(crate::primitives::TextWidget::new(lit!(row.id.to_string())))
                 })
                 .width(ColumnWidth::Fixed(60.0))
                 .pinned(super::PinnedSide::Trailing),
@@ -616,8 +616,8 @@ fn set_column_order_reorders_display() {
             .add_column(id_col()) // 60
             .add_column(name_col())
             .add_column(
-                Column::<Row>::new("extra", "Extra", |_row, _: &CellContext| {
-                    Box::new(crate::primitives::TextWidget::new_literal("…"))
+                Column::<Row>::new("extra", lit!("Extra"), |_row, _: &CellContext| {
+                    Box::new(crate::primitives::TextWidget::new(lit!("…")))
                 })
                 .width(ColumnWidth::Fixed(40.0)),
             )
@@ -762,7 +762,7 @@ fn unknown_column_id_in_order_signal_is_ignored() {
     assert_eq!(row_cells.len(), 2, "phantom id was skipped");
 }
 
-// ── Keyboard / focused cell / cell selection (Phase 5) ─────────────────────
+// ── Keyboard / focused cell / cell selection ───────────────────────────────
 
 use bastyde_core::event::{Key, Modifiers};
 
@@ -997,7 +997,7 @@ fn cell_selection_mode_tracks_pairs() {
     assert!(cs.is_selected(2, 1));
 }
 
-// ── Edit hooks + filter signal + row drag-drop (Phase 6) ──────────────────
+// ── Edit hooks + filter signal + row drag-drop ────────────────────────────
 
 #[test]
 fn editing_cell_signal_round_trips() {
@@ -1197,7 +1197,7 @@ fn empty_view_renders_when_no_rows() {
             .add_column(id_col())
             .add_column(name_col())
             .row_height(20.0)
-            .empty_view(|| Box::new(TextWidget::new_literal("nothing here"))),
+            .empty_view(|| Box::new(TextWidget::new(lit!("nothing here")))),
     );
     tree.layout(SizeProposal {
         width: Some(400.0),
@@ -1607,16 +1607,16 @@ fn header_resizing_works_in_full_data_grid_layout() {
     use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
 
     fn id_c() -> Column<Row> {
-        Column::<Row>::new("id", "ID", |r, _: &CellContext| {
-            Box::new(TextWidget::new_literal(r.id.to_string()))
+        Column::<Row>::new("id", lit!("ID"), |r, _: &CellContext| {
+            Box::new(TextWidget::new(lit!(r.id.to_string())))
         })
         .width(ColumnWidth::Fixed(60.0))
         .pinned(crate::table_view::column::PinnedSide::Leading)
         .sortable(true)
     }
     fn name_c() -> Column<Row> {
-        Column::<Row>::new("name", "Name", |r, _: &CellContext| {
-            Box::new(TextWidget::new_literal(r.name.clone()))
+        Column::<Row>::new("name", lit!("Name"), |r, _: &CellContext| {
+            Box::new(TextWidget::new(lit!(r.name.clone())))
         })
         .width(ColumnWidth::Flex(2.0))
         .sortable(true)
@@ -1791,7 +1791,9 @@ fn header_cells_route_through_table_style_make_header_cell() {
     // count how many `Role::ColumnHeader` AT nodes have it as their
     // first descendant.
     use bastyde_core::build_context::BuildContext;
-    use bastyde_core::styles::{TableGridRecipe, TableHeaderCellConfig, TableRowConfig, TableStyle};
+    use bastyde_core::styles::{
+        TableGridRecipe, TableHeaderCellConfig, TableRowConfig, TableStyle,
+    };
     use bastyde_core::widget_id::WidgetId;
     use std::cell::Cell;
     use std::rc::Rc;
@@ -1846,5 +1848,117 @@ fn header_cells_route_through_table_style_make_header_cell() {
         calls.get(),
         2,
         "TableStyle::make_header_cell must be called once per header cell",
+    );
+}
+
+// -- Boundary scroll chaining -----------------------------------------------
+
+/// A TableView (40 × 20px rows in a ~120px viewport) above a filler inside an
+/// outer ScrollArea, so chaining from the inner table to the outer area is
+/// observable.
+fn nested_table_fixture(inner: OverscrollBehavior) -> (WidgetTree, Signal<f32>, Signal<f32>) {
+    use crate::ScrollArea;
+    use crate::primitives::{FixedSize, VStack};
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let tv = TableView::new(rows(40))
+        .add_column(id_col())
+        .add_column(name_col())
+        .row_height(20.0)
+        .overscroll_behavior(inner);
+    let inner_y = tv.scroll_y_signal().clone();
+    let tv_id = tree.add(tv);
+    let viewport = tree.add(
+        FixedSize::new()
+            .bind_width(220.0)
+            .bind_height(120.0)
+            .child_id(tv_id),
+    );
+    let filler = tree.add(
+        FixedSize::new()
+            .bind_width(220.0)
+            .bind_height(300.0)
+            .child(TextWidget::new(lit!(""))),
+    );
+    let outer_content = tree.add(VStack::new().add_child(viewport).add_child(filler));
+    let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
+    let outer_y = outer.scroll_y_signal().clone();
+    let _outer = tree.add(outer);
+    tree.layout(SizeProposal {
+        width: Some(220.0),
+        height: Some(150.0),
+    });
+    (tree, inner_y, outer_y)
+}
+
+#[test]
+fn nested_table_chains_to_outer_at_boundary() {
+    use bastyde_canvas::Point;
+    use bastyde_core::event::{Modifiers, ScrollDelta, WidgetEvent};
+    let (mut tree, inner_y, outer_y) = nested_table_fixture(OverscrollBehavior::Chain);
+    // Pointer in the table body (below the header).
+    tree.pointer_move(Point::new(110.0, 90.0));
+    tree.dispatch_event(WidgetEvent::Scroll {
+        delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+        modifiers: Modifiers::NONE,
+    });
+    tree.layout(SizeProposal {
+        width: Some(220.0),
+        height: Some(150.0),
+    });
+    let inner_bottom = inner_y.get();
+    assert!(
+        inner_bottom > 0.0,
+        "inner table should scroll down; got {inner_bottom}"
+    );
+    assert!(
+        outer_y.get() < 0.01,
+        "outer must not move while the inner absorbs"
+    );
+
+    tree.pointer_move(Point::new(110.0, 90.0));
+    tree.dispatch_event(WidgetEvent::Scroll {
+        delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+        modifiers: Modifiers::NONE,
+    });
+    tree.layout(SizeProposal {
+        width: Some(220.0),
+        height: Some(150.0),
+    });
+    assert!(
+        (inner_y.get() - inner_bottom).abs() < 0.01,
+        "inner stays clamped at bottom"
+    );
+    assert!(
+        outer_y.get() > 0.01,
+        "outer scrolled because the inner chained the boundary"
+    );
+}
+
+#[test]
+fn nested_table_contain_blocks_chaining() {
+    use bastyde_canvas::Point;
+    use bastyde_core::event::{Modifiers, ScrollDelta, WidgetEvent};
+    let (mut tree, _inner_y, outer_y) = nested_table_fixture(OverscrollBehavior::Contain);
+    tree.pointer_move(Point::new(110.0, 90.0));
+    tree.dispatch_event(WidgetEvent::Scroll {
+        delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+        modifiers: Modifiers::NONE,
+    });
+    tree.layout(SizeProposal {
+        width: Some(220.0),
+        height: Some(150.0),
+    });
+    tree.pointer_move(Point::new(110.0, 90.0));
+    tree.dispatch_event(WidgetEvent::Scroll {
+        delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+        modifiers: Modifiers::NONE,
+    });
+    tree.layout(SizeProposal {
+        width: Some(220.0),
+        height: Some(150.0),
+    });
+    assert!(
+        outer_y.get() < 0.01,
+        "Contain must prevent chaining: outer stays put"
     );
 }

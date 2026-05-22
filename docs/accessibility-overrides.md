@@ -43,13 +43,13 @@ Naming: `.access_*` prefix throughout. Three tiers by frequency of use.
 | Method | Sets | Notes |
 |---|---|---|
 | `.access_label(s)` | `Node::label` | What screen readers announce. Replaces widget-emitted name. |
-| `.access_label_literal(s)` | same | `#[doc(hidden)]` grep marker for explicitly untranslated strings. |
+| `.access_label(lit!(s))` | same | `#[doc(hidden)]` grep marker for explicitly untranslated strings. |
 | `.access_description(s)` | `Node::description` | Long-form context. |
-| `.access_description_literal(s)` | same | `#[doc(hidden)]` grep marker. |
+| `.access_description(lit!(s))` | same | `#[doc(hidden)]` grep marker. |
 | `.access_hint(s)` | `Node::description` | Alias for `access_description` (SwiftUI parity — AccessKit has no separate hint slot). |
-| `.access_hint_literal(s)` | same | `#[doc(hidden)]` grep marker. |
+| `.access_hint(lit!(s))` | same | `#[doc(hidden)]` grep marker. |
 | `.access_value(s)` | `Node::value` | Current value (sliders, spin boxes, text input). |
-| `.access_value_literal(s)` | same | `#[doc(hidden)]` grep marker. |
+| `.access_value(lit!(s))` | same | `#[doc(hidden)]` grep marker. |
 | `.access_role(role)` | `Node::role` | Replace widget-emitted role. |
 | `.access_hidden(bool)` | `Node::hidden` flag | `true` hides from AT, `false` un-hides (clears even widget-emitted hidden). |
 | `.access_disabled(bool)` | `Node::disabled` flag | `true` marks disabled, `false` clears even arena-driven disabled. |
@@ -80,7 +80,7 @@ Naming: `.access_*` prefix throughout. Three tiers by frequency of use.
 | `.access_action(action, handler)` | Advertise an AT action AND register a callback. |
 | `.access_remove_action(action)` | Suppress an action the widget emitted. |
 | `.access_custom_action(label, handler)` | SwiftUI `accessibilityAction(named:)` — appears in VoiceOver's Actions rotor. |
-| `.access_custom_action_literal(label, handler)` | `#[doc(hidden)]` grep marker. |
+| `.access_custom_action(lit!(label), handler)` | `#[doc(hidden)]` grep marker. |
 | `.access_shortcut_literal(s)` | Pre-formatted chord string (`"Ctrl+S"`). |
 | `.access_shortcut_id(id)` | Bind to a registered `Shortcut` id; tracks user rebinds. |
 | `.access_customize(\|builder\| ...)` | Final escape hatch — runs last, full `&mut AccessNodeBuilder` access. |
@@ -102,9 +102,9 @@ Keep the parent in the AT tree, prune all descendants. Equivalent to Flutter's `
 ```rust
 HStack::new()
     .child(IconWidget::from_svg_icon(logo_icon))
-    .child(TextWidget::new_literal("Bastyde"))
-    .child(TextWidget::new_literal("Pure-Rust GUI"))
-    .access_label_literal("Bastyde logo")
+    .child(TextWidget::new(lit!("Bastyde")))
+    .child(TextWidget::new(lit!("Pure-Rust GUI")))
+    .access_label(lit!("Bastyde logo"))
     .access_exclude_subtree();
 ```
 
@@ -118,9 +118,9 @@ Keep the parent, but **lift descendants' a11y info into the parent** before prun
 
 ```rust
 Card::new()
-    .child(TextWidget::new_literal("New message"))
-    .child(TextWidget::new_literal("From Alice"))
-    .child(TextWidget::new_literal("Hey, are we still on for…"))
+    .child(TextWidget::new(lit!("New message")))
+    .child(TextWidget::new(lit!("From Alice")))
+    .child(TextWidget::new(lit!("Hey, are we still on for…")))
     .access_merge_subtree();
 ```
 
@@ -239,7 +239,7 @@ See [shortcut-intent-action.md](shortcut-intent-action.md) for the full Shortcut
 
 ## Internationalization
 
-User-visible string methods (`access_label`, `access_description`, `access_hint`, `access_value`, `access_custom_action`) accept `impl Into<String>`. With the `i18n` feature enabled, [`bastyde_i18n::LocalizedString`](../crates/bastyde-i18n/src/localized_string.rs) (the type produced by `tr!(...)`) implements `From<LocalizedString> for String`, so:
+User-visible string methods (`access_label`, `access_description`, `access_hint`, `access_value`, `access_custom_action`) accept `impl Into<Prop<String>>`. With the `i18n` feature enabled, [`bastyde_i18n::LocalizedString`](../crates/bastyde-i18n/src/localized_string.rs) (the type produced by `tr!(...)`) implements `From<LocalizedString> for Prop<String>`, so:
 
 ```rust
 button
@@ -248,9 +248,9 @@ button
     .access_custom_action(tr!(publish_now()), |ctx| ctx.send_intent(AppIntent::Publish));
 ```
 
-flows through unchanged. Translation is resolved eagerly at builder time. Locale changes rebuild the composite, which re-runs the builder chain and stores the new translation. Same model as `Button::new(impl Into<LocalizedString>)`.
+flows through unchanged. The user-visible string overrides (`access_label`, `access_description`, `access_hint`, `access_value`, `access_custom_action`) take `impl Into<Prop<String>>` and store a `Prop<String>`, so `tr!(...)` stays **locale-reactive**: the accessibility tree re-walks on a locale change and re-resolves the announced value — no composite rebuild required. (`AccessibilityOverrides` lives in `bastyde-core`, which can't name `LocalizedString`; the bridge is `From<LocalizedString> for Prop<String>`.)
 
-The `_literal` twins (`access_label_literal`, etc.) are `#[doc(hidden)]` grep markers for explicitly-untranslated call sites. Same convention as `Button::new_literal`/`tooltip_literal`. Use literal variants in tests, demo scaffolding, and any string the app explicitly does not translate.
+For explicitly-untranslated AT strings, wrap with `lit!(...)` — `access_label(lit!("Debug"))`. A bare `&str` no longer compiles (it doesn't convert to `Prop<String>`), so the marker is mandatory. The `#[doc(hidden)]` `_literal` twins (`access_label_literal`, etc.) remain only as the literal path reachable from inside `bastyde-core` itself (where `lit!` isn't available); application code uses `lit!`.
 
 ---
 
@@ -325,7 +325,7 @@ use bastyde::core::accesskit::{Action, Role, HasPopup};
 
 // Scalar override
 let mut tree = WidgetTree::new();
-let id = tree.add(MyWidget.access_label_literal("Publish"));
+let id = tree.add(MyWidget.access_label(lit!("Publish")));
 tree.layout(SizeProposal::exact(100.0, 40.0));
 assert_eq!(tree.accessibility_node(id).name(), Some("Publish"));
 
@@ -365,7 +365,7 @@ let node = find_node(&tree.sync_accessibility(), id).unwrap();
 assert_eq!(node.keyboard_shortcut(), Some("Ctrl+Q"));
 ```
 
-The 54 in-crate tests at [`crates/bastyde-core/src/widget_tree/accessibility_impl.rs`](../crates/bastyde-core/src/widget_tree/accessibility_impl.rs) cover every method in this reference, including all subtree-mode edge cases (nested Exclude-in-Merge, Merge-in-Merge), action-callback layering with `on_access_action`, custom-action dispatch by index, state-clearing for both hidden and disabled, and the `i18n` `Into<String>` conversion path.
+The 54 in-crate tests at [`crates/bastyde-core/src/widget_tree/accessibility_impl.rs`](../crates/bastyde-core/src/widget_tree/accessibility_impl.rs) cover every method in this reference, including all subtree-mode edge cases (nested Exclude-in-Merge, Merge-in-Merge), action-callback layering with `on_access_action`, custom-action dispatch by index, state-clearing for both hidden and disabled, and the `i18n` `Into<Prop<String>>` conversion path (with locale-reactive re-walk covered by an integration test in `bastyde-app`).
 
 ---
 

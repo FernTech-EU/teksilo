@@ -1,3 +1,4 @@
+use bastyde_i18n::lit;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -28,31 +29,24 @@ type WizardAction = Rc<dyn Fn(&mut EventContext)>;
 
 #[derive(Clone)]
 struct WizardStepInfo {
-    title: String,
-    supporting_text: Option<String>,
+    title: bastyde_i18n::LocalizedString,
+    supporting_text: Option<bastyde_i18n::LocalizedString>,
 }
 
 #[derive(Clone)]
 pub struct WizardStep {
-    title: String,
-    supporting_text: Option<String>,
+    title: bastyde_i18n::LocalizedString,
+    supporting_text: Option<bastyde_i18n::LocalizedString>,
     content_factory: Option<WizardStepFactory>,
 }
 
 impl WizardStep {
     pub fn new(title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = title.into();
         Self {
-            title: ls.resolve_now(),
+            title: title.into(),
             supporting_text: None,
             content_factory: None,
         }
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw title in `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(title: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(title))
     }
 
     pub fn content<W, F>(mut self, factory: F) -> Self
@@ -65,14 +59,6 @@ impl WizardStep {
     }
 
     pub fn supporting_text(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
-        self.supporting_text = Some(ls.resolve_now());
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `supporting_text(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn supporting_text_literal(mut self, text: impl Into<String>) -> Self {
         self.supporting_text = Some(text.into());
         self
     }
@@ -96,15 +82,15 @@ impl std::fmt::Debug for WizardStep {
 
 fn queue_wizard_request(
     ctx: &mut EventContext,
-    label: &str,
+    label: &bastyde_i18n::LocalizedString,
     steps: &[WizardStep],
     presentation: ModalPresentation,
     close_behavior: ModalCloseBehavior,
     size: (u32, u32),
-    back_label: &str,
-    cancel_label: &str,
-    next_label: &str,
-    finish_label: &str,
+    back_label: &bastyde_i18n::LocalizedString,
+    cancel_label: &bastyde_i18n::LocalizedString,
+    next_label: &bastyde_i18n::LocalizedString,
+    finish_label: &bastyde_i18n::LocalizedString,
     finish_action: Option<&WizardAction>,
 ) {
     if steps.is_empty() {
@@ -112,10 +98,10 @@ fn queue_wizard_request(
     }
 
     let steps = steps.to_vec();
-    let back_label = back_label.to_string();
-    let cancel_label = cancel_label.to_string();
-    let next_label = next_label.to_string();
-    let finish_label = finish_label.to_string();
+    let back_label = back_label.clone();
+    let cancel_label = cancel_label.clone();
+    let next_label = next_label.clone();
+    let finish_label = finish_label.clone();
     let finish_action = finish_action.cloned();
 
     ctx.present_modal(
@@ -131,7 +117,7 @@ fn queue_wizard_request(
         })
         .presentation(presentation)
         .close_behavior(close_behavior)
-        .title(label)
+        .title(label.resolve_now())
         .size(size.0, size.1),
     );
 }
@@ -169,43 +155,48 @@ impl Widget for WizardHeader {
             let steps = steps.clone();
             move |index| format!("Step {} of {}", *index + 1, steps.len())
         });
-        let title = current_step.map({
+        // Zip the step index with the locale signal so the resolved
+        // title / supporting text re-derive on BOTH a step change AND a
+        // locale switch (the steps hold `LocalizedString`; resolving
+        // inside `map` keeps the bound text widgets locale-reactive).
+        let locale = ctx.locale_signal();
+        let title = current_step.zip(&locale).map({
             let steps = steps.clone();
-            move |index| {
+            move |pair| {
                 steps
-                    .get(*index)
-                    .map(|step| step.title.clone())
+                    .get(pair.0)
+                    .map(|step| step.title.resolve_now())
                     .unwrap_or_default()
             }
         });
-        let supporting_text = current_step.map({
+        let supporting_text = current_step.zip(&locale).map({
             let steps = steps.clone();
-            move |index| {
+            move |pair| {
                 steps
-                    .get(*index)
-                    .and_then(|step| step.supporting_text.clone())
+                    .get(pair.0)
+                    .and_then(|step| step.supporting_text.as_ref().map(|t| t.resolve_now()))
                     .unwrap_or_default()
             }
         });
-        let show_supporting = current_step.map({
+        let show_supporting = current_step.zip(&locale).map({
             let steps = steps.clone();
-            move |index| {
+            move |pair| {
                 steps
-                    .get(*index)
+                    .get(pair.0)
                     .and_then(|step| step.supporting_text.as_ref())
-                    .is_some_and(|text| !text.is_empty())
+                    .is_some_and(|text| !text.resolve_now().is_empty())
             }
         });
 
         let progress_id = ctx.add(
-            TextWidget::new_literal("")
+            TextWidget::new(lit!(""))
                 .bind_text(progress)
                 .style(TextStyleRole::Small)
                 .color(TextRole::Secondary)
                 .single_line(),
         );
         let title_id = ctx.add(
-            TextWidget::new_literal("")
+            TextWidget::new(lit!(""))
                 .bind_text(title)
                 .style(TextStyleRole::BodyBold)
                 .color(TextRole::Primary)
@@ -214,7 +205,7 @@ impl Widget for WizardHeader {
         // `supporting_text` wraps naturally — it's the caller's
         // explanatory paragraph.
         let supporting_id = ctx.add(
-            TextWidget::new_literal("")
+            TextWidget::new(lit!(""))
                 .bind_text(supporting_text)
                 .style(TextStyleRole::Body)
                 .color(TextRole::Secondary),
@@ -283,10 +274,10 @@ impl Widget for WizardHeader {
 struct WizardFooter {
     current_step: Signal<usize>,
     total_steps: usize,
-    back_label: String,
-    cancel_label: String,
-    next_label: String,
-    finish_label: String,
+    back_label: bastyde_i18n::LocalizedString,
+    cancel_label: bastyde_i18n::LocalizedString,
+    next_label: bastyde_i18n::LocalizedString,
+    finish_label: bastyde_i18n::LocalizedString,
     finish_action: Option<WizardAction>,
     root_child_id: Option<WidgetId>,
     back_button_id: Option<WidgetId>,
@@ -298,10 +289,10 @@ impl WizardFooter {
     fn new(
         current_step: Signal<usize>,
         total_steps: usize,
-        back_label: String,
-        cancel_label: String,
-        next_label: String,
-        finish_label: String,
+        back_label: bastyde_i18n::LocalizedString,
+        cancel_label: bastyde_i18n::LocalizedString,
+        next_label: bastyde_i18n::LocalizedString,
+        finish_label: bastyde_i18n::LocalizedString,
         finish_action: Option<WizardAction>,
     ) -> Self {
         Self {
@@ -341,7 +332,7 @@ impl Widget for WizardFooter {
             let finish_focus_id = Rc::new(RefCell::new(None));
 
             let back_id = ctx.add(
-                Button::new_literal(self.back_label.clone())
+                Button::new(self.back_label.clone())
                     .variant(ButtonVariant::Plain)
                     .on_activate_fn({
                         let current_step = current_step.clone();
@@ -360,13 +351,13 @@ impl Widget for WizardFooter {
             );
 
             let cancel_id = ctx.add(
-                Button::new_literal(self.cancel_label.clone())
+                Button::new(self.cancel_label.clone())
                     .variant(ButtonVariant::Ghost)
                     .on_activate_fn(|ctx| ctx.dismiss_modal()),
             );
 
             let next_id = ctx.add(
-                Button::new_literal(self.next_label.clone())
+                Button::new(self.next_label.clone())
                     .variant(ButtonVariant::Filled)
                     .on_activate_fn({
                         let current_step = current_step.clone();
@@ -393,7 +384,7 @@ impl Widget for WizardFooter {
 
             let finish_action = self.finish_action.clone();
             let finish_id = ctx.add(
-                Button::new_literal(self.finish_label.clone())
+                Button::new(self.finish_label.clone())
                     .variant(ButtonVariant::Filled)
                     .on_activate_fn(move |ctx| {
                         if let Some(action) = &finish_action {
@@ -471,10 +462,10 @@ impl Widget for WizardFooter {
 struct WizardFlow {
     steps: Vec<WizardStep>,
     current_step: Signal<usize>,
-    back_label: String,
-    cancel_label: String,
-    next_label: String,
-    finish_label: String,
+    back_label: bastyde_i18n::LocalizedString,
+    cancel_label: bastyde_i18n::LocalizedString,
+    next_label: bastyde_i18n::LocalizedString,
+    finish_label: bastyde_i18n::LocalizedString,
     finish_action: Option<WizardAction>,
     root_child_id: Option<WidgetId>,
 }
@@ -482,10 +473,10 @@ struct WizardFlow {
 impl WizardFlow {
     fn new(
         steps: Vec<WizardStep>,
-        back_label: String,
-        cancel_label: String,
-        next_label: String,
-        finish_label: String,
+        back_label: bastyde_i18n::LocalizedString,
+        cancel_label: bastyde_i18n::LocalizedString,
+        next_label: bastyde_i18n::LocalizedString,
+        finish_label: bastyde_i18n::LocalizedString,
         finish_action: Option<WizardAction>,
     ) -> Self {
         Self {
@@ -520,7 +511,7 @@ impl Widget for WizardFlow {
             let factory = step.content_factory.as_ref().unwrap_or_else(|| {
                 panic!(
                     "WizardStep \"{}\" requires .content(...) — no content factory was set",
-                    step.title
+                    step.title.resolve_now()
                 )
             });
             switcher = switcher.child_boxed(factory());
@@ -586,17 +577,17 @@ impl Widget for WizardFlow {
 }
 
 pub struct Wizard {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     variant: ButtonVariant,
     enabled: bool,
     presentation: ModalPresentation,
     close_behavior: ModalCloseBehavior,
     size: (u32, u32),
     steps: Vec<WizardStep>,
-    back_label: String,
-    cancel_label: String,
-    next_label: String,
-    finish_label: String,
+    back_label: bastyde_i18n::LocalizedString,
+    cancel_label: bastyde_i18n::LocalizedString,
+    next_label: bastyde_i18n::LocalizedString,
+    finish_label: bastyde_i18n::LocalizedString,
     finish_action: Option<WizardAction>,
     pending_trigger: Option<Box<dyn Widget>>,
     root_child_id: Option<WidgetId>,
@@ -604,29 +595,22 @@ pub struct Wizard {
 
 impl Wizard {
     pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: label.into(),
             variant: ButtonVariant::Filled,
             enabled: true,
             presentation: ModalPresentation::Auto,
             close_behavior: ModalCloseBehavior::Manual,
             size: (DEFAULT_WIZARD_WIDTH, DEFAULT_WIZARD_HEIGHT),
             steps: Vec::new(),
-            back_label: DEFAULT_BACK_LABEL.to_string(),
-            cancel_label: DEFAULT_CANCEL_LABEL.to_string(),
-            next_label: DEFAULT_NEXT_LABEL.to_string(),
-            finish_label: DEFAULT_FINISH_LABEL.to_string(),
+            back_label: lit!(DEFAULT_BACK_LABEL),
+            cancel_label: lit!(DEFAULT_CANCEL_LABEL),
+            next_label: lit!(DEFAULT_NEXT_LABEL),
+            finish_label: lit!(DEFAULT_FINISH_LABEL),
             finish_action: None,
             pending_trigger: None,
             root_child_id: None,
         }
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(label))
     }
 
     pub fn step(mut self, step: WizardStep) -> Self {
@@ -665,53 +649,21 @@ impl Wizard {
     }
 
     pub fn back_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
-        self.back_label = ls.resolve_now();
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `back_label(...)`.
-    #[doc(hidden)]
-    pub fn back_label_literal(mut self, label: impl Into<String>) -> Self {
         self.back_label = label.into();
         self
     }
 
     pub fn cancel_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
-        self.cancel_label = ls.resolve_now();
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `cancel_label(...)`.
-    #[doc(hidden)]
-    pub fn cancel_label_literal(mut self, label: impl Into<String>) -> Self {
         self.cancel_label = label.into();
         self
     }
 
     pub fn next_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
-        self.next_label = ls.resolve_now();
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `next_label(...)`.
-    #[doc(hidden)]
-    pub fn next_label_literal(mut self, label: impl Into<String>) -> Self {
         self.next_label = label.into();
         self
     }
 
     pub fn finish_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
-        self.finish_label = ls.resolve_now();
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `finish_label(...)`.
-    #[doc(hidden)]
-    pub fn finish_label_literal(mut self, label: impl Into<String>) -> Self {
         self.finish_label = label.into();
         self
     }
@@ -851,7 +803,7 @@ impl Widget for Wizard {
             )
         } else {
             ctx.add(
-                Button::new_literal(self.label.clone())
+                Button::new(self.label.clone())
                     .variant(style)
                     .enabled(enabled)
                     .on_activate_fn({
@@ -946,8 +898,8 @@ mod tests {
     fn wizard_queues_modal_request() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(
-            Wizard::new_literal("Open wizard")
-                .step(WizardStep::new_literal("Details").content(|| FixedLeaf(220.0, 120.0))),
+            Wizard::new(lit!("Open wizard"))
+                .step(WizardStep::new(lit!("Details")).content(|| FixedLeaf(220.0, 120.0))),
         );
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -983,9 +935,9 @@ mod tests {
     fn wizard_with_button_trigger_queues_modal_on_tap() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
         tree.add(
-            Wizard::new_literal("Open wizard")
-                .trigger(Button::new_literal("Launch"))
-                .step(WizardStep::new_literal("Details").content(|| FixedLeaf(220.0, 120.0))),
+            Wizard::new(lit!("Open wizard"))
+                .trigger(Button::new(lit!("Launch")))
+                .step(WizardStep::new(lit!("Details")).content(|| FixedLeaf(220.0, 120.0))),
         );
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -1006,19 +958,16 @@ mod tests {
         let finished_flag = finished.clone();
 
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let trigger = tree.add(Button::new_literal("Anchor"));
+        let trigger = tree.add(Button::new(lit!("Anchor")));
         tree.add(
-            Wizard::new_literal("Launch")
+            Wizard::new(lit!("Launch"))
                 .step(
-                    WizardStep::new_literal("Account")
-                        .content(|| Button::new_literal("Account field"))
-                        .supporting_text_literal("Enter the account details before continuing."),
+                    WizardStep::new(lit!("Account"))
+                        .content(|| Button::new(lit!("Account field")))
+                        .supporting_text(lit!("Enter the account details before continuing.")),
                 )
-                .step(
-                    WizardStep::new_literal("Review")
-                        .content(|| Button::new_literal("Review field")),
-                )
-                .finish_label_literal("Create")
+                .step(WizardStep::new(lit!("Review")).content(|| Button::new(lit!("Review field"))))
+                .finish_label(lit!("Create"))
                 .on_finish(move |_ctx| {
                     *finished_flag.borrow_mut() = true;
                 }),
@@ -1081,7 +1030,7 @@ mod tests {
     #[should_panic(expected = "requires .content(...)")]
     fn wizard_step_without_content_panics_on_modal_build() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(Wizard::new_literal("Open wizard").step(WizardStep::new_literal("Details")));
+        tree.add(Wizard::new(lit!("Open wizard")).step(WizardStep::new(lit!("Details"))));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open wizard").unwrap();

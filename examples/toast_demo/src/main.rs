@@ -52,54 +52,54 @@ fn toolbar(next_id: Rc<Cell<usize>>, upload_handle: Rc<Cell<Option<ToastHandle>>
     Toolbar::new().child(
         HStack::new()
             .spacing(6.0)
-            .child(Button::new_literal("Info").on_activate_fn(move |ctx| {
+            .child(Button::new(lit!("Info")).on_activate_fn(move |ctx| {
                 let i = bump(&n0);
-                ctx.show_toast(Toast::info_literal(format!("Info notice #{i}")));
+                ctx.show_toast(Toast::info(lit!(format!("Info notice #{i}"))));
             }))
-            .child(Button::new_literal("Success").on_activate_fn(move |ctx| {
+            .child(Button::new(lit!("Success")).on_activate_fn(move |ctx| {
                 let i = bump(&n1);
-                ctx.show_toast(Toast::success_literal(format!("Saved #{i}")));
+                ctx.show_toast(Toast::success(lit!(format!("Saved #{i}"))));
             }))
-            .child(Button::new_literal("Warning").on_activate_fn(move |ctx| {
+            .child(Button::new(lit!("Warning")).on_activate_fn(move |ctx| {
                 let i = bump(&n2);
                 ctx.show_toast(
-                    Toast::warning_literal(format!("Warning #{i}"))
-                        .body_literal("Take a look when you have a moment."),
+                    Toast::warning(lit!(format!("Warning #{i}")))
+                        .body(lit!("Take a look when you have a moment.")),
                 );
             }))
-            .child(Button::new_literal("Error").on_activate_fn(move |ctx| {
+            .child(Button::new(lit!("Error")).on_activate_fn(move |ctx| {
                 let i = bump(&n3);
                 ctx.show_toast(
-                    Toast::error_literal(format!("Build #{i} failed"))
-                        .body_literal("Three errors in src/main.rs, two warnings.")
-                        .action(ToastAction::primary("Show errors", |_| {
+                    Toast::error(lit!(format!("Build #{i} failed")))
+                        .body(lit!("Three errors in src/main.rs, two warnings."))
+                        .action(ToastAction::primary(lit!("Show errors"), |_| {
                             eprintln!("[demo] Show errors clicked");
                         })),
                 );
             }))
             .child(
-                Button::new_literal("Persistent error").on_activate_fn(move |ctx| {
+                Button::new(lit!("Persistent error")).on_activate_fn(move |ctx| {
                     let i = bump(&n4);
                     ctx.show_toast(
-                        Toast::error_literal(format!("Sticky error #{i}"))
-                            .body_literal("This one persists until you dismiss it.")
+                        Toast::error(lit!(format!("Sticky error #{i}")))
+                            .body(lit!("This one persists until you dismiss it."))
                             .persistent(),
                     );
                 }),
             )
             .child(Spacer::new())
             .child(
-                Button::new_literal("Start upload")
+                Button::new(lit!("Start upload"))
                     .variant(ButtonVariant::Filled)
                     .on_activate_fn(move |ctx| {
                         let h = ctx.show_toast(
-                            Toast::loading_literal("Uploading 1 of 7…").id("demo.upload"),
+                            Toast::loading(lit!("Uploading 1 of 7…")).id("demo.upload"),
                         );
                         uh_start.set(Some(h));
                     }),
             )
             .child(
-                Button::new_literal("Update upload").on_activate_fn(move |ctx| {
+                Button::new(lit!("Update upload")).on_activate_fn(move |ctx| {
                     if uh_progress.take().is_some() {
                         // Re-present with the same id. `Toast::id`
                         // is the update-in-place key: the live toast
@@ -107,19 +107,19 @@ fn toolbar(next_id: Rc<Cell<usize>>, upload_handle: Rc<Cell<Option<ToastHandle>>
                         // entry merges (one row in the log with the
                         // mutation recorded under `updates`).
                         let h = ctx.show_toast(
-                            Toast::loading_literal("Uploading 4 of 7…").id("demo.upload"),
+                            Toast::loading(lit!("Uploading 4 of 7…")).id("demo.upload"),
                         );
                         uh_progress.set(Some(h));
                     }
                 }),
             )
             .child(
-                Button::new_literal("Complete upload")
+                Button::new(lit!("Complete upload"))
                     .variant(ButtonVariant::Filled)
                     .on_activate_fn(move |ctx| {
                         uh_complete.take();
                         ctx.show_toast(
-                            Toast::success_literal("Upload complete")
+                            Toast::success(lit!("Upload complete"))
                                 .id("demo.upload")
                                 .auto_dismiss_after(Duration::from_secs(5)),
                         );
@@ -132,16 +132,14 @@ fn body() -> impl Widget {
     Padding::uniform(24.0).child(
         VStack::new()
             .spacing(12.0)
-            .child(
-                TextWidget::new_literal("Toast Notifications Demo").style(TextStyleRole::BodyBold),
-            )
-            .child(TextWidget::new_literal(
+            .child(TextWidget::new(lit!("Toast Notifications Demo")).style(TextStyleRole::BodyBold))
+            .child(TextWidget::new(lit!(
                 "Click the buttons in the toolbar to spawn toasts. They appear at the \
                  bottom-right corner. Hover any toast to pause every timer (the auto-dismiss \
                  won't fire while your pointer is over the group). The bell icon in the \
                  status bar shows the persistent archive — every toast is logged there \
-                 (unless you call `.archive(false)`), and the log survives app restarts.",
-            )),
+                 (unless you call `.archive(false)`), and the log survives app restarts."
+            ))),
     )
 }
 
@@ -149,15 +147,13 @@ fn status_bar() -> impl Widget {
     StatusBar::new().child(
         HStack::new()
             .child(Spacer::new())
-            .child(
-                Button::new_literal("Open log dialog").on_activate_fn(|ctx| {
-                    let archive = ctx
-                        .app_state::<Rc<NotificationArchiveModel>>()
-                        .cloned()
-                        .expect("install_toast registers the archive");
-                    NotificationLogDialog::show(archive, ctx);
-                }),
-            )
+            .child(Button::new(lit!("Open log dialog")).on_activate_fn(|ctx| {
+                let archive = ctx
+                    .app_state::<Rc<NotificationArchiveModel>>()
+                    .cloned()
+                    .expect("install_toast registers the archive");
+                NotificationLogDialog::show(archive, ctx);
+            }))
             .child(BellButton::default()),
     )
 }

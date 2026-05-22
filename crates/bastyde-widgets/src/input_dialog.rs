@@ -41,9 +41,9 @@ use crate::text_input::TextInput;
 
 /// A single-field input modal.
 pub struct InputDialog {
-    title: String,
-    prompt: Option<String>,
-    placeholder: Option<String>,
+    title: bastyde_i18n::LocalizedString,
+    prompt: Option<bastyde_i18n::LocalizedString>,
+    placeholder: Option<bastyde_i18n::LocalizedString>,
     default_text: String,
     ok_label: Option<LocalizedString>,
     cancel_label: Option<LocalizedString>,
@@ -55,7 +55,7 @@ impl InputDialog {
     pub fn new(title: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = title.into();
         Self {
-            title: ls.resolve_now(),
+            title: ls,
             prompt: None,
             placeholder: None,
             default_text: String::new(),
@@ -65,36 +65,17 @@ impl InputDialog {
         }
     }
 
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw title in
-    /// `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(title: impl Into<String>) -> Self {
-        Self::new(LocalizedString::literal(title))
-    }
-
     /// Prompt rendered above the input field. Optional but recommended.
     pub fn prompt(mut self, text: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = text.into();
-        self.prompt = Some(ls.resolve_now());
+        self.prompt = Some(ls);
         self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `prompt(...)`.
-    #[doc(hidden)]
-    pub fn prompt_literal(self, text: impl Into<String>) -> Self {
-        self.prompt(LocalizedString::literal(text))
     }
 
     /// Placeholder shown when the field is empty.
     pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.placeholder = Some(ls.resolve_now());
-        self
-    }
-
-    /// Untranslated [`placeholder`](Self::placeholder).
-    pub fn placeholder_literal(mut self, text: impl Into<String>) -> Self {
-        self.placeholder = Some(text.into());
+        self.placeholder = Some(ls);
         self
     }
 
@@ -138,7 +119,7 @@ impl InputDialog {
                     .expect("InputDialog present closure called twice");
                 tree.add(
                     ModalContainer::new(InputDialogBody::new(dlg))
-                        .title_literal(dialog_title.clone()),
+                        .title(dialog_title.clone()),
                 )
             })
             .presentation(ModalPresentation::Auto)
@@ -162,9 +143,9 @@ impl std::fmt::Debug for InputDialog {
 // ── InputDialogBody — the actual widget that renders inside the modal ─
 
 struct InputDialogBody {
-    title: String,
-    prompt: Option<String>,
-    placeholder: Option<String>,
+    title: bastyde_i18n::LocalizedString,
+    prompt: Option<bastyde_i18n::LocalizedString>,
+    placeholder: Option<bastyde_i18n::LocalizedString>,
     text: Signal<String>,
     ok_label: LocalizedString,
     cancel_label: LocalizedString,
@@ -220,13 +201,13 @@ impl std::fmt::Debug for InputDialogBody {
 
 impl Widget for InputDialogBody {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let title = TextWidget::new_literal(&self.title)
+        let title = TextWidget::new(self.title.clone())
             .style(TextStyleRole::BodyBold)
             .single_line();
 
         let mut column = VStack::new().spacing(10.0).child(title);
         if let Some(p) = &self.prompt {
-            column = column.child(TextWidget::new_literal(p).style(TextStyleRole::Body));
+            column = column.child(TextWidget::new(p.clone()).style(TextStyleRole::Body));
         }
 
         // The bound text input. Submit-on-Enter accepts the dialog.
@@ -311,6 +292,7 @@ impl Widget for InputDialogBody {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_core::widget_tree::WidgetTree;
 
     #[test]
@@ -318,8 +300,8 @@ mod tests {
         // Smoke test: the body widget renders without panic when added
         // standalone (without going through present_modal).
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let dlg = InputDialog::new_literal("Rename")
-            .prompt_literal("Choose a new name:")
+        let dlg = InputDialog::new(lit!("Rename"))
+            .prompt(lit!("Choose a new name:"))
             .default_text("untitled");
         let body = InputDialogBody::new(dlg);
         let id = tree.add(body);

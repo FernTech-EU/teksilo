@@ -49,7 +49,7 @@ use crate::primitives::{
     VStack, ZStack,
 };
 use crate::tooltip::{
-    DEFAULT_RICH_TOOLTIP_DELAY, RichTooltipSource, TooltipContent, attach_rich_tooltip_source,
+    RichTooltipSource, TooltipContent, TooltipWidget, attach_rich_tooltip_source,
 };
 
 // Large sentinel value used when binding `MaxSize::max_height` / `max_width`
@@ -76,10 +76,15 @@ const UNBOUNDED: f32 = 10_000.0;
 /// are a small `IconWidget`, a `Checkbox` (checkable section), a
 /// `Badge` (count), or a `Button` (per-row action).
 pub struct ToolBoxItem {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     leading: Option<Box<dyn Widget>>,
     trailing: Option<Box<dyn Widget>>,
-    tooltip: Option<RichTooltipSource>,
+    /// Plain-text tooltip body. Mutually exclusive with `rich_tooltip`
+    /// (the last tooltip setter called wins). Kept as a `LocalizedString`
+    /// so a `tr!(...)` source stays locale-reactive.
+    tooltip_text: Option<LocalizedString>,
+    /// Rich (registry-key or inline `TooltipContent`) tooltip.
+    rich_tooltip: Option<RichTooltipSource>,
     content: PendingChild,
     /// Initial-enabled hint. Forwarded into the arena via
     /// `ctx.enabled_when(header_id, false)` at build time when `false`.
@@ -100,14 +105,15 @@ impl std::fmt::Debug for ToolBoxItem {
 
 impl ToolBoxItem {
     /// Build an item with an inline content widget. The label may come from
-    /// `tr!(...)` (translated) or `LocalizedString::literal(...)`.
+    /// `tr!(...)` (translated) or `lit!(...)`.
     pub fn new(label: impl Into<LocalizedString>, content: impl Widget + 'static) -> Self {
         let ls: LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: ls,
             leading: None,
             trailing: None,
-            tooltip: None,
+            tooltip_text: None,
+            rich_tooltip: None,
             content: PendingChild::Deferred(Box::new(content)),
             initial_enabled: true,
         }
@@ -117,20 +123,14 @@ impl ToolBoxItem {
     pub fn new_id(label: impl Into<LocalizedString>, content_id: WidgetId) -> Self {
         let ls: LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: ls,
             leading: None,
             trailing: None,
-            tooltip: None,
+            tooltip_text: None,
+            rich_tooltip: None,
             content: PendingChild::Id(content_id),
             initial_enabled: true,
         }
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in
-    /// `LocalizedString::literal` for tests and scaffolding.
-    #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>, content: impl Widget + 'static) -> Self {
-        Self::new(LocalizedString::literal(label), content)
     }
 
     /// Attach a leading-slot widget rendered before the label (after
@@ -156,17 +156,31 @@ impl ToolBoxItem {
         self
     }
 
-    /// Attach a rich tooltip shown after a hover delay on the header row.
-    /// Accepts either a registry key (`"save-as"`) or inline
-    /// [`TooltipContent`].
-    pub fn tooltip(mut self, source: impl Into<RichTooltipSource>) -> Self {
-        self.tooltip = Some(source.into());
+    /// Attach a plain-text tooltip shown after a hover delay on the header
+    /// row. The text may come from `tr!(...)` (translated, locale-reactive)
+    /// or `lit!(...)`. Mirrors `.tooltip(...)` on Button / IconButton /
+    /// MenuItem. Overrides any previously set rich tooltip.
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self.rich_tooltip = None;
         self
     }
 
-    /// Attach an inline tooltip without using the registry.
-    pub fn tooltip_content(mut self, content: TooltipContent) -> Self {
-        self.tooltip = Some(RichTooltipSource::Content(content));
+    /// Attach a rich tooltip resolved from the app-wide
+    /// [`TooltipRegistry`](crate::tooltip::TooltipRegistry) by key.
+    /// Overrides any previously set plain `.tooltip(...)` text.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip = Some(RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self
+    }
+
+    /// Attach a rich tooltip driven by inline [`TooltipContent`] — for
+    /// one-offs that don't belong in the registry. Overrides any
+    /// previously set plain `.tooltip(...)` text.
+    pub fn rich_tooltip_content(mut self, content: TooltipContent) -> Self {
+        self.rich_tooltip = Some(RichTooltipSource::Content(content));
+        self.tooltip_text = None;
         self
     }
 
@@ -224,13 +238,6 @@ impl ToolBox {
     /// Append an item whose content is a pre-registered widget id.
     pub fn item_id(self, label: impl Into<LocalizedString>, content_id: WidgetId) -> Self {
         self.add(ToolBoxItem::new_id(label, content_id))
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) — raw-label convenience for
-    /// tests and scaffolding.
-    #[doc(hidden)]
-    pub fn item_literal(self, label: impl Into<String>, content: impl Widget + 'static) -> Self {
-        self.item(LocalizedString::literal(label), content)
     }
 
     /// Append a fully-built [`ToolBoxItem`] — required when an icon,
@@ -302,7 +309,7 @@ fn last_enabled_index(enabled: &[bool]) -> Option<usize> {
 
 #[derive(Debug)]
 struct ToolBoxHeader {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     index: usize,
     /// Structural per-item enabled flag. Forwarded into the arena at
     /// build time; the arena is then the single source of truth (events,
@@ -328,14 +335,15 @@ struct ToolBoxHeader {
     enabled_flags: Rc<Vec<bool>>,
     pending_leading: Option<Box<dyn Widget>>,
     pending_trailing: Option<Box<dyn Widget>>,
-    tooltip: Option<RichTooltipSource>,
+    tooltip_text: Option<LocalizedString>,
+    rich_tooltip: Option<RichTooltipSource>,
     root_child_id: Option<WidgetId>,
 }
 
 impl ToolBoxHeader {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        label: String,
+        label: bastyde_i18n::LocalizedString,
         index: usize,
         initial_enabled: bool,
         selected: Signal<usize>,
@@ -344,7 +352,8 @@ impl ToolBoxHeader {
         enabled_flags: Rc<Vec<bool>>,
         pending_leading: Option<Box<dyn Widget>>,
         pending_trailing: Option<Box<dyn Widget>>,
-        tooltip: Option<RichTooltipSource>,
+        tooltip_text: Option<LocalizedString>,
+        rich_tooltip: Option<RichTooltipSource>,
     ) -> Self {
         Self {
             label,
@@ -356,7 +365,8 @@ impl ToolBoxHeader {
             enabled_flags,
             pending_leading,
             pending_trailing,
-            tooltip,
+            tooltip_text,
+            rich_tooltip,
             root_child_id: None,
         }
     }
@@ -466,7 +476,7 @@ impl Widget for ToolBoxHeader {
         // Label — single-line, clips with ellipsis if the header is
         // narrower than the text.
         let label_id = ctx.add(
-            TextWidget::new_literal(&self.label)
+            TextWidget::new(self.label.clone())
                 .bind_color(text_role.clone())
                 .style(TextStyleRole::Body)
                 .single_line()
@@ -542,9 +552,16 @@ impl Widget for ToolBoxHeader {
         let root_id = ctx.add(MinSize::new(0.0, TOOL_BOX_HEADER_MIN_HEIGHT).child_id(zstack_id));
         self.root_child_id = Some(root_id);
 
-        // Attach rich tooltip if configured.
-        if let Some(source) = self.tooltip.take() {
-            attach_rich_tooltip_source(ctx, root_id, source, DEFAULT_RICH_TOOLTIP_DELAY);
+        // Attach tooltip if configured. Plain and rich are mutually
+        // exclusive (last setter wins); rich takes precedence if both
+        // were somehow set.
+        if let Some(source) = self.rich_tooltip.take() {
+            let delay = ctx.theme().motion.tooltip_delay;
+            attach_rich_tooltip_source(ctx, root_id, source, delay);
+        } else if let Some(text) = self.tooltip_text.take() {
+            let tip_id = ctx.add(TooltipWidget::new(text));
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root_id, tip_id, delay);
         }
 
         // --- V2 attached handlers on the header's own node ---
@@ -587,8 +604,8 @@ impl Widget for ToolBoxHeader {
                 };
                 focus_origin_for_focus.set(Some(origin));
             })
-            .on_key(move |event: &WidgetEvent, ctx: &mut EventContext| {
-                match event {
+            .on_key(
+                move |event: &WidgetEvent, ctx: &mut EventContext| match event {
                     WidgetEvent::KeyDown {
                         key: Key::Space | Key::Enter,
                         ..
@@ -652,11 +669,12 @@ impl Widget for ToolBoxHeader {
                         EventResponse::Ignored
                     }
                     _ => EventResponse::Ignored,
-                }
-            })
+                },
+            )
             .on_access_action(move |action, _ctx| {
                 match action {
-                    bastyde_core::accesskit::Action::Click | bastyde_core::accesskit::Action::Expand => {
+                    bastyde_core::accesskit::Action::Click
+                    | bastyde_core::accesskit::Action::Expand => {
                         selected_access.set(idx);
                         EventResponse::Handled
                     }
@@ -712,7 +730,7 @@ impl Widget for ToolBoxHeader {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         use bastyde_core::accesskit::{Action, Role};
         builder.set_role(Role::Button);
-        builder.set_name(&self.label);
+        builder.set_name(self.label.resolve_now());
         let is_active = self.selected.get() == self.index;
         builder.set_expanded(is_active);
         // Framework a11y walker auto-emits `set_disabled()` when
@@ -746,7 +764,7 @@ enum HeaderInteraction {
 
 #[derive(Debug)]
 struct ToolBoxPanel {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     selected: Signal<usize>,
     index: usize,
     content: Option<PendingChild>,
@@ -754,7 +772,7 @@ struct ToolBoxPanel {
 }
 
 impl ToolBoxPanel {
-    fn new(label: String, selected: Signal<usize>, index: usize, content: PendingChild) -> Self {
+    fn new(label: LocalizedString, selected: Signal<usize>, index: usize, content: PendingChild) -> Self {
         Self {
             label,
             selected,
@@ -824,7 +842,7 @@ impl Widget for ToolBoxPanel {
         // `Region` is the ARIA role for a labelled landmark section. Used
         // by screen readers to announce the panel as "Region: <label>".
         builder.set_role(Role::Region);
-        builder.set_name(&self.label);
+        builder.set_name(self.label.resolve_now());
         // Collapsed panels must be hidden from AT — they're kept in the
         // widget tree for animation purposes, but their content is at
         // height=0 and should not be navigable by screen readers.
@@ -868,7 +886,8 @@ impl Widget for ToolBox {
                 enabled_flags.clone(),
                 item.leading,
                 item.trailing,
-                item.tooltip,
+                item.tooltip_text,
+                item.rich_tooltip,
             ));
             header_ids.borrow_mut().push(header_id);
 
@@ -935,6 +954,7 @@ impl Widget for ToolBox {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use crate::primitives::TextWidget;
     use bastyde_canvas::SizeProposal;
     use bastyde_core::accesskit;
@@ -966,9 +986,9 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .item_literal("Outline", TextWidget::new_literal("Outline content"))
-                .item_literal("Props", TextWidget::new_literal("Props content"))
-                .item_literal("Refs", TextWidget::new_literal("Refs content")),
+                .item(lit!("Outline"), TextWidget::new(lit!("Outline content")))
+                .item(lit!("Props"), TextWidget::new(lit!("Props content")))
+                .item(lit!("Refs"), TextWidget::new(lit!("Refs content"))),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -983,9 +1003,9 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .item_literal("A", TextWidget::new_literal("A"))
-                .item_literal("B", TextWidget::new_literal("B"))
-                .item_literal("C", TextWidget::new_literal("C")),
+                .item(lit!("A"), TextWidget::new(lit!("A")))
+                .item(lit!("B"), TextWidget::new(lit!("B")))
+                .item(lit!("C"), TextWidget::new(lit!("C"))),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -1002,8 +1022,8 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .item_literal("A", TextWidget::new_literal("AAAAAAAA"))
-                .item_literal("B", TextWidget::new_literal("BBBBBBBB")),
+                .item(lit!("A"), TextWidget::new(lit!("AAAAAAAA")))
+                .item(lit!("B"), TextWidget::new(lit!("BBBBBBBB"))),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -1030,8 +1050,8 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .item_literal("A", TextWidget::new_literal("AAA"))
-                .item_literal("B", TextWidget::new_literal("BBB")),
+                .item(lit!("A"), TextWidget::new(lit!("AAA")))
+                .item(lit!("B"), TextWidget::new(lit!("BBB"))),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -1051,9 +1071,9 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .item_literal("A", TextWidget::new_literal("A"))
-                .add(ToolBoxItem::new_literal("B", TextWidget::new_literal("B")).enabled(false))
-                .item_literal("C", TextWidget::new_literal("C")),
+                .item(lit!("A"), TextWidget::new(lit!("A")))
+                .add(ToolBoxItem::new(lit!("B"), TextWidget::new(lit!("B"))).enabled(false))
+                .item(lit!("C"), TextWidget::new(lit!("C"))),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -1068,9 +1088,9 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .item_literal("A", TextWidget::new_literal("A"))
-                .add(ToolBoxItem::new_literal("B", TextWidget::new_literal("B")).enabled(false))
-                .item_literal("C", TextWidget::new_literal("C")),
+                .item(lit!("A"), TextWidget::new(lit!("A")))
+                .add(ToolBoxItem::new(lit!("B"), TextWidget::new(lit!("B"))).enabled(false))
+                .item(lit!("C"), TextWidget::new(lit!("C"))),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -1088,11 +1108,9 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .add(
-                    ToolBoxItem::new_literal("Locked", TextWidget::new_literal("x")).enabled(false),
-                )
-                .item_literal("Middle", TextWidget::new_literal("m"))
-                .item_literal("Last", TextWidget::new_literal("l")),
+                .add(ToolBoxItem::new(lit!("Locked"), TextWidget::new(lit!("x"))).enabled(false))
+                .item(lit!("Middle"), TextWidget::new(lit!("m")))
+                .item(lit!("Last"), TextWidget::new(lit!("l"))),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -1116,8 +1134,8 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .item_literal("A", TextWidget::new_literal("A"))
-                .item_literal("B", TextWidget::new_literal("B")),
+                .item(lit!("A"), TextWidget::new(lit!("A")))
+                .item(lit!("B"), TextWidget::new(lit!("B"))),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -1147,9 +1165,9 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .item_literal("A", TextWidget::new_literal("A"))
-                .item_literal("B", TextWidget::new_literal("B"))
-                .item_literal("C", TextWidget::new_literal("C")),
+                .item(lit!("A"), TextWidget::new(lit!("A")))
+                .item(lit!("B"), TextWidget::new(lit!("B")))
+                .item(lit!("C"), TextWidget::new(lit!("C"))),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -1169,8 +1187,8 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .item_literal("A", TextWidget::new_literal("A"))
-                .item_literal("B", TextWidget::new_literal("B")),
+                .item(lit!("A"), TextWidget::new(lit!("A")))
+                .item(lit!("B"), TextWidget::new(lit!("B"))),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -1193,8 +1211,8 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone()).add(
-                ToolBoxItem::new_literal("A", TextWidget::new_literal("A"))
-                    .leading(Button::new_literal("start")),
+                ToolBoxItem::new(lit!("A"), TextWidget::new(lit!("A")))
+                    .leading(Button::new(lit!("start"))),
             ),
         );
         t.layout(SizeProposal::exact(300.0, 200.0));
@@ -1234,8 +1252,8 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone()).add(
-                ToolBoxItem::new_literal("A", TextWidget::new_literal("A"))
-                    .trailing(Button::new_literal("x")),
+                ToolBoxItem::new(lit!("A"), TextWidget::new(lit!("A")))
+                    .trailing(Button::new(lit!("x"))),
             ),
         );
         t.layout(SizeProposal::exact(300.0, 200.0));
@@ -1277,8 +1295,8 @@ mod tests {
         let mut t = tree();
         let tb = t.add(
             ToolBox::new(selected.clone())
-                .item_literal("A", TextWidget::new_literal("A"))
-                .add(ToolBoxItem::new_literal("B", TextWidget::new_literal("B")).enabled(false)),
+                .item(lit!("A"), TextWidget::new(lit!("A")))
+                .add(ToolBoxItem::new(lit!("B"), TextWidget::new(lit!("B"))).enabled(false)),
         );
         t.layout(SizeProposal::exact(300.0, 600.0));
 

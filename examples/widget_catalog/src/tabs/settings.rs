@@ -22,7 +22,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // catalog's TabContent already scrolls vertically.
     let shortcuts = section(
         ctx,
-        "ShortcutSettings",
+        lit!("ShortcutSettings"),
         Panel::new()
             .background(SurfaceRole::Raised)
             .border_color(BorderRole::Default)
@@ -37,7 +37,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     );
     let privacy = section(
         ctx,
-        "PrivacySettings",
+        lit!("PrivacySettings"),
         TextWidget::new(tr!(set_privacy_note()))
             .style(TextStyleRole::Small)
             .color(TextRole::Secondary),
@@ -78,7 +78,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("ShortcutSettings") {
+                TextWidget::new(lit!("ShortcutSettings")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -94,7 +94,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("PrivacySettings") {
+                TextWidget::new(lit!("PrivacySettings")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

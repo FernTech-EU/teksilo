@@ -17,6 +17,7 @@
 //! [`NotificationLogDialog::show`](super::log_dialog::NotificationLogDialog::show)
 //! for a one-line modal presentation.
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Canvas, Path, Point, Rect, SizeProposal};
@@ -139,7 +140,7 @@ impl NotificationLog {
             severity: entry.severity,
             size: 14.0,
         });
-        let mut row = StandardListItem::new_literal(entry.title.clone())
+        let mut row = StandardListItem::new(lit!(entry.title.clone()))
             .leading_slot_boxed(glyph)
             // Unread rows get a bold title (`BodyBold`); read rows
             // fall back to the StandardListItem default (`Body`).
@@ -151,7 +152,7 @@ impl NotificationLog {
                 TextStyleRole::BodyBold
             });
         if let Some(body) = &entry.body {
-            row = row.subtitle_literal(body.clone());
+            row = row.subtitle(lit!(body.clone()));
         }
         if !entry.actions.is_empty() {
             // Trailing action strip — Links inline, Buttons as buttons.
@@ -344,7 +345,7 @@ fn build_actions_row(
                 bastyde_i18n::tr_widget!(notifications_archive_replay_disabled()).resolve_now()
             );
             row = row.child(
-                TextWidget::new_literal(label)
+                TextWidget::new(lit!(label))
                     .style(TextStyleRole::Small)
                     .bind_color(TextRole::Secondary),
             );
@@ -358,20 +359,20 @@ fn build_actions_row(
         };
         row = match action.style {
             ArchivedActionStyle::Link => {
-                row.child(Link::new_literal(action.label.clone()).on_activate_fn(activate))
+                row.child(Link::new(lit!(action.label.clone())).on_activate_fn(activate))
             }
             ArchivedActionStyle::PrimaryButton => row.child(
-                Button::new_literal(action.label.clone())
+                Button::new(lit!(action.label.clone()))
                     .variant(ButtonVariant::Filled)
                     .on_activate_fn(activate),
             ),
             ArchivedActionStyle::SecondaryButton => row.child(
-                Button::new_literal(action.label.clone())
+                Button::new(lit!(action.label.clone()))
                     .variant(ButtonVariant::Plain)
                     .on_activate_fn(activate),
             ),
             ArchivedActionStyle::Destructive => row.child(
-                Button::new_literal(action.label.clone())
+                Button::new(lit!(action.label.clone()))
                     .variant(ButtonVariant::Destructive)
                     .on_activate_fn(activate),
             ),
@@ -715,7 +716,8 @@ mod tests {
         let tree = tree_with(NotificationLog::new(archive));
 
         let today_label = bastyde_i18n::tr_widget!(notifications_bucket_today()).resolve_now();
-        let yesterday_label = bastyde_i18n::tr_widget!(notifications_bucket_yesterday()).resolve_now();
+        let yesterday_label =
+            bastyde_i18n::tr_widget!(notifications_bucket_yesterday()).resolve_now();
         let earlier_label = bastyde_i18n::tr_widget!(notifications_bucket_earlier()).resolve_now();
 
         assert!(

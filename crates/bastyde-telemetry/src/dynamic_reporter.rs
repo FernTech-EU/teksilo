@@ -15,7 +15,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use bastyde_core::Signal;
-use bastyde_core::telemetry::{ConsentScope, Event, RemoteDataExport, TelemetryError, UsageReporter};
+use bastyde_core::telemetry::{
+    ConsentScope, Event, RemoteDataExport, TelemetryError, UsageReporter,
+};
 
 use crate::bundle::TelemetryMode;
 use crate::consent::ConsentStore;

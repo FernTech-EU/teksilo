@@ -5,7 +5,7 @@
 //! Three columns, each demonstrating one tooltip tier and cascade
 //! depth:
 //!
-//! 1. **Plain** — single-line text via `.tooltip_literal(...)`.
+//! 1. **Plain** — single-line text via `.tooltip(lit!(...))`.
 //! 2. **Rich** — `[label](:key)` cascade three levels deep, plus
 //!    `.with_more(...)` Accordion bodies and shortcut chips.
 //! 3. **Composite** — `VStack` with header / `ProgressBar` / stat
@@ -40,49 +40,39 @@ fn build_tooltip_registry() -> Vec<TooltipContent> {
     vec![
         TooltipContent::new(
             KEY_A,
-            LocalizedString::literal(
-                "Level 1 of the cascade. Hover the [next link](:tip-b) to open level 2.",
-            ),
+            lit!("Level 1 of the cascade. Hover the [next link](:tip-b) to open level 2.",),
         )
-        .with_more(LocalizedString::literal(
+        .with_more(lit!(
             "Open the Accordion to read this long-form body without leaving the tooltip.",
         ))
         .with_shortcut_label("F1"),
         TooltipContent::new(
             KEY_B,
-            LocalizedString::literal(
-                "Level 2 of the cascade. Hover the [final link](:tip-c) for one more.",
-            ),
+            lit!("Level 2 of the cascade. Hover the [final link](:tip-c) for one more.",),
         )
-        .with_more(LocalizedString::literal(
+        .with_more(lit!(
             "Each nested tooltip parents its overlay to the previous one (OverlayLayer::InTree).",
         )),
         TooltipContent::new(
             KEY_C,
-            LocalizedString::literal(
-                "Level 3 — end of the cascade. Press Esc or click outside to dismiss.",
-            ),
+            lit!("Level 3 — end of the cascade. Press Esc or click outside to dismiss.",),
         )
         .with_shortcut_label("Esc"),
         TooltipContent::new(
             KEY_FOOD,
-            LocalizedString::literal(
+            lit!(
                 "**Food** modifies your population's growth rate. Linked to [trade](:stat-trade).",
             ),
         )
         .with_shortcut_label("F"),
         TooltipContent::new(
             KEY_TRADE,
-            LocalizedString::literal(
-                "**Trade** routes affect coin income. Linked to [happiness](:stat-happiness).",
-            ),
+            lit!("**Trade** routes affect coin income. Linked to [happiness](:stat-happiness).",),
         )
         .with_shortcut_label("T"),
         TooltipContent::new(
             KEY_HAPPINESS,
-            LocalizedString::literal(
-                "**Happiness** caps unrest. End of the inside-composite cascade.",
-            ),
+            lit!("**Happiness** caps unrest. End of the inside-composite cascade.",),
         ),
     ]
 }
@@ -93,11 +83,11 @@ fn plain_column() -> impl Widget {
     Panel::new().child(
         VStack::new()
             .spacing(8.0)
-            .child(TextWidget::new_literal("Plain tooltips").style(TextStyleRole::BodyBold))
-            .child(TextWidget::new_literal("(single-line, ephemeral)"))
-            .child(Button::new_literal("Save").tooltip_literal("Save the current document"))
-            .child(Button::new_literal("Open").tooltip_literal("Open a file"))
-            .child(Button::new_literal("Close").tooltip_literal("Close the tab"))
+            .child(TextWidget::new(lit!("Plain tooltips")).style(TextStyleRole::BodyBold))
+            .child(TextWidget::new(lit!("(single-line, ephemeral)")))
+            .child(Button::new(lit!("Save")).tooltip(lit!("Save the current document")))
+            .child(Button::new(lit!("Open")).tooltip(lit!("Open a file")))
+            .child(Button::new(lit!("Close")).tooltip(lit!("Close the tab")))
             .child(Spacer::new()),
     )
 }
@@ -106,20 +96,19 @@ fn rich_column() -> impl Widget {
     Panel::new().child(
         VStack::new()
             .spacing(8.0)
-            .child(TextWidget::new_literal("Rich tooltips").style(TextStyleRole::BodyBold))
-            .child(TextWidget::new_literal("(:key cascade, dwell-to-sticky)"))
+            .child(TextWidget::new(lit!("Rich tooltips")).style(TextStyleRole::BodyBold))
+            .child(TextWidget::new(lit!("(:key cascade, dwell-to-sticky)")))
             .child(Spacer::new())
-            .child(Button::new_literal("Hover for level 1").rich_tooltip(KEY_A))
-            .child(Button::new_literal("Hover for level 2").rich_tooltip(KEY_B))
-            .child(Button::new_literal("Hover for level 3").rich_tooltip(KEY_C))
-            .child(
-                Button::new_literal("Plain among rich")
-                    .tooltip_literal("Plain tooltip living in the rich column — diagnostic."),
-            )
+            .child(Button::new(lit!("Hover for level 1")).rich_tooltip(KEY_A))
+            .child(Button::new(lit!("Hover for level 2")).rich_tooltip(KEY_B))
+            .child(Button::new(lit!("Hover for level 3")).rich_tooltip(KEY_C))
+            .child(Button::new(lit!("Plain among rich")).tooltip(lit!(
+                "Plain tooltip living in the rich column — diagnostic."
+            )))
             .child(Spacer::new())
-            .child(TextWidget::new_literal(
-                "Tip: dwell ~2 s to pin, then click links to chain.",
-            )),
+            .child(TextWidget::new(lit!(
+                "Tip: dwell ~2 s to pin, then click links to chain."
+            ))),
     )
 }
 
@@ -129,15 +118,15 @@ fn rich_column() -> impl Widget {
 fn province_composite_body() -> impl Widget {
     VStack::new()
         .spacing(8.0)
-        .child(TextWidget::new_literal("Iberia").style(TextStyleRole::BodyBold))
-        .child(TextWidget::new_literal("Province overview"))
+        .child(TextWidget::new(lit!("Iberia")).style(TextStyleRole::BodyBold))
+        .child(TextWidget::new(lit!("Province overview")))
         .child(ProgressBar::new(0.65))
         .child(
             HStack::new()
                 .spacing(12.0)
-                .child(Button::new_literal("Food: 42").rich_tooltip(KEY_FOOD))
-                .child(Button::new_literal("Trade: 18").rich_tooltip(KEY_TRADE))
-                .child(Button::new_literal("Happiness: 71%").rich_tooltip(KEY_HAPPINESS)),
+                .child(Button::new(lit!("Food: 42")).rich_tooltip(KEY_FOOD))
+                .child(Button::new(lit!("Trade: 18")).rich_tooltip(KEY_TRADE))
+                .child(Button::new(lit!("Happiness: 71%")).rich_tooltip(KEY_HAPPINESS)),
         )
 }
 
@@ -147,19 +136,19 @@ fn tabbed_composite_body() -> impl Widget {
     let selected: Signal<Option<bastyde::widgets::tab_widget::TabId>> = Signal::new(None);
     let body = TabWidget::new(selected)
         .static_tab(
-            TabInfo::new().title(LocalizedString::literal("Stats")),
+            TabInfo::new().title(lit!("Stats")),
             VStack::new()
                 .spacing(4.0)
-                .child(TextWidget::new_literal("Population: 12,400"))
-                .child(TextWidget::new_literal("Garrison: 320")),
+                .child(TextWidget::new(lit!("Population: 12,400")))
+                .child(TextWidget::new(lit!("Garrison: 320"))),
         )
         .static_tab(
-            TabInfo::new().title(LocalizedString::literal("History")),
-            TextWidget::new_literal("Founded 1247 • 3 sieges • 1 plague"),
+            TabInfo::new().title(lit!("History")),
+            TextWidget::new(lit!("Founded 1247 • 3 sieges • 1 plague")),
         );
     VStack::new()
         .spacing(8.0)
-        .child(TextWidget::new_literal("Tabbed details").style(TextStyleRole::BodyBold))
+        .child(TextWidget::new(lit!("Tabbed details")).style(TextStyleRole::BodyBold))
         .child(body)
 }
 
@@ -168,10 +157,10 @@ fn tabbed_composite_body() -> impl Widget {
 fn interactive_composite_body() -> impl Widget {
     VStack::new()
         .spacing(8.0)
-        .child(TextWidget::new_literal("Treasury report").style(TextStyleRole::BodyBold))
-        .child(TextWidget::new_literal("This quarter: +423 coins"))
+        .child(TextWidget::new(lit!("Treasury report")).style(TextStyleRole::BodyBold))
+        .child(TextWidget::new(lit!("This quarter: +423 coins")))
         .child(ProgressBar::new(0.42))
-        .child(Button::new_literal("Open ledger").on_activate_fn(|_ctx| {
+        .child(Button::new(lit!("Open ledger")).on_activate_fn(|_ctx| {
             println!("Open ledger pressed from inside a composite tooltip!");
         }))
 }
@@ -180,23 +169,19 @@ fn composite_column() -> impl Widget {
     Panel::new().child(
         VStack::new()
             .spacing(8.0)
-            .child(TextWidget::new_literal("Composite tooltips").style(TextStyleRole::BodyBold))
-            .child(TextWidget::new_literal(
-                "(arbitrary widget tree, CK3-style)",
-            ))
+            .child(TextWidget::new(lit!("Composite tooltips")).style(TextStyleRole::BodyBold))
+            .child(TextWidget::new(lit!("(arbitrary widget tree, CK3-style)")))
             .child(Spacer::new())
+            .child(Button::new(lit!("Province info")).composite_tooltip(province_composite_body()))
+            .child(Button::new(lit!("Tabbed details")).composite_tooltip(tabbed_composite_body()))
             .child(
-                Button::new_literal("Province info").composite_tooltip(province_composite_body()),
-            )
-            .child(Button::new_literal("Tabbed details").composite_tooltip(tabbed_composite_body()))
-            .child(
-                Button::new_literal("With internal Button")
+                Button::new(lit!("With internal Button"))
                     .composite_tooltip(interactive_composite_body()),
             )
             .child(Spacer::new())
-            .child(TextWidget::new_literal(
-                "Tip: dwell ~2 s, then Tab into the surface, then activate the inner Button.",
-            )),
+            .child(TextWidget::new(lit!(
+                "Tip: dwell ~2 s, then Tab into the surface, then activate the inner Button."
+            ))),
     )
 }
 
@@ -204,7 +189,7 @@ fn root() -> impl Widget {
     VStack::new()
         .spacing(12.0)
         .child(Padding::uniform(12.0).child(
-            TextWidget::new_literal("Bastyde — Tooltips Showcase").style(TextStyleRole::BodyBold),
+            TextWidget::new(lit!("Bastyde — Tooltips Showcase")).style(TextStyleRole::BodyBold),
         ))
         .child(
             Expand::new().child(

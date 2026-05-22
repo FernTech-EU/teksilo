@@ -26,7 +26,7 @@ use bastyde::core::WidgetPlacement;
 use bastyde::prelude::*;
 use bastyde::widgets::{
     AtRevealPolicy, Button, ButtonVariant, EchoMode, Expand, GroupBox, HStack, Padding,
-    PasswordField, RevealMode, Spacer, TextInput, TextWidget, Toolbar, ValidationOutcome, VStack,
+    PasswordField, RevealMode, Spacer, TextInput, TextWidget, Toolbar, VStack, ValidationOutcome,
 };
 
 fn dark_mode_toolbar() -> impl Widget {
@@ -34,9 +34,9 @@ fn dark_mode_toolbar() -> impl Widget {
     bati!(
         Toolbar {
             HStack {
-                TextWidget::new_literal("PasswordField demo") { style: TextStyleRole::BodyBold }
+                TextWidget::new(lit!("PasswordField demo")) { style: TextStyleRole::BodyBold }
                 Spacer
-                Button::new_literal("Toggle Dark Mode") {
+                Button::new(lit!("Toggle Dark Mode")) {
                     on_activate_fn: move |ctx| {
                         let next = !is_dark.get();
                         is_dark.set(next);
@@ -79,20 +79,22 @@ impl Widget for Root {
         // "Sign in" enables only when both fields are valid and equal.
         let pw = self.password.clone();
         let cf = self.confirm.clone();
-        let can_submit = pw.zip(&cf).map(|(p, c)| p.chars().count() >= MIN_LEN && p == c);
+        let can_submit = pw
+            .zip(&cf)
+            .map(|(p, c)| p.chars().count() >= MIN_LEN && p == c);
 
-        let card = GroupBox::new("Sign in").child(
+        let card = GroupBox::new(lit!("Sign in")).child(
             VStack::new()
                 .spacing(12.0)
                 .child(labeled(
                     "Username",
-                    TextInput::new(self.username.clone()).placeholder_literal("you@example.com"),
+                    TextInput::new(self.username.clone()).placeholder(lit!("you@example.com")),
                 ))
                 .child(labeled(
                     "Password",
                     PasswordField::new(self.password.clone())
-                        .label_literal("Password")
-                        .placeholder_literal("At least 8 characters")
+                        .label(lit!("Password"))
+                        .placeholder(lit!("At least 8 characters"))
                         .validator(|s| {
                             if s.chars().count() >= MIN_LEN {
                                 ValidationOutcome::Valid
@@ -105,56 +107,58 @@ impl Widget for Root {
                 ))
                 .child(labeled(
                     "Confirm password",
-                    PasswordField::new(self.confirm.clone()).label_literal("Confirm password").validator({
-                        let pw = self.password.clone();
-                        move |s| {
-                            if s == pw.get().as_str() {
-                                ValidationOutcome::Valid
-                            } else {
-                                ValidationOutcome::Invalid {
-                                    message: "Passwords don't match".into(),
+                    PasswordField::new(self.confirm.clone())
+                        .label(lit!("Confirm password"))
+                        .validator({
+                            let pw = self.password.clone();
+                            move |s| {
+                                if s == pw.get().as_str() {
+                                    ValidationOutcome::Valid
+                                } else {
+                                    ValidationOutcome::Invalid {
+                                        message: "Passwords don't match".into(),
+                                    }
                                 }
                             }
-                        }
-                    }),
+                        }),
                 ))
                 .child({
-                    let btn = Button::new_literal("Sign in").variant(ButtonVariant::Filled);
+                    let btn = Button::new(lit!("Sign in")).variant(ButtonVariant::Filled);
                     let id = ctx.add(btn);
                     ctx.enabled_when(id, can_submit);
                     HStack::new().child(Spacer::new()).add_child(id)
                 }),
         );
 
-        let showcase = GroupBox::new("Echo modes").child(
+        let showcase = GroupBox::new(lit!("Echo modes")).child(
             VStack::new()
                 .spacing(12.0)
                 .child(labeled(
                     "Masked (default)",
-                    PasswordField::new(Signal::new("hunter2".to_string())).label_literal("Masked"),
+                    PasswordField::new(Signal::new("hunter2".to_string())).label(lit!("Masked")),
                 ))
                 .child(labeled(
                     "Reveal while typing",
                     PasswordField::new(Signal::new("hunter2".to_string()))
-                        .label_literal("Reveal while typing")
+                        .label(lit!("Reveal while typing"))
                         .echo_mode(EchoMode::RevealWhileTyping),
                 ))
                 .child(labeled(
                     "No echo (length hidden)",
                     PasswordField::new(Signal::new("hunter2".to_string()))
-                        .label_literal("No echo")
+                        .label(lit!("No echo"))
                         .echo_mode(EchoMode::NoEcho),
                 ))
                 .child(labeled(
                     "Hold to reveal (press the eye)",
                     PasswordField::new(Signal::new("hunter2".to_string()))
-                        .label_literal("Hold to reveal")
+                        .label(lit!("Hold to reveal"))
                         .reveal_mode(RevealMode::Hold),
                 ))
                 .child(labeled(
                     "Always protected for AT",
                     PasswordField::new(Signal::new("hunter2".to_string()))
-                        .label_literal("Always protected")
+                        .label(lit!("Always protected"))
                         .at_reveal_policy(AtRevealPolicy::AlwaysProtected),
                 )),
         );
@@ -200,7 +204,7 @@ fn labeled(caption: &str, field: impl Widget + 'static) -> impl Widget {
     VStack::new()
         .spacing(4.0)
         .child(
-            TextWidget::new_literal(caption)
+            TextWidget::new(lit!(caption))
                 .style(TextStyleRole::Small)
                 .color(TextRole::Secondary),
         )

@@ -13,7 +13,7 @@ use bastyde::widgets::{
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -47,53 +47,53 @@ impl Widget for Root {
         let outline_panel = Panel::new().padding(12.0).child(
             VStack::new()
                 .spacing(6.0)
-                .child(TextWidget::new_literal("Chapter 1 — Opening"))
-                .child(TextWidget::new_literal("Chapter 2 — Rising Action"))
-                .child(TextWidget::new_literal("Chapter 3 — Turning Point"))
-                .child(TextWidget::new_literal("Chapter 4 — Climax"))
-                .child(TextWidget::new_literal("Chapter 5 — Resolution")),
+                .child(TextWidget::new(lit!("Chapter 1 — Opening")))
+                .child(TextWidget::new(lit!("Chapter 2 — Rising Action")))
+                .child(TextWidget::new(lit!("Chapter 3 — Turning Point")))
+                .child(TextWidget::new(lit!("Chapter 4 — Climax")))
+                .child(TextWidget::new(lit!("Chapter 5 — Resolution"))),
         );
 
         let properties_panel = Panel::new().padding(12.0).child(
             VStack::new()
                 .spacing(8.0)
-                .child(TextWidget::new_literal("Title: Untitled manuscript"))
-                .child(TextWidget::new_literal("Word count: 42 318"))
-                .child(TextWidget::new_literal("Language: en-US"))
-                .child(TextWidget::new_literal("Last modified: today")),
+                .child(TextWidget::new(lit!("Title: Untitled manuscript")))
+                .child(TextWidget::new(lit!("Word count: 42 318")))
+                .child(TextWidget::new(lit!("Language: en-US")))
+                .child(TextWidget::new(lit!("Last modified: today"))),
         );
 
         let references_panel = Panel::new().padding(12.0).child(
             VStack::new()
                 .spacing(6.0)
-                .child(TextWidget::new_literal("Note: unify the two protagonists"))
-                .child(TextWidget::new_literal("Research: Napoleonic uniforms"))
-                .child(TextWidget::new_literal("Research: 1810 Paris street plan"))
-                .child(TextWidget::new_literal("Link: editor style guide")),
+                .child(TextWidget::new(lit!("Note: unify the two protagonists")))
+                .child(TextWidget::new(lit!("Research: Napoleonic uniforms")))
+                .child(TextWidget::new(lit!("Research: 1810 Paris street plan")))
+                .child(TextWidget::new(lit!("Link: editor style guide"))),
         );
 
-        let build_panel = Panel::new().padding(12.0).child(TextWidget::new_literal(
+        let build_panel = Panel::new().padding(12.0).child(TextWidget::new(lit!(
             "Build tasks appear here during export. Nothing is running — the \
                  section is disabled so it keeps its slot in the palette without \
-                 accepting focus.",
-        ));
+                 accepting focus."
+        )));
 
         let toolbox = ToolBox::new(selected.clone())
             .add(
-                ToolBoxItem::new_literal("Outline", outline_panel)
+                ToolBoxItem::new(lit!("Outline"), outline_panel)
                     .leading(IconWidget::chevron_down(14.0))
-                    .trailing(Badge::new_literal("5")),
+                    .trailing(Badge::new(lit!("5"))),
             )
-            .item_literal("Properties", properties_panel)
+            .item(lit!("Properties"), properties_panel)
             .add(
-                ToolBoxItem::new_literal("References", references_panel)
-                    .trailing(Badge::new_literal("12")),
+                ToolBoxItem::new(lit!("References"), references_panel)
+                    .trailing(Badge::new(lit!("12"))),
             )
-            .add(ToolBoxItem::new_literal("Build tasks", build_panel).enabled(false))
+            .add(ToolBoxItem::new(lit!("Build tasks"), build_panel).enabled(false))
             .show_dividers(false);
 
         let is_dark = self.is_dark.clone();
-        let theme_button = Button::new_literal("Toggle theme")
+        let theme_button = Button::new(lit!("Toggle theme"))
             .variant(ButtonVariant::Ghost)
             .on_activate_fn(move |ctx: &mut EventContext| {
                 let next_dark = !is_dark.get();
@@ -105,39 +105,39 @@ impl Widget for Root {
                 });
             });
 
-        let selected_hint = TextWidget::new_literal("Section index:")
+        let selected_hint = TextWidget::new(lit!("Section index:"))
             .bind_text(selected.map(|i| format!("Section index: {}", i)));
 
         let header_row = HStack::new()
             .spacing(16.0)
             .child(
-                TextWidget::new_literal("ToolBox demo")
+                TextWidget::new(lit!("ToolBox demo"))
                     .style(TextStyleRole::BodyBold)
                     .color(TextRole::Primary),
             )
             .child(selected_hint)
             .child(theme_button);
 
-        let instructions = TextWidget::new_literal(
+        let instructions = TextWidget::new(lit!(
             "Click a section header to expand it, or Tab into the palette and use \
              Up / Down / Home / End to navigate. The Build tasks row is disabled — \
-             keyboard focus skips it.",
-        )
+             keyboard focus skips it."
+        ))
         .color(TextRole::Secondary);
 
         let sidebar = Card::new()
-            .header(TextWidget::new_literal("Palette").style(TextStyleRole::BodyBold))
+            .header(TextWidget::new(lit!("Palette")).style(TextStyleRole::BodyBold))
             .content(toolbox);
 
         let content_row =
             HStack::new()
                 .spacing(16.0)
                 .child(sidebar)
-                .child(Panel::new().padding(20.0).child(TextWidget::new_literal(
+                .child(Panel::new().padding(20.0).child(TextWidget::new(lit!(
                     "The ToolBox on the left is a self-contained widget — it plays \
                      the same role as Qt's QToolBox or an IntelliJ settings-group \
-                     accordion: exactly one section open at any time.",
-                )));
+                     accordion: exactly one section open at any time."
+                ))));
 
         let root_id = ctx.add(
             Panel::new().padding(24.0).child(

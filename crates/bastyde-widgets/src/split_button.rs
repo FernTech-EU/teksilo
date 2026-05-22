@@ -16,13 +16,14 @@
 //!
 //! ```ignore
 //! SplitButton::new()
-//!     .item(MenuItem::new_literal("Run").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Run)))
-//!     .item(MenuItem::new_literal("Run Tests").on_activate_fn(|ctx| ctx.send_intent(AppIntent::RunTests)))
+//!     .item(MenuItem::new(lit!("Run")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Run)))
+//!     .item(MenuItem::new(lit!("Run Tests")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::RunTests)))
 //!     .separator()
-//!     .item(MenuItem::new_literal("Debug").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Debug)))
+//!     .item(MenuItem::new(lit!("Debug")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Debug)))
 //!     .variant(ButtonVariant::Plain)
 //! ```
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Rect, SizeProposal};
@@ -75,7 +76,7 @@ pub struct SplitButton {
     /// [`SplitButton::new`], `false` for [`SplitButton::new_static`].
     promote_on_select: bool,
     /// Tooltip shown on hover over the main (default-action) region.
-    tooltip_text: Option<String>,
+    tooltip_text: Option<bastyde_i18n::LocalizedString>,
     /// Rich tooltip source for the main region (registry key or inline
     /// content). Mutually exclusive with `tooltip_text` and
     /// `composite_tooltip_content`.
@@ -86,7 +87,7 @@ pub struct SplitButton {
     /// Tooltip shown on hover over the trailing chevron region. Falls
     /// back to a generic "Show dropdown menu" label when not explicitly
     /// set, since the chevron region has no label of its own.
-    chevron_tooltip_text: Option<String>,
+    chevron_tooltip_text: Option<bastyde_i18n::LocalizedString>,
     /// Rich tooltip source for the chevron region.
     chevron_rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     /// Composite tooltip body for the chevron region.
@@ -183,16 +184,6 @@ impl SplitButton {
     /// Attach a tooltip to the main (default-action) region. Same hover
     /// delay as [`Button::tooltip`](crate::button::Button::tooltip).
     pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
-        self.tooltip_text = Some(ls.resolve_now());
-        self.rich_tooltip_source = None;
-        self.composite_tooltip_content = None;
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `tooltip(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;
@@ -216,7 +207,10 @@ impl SplitButton {
     }
 
     /// Attach a composite tooltip to the main region.
-    pub fn composite_tooltip(mut self, content: impl bastyde_core::widget::Widget + 'static) -> Self {
+    pub fn composite_tooltip(
+        mut self,
+        content: impl bastyde_core::widget::Widget + 'static,
+    ) -> Self {
         self.composite_tooltip_content = Some(Box::new(content));
         self.tooltip_text = None;
         self.rich_tooltip_source = None;
@@ -227,16 +221,6 @@ impl SplitButton {
     /// region. When unset, the chevron gets a default "Show dropdown
     /// menu" tooltip so its affordance isn't silent.
     pub fn chevron_tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
-        self.chevron_tooltip_text = Some(ls.resolve_now());
-        self.chevron_rich_tooltip_source = None;
-        self.chevron_composite_tooltip_content = None;
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `chevron_tooltip(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn chevron_tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.chevron_tooltip_text = Some(text.into());
         self.chevron_rich_tooltip_source = None;
         self.chevron_composite_tooltip_content = None;
@@ -531,7 +515,7 @@ impl Widget for SplitButton {
         let self_id = ctx.self_id();
 
         // ---- Main region subtree ----
-        let label_widget = TextWidget::new_literal("")
+        let label_widget = TextWidget::new(lit!(""))
             .bind_text(main_label_text)
             .bind_color(text_role.clone())
             .single_line()
@@ -569,27 +553,16 @@ impl Widget for SplitButton {
         // Attach the main-region tooltip if configured. Three
         // mutually-exclusive setters; setters clear the others.
         if let Some(content) = self.composite_tooltip_content.take() {
-            crate::tooltip::attach_composite_tooltip_boxed(
-                ctx,
-                main_region_id,
-                content,
-                crate::tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, main_region_id, content, delay);
         } else if let Some(source) = self.rich_tooltip_source.take() {
-            crate::tooltip::attach_rich_tooltip_source(
-                ctx,
-                main_region_id,
-                source,
-                crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
-            );
-        } else if let Some(ref text) = self.tooltip_text {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new_literal(text);
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, main_region_id, source, delay);
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
             let tooltip_id = ctx.add(tooltip_widget);
-            ctx.attach_tooltip(
-                main_region_id,
-                tooltip_id,
-                std::time::Duration::from_millis(500),
-            );
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(main_region_id, tooltip_id, delay);
         }
 
         // ---- Divider between main and chevron regions ----
@@ -648,31 +621,20 @@ impl Widget for SplitButton {
         // override via `.chevron_tooltip(...)` (plain),
         // `.chevron_rich_tooltip(...)`, or `.chevron_composite_tooltip(...)`.
         if let Some(content) = self.chevron_composite_tooltip_content.take() {
-            crate::tooltip::attach_composite_tooltip_boxed(
-                ctx,
-                chevron_region_id,
-                content,
-                crate::tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, chevron_region_id, content, delay);
         } else if let Some(source) = self.chevron_rich_tooltip_source.take() {
-            crate::tooltip::attach_rich_tooltip_source(
-                ctx,
-                chevron_region_id,
-                source,
-                crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, chevron_region_id, source, delay);
         } else {
             let chevron_text = self
                 .chevron_tooltip_text
                 .clone()
-                .unwrap_or_else(|| "Show dropdown menu".to_string());
-            let tooltip_widget = crate::tooltip::TooltipWidget::new_literal(&chevron_text);
+                .unwrap_or_else(|| lit!("Show dropdown menu"));
+            let tooltip_widget = crate::tooltip::TooltipWidget::new(chevron_text);
             let tooltip_id = ctx.add(tooltip_widget);
-            ctx.attach_tooltip(
-                chevron_region_id,
-                tooltip_id,
-                std::time::Duration::from_millis(500),
-            );
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(chevron_region_id, tooltip_id, delay);
         }
 
         // ---- Row: main | divider | chevron ----

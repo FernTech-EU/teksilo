@@ -41,7 +41,7 @@ use serde::{Deserialize, Serialize};
 fn dark_mode_toolbar() -> impl Widget {
     let is_dark = Signal::new(false);
     Toolbar::new().child(HStack::new().child(Spacer::new()).child(
-        Button::new_literal("Toggle Dark Mode").on_activate_fn(move |ctx| {
+        Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
             let next = !is_dark.get();
             is_dark.set(next);
             ctx.set_theme(if next {
@@ -203,16 +203,16 @@ impl Widget for Root {
         let theme = ctx.theme_signal().get();
 
         // ----- Header -------------------------------------------------
-        let title = TextWidget::new_literal("Recent Projects")
+        let title = TextWidget::new(lit!("Recent Projects"))
             .style(theme.typography.body_bold.clone())
             .color(theme.colors.text_primary);
-        let subtitle = TextWidget::new_literal(format!("Settings stored at: {store_path}"))
+        let subtitle = TextWidget::new(lit!(format!("Settings stored at: {store_path}")))
             .color(theme.colors.text_secondary);
 
-        let font_label = TextWidget::new_literal("")
+        let font_label = TextWidget::new(lit!(""))
             .color(theme.colors.text_primary)
             .bind_text(font_size.clone().map(|v| format!("Font size: {v:.0} pt")));
-        let show_paths_label = TextWidget::new_literal("")
+        let show_paths_label = TextWidget::new(lit!(""))
             .color(theme.colors.text_secondary)
             .bind_text(
                 show_paths
@@ -235,40 +235,40 @@ impl Widget for Root {
 
         // ----- Toolbar (font size + show/hide paths + clear) ---------
         let smaller_btn = ctx.add(
-            Button::new_literal("Smaller font")
+            Button::new(lit!("Smaller font"))
                 .variant(ButtonVariant::Filled)
                 .on_activate_fn(|ctx: &mut EventContext| {
                     ctx.send_intent(AppIntent::FontShrink);
                 }),
         );
         let bigger_btn = ctx.add(
-            Button::new_literal("Bigger font")
+            Button::new(lit!("Bigger font"))
                 .variant(ButtonVariant::Filled)
                 .on_activate_fn(|ctx: &mut EventContext| {
                     ctx.send_intent(AppIntent::FontGrow);
                 }),
         );
-        let show_paths_btn = ctx.add(Button::new_literal("Show paths").on_activate_fn(
+        let show_paths_btn = ctx.add(Button::new(lit!("Show paths")).on_activate_fn(
             |ctx: &mut EventContext| {
                 ctx.send_intent(AppIntent::ToggleShowPaths);
             },
         ));
         ctx.visible_when(show_paths_btn, show_paths.not());
 
-        let hide_paths_btn = ctx.add(Button::new_literal("Hide paths").on_activate_fn(
+        let hide_paths_btn = ctx.add(Button::new(lit!("Hide paths")).on_activate_fn(
             |ctx: &mut EventContext| {
                 ctx.send_intent(AppIntent::ToggleShowPaths);
             },
         ));
         ctx.visible_when(hide_paths_btn, show_paths.clone());
 
-        let seed_btn = ctx.add(Button::new_literal("Seed demo entries").on_activate_fn(
+        let seed_btn = ctx.add(Button::new(lit!("Seed demo entries")).on_activate_fn(
             |ctx: &mut EventContext| {
                 ctx.send_intent(AppIntent::Seed);
             },
         ));
         let clear_btn = ctx.add(
-            Button::new_literal("Clear recents")
+            Button::new(lit!("Clear recents"))
                 .variant(ButtonVariant::Filled)
                 .on_activate_fn(|ctx: &mut EventContext| {
                     ctx.send_intent(AppIntent::ClearRecents);
@@ -299,7 +299,7 @@ impl Widget for Root {
             } else {
                 display_name.clone()
             };
-            let row_title = TextWidget::new_literal(title_text).color(theme.colors.text_primary);
+            let row_title = TextWidget::new(lit!(title_text)).color(theme.colors.text_primary);
 
             let path_for_display = path_str.clone();
             let path_text_signal = show_paths_for_factory.clone().map(move |show| {
@@ -309,7 +309,7 @@ impl Widget for Root {
                     String::new()
                 }
             });
-            let path_text_widget = TextWidget::new_literal("")
+            let path_text_widget = TextWidget::new(lit!(""))
                 .color(theme.colors.text_secondary)
                 .bind_text(path_text_signal);
 
@@ -320,17 +320,17 @@ impl Widget for Root {
 
             let path_for_open = path_str.clone();
             let open_btn =
-                Button::new_literal("Open").on_activate_fn(move |ctx: &mut EventContext| {
+                Button::new(lit!("Open")).on_activate_fn(move |ctx: &mut EventContext| {
                     ctx.send_intent(AppIntent::OpenRecent(path_for_open.clone()));
                 });
             let path_for_pin = path_str.clone();
             let pin_label = if pinned { "Unpin" } else { "Pin" };
             let pin_btn =
-                Button::new_literal(pin_label).on_activate_fn(move |ctx: &mut EventContext| {
+                Button::new(lit!(pin_label)).on_activate_fn(move |ctx: &mut EventContext| {
                     ctx.send_intent(AppIntent::TogglePin(path_for_pin.clone()));
                 });
             let path_for_remove = path_str.clone();
-            let remove_btn = Button::new_literal("Remove")
+            let remove_btn = Button::new(lit!("Remove"))
                 .variant(ButtonVariant::Filled)
                 .on_activate_fn(move |ctx: &mut EventContext| {
                     ctx.send_intent(AppIntent::RemoveRecent(path_for_remove.clone()));
@@ -362,7 +362,7 @@ impl Widget for Root {
                 VStack::new()
                     .spacing(8.0)
                     .child(
-                        TextWidget::new_literal("Recents")
+                        TextWidget::new(lit!("Recents"))
                             .style(theme.typography.body_bold.clone())
                             .color(theme.colors.text_primary),
                     )

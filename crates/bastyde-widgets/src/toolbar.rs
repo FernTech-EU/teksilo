@@ -23,7 +23,7 @@ pub struct Toolbar {
     pending: Vec<PendingChild>,
     child_ids: Vec<WidgetId>,
     root_child_id: Option<WidgetId>,
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
 }
 
 impl Toolbar {
@@ -54,14 +54,8 @@ impl Toolbar {
     /// "Drawing", etc.).
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
+        self.label = Some(ls);
         self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `label(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn label_literal(self, label: impl Into<String>) -> Self {
-        self.label(bastyde_i18n::LocalizedString::literal(label))
     }
 }
 
@@ -141,7 +135,8 @@ impl Widget for Toolbar {
         builder.set_role(bastyde_core::accesskit::Role::Toolbar);
         let name = self
             .label
-            .clone()
+            .as_ref()
+            .map(|l| l.resolve_now())
             .unwrap_or_else(|| bastyde_i18n::tr_widget!(a11y_toolbar_name()).resolve_now());
         builder.set_name(name);
     }
@@ -155,6 +150,7 @@ impl Widget for Toolbar {
 mod tests {
     use super::*;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn toolbar_builds() {
@@ -169,7 +165,7 @@ mod tests {
     fn toolbar_with_children() {
         use crate::Button;
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let btn = tree.add(Button::new_literal("Action"));
+        let btn = tree.add(Button::new(lit!("Action")));
         let tb = tree.add(Toolbar::new().add_child(btn));
         tree.layout(SizeProposal::exact(400.0, 50.0));
         let b = tree.bounds(tb);
@@ -192,7 +188,7 @@ mod tests {
     #[test]
     fn toolbar_custom_label_overrides_default() {
         let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        let tb = tree.add(Toolbar::new().label_literal("Formatting"));
+        let tb = tree.add(Toolbar::new().label(lit!("Formatting")));
         tree.layout(SizeProposal::exact(400.0, 50.0));
         let info = tree.accessibility_node(tb);
         assert_eq!(info.name(), Some("Formatting"));

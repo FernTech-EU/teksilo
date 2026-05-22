@@ -15,7 +15,7 @@
 
 use bastyde_canvas::Point;
 
-use crate::drag_payload::DragPayload;
+use crate::drag_payload::{DragPayload, DropOutcome};
 use crate::drag_state::DropFeedback;
 use crate::event::{ButtonMask, EventResponse, WidgetEvent};
 use crate::gesture::{DragPhase, GestureArena, PinchPhase, SwipeDirection, TapEvent};
@@ -108,6 +108,11 @@ pub(crate) struct EventHandlers {
     /// Called when a payload is dropped on this widget.
     /// Returns `true` if the drop was accepted.
     pub on_drop: Option<Box<dyn FnMut(DragPayload, Point, &mut EventContext) -> bool>>,
+    /// Called on the **source** widget when a drag it started ends, with the
+    /// outcome (dropped in-app, exported to the OS as copy/move, or
+    /// cancelled). The single completion hook for the drag's originator —
+    /// used e.g. to remove the dragged item on an `OsMove`.
+    pub on_drag_ended: Option<Box<dyn FnMut(DropOutcome, &mut EventContext)>>,
 
     #[allow(dead_code)] // V2 API: gesture arena for attached gesture recognizers
     pub gesture_arena: Option<GestureArena>,
@@ -139,6 +144,7 @@ impl EventHandlers {
             on_drag_leave: None,
             on_drag_tick: None,
             on_drop: None,
+            on_drag_ended: None,
             gesture_arena: None,
         }
     }
@@ -165,6 +171,7 @@ impl EventHandlers {
             || self.on_drag_leave.is_some()
             || self.on_drag_tick.is_some()
             || self.on_drop.is_some()
+            || self.on_drag_ended.is_some()
     }
 
     pub fn merge(self, other: EventHandlers) -> EventHandlers {
@@ -194,6 +201,7 @@ impl EventHandlers {
             on_drag_leave: merge_ctx_handler(self.on_drag_leave, other.on_drag_leave),
             on_drag_tick: merge_point_handler(self.on_drag_tick, other.on_drag_tick),
             on_drop: other.on_drop.or(self.on_drop),
+            on_drag_ended: merge_outcome_handler(self.on_drag_ended, other.on_drag_ended),
             gesture_arena: other.gesture_arena.or(self.gesture_arena),
         }
     }
@@ -207,6 +215,21 @@ fn merge_point_handler(
         (Some(mut existing), Some(mut incoming)) => Some(Box::new(move |point, ctx| {
             existing(point, ctx);
             incoming(point, ctx);
+        })),
+        (Some(existing), None) => Some(existing),
+        (None, Some(incoming)) => Some(incoming),
+        (None, None) => None,
+    }
+}
+
+fn merge_outcome_handler(
+    existing: Option<Box<dyn FnMut(DropOutcome, &mut EventContext)>>,
+    incoming: Option<Box<dyn FnMut(DropOutcome, &mut EventContext)>>,
+) -> Option<Box<dyn FnMut(DropOutcome, &mut EventContext)>> {
+    match (existing, incoming) {
+        (Some(mut existing), Some(mut incoming)) => Some(Box::new(move |outcome, ctx| {
+            existing(outcome, ctx);
+            incoming(outcome, ctx);
         })),
         (Some(existing), None) => Some(existing),
         (None, Some(incoming)) => Some(incoming),

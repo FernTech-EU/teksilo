@@ -18,7 +18,7 @@
 //! ```ignore
 //! let password = ctx.signal(String::new());
 //! PasswordField::new(password.clone())
-//!     .label(tr!(password()))               // or .label_literal("Password")
+//!     .label(tr!(password()))               // or .label(lit!("Password"))
 //!     .placeholder(tr!(password_hint()))    // i18n-first; `_literal` twins bypass i18n
 //!     .validator(|s| if s.len() >= 8 {
 //!         ValidationOutcome::Valid
@@ -30,6 +30,7 @@
 #[cfg(test)]
 mod tests;
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Point, Rect, SizeProposal};
@@ -82,8 +83,8 @@ pub enum RevealMode {
 /// Secure single-line text entry. See the [module docs](self).
 pub struct PasswordField {
     text: Signal<String>,
-    placeholder: String,
-    label: String,
+    placeholder: bastyde_i18n::LocalizedString,
+    label: bastyde_i18n::LocalizedString,
     initial_enabled: bool,
     read_only: bool,
     max_length: Option<usize>,
@@ -105,7 +106,7 @@ pub struct PasswordField {
     at_reveal_policy: AtRevealPolicy,
 
     // ── Tooltips (mutually exclusive, last-call-wins) ───────────────
-    tooltip_text: Option<String>,
+    tooltip_text: Option<bastyde_i18n::LocalizedString>,
     rich_tooltip_source: Option<RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn Widget>>,
 
@@ -129,8 +130,8 @@ impl PasswordField {
     pub fn new(password: Signal<String>) -> Self {
         Self {
             text: password,
-            placeholder: String::new(),
-            label: String::new(),
+            placeholder: bastyde_i18n::LocalizedString::literal(String::new()),
+            label: bastyde_i18n::LocalizedString::literal(String::new()),
             initial_enabled: true,
             read_only: false,
             max_length: None,
@@ -159,13 +160,7 @@ impl PasswordField {
     /// Placeholder shown when empty. Never masked.
     pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.placeholder = ls.resolve_now();
-        self
-    }
-
-    /// Untranslated [`placeholder`](Self::placeholder).
-    pub fn placeholder_literal(mut self, text: impl Into<String>) -> Self {
-        self.placeholder = text.into();
+        self.placeholder = ls;
         self
     }
 
@@ -173,13 +168,7 @@ impl PasswordField {
     /// Strongly recommended for screen-reader users.
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = ls.resolve_now();
-        self
-    }
-
-    /// Untranslated [`label`](Self::label).
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = label.into();
+        self.label = ls;
         self
     }
 
@@ -300,14 +289,6 @@ impl PasswordField {
         self
     }
 
-    /// Plain-text tooltip.
-    pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
-        self.tooltip_text = Some(text.into());
-        self.rich_tooltip_source = None;
-        self.composite_tooltip_content = None;
-        self
-    }
-
     /// Registry-keyed rich tooltip.
     pub fn rich_tooltip_key(mut self, key: impl Into<String>) -> Self {
         self.rich_tooltip_source = Some(RichTooltipSource::Key(key.into()));
@@ -402,7 +383,7 @@ impl Widget for PasswordField {
 
         // The field carries the `Role::PasswordInput` AT node, so the
         // accessible name belongs on it.
-        let field_id = if self.label.is_empty() {
+        let field_id = if self.label.resolve_now().is_empty() {
             ctx.add(field)
         } else {
             ctx.add(field.access_label(self.label.clone()))
@@ -419,22 +400,30 @@ impl Widget for PasswordField {
         );
 
         // Placeholder overlay (never masked) shares the field's column.
-        let text_column_id = if self.placeholder.is_empty() {
-            ctx.add(Expand::horizontal().respect_intrinsic().child_id(padded_field))
+        let text_column_id = if self.placeholder.resolve_now().is_empty() {
+            ctx.add(
+                Expand::horizontal()
+                    .respect_intrinsic()
+                    .child_id(padded_field),
+            )
         } else {
             let ph = TextWidget::new(self.placeholder.clone())
                 .style(TextStyleRole::Body)
                 .color(TextRole::Secondary)
                 .single_line()
                 .a11y_hidden();
-            let ph_id = ctx.add(Expand::new().respect_intrinsic().child(Center::new().child(ph)));
+            let ph_id = ctx.add(
+                Expand::new()
+                    .respect_intrinsic()
+                    .child(Center::new().child(ph)),
+            );
             let text_for_vis = self.text.clone();
             let visible = text_for_vis.map(|t| t.is_empty());
             ctx.visible_when(ph_id, visible);
             ctx.add(
-                Expand::horizontal().respect_intrinsic().child(
-                    ZStack::new().add_child(ph_id).add_child(padded_field),
-                ),
+                Expand::horizontal()
+                    .respect_intrinsic()
+                    .child(ZStack::new().add_child(ph_id).add_child(padded_field)),
             )
         };
 
@@ -447,13 +436,13 @@ impl Widget for PasswordField {
             && let Some(window) = ctx.window()
         {
             let caps = window.caps_lock().clone();
-            let warn = TextWidget::new_literal(CAPS_LOCK_GLYPH)
+            let warn = TextWidget::new(lit!(CAPS_LOCK_GLYPH))
                 .style(TextStyleRole::Body)
                 .color(TextRole::Secondary)
                 .single_line()
                 .access_role(Role::Status)
                 .access_live(Live::Polite)
-                .access_label(bastyde_i18n::tr!(a11y_caps_lock_on()));
+                .access_label(bastyde_i18n::tr_widget!(a11y_caps_lock_on()));
             let warn_id = ctx.add(warn);
             let visible = caps.zip(&focused).map(|(c, f)| *c && *f);
             ctx.visible_when(warn_id, visible);
@@ -466,7 +455,7 @@ impl Widget for PasswordField {
                 let reveal = IconButton::visibility_toggle(revealed.clone())
                     .embedded()
                     .focusable(true)
-                    .access_label(bastyde_i18n::tr!(a11y_password_reveal()));
+                    .access_label(bastyde_i18n::tr_widget!(a11y_password_reveal()));
                 row = row.add_child(ctx.add(reveal));
             }
             RevealMode::Hold => {
@@ -489,13 +478,16 @@ impl Widget for PasswordField {
                     })
                     .cursor(CursorIcon::Pointer)
                     .access_role(Role::Button)
-                    .access_label(bastyde_i18n::tr!(a11y_password_reveal()));
+                    .access_label(bastyde_i18n::tr_widget!(a11y_password_reveal()));
                 row = row.add_child(ctx.add(hold));
             }
             RevealMode::None => {}
         }
 
-        let row_id = ctx.add(row.focus_within(focused.clone()).hover_within(hovered.clone()));
+        let row_id = ctx.add(
+            row.focus_within(focused.clone())
+                .hover_within(hovered.clone()),
+        );
 
         // ── Frame chrome via the (reused) TextInputStyle ────────────
         let effective_enabled = ctx.effective_enabled_signal(self_id);
@@ -540,22 +532,15 @@ impl Widget for PasswordField {
 
         // Tooltips — mutually exclusive (setters clear the others).
         if let Some(content) = self.composite_tooltip_content.take() {
-            tooltip::attach_composite_tooltip_boxed(
-                ctx,
-                root_id,
-                content,
-                tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
         } else if let Some(source) = self.rich_tooltip_source.take() {
-            tooltip::attach_rich_tooltip_source(
-                ctx,
-                root_id,
-                source,
-                tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
-            );
-        } else if let Some(ref text) = self.tooltip_text {
-            let tooltip_id = ctx.add(crate::tooltip::TooltipWidget::new_literal(text));
-            ctx.attach_tooltip(root_id, tooltip_id, std::time::Duration::from_millis(500));
+            let delay = ctx.theme().motion.tooltip_delay;
+            tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
+        } else if let Some(text) = self.tooltip_text.clone() {
+            let tooltip_id = ctx.add(crate::tooltip::TooltipWidget::new(text));
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root_id, tooltip_id, delay);
         }
 
         self.root_child_id = Some(root_id);

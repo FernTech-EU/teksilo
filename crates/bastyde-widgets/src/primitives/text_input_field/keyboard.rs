@@ -21,7 +21,9 @@ pub(crate) fn report_ime_cursor_area(state: &SharedState, ctx: &mut EventContext
         if !st.has_focus || !st.engine.has_full_layout() {
             return;
         }
-        let caret = st.engine.caret_rect(st.cursor.position(), CursorAffinity::Downstream);
+        let caret = st
+            .engine
+            .caret_rect(st.cursor.position(), CursorAffinity::Downstream);
         bastyde_canvas::Rect::new(
             st.viewport_origin.x + caret[0] - st.scroll_x,
             st.viewport_origin.y + caret[1],

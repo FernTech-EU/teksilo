@@ -19,7 +19,7 @@ fn main() {
                 .size(400, 300)
                 .root(|tree, _state| {
                     tree.add(
-                        Button::new_literal("Click Me")
+                        Button::new(lit!("Click Me"))
                             .on_activate_fn(|_ctx| println!("Clicked!")),
                     )
                 }),
@@ -47,9 +47,9 @@ fn main() {
                     tree.add(
                         VStack::new()
                             .spacing(12.0)
-                            .child(TextWidget::new_literal("").bind_text(label))
+                            .child(TextWidget::new(lit!("")).bind_text(label))
                             .child(
-                                Button::new_literal("Increment")
+                                Button::new(lit!("Increment"))
                                     .on_activate_fn(move |_| {
                                         count.set(count.get() + 1)
                                     }),

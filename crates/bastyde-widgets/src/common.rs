@@ -8,3 +8,4 @@
 //! surface.
 
 pub mod datetime;
+pub(crate) mod scroll;

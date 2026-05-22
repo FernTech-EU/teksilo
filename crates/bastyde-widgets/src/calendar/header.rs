@@ -1,5 +1,6 @@
 //! `CalendarHeader` — month navigation strip: prev / "Month Year" / next.
 
+use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Path, Point, Rect, Size, SizeProposal};
@@ -168,7 +169,7 @@ impl Widget for CalendarHeader {
             }
         });
         let mode_for_action = self.mode.clone();
-        let title_btn = crate::button::Button::new_literal("")
+        let title_btn = crate::button::Button::new(lit!(""))
             .bind_label(label_signal)
             .variant(crate::button::ButtonVariant::Ghost)
             .on_activate_fn(move |ctx_evt| {

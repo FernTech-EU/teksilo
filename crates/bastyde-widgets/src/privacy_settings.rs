@@ -43,6 +43,7 @@ use bastyde_core::build_context::BuildContext;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
+use bastyde_i18n::lit;
 use bastyde_i18n::tr_widget;
 use bastyde_telemetry::{
     ConsentScope, ConsentState, ConsentStore, OpenedTelemetry, RemoteDataExport, TelemetryExt,
@@ -75,7 +76,7 @@ pub struct PrivacySettings {
     /// Show the "Inspect data sent" accordion. When enabled, the
     /// widget peeks the last `inspect_event_count` events from the
     /// `recent_log` ring buffer and lists them. Default `true`.
-    /// Note: snapshot-at-build (Phase 3.1) — opening and closing the
+    /// Note: snapshot-at-build — opening and closing the
     /// accordion refreshes the list to current state.
     show_inspect: bool,
     /// How many recent events to show in the accordion. Default 50.
@@ -176,7 +177,7 @@ impl Widget for PrivacySettings {
         let consent_signal = telemetry.consent.state_signal();
         consent_signal.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
-        // Phase 3.2: live-update the "Inspect data sent" accordion as
+        // Live-update the "Inspect data sent" accordion as
         // events stream in. The reporter bumps `recent_log_revision`
         // on every `record()` and `discard_pending()`. Bound at
         // `BindingLevel::Rebuild` so the accordion's snapshot
@@ -320,8 +321,8 @@ fn build_scope_panel(
 
     if supported.anonymous_metrics {
         column = column.child(scope_row(
-            tr_widget!(privacy_scope_anonymous_metrics_label()).resolve_now(),
-            tr_widget!(privacy_scope_anonymous_metrics_description()).resolve_now(),
+            tr_widget!(privacy_scope_anonymous_metrics_label()),
+            tr_widget!(privacy_scope_anonymous_metrics_description()),
             current_value(state, |s| s.anonymous_metrics),
             !matches!(state, ConsentState::Denied),
             telemetry.consent.clone(),
@@ -331,8 +332,8 @@ fn build_scope_panel(
     }
     if supported.crash_reports {
         column = column.child(scope_row(
-            tr_widget!(privacy_scope_crash_reports_label()).resolve_now(),
-            tr_widget!(privacy_scope_crash_reports_description()).resolve_now(),
+            tr_widget!(privacy_scope_crash_reports_label()),
+            tr_widget!(privacy_scope_crash_reports_description()),
             current_value(state, |s| s.crash_reports),
             !matches!(state, ConsentState::Denied),
             telemetry.consent.clone(),
@@ -342,8 +343,8 @@ fn build_scope_panel(
     }
     if supported.feature_flags {
         column = column.child(scope_row(
-            tr_widget!(privacy_scope_feature_flags_label()).resolve_now(),
-            tr_widget!(privacy_scope_feature_flags_description()).resolve_now(),
+            tr_widget!(privacy_scope_feature_flags_label()),
+            tr_widget!(privacy_scope_feature_flags_description()),
             current_value(state, |s| s.feature_flags),
             !matches!(state, ConsentState::Denied),
             telemetry.consent.clone(),
@@ -362,8 +363,8 @@ fn current_value(state: &ConsentState, f: impl FnOnce(&ConsentScope) -> bool) ->
 }
 
 fn scope_row(
-    label: String,
-    description: String,
+    label: bastyde_i18n::LocalizedString,
+    description: bastyde_i18n::LocalizedString,
     initial: bool,
     enabled: bool,
     consent: ConsentStore,
@@ -390,11 +391,11 @@ fn scope_row(
         .child(
             VStack::new()
                 .spacing(2.0)
-                .child(TextWidget::new_literal(label.clone()).style(TextStyleRole::Body))
-                .child(TextWidget::new_literal(description).style(TextStyleRole::Small)),
+                .child(TextWidget::new(label.clone()).style(TextStyleRole::Body))
+                .child(TextWidget::new(description).style(TextStyleRole::Small)),
         )
         .child(Spacer::new())
-        .child(Toggle::new(signal).label_literal(label).enabled(enabled))
+        .child(Toggle::new(signal).label(label).enabled(enabled))
 }
 
 fn build_accept_reject(telemetry: &OpenedTelemetry, endpoint: &str) -> HStack {
@@ -506,13 +507,13 @@ fn build_identity_row(telemetry: &OpenedTelemetry) -> Panel {
                                     .text(tr_widget!(privacy_fetch_success_text(
                                         count = event_count
                                     )))
-                                    .informative_text_literal(format!(
+                                    .informative_text(lit!(format!(
                                         "{}\n\n{details}",
                                         tr_widget!(privacy_fetch_saved_to(
                                             path = path.display().to_string()
                                         ))
                                         .resolve_now()
-                                    ))
+                                    )))
                                     .buttons(MessageBoxButtons::Ok)
                                     .present(ctx);
                                 }
@@ -547,14 +548,14 @@ fn build_identity_row(telemetry: &OpenedTelemetry) -> Panel {
                             }
                             MessageBox::information(tr_widget!(privacy_fetch_success_title()))
                                 .text(tr_widget!(privacy_fetch_success_text(count = event_count)))
-                                .informative_text_literal(details)
-                                .detailed_text_literal(json)
+                                .informative_text(lit!(details))
+                                .detailed_text(lit!(json))
                                 .buttons(MessageBoxButtons::Ok)
                                 .present(ctx);
                         }
                         FileDialogResult::Error(msg) => {
                             MessageBox::warning(tr_widget!(privacy_fetch_error_title()))
-                                .text_literal(msg)
+                                .text(lit!(msg))
                                 .buttons(MessageBoxButtons::Ok)
                                 .present(ctx);
                         }
@@ -565,14 +566,14 @@ fn build_identity_row(telemetry: &OpenedTelemetry) -> Panel {
                     });
                     if let Err(msg) = submit {
                         MessageBox::warning(tr_widget!(privacy_fetch_error_title()))
-                            .text_literal(msg)
+                            .text(lit!(msg))
                             .buttons(MessageBoxButtons::Ok)
                             .present(ctx);
                     }
                 }
                 Err(e) => {
                     MessageBox::warning(tr_widget!(privacy_fetch_error_title()))
-                        .text_literal(format!("{e}"))
+                        .text(lit!(format!("{e}")))
                         .buttons(MessageBoxButtons::Ok)
                         .present(ctx);
                 }
@@ -757,7 +758,7 @@ fn build_inspect_accordion(telemetry: &OpenedTelemetry, n: usize) -> Accordion {
             } else {
                 format!("{}. {} ({})", idx + 1, event.name, props_summary)
             };
-            col = col.child(TextWidget::new_literal(line).style(TextStyleRole::Mono));
+            col = col.child(TextWidget::new(lit!(line)).style(TextStyleRole::Mono));
         }
         col
     };

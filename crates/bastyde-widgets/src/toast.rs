@@ -42,8 +42,8 @@ use std::time::Duration;
 
 use bastyde_core::widget::{EventContext, Widget};
 
-pub use ext::EventContextToastExt;
 pub use bastyde_core::styles::{ToastPriority, ToastStyleConfig};
+pub use ext::EventContextToastExt;
 pub use host::{ToastHost, ToastInstallOptions};
 pub use registry::ToastRegistry;
 pub use surface::ToastSurface;
@@ -113,12 +113,12 @@ pub type ToastActionCallback = Rc<dyn Fn(&mut EventContext)>;
 /// One actionable element inside a [`Toast`] — a button or hyperlink
 /// the user can click to drive a domain action.
 pub struct ToastAction {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     on_invoke: ToastActionCallback,
     style: ToastActionStyle,
     closes_toast: bool,
     shortcut_id: Option<String>,
-    tooltip: Option<String>,
+    tooltip: Option<bastyde_i18n::LocalizedString>,
 }
 
 impl ToastAction {
@@ -130,22 +130,13 @@ impl ToastAction {
     ) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: ls,
             on_invoke: Rc::new(on_invoke),
             style: ToastActionStyle::default(),
             closes_toast: true,
             shortcut_id: None,
             tooltip: None,
         }
-    }
-
-    /// Permanent grep marker for untranslated action labels.
-    #[doc(hidden)]
-    pub fn new_literal(
-        label: impl Into<String>,
-        on_invoke: impl Fn(&mut EventContext) + 'static,
-    ) -> Self {
-        Self::new(bastyde_i18n::LocalizedString::literal(label), on_invoke)
     }
 
     /// Shorthand for `ToastAction::new(label, on_invoke).style(Button { Filled })`.
@@ -188,12 +179,9 @@ impl ToastAction {
     /// Associate the action with a registered [`Shortcut`] id. Two
     /// effects: the keystroke label is shown as a chip on the action,
     /// and the archived form of this action (in
-    /// [`NotificationLog`](crate::notification::log::NotificationLog),
-    /// Phase 4) is re-invokable by name through the existing Intent
+    /// [`NotificationLog`](crate::notification::log::NotificationLog))
+    /// is re-invokable by name through the existing Intent
     /// dispatcher.
-    ///
-    /// (Phase 2: only stored. The chip rendering and archive-replay
-    /// paths land with Phase 3 / Phase 4.)
     pub fn shortcut_id(mut self, id: impl Into<String>) -> Self {
         self.shortcut_id = Some(id.into());
         self
@@ -201,13 +189,12 @@ impl ToastAction {
 
     /// Optional tooltip text shown when the pointer hovers the action.
     pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
-        self.tooltip = Some(ls.resolve_now());
+        self.tooltip = Some(text.into());
         self
     }
 
-    pub fn label(&self) -> &str {
-        &self.label
+    pub fn label(&self) -> String {
+        self.label.resolve_now()
     }
     pub fn style_ref(&self) -> &ToastActionStyle {
         &self.style
@@ -218,8 +205,14 @@ impl ToastAction {
     pub fn shortcut_id_ref(&self) -> Option<&str> {
         self.shortcut_id.as_deref()
     }
-    pub fn tooltip_ref(&self) -> Option<&str> {
-        self.tooltip.as_deref()
+    /// The action label as a `LocalizedString` (reactive source for
+    /// the rendered Link/Button).
+    pub(crate) fn label_ls(&self) -> bastyde_i18n::LocalizedString {
+        self.label.clone()
+    }
+
+    pub fn tooltip_ref(&self) -> Option<&bastyde_i18n::LocalizedString> {
+        self.tooltip.as_ref()
     }
     pub fn callback(&self) -> ToastActionCallback {
         self.on_invoke.clone()
@@ -330,8 +323,8 @@ pub type ToastDismissCallback = Rc<dyn Fn(ToastDismissCause, &mut EventContext)>
 /// See the module docs for the full conceptual overview.
 pub struct Toast {
     pub(crate) severity: ToastSeverity,
-    pub(crate) title: String,
-    pub(crate) body: Option<String>,
+    pub(crate) title: bastyde_i18n::LocalizedString,
+    pub(crate) body: Option<bastyde_i18n::LocalizedString>,
     pub(crate) leading: Option<Box<dyn Widget>>,
     pub(crate) actions: Vec<ToastAction>,
     pub(crate) auto_dismiss_after: Option<Duration>,
@@ -339,7 +332,7 @@ pub struct Toast {
     pub(crate) id: Option<String>,
     pub(crate) on_click: Option<Rc<dyn Fn(&mut EventContext)>>,
     pub(crate) on_dismiss: Option<ToastDismissCallback>,
-    pub(crate) announcement: Option<String>,
+    pub(crate) announcement: Option<bastyde_i18n::LocalizedString>,
     pub(crate) show_close_button: bool,
     pub(crate) closable_on_escape: bool,
     pub(crate) archive: bool,
@@ -368,7 +361,7 @@ impl Toast {
         let ls: bastyde_i18n::LocalizedString = title.into();
         Self {
             severity,
-            title: ls.resolve_now(),
+            title: ls,
             body: None,
             leading: None,
             actions: Vec::new(),
@@ -416,38 +409,13 @@ impl Toast {
 
     // ----- _literal shims (permanent grep markers for untranslated strings) -----
 
-    #[doc(hidden)]
-    pub fn info_literal(title: impl Into<String>) -> Self {
-        Self::info(bastyde_i18n::LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn success_literal(title: impl Into<String>) -> Self {
-        Self::success(bastyde_i18n::LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn warning_literal(title: impl Into<String>) -> Self {
-        Self::warning(bastyde_i18n::LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn error_literal(title: impl Into<String>) -> Self {
-        Self::error(bastyde_i18n::LocalizedString::literal(title))
-    }
-    #[doc(hidden)]
-    pub fn loading_literal(title: impl Into<String>) -> Self {
-        Self::loading(bastyde_i18n::LocalizedString::literal(title))
-    }
-
     // ----- Body content -----
 
     /// Optional secondary line below the title.
     pub fn body(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.body = Some(ls.resolve_now());
+        self.body = Some(ls);
         self
-    }
-    #[doc(hidden)]
-    pub fn body_literal(self, text: impl Into<String>) -> Self {
-        self.body(bastyde_i18n::LocalizedString::literal(text))
     }
 
     /// Replace the default severity glyph with a custom leading
@@ -494,9 +462,8 @@ impl Toast {
 
     /// Stable identity for the "progress toast updates in place"
     /// pattern. Two toasts presented with the same id reuse the same
-    /// slot (Phase 3 will land the actual mutation hooks; for now the
-    /// id is captured + archived but each present allocates a new
-    /// slot).
+    /// slot (mutation hooks are not yet implemented; the id is captured
+    /// and archived but each present allocates a new slot).
     pub fn id(mut self, id: impl Into<String>) -> Self {
         self.id = Some(id.into());
         self
@@ -539,19 +506,15 @@ impl Toast {
     /// ("3") but the spoken text needs context ("3 unread messages").
     pub fn announcement(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.announcement = Some(ls.resolve_now());
+        self.announcement = Some(ls);
         self
-    }
-    #[doc(hidden)]
-    pub fn announcement_literal(self, text: impl Into<String>) -> Self {
-        self.announcement(bastyde_i18n::LocalizedString::literal(text))
     }
 
     // ----- Archive -----
 
     /// Whether this toast is added to the persistent archive that
-    /// drives [`NotificationLog`](crate::notification::log::NotificationLog)
-    /// (Phase 4). Default `true`. Set `false` for noise-suppressing
+    /// drives [`NotificationLog`](crate::notification::log::NotificationLog).
+    /// Default `true`. Set `false` for noise-suppressing
     /// transient notifications like quick "Copied!" feedback.
     pub fn archive(mut self, archive: bool) -> Self {
         self.archive = archive;
@@ -581,18 +544,19 @@ impl Toast {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
 
     #[test]
     fn severity_constructors_round_trip() {
-        assert_eq!(Toast::info_literal("x").severity, ToastSeverity::Info);
-        assert_eq!(Toast::success_literal("x").severity, ToastSeverity::Success);
-        assert_eq!(Toast::warning_literal("x").severity, ToastSeverity::Warning);
-        assert_eq!(Toast::error_literal("x").severity, ToastSeverity::Error);
+        assert_eq!(Toast::info(lit!("x")).severity, ToastSeverity::Info);
+        assert_eq!(Toast::success(lit!("x")).severity, ToastSeverity::Success);
+        assert_eq!(Toast::warning(lit!("x")).severity, ToastSeverity::Warning);
+        assert_eq!(Toast::error(lit!("x")).severity, ToastSeverity::Error);
     }
 
     #[test]
     fn defaults_match_documented_values() {
-        let t = Toast::info_literal("hello");
+        let t = Toast::info(lit!("hello"));
         assert_eq!(t.auto_dismiss_after, Some(DEFAULT_TOAST_AUTO_DISMISS));
         assert_eq!(t.priority, ToastPriority::Normal);
         assert!(t.show_close_button);
@@ -606,13 +570,13 @@ mod tests {
 
     #[test]
     fn persistent_clears_auto_dismiss() {
-        let t = Toast::error_literal("boom").persistent();
+        let t = Toast::error(lit!("boom")).persistent();
         assert!(t.auto_dismiss_after.is_none());
     }
 
     #[test]
     fn loading_is_info_persistent() {
-        let t = Toast::loading_literal("Uploading");
+        let t = Toast::loading(lit!("Uploading"));
         assert_eq!(t.severity, ToastSeverity::Info);
         assert!(
             t.auto_dismiss_after.is_none(),
@@ -623,7 +587,7 @@ mod tests {
 
     #[test]
     fn action_primary_uses_filled_button() {
-        let a = ToastAction::primary("Retry", |_| {}).style(ToastActionStyle::Button {
+        let a = ToastAction::primary(lit!("Retry"), |_| {}).style(ToastActionStyle::Button {
             variant: crate::button::ButtonVariant::Filled,
         });
         match a.style_ref() {
@@ -637,13 +601,13 @@ mod tests {
 
     #[test]
     fn action_default_style_is_link() {
-        let a = ToastAction::new_literal("Show details", |_| {});
+        let a = ToastAction::new(lit!("Show details"), |_| {});
         matches!(a.style_ref(), ToastActionStyle::Link);
     }
 
     #[test]
     fn action_closes_toast_can_be_disabled() {
-        let a = ToastAction::new_literal("Toggle", |_| {}).closes_toast(false);
+        let a = ToastAction::new(lit!("Toggle"), |_| {}).closes_toast(false);
         assert!(!a.closes_toast_flag());
     }
 
@@ -665,7 +629,7 @@ mod tests {
     #[test]
     fn enqueue_creates_live_entry() {
         let r = fresh_registry();
-        let (h, _overflow) = r.enqueue(Toast::info_literal("Saved"));
+        let (h, _overflow) = r.enqueue(Toast::info(lit!("Saved")));
         assert!(h.entry_id() > 0);
         assert_eq!(r.live_count(), 1);
     }
@@ -673,9 +637,9 @@ mod tests {
     #[test]
     fn enqueue_returns_distinct_ids() {
         let r = fresh_registry();
-        let (h1, _) = r.enqueue(Toast::info_literal("a"));
-        let (h2, _) = r.enqueue(Toast::info_literal("b"));
-        let (h3, _) = r.enqueue(Toast::info_literal("c"));
+        let (h1, _) = r.enqueue(Toast::info(lit!("a")));
+        let (h2, _) = r.enqueue(Toast::info(lit!("b")));
+        let (h3, _) = r.enqueue(Toast::info(lit!("c")));
         assert!(h1.entry_id() != h2.entry_id());
         assert!(h2.entry_id() != h3.entry_id());
         assert_eq!(r.live_count(), 3);
@@ -684,10 +648,10 @@ mod tests {
     #[test]
     fn slot_pool_overflow_drops_normal_priority() {
         let r = small_registry(2);
-        let (_h1, _) = r.enqueue(Toast::info_literal("a"));
-        let (_h2, _) = r.enqueue(Toast::info_literal("b"));
+        let (_h1, _) = r.enqueue(Toast::info(lit!("a")));
+        let (_h2, _) = r.enqueue(Toast::info(lit!("b")));
         assert_eq!(r.live_count(), 2);
-        let (h3, overflow) = r.enqueue(Toast::info_literal("c"));
+        let (h3, overflow) = r.enqueue(Toast::info(lit!("c")));
         assert_eq!(
             r.live_count(),
             2,
@@ -704,11 +668,11 @@ mod tests {
     fn slot_pool_overflow_fires_on_dismiss_for_normal_drop() {
         use std::cell::Cell;
         let r = small_registry(2);
-        let (_h1, _) = r.enqueue(Toast::info_literal("a"));
-        let (_h2, _) = r.enqueue(Toast::info_literal("b"));
+        let (_h1, _) = r.enqueue(Toast::info(lit!("a")));
+        let (_h2, _) = r.enqueue(Toast::info(lit!("b")));
         let fired = Rc::new(Cell::new(false));
         let fired_clone = fired.clone();
-        let (_h3, overflow) = r.enqueue(Toast::info_literal("c").on_dismiss(move |cause, _ctx| {
+        let (_h3, overflow) = r.enqueue(Toast::info(lit!("c")).on_dismiss(move |cause, _ctx| {
             assert_eq!(cause, ToastDismissCause::SlotPoolFull);
             fired_clone.set(true);
         }));
@@ -729,11 +693,11 @@ mod tests {
     #[test]
     fn high_priority_evicts_oldest_normal_when_full() {
         let r = small_registry(2);
-        let (h_a, _) = r.enqueue(Toast::info_literal("a"));
-        let (h_b, _) = r.enqueue(Toast::info_literal("b"));
+        let (h_a, _) = r.enqueue(Toast::info(lit!("a")));
+        let (h_b, _) = r.enqueue(Toast::info(lit!("b")));
         let oldest_normal_id = h_a.entry_id();
         let newer_normal_id = h_b.entry_id();
-        let (h_high, _) = r.enqueue(Toast::info_literal("urgent").priority(ToastPriority::High));
+        let (h_high, _) = r.enqueue(Toast::info(lit!("urgent")).priority(ToastPriority::High));
         let live_ids = r.live_entry_ids();
         assert!(
             !live_ids.contains(&oldest_normal_id),
@@ -748,7 +712,7 @@ mod tests {
     fn tick_timers_decrements_and_dismisses_on_expiry() {
         let r = fresh_registry();
         let (h, _) =
-            r.enqueue(Toast::info_literal("fast").auto_dismiss_after(Duration::from_millis(500)));
+            r.enqueue(Toast::info(lit!("fast")).auto_dismiss_after(Duration::from_millis(500)));
         let id = h.entry_id();
 
         // Tick 200ms — entry still alive.
@@ -766,7 +730,7 @@ mod tests {
     fn paused_tick_does_not_decrement() {
         let r = fresh_registry();
         let (h, _) =
-            r.enqueue(Toast::info_literal("slow").auto_dismiss_after(Duration::from_millis(300)));
+            r.enqueue(Toast::info(lit!("slow")).auto_dismiss_after(Duration::from_millis(300)));
         // 10 ticks of 100ms (total 1s, well past 300ms) with paused=true.
         for _ in 0..10 {
             let any_expired = r.tick_timers(Duration::from_millis(100), true);
@@ -778,7 +742,7 @@ mod tests {
     #[test]
     fn persistent_toast_never_expires() {
         let r = fresh_registry();
-        let (h, _) = r.enqueue(Toast::error_literal("sticky").persistent());
+        let (h, _) = r.enqueue(Toast::error(lit!("sticky")).persistent());
         for _ in 0..50 {
             let any_expired = r.tick_timers(Duration::from_secs(1), false);
             assert!(!any_expired);
@@ -789,7 +753,7 @@ mod tests {
     #[test]
     fn loading_constructor_is_persistent_with_spinner_leading() {
         let r = fresh_registry();
-        let (h, _) = r.enqueue(Toast::loading_literal("Uploading"));
+        let (h, _) = r.enqueue(Toast::loading(lit!("Uploading")));
         r.with_entry(h.entry_id(), |e| {
             assert!(e.time_left.is_none(), "loading toasts are persistent");
             assert!(
@@ -805,14 +769,14 @@ mod tests {
     fn version_signal_bumps_on_enqueue_and_dismiss() {
         let r = fresh_registry();
         let initial = r.version_signal().get();
-        let (_h1, _) = r.enqueue(Toast::info_literal("a"));
+        let (_h1, _) = r.enqueue(Toast::info(lit!("a")));
         let after_show = r.version_signal().get();
         assert_ne!(initial, after_show, "version bumps on enqueue");
 
         r.tick_timers(Duration::ZERO, false); // no-op, no expiry
         // Expire one with a fast timer.
         let (h2, _) =
-            r.enqueue(Toast::info_literal("b").auto_dismiss_after(Duration::from_millis(1)));
+            r.enqueue(Toast::info(lit!("b")).auto_dismiss_after(Duration::from_millis(1)));
         let _ = h2;
         let pre_dismiss = r.version_signal().get();
         r.tick_timers(Duration::from_millis(10), false);
@@ -826,8 +790,8 @@ mod tests {
         let archive = std::rc::Rc::new(NotificationArchiveModel::in_memory());
         let registry =
             ToastRegistry::with_archive(host::ToastInstallOptions::default(), archive.clone());
-        let (_h1, _) = registry.enqueue(Toast::error_literal("Build failed"));
-        let (_h2, _) = registry.enqueue(Toast::success_literal("Deploy ok"));
+        let (_h1, _) = registry.enqueue(Toast::error(lit!("Build failed")));
+        let (_h2, _) = registry.enqueue(Toast::success(lit!("Deploy ok")));
         // Both toasts mirrored.
         assert_eq!(archive.entries().len(), 2);
         // Newest first (the archive inserts at index 0).
@@ -845,9 +809,9 @@ mod tests {
         let registry =
             ToastRegistry::with_archive(host::ToastInstallOptions::default(), archive.clone());
         // Default toast is archived.
-        let (_archived, _) = registry.enqueue(Toast::info_literal("logged"));
+        let (_archived, _) = registry.enqueue(Toast::info(lit!("logged")));
         // Opt-out toast is NOT archived.
-        let (_silent, _) = registry.enqueue(Toast::info_literal("Copied!").archive(false));
+        let (_silent, _) = registry.enqueue(Toast::info(lit!("Copied!")).archive(false));
         assert_eq!(archive.entries().len(), 1);
         assert_eq!(
             archive.entries().with_item(0, |e| e.title.clone()),
@@ -858,11 +822,11 @@ mod tests {
     #[test]
     fn registry_with_id_updates_live_entry_in_place_keeping_entry_id() {
         let r = fresh_registry();
-        let (first, _) = r.enqueue(Toast::loading_literal("Uploading 1 of 7…").id("upload"));
+        let (first, _) = r.enqueue(Toast::loading(lit!("Uploading 1 of 7…")).id("upload"));
         assert_eq!(r.live_count(), 1);
         let first_entry_id = first.entry_id();
 
-        let (second, _) = r.enqueue(Toast::loading_literal("Uploading 4 of 7…").id("upload"));
+        let (second, _) = r.enqueue(Toast::loading(lit!("Uploading 4 of 7…")).id("upload"));
         // Same entry, NOT a new one.
         assert_eq!(r.live_count(), 1, "live entry count stays at 1");
         assert_eq!(
@@ -880,16 +844,16 @@ mod tests {
     #[test]
     fn registry_in_place_update_reflects_new_title_body() {
         let r = fresh_registry();
-        let (h, _) = r.enqueue(Toast::info_literal("Saving").id("save"));
+        let (h, _) = r.enqueue(Toast::info(lit!("Saving")).id("save"));
         let _ = r.enqueue(
-            Toast::success_literal("Saved!")
+            Toast::success(lit!("Saved!"))
                 .id("save")
-                .body_literal("Written 1.2 MB to disk."),
+                .body(lit!("Written 1.2 MB to disk.")),
         );
         r.with_entry(h.entry_id(), |e| {
-            assert_eq!(e.title, "Saved!", "title updated in place");
+            assert_eq!(e.title.resolve_now(), "Saved!", "title updated in place");
             assert_eq!(
-                e.body.as_deref(),
+                e.body.as_ref().map(|b| b.resolve_now()).as_deref(),
                 Some("Written 1.2 MB to disk."),
                 "body updated in place"
             );
@@ -902,7 +866,7 @@ mod tests {
     fn registry_in_place_update_resets_auto_dismiss_timer() {
         let r = fresh_registry();
         let (h, _) = r.enqueue(
-            Toast::info_literal("slow")
+            Toast::info(lit!("slow"))
                 .id("ticker")
                 .auto_dismiss_after(Duration::from_millis(500)),
         );
@@ -910,7 +874,7 @@ mod tests {
         r.tick_timers(Duration::from_millis(450), false);
         // Update: resets time_left to a fresh 500 ms.
         let _ = r.enqueue(
-            Toast::info_literal("slow #2")
+            Toast::info(lit!("slow #2"))
                 .id("ticker")
                 .auto_dismiss_after(Duration::from_millis(500)),
         );
@@ -930,7 +894,7 @@ mod tests {
         // survive (so the demo's "Uploading 1 of 7" → "Uploading
         // 4 of 7" pattern keeps showing a spinner).
         let r = fresh_registry();
-        let (h, _) = r.enqueue(Toast::loading_literal("step 1").id("upload"));
+        let (h, _) = r.enqueue(Toast::loading(lit!("step 1")).id("upload"));
         // Probe: first build will take_leading; we test the registry's
         // intent (no take here, just verify it's still Some before the
         // update so we have a baseline).
@@ -938,7 +902,7 @@ mod tests {
         assert!(has_spinner_initially, "loading toast carries a Spinner");
 
         // Update with no leading set — preserves existing.
-        let _ = r.enqueue(Toast::info_literal("step 2").id("upload"));
+        let _ = r.enqueue(Toast::info(lit!("step 2")).id("upload"));
         let still_has_spinner = r.with_entry(h.entry_id(), |e| e.leading.is_some()).unwrap();
         assert!(
             still_has_spinner,
@@ -956,7 +920,7 @@ mod tests {
         // proves the preservation behaviour up to the fire point.)
         let r = fresh_registry();
         let (h, _) = r.enqueue(
-            Toast::info_literal("step 1")
+            Toast::info(lit!("step 1"))
                 .id("preserve-on-dismiss")
                 .on_dismiss(|_cause, _ctx| {}),
         );
@@ -968,7 +932,7 @@ mod tests {
         );
 
         // Update with no on_dismiss — original must survive.
-        let _ = r.enqueue(Toast::success_literal("step 2").id("preserve-on-dismiss"));
+        let _ = r.enqueue(Toast::success(lit!("step 2")).id("preserve-on-dismiss"));
         assert!(
             r.with_entry(h.entry_id(), |e| e.on_dismiss.is_some())
                 .unwrap(),
@@ -979,7 +943,7 @@ mod tests {
         // field stays Some — the OLD callback gets dropped silently,
         // per the documented contract).
         let _ = r.enqueue(
-            Toast::info_literal("step 3")
+            Toast::info(lit!("step 3"))
                 .id("preserve-on-dismiss")
                 .on_dismiss(|_cause, _ctx| {}),
         );
@@ -993,8 +957,8 @@ mod tests {
     #[test]
     fn registry_in_place_update_without_id_appends_normally() {
         let r = fresh_registry();
-        let _ = r.enqueue(Toast::info_literal("a"));
-        let _ = r.enqueue(Toast::info_literal("b"));
+        let _ = r.enqueue(Toast::info(lit!("a")));
+        let _ = r.enqueue(Toast::info(lit!("b")));
         // No id on either — both appear as distinct entries.
         assert_eq!(r.live_count(), 2);
     }
@@ -1002,12 +966,12 @@ mod tests {
     #[test]
     fn registry_in_place_update_distinct_ids_do_not_collide() {
         let r = fresh_registry();
-        let _ = r.enqueue(Toast::info_literal("upload").id("upload"));
-        let _ = r.enqueue(Toast::info_literal("download").id("download"));
+        let _ = r.enqueue(Toast::info(lit!("upload")).id("upload"));
+        let _ = r.enqueue(Toast::info(lit!("download")).id("download"));
         // Different ids → two live entries.
         assert_eq!(r.live_count(), 2);
         // Updates target each independently.
-        let _ = r.enqueue(Toast::success_literal("Uploaded!").id("upload"));
+        let _ = r.enqueue(Toast::success(lit!("Uploaded!")).id("upload"));
         assert_eq!(
             r.live_count(),
             2,
@@ -1021,9 +985,9 @@ mod tests {
         let archive = std::rc::Rc::new(NotificationArchiveModel::in_memory());
         let registry =
             ToastRegistry::with_archive(host::ToastInstallOptions::default(), archive.clone());
-        let (_a, _) = registry.enqueue(Toast::info_literal("Uploading 1 of 7").id("upload"));
+        let (_a, _) = registry.enqueue(Toast::info(lit!("Uploading 1 of 7")).id("upload"));
         assert_eq!(archive.entries().len(), 1);
-        let (_b, _) = registry.enqueue(Toast::info_literal("Uploading 4 of 7").id("upload"));
+        let (_b, _) = registry.enqueue(Toast::info(lit!("Uploading 4 of 7")).id("upload"));
         // No new entry — the existing one was updated.
         assert_eq!(archive.entries().len(), 1);
         let merged = archive.entries().with_item(0, |e| e.clone()).unwrap();
@@ -1036,7 +1000,7 @@ mod tests {
         // No archive configured — pushes still succeed; archive lookup
         // is just None.
         let registry = ToastRegistry::new(host::ToastInstallOptions::default());
-        let (_h, _) = registry.enqueue(Toast::info_literal("no archive here"));
+        let (_h, _) = registry.enqueue(Toast::info(lit!("no archive here")));
         assert!(registry.archive().is_none());
     }
 
@@ -1046,10 +1010,10 @@ mod tests {
         let archive = std::rc::Rc::new(NotificationArchiveModel::in_memory());
         let registry =
             ToastRegistry::with_archive(host::ToastInstallOptions::default(), archive.clone());
-        let (_h, _) = registry.enqueue(
-            Toast::error_literal("Build failed")
-                .action(ToastAction::primary("Retry", |_| {}).shortcut_id("app.build.retry")),
-        );
+        let (_h, _) = registry
+            .enqueue(Toast::error(lit!("Build failed")).action(
+                ToastAction::primary(lit!("Retry"), |_| {}).shortcut_id("app.build.retry"),
+            ));
         let entry = archive.entries().with_item(0, |e| e.clone()).unwrap();
         assert_eq!(entry.actions.len(), 1);
         assert_eq!(entry.actions[0].label, "Retry");
@@ -1064,11 +1028,11 @@ mod tests {
     #[test]
     fn archive_flag_is_captured_on_entry() {
         let r = fresh_registry();
-        let (h_noarchive, _) = r.enqueue(Toast::info_literal("Copied!").archive(false));
+        let (h_noarchive, _) = r.enqueue(Toast::info(lit!("Copied!")).archive(false));
         let archived = r.with_entry(h_noarchive.entry_id(), |e| e.archive).unwrap();
         assert!(!archived);
 
-        let (h_archived, _) = r.enqueue(Toast::error_literal("Build failed"));
+        let (h_archived, _) = r.enqueue(Toast::error(lit!("Build failed")));
         let archived = r.with_entry(h_archived.entry_id(), |e| e.archive).unwrap();
         assert!(archived, "archive defaults to true");
     }
@@ -1091,7 +1055,7 @@ mod tests {
             entry_id: 1,
             severity,
             priority,
-            title: "x".to_string(),
+            title: bastyde_i18n::lit!("x"),
             body: None,
             announcement: None,
             actions: Rc::new(Vec::new()),
@@ -1212,7 +1176,7 @@ mod tests {
         tree.set_app_context(Rc::new(
             bastyde_core::event_source::TreeAppContext::empty().with_app_state(app_state),
         ));
-        let user_root = tree.add(TestLeaf::new_literal("user content"));
+        let user_root = tree.add(TestLeaf::new(lit!("user content")));
         let host = ToastHost::wrapping(user_root, registry.clone(), opts);
         tree.add(host);
         tree.layout(bastyde_canvas::SizeProposal::exact(800.0, 600.0));
@@ -1230,7 +1194,7 @@ mod tests {
         // pass which is exercised in `dismiss_clears_surface` below.)
         let opts = host::ToastInstallOptions::default();
         let registry = ToastRegistry::new(opts.clone());
-        let _h = registry.enqueue(Toast::success_literal("Saved"));
+        let _h = registry.enqueue(Toast::success(lit!("Saved")));
         assert_eq!(registry.live_count(), 1);
 
         let mut app_state: HashMap<TypeId, Box<dyn Any>> = HashMap::new();
@@ -1241,7 +1205,7 @@ mod tests {
         tree.set_app_context(Rc::new(
             bastyde_core::event_source::TreeAppContext::empty().with_app_state(app_state),
         ));
-        let user_root = tree.add(TestLeaf::new_literal("user content"));
+        let user_root = tree.add(TestLeaf::new(lit!("user content")));
         tree.add(ToastHost::wrapping(user_root, registry.clone(), opts));
         tree.layout(bastyde_canvas::SizeProposal::exact(800.0, 600.0));
 
@@ -1258,7 +1222,7 @@ mod tests {
         use std::collections::HashMap;
         let opts = host::ToastInstallOptions::default();
         let registry = ToastRegistry::new(opts.clone());
-        let _h = registry.enqueue(Toast::error_literal("Build failed").persistent());
+        let _h = registry.enqueue(Toast::error(lit!("Build failed")).persistent());
 
         let mut app_state: HashMap<TypeId, Box<dyn Any>> = HashMap::new();
         app_state.insert(TypeId::of::<ToastRegistry>(), Box::new(registry.clone()));
@@ -1267,7 +1231,7 @@ mod tests {
         tree.set_app_context(Rc::new(
             bastyde_core::event_source::TreeAppContext::empty().with_app_state(app_state),
         ));
-        let user_root = tree.add(TestLeaf::new_literal("root"));
+        let user_root = tree.add(TestLeaf::new(lit!("root")));
         tree.add(ToastHost::wrapping(user_root, registry.clone(), opts));
         tree.layout(bastyde_canvas::SizeProposal::exact(800.0, 600.0));
         assert!(
@@ -1284,9 +1248,8 @@ mod tests {
         // need a full WidgetTree — the registry is the integration
         // surface.
         let r = fresh_registry();
-        let (h, _) = r.enqueue(
-            Toast::info_literal("hover me").auto_dismiss_after(Duration::from_millis(200)),
-        );
+        let (h, _) =
+            r.enqueue(Toast::info(lit!("hover me")).auto_dismiss_after(Duration::from_millis(200)));
         // Simulate pointer-enter on the surface: hover_count = 1.
         r.hover_count_signal().set(1);
         // 10 ticks of 100 ms each (total 1 s, well past 200 ms) with
@@ -1327,17 +1290,17 @@ mod tests {
 
     #[test]
     fn builder_chain_typechecks() {
-        let _t = Toast::warning(bastyde_i18n::LocalizedString::literal("Heads up"))
-            .body_literal("Something happened")
-            .action(ToastAction::new_literal("Open", |_| {}))
-            .primary_action(bastyde_i18n::LocalizedString::literal("Fix"), |_| {})
+        let _t = Toast::warning(lit!("Heads up"))
+            .body(lit!("Something happened"))
+            .action(ToastAction::new(lit!("Open"), |_| {}))
+            .primary_action(lit!("Fix"), |_| {})
             .auto_dismiss_after(Duration::from_secs(5))
             .priority(ToastPriority::High)
             .id("dedup-key")
             .show_close_button(false)
             .closable_on_escape(false)
             .archive(false)
-            .announcement_literal("Custom AT text")
+            .announcement(lit!("Custom AT text"))
             .on_click(|_| {})
             .on_dismiss(|_cause, _ctx| {});
     }

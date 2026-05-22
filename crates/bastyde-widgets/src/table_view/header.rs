@@ -7,10 +7,10 @@
 //! `column_widths` handle that body rows consume — so a resize commits
 //! in one place and reflows everywhere.
 //!
-//! Phase 3 wires sort + resize. Phase 4 will reuse `HeaderRow` across
-//! pinned panes; Phase 6 grows it to host per-column filter popovers
-//! and column-reorder drag.
+//! Supports sort, resize, reuse across pinned panes, per-column filter
+//! popovers, and column-reorder drag.
 
+use bastyde_i18n::lit;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -210,7 +210,7 @@ impl Widget for HeaderCell {
         use crate::styles::recipe_table_style as cp;
 
         let label_id = ctx.add(
-            TextWidget::new_literal(self.label.clone())
+            TextWidget::new(lit!(self.label.clone()))
                 .style(TextStyleRole::Body)
                 .bind_color(ColorProp::from(TextRole::Primary))
                 .single_line()
@@ -263,7 +263,7 @@ impl Widget for HeaderCell {
                 }
             };
             let focus_slot = Rc::new(Cell::new(None));
-            let popover = Popover::new_literal("Filter")
+            let popover = Popover::new(lit!("Filter"))
                 .content(
                     FilterPopoverContent::new(initial)
                         .on_change(on_change)

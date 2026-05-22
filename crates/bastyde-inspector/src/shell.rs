@@ -28,6 +28,7 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::WidgetBuilder;
 use bastyde_core::widget_id::WidgetId;
+use bastyde_i18n::lit;
 use bastyde_widgets::primitives::{Expand, FixedSize, HStack, Padding, VStack, ZStack};
 use bastyde_widgets::{Button, Panel, SegmentedControl, Slider, TabWidget};
 
@@ -228,7 +229,7 @@ fn empty_filler() -> impl Widget + 'static {
 fn build_panel(state: InspectorState) -> impl Widget + 'static {
     use bastyde_widgets::TabInfo;
     fn ti(label: &'static str) -> TabInfo {
-        TabInfo::new().title(bastyde_i18n::LocalizedString::literal(label))
+        TabInfo::new().title(lit!(label))
     }
     let tabs = TabWidget::new(state.active_tab_id.clone())
         // Tree tab is self-scrolling (it owns its own ScrollArea so it
@@ -293,7 +294,7 @@ fn build_toolbar(state: InspectorState) -> impl Widget + 'static {
     });
 
     let picker_state_for_click = state.picker_mode.clone();
-    let pick_button = Button::new_literal("Pick")
+    let pick_button = Button::new(lit!("Pick"))
         .bind_label(picker_label_signal)
         .on_activate_fn(move |_ctx| {
             let next = !picker_state_for_click.get();
@@ -336,7 +337,7 @@ fn build_toolbar(state: InspectorState) -> impl Widget + 'static {
         .child(Slider::new(state.overlay_opacity.clone(), 0.1, 1.0));
 
     let open_state_for_close = state.open.clone();
-    let close_button = Button::new_literal("×").on_activate_fn(move |_ctx| {
+    let close_button = Button::new(lit!("×")).on_activate_fn(move |_ctx| {
         open_state_for_close.set(false);
     });
 
@@ -408,7 +409,7 @@ fn build_pick_chain_menu(ctx: &mut BuildContext, state: InspectorState) -> Widge
         });
         let visible_signal = chain_signal.map(move |chain| chain.len() > i);
         let state_for_action = state.clone();
-        let row = Button::new_literal("")
+        let row = Button::new(lit!(""))
             .bind_label(label_signal)
             .on_activate_fn(move |c| {
                 let chain = state_for_action.pending_pick_chain.get();

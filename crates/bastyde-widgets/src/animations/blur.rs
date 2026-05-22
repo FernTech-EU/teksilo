@@ -274,7 +274,11 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
-        radius.animate_to(0.0, Duration::from_millis(100), bastyde_tokens::Easing::Linear);
+        radius.animate_to(
+            0.0,
+            Duration::from_millis(100),
+            bastyde_tokens::Easing::Linear,
+        );
         // Drain the pending request onto the scheduler.
         tree.layout(SizeProposal::exact(200.0, 100.0));
         assert!(

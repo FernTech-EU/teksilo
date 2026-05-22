@@ -21,7 +21,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
     let checkbox = section(
         ctx,
-        "Checkbox",
+        lit!("Checkbox"),
         VStack::new()
             .spacing(6.0)
             .child(
@@ -36,7 +36,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let radio = section(
         ctx,
-        "RadioButton (in a group)",
+        tr!(inp_heading_radio_group()),
         VStack::new()
             .spacing(4.0)
             .child(RadioButton::new(0, sigs.radio_selected.clone()).label(tr!(inp_radio_a())))
@@ -45,7 +45,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let toggle = section(
         ctx,
-        "Toggle",
+        lit!("Toggle"),
         VStack::new()
             .spacing(6.0)
             .child(Toggle::new(sigs.toggle_on.clone()).label(tr!(inp_toggle_feature())))
@@ -58,14 +58,14 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let slider_h = section(
         ctx,
-        "Slider — horizontal",
+        tr!(inp_heading_slider_h()),
         FixedSize::new().bind_width(300.0_f32).child(
             Slider::new(sigs.slider_value.clone(), 0.0, 100.0).label(tr!(inp_slider_volume())),
         ),
     );
     let slider_stepped = section(
         ctx,
-        "Slider — stepped",
+        tr!(inp_heading_slider_stepped()),
         FixedSize::new().bind_width(300.0_f32).child(
             Slider::new(sigs.slider_stepped.clone(), 0.0, 100.0)
                 .step(25.0)
@@ -74,7 +74,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let slider_v = section(
         ctx,
-        "Slider — vertical",
+        tr!(inp_heading_slider_v()),
         FixedSize::new().bind_height(150.0_f32).child(
             Slider::new(sigs.slider_v_value.clone(), 0.0, 1.0)
                 .orientation(Orientation::Vertical)
@@ -83,7 +83,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let segmented = section(
         ctx,
-        "SegmentedControl",
+        lit!("SegmentedControl"),
         SegmentedControl::new(
             vec![
                 tr!(inp_segment_first()).resolve_now(),
@@ -95,7 +95,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     let combo = section(
         ctx,
-        "ComboBox",
+        lit!("ComboBox"),
         FixedSize::new().bind_width(220.0_f32).child(
             ComboBox::from_items(
                 vec![
@@ -106,7 +106,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                 sigs.combo_selected.clone(),
                 |s: &String| s.clone(),
             )
-            .placeholder(tr!(inp_combo_placeholder()).resolve_now()),
+            .placeholder(tr!(inp_combo_placeholder())),
         ),
     );
 
@@ -147,7 +147,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
             sigs.combo_selected.clone(),
             |s: &String| s.clone(),
         )
-        .placeholder(tr!(inp_combo_placeholder()).resolve_now()),
+        .placeholder(tr!(inp_combo_placeholder())),
     );
 
     let cb_checked = sigs.checkbox_checked.clone();
@@ -178,7 +178,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Checkbox") {
+                TextWidget::new(lit!("Checkbox")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -199,7 +199,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("RadioButton (in a group)") {
+                TextWidget::new(tr!(inp_heading_radio_group())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -219,7 +219,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Toggle") {
+                TextWidget::new(lit!("Toggle")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -240,7 +240,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Slider — horizontal") {
+                TextWidget::new(tr!(inp_heading_slider_h())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -254,7 +254,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Slider — stepped") {
+                TextWidget::new(tr!(inp_heading_slider_stepped())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -269,7 +269,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("Slider — vertical") {
+                TextWidget::new(tr!(inp_heading_slider_v())) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -284,7 +284,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("SegmentedControl") {
+                TextWidget::new(lit!("SegmentedControl")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
@@ -293,7 +293,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 
             VStack {
                 spacing: 6.0
-                TextWidget::new_literal("ComboBox") {
+                TextWidget::new(lit!("ComboBox")) {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }

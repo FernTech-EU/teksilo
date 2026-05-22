@@ -20,6 +20,7 @@
 //!   `rich-text` — the `FilteredItemList` inner widget.
 //! - [`tests`] holds the headless unit tests.
 
+use bastyde_i18n::lit;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Instant;
@@ -80,10 +81,10 @@ pub struct ComboBox<T: Clone + PartialEq + 'static> {
     selected: Signal<Option<T>>,
     item_label: Rc<dyn Fn(&T) -> String>,
     render_item: Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
-    placeholder: String,
+    placeholder: bastyde_i18n::LocalizedString,
     /// Accessible label — independent of placeholder and current selection.
     /// Screen readers announce this as the name of the control.
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     max_visible_items: usize,
@@ -160,7 +161,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
             selected,
             item_label,
             render_item: None,
-            placeholder: String::new(),
+            placeholder: bastyde_i18n::LocalizedString::literal(String::new()),
             label: None,
             initial_enabled: true,
             max_visible_items: DEFAULT_MAX_VISIBLE_ITEMS,
@@ -272,13 +273,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     /// untranslated string.
     pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.placeholder = ls.resolve_now();
-        self
-    }
-
-    /// Untranslated [`placeholder`](Self::placeholder).
-    pub fn placeholder_literal(mut self, text: impl Into<String>) -> Self {
-        self.placeholder = text.into();
+        self.placeholder = ls;
         self
     }
 
@@ -288,13 +283,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     /// announce this as the name of the control.
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
-        self
-    }
-
-    /// Untranslated [`label`](Self::label).
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
+        self.label = Some(ls);
         self
     }
 
@@ -453,9 +442,9 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         let label_text = self.selected.map(move |sel| match sel {
             Some(v) => match resolve_index(&source_for_label, v, &hint_for_label) {
                 Some(_) => (item_label_for_trigger)(v),
-                None => placeholder.clone(),
+                None => placeholder.resolve_now(),
             },
-            None => placeholder.clone(),
+            None => placeholder.resolve_now(),
         });
 
         // Label colour follows the disabled signal — the chrome style
@@ -473,7 +462,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         // `accessibility(builder)` already announces the selected value
         // via `set_value`, so a screen reader exposed to the inner text
         // node would double-announce.
-        let label = TextWidget::new_literal("")
+        let label = TextWidget::new(lit!(""))
             .style(TextStyleRole::Body)
             .bind_text(label_text)
             .bind_color(text_role)
@@ -894,8 +883,8 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         builder.set_role(bastyde_core::accesskit::Role::ComboBox);
         builder.set_has_popup(bastyde_core::accesskit::HasPopup::Listbox);
 
-        if let Some(name) = self.label.as_deref() {
-            builder.set_name(name);
+        if let Some(name) = self.label.as_ref() {
+            builder.set_name(name.resolve_now());
         }
 
         // A11y gap #3: use `placeholder` when nothing is selected, `value`
@@ -909,8 +898,9 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                 }
             }
             None => {
-                if !self.placeholder.is_empty() {
-                    builder.set_placeholder(self.placeholder.clone());
+                let ph = self.placeholder.resolve_now();
+                if !ph.is_empty() {
+                    builder.set_placeholder(ph);
                 }
             }
         }

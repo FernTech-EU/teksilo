@@ -31,6 +31,13 @@ pub struct EventContext<'ops> {
     pub(crate) dismiss_modal: bool,
     pub(crate) overlay_requests: Vec<crate::overlay::OverlayRequest>,
     pub(crate) overlay_dismissals: Vec<crate::overlay::OverlayId>,
+    /// Content widget ids whose currently-shown overlay (if any) should
+    /// be dismissed. Resolved to an `OverlayId` via
+    /// `OverlayManager::find_by_content` at drain time. Lets a handler
+    /// dismiss an overlay it can only identify by content (e.g. a single
+    /// reusable tooltip surface) — the symmetric companion to
+    /// [`cancel_delayed_overlay`](EventContext::cancel_delayed_overlay).
+    pub(crate) overlay_content_dismissals: Vec<crate::widget_id::WidgetId>,
     /// Overlay ids whose `auto_dismiss_after` timer should be paused
     /// or resumed after the handler returns (`true` = pause, `false`
     /// = resume). Drained by `WidgetTree::process_overlay_requests`
@@ -105,7 +112,7 @@ pub struct EventContext<'ops> {
     /// Intents queued by handlers via `send_intent`. Drained by the
     /// tree after event dispatch and routed source-widget → root.
     pub(crate) pending_intents: Vec<crate::intent::Intent>,
-    /// Phase 5.2 — the dispatcher sets this to the appropriate
+    /// The dispatcher sets this to the appropriate
     /// [`IntentSource`](crate::telemetry::IntentSource) before
     /// invoking a typed handler (menu select → `Menu`, AccessKit
     /// action → `Accessibility`, on_tap / button activation →
@@ -129,6 +136,12 @@ pub struct EventContext<'ops> {
     /// tree belongs to. Drained after dispatch via
     /// `WidgetTree::take_close_window_request`.
     pub(crate) close_window_requested: bool,
+    /// Set by [`request_accessibility_update`](EventContext::request_accessibility_update);
+    /// drained in `collect_from_ctx` to set `WidgetTree::a11y_dirty`, forcing the
+    /// next `sync_accessibility` to re-walk the AccessKit tree. The general lever for a
+    /// composing widget that restructured its subtree in a way that changes the AT tree
+    /// (relayout alone no longer re-walks AT).
+    pub(crate) request_a11y_update: bool,
 }
 
 /// Deferred edit to the tree's shortcut registry, queued on an
@@ -149,11 +162,35 @@ pub(crate) enum ShortcutMutation {
 }
 
 /// A structural change to the widget tree, deferred until after event dispatch.
-#[derive(Debug)]
 pub(crate) enum TreeMutation {
     SetDormant(WidgetId),
     Activate(WidgetId),
     Destroy(WidgetId),
+    /// Typed mutable access to a mounted widget, applied in
+    /// `apply_tree_mutations` where `&mut arena` is live. The boxed closure
+    /// downcasts the node's `as_any_mut()` to the requested concrete type;
+    /// `dirty` selects the post-mutation re-render level.
+    WithWidgetMut {
+        id: WidgetId,
+        dirty: crate::binding::BindingLevel,
+        apply: Box<dyn FnOnce(&mut dyn std::any::Any)>,
+    },
+}
+
+// Manual `Debug`: the `WithWidgetMut` closure is not `Debug`.
+impl std::fmt::Debug for TreeMutation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SetDormant(id) => f.debug_tuple("SetDormant").field(id).finish(),
+            Self::Activate(id) => f.debug_tuple("Activate").field(id).finish(),
+            Self::Destroy(id) => f.debug_tuple("Destroy").field(id).finish(),
+            Self::WithWidgetMut { id, dirty, .. } => f
+                .debug_struct("WithWidgetMut")
+                .field("id", id)
+                .field("dirty", dirty)
+                .finish_non_exhaustive(),
+        }
+    }
 }
 
 impl<'ops> EventContext<'ops> {
@@ -166,6 +203,7 @@ impl<'ops> EventContext<'ops> {
             dismiss_modal: false,
             overlay_requests: Vec::new(),
             overlay_dismissals: Vec::new(),
+            overlay_content_dismissals: Vec::new(),
             overlay_pause_requests: Vec::new(),
             dismiss_scope: None,
             pointer_capture: None,
@@ -189,6 +227,7 @@ impl<'ops> EventContext<'ops> {
             cancel_key_capture: false,
             pending_shortcut_mutations: Vec::new(),
             close_window_requested: false,
+            request_a11y_update: false,
             window_ops: None,
             current_window: None,
         }
@@ -497,6 +536,63 @@ impl<'ops> EventContext<'ops> {
         self.tree_mutations.push(TreeMutation::Destroy(id));
     }
 
+    /// Imperatively mutate a mounted widget by id, downcasting to the
+    /// concrete type `W`.
+    ///
+    /// The mutation is **deferred**: the closure runs after the handler
+    /// returns, inside `apply_tree_mutations`, where the framework holds
+    /// `&mut` arena access (a handler cannot re-borrow the arena to reach
+    /// another node, so this is the only safe channel — the same model as
+    /// [`destroy`](Self::destroy)). After the closure runs, the target is
+    /// dirty-marked at `dirty` so the mutation takes visual effect.
+    ///
+    /// The target widget must override [`Widget::as_any_mut`] to return
+    /// `Some(self)`. If the id is gone or is not a `W`, the closure is a
+    /// no-op in release and a `debug_assert` failure in debug — it never
+    /// silently mutates the wrong widget.
+    ///
+    /// Use it for per-view state a handler can't otherwise reach — e.g.
+    /// `SceneView::ensure_visible(...)` (camera) after the view is mounted:
+    /// ```ignore
+    /// ctx.with_widget_mut::<SceneView>(view_id, BindingLevel::Relayout, |v| {
+    ///     v.ensure_visible(card_rect, 40.0);
+    /// });
+    /// ```
+    /// For scene *content*, prefer the shared `SceneModel` handle (`view.model()`)
+    /// — its mutators are `&self`, so a handler holding a clone can drive the
+    /// scene directly and every attached view reconciles, no `with_widget_mut`
+    /// needed.
+    pub fn with_widget_mut<W: 'static>(
+        &mut self,
+        id: WidgetId,
+        dirty: crate::binding::BindingLevel,
+        f: impl FnOnce(&mut W) + 'static,
+    ) {
+        self.tree_mutations.push(TreeMutation::WithWidgetMut {
+            id,
+            dirty,
+            apply: Box::new(move |any| match any.downcast_mut::<W>() {
+                Some(w) => f(w),
+                None => debug_assert!(
+                    false,
+                    "with_widget_mut: widget {id:?} is not the requested type (or does not \
+                     override Widget::as_any_mut)"
+                ),
+            }),
+        });
+    }
+
+    /// Request that the AccessKit tree be re-walked after this handler
+    /// returns. Use after a mutation that changes the accessibility tree
+    /// **shape** in a way the framework doesn't already detect (relayout
+    /// alone no longer re-walks AT; only events that change the AT tree
+    /// — focus, overlays, locale/shortcut rebinds — set the dirty flag).
+    /// The companion [`BuildContext::request_accessibility_update`] covers
+    /// the build-time path.
+    pub fn request_accessibility_update(&mut self) {
+        self.request_a11y_update = true;
+    }
+
     /// Show an overlay (tooltip, menu, popover).
     pub fn show_overlay(&mut self, request: crate::overlay::OverlayRequest) {
         self.overlay_requests.push(request);
@@ -514,6 +610,18 @@ impl<'ops> EventContext<'ops> {
     /// Dismiss an overlay by ID.
     pub fn dismiss_overlay(&mut self, id: crate::overlay::OverlayId) {
         self.overlay_dismissals.push(id);
+    }
+
+    /// Dismiss the currently-shown overlay whose content root is
+    /// `content_id`, if one is active. No-op when no overlay is showing
+    /// that content. Use this to dismiss an overlay you can only name by
+    /// its content widget — the symmetric companion to
+    /// [`cancel_delayed_overlay`](Self::cancel_delayed_overlay), which
+    /// cancels a *pending* delayed show for the same content. Together
+    /// they let a caller fully retract a reusable tooltip surface
+    /// (shown or pending) without tracking the `OverlayId`.
+    pub fn dismiss_overlay_by_content(&mut self, content_id: crate::widget_id::WidgetId) {
+        self.overlay_content_dismissals.push(content_id);
     }
 
     /// Queue a request to pause an overlay's `auto_dismiss_after`
@@ -904,7 +1012,10 @@ mod multi_window_tests {
             let mut ctx = EventContext::new().with_window_context(&mut ops, Some(main_state));
             ctx.close_window_by_id(BastydeWindowId::new(9));
         }
-        assert_eq!(ops.close_calls.borrow().as_slice(), &[BastydeWindowId::new(9)]);
+        assert_eq!(
+            ops.close_calls.borrow().as_slice(),
+            &[BastydeWindowId::new(9)]
+        );
     }
 
     #[test]

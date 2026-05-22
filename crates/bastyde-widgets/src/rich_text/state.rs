@@ -289,11 +289,13 @@ pub(crate) struct EditorState {
     /// of the state borrow to invoke — running the callback itself
     /// with `state.borrow()` held would deadlock if the handler calls
     /// back into the widget's API.
-    pub on_link_activated: Option<std::rc::Rc<dyn Fn(&str, &mut bastyde_core::widget::EventContext)>>,
+    pub on_link_activated:
+        Option<std::rc::Rc<dyn Fn(&str, &mut bastyde_core::widget::EventContext)>>,
     /// Callback invoked on a Primary-click whose hit lands on a
     /// `HitRegion::Image`. Same Rc / borrow-release convention as
     /// [`on_link_activated`](Self::on_link_activated).
-    pub on_image_activated: Option<std::rc::Rc<dyn Fn(&str, &mut bastyde_core::widget::EventContext)>>,
+    pub on_image_activated:
+        Option<std::rc::Rc<dyn Fn(&str, &mut bastyde_core::widget::EventContext)>>,
 
     /// `(table_id, row, column, rows, columns)` remembered from the
     /// Ctrl+A ladder's level-1 call. After `select(BlockUnderCursor)`

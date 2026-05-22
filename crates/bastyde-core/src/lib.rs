@@ -26,6 +26,7 @@ pub mod intent;
 pub mod modal;
 pub mod motion_visibility;
 pub mod overlay;
+pub mod overscroll;
 pub mod presets;
 pub mod raw_handle;
 pub mod shortcut;
@@ -55,7 +56,10 @@ pub use async_completion::{AsyncCompletionHandle, AsyncCompletionPayload};
 pub use binding::{BindingLevel, BindingRegistry};
 pub use build_context::BuildContext;
 pub use color_prop::{ColorProp, TextStyleProp};
-pub use drag_payload::{DragData, DragOrigin, DragPayload, ExternalDropData};
+pub use drag_payload::{
+    DragData, DragImageData, DragOrigin, DragPayload, DropOutcome, ExternalDropData,
+    OutboundDragData,
+};
 pub use drag_state::DropFeedback;
 pub use environment::{Environment, LayoutDirection};
 pub use event::{
@@ -81,6 +85,7 @@ pub use modal::{
 pub use overlay::{
     DismissBehavior, OverlayId, OverlayLayer, OverlayManager, OverlayPlacement, OverlayRequest,
 };
+pub use overscroll::{OverscrollBehavior, SCROLL_MOVE_EPSILON};
 pub use raw_handle::ParentHandle;
 pub use shortcut::{
     CaptureHandle, EffectiveShortcut, KeyCaptureCallback, KeyStroke, KeyStrokeOverride, Shortcut,
@@ -102,7 +107,7 @@ pub use widget_id::WidgetId;
 pub use widget_tree::WidgetTree;
 pub use window::state::WindowStateInit;
 pub use window::{
-    DecorationsMode, BastydeWindowId, ModalConfig, NoopWindowOps, PostRootBuilder, RootBuilder,
+    BastydeWindowId, DecorationsMode, ModalConfig, NoopWindowOps, PostRootBuilder, RootBuilder,
     UserAttentionKind, WindowCommand, WindowConfig, WindowIcon, WindowOps, WindowPlacement,
     WindowState,
 };

@@ -16,9 +16,12 @@ use bastyde_core::build_context::BuildContext;
 use bastyde_core::widget::CursorIcon;
 use bastyde_core::widget_builder::WidgetBuilder;
 use bastyde_core::widget_id::WidgetId;
+use bastyde_i18n::lit;
 use bastyde_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
 use bastyde_widgets::primitives::{Padding, ZStack};
-use bastyde_widgets::{Expand, HStack, MaxSize, MinSize, RectWidget, ScrollArea, TextWidget, VStack};
+use bastyde_widgets::{
+    Expand, HStack, MaxSize, MinSize, RectWidget, ScrollArea, TextWidget, VStack,
+};
 
 use crate::app_state::AppState;
 
@@ -43,10 +46,10 @@ pub fn build_navigator(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
 }
 
 fn build_header(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
-    let title = TextWidget::new_literal("Catalog")
+    let title = TextWidget::new(lit!("Catalog"))
         .style(TextStyleRole::SmallBold)
         .color(TextRole::Primary);
-    let count = TextWidget::new_literal("")
+    let count = TextWidget::new(lit!(""))
         .style(TextStyleRole::Tiny)
         .color(TextRole::Secondary)
         .single_line()
@@ -87,7 +90,7 @@ fn build_list(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
     let mut column = VStack::new().spacing(4.0);
     let entries: Vec<_> = bastyde_preview::entries_by_group();
     for (group_name, group_entries) in entries {
-        let group_label = TextWidget::new_literal(group_name)
+        let group_label = TextWidget::new(lit!(group_name))
             .style(TextStyleRole::Tiny)
             .color(TextRole::Secondary);
         let group_padding = Padding::symmetric(4.0, 12.0).child(group_label);
@@ -109,7 +112,7 @@ fn build_entry_row(
     let display_name = entry.display_name();
     let widget_id = entry.id();
 
-    let widget_label = TextWidget::new_literal(display_name)
+    let widget_label = TextWidget::new(lit!(display_name))
         .style(TextStyleRole::Body)
         .color(TextRole::Primary)
         .single_line();
@@ -162,7 +165,7 @@ fn build_variant_row(
     widget_id: &'static str,
     variant_name: &'static str,
 ) -> WidgetId {
-    let variant_label = TextWidget::new_literal(variant_name)
+    let variant_label = TextWidget::new(lit!(variant_name))
         .style(TextStyleRole::Small)
         .color(TextRole::Secondary)
         .single_line();

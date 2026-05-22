@@ -314,8 +314,12 @@ SceneView::new(scene)
     })
 ```
 
-Paint order: background → items → marquee → foreground → debug
-overlay.
+Paint order, bottom to top: `background` → **Under** items → heavyweight
+children → **Over** items → marquee → `foreground` → debug overlay. The
+`background` hook runs in the SceneView's `paint` (a backdrop, before the
+heavyweight children); the `foreground` hook runs in its `post_paint` (after the
+children), so it paints over the cards. See [Z-order and paint bands](#z-order-and-paint-bands)
+for the Under/Over band and the three-pass model.
 
 ---
 
@@ -371,17 +375,80 @@ exposed via [`SceneSelection`](../crates/bastyde-scene/src/selection.rs).
 
 ---
 
-## Z-order
+## Z-order and paint bands
+
+A `SceneView` paints in three passes — the per-widget `paint → children →
+post_paint` model applied at the scene level:
+
+| Pass | What paints | Tier |
+| --- | --- | --- |
+| `paint` (backdrop) | lightweight **Under** items, z-sorted | lightweight |
+| arena child-walk | heavyweight widgets, z-sorted | heavyweight |
+| `post_paint` (foreground) | lightweight **Over** items, then the selection marquee / app foreground hook / debug overlays | lightweight |
+
+So the stacking order, bottom to top, is **Under items → heavyweight cards →
+Over items**.
+
+### Within a tier
 
 ```rust
-scene.set_z(id, 5.0);
-scene.z(id) -> Option<f32>
+scene.set_z(id, 5.0);          // higher z paints later (on top)
+scene.z(id) -> Option<f32>;
+scene.bring_to_front(id);      // z = current max + 1
+scene.send_to_back(id);        // z = current min − 1
 ```
 
-Higher `z` paints later (on top). Equal-`z` items fall back to
-insertion order. Z-order is paint-only — it does not change hit-test
-priority *between tiers* (heavyweight widgets always win
-heavyweight-vs-lightweight collisions).
+`set_z` works for **both** tiers. Lightweight items re-sort within their band on
+the next paint. Heavyweight widget entries restack the arena children on the next
+rebuild — the SceneView reorders `node.children` by z *without recreating the
+widgets*, so a dragged card keeps its focus, text-edit cursor and in-flight
+animations across the restack. Equal-`z` falls back to insertion order (stable).
+
+`bring_to_front` is the drag-to-front primitive: call it on drag-start (via
+[`SceneView::scene_mut`]) so the grabbed card — and its text — render over the
+others.
+
+### Across the tiers — the Over band
+
+```rust
+scene.set_layer(id, SceneLayer::Over);   // raise a lightweight item above the cards
+scene.layer(id) -> Option<SceneLayer>;   // Under (default) | Over
+```
+
+Lightweight items default to `Under` (background furniture: connector lines,
+grids, decorations). `Over` raises an item into the foreground pass so it paints
+*above* the heavyweight widgets — selection halos, highlighted connectors,
+annotations. Within each band `z` still orders items among themselves.
+
+This is a **binary band, not a continuous z across the tiers**, because the
+render walker offers exactly two lightweight paint positions (before and after
+the child subtree). The heavyweight tier is one contiguous block in between. To
+place a lightweight item *between* two specific cards, promote it to a
+heavyweight widget and give it a z between theirs.
+
+### Nested P-C-AP — a node is one widget
+
+The `paint → children → post_paint` model is per-widget and *nests*. A scene's
+bands are for **furniture** (connectors, the nodes-as-units, the lasso); each
+**node** is itself a P-C-AP scope — its `paint` draws the container, its children
+are the text. **Keep a node whole: build it as one heavyweight widget; never
+split its container into the lightweight tier and its text into the heavyweight
+tier.** The render walker paints each heavyweight child's entire subtree
+atomically, so a node ordered last paints its container *and* its text on top of
+the node beneath — drag-to-front "with text included" is structural, not
+something you arrange. Splitting a node across tiers tears it: every container
+would sit in one band and every text in the band above, so a raised card's
+neighbour would have its text leak on top of it.
+
+### Hit-testing irregular nodes
+
+Z-order is paint-only; it does not change hit-test priority between tiers
+(heavyweight widgets win heavyweight-vs-lightweight collisions). For a node whose
+visible shape isn't its bounding box — an ellipse, a cloud — override
+`Widget::hit_shape` so a click lands on the silhouette you see, not the
+rectangle. Returning `false` for an in-bounds point makes the click fall through
+to whatever node is painted underneath; this mirrors the lightweight tier's
+`SceneItem::shape_contains`.
 
 ---
 
@@ -396,6 +463,132 @@ Recursive remove is the Qt `removeItem` convention: deleting a parent
 deletes its children. Apps wanting to drop the parent without losing
 the children call `orphan(id)` first (which detaches children and
 re-buckets them in the spatial index), then `remove(id)`.
+
+`remove` also cleans the logical-AT maps for the removed item(s) — parents,
+relations, live, landmarks, categories — and re-roots any still-alive node
+that was AT-parented under a removed item, so the separate AccessKit tree
+never carries a dangling reference. See *Runtime mutation* below.
+
+---
+
+## Shared model & multi-view
+
+A `Scene` lives behind a cloneable [`SceneModel`] handle — `Rc<RefCell<Scene>>`,
+the same share-by-handle pattern as `bastyde-data`'s `ListModel`. Clone the
+handle into several `SceneView::with_model(model.clone())` panes to render **one
+scene many ways**: an overview + a detail pane, the same document in two
+windows, or a headless model a tool mutates with no view at all. Mutate the
+model once and **every** attached view reconciles.
+
+```rust
+let model = SceneModel::new();
+let id = model.add_widget_item(CardData { /* … */ }, rect);   // a typed payload
+
+let editor = SceneView::with_model(model.clone())
+    .delegate_typed::<CardData>(|card, id| build_card(card, id));
+let overview = SceneView::with_model(model.clone())   // same model, own camera
+    .delegate_typed::<CardData>(|card, id| build_card(card, id));
+
+// Later, from any handler holding a clone — no `with_widget_mut`:
+model.set_payload(id, CardData { /* … */ });   // both panes rebuild that card
+```
+
+### Heavyweight content: payload + per-view delegate
+
+A heavyweight `Widget` instance lives in exactly one arena, so a shared model
+can't hand the *same* `Box<dyn Widget>` to two views. Two ways to add one:
+
+- **Single-view** — `model.add_widget(widget, rect)` (or `Scene::add_widget`)
+  stores the instance in a one-shot slot, drained by the **first** view that
+  builds. A second view sharing the model produces no child for it. Use it when
+  the scene has exactly one view.
+- **Multi-view** — `model.add_widget_item(payload, rect)` stores a type-erased
+  `payload` (any `'static` type). Each view supplies a delegate —
+  `.delegate_typed::<P>(|&P, ItemId| -> Box<dyn Widget>)` (downcasts;
+  debug-asserts on a type mismatch) or the untyped
+  `.delegate(|&dyn Any, ItemId| -> Box<dyn Widget>)` — and builds its **own**
+  instance per item. `model.set_payload(id, new)` replaces the data and
+  re-invokes the delegate for that item in every view (so a card with transient
+  widget state — caret, focus — should bind a `Signal` for those fields rather
+  than rely on the rebuild).
+
+Lightweight `SceneItem`s (`add_item`) are shared automatically — painted
+read-only from each view's paint walk, so no per-view instance is needed.
+
+### Selection across panes
+
+Selection is **per-view by default**. To sync panes, build a `SceneSelection`
+and pass a clone to each view via `.selection_model(sel.clone())`; capture the
+same `sel.selection_signal()` in your delegate so each card derives its
+highlight reactively — selecting in one pane repaints the border in every pane,
+with no rebuild. (`SceneSelection` is itself a cheap-clone shared handle.)
+
+### Single-view ergonomics
+
+`SceneView::new(scene)` still takes a `Scene` by value (it wraps a fresh
+`SceneModel` internally); `view.scene()` / `view.scene_mut()` return borrow
+guards for ad-hoc single-view access; `view.model()` hands out the shared handle.
+
+## Runtime mutation (after mount)
+
+The cleanest way to mutate a mounted scene is through the shared [`SceneModel`]
+handle: every mutator is `&self`, so a handler holding `view.model()` (a cheap
+clone) drives the scene directly and **all** views reconcile — no
+`with_widget_mut` needed for content:
+
+```rust
+let model = view.model();             // a clone captured in the handler
+let act = model.add_a11y_group(A11yGroup::builder().label(lit!("Act IV")));
+model.set_a11y_live(A11yNode::Group(act), Live::Polite);
+let card = model.add_widget_item(CardData { /* … */ }, rect);
+model.set_a11y_parent(A11yNode::Item(card), Some(A11yNode::Group(act)));
+```
+
+`with_widget_mut` remains the channel for **per-view** state a handler can't
+otherwise reach — e.g. animating one pane's camera:
+
+```rust
+ctx.with_widget_mut::<SceneView>(view_id, BindingLevel::Relayout, |view| {
+    view.ensure_visible(rect, 40.0);
+});
+```
+
+Each view **self-reconciles** on every scene mutation — visual *and*
+accessibility:
+
+- **Add** (`add_widget_item` / `add_widget` / `add_item`) materialises into the
+  arena on the next rebuild; the spatial index already holds it from insertion.
+- **Payload change** (`set_payload`) re-invokes the delegate for that item in
+  every view, rebuilding its widget with the new data.
+- **Remove** (`remove`) destroys the orphaned arena widget (no leak), drops it
+  from the materialised maps, and cleans the logical-AT maps.
+- **Move / transform / reparent / visibility / opacity / z / layer** — every
+  `ItemChange` variant drives a reconcile pass, so paint *and* the
+  screen-projected AccessKit bounds follow.
+- **Pure-a11y mutations** (`add_a11y_group`, `set_a11y_parent`, relations,
+  live, landmark, categories) don't change item geometry, so they ride a
+  *separate* `Scene::a11y_change_signal` — the AccessKit tree still re-walks.
+
+A relayout no longer re-walks the AccessKit tree on its own (it's gated on
+`a11y_dirty`), so `SceneView::build()` calls `ctx.request_accessibility_update()`
+when it reconciles — the lever that keeps assistive tech in lock-step with the
+visual scene. The call is **gated on a mutation-version delta**: `build()`
+re-walks AT only when [`Scene::mutation_version`] advanced since the last walk
+(any add / remove / move / reparent / visibility / a11y change). A `build()`
+driven *purely* by a per-frame `add_item_dynamic` animation does **not** re-walk
+AT every frame — re-walking 60×/s for sub-pixel bounds drift is waste a screen
+reader can't use — but when that animation **settles**, the final bounds are
+walked into AT exactly once. Discrete mutations always re-walk, even interleaved
+with an animation. Demo: `cargo run -p scene-corkboard` ("Add Act").
+
+### App-owned view state
+
+Pan / zoom / rotation default to view-owned signals. Inject app-owned ones with
+`bind_view_state(pan_x, pan_y, zoom, rotation)` so view state survives a
+rebuild-from-state, a "Reset View" button can snap it home, and a toolbar can
+read it. `initial_pan` / `initial_zoom` / `initial_rotation` seed starting
+values without giving up ownership. These builders run pre-mount, like the
+others.
 
 ---
 
@@ -443,6 +636,12 @@ view.scene_mut().add_item(
     Point::ZERO,
 );
 ```
+
+These `scene_mut()` calls run **pre-mount** — the app still owns `view`. To
+mutate the same scene from a handler *after* the view is added to the tree, go
+through `ctx.with_widget_mut::<SceneView>(view_id, …)` (see *Runtime mutation*
+above); the live `scene-corkboard` example does exactly that for its "Add Act"
+button.
 
 ---
 

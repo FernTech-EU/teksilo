@@ -1,6 +1,6 @@
 //! Spec §7.7 stop-gate: the internationalization translation mixes
 //! declarative elements, `let` bindings at body position, and a
-//! side-effect `rust { ... }` block. Exercises Phase 3a's
+//! side-effect `rust { ... }` block. Exercises the
 //! statement-sequence lowering.
 
 use bastyde::prelude::*;

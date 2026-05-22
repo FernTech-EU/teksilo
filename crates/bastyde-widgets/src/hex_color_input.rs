@@ -37,6 +37,7 @@
 //! );
 //! ```
 
+use bastyde_i18n::lit;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -418,7 +419,7 @@ impl Widget for HexColorInput {
         };
 
         let mut text_input = TextInput::new(self.text_signal.clone())
-            .placeholder(placeholder)
+            .placeholder(lit!(placeholder))
             .enabled(self.initial_enabled)
             .read_only(self.read_only)
             .input_mask(mask_string.to_string())
@@ -436,7 +437,7 @@ impl Widget for HexColorInput {
                 move |ctx_evt| commit(ctx_evt)
             });
         if let Some(label) = self.label.clone() {
-            text_input = text_input.label(label.resolve_now());
+            text_input = text_input.label(lit!(label.resolve_now()));
         }
         if let Some(w) = self.width {
             text_input = text_input.min_width(w);
