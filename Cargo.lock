@@ -181,14 +181,14 @@ dependencies = [
 
 [[package]]
 name = "animations"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
 
 [[package]]
 name = "animations-kit"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -306,7 +306,7 @@ dependencies = [
 
 [[package]]
 name = "async-demo"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -538,7 +538,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bastyde"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-app",
  "bastyde-async",
@@ -566,7 +566,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-analytics-otlp"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-core",
  "bastyde-settings",
@@ -579,7 +579,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-analytics-plausible"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-core",
  "bastyde-settings",
@@ -592,7 +592,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-app"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-canvas",
  "bastyde-core",
@@ -613,7 +613,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-async"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-channel 2.5.0",
  "bastyde-app",
@@ -623,7 +623,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-async-std"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-std",
  "bastyde-app",
@@ -633,7 +633,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-canvas"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-tokens",
  "bytemuck",
@@ -646,7 +646,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-charts"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-canvas",
  "bastyde-core",
@@ -659,7 +659,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "accesskit",
  "accesskit_consumer",
@@ -673,7 +673,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-data"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-core",
  "slotmap",
@@ -681,7 +681,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-fmt"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-parse",
  "proc-macro2",
@@ -692,7 +692,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-fmt-lsp"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-fmt",
  "serde",
@@ -701,7 +701,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-i18n"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-core",
  "bastyde-i18n-macros",
@@ -723,7 +723,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-i18n-macros"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "fluent-syntax",
  "proc-macro2",
@@ -733,7 +733,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-inspector"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-app",
  "bastyde-canvas",
@@ -749,7 +749,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-macros"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-parse",
  "proc-macro2",
@@ -759,7 +759,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-parse"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "proc-macro2",
  "syn",
@@ -767,7 +767,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-platform"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "accesskit",
  "accesskit_winit",
@@ -793,7 +793,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-preview"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-core",
  "bastyde-tokens",
@@ -802,7 +802,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-preview-ui"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-app",
  "bastyde-canvas",
@@ -821,7 +821,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-render"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-canvas",
  "bastyde-tokens",
@@ -833,7 +833,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-resources"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -843,7 +843,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-scene"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "accesskit",
  "bastyde-canvas",
@@ -856,7 +856,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-settings"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-core",
  "bastyde-data",
@@ -869,7 +869,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-telemetry"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-core",
  "bastyde-settings",
@@ -883,7 +883,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-telemetry-codegen"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -894,7 +894,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-text"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-canvas",
  "bastyde-tokens",
@@ -905,7 +905,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-theme-fluent"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-core",
  "bastyde-tokens",
@@ -913,7 +913,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-theme-macos"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-core",
  "bastyde-tokens",
@@ -921,7 +921,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-theme-material3"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-core",
  "bastyde-tokens",
@@ -929,7 +929,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-tokens"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -937,7 +937,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-tokio"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-app",
  "bastyde-async",
@@ -947,7 +947,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-widgets"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "accesskit_consumer",
  "bastyde-canvas",
@@ -971,7 +971,7 @@ dependencies = [
 
 [[package]]
 name = "bastyde-widgets-previewer"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-canvas",
  "bastyde-core",
@@ -1130,7 +1130,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-bastyde-fmt"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-fmt",
  "tempfile",
@@ -1139,7 +1139,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-bastyde-telemetry-lint"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1172,7 +1172,7 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chart-demo"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
  "bastyde-charts",
@@ -1214,7 +1214,7 @@ dependencies = [
 
 [[package]]
 name = "color-picker-demo"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -1345,21 +1345,21 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
 name = "data-collections"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
 
 [[package]]
 name = "data-grid"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
 
 [[package]]
 name = "datetime-pickers"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
  "jiff",
@@ -1388,7 +1388,7 @@ dependencies = [
 
 [[package]]
 name = "dialogs-and-popovers"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -1490,7 +1490,7 @@ checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 
 [[package]]
 name = "drag-and-drop"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -1656,14 +1656,14 @@ dependencies = [
 
 [[package]]
 name = "file-dialogs"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
 
 [[package]]
 name = "file-drop"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -2476,7 +2476,7 @@ dependencies = [
 
 [[package]]
 name = "ime-playground"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -2515,7 +2515,7 @@ dependencies = [
 
 [[package]]
 name = "internationalization"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
  "jiff",
@@ -2854,7 +2854,7 @@ dependencies = [
 
 [[package]]
 name = "menus-and-dropdowns"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -2893,7 +2893,7 @@ dependencies = [
 
 [[package]]
 name = "multi-window"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -2956,7 +2956,7 @@ dependencies = [
 
 [[package]]
 name = "new-widgets-kit"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -3500,7 +3500,7 @@ dependencies = [
 
 [[package]]
 name = "password-field"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -3914,7 +3914,7 @@ dependencies = [
 
 [[package]]
 name = "recent-projects"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
  "serde",
@@ -4028,14 +4028,14 @@ dependencies = [
 
 [[package]]
 name = "rich-text-editor"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
 
 [[package]]
 name = "rich-text-viewer"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -4193,7 +4193,7 @@ dependencies = [
 
 [[package]]
 name = "scene-corkboard"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "accesskit",
  "bastyde",
@@ -4202,7 +4202,7 @@ dependencies = [
 
 [[package]]
 name = "scene-showcase"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
  "bastyde-scene",
@@ -4381,7 +4381,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "shortcuts-demo"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -4420,7 +4420,7 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "simple-button"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -4527,7 +4527,7 @@ dependencies = [
 
 [[package]]
 name = "spin-box"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -4543,7 +4543,7 @@ dependencies = [
 
 [[package]]
 name = "split-view"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -4646,14 +4646,14 @@ dependencies = [
 
 [[package]]
 name = "tab-migration"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
 
 [[package]]
 name = "tab-widget"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -4666,7 +4666,7 @@ checksum = "591ef38edfb78ca4771ee32cf494cb8771944bee237a9b91fc9c1424ac4b777b"
 
 [[package]]
 name = "telemetry-codegen"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde-telemetry",
  "bastyde-telemetry-codegen",
@@ -4674,7 +4674,7 @@ dependencies = [
 
 [[package]]
 name = "telemetry-plausible"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
  "bastyde-analytics-plausible",
@@ -4717,7 +4717,7 @@ dependencies = [
 
 [[package]]
 name = "text-and-layout"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -4881,7 +4881,7 @@ dependencies = [
 
 [[package]]
 name = "theme-styles"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -5019,14 +5019,14 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "title-bar-demo"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
 
 [[package]]
 name = "toast-demo"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -5138,14 +5138,14 @@ checksum = "756daf9b1013ebe47a8776667b466417e2d4c5679d441c26230efd9ef78692db"
 
 [[package]]
 name = "tool-box"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
 
 [[package]]
 name = "tooltips-showcase"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -5183,7 +5183,7 @@ dependencies = [
 
 [[package]]
 name = "tree-table"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
 ]
@@ -5882,7 +5882,7 @@ dependencies = [
 
 [[package]]
 name = "widget-catalog"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bastyde",
  "bastyde-render",
