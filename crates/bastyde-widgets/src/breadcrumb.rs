@@ -19,7 +19,7 @@ const FALLBACK_LINE_HEIGHT: f32 = 16.0;
 type CommandFactory = Box<dyn Fn(&mut EventContext)>;
 
 struct BreadcrumbEntry {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     action: Option<CommandFactory>,
     current: bool,
 }
@@ -41,7 +41,7 @@ pub const BREADCRUMB_CORNER_RADIUS: f32 = 4.0;
 
 /// A single breadcrumb segment definition.
 pub struct BreadcrumbItem {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     action: Option<CommandFactory>,
     current: bool,
 }
@@ -59,7 +59,7 @@ impl BreadcrumbItem {
     pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: ls,
             action: None,
             current: false,
         }
@@ -68,7 +68,7 @@ impl BreadcrumbItem {
     pub fn current(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: ls,
             action: None,
             current: true,
         }
@@ -89,7 +89,7 @@ enum SegmentInteraction {
 }
 
 struct BreadcrumbSegment {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     action: Option<CommandFactory>,
     current: bool,
     interaction: Signal<SegmentInteraction>,
@@ -106,7 +106,7 @@ impl std::fmt::Debug for BreadcrumbSegment {
 }
 
 impl BreadcrumbSegment {
-    fn new(label: String, action: Option<CommandFactory>, current: bool) -> Self {
+    fn new(label: bastyde_i18n::LocalizedString, action: Option<CommandFactory>, current: bool) -> Self {
         Self {
             label,
             action,
@@ -122,13 +122,14 @@ impl BreadcrumbSegment {
     fn estimate_width(&self, ctx: &LayoutContext) -> f32 {
         let pad_h = BREADCRUMB_ITEM_PADDING_HORIZONTAL;
         let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
+        let resolved = self.label.resolve_now();
         let text_width = if let Some(backend) = ctx.text_backend {
             backend
                 .borrow_mut()
-                .layout_single_line(&self.label, &ctx.theme.typography.small, None)
+                .layout_single_line(&resolved, &ctx.theme.typography.small, None)
                 .width
         } else {
-            self.label.len() as f32 * FALLBACK_CHAR_WIDTH
+            resolved.len() as f32 * FALLBACK_CHAR_WIDTH
         };
         text_width + pad_h * 2.0 + envelope * 2.0
     }
@@ -140,6 +141,10 @@ impl Widget for BreadcrumbSegment {
         let interaction = ctx.signal(SegmentInteraction::Idle);
         let registry = ctx.binding_registry();
         interaction.bind_to(self_id, registry, BindingLevel::RepaintOnly);
+        // Locale changes can alter the resolved label (and its width), so
+        // re-measure + repaint this custom-painted segment on locale switch.
+        ctx.locale_signal()
+            .bind_to(self_id, registry, BindingLevel::Relayout);
         self.interaction = interaction.clone();
 
         let interactive = self.is_interactive();
@@ -245,7 +250,7 @@ impl Widget for BreadcrumbSegment {
         let text_height = if let Some(backend) = ctx.text_backend {
             backend
                 .borrow_mut()
-                .layout_single_line(&self.label, &ctx.theme.typography.small, None)
+                .layout_single_line(&self.label.resolve_now(), &ctx.theme.typography.small, None)
                 .height
         } else {
             FALLBACK_LINE_HEIGHT
@@ -321,7 +326,7 @@ impl Widget for BreadcrumbSegment {
             visual.height,
         );
         canvas.draw_text(
-            &self.label,
+            &self.label.resolve_now(),
             text_bounds,
             &ctx.theme.typography.small,
             text_color,
@@ -336,7 +341,7 @@ impl Widget for BreadcrumbSegment {
         // i18n `set_value` workaround which didn't map to a standard
         // ARIA pattern.
         builder.set_role(bastyde_core::accesskit::Role::Link);
-        builder.set_name(&self.label);
+        builder.set_name(self.label.resolve_now());
         if self.current {
             builder.set_aria_current(bastyde_core::accesskit::AriaCurrent::Page);
         } else if self.is_interactive() {
@@ -393,7 +398,7 @@ enum BreadcrumbSlot {
 pub struct Breadcrumb {
     slots: Vec<BreadcrumbSlot>,
     trailing_slot: Option<PendingChild>,
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -413,7 +418,7 @@ impl Breadcrumb {
     /// name of the landmark when it gains focus or is summoned.
     pub fn label(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.label = Some(ls.resolve_now());
+        self.label = Some(ls);
         self
     }
 
