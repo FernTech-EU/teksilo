@@ -14,7 +14,6 @@
 //!     .on_dismiss(|ctx| ctx.send_intent(AppIntent::DismissBanner))
 //! ```
 
-use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Canvas, Path, Point, Rect, SizeProposal};
@@ -85,8 +84,8 @@ impl Widget for SeverityGlyph {
 /// A persistent inline status strip.
 pub struct Banner {
     severity: BannerSeverity,
-    title: String,
-    description: Option<String>,
+    title: bastyde_i18n::LocalizedString,
+    description: Option<bastyde_i18n::LocalizedString>,
     action: Option<Box<dyn Widget>>,
     on_dismiss: Option<Box<dyn Fn(&mut EventContext)>>,
     /// Per-call override for the banner strip chrome.
@@ -99,7 +98,7 @@ impl Banner {
         let ls: bastyde_i18n::LocalizedString = title.into();
         Self {
             severity,
-            title: ls.resolve_now(),
+            title: ls,
             description: None,
             action: None,
             on_dismiss: None,
@@ -138,7 +137,7 @@ impl Banner {
     /// Optional secondary line of text rendered below the title.
     pub fn description(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.description = Some(ls.resolve_now());
+        self.description = Some(ls);
         self
     }
 
@@ -181,7 +180,7 @@ impl Widget for Banner {
 
         // Title + optional description column.
         let title = ctx.add(
-            TextWidget::new(lit!(&self.title))
+            TextWidget::new(self.title.clone())
                 .style(TextStyleRole::BodyBold)
                 .bind_color(TextRole::Primary)
                 .single_line(),
@@ -191,7 +190,7 @@ impl Widget for Banner {
             .add_child(title);
         if let Some(description) = &self.description {
             let desc = ctx.add(
-                TextWidget::new(lit!(description))
+                TextWidget::new(description.clone())
                     .style(TextStyleRole::Body)
                     .bind_color(TextRole::Secondary),
             );
@@ -300,6 +299,7 @@ impl Widget for Banner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_core::widget_tree::WidgetTree;
 
     #[test]

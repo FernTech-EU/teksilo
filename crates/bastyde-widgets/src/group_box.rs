@@ -15,7 +15,6 @@ use bastyde_core::build_context::BuildContext;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
-use bastyde_i18n::lit;
 
 use crate::Checkbox;
 use crate::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
@@ -27,7 +26,7 @@ pub const GROUP_BOX_TITLE_CONTENT_SPACING: f32 = 8.0;
 pub const GROUP_BOX_CHECKBOX_GAP: f32 = 6.0;
 
 pub struct GroupBox {
-    title: String,
+    title: bastyde_i18n::LocalizedString,
     checked: Option<Signal<bool>>,
     pending_content: Option<Box<dyn Widget>>,
     content_id: Option<WidgetId>,
@@ -38,7 +37,7 @@ impl GroupBox {
     pub fn new(title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = title.into();
         Self {
-            title: ls.resolve_now(),
+            title: ls,
             checked: None,
             pending_content: None,
             content_id: None,
@@ -96,7 +95,7 @@ impl Widget for GroupBox {
         let theme_signal = ctx.theme_signal();
         let _ = theme_signal.get();
 
-        let title_label = TextWidget::new(lit!(&self.title))
+        let title_label = TextWidget::new(self.title.clone())
             .style(TextStyleRole::BodyBold)
             .color(TextRole::Primary)
             .single_line()
@@ -105,7 +104,7 @@ impl Widget for GroupBox {
         let title_row_id = if let Some(ref checked) = self.checked {
             // The adjacent title text is `a11y_hidden`, so the checkbox must
             // carry the accessible name for the group's on/off state.
-            let checkbox = Checkbox::new(checked.clone()).label(lit!(&self.title));
+            let checkbox = Checkbox::new(checked.clone()).label(self.title.clone());
             ctx.add(
                 HStack::new()
                     .spacing(GROUP_BOX_CHECKBOX_GAP)
@@ -179,7 +178,7 @@ impl Widget for GroupBox {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::Group);
-        builder.set_name(&self.title);
+        builder.set_name(self.title.resolve_now());
         if let Some(ref checked) = self.checked
             && !checked.get()
         {

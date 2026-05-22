@@ -19,14 +19,13 @@ use bastyde_core::build_context::BuildContext;
 use bastyde_core::color_prop::ColorProp;
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
-use bastyde_i18n::lit;
 use bastyde_tokens::{Color, TextRole, TextStyle};
 
 use crate::primitives::{Divider, Expand, HStack, TextWidget};
 
 /// A labelled section header with a trailing rule line.
 pub struct GroupHeader {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     /// Optional text-style override for the label. Defaults to
     /// `theme.typography.body` — IntelliJ/Jewel group headers render at
     /// normal body size, not as a smaller caption.
@@ -44,7 +43,7 @@ impl GroupHeader {
     pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: ls,
             style: None,
             color: None,
             gap: 8.0,
@@ -94,7 +93,7 @@ impl Widget for GroupHeader {
             None => TextRole::Primary.into(),
         };
 
-        let label = TextWidget::new(lit!(&self.label))
+        let label = TextWidget::new(self.label.clone())
             .style(style)
             .bind_color(color)
             .single_line()
@@ -150,7 +149,7 @@ impl Widget for GroupHeader {
         // is the closest accesskit role — screen readers read it as a
         // non-interactive caption.
         builder.set_role(bastyde_core::accesskit::Role::Label);
-        builder.set_name(&self.label);
+        builder.set_name(self.label.resolve_now());
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -164,6 +163,7 @@ impl Widget for GroupHeader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_core::widget_tree::WidgetTree;
 
     #[test]

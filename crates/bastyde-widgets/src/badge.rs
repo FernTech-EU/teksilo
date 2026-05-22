@@ -1,6 +1,5 @@
 //! Badge — a pill-shaped label for tags, status indicators, and counts.
 
-use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Rect, Size, SizeProposal};
@@ -16,7 +15,7 @@ use crate::primitives::TextWidget;
 
 /// A pill-shaped label for displaying tags, counts, or status.
 pub struct Badge {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     color: Option<ColorProp>,
     text_color: Option<ColorProp>,
     /// Per-call override for the pill chrome.
@@ -26,9 +25,8 @@ pub struct Badge {
 
 impl Badge {
     pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: label.into(),
             color: None,
             text_color: None,
             style_override: None,
@@ -79,7 +77,7 @@ impl Widget for Badge {
             .take()
             .unwrap_or_else(|| ColorProp::Bound(theme_signal.map(|t| t.colors.status_info_fg)));
 
-        let text_widget = TextWidget::new(lit!(&self.label))
+        let text_widget = TextWidget::new(self.label.clone())
             .style(TextStyleRole::Tiny)
             .color(text)
             .single_line()
@@ -132,7 +130,7 @@ impl Widget for Badge {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::Label);
-        builder.set_name(&self.label);
+        builder.set_name(self.label.resolve_now());
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -144,6 +142,7 @@ impl Widget for Badge {
 mod tests {
     use super::*;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn badge_builds_and_renders() {

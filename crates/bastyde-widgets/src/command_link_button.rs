@@ -22,7 +22,6 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_i18n::lit;
 use bastyde_tokens::{
     BorderRole, CornerRadius, HAlignment, SurfaceRole, TextRole, TextStyleRole, VAlignment,
 };
@@ -42,8 +41,8 @@ pub const COMMAND_LINK_BUTTON_MIN_HEIGHT: f32 = 64.0;
 
 /// A large two-line CTA button: icon + title + subtitle.
 pub struct CommandLinkButton {
-    title: String,
-    description: Option<String>,
+    title: bastyde_i18n::LocalizedString,
+    description: Option<bastyde_i18n::LocalizedString>,
     icon: Option<IconWidget>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
@@ -56,7 +55,7 @@ impl CommandLinkButton {
     pub fn new(title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = title.into();
         Self {
-            title: ls.resolve_now(),
+            title: ls,
             description: None,
             icon: None,
             initial_enabled: true,
@@ -69,7 +68,7 @@ impl CommandLinkButton {
     /// Optional descriptive subtitle rendered below the title.
     pub fn description(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.description = Some(ls.resolve_now());
+        self.description = Some(ls);
         self
     }
 
@@ -150,7 +149,7 @@ impl Widget for CommandLinkButton {
         let corner_radius = crate::styles::recipe_button_style::BUTTON_CORNER_RADIUS;
 
         // Title + optional description column.
-        let title_widget = TextWidget::new(lit!(&self.title))
+        let title_widget = TextWidget::new(self.title.clone())
             .style(TextStyleRole::BodyBold)
             .bind_color(title_role)
             .single_line()
@@ -163,7 +162,7 @@ impl Widget for CommandLinkButton {
             .add_child(title_id);
         if let Some(description) = &self.description {
             let desc = ctx.add(
-                TextWidget::new(lit!(description))
+                TextWidget::new(description.clone())
                     .style(TextStyleRole::Body)
                     .bind_color(desc_role)
                     .a11y_hidden(),
@@ -330,8 +329,8 @@ impl Widget for CommandLinkButton {
         // Compose the AT name as "title — description" so screen reader
         // users hear both lines without having to drill into children.
         let name = match &self.description {
-            Some(desc) => format!("{} — {}", self.title, desc),
-            None => self.title.clone(),
+            Some(desc) => format!("{} — {}", self.title.resolve_now(), desc.resolve_now()),
+            None => self.title.resolve_now(),
         };
         builder.set_name(name);
     }
@@ -344,6 +343,7 @@ impl Widget for CommandLinkButton {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_core::widget_tree::WidgetTree;
 
     #[test]

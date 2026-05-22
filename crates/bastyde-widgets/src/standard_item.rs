@@ -63,7 +63,6 @@
 //! decorative (`set_hidden`); the row's expanded state is owned by
 //! the wrapper.
 
-use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Rect, SizeProposal};
@@ -99,8 +98,8 @@ enum CheckboxKind {
 /// Default visual for a row in a `ListView` (or any place that wants
 /// the canonical icon + label + trailing layout).
 pub struct StandardListItem {
-    label: String,
-    subtitle: Option<String>,
+    label: bastyde_i18n::LocalizedString,
+    subtitle: Option<bastyde_i18n::LocalizedString>,
     leading_slot: Option<Box<dyn Widget>>,
     center_slot: Option<Box<dyn Widget>>,
     trailing_slot: Option<Box<dyn Widget>>,
@@ -120,7 +119,7 @@ impl StandardListItem {
     pub fn new(label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: ls,
             subtitle: None,
             leading_slot: None,
             center_slot: None,
@@ -147,7 +146,7 @@ impl StandardListItem {
 
     pub fn subtitle(mut self, text: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = text.into();
-        self.subtitle = Some(ls.resolve_now());
+        self.subtitle = Some(ls);
         self
     }
 
@@ -286,7 +285,7 @@ impl StandardListItem {
 
         // Label column: either a single TextWidget or a VStack with
         // label on top and subtitle (with its own slots) below.
-        let label_widget = TextWidget::new(lit!(&self.label))
+        let label_widget = TextWidget::new(self.label.clone())
             .style(self.label_style)
             .bind_color(label_role.clone())
             .a11y_hidden();
@@ -294,7 +293,7 @@ impl StandardListItem {
 
         let label_column_id = if let Some(subtitle) = &self.subtitle {
             // Two-line: VStack { label, subtitle line }.
-            let subtitle_widget = TextWidget::new(lit!(subtitle))
+            let subtitle_widget = TextWidget::new(subtitle.clone())
                 .style(self.subtitle_style)
                 .color(TextRole::Secondary)
                 .a11y_hidden();
@@ -350,7 +349,7 @@ impl StandardListItem {
                 CheckboxKind::TriState(s) => Checkbox::tristate(s),
             }
             .labels_hidden(true);
-            let cb_id = ctx.add(cb.access_label(lit!(self.label.clone())));
+            let cb_id = ctx.add(cb.access_label(self.label.clone()));
             row = row.add_child(cb_id);
         }
         if let Some(w) = self.leading_slot.take() {
@@ -788,6 +787,7 @@ impl Widget for StandardTreeItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_canvas::SizeProposal;
     use bastyde_core::Theme;
     use bastyde_core::widget_tree::WidgetTree;
