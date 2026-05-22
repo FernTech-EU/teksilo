@@ -1,45 +1,32 @@
-//! `scene-corkboard` — `bastyde-scene` demo.
+//! `scene-corkboard` — `bastyde-scene` multi-view + delegate demo.
 //!
-//! Renders a grid of story cards on a bastyde-scene `SceneView`. Each card is
-//! a real heavyweight widget — `Panel { VStack { TextWidget, TextWidget } }` —
-//! placed at a fixed scene-coordinate rectangle. The cards sit on top of a
-//! **lightweight** background grid (`RectItem`) and are stitched together by
-//! **lightweight** connector lines (`PathItem`) tracing the reading order.
+//! **Two `SceneView` panes share one `SceneModel`.** A story corkboard is shown
+//! in a wide "editor" pane and a zoomed-out "overview" pane side by side; both
+//! render the *same* scene through the same handle, each with its own camera.
 //!
-//! This demo mixes the two content tiers under one `SceneView`:
+//! Cards are stored as `CardData` **payloads** (`SceneModel::add_widget_item`),
+//! not widget instances — so each pane materialises its **own** card widgets via
+//! a per-view `delegate_typed::<CardData>`. Mutating the shared model once
+//! ("Add Act") reconciles **both** panes. A shared [`SceneSelection`] (passed to
+//! both views via `selection_model`) makes selection reactive across panes:
+//! clicking a card in either pane highlights it in both, with **no rebuild** —
+//! each card's border binds the shared selection signal.
 //!
-//! - **Heavyweight** cards (real widgets, focus + keyboard + a11y).
-//! - **Lightweight** items (RectItem cells, PathItem connectors).
-//! - **Same view transform** projects both tiers; pan / zoom keep the
-//!   connectors glued to the card edges.
-//! - **Same spatial index** culls both tiers.
+//! Two content tiers coexist under each pane's view transform:
+//! - **Heavyweight** cards (real widgets, focus + keyboard + a11y), one instance
+//!   per pane, built by that pane's delegate from the shared `CardData`.
+//! - **Lightweight** items (RectItem grid, PathItem connectors, an Over-band
+//!   accent tag) — shared automatically; no per-view instance needed.
 //!
-//! **Runtime mutation (the headline of this revision).** The toolbar's
-//! **"Add Act"** button mutates the *live* scene from a handler:
+//! **Runtime mutation.** "Add Act" calls `model.add_widget_item(..)` directly
+//! from the handler (every `SceneModel` mutator is `&self` — no
+//! `with_widget_mut` needed for the mutation); both panes rebuild via the shared
+//! change signal, and — because the AccessKit tree is *separate* from the visual
+//! scene — the new card is grafted under a fresh Act group announced by a
+//! `Live::Polite` region. Each pane's camera is app-owned via `bind_view_state`,
+//! so the per-pane "Reset" buttons snap only their own viewport home.
 //!
-//! ```ignore
-//! ctx.with_widget_mut::<SceneView>(view_id, BindingLevel::Rebuild, |view| {
-//!     let scene = view.scene_mut();
-//!     let act = scene.add_a11y_group(A11yGroup::builder().label(lit!("Act N")));
-//!     scene.set_a11y_live(A11yNode::Group(act), Live::Polite);
-//!     let card = scene.add_widget(build_card(...), rect);
-//!     scene.set_a11y_parent(A11yNode::Item(card), Some(A11yNode::Group(act)));
-//!     view.ensure_visible(rect, 40.0);
-//! });
-//! ```
-//!
-//! The framework reconciles both trees: the new card materialises into the
-//! arena, the spatial index re-buckets, and — because the AccessKit tree is
-//! *separate* from the visual scene — the new card is grafted under its new
-//! Act group and a `Live::Polite` region announces the addition. View state
-//! (pan / zoom) is app-owned via `bind_view_state`, so the viewport doesn't
-//! reset; **"Reset View"** snaps it home.
-//!
-//! Earlier exercises (still in effect): `Scene::add_widget` round-trip, pan /
-//! zoom / pinch gestures, trackpad + wheel pan, reduced-motion, spatial-index
-//! culling, marquee box-select over the connectors, an over-band accent tag.
-//!
-//! Run with: `cargo run -p scene-corkboard`
+//! Run with: `cargo run -p scene_corkboard`
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -50,8 +37,8 @@ use bastyde::core::BindingLevel;
 use bastyde::prelude::*;
 use bastyde::widgets::{Button, Expand, HStack, Panel, Spacer, TextWidget, Toolbar, VStack};
 use bastyde_scene::{
-    A11yGroup, A11yGroupId, A11yNode, ItemFlags, ItemId, PathItem, RectItem, Scene, SceneLayer,
-    SceneSelectionMode, SceneView,
+    A11yGroup, A11yGroupId, A11yNode, ItemFlags, ItemId, PathItem, RectItem, SceneLayer, SceneModel,
+    SceneSelection, SceneSelectionMode, SceneView,
 };
 
 const CARDS_PER_ROW: usize = 3;
@@ -89,12 +76,40 @@ const CARDS: [(&str, &str); 9] = [
     ("Coda", "Months later. Quiet evidence of change."),
 ];
 
-fn build_card(title: &str, body: &str) -> impl Widget + 'static {
-    Panel::new().child(
-        VStack::new()
-            .spacing(8.0)
-            .child(TextWidget::new(lit!(title)).style(TextStyleRole::BodyBold))
-            .child(TextWidget::new(lit!(body)).style(TextStyleRole::Body)),
+/// The per-card data stored in the shared [`SceneModel`]. Each pane's delegate
+/// builds its own card widget from a borrow of this — so one logical card can
+/// be rendered (independently) in any number of views.
+#[derive(Clone)]
+struct CardData {
+    title: String,
+    body: String,
+}
+
+/// Build a card widget for one pane from shared `CardData`. The border binds the
+/// shared selection signal (reactive — selecting in one pane repaints the border
+/// in every pane, with no rebuild), and a tap toggles the shared selection.
+fn build_card(card: &CardData, selection: SceneSelection, id: ItemId) -> Box<dyn Widget> {
+    let border = selection.selection_signal().map(move |sel| {
+        if sel.contains(&id) {
+            Color::new(0.40, 0.55, 0.85, 1.0) // selected: accent
+        } else {
+            Color::new(0.80, 0.80, 0.85, 0.4) // idle: faint
+        }
+    });
+    let tap_selection = selection.clone();
+    Box::new(
+        Panel::new()
+            .border_color(border)
+            .border_width(2.0)
+            .child(
+                VStack::new()
+                    .spacing(8.0)
+                    .child(TextWidget::new(lit!(card.title.clone())).style(TextStyleRole::BodyBold))
+                    .child(TextWidget::new(lit!(card.body.clone())).style(TextStyleRole::Body)),
+            )
+            .on_tap(move |_ev, _ctx| {
+                tap_selection.toggle(id);
+            }),
     )
 }
 
@@ -117,8 +132,9 @@ fn scene_size() -> (f32, f32) {
 /// Add a lightweight step-shaped connector from `from_rect`'s trailing-mid to
 /// `to_rect`'s leading-mid. Returns the connector's `ItemId` so the caller can
 /// parent it into the right Act group. Shared by the initial build and the
-/// runtime "Add Act" path.
-fn add_connector(scene: &mut Scene, from_rect: Rect, to_rect: Rect, beat: usize) -> ItemId {
+/// runtime "Add Act" path. Connectors are lightweight, so both panes share the
+/// one instance — no per-view delegate involved.
+fn add_connector(model: &SceneModel, from_rect: Rect, to_rect: Rect, beat: usize) -> ItemId {
     let from = Point::new(
         from_rect.x + from_rect.width,
         from_rect.y + from_rect.height * 0.5,
@@ -140,7 +156,7 @@ fn add_connector(scene: &mut Scene, from_rect: Rect, to_rect: Rect, beat: usize)
     let max_y = from.y.max(to.y) + pad;
     let bounds = Rect::new(min_x, min_y, max_x - min_x, max_y - min_y);
     let connector_color = Color::new(0.40, 0.55, 0.85, 0.9);
-    scene.add_item(
+    model.add_item(
         PathItem::new(path, bounds)
             // Cosmetic stroke: constant device-pixel width at any zoom.
             .stroke_cosmetic(connector_color, stroke_w)
@@ -155,14 +171,14 @@ struct CorkboardModel {
     next_index: usize,
     /// Act groups created so far (initial three + any runtime additions).
     acts: Vec<A11yGroupId>,
-    /// The last card in reading order, for the connector + flow.
-    last_card_rect: Rect,
+    /// The last card in reading order (item + rect), for the connector + flow.
+    last_card_item: Option<(ItemId, Rect)>,
 }
 
-/// Build the initial 9-card / 3-Act corkboard, returning the scene and the
-/// runtime model seeded to continue from card 9.
-fn build_initial_scene() -> (Scene, CorkboardModel) {
-    let mut scene = Scene::new();
+/// Build the initial 9-card / 3-Act corkboard, returning a shared [`SceneModel`]
+/// handle and the runtime model seeded to continue from card 9.
+fn build_initial_scene() -> (SceneModel, CorkboardModel) {
+    let model = SceneModel::new();
 
     // Background tile grid (lightweight tier) — one RectItem per cell.
     let (scene_width, scene_height) = scene_size();
@@ -173,140 +189,203 @@ fn build_initial_scene() -> (Scene, CorkboardModel) {
     for r in 0..rows {
         for c in 0..cols {
             let cell = Rect::new(c as f32 * tile, r as f32 * tile, tile, tile);
-            let id = scene.add_item(
+            let id = model.add_item(
                 RectItem::new(cell).stroke_cosmetic(grid_color, 1.0),
                 Point::ZERO,
             );
             // Decorative backdrop: keep it out of marquee box-select.
-            scene.set_flag(id, ItemFlags::IS_SELECTABLE, false);
+            model.set_flag(id, ItemFlags::IS_SELECTABLE, false);
         }
     }
 
     // Three logical Act groups. The screen reader announces "Act I — Setup,
     // contains: …" before reaching Act II, regardless of visual placement.
-    let act1 = scene.add_a11y_group(A11yGroup::builder().label(lit!("Act I — Setup")));
-    let act2 = scene.add_a11y_group(A11yGroup::builder().label(lit!("Act II — Confrontation")));
-    let act3 = scene.add_a11y_group(A11yGroup::builder().label(lit!("Act III — Resolution")));
+    let act1 = model.add_a11y_group(A11yGroup::builder().label(lit!("Act I — Setup")));
+    let act2 = model.add_a11y_group(A11yGroup::builder().label(lit!("Act II — Confrontation")));
+    let act3 = model.add_a11y_group(A11yGroup::builder().label(lit!("Act III — Resolution")));
     let acts = [act1, act2, act3];
 
-    // Heavyweight cards, auto-grafted under their declared Act group.
-    let mut card_rects = Vec::with_capacity(CARDS.len());
+    // Heavyweight cards stored as `CardData` payloads, auto-grafted under their
+    // declared Act group. Each pane's delegate builds its own widget per card.
+    let mut last: Option<(ItemId, Rect)> = None;
+    let mut prev: Option<(ItemId, Rect)> = None;
     for (i, (title, body)) in CARDS.iter().enumerate() {
         let r = card_rect(i);
-        let card_item = scene.add_widget(build_card(title, body), r);
-        card_rects.push(r);
+        let card_item = model.add_widget_item(
+            CardData {
+                title: (*title).to_string(),
+                body: (*body).to_string(),
+            },
+            r,
+        );
         let act_index = i / 3;
-        scene.set_a11y_parent(
+        model.set_a11y_parent(
             A11yNode::Item(card_item),
             Some(A11yNode::Group(acts[act_index])),
         );
-    }
 
-    // Connector lines wiring each card to the next in reading order.
-    for (i, pair) in card_rects.windows(2).enumerate() {
-        let connector_id = add_connector(&mut scene, pair[0], pair[1], i + 2);
-        let act_index = i / 3;
-        scene.set_a11y_parent(
-            A11yNode::Item(connector_id),
-            Some(A11yNode::Group(acts[act_index])),
-        );
+        // Connector from the previous card to this one, parented in this card's
+        // Act group.
+        if let Some((_, prev_rect)) = prev {
+            let connector_id = add_connector(&model, prev_rect, r, i + 1);
+            model.set_a11y_parent(
+                A11yNode::Item(connector_id),
+                Some(A11yNode::Group(acts[act_index])),
+            );
+        }
+        prev = Some((card_item, r));
+        last = Some((card_item, r));
     }
 
     // Over-band accent tag pinned to the first card's top-right corner —
     // raised to `SceneLayer::Over` so it paints on top of the heavyweight card.
-    if let Some(&first) = card_rects.first() {
-        let tag =
-            RectItem::new(Rect::new(0.0, 0.0, 16.0, 16.0)).fill(Color::new(0.95, 0.55, 0.15, 0.95));
-        let tag_id = scene.add_item(tag, Point::new(first.x + first.width - 12.0, first.y - 4.0));
-        scene.set_layer(tag_id, SceneLayer::Over);
-        scene.set_flag(tag_id, ItemFlags::IS_SELECTABLE, false);
-    }
+    let first_rect = card_rect(0);
+    let tag =
+        RectItem::new(Rect::new(0.0, 0.0, 16.0, 16.0)).fill(Color::new(0.95, 0.55, 0.15, 0.95));
+    let tag_id = model.add_item(
+        tag,
+        Point::new(first_rect.x + first_rect.width - 12.0, first_rect.y - 4.0),
+    );
+    model.set_layer(tag_id, SceneLayer::Over);
+    model.set_flag(tag_id, ItemFlags::IS_SELECTABLE, false);
 
-    let model = CorkboardModel {
+    let cork = CorkboardModel {
         next_index: CARDS.len(),
         acts: acts.to_vec(),
-        last_card_rect: card_rect(CARDS.len() - 1),
+        last_card_item: last,
     };
-    (scene, model)
+    (model, cork)
 }
 
 /// Append a new Act: a fresh logical group (announced via a polite live
 /// region), one card under it at the next grid slot, and a connector from the
-/// previous last card. Returns the new card's scene rect for `ensure_visible`.
-fn add_act(scene: &mut Scene, model: &mut CorkboardModel) -> Rect {
-    let index = model.next_index;
+/// previous last card. Returns the new card's `(ItemId, Rect)`. Drives the
+/// shared model directly (`&self`), so every attached pane reconciles.
+fn add_act(model: &SceneModel, state: &mut CorkboardModel) -> (ItemId, Rect) {
+    let index = state.next_index;
     let r = card_rect(index);
-    let act_number = model.acts.len() + 1;
+    let act_number = state.acts.len() + 1;
 
     let group =
-        scene.add_a11y_group(A11yGroup::builder().label(lit!(format!("Act {act_number}"))));
+        model.add_a11y_group(A11yGroup::builder().label(lit!(format!("Act {act_number}"))));
     // Live region: a screen reader announces the runtime addition.
-    scene.set_a11y_live(A11yNode::Group(group), Live::Polite);
+    model.set_a11y_live(A11yNode::Group(group), Live::Polite);
 
-    let card = scene.add_widget(
-        build_card(
-            &format!("Act {act_number} — new beat"),
-            "Added live via with_widget_mut → scene_mut().",
-        ),
+    let card = model.add_widget_item(
+        CardData {
+            title: format!("Act {act_number} — new beat"),
+            body: "Added live via the shared SceneModel; both panes show it."
+                .to_string(),
+        },
         r,
     );
-    scene.set_a11y_parent(A11yNode::Item(card), Some(A11yNode::Group(group)));
+    model.set_a11y_parent(A11yNode::Item(card), Some(A11yNode::Group(group)));
 
     // Connector from the previous last card into this new beat.
-    let connector = add_connector(scene, model.last_card_rect, r, index + 1);
-    scene.set_a11y_parent(A11yNode::Item(connector), Some(A11yNode::Group(group)));
+    if let Some((_, prev_rect)) = state.last_card_item {
+        let connector = add_connector(model, prev_rect, r, index + 1);
+        model.set_a11y_parent(A11yNode::Item(connector), Some(A11yNode::Group(group)));
+    }
 
-    model.acts.push(group);
-    model.last_card_rect = r;
-    model.next_index += 1;
-    r
+    state.acts.push(group);
+    state.last_card_item = Some((card, r));
+    state.next_index += 1;
+    (card, r)
 }
 
-/// The toolbar: Add Act, Reset View, dark-mode toggle. Handlers capture the
-/// SceneView's `WidgetId`, the shared model, and the app-owned view-state
-/// signals.
-fn build_toolbar(
-    view_id: WidgetId,
-    model: Rc<RefCell<CorkboardModel>>,
+/// Per-pane camera signals (pan x/y, zoom, rotation), app-owned so the toolbar
+/// can reset each pane independently.
+#[derive(Clone)]
+struct Camera {
     pan_x: Signal<f32>,
     pan_y: Signal<f32>,
     zoom: Signal<f32>,
     rotation: Signal<f32>,
+}
+
+impl Camera {
+    fn new(zoom: f32) -> Self {
+        Self {
+            pan_x: Signal::new_animated(0.0),
+            pan_y: Signal::new_animated(0.0),
+            zoom: Signal::new_animated(zoom),
+            rotation: Signal::new_animated(0.0),
+        }
+    }
+
+    /// Animate this camera home (to the given resting zoom).
+    fn reset(&self, rest_zoom: f32) {
+        let dur = std::time::Duration::from_millis(220);
+        // Animate rather than `set`: a plain set does NOT cancel an in-flight
+        // pan animation (the scroll handler pans via `animate_to`), so a reset
+        // mid-scroll would be overridden on the next scheduler tick.
+        self.pan_x.animate_to(0.0, dur, bastyde::tokens::Easing::EaseOut);
+        self.pan_y.animate_to(0.0, dur, bastyde::tokens::Easing::EaseOut);
+        self.zoom.animate_to(rest_zoom, dur, bastyde::tokens::Easing::EaseOut);
+        self.rotation
+            .animate_to(0.0, dur, bastyde::tokens::Easing::EaseOut);
+    }
+}
+
+/// Configure a pane over the shared model: same content, own camera + delegate,
+/// shared selection (so both panes highlight together).
+fn build_pane(model: &SceneModel, selection: &SceneSelection, camera: &Camera) -> SceneView {
+    let delegate_selection = selection.clone();
+    let (sw, sh) = scene_size();
+    SceneView::with_model(model.clone())
+        .selection_mode(SceneSelectionMode::Multi)
+        .selection_model(selection.clone())
+        .delegate_typed::<CardData>(move |card, id| {
+            build_card(card, delegate_selection.clone(), id)
+        })
+        .default_size(sw, sh)
+        .bind_view_state(
+            camera.pan_x.clone(),
+            camera.pan_y.clone(),
+            camera.zoom.clone(),
+            camera.rotation.clone(),
+        )
+}
+
+/// The toolbar: Add Act, per-pane Reset, dark-mode toggle. Captures the shared
+/// model (mutated directly) + main pane id (for `ensure_visible`) + both cameras.
+fn build_toolbar(
+    main_view_id: WidgetId,
+    model: SceneModel,
+    cork: Rc<RefCell<CorkboardModel>>,
+    main_cam: Camera,
+    overview_cam: Camera,
 ) -> impl Widget + 'static {
     let is_dark = Signal::new(false);
     Toolbar::new().child(
         HStack::new()
             .spacing(8.0)
             .child(Button::new(lit!("Add Act")).on_activate_fn(move |ctx| {
-                let model = model.clone();
-                // Reach the live SceneView from the handler and mutate its
-                // scene; the framework reconciles visual + AccessKit trees.
-                ctx.with_widget_mut::<SceneView>(view_id, BindingLevel::Rebuild, move |view| {
-                    let rect = {
-                        let mut m = model.borrow_mut();
-                        add_act(view.scene_mut(), &mut m)
-                    };
-                    // View state is app-owned, so panning to the new card
-                    // doesn't fight the rebuild.
-                    view.ensure_visible(rect, 40.0);
-                });
+                // Mutate the shared model directly — every mutator is `&self`,
+                // so both panes' observers fire and both rebuild. No
+                // `with_widget_mut` needed for the mutation itself.
+                let (_card, rect) = {
+                    let mut state = cork.borrow_mut();
+                    add_act(&model, &mut state)
+                };
+                // Pan the *main* pane to the new card. ensure_visible animates
+                // the (app-owned) main camera; the overview pane is untouched.
+                ctx.with_widget_mut::<SceneView>(
+                    main_view_id,
+                    BindingLevel::Relayout,
+                    move |view| {
+                        view.ensure_visible(rect, 40.0);
+                    },
+                );
             }))
-            .child(
-                Button::new(lit!("Reset View")).on_activate_fn(move |_ctx| {
-                    // Animate home rather than `set(...)`. A plain set does NOT
-                    // cancel an in-flight pan animation (the scroll handler pans
-                    // via `animate_to`), so a set mid-scroll-animation gets
-                    // overridden on the next scheduler tick and Reset appears
-                    // dead. `animate_to` installs a fresh target, overriding any
-                    // running animation. (On a pristine view this is a no-op —
-                    // there is nothing to reset.)
-                    let dur = std::time::Duration::from_millis(220);
-                    pan_x.animate_to(0.0, dur, bastyde::tokens::Easing::EaseOut);
-                    pan_y.animate_to(0.0, dur, bastyde::tokens::Easing::EaseOut);
-                    zoom.animate_to(1.0, dur, bastyde::tokens::Easing::EaseOut);
-                    rotation.animate_to(0.0, dur, bastyde::tokens::Easing::EaseOut);
-                }),
-            )
+            .child({
+                let cam = main_cam.clone();
+                Button::new(lit!("Reset Main")).on_activate_fn(move |_ctx| cam.reset(1.0))
+            })
+            .child({
+                let cam = overview_cam.clone();
+                Button::new(lit!("Reset Overview")).on_activate_fn(move |_ctx| cam.reset(0.5))
+            })
             .child(Spacer::new())
             .child(
                 Button::new(lit!("Toggle Dark Mode")).on_activate_fn(move |ctx| {
@@ -328,38 +407,49 @@ fn main() {
         .theme(bastyde::presets::intui::light())
         .initial_window(
             WindowConfig::new()
-                .title("Bastyde — Scene Corkboard (Add Act mutates the live scene + AccessKit)")
-                .size(900, 600)
+                .title("Bastyde — Scene Corkboard (two panes, one shared SceneModel)")
+                .size(1300, 640)
                 .root(|tree, _state| {
-                    let (scene, model) = build_initial_scene();
-                    let model = Rc::new(RefCell::new(model));
+                    let (model, cork) = build_initial_scene();
+                    let cork = Rc::new(RefCell::new(cork));
 
-                    // App-owned view state, injected into the SceneView so it
-                    // survives runtime mutation and "Reset View" can snap it.
-                    let pan_x = Signal::new_animated(0.0);
-                    let pan_y = Signal::new_animated(0.0);
-                    let zoom = Signal::new_animated(1.0);
-                    let rotation = Signal::new_animated(0.0);
+                    // One shared selection across both panes: clicking a card in
+                    // either pane highlights it in both.
+                    let selection = SceneSelection::new(SceneSelectionMode::Multi);
 
-                    let (scene_width, scene_height) = scene_size();
-                    let view_id = tree.add(
-                        SceneView::new(scene)
-                            .selection_mode(SceneSelectionMode::Multi)
-                            .default_size(scene_width, scene_height)
-                            .bind_view_state(
-                                pan_x.clone(),
-                                pan_y.clone(),
-                                zoom.clone(),
-                                rotation.clone(),
-                            ),
+                    // Independent cameras: the editor pane at 1×, the overview
+                    // pane zoomed out to 0.5×.
+                    let main_cam = Camera::new(1.0);
+                    let overview_cam = Camera::new(0.5);
+
+                    let main_id = tree.add(build_pane(&model, &selection, &main_cam));
+                    let overview_id = tree.add(
+                        build_pane(&model, &selection, &overview_cam)
+                            .nested_a11y(true)
+                            .a11y_label(lit!("Overview pane")),
                     );
 
-                    let toolbar =
-                        build_toolbar(view_id, model, pan_x, pan_y, zoom, rotation);
+                    let toolbar = build_toolbar(
+                        main_id,
+                        model.clone(),
+                        cork,
+                        main_cam,
+                        overview_cam,
+                    );
+
                     tree.add(
-                        VStack::new()
-                            .child(toolbar)
-                            .child(Expand::new().child_id(view_id)),
+                        VStack::new().child(toolbar).child(
+                            // Wrap the pane row in an `Expand` so it fills the
+                            // VStack's remaining height (a bare HStack child is
+                            // flex-0 and would collapse to ~0 px, culling both
+                            // panes — only the toolbar would show).
+                            Expand::new().child(
+                                HStack::new()
+                                    // Editor pane gets 2/3, overview 1/3.
+                                    .child(Expand::new().flex(2.0).child_id(main_id))
+                                    .child(Expand::new().child_id(overview_id)),
+                            ),
+                        ),
                     )
                 }),
         )
@@ -370,71 +460,85 @@ fn main() {
 mod tests {
     use super::*;
     use bastyde::core::WidgetTree;
+    use std::collections::BTreeSet;
 
-    /// Reproduce the real-app topology + the exact "Add Act" handler path:
-    /// view wrapped in `VStack → Expand`, app-owned view state via
-    /// `bind_view_state`, and the mutation driven through
-    /// `ctx.with_widget_mut(view_id, Rebuild, |v| { add_act; ensure_visible })`.
-    #[test]
-    fn add_act_via_handler_materialises_card_in_real_topology() {
-        let (scene, model) = build_initial_scene();
-        let model = Rc::new(RefCell::new(model));
-        let pan_x = Signal::new_animated(0.0);
-        let pan_y = Signal::new_animated(0.0);
-        let zoom = Signal::new_animated(1.0);
-        let rotation = Signal::new_animated(0.0);
-        let (scene_width, scene_height) = scene_size();
-
+    /// A `WidgetTree` + two panes over one shared model, the way `main()` wires
+    /// them. Returns `(tree, model, selection, main_id, overview_id)`.
+    fn two_pane_tree() -> (WidgetTree, SceneModel, SceneSelection, WidgetId, WidgetId) {
+        let (model, _cork) = build_initial_scene();
+        let selection = SceneSelection::new(SceneSelectionMode::Multi);
+        let main_cam = Camera::new(1.0);
+        let overview_cam = Camera::new(0.5);
         let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
-        let view_id = tree.add(
-            SceneView::new(scene)
-                .selection_mode(SceneSelectionMode::Multi)
-                .default_size(scene_width, scene_height)
-                .bind_view_state(pan_x.clone(), pan_y.clone(), zoom.clone(), rotation.clone()),
+        let main_id = tree.add(build_pane(&model, &selection, &main_cam));
+        let overview_id = tree.add(build_pane(&model, &selection, &overview_cam));
+        let _root = tree.add(
+            VStack::new().child(
+                HStack::new()
+                    .child(Expand::new().child_id(main_id))
+                    .child(Expand::new().child_id(overview_id)),
+            ),
         );
-        // Wrap exactly like main(): VStack → Expand → SceneView.
-        let _root = tree.add(VStack::new().child(Expand::new().child_id(view_id)));
-        tree.layout(SizeProposal::exact(900.0, 600.0));
-        let before = tree.children(view_id).len();
+        tree.layout(SizeProposal::exact(1200.0, 600.0));
+        (tree, model, selection, main_id, overview_id)
+    }
 
-        // Drive the handler path.
-        let mut noop = bastyde::core::window::NoopWindowOps;
-        tree.run_with_event_context(&mut noop, |ctx| {
-            let model = model.clone();
-            ctx.with_widget_mut::<SceneView>(view_id, BindingLevel::Rebuild, move |view| {
-                let rect = {
-                    let mut m = model.borrow_mut();
-                    add_act(view.scene_mut(), &mut m)
-                };
-                view.ensure_visible(rect, 40.0);
-            });
-        });
-
-        assert!(
-            tree.needs_redraw(),
-            "Add Act handler must schedule a frame"
-        );
-        tree.layout(SizeProposal::exact(900.0, 600.0));
+    #[test]
+    fn both_panes_materialise_every_card_via_their_own_delegate() {
+        let (tree, _model, _sel, main_id, overview_id) = two_pane_tree();
         assert_eq!(
-            tree.children(view_id).len(),
-            before + 1,
-            "Add Act must materialise the new card in the real (wrapped) topology"
+            tree.children(main_id).len(),
+            CARDS.len(),
+            "main pane builds its own 9 card widgets"
         );
-        let new_wid = *tree.children(view_id).last().unwrap();
-        let b = tree.bounds(new_wid);
-        // It should be placed at its scene rect (card_rect(9) = 32, 524) and not
-        // culled — its top is within the ~560px-tall view under the toolbar.
+        assert_eq!(
+            tree.children(overview_id).len(),
+            CARDS.len(),
+            "overview pane builds its OWN 9 card widgets from the same payloads"
+        );
+        // Distinct arenas → distinct WidgetIds for the same logical cards.
+        let main_kids: BTreeSet<_> = tree.children(main_id).into_iter().collect();
+        let ov_kids: BTreeSet<_> = tree.children(overview_id).into_iter().collect();
         assert!(
-            b.width > 0.0 && b.height > 0.0,
-            "runtime card must be placed (non-zero) in the wrapped topology, got {b:?}"
+            main_kids.is_disjoint(&ov_kids),
+            "the two panes own independent widget instances"
+        );
+    }
+
+    #[test]
+    fn add_act_via_shared_model_materialises_in_both_panes() {
+        let (mut tree, model, _sel, main_id, overview_id) = two_pane_tree();
+        let before_main = tree.children(main_id).len();
+        let before_ov = tree.children(overview_id).len();
+
+        // Mutate the shared model directly (the way the "Add Act" button does).
+        let mut cork = CorkboardModel {
+            next_index: CARDS.len(),
+            acts: vec![],
+            last_card_item: Some((model.ids()[0], card_rect(CARDS.len() - 1))),
+        };
+        let (_card, _rect) = add_act(&model, &mut cork);
+        tree.layout(SizeProposal::exact(1200.0, 600.0));
+
+        assert_eq!(
+            tree.children(main_id).len(),
+            before_main + 1,
+            "main pane materialises the new card"
+        );
+        assert_eq!(
+            tree.children(overview_id).len(),
+            before_ov + 1,
+            "overview pane materialises the new card too (shared model)"
         );
     }
 
     #[test]
     fn corkboard_lays_out_nine_cards_at_scene_coords() {
-        let (scene, _model) = build_initial_scene();
+        let (model, _cork) = build_initial_scene();
+        let selection = SceneSelection::new(SceneSelectionMode::Multi);
+        let camera = Camera::new(1.0);
         let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
-        let view_id = tree.add(SceneView::new(scene));
+        let view_id = tree.add(build_pane(&model, &selection, &camera));
         tree.layout(SizeProposal::exact(900.0, 600.0));
 
         let kids = tree.children(view_id);
@@ -452,23 +556,58 @@ mod tests {
         assert_eq!(last.y, SCENE_MARGIN + 2.0 * (CARD_HEIGHT + CARD_GAP));
     }
 
+    /// Regression for "empty panes, only the toolbar shows": the two-pane row
+    /// must fill the VStack's remaining height (via an `Expand`), or both panes
+    /// collapse to ~0 px and every card is culled. Mirrors `main()`'s layout
+    /// and asserts both panes *place* their first card at non-zero size — a
+    /// child-count check alone (cards materialise regardless of viewport size)
+    /// would not catch this.
     #[test]
-    fn add_act_appends_a_card_and_group() {
-        let (scene, mut model) = build_initial_scene();
-        let acts_before = model.acts.len();
+    fn app_layout_places_cards_in_both_panes_with_nonzero_size() {
+        let (model, _cork) = build_initial_scene();
+        let selection = SceneSelection::new(SceneSelectionMode::Multi);
+        let main_cam = Camera::new(1.0);
+        let overview_cam = Camera::new(0.5);
         let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
-        let view_id = tree.add(SceneView::new(scene));
+        let main_id = tree.add(build_pane(&model, &selection, &main_cam));
+        let overview_id = tree.add(build_pane(&model, &selection, &overview_cam));
+        // Exactly main()'s structure: VStack { toolbar, Expand { HStack { … } } }.
+        tree.add(
+            VStack::new()
+                .child(TextWidget::new(lit!("toolbar")))
+                .child(Expand::new().child(
+                    HStack::new()
+                        .child(Expand::new().flex(2.0).child_id(main_id))
+                        .child(Expand::new().child_id(overview_id)),
+                )),
+        );
+        tree.layout(SizeProposal::exact(1300.0, 640.0));
+
+        let main_card = tree.bounds(tree.children(main_id)[0]);
+        let ov_card = tree.bounds(tree.children(overview_id)[0]);
+        assert!(
+            main_card.width > 0.0 && main_card.height > 0.0,
+            "main pane must place its card at non-zero size, got {main_card:?}"
+        );
+        assert!(
+            ov_card.width > 0.0 && ov_card.height > 0.0,
+            "overview pane must place its card at non-zero size, got {ov_card:?}"
+        );
+    }
+
+    #[test]
+    fn add_act_appends_a_card_and_group_and_requests_at_rewalk() {
+        let (model, mut cork) = build_initial_scene();
+        let acts_before = cork.acts.len();
+        let selection = SceneSelection::new(SceneSelectionMode::Multi);
+        let camera = Camera::new(1.0);
+        let mut tree = WidgetTree::new().with_theme(bastyde::presets::intui::light());
+        let view_id = tree.add(build_pane(&model, &selection, &camera));
         tree.layout(SizeProposal::exact(900.0, 600.0));
         assert_eq!(tree.children(view_id).len(), CARDS.len());
 
-        // Mutate the live scene the way the "Add Act" button does, then rebuild.
-        let new_rect = {
-            let view = tree
-                .widget_as_any_mut(view_id)
-                .and_then(|a| a.downcast_mut::<SceneView>())
-                .expect("view is a SceneView");
-            add_act(view.scene_mut(), &mut model)
-        };
+        // Mutate the shared model directly, then rebuild.
+        let (_card, new_rect) = add_act(&model, &mut cork);
         tree.layout(SizeProposal::exact(900.0, 600.0));
 
         assert_eq!(
@@ -476,23 +615,38 @@ mod tests {
             CARDS.len() + 1,
             "Add Act must materialise one new card"
         );
-        assert_eq!(model.acts.len(), acts_before + 1, "a new Act group is created");
+        assert_eq!(cork.acts.len(), acts_before + 1, "a new Act group is created");
         assert!(
             tree.a11y_request_handle().get(),
             "Add Act must request an AccessKit re-walk"
         );
 
-        // The new card sits at the next grid slot.
+        // The new card sits at the next grid slot and is placed (non-zero).
         assert_eq!(new_rect, card_rect(CARDS.len()));
-
-        // The new card must be PLACED (non-zero bounds) — not just present in
-        // the child list. card_rect(9) is (32, 524, 220, 140); with pan=0 / zoom=1
-        // and a 900×600 viewport its top is in view, so it must not be culled.
         let new_wid = *tree.children(view_id).last().unwrap();
         let b = tree.bounds(new_wid);
         assert!(
             b.width > 0.0 && b.height > 0.0,
             "the runtime-added card must be placed at non-zero size, got {b:?}"
         );
+    }
+
+    #[test]
+    fn shared_selection_is_observed_by_both_panes() {
+        let (_tree, model, selection, _main_id, _overview_id) = two_pane_tree();
+        // Pick a real heavyweight (Delegated) card — `payload(id).is_some()`
+        // is true only for `add_widget_item` entries, not the grid cells.
+        let card_id = model
+            .ids()
+            .into_iter()
+            .find(|&id| model.payload(id).is_some())
+            .expect("at least one Delegated card");
+        assert!(selection.selection_signal().get().is_empty());
+        selection.select_one(card_id);
+        // Both panes were built with `.selection_model(selection.clone())`, so
+        // their cards bind THIS same selection signal — selecting once is seen
+        // by both panes' borders (verified visually; here we assert the shared
+        // signal reflects it).
+        assert!(selection.selection_signal().get().contains(&card_id));
     }
 }

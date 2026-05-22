@@ -25,7 +25,7 @@ fn with_scene_mut<R>(tree: &mut WidgetTree, view_id: WidgetId, f: impl FnOnce(&m
         .widget_as_any_mut(view_id)
         .and_then(|a| a.downcast_mut::<SceneView>())
         .expect("view is a SceneView");
-    f(view.scene_mut())
+    f(&mut view.scene_mut())
 }
 
 fn view_ref<'t>(tree: &'t WidgetTree, view_id: WidgetId) -> &'t SceneView {

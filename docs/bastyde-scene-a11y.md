@@ -299,6 +299,16 @@ AT-parented under a removed item (its explicit parent mapping is dropped, exactl
 like `remove_a11y_group`). Mark a runtime-added group `Live::Polite` to have the
 addition announced. Demo: the "Add Act" button in `cargo run -p scene-corkboard`.
 
+**Multi-view.** When several `SceneView`s share one `SceneModel` (see
+[bastyde-scene.md](bastyde-scene.md) → *Shared model & multi-view*), each pane
+installs its **own** observers on these two channels and walks its **own**
+AccessKit subtree — the gate (`mutation_version` delta) is per-view, and each
+pane's synthetic AT nodes carry bounds projected through *that* pane's view
+transform. A mutation on the shared model therefore reaches assistive tech for
+every pane independently. A heavyweight item added via `add_widget_item` is a
+type-erased payload, so each pane's delegate builds its own widget — and the
+item's `accessibility()` runs once per pane, under that pane's projected bounds.
+
 ---
 
 ## Worked example: story corkboard

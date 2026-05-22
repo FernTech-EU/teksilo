@@ -4,6 +4,7 @@
 // is a follow-up.
 mod a11y;
 mod edge_cases;
+mod multi_view;
 mod nested;
 mod runtime_mutation;
 
@@ -5560,6 +5561,27 @@ fn item_thumbnails_skips_invisible_and_logical_items() {
     );
     assert_eq!(thumbs[0].1, bastyde_tokens::Color::RED);
     let _ = visible;
+}
+
+#[test]
+fn item_thumbnails_includes_heavyweight_widget_rects() {
+    use crate::items::RectItem;
+    let mut scene = Scene::new();
+    scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)).fill(bastyde_tokens::Color::RED),
+        Point::ZERO,
+    );
+    // A heavyweight widget entry has no `SceneItem`, but the minimap must still
+    // show it (a widget-heavy scene would otherwise look empty in the minimap).
+    let _card = scene.add_widget(FillWidget::new(), Rect::new(50.0, 60.0, 100.0, 40.0));
+    let thumbs = scene.item_thumbnails();
+    assert_eq!(thumbs.len(), 2, "both tiers contribute a thumbnail");
+    assert!(
+        thumbs
+            .iter()
+            .any(|(r, _)| *r == Rect::new(50.0, 60.0, 100.0, 40.0)),
+        "the heavyweight card's scene rect appears in the thumbnails"
+    );
 }
 
 // -----------------------------------------------------------------

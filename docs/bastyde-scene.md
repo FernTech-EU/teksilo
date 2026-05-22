@@ -471,29 +471,95 @@ never carries a dangling reference. See *Runtime mutation* below.
 
 ---
 
-## Runtime mutation (after mount)
+## Shared model & multi-view
 
-`Scene` is owned by its `SceneView`. *Before* the view is mounted you mutate
-the scene through the value you still hold (`view.scene_mut()…`, as in the
-worked example below). *After* the view is in the widget tree, a handler
-reaches it through the deferred [`EventContext::with_widget_mut`] channel:
+A `Scene` lives behind a cloneable [`SceneModel`] handle — `Rc<RefCell<Scene>>`,
+the same share-by-handle pattern as `bastyde-data`'s `ListModel`. Clone the
+handle into several `SceneView::with_model(model.clone())` panes to render **one
+scene many ways**: an overview + a detail pane, the same document in two
+windows, or a headless model a tool mutates with no view at all. Mutate the
+model once and **every** attached view reconciles.
 
 ```rust
-ctx.with_widget_mut::<SceneView>(view_id, BindingLevel::Rebuild, |view| {
-    let scene = view.scene_mut();
-    let act = scene.add_a11y_group(A11yGroup::builder().label(lit!("Act IV")));
-    scene.set_a11y_live(A11yNode::Group(act), Live::Polite);
-    let card = scene.add_widget(build_card(/* … */), rect);
-    scene.set_a11y_parent(A11yNode::Item(card), Some(A11yNode::Group(act)));
+let model = SceneModel::new();
+let id = model.add_widget_item(CardData { /* … */ }, rect);   // a typed payload
+
+let editor = SceneView::with_model(model.clone())
+    .delegate_typed::<CardData>(|card, id| build_card(card, id));
+let overview = SceneView::with_model(model.clone())   // same model, own camera
+    .delegate_typed::<CardData>(|card, id| build_card(card, id));
+
+// Later, from any handler holding a clone — no `with_widget_mut`:
+model.set_payload(id, CardData { /* … */ });   // both panes rebuild that card
+```
+
+### Heavyweight content: payload + per-view delegate
+
+A heavyweight `Widget` instance lives in exactly one arena, so a shared model
+can't hand the *same* `Box<dyn Widget>` to two views. Two ways to add one:
+
+- **Single-view** — `model.add_widget(widget, rect)` (or `Scene::add_widget`)
+  stores the instance in a one-shot slot, drained by the **first** view that
+  builds. A second view sharing the model produces no child for it. Use it when
+  the scene has exactly one view.
+- **Multi-view** — `model.add_widget_item(payload, rect)` stores a type-erased
+  `payload` (any `'static` type). Each view supplies a delegate —
+  `.delegate_typed::<P>(|&P, ItemId| -> Box<dyn Widget>)` (downcasts;
+  debug-asserts on a type mismatch) or the untyped
+  `.delegate(|&dyn Any, ItemId| -> Box<dyn Widget>)` — and builds its **own**
+  instance per item. `model.set_payload(id, new)` replaces the data and
+  re-invokes the delegate for that item in every view (so a card with transient
+  widget state — caret, focus — should bind a `Signal` for those fields rather
+  than rely on the rebuild).
+
+Lightweight `SceneItem`s (`add_item`) are shared automatically — painted
+read-only from each view's paint walk, so no per-view instance is needed.
+
+### Selection across panes
+
+Selection is **per-view by default**. To sync panes, build a `SceneSelection`
+and pass a clone to each view via `.selection_model(sel.clone())`; capture the
+same `sel.selection_signal()` in your delegate so each card derives its
+highlight reactively — selecting in one pane repaints the border in every pane,
+with no rebuild. (`SceneSelection` is itself a cheap-clone shared handle.)
+
+### Single-view ergonomics
+
+`SceneView::new(scene)` still takes a `Scene` by value (it wraps a fresh
+`SceneModel` internally); `view.scene()` / `view.scene_mut()` return borrow
+guards for ad-hoc single-view access; `view.model()` hands out the shared handle.
+
+## Runtime mutation (after mount)
+
+The cleanest way to mutate a mounted scene is through the shared [`SceneModel`]
+handle: every mutator is `&self`, so a handler holding `view.model()` (a cheap
+clone) drives the scene directly and **all** views reconcile — no
+`with_widget_mut` needed for content:
+
+```rust
+let model = view.model();             // a clone captured in the handler
+let act = model.add_a11y_group(A11yGroup::builder().label(lit!("Act IV")));
+model.set_a11y_live(A11yNode::Group(act), Live::Polite);
+let card = model.add_widget_item(CardData { /* … */ }, rect);
+model.set_a11y_parent(A11yNode::Item(card), Some(A11yNode::Group(act)));
+```
+
+`with_widget_mut` remains the channel for **per-view** state a handler can't
+otherwise reach — e.g. animating one pane's camera:
+
+```rust
+ctx.with_widget_mut::<SceneView>(view_id, BindingLevel::Relayout, |view| {
     view.ensure_visible(rect, 40.0);
 });
 ```
 
-The view **self-reconciles** on every scene mutation — visual *and*
+Each view **self-reconciles** on every scene mutation — visual *and*
 accessibility:
 
-- **Add** (`add_widget` / `add_item`) materialises into the arena on the next
-  rebuild; the spatial index already holds it from insertion.
+- **Add** (`add_widget_item` / `add_widget` / `add_item`) materialises into the
+  arena on the next rebuild; the spatial index already holds it from insertion.
+- **Payload change** (`set_payload`) re-invokes the delegate for that item in
+  every view, rebuilding its widget with the new data.
 - **Remove** (`remove`) destroys the orphaned arena widget (no leak), drops it
   from the materialised maps, and cleans the logical-AT maps.
 - **Move / transform / reparent / visibility / opacity / z / layer** — every

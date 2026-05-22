@@ -551,13 +551,17 @@ impl<'ops> EventContext<'ops> {
     /// no-op in release and a `debug_assert` failure in debug — it never
     /// silently mutates the wrong widget.
     ///
-    /// This is the supported way to reach, e.g., `SceneView::scene_mut()`
-    /// from a handler after the view is mounted:
+    /// Use it for per-view state a handler can't otherwise reach — e.g.
+    /// `SceneView::ensure_visible(...)` (camera) after the view is mounted:
     /// ```ignore
-    /// ctx.with_widget_mut::<SceneView>(view_id, BindingLevel::Rebuild, |v| {
-    ///     v.scene_mut().add_widget(card, rect);
+    /// ctx.with_widget_mut::<SceneView>(view_id, BindingLevel::Relayout, |v| {
+    ///     v.ensure_visible(card_rect, 40.0);
     /// });
     /// ```
+    /// For scene *content*, prefer the shared `SceneModel` handle (`view.model()`)
+    /// — its mutators are `&self`, so a handler holding a clone can drive the
+    /// scene directly and every attached view reconciles, no `with_widget_mut`
+    /// needed.
     pub fn with_widget_mut<W: 'static>(
         &mut self,
         id: WidgetId,

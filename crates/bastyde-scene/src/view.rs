@@ -63,6 +63,7 @@ use bastyde_tokens::Easing;
 
 use crate::item::ItemId;
 use crate::scene::Scene;
+use crate::scene_model::SceneModel;
 use crate::transform::{anchor_pan_for_pinch, compose_view};
 
 /// Logical pixels of pan applied per `ScrollDelta::Lines` notch.
@@ -307,7 +308,22 @@ pub enum FocusDirection {
 /// A pannable/zoomable viewport hosting a [`Scene`]'s items at scene
 /// coordinates.
 pub struct SceneView {
-    scene: Scene,
+    /// Shared, cloneable handle to the scene this view renders. Multiple
+    /// `SceneView`s can hold clones of one [`SceneModel`] and reconcile
+    /// independently on every mutation.
+    model: SceneModel,
+    /// Per-view heavyweight builder for `Delegated` items. Each view calls
+    /// its own delegate with an item's type-erased payload to build a fresh
+    /// `Widget` instance for **this** view's arena. Returns `None` to skip
+    /// an item (e.g. a downcast miss). `None` (the field) = no delegate
+    /// installed; only single-view `Once` widgets materialise.
+    delegate: Option<Rc<dyn Fn(&dyn std::any::Any, ItemId) -> Option<Box<dyn Widget>>>>,
+    /// Items whose payload changed since the last build (filled by the
+    /// `item_change` observer on [`ItemChange::PayloadChanged`]). Drained at
+    /// the top of `build`, where each is destroyed and re-materialised via the
+    /// delegate. `Rc<RefCell>` so the observer closure can push without
+    /// borrowing `model`.
+    payload_dirty: Rc<RefCell<HashSet<ItemId>>>,
     /// Materialisation map populated during `build`. Stable across
     /// rebuilds — subsequent `build` calls just return the cached
     /// widget ids.
@@ -588,7 +604,7 @@ impl std::fmt::Debug for SceneView {
         // Manual impl: `focus_order_callback` is `Rc<dyn Fn>` and
         // therefore not `Debug`. Render it as a presence flag instead.
         f.debug_struct("SceneView")
-            .field("scene", &self.scene)
+            .field("model", &self.model)
             .field("materialized_count", &self.materialized.len())
             .field("default_size", &self.default_size)
             .field("interactive", &self.interactive)
@@ -607,9 +623,17 @@ impl std::fmt::Debug for SceneView {
 }
 
 impl SceneView {
-    /// Wrap a [`Scene`] in a viewport. The scene is moved into the
-    /// view; query / mutate it later via [`SceneView::scene_mut`].
+    /// Wrap a [`Scene`] in a viewport (single-view sugar). The scene is moved
+    /// into a fresh [`SceneModel`]; for multi-view, build a `SceneModel`
+    /// yourself and use [`with_model`](Self::with_model).
     pub fn new(scene: Scene) -> Self {
+        Self::with_model(SceneModel::from_scene(scene))
+    }
+
+    /// Attach a viewport to a (possibly shared) [`SceneModel`]. Clone one
+    /// model into several `SceneView::with_model(model.clone())` to render the
+    /// same scene in multiple panes, each with its own camera and delegate.
+    pub fn with_model(model: SceneModel) -> Self {
         let pan_x = Signal::new_animated(0.0);
         let pan_y = Signal::new_animated(0.0);
         let zoom = Signal::new_animated(1.0);
@@ -622,7 +646,9 @@ impl SceneView {
         let view_transform_signal =
             Self::compose_view_transform(&pan_x, &pan_y, &zoom, &rotation, &bounds_origin_signal);
         Self {
-            scene,
+            model,
+            delegate: None,
+            payload_dirty: Rc::new(RefCell::new(HashSet::new())),
             materialized: HashMap::new(),
             widget_to_item: HashMap::new(),
             default_size: Size::new(800.0, 600.0),
@@ -692,6 +718,62 @@ impl SceneView {
         &self.selection
     }
 
+    /// Install the per-view heavyweight builder for `Delegated` items
+    /// (those added via [`SceneModel::add_widget_item`](crate::SceneModel::add_widget_item)).
+    /// The closure receives the item's type-erased payload and its [`ItemId`]
+    /// and returns the widget to materialise in **this** view's arena.
+    /// Prefer the typed [`delegate_typed`](Self::delegate_typed) wrapper.
+    pub fn delegate(
+        mut self,
+        f: impl Fn(&dyn std::any::Any, ItemId) -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        self.delegate = Some(Rc::new(move |payload, id| Some(f(payload, id))));
+        self
+    }
+
+    /// Typed convenience over [`delegate`](Self::delegate): downcasts the
+    /// payload to `P` before calling `f`. A downcast miss debug-asserts and
+    /// skips the item (no widget is materialised) in release.
+    pub fn delegate_typed<P: 'static>(
+        mut self,
+        f: impl Fn(&P, ItemId) -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        self.delegate = Some(Rc::new(move |payload, id| match payload.downcast_ref::<P>() {
+            Some(typed) => Some(f(typed, id)),
+            None => {
+                debug_assert!(
+                    false,
+                    "SceneView delegate_typed: payload for {id:?} is not a {}",
+                    std::any::type_name::<P>()
+                );
+                None
+            }
+        }));
+        self
+    }
+
+    /// Replace this view's selection with a (typically shared) one. Pass the
+    /// same [`SceneSelection`](crate::SceneSelection) clone to several views so
+    /// they select together; capture its `selection_signal()` in your delegate
+    /// to highlight selected items reactively (no rebuild). Distinct from the
+    /// [`selection()`](Self::selection) getter; supersedes any
+    /// [`selection_mode`](Self::selection_mode) set earlier.
+    pub fn selection_model(mut self, selection: crate::selection::SceneSelection) -> Self {
+        self.selection = selection;
+        self
+    }
+
+    /// A clone of this view's [`SceneModel`] handle — for handler closures
+    /// that mutate the scene (every mutator is `&self`) or wire additional views.
+    pub fn model(&self) -> SceneModel {
+        self.model.clone()
+    }
+
+    /// Borrow this view's [`SceneModel`] handle.
+    pub fn model_ref(&self) -> &SceneModel {
+        &self.model
+    }
+
     /// Drain any pending marquee commit synchronously. Normal
     /// per-frame use never needs this — `place_children` consumes
     /// the pending commit at the start of every layout pass. Tests
@@ -699,7 +781,8 @@ impl SceneView {
     /// materialise the box-select result.
     pub fn flush_marquee_commit(&self) -> bool {
         if let Some((rect, additive)) = self.pending_marquee_commit.take() {
-            self.selection.commit_marquee(&self.scene, rect, additive);
+            self.selection
+                .commit_marquee(&self.model.0.borrow(), rect, additive);
             self.marquee.set(None);
             true
         } else {
@@ -713,9 +796,9 @@ impl SceneView {
     /// their `scene_pos` derives from the parent's chain.
     pub fn flush_pending_item_move(&mut self) -> bool {
         if let Some((target_id, delta)) = self.pending_item_move.take() {
-            if let Some(local_pos) = self.scene.local_pos(target_id) {
+            if let Some(local_pos) = self.model.local_pos(target_id) {
                 let new_local_pos = Point::new(local_pos.x + delta.x, local_pos.y + delta.y);
-                self.scene.set_local_pos(target_id, new_local_pos);
+                self.model.set_local_pos(target_id, new_local_pos);
             }
             self.drag_target.set(None);
             true
@@ -870,9 +953,9 @@ impl SceneView {
         current: Option<ItemId>,
     ) -> Option<ItemId> {
         if let Some(cb) = &self.focus_order_callback {
-            return cb(&self.scene, direction, current);
+            return cb(&self.model.0.borrow(), direction, current);
         }
-        let ids = self.scene.ids();
+        let ids = self.scene().ids();
         if ids.is_empty() {
             return None;
         }
@@ -1233,31 +1316,36 @@ impl SceneView {
         self
     }
 
-    /// Read access to the underlying scene model.
-    pub fn scene(&self) -> &Scene {
-        &self.scene
+    /// Read access to the underlying scene, as a borrow guard.
+    ///
+    /// Prefer the cloneable [`model`](Self::model) handle for multi-view
+    /// wiring and scene mutation (its methods are `&self`); this guard is the
+    /// single-view escape hatch for ad-hoc reads.
+    pub fn scene(&self) -> std::cell::Ref<'_, Scene> {
+        self.model.0.borrow()
     }
 
-    /// Mutable access to the underlying scene model.
+    /// Mutable access to the underlying scene, as a borrow guard.
     ///
-    /// Use it freely **before** the view is added to the tree (pre-build
-    /// configuration). **After** the view is mounted, a handler reaches it via
-    /// the deferred [`EventContext::with_widget_mut`] channel:
+    /// Single-view escape hatch. For multi-view, mutate through the shared
+    /// [`SceneModel`](crate::SceneModel) handle ([`model`](Self::model)) — every
+    /// mutator is `&self`, so a handler holding a clone can drive the scene
+    /// directly (no `with_widget_mut` needed) and **all** views reconcile:
     ///
     /// ```ignore
-    /// ctx.with_widget_mut::<SceneView>(view_id, BindingLevel::Rebuild, |view| {
-    ///     view.scene_mut().add_widget(card, rect);
-    /// });
+    /// let model = view.model();          // cheap handle clone
+    /// model.add_widget_item(card_data, rect);   // every view rebuilds it
     /// ```
     ///
-    /// The view self-reconciles on every mutation: `add_widget` /
+    /// The view self-reconciles on every mutation: `add_widget_item` /
     /// `add_item` materialise on the next rebuild, `remove` destroys the
-    /// orphaned arena widget and cleans its maps, and **both** the visual tree
-    /// and the *separate* AccessKit tree re-walk (geometry, reparents, and
-    /// pure-a11y mutations all reach assistive tech — `build()` requests an AT
-    /// re-walk, since a relayout no longer does so on its own).
-    pub fn scene_mut(&mut self) -> &mut Scene {
-        &mut self.scene
+    /// orphaned arena widget and cleans its maps, `set_payload` rebuilds an
+    /// item's widget, and **both** the visual tree and the *separate* AccessKit
+    /// tree re-walk (geometry, reparents, and pure-a11y mutations all reach
+    /// assistive tech — `build()` requests an AT re-walk, since a relayout no
+    /// longer does so on its own).
+    pub fn scene_mut(&mut self) -> std::cell::RefMut<'_, Scene> {
+        self.model.0.borrow_mut()
     }
 
     /// The `WidgetId` an item was materialised as, if known.
@@ -1330,18 +1418,18 @@ impl SceneView {
         let view_transform = self.view_transform();
         let item_ctx = crate::item::SceneItemPaintContext::new(view_transform, Some(region));
         let drag_target = self.drag_target.get();
-        let mut visible_ids = self.scene.items_in_rect(region);
+        let mut visible_ids = self.scene().items_in_rect(region);
         // Z-order within the band: higher z paints last (on top); equal-z
         // preserves insertion order (stable sort). Heavyweight ids stay in the
         // list but are skipped below — they paint via the arena walker.
-        self.scene.sort_by_z(&mut visible_ids);
+        self.scene().sort_by_z(&mut visible_ids);
         for id in visible_ids {
-            if self.scene.item(id).is_none() {
+            let scene = self.model.0.borrow();
+            if scene.item(id).is_none() {
                 continue;
             }
             // Only this band; items default to Under.
-            if self
-                .scene
+            if scene
                 .layer(id)
                 .unwrap_or(crate::scene::SceneLayer::Under)
                 != band
@@ -1350,10 +1438,10 @@ impl SceneView {
             }
             // Skip items whose chain is invisible or which carry the
             // HAS_NO_CONTENTS flag (logical-only).
-            if !self.scene.is_effectively_visible(id) {
+            if !self.scene().is_effectively_visible(id) {
                 continue;
             }
-            let flags = self.scene.flags(id).unwrap_or_default();
+            let flags = self.scene().flags(id).unwrap_or_default();
             if flags.contains(crate::flags::ItemFlags::HAS_NO_CONTENTS) {
                 continue;
             }
@@ -1361,7 +1449,7 @@ impl SceneView {
             // with a visual delta in scene coords — a child follows its
             // dragged parent until the rebuild commits the new local_pos.
             let drag_delta = drag_target
-                .filter(|t| t.item_id == id || self.scene.is_descendant_of(id, t.item_id))
+                .filter(|t| t.item_id == id || self.scene().is_descendant_of(id, t.item_id))
                 .map(|t| {
                     bastyde_canvas::Transform2D::translate(
                         t.current_scene.x - t.anchor_scene.x,
@@ -1373,7 +1461,7 @@ impl SceneView {
             // offset baked in. Push beneath the view transform so the item's
             // `paint` works in local coords. `save` / `restore` isolate
             // neighbouring items' transforms.
-            let mut local_to_scene = self.scene.scene_transform(id);
+            let mut local_to_scene = self.scene().scene_transform(id);
             if let Some(t) = drag_delta {
                 local_to_scene = local_to_scene.then(&t);
             }
@@ -1397,12 +1485,12 @@ impl SceneView {
             }
             // Effective opacity composes through the parent chain. Pushed via
             // `set_opacity` / `restore_opacity` so the scope is balanced.
-            let alpha = self.scene.effective_opacity(id);
+            let alpha = self.scene().effective_opacity(id);
             let opacity_pushed = alpha < 0.999;
             if opacity_pushed {
                 canvas.set_opacity(alpha);
             }
-            if let Some(item) = self.scene.item(id) {
+            if let Some(item) = scene.item(id) {
                 // Item-coordinate cache: replay a cached local-coord
                 // RenderFrame instead of re-running paint when the item opted
                 // into `CacheMode::ItemCoordinate`; record on a miss.
@@ -1522,7 +1610,7 @@ impl SceneView {
     /// `[min_zoom, max_zoom]`. No-op when the scene declares
     /// [`Scene::zoomable(false)`](crate::Scene::zoomable).
     pub fn zoom_to(&self, target: f32, duration: Duration) {
-        if !self.scene.is_zoomable() || self.adopt_scene_size {
+        if !self.scene().is_zoomable() || self.adopt_scene_size {
             return;
         }
         let clamped = self.gate_zoom_target(target);
@@ -1532,7 +1620,7 @@ impl SceneView {
     /// Snap zoom to `target` without animation, clamped. No-op when
     /// the scene declares zoom disabled.
     pub fn set_zoom(&self, target: f32) {
-        if !self.scene.is_zoomable() || self.adopt_scene_size {
+        if !self.scene().is_zoomable() || self.adopt_scene_size {
             return;
         }
         let clamped = self.gate_zoom_target(target);
@@ -1614,7 +1702,7 @@ impl SceneView {
         if self.adopt_scene_size {
             return Vec2::new(self.pan_x.get(), self.pan_y.get());
         }
-        let axes = self.scene.current_pan_axes();
+        let axes = self.scene().current_pan_axes();
         let after_axes = match axes {
             PanAxes::Both => target,
             PanAxes::None => Vec2::new(self.pan_x.get(), self.pan_y.get()),
@@ -1641,7 +1729,7 @@ impl SceneView {
     /// Effective zoom range = intersect(Scene declared, view override).
     fn effective_zoom_range(&self) -> Option<std::ops::RangeInclusive<f32>> {
         intersect_zoom_range(
-            self.scene.current_zoom_range().as_ref(),
+            self.scene().current_zoom_range().as_ref(),
             self.zoom_range_override.get().as_ref(),
         )
     }
@@ -1649,7 +1737,7 @@ impl SceneView {
     /// Effective pan bounds = intersect(Scene declared, view override).
     fn effective_pan_bounds(&self) -> Option<Rect> {
         intersect_pan_bounds(
-            self.scene.current_pan_bounds(),
+            self.scene().current_pan_bounds(),
             self.pan_bounds_override.get(),
         )
     }
@@ -1706,8 +1794,8 @@ impl SceneView {
     /// Compute the bounding rectangle (in scene coords) that encloses
     /// every item in the scene. Returns `None` for an empty scene.
     pub fn scene_content_bounds(&self) -> Option<Rect> {
-        let ids: Vec<ItemId> = self.scene.ids();
-        union_rects(ids.iter().filter_map(|id| self.scene.scene_rect(*id)))
+        let ids: Vec<ItemId> = self.scene().ids();
+        union_rects(ids.iter().filter_map(|id| self.scene().scene_rect(*id)))
     }
 
     /// Animate pan + zoom so the scene's content bounding box fits
@@ -1726,7 +1814,7 @@ impl SceneView {
     ///
     /// Use this for "zoom to selection" / "frame this subset" UX.
     pub fn fit_to_items(&self, ids: &[ItemId]) {
-        let union = union_rects(ids.iter().filter_map(|id| self.scene.scene_rect(*id)));
+        let union = union_rects(ids.iter().filter_map(|id| self.scene().scene_rect(*id)));
         if let Some(rect) = union {
             self.fit_to_rect(rect);
         }
@@ -1777,9 +1865,9 @@ impl Widget for SceneView {
         // the move actually lands; otherwise the item would visibly
         // "snap back" between drag-end and the rebuild.
         if let Some((target_id, delta)) = self.pending_item_move.take() {
-            if let Some(local_pos) = self.scene.local_pos(target_id) {
+            if let Some(local_pos) = self.model.local_pos(target_id) {
                 let new_local_pos = Point::new(local_pos.x + delta.x, local_pos.y + delta.y);
-                self.scene.set_local_pos(target_id, new_local_pos);
+                self.model.set_local_pos(target_id, new_local_pos);
             }
             self.drag_target.set(None);
         }
@@ -1790,8 +1878,26 @@ impl Widget for SceneView {
         // this the lasso would linger on screen until something
         // else triggered a layout pass (next user drag, etc.).
         if let Some((rect, additive)) = self.pending_marquee_commit.take() {
-            self.selection.commit_marquee(&self.scene, rect, additive);
+            {
+                let scene = self.model.0.borrow();
+                self.selection.commit_marquee(&scene, rect, additive);
+            }
             self.marquee.set(None);
+        }
+
+        // Drain the payload-dirty set (filled by the item_change observer on
+        // `ItemChange::PayloadChanged`). Each `Delegated` item whose payload
+        // changed is destroyed here so the materialise loop below rebuilds it
+        // via the delegate with the fresh payload. `Once` / removed ids are
+        // left untouched — a single-view widget has no source to rebuild from.
+        let payload_dirty_ids: Vec<ItemId> = self.payload_dirty.borrow_mut().drain().collect();
+        for id in payload_dirty_ids {
+            if self.model.payload(id).is_some() {
+                if let Some(wid) = self.materialized.remove(&id) {
+                    ctx.destroy_subtree(wid);
+                    self.widget_to_item.remove(&wid);
+                }
+            }
         }
 
         // --- AccessKit re-walk gate (version delta) ----------------------
@@ -1805,7 +1911,7 @@ impl Widget for SceneView {
         // every frame, and re-walking AT 60×/s for sub-pixel bounds drift is
         // pure waste a screen reader can't use. `None` (first build) compares
         // unequal, so the initial AT population is never gated out.
-        let version_before_refresh = self.scene.mutation_version();
+        let version_before_refresh = self.model.mutation_version();
         let structural_at_change = self.last_at_version != Some(version_before_refresh);
 
         // Pull fresh `local_bounds` for every item flagged
@@ -1813,7 +1919,7 @@ impl Widget for SceneView {
         // Static items pay nothing here; dynamic items get their
         // signal-driven AABBs read back into the entry + spatial
         // index so hit-test and viewport-cull stay correct.
-        let dynamic_changed = self.scene.refresh_dynamic_bounds();
+        let dynamic_changed = self.model.refresh_dynamic_bounds();
         // The one AT update the version gate would otherwise miss: when a
         // dynamic-bounds animation *settles* (changing last build, steady now),
         // walk its final bounds into AT exactly once so the resting geometry is
@@ -1825,7 +1931,7 @@ impl Widget for SceneView {
         // mutation inside build() happens at or above this point (the drains and
         // the refresh); materialise / orphan-reap / z-sort below only touch the
         // arena, not the Scene model — so this snapshot is stable to end-of-build.
-        self.last_at_version = Some(self.scene.mutation_version());
+        self.last_at_version = Some(self.model.mutation_version());
 
         // Bind the drag-rebuild signal so the next drop triggers a
         // rebuild and the drains above run. `BindingLevel::Rebuild`
@@ -1846,7 +1952,8 @@ impl Widget for SceneView {
         {
             let cache = self.item_cache.clone();
             let reconcile_dirty = self.reconcile_dirty.clone();
-            let handle = self.scene.item_change_signal().observe(move |change| {
+            let payload_dirty = self.payload_dirty.clone();
+            let handle = self.model.item_change_signal().observe(move |change| {
                 use crate::scene::ItemChange;
                 // The item cache holds *local-coordinate* paint output, so only
                 // a geometry change or a removal can invalidate a cached frame;
@@ -1855,6 +1962,11 @@ impl Widget for SceneView {
                 match *change {
                     ItemChange::Removed { id } | ItemChange::LocalBoundsChanged { id, .. } => {
                         cache.borrow_mut().evict(id);
+                    }
+                    // A `Delegated` item's data changed: queue a targeted rebuild
+                    // so the next build re-invokes the delegate for just that id.
+                    ItemChange::PayloadChanged { id } => {
+                        payload_dirty.borrow_mut().insert(id);
                     }
                     _ => {}
                 }
@@ -1880,57 +1992,61 @@ impl Widget for SceneView {
         // AccessKit tree re-walks — even for a mutation with no visual change.
         {
             let reconcile_dirty = self.reconcile_dirty.clone();
-            let handle = self.scene.a11y_change_signal().observe(move |_| {
+            let handle = self.model.a11y_change_signal().observe(move |_| {
                 reconcile_dirty.set(reconcile_dirty.get().wrapping_add(1));
             });
             *self._a11y_observer.borrow_mut() = Some(handle);
         }
 
-        // Snapshot the ids that still have a `Widget` entry, used by the orphan
-        // pass below. Taken before the materialise loop, which neither adds nor
-        // removes entries (it only drains `pending`).
-        let live_widget_ids: std::collections::HashSet<ItemId> = self
-            .scene
-            .entries
-            .iter()
-            .filter_map(|e| match e.kind {
-                crate::scene::SceneEntryKind::Widget { .. } => Some(e.id),
-                crate::scene::SceneEntryKind::Item(_) => None,
-            })
-            .collect();
-
-        // Materialise pending widgets (drained the first time, idempotent
-        // afterwards). Also keeps the reverse lookup
-        // `widget_to_item` in sync so place_children's cull is `O(1)`
-        // per child instead of scanning the entries vec.
-        let mut child_ids = Vec::with_capacity(self.scene.entries.len());
-        for entry in self.scene.entries.iter_mut() {
-            match &mut entry.kind {
-                crate::scene::SceneEntryKind::Widget { pending } => {
-                    if let Some(widget) = pending.take() {
-                        let wid = ctx.add_boxed(widget);
-                        self.materialized.insert(entry.id, wid);
-                        self.widget_to_item.insert(wid, entry.id);
-                        child_ids.push(wid);
-                    } else if let Some(wid) = self.materialized.get(&entry.id).copied() {
-                        child_ids.push(wid);
-                    }
-                }
-                crate::scene::SceneEntryKind::Item(_) => {
-                    // Lightweight items don't go in the arena. They're
-                    // painted from `SceneView::paint` directly.
-                }
-            }
+        // Materialise heavyweight widgets. Two paths, neither holding a model
+        // borrow across `ctx.add_boxed` or a delegate call (the reentrancy
+        // contract): both `drain_all_once` and `delegated_payloads` return owned
+        // Vecs with the model borrow already dropped.
+        //
+        // 1. Single-view `Once` widgets: drain the boxed instance. Only the
+        //    first `SceneView` over a shared model gets it; a second view's
+        //    drain returns nothing for that id (it's single-view by design).
+        for (id, widget) in self.model.drain_all_once() {
+            let wid = ctx.add_boxed(widget);
+            self.materialized.insert(id, wid);
+            self.widget_to_item.insert(wid, id);
         }
 
-        // Reap widgets whose scene entry was removed at runtime. SceneView
-        // returns `preserves_children_on_rebuild() == true` (so a drag / marquee
-        // rebuild doesn't destroy the cards), which means the framework's
-        // pre-rebuild destroy loop is skipped — we must destroy our own orphans,
-        // or a removed widget leaks its arena node (plus its signal / animation /
-        // shortcut registrations) and `materialized` / `widget_to_item` grow
-        // unbounded. After the loop `materialized ⊇ live_widget_ids`, so any
-        // surplus entry is exactly an orphan.
+        // 2. Multi-view `Delegated` items: each view builds its OWN instance via
+        //    its delegate. Already-materialised ids are skipped (the
+        //    payload-dirty drain above destroyed any that need rebuilding, so
+        //    they fall through here as fresh).
+        let delegated = self.model.delegated_payloads();
+        if let Some(delegate) = self.delegate.clone() {
+            for (id, payload) in &delegated {
+                if self.materialized.contains_key(id) {
+                    continue;
+                }
+                if let Some(widget) = delegate(&**payload, *id) {
+                    let wid = ctx.add_boxed(widget);
+                    self.materialized.insert(*id, wid);
+                    self.widget_to_item.insert(wid, *id);
+                }
+            }
+        } else {
+            debug_assert!(
+                delegated.iter().all(|(id, _)| self.materialized.contains_key(id)),
+                "SceneView has `Delegated` items but no delegate installed — \
+                 call `.delegate_typed::<P>(..)` (or `.delegate(..)`) before adding it to the tree"
+            );
+        }
+
+        // Assemble child ids in scene (entry) order, then reap orphans — reusing
+        // one heavyweight-id snapshot. A removed entry is absent from
+        // `heavy_ids`, so it never enters `child_ids`; SceneView preserves its
+        // children on rebuild, so we must destroy our own orphan arena nodes or
+        // they (and their signal / animation / shortcut registrations) leak.
+        let heavy_ids = self.model.heavyweight_ids();
+        let mut child_ids: Vec<WidgetId> = heavy_ids
+            .iter()
+            .filter_map(|id| self.materialized.get(id).copied())
+            .collect();
+        let live_widget_ids: std::collections::HashSet<ItemId> = heavy_ids.into_iter().collect();
         if self.materialized.len() > live_widget_ids.len() {
             let orphans: Vec<(ItemId, WidgetId)> = self
                 .materialized
@@ -1965,16 +2081,23 @@ impl Widget for SceneView {
         // widget entry restacks the cards here, on the next rebuild.
         // Reordering `node.children` (rather than destroying / recreating the
         // widgets) preserves each card's focus, text-edit and animation state.
+        let zmap: HashMap<ItemId, f32> = {
+            let scene = self.model.0.borrow();
+            self.widget_to_item
+                .values()
+                .map(|id| (*id, scene.z(*id).unwrap_or(0.0)))
+                .collect()
+        };
         child_ids.sort_by(|a, b| {
             let za = self
                 .widget_to_item
                 .get(a)
-                .and_then(|id| self.scene.z(*id))
+                .and_then(|id| zmap.get(id).copied())
                 .unwrap_or(0.0);
             let zb = self
                 .widget_to_item
                 .get(b)
-                .and_then(|id| self.scene.z(*id))
+                .and_then(|id| zmap.get(id).copied())
                 .unwrap_or(0.0);
             za.partial_cmp(&zb).unwrap_or(std::cmp::Ordering::Equal)
         });
@@ -1996,9 +2119,12 @@ impl Widget for SceneView {
         // walk reads the current value. Items without bindings
         // default to a no-op `register_bindings`.
         let self_id_for_items = ctx.self_id();
-        for entry in self.scene.entries.iter() {
-            if let crate::scene::SceneEntryKind::Item(item) = &entry.kind {
-                item.register_bindings(ctx, self_id_for_items);
+        {
+            let scene = self.model.0.borrow();
+            for entry in scene.entries.iter() {
+                if let crate::scene::SceneEntryKind::Item(item) = &entry.kind {
+                    item.register_bindings(ctx, self_id_for_items);
+                }
             }
         }
 
@@ -2408,11 +2534,11 @@ impl Widget for SceneView {
                 let bounds_origin_for_scroll = self.bounds_origin_signal.clone();
                 let last_viewport_for_scroll = self.last_viewport.clone();
                 let cursor_pos_for_scroll = self.cursor_pos.clone();
-                let pan_axes_sig = self.scene.pan_axes_signal();
-                let zoomable_sig = self.scene.zoomable_signal();
-                let scene_zoom_range_sig = self.scene.zoom_range_signal();
+                let pan_axes_sig = self.scene().pan_axes_signal();
+                let zoomable_sig = self.scene().zoomable_signal();
+                let scene_zoom_range_sig = self.scene().zoom_range_signal();
                 let view_zoom_range_sig = self.zoom_range_override.clone();
-                let scene_pan_bounds_sig = self.scene.pan_bounds_signal();
+                let scene_pan_bounds_sig = self.scene().pan_bounds_signal();
                 let view_pan_bounds_sig = self.pan_bounds_override.clone();
                 let adopt_scene_size = self.adopt_scene_size;
                 handlers = handlers.on_scroll(move |event, _ctx| {
@@ -2583,11 +2709,11 @@ impl Widget for SceneView {
                 let rotation = self.rotation.clone();
                 let bounds_origin_for_pinch = self.bounds_origin_signal.clone();
                 let last_viewport_for_pinch = self.last_viewport.clone();
-                let zoomable_sig_pinch = self.scene.zoomable_signal();
-                let pan_axes_sig_pinch = self.scene.pan_axes_signal();
-                let scene_zoom_range_sig_pinch = self.scene.zoom_range_signal();
+                let zoomable_sig_pinch = self.scene().zoomable_signal();
+                let pan_axes_sig_pinch = self.scene().pan_axes_signal();
+                let scene_zoom_range_sig_pinch = self.scene().zoom_range_signal();
                 let view_zoom_range_sig_pinch = self.zoom_range_override.clone();
-                let scene_pan_bounds_sig_pinch = self.scene.pan_bounds_signal();
+                let scene_pan_bounds_sig_pinch = self.scene().pan_bounds_signal();
                 let view_pan_bounds_sig_pinch = self.pan_bounds_override.clone();
                 let adopt_scene_size_pinch = self.adopt_scene_size;
                 handlers = handlers.on_pinch(move |phase, _ctx| {
@@ -2682,11 +2808,11 @@ impl Widget for SceneView {
                 let zoom_for_xform = self.zoom.clone();
                 let rotation_for_xform = self.rotation.clone();
                 let bounds_origin_for_xform = self.bounds_origin_signal.clone();
-                let pan_axes_sig_keys = self.scene.pan_axes_signal();
-                let zoomable_sig_keys = self.scene.zoomable_signal();
-                let scene_zoom_range_sig_keys = self.scene.zoom_range_signal();
+                let pan_axes_sig_keys = self.scene().pan_axes_signal();
+                let zoomable_sig_keys = self.scene().zoomable_signal();
+                let scene_zoom_range_sig_keys = self.scene().zoom_range_signal();
                 let view_zoom_range_sig_keys = self.zoom_range_override.clone();
-                let scene_pan_bounds_sig_keys = self.scene.pan_bounds_signal();
+                let scene_pan_bounds_sig_keys = self.scene().pan_bounds_signal();
                 let view_pan_bounds_sig_keys = self.pan_bounds_override.clone();
                 let adopt_scene_size_keys = self.adopt_scene_size;
                 handlers = handlers.on_key(move |event, _ctx| {
@@ -2828,8 +2954,8 @@ impl Widget for SceneView {
             let drag_mode_sig = self.drag_mode.clone();
             // Live signal captures — runtime mutations to pan_axes /
             // pan_bounds take effect on the next drag event.
-            let pan_axes_sig_drag = self.scene.pan_axes_signal();
-            let scene_pan_bounds_sig_drag = self.scene.pan_bounds_signal();
+            let pan_axes_sig_drag = self.scene().pan_axes_signal();
+            let scene_pan_bounds_sig_drag = self.scene().pan_bounds_signal();
             let view_pan_bounds_sig_drag = self.pan_bounds_override.clone();
             let zoom_for_drag = self.zoom.clone();
             let last_viewport_for_drag = self.last_viewport.clone();
@@ -3012,7 +3138,7 @@ impl Widget for SceneView {
         // coordinates, right/bottom is inflated by the bounding rect's
         // origin offset.
         let (default_w, default_h) = if self.adopt_scene_size {
-            match self.scene.scene_rect_extent() {
+            match self.scene().scene_rect_extent() {
                 Some(r) => (r.width, r.height),
                 None => (self.default_size.width, self.default_size.height),
             }
@@ -3052,18 +3178,18 @@ impl Widget for SceneView {
             // the drag-start hit-test. Refreshed each layout pass so
             // a parent move between drag events doesn't leave the
             // snapshot stale.
-            let ids: Vec<crate::item::ItemId> = self.scene.ids();
+            let ids: Vec<crate::item::ItemId> = self.scene().ids();
             for id in ids {
-                if self.scene.item(id).is_none() {
+                if self.scene().item(id).is_none() {
                     continue;
                 }
-                let Some(flags) = self.scene.flags(id) else {
+                let Some(flags) = self.scene().flags(id) else {
                     continue;
                 };
                 if !flags.contains(crate::flags::ItemFlags::IS_DRAGGABLE) {
                     continue;
                 }
-                if let Some(scene_rect) = self.scene.scene_rect(id) {
+                if let Some(scene_rect) = self.scene().scene_rect(id) {
                     snapshot.push((id, scene_rect));
                 }
             }
@@ -3078,16 +3204,17 @@ impl Widget for SceneView {
         {
             let mut snap = self.handler_snapshot.borrow_mut();
             snap.clear();
-            for id in self.scene.ids() {
-                let Some(item) = self.scene.item(id) else {
+            let scene = self.model.0.borrow();
+            for id in scene.ids() {
+                let Some(item) = scene.item(id) else {
                     continue;
                 };
-                let Some(scene_rect) = self.scene.scene_rect(id) else {
+                let Some(scene_rect) = scene.scene_rect(id) else {
                     continue;
                 };
-                let scene_xform = self.scene.scene_transform(id);
-                let z = self.scene.z(id).unwrap_or(0.0);
-                let handlers = self.scene.handlers(id).cloned().map(Box::new);
+                let scene_xform = scene.scene_transform(id);
+                let z = scene.z(id).unwrap_or(0.0);
+                let handlers = scene.handlers(id).cloned().map(Box::new);
                 // Capture the item's shape-test as a stand-alone
                 // closure so the snapshot can answer narrow-phase
                 // hit-test without holding a borrow on the Scene.
@@ -3096,8 +3223,8 @@ impl Widget for SceneView {
                 // to capture the data they need; default impl returns
                 // an AABB predicate over `local_bounds`.
                 let shape_contains: Rc<dyn Fn(Point, f32) -> bool> = item.clone_shape_test().into();
-                let local_bounds = self.scene.local_bounds(id).unwrap_or(Rect::ZERO);
-                let flags = self.scene.flags(id).unwrap_or_default();
+                let local_bounds = scene.local_bounds(id).unwrap_or(Rect::ZERO);
+                let flags = scene.flags(id).unwrap_or_default();
                 let ignores_xform =
                     flags.contains(crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS);
                 // For IGNORES items the scene_anchor is fixed across
@@ -3153,7 +3280,8 @@ impl Widget for SceneView {
         // After commit, clear the in-flight marquee so paint stops
         // overlaying the rect.
         if let Some((rect, additive)) = self.pending_marquee_commit.take() {
-            self.selection.commit_marquee(&self.scene, rect, additive);
+            self.selection
+                .commit_marquee(&self.model.0.borrow(), rect, additive);
             self.marquee.set(None);
         }
 
@@ -3198,7 +3326,7 @@ impl Widget for SceneView {
             let Some(&item_id) = self.widget_to_item.get(&placement.id) else {
                 continue;
             };
-            let Some(rect) = self.scene.scene_rect(item_id) else {
+            let Some(rect) = self.scene().scene_rect(item_id) else {
                 continue;
             };
             placement.origin = Point::new(rect.x, rect.y);
@@ -3261,7 +3389,7 @@ impl Widget for SceneView {
         self.marquee.get().is_some()
             || self.foreground_paint.is_some()
             || self.debug_overlay.is_active()
-            || self.scene.has_over_layer_items()
+            || self.scene().has_over_layer_items()
     }
 
     fn post_paint(&self, bounds: Rect, canvas: &mut bastyde_canvas::Canvas, ctx: &PaintContext) {
@@ -3361,8 +3489,8 @@ impl Widget for SceneView {
         let parent = self
             .widget_to_item
             .get(&descendant)
-            .and_then(|item_id| self.scene.a11y_parent_of(A11yNode::Item(*item_id)))
-            .or_else(|| self.scene.a11y_parent_of(A11yNode::Widget(descendant)))?;
+            .and_then(|item_id| self.scene().a11y_parent_of(A11yNode::Item(*item_id)))
+            .or_else(|| self.scene().a11y_parent_of(A11yNode::Widget(descendant)))?;
         match parent {
             A11yNode::Item(item_id) => Some(synthetic_node_id(
                 owner,
@@ -3428,8 +3556,8 @@ impl Widget for SceneView {
         // The set of items the off-screen-mode policy says are
         // AT-visible. Used to filter the second pass.
         let visible_item_ids: HashSet<ItemId> = match at_region {
-            Some(r) => self.scene.items_in_rect(r).into_iter().collect(),
-            None => self.scene.ids().into_iter().collect(),
+            Some(r) => self.scene().items_in_rect(r).into_iter().collect(),
+            None => self.scene().ids().into_iter().collect(),
         };
 
         // Build a `parent → ordered children` map of the logical
@@ -3443,9 +3571,9 @@ impl Widget for SceneView {
         // Place groups. Groups always emit — they have no
         // visual default to fall back to. A group with no declared
         // parent goes to SceneView root, regardless of mode.
-        for group in &self.scene.a11y_groups {
+        for group in &self.scene().a11y_groups {
             let node = A11yNode::Group(group.id);
-            let parent = self.scene.a11y_parent_of(node);
+            let parent = self.scene().a11y_parent_of(node);
             logical_children.entry(parent).or_default().push(node);
         }
 
@@ -3464,12 +3592,12 @@ impl Widget for SceneView {
         //   - StrictlyParallel: lightweight item without a parent
         //     is suppressed; heavyweight without a parent stays
         //     at SceneView root via the framework walker.
-        for entry in &self.scene.entries {
+        for entry in &self.scene().entries {
             if !visible_item_ids.contains(&entry.id) {
                 continue;
             }
             let node = A11yNode::Item(entry.id);
-            let parent = self.scene.a11y_parent_of(node);
+            let parent = self.scene().a11y_parent_of(node);
             let is_widget = matches!(&entry.kind, SceneEntryKind::Widget { .. });
             match (parent, is_widget, self.a11y_mode) {
                 (Some(p), _, _) => {
@@ -3495,7 +3623,7 @@ impl Widget for SceneView {
         // item that should belong elsewhere logically). Widgets
         // referenced via `A11yNode::Item(item_id)` are already
         // handled by the visible-entries pass.
-        for (child_node, parent_node) in &self.scene.a11y_parents {
+        for (child_node, parent_node) in &self.scene().a11y_parents {
             if matches!(child_node, A11yNode::Widget(_)) {
                 logical_children
                     .entry(Some(*parent_node))
@@ -3535,17 +3663,17 @@ impl Widget for SceneView {
                 A11yNode::Widget(id) => Some(bastyde_core::accessibility::widget_id_to_node_id(id)),
             }
         };
-        for (from, kind, to) in self.scene.a11y_relations() {
+        for (from, kind, to) in self.scene().a11y_relations() {
             let (Some(from_id), Some(to_id)) = (resolve(*from), resolve(*to)) else {
                 continue;
             };
             self.apply_relation_to_collected(builder, from_id, *kind, to_id);
         }
-        for (node, live) in &self.scene.a11y_live {
+        for (node, live) in &self.scene().a11y_live {
             let Some(id) = resolve(*node) else { continue };
             self.set_collected_live(builder, id, *live);
         }
-        for (node, role) in &self.scene.a11y_landmarks {
+        for (node, role) in &self.scene().a11y_landmarks {
             let Some(id) = resolve(*node) else { continue };
             self.set_collected_role(builder, id, *role);
         }
@@ -3584,7 +3712,7 @@ impl SceneView {
 
     fn compute_visible_ids(&self, bounds: Rect) -> HashSet<ItemId> {
         let region = self.visible_scene_region(bounds);
-        self.scene.items_in_rect(region).into_iter().collect()
+        self.scene().items_in_rect(region).into_iter().collect()
     }
 
     /// Paint enabled debug overlays on top of the scene rendering.
@@ -3613,13 +3741,13 @@ impl SceneView {
         // view transform is degenerate.
         let view_transform = self.view_transform();
         let visible_bounds = |id: crate::item::ItemId| -> Option<Rect> {
-            let scene_rect = self.scene.scene_rect(id)?;
-            let flags = self.scene.flags(id).unwrap_or_default();
+            let scene_rect = self.scene().scene_rect(id)?;
+            let flags = self.scene().flags(id).unwrap_or_default();
             if !flags.contains(crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS) {
                 return Some(scene_rect);
             }
-            let local_bounds = self.scene.local_bounds(id)?;
-            let scene_xform = self.scene.scene_transform(id);
+            let local_bounds = self.scene().local_bounds(id)?;
+            let scene_xform = self.scene().scene_transform(id);
             let scene_anchor = scene_xform.apply_point(Point::ZERO);
             let screen_anchor = view_transform.apply_point(scene_anchor);
             let screen_rect = Rect::new(
@@ -3635,7 +3763,7 @@ impl SceneView {
         };
 
         if cfg.item_bounds {
-            for id in self.scene.ids() {
+            for id in self.scene().ids() {
                 if let Some(rect) = visible_bounds(id) {
                     canvas.stroke_rect(
                         rect,
@@ -3700,15 +3828,16 @@ impl SceneView {
         }
 
         let view_transform = self.view_transform();
+        let scene = self.model.0.borrow();
         let synthetic_id = match node {
             A11yNode::Item(item_id) => {
                 // Discriminate by entry kind: lightweight items
                 // emit a synthetic AT node; heavyweight items
                 // attach the framework-emitted widget node under
                 // the declared parent (auto-graft).
-                if let Some(item) = self.scene.item(item_id) {
+                if let Some(item) = scene.item(item_id) {
                     let _ = item; // borrowed below for accessibility() call
-                    let scene_bounds = self.scene.scene_rect(item_id).unwrap_or(Rect::ZERO);
+                    let scene_bounds = scene.scene_rect(item_id).unwrap_or(Rect::ZERO);
                     let screen_bounds = view_transform.apply_rect(scene_bounds);
                     // Choose which space to advertise to AT clients
                     // per `a11y_bounds_space`. The `SceneItemA11yContext`
@@ -3759,7 +3888,7 @@ impl SceneView {
                 }
             }
             A11yNode::Group(group_id) => {
-                let Some(group) = self.scene.a11y_group(group_id) else {
+                let Some(group) = scene.a11y_group(group_id) else {
                     return;
                 };
                 let role = group.role;

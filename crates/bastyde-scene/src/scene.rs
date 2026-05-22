@@ -10,6 +10,7 @@
 
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::a11y::{A11yCategory, A11yGroup, A11yGroupBuilder, A11yGroupId, A11yNode, A11yRelation};
 use crate::flags::ItemFlags;
@@ -62,6 +63,12 @@ pub enum ItemChange {
     Removed { id: ItemId },
     /// `add_item` / `add_widget`: item was inserted.
     Added { id: ItemId },
+    /// `set_payload`: the type-erased payload of a `Delegated` heavyweight
+    /// entry was replaced. A `SceneView` rebuilds that entry's widget
+    /// (re-invokes its delegate) on the next build. Routed through
+    /// `emit_item_change`, so `mutation_seq` advances and the AT-walk gate
+    /// notices.
+    PayloadChanged { id: ItemId },
 }
 
 /// Which paint band a lightweight [`SceneItem`] sits in, relative to
@@ -250,12 +257,28 @@ pub(crate) struct SceneEntry {
     pub(crate) dynamic_bounds: bool,
 }
 
+/// How a heavyweight `Widget` entry makes its instance available to a
+/// [`SceneView`]. The two variants are the single-view and multi-view
+/// production paths.
+pub(crate) enum WidgetSource {
+    /// Single-view sugar ([`Scene::add_widget`]). The first `SceneView` to
+    /// build drains the `Option` via `take()`; subsequent views (sharing the
+    /// same [`SceneModel`](crate::SceneModel)) find `None` and produce no
+    /// arena child for this entry. Use [`Scene::add_widget_delegated`] +
+    /// a view delegate for multi-view content.
+    Once(Option<Box<dyn Widget>>),
+    /// Multi-view path ([`Scene::add_widget_delegated`], surfaced as
+    /// [`SceneModel::add_widget_item`](crate::SceneModel::add_widget_item)).
+    /// Each view calls its own delegate with this type-erased `payload`
+    /// to build a fresh `Widget` instance. The payload is `Rc` so a view
+    /// can clone it out of a model borrow before invoking the delegate.
+    Delegated { payload: Rc<dyn std::any::Any> },
+}
+
 pub(crate) enum SceneEntryKind {
-    /// A heavyweight `Widget` to materialise into the arena. `Some`
-    /// until `SceneView::build` consumes it via
-    /// [`bastyde_core::build_context::BuildContext::add_boxed`]; `None`
-    /// afterwards.
-    Widget { pending: Option<Box<dyn Widget>> },
+    /// A heavyweight `Widget` materialised into the arena, via either the
+    /// single-view `Once` slot or the multi-view `Delegated` payload.
+    Widget(WidgetSource),
     /// A lightweight `SceneItem` that lives in the scene
     /// permanently; painted by the SceneView's paint walk.
     Item(Box<dyn SceneItem>),
@@ -366,9 +389,7 @@ impl Scene {
             local_pos,
             local_bounds,
             transform: Transform2D::identity(),
-            kind: SceneEntryKind::Widget {
-                pending: Some(Box::new(widget)),
-            },
+            kind: SceneEntryKind::Widget(WidgetSource::Once(Some(Box::new(widget)))),
             z: 0.0,
             layer: SceneLayer::Under,
             parent: None,
@@ -378,6 +399,108 @@ impl Scene {
             dynamic_bounds: false,
         };
         self.push_entry(entry)
+    }
+
+    /// Multi-view heavyweight insertion: store a type-erased `payload`; each
+    /// [`SceneView`](crate::SceneView) builds its own instance via its
+    /// delegate. Surfaced publicly as
+    /// [`SceneModel::add_widget_item`](crate::SceneModel::add_widget_item).
+    pub(crate) fn add_widget_delegated(
+        &mut self,
+        payload: Rc<dyn std::any::Any>,
+        local_rect: Rect,
+    ) -> ItemId {
+        let id = ItemId::next();
+        let local_pos = Point::new(local_rect.x, local_rect.y);
+        let local_bounds = Rect::new(0.0, 0.0, local_rect.width, local_rect.height);
+        let entry = SceneEntry {
+            id,
+            local_pos,
+            local_bounds,
+            transform: Transform2D::identity(),
+            kind: SceneEntryKind::Widget(WidgetSource::Delegated { payload }),
+            z: 0.0,
+            layer: SceneLayer::Under,
+            parent: None,
+            flags: ItemFlags::default(),
+            opacity: 1.0,
+            handlers: None,
+            dynamic_bounds: false,
+        };
+        self.push_entry(entry)
+    }
+
+    /// Replace the type-erased payload of a `Delegated` heavyweight entry and
+    /// fire [`ItemChange::PayloadChanged`]. Debug-asserts (no-op in release)
+    /// for an unknown id, a `Once` widget entry, or a lightweight item.
+    pub(crate) fn set_payload(&mut self, id: ItemId, payload: Rc<dyn std::any::Any>) {
+        let Some(&pos) = self.entry_index.get(&id) else {
+            debug_assert!(false, "set_payload: unknown ItemId {id:?}");
+            return;
+        };
+        match &mut self.entries[pos].kind {
+            SceneEntryKind::Widget(WidgetSource::Delegated { payload: slot }) => *slot = payload,
+            _ => {
+                debug_assert!(false, "set_payload: {id:?} is not a Delegated widget entry");
+                return;
+            }
+        }
+        // Entry borrow dropped above; `emit_item_change` is `&self`.
+        self.emit_item_change(ItemChange::PayloadChanged { id });
+    }
+
+    /// The current type-erased payload of a `Delegated` heavyweight entry.
+    /// `None` for unknown ids, `Once` widget entries, and lightweight items.
+    pub(crate) fn payload(&self, id: ItemId) -> Option<Rc<dyn std::any::Any>> {
+        let pos = *self.entry_index.get(&id)?;
+        match &self.entries[pos].kind {
+            SceneEntryKind::Widget(WidgetSource::Delegated { payload }) => Some(payload.clone()),
+            _ => None,
+        }
+    }
+
+    /// Drain every still-pending `Once` heavyweight widget, in entry order.
+    /// Each is `take()`n from its slot, so a second `SceneView` over the same
+    /// model returns nothing for it — `Once` widgets are single-view. Called
+    /// by `SceneView::build`.
+    pub(crate) fn drain_all_once(&mut self) -> Vec<(ItemId, Box<dyn Widget>)> {
+        let mut out = Vec::new();
+        for entry in self.entries.iter_mut() {
+            if let SceneEntryKind::Widget(WidgetSource::Once(pending)) = &mut entry.kind {
+                if let Some(w) = pending.take() {
+                    out.push((entry.id, w));
+                }
+            }
+        }
+        out
+    }
+
+    /// `(id, payload)` for every `Delegated` heavyweight entry, in entry order.
+    /// The payload `Rc` is cloned so the caller can drop the model borrow before
+    /// invoking its delegate (the reentrancy contract). Called by `SceneView::build`.
+    pub(crate) fn delegated_payloads(&self) -> Vec<(ItemId, Rc<dyn std::any::Any>)> {
+        self.entries
+            .iter()
+            .filter_map(|e| match &e.kind {
+                SceneEntryKind::Widget(WidgetSource::Delegated { payload }) => {
+                    Some((e.id, payload.clone()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Ids of every heavyweight `Widget` entry (`Once` and `Delegated`), in
+    /// entry order. Used by `SceneView::build` for child ordering and the
+    /// orphan-reap live-set.
+    pub(crate) fn heavyweight_ids(&self) -> Vec<ItemId> {
+        self.entries
+            .iter()
+            .filter_map(|e| match &e.kind {
+                SceneEntryKind::Widget(_) => Some(e.id),
+                SceneEntryKind::Item(_) => None,
+            })
+            .collect()
     }
 
     /// Place a lightweight [`SceneItem`] at `local_pos`. The item's
@@ -1150,7 +1273,7 @@ impl Scene {
         let pos = *self.entry_index.get(&id)?;
         match &self.entries[pos].kind {
             SceneEntryKind::Item(item) => Some(item.as_ref()),
-            SceneEntryKind::Widget { .. } => None,
+            SceneEntryKind::Widget(_) => None,
         }
     }
 
@@ -1290,25 +1413,21 @@ impl Scene {
             .collect()
     }
 
-    /// Snapshot every visible lightweight item as a `(scene_rect,
-    /// color)` pair suitable for a minimap thumbnail. Filters out
-    /// items with `HAS_NO_CONTENTS` (logical-only) and items hidden
-    /// by `IS_VISIBLE` / a hidden ancestor — the visible-effective
-    /// set matches what the SceneView's paint walk renders.
-    /// Heavyweight widget entries are skipped (they paint via the
-    /// arena walker and don't have a `thumbnail_color`).
+    /// Snapshot every visible item — **both tiers** — as a `(scene_rect,
+    /// color)` pair suitable for a minimap thumbnail. Filters out items with
+    /// `HAS_NO_CONTENTS` (logical-only) and items hidden by `IS_VISIBLE` / a
+    /// hidden ancestor — the visible-effective set matches what the SceneView's
+    /// paint walk renders.
     ///
-    /// Ordered by insertion (low z first). The color comes from
-    /// [`SceneItem::thumbnail_color`]; built-in items return their
-    /// fill / stroke / a neutral grey.
+    /// Ordered by insertion (low z first). A lightweight item's color comes
+    /// from [`SceneItem::thumbnail_color`] (its fill / stroke / a neutral grey);
+    /// a heavyweight widget entry has no `SceneItem`, so it's shown in a neutral
+    /// tint — a minimap that omitted the heavyweight tier would misrepresent a
+    /// widget-heavy scene (cards, nodes), so both tiers are included.
     pub fn item_thumbnails(&self) -> Vec<(Rect, bastyde_tokens::Color)> {
         let mut out = Vec::new();
         for entry in &self.entries {
-            // Skip heavyweight items.
-            let SceneEntryKind::Item(item) = &entry.kind else {
-                continue;
-            };
-            // Skip invisible / logical-only items.
+            // Skip invisible / logical-only items (either tier).
             if !self.is_effectively_visible(entry.id) {
                 continue;
             }
@@ -1318,7 +1437,12 @@ impl Scene {
             let Some(rect) = self.scene_rect(entry.id) else {
                 continue;
             };
-            out.push((rect, item.thumbnail_color()));
+            let color = match &entry.kind {
+                SceneEntryKind::Item(item) => item.thumbnail_color(),
+                // Heavyweight widget: no `thumbnail_color`, so use a neutral tint.
+                SceneEntryKind::Widget(_) => bastyde_tokens::Color::new(0.45, 0.52, 0.65, 0.85),
+            };
+            out.push((rect, color));
         }
         out
     }

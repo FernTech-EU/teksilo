@@ -41,13 +41,14 @@ use std::time::Duration;
 use bastyde::canvas::{Canvas, Path, Point, Rect, StrokeStyle};
 use bastyde::core::binding::BindingLevel;
 use bastyde::prelude::*;
-use bastyde::tokens::Easing;
+use bastyde::tokens::{Alignment, Easing};
 use bastyde::widgets::{
-    Button, ComboBox, Expand, HStack, Panel, ScrollArea, Spacer, TextWidget, Toolbar, VStack,
+    Button, ComboBox, Expand, HStack, Padding, Panel, ScrollArea, Spacer, TextWidget, Toolbar,
+    VStack, ZStack,
 };
 use bastyde_scene::{
     A11yGroup, A11yNode, DragMode, GroupItem, ItemId, PanAxes, PathItem, RectItem, Scene,
-    SceneItem, SceneItemPaintContext, SceneSelectionMode, SceneView, TextItem,
+    SceneItem, SceneItemPaintContext, SceneMinimap, SceneSelectionMode, SceneView, TextItem,
     register_animated_item_signal,
 };
 
@@ -947,12 +948,38 @@ fn build_root() -> impl Widget + 'static {
     let drag_mode = view.drag_mode_signal();
     let status = build_status_row(&view);
 
+    // Minimap: a bottom-trailing thumbnail of the whole scene with a live
+    // viewport rectangle. Read its inputs from the view *before* moving `view`
+    // into the ZStack. `item_thumbnails()` snapshots both tiers (cards + the
+    // lightweight grid/connectors); the viewport rect is reactive on its own,
+    // tracking pan / zoom with no extra plumbing. (A live "items as they move"
+    // minimap would re-snapshot on mutation; this showcase scene is static.)
+    let content = view.scene_content_bounds().unwrap_or_else(|| {
+        let (w, h) = scene_extent();
+        Rect::new(0.0, 0.0, w, h)
+    });
+    let minimap = SceneMinimap::new(content, view.viewport_in_scene_signal())
+        .items(view.scene().item_thumbnails())
+        .size(240.0, 160.0)
+        .background(Color::new(0.10, 0.11, 0.15, 0.82))
+        .border(Some((Color::new(1.0, 1.0, 1.0, 0.35), 1.0)))
+        .content_outline(Some((Color::new(1.0, 1.0, 1.0, 0.18), 1.0)))
+        .viewport_color(Color::new(0.40, 0.66, 1.0, 0.95));
+
     VStack::new()
         .spacing(8.0)
         .child(build_toolbar(drag_mode))
         .child(TextWidget::new(lit!("bastyde-scene showcase")).style(TextStyleRole::BodyBold))
         .child(status)
-        .child(Expand::new().child(view))
+        .child(
+            // Overlay the minimap on the viewport's bottom-trailing corner.
+            Expand::new().child(
+                ZStack::new()
+                    .alignment(Alignment::BOTTOM_TRAILING)
+                    .child(Expand::new().child(view))
+                    .child(Padding::new(12.0, 12.0, 12.0, 12.0).child(minimap)),
+            ),
+        )
 }
 
 fn main() {
