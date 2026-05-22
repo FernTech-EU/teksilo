@@ -21,7 +21,7 @@ type CommandFactory = Box<dyn Fn(&mut EventContext)>;
 
 /// A clickable text link with underline.
 pub struct Link {
-    text: String,
+    text: bastyde_i18n::LocalizedString,
     url: Option<String>,
     action: Option<CommandFactory>,
     tooltip_text: Option<bastyde_i18n::LocalizedString>,
@@ -45,7 +45,7 @@ impl Link {
     pub fn new(text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
         Self {
-            text: ls.resolve_now(),
+            text: ls,
             url: None,
             action: None,
             tooltip_text: None,
@@ -169,7 +169,7 @@ impl Widget for Link {
             .unwrap_or_else(|| Rc::new(crate::styles::RecipeLinkStyle));
         let root_id = style.make_body(
             &LinkStyleConfig {
-                text: self.text.clone(),
+                text: self.text.clone().into(),
                 is_hovered,
                 is_pressed,
                 is_focused,
@@ -318,7 +318,7 @@ impl Widget for Link {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::Link);
-        builder.set_name(&self.text);
+        builder.set_name(self.text.resolve_now());
         if let Some(ref url) = self.url {
             builder.set_url(url.clone());
         }

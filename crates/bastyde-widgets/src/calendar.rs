@@ -205,7 +205,7 @@ pub struct Calendar {
     min_date: Option<Date>,
     max_date: Option<Date>,
     disabled_date_filter: Option<DisabledDateFilter>,
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     on_selection_changed: Option<OnSelectionChanged>,
@@ -321,7 +321,7 @@ impl Calendar {
     /// derived from the visible month).
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
+        self.label = Some(ls);
         self
     }
 
@@ -663,7 +663,7 @@ impl Widget for Calendar {
         builder.set_role(Role::Grid);
 
         let label = match &self.label {
-            Some(s) => s.clone(),
+            Some(s) => s.resolve_now(),
             None => {
                 let month_name = resolve_message_widget(month_long_key(ym.month()), &[]);
                 format!("Calendar, {} {}", month_name, ym.year())
