@@ -182,8 +182,8 @@ impl Widget for Root {
         let range_edit = DateRangeEdit::new(self.edit_range.clone())
             .min_date(Date::constant(2020, 1, 1))
             .max_date(Date::constant(2030, 12, 31))
-            .placeholder_start("Start")
-            .placeholder_end("End");
+            .placeholder_start(lit!("Start"))
+            .placeholder_end(lit!("End"));
         let range_edit_id = ctx.add(range_edit);
         let range_edit_status_id = ctx.add(
             TextWidget::new(lit!(""))
