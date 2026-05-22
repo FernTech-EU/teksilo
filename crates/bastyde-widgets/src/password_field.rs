@@ -18,7 +18,7 @@
 //! ```ignore
 //! let password = ctx.signal(String::new());
 //! PasswordField::new(password.clone())
-//!     .label(tr!(password()))               // or .label_literal("Password")
+//!     .label(tr!(password()))               // or .label(lit!("Password"))
 //!     .placeholder(tr!(password_hint()))    // i18n-first; `_literal` twins bypass i18n
 //!     .validator(|s| if s.len() >= 8 {
 //!         ValidationOutcome::Valid

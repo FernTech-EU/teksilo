@@ -406,7 +406,7 @@ an optional popup hint card centered in the zone. It reacts to **both** internal
 // Wrap a panel; accept image files; show a hint while an accepted drag hovers.
 DropTarget::new()
     .child(my_panel)
-    .hint(TextWidget::new_literal("Drop your image here"))
+    .hint(TextWidget::new(lit!("Drop your image here")))
     .accept_external_extensions(["png", "jpg", "jpeg"])
     .on_drop(|payload, _pos, _ctx| { import(payload.files()); true });
 

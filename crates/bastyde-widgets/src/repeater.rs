@@ -26,7 +26,7 @@ use crate::primitives::VStack;
 ///
 /// ```ignore
 /// Repeater::new(model, |index, item| {
-///     Box::new(TextWidget::new_literal(&item.title))
+///     Box::new(TextWidget::new(lit!(&item.title)))
 /// })
 /// .spacing(8.0)
 /// ```
@@ -89,13 +89,6 @@ impl<T: 'static> Repeater<T> {
     pub fn a11y_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
         self.a11y_label = Some(ls.resolve_now());
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `a11y_label(...)` accepting a raw string.
-    #[doc(hidden)]
-    pub fn a11y_label_literal(mut self, label: impl Into<String>) -> Self {
-        self.a11y_label = Some(label.into());
         self
     }
 }

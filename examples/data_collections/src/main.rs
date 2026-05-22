@@ -341,18 +341,9 @@ impl Widget for Root {
         let root = ctx.add(
             Panel::new().child(
                 TabWidget::new(selected_tab)
-                    .static_tab(
-                        TabInfo::new().title(bastyde::i18n::LocalizedString::literal("Repeater")),
-                        repeater_tab,
-                    )
-                    .static_tab(
-                        TabInfo::new().title(bastyde::i18n::LocalizedString::literal("ListView")),
-                        listview_tab,
-                    )
-                    .static_tab(
-                        TabInfo::new().title(bastyde::i18n::LocalizedString::literal("TreeView")),
-                        treeview_tab,
-                    ),
+                    .static_tab(TabInfo::new().title(lit!("Repeater")), repeater_tab)
+                    .static_tab(TabInfo::new().title(lit!("ListView")), listview_tab)
+                    .static_tab(TabInfo::new().title(lit!("TreeView")), treeview_tab),
             ),
         );
 

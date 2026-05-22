@@ -24,6 +24,7 @@
 //! [`.access_label(tr!(tab_list_name()))`](bastyde_core::widget_builder::WidgetBuilder::access_label)
 //! so screen readers can distinguish them (ARIA APG recommendation).
 
+use bastyde_i18n::lit;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -1142,7 +1143,7 @@ impl<T: 'static> Widget for TabBar<T> {
                 if let Some(lbl) = label_capture.borrow_mut().take() {
                     header_labels.push(lbl);
                 } else {
-                    header_labels.push(LocalizedString::literal(String::new()));
+                    header_labels.push(lit!(String::new()));
                 }
             }
         }
@@ -1981,16 +1982,16 @@ fn build_scroll_arrow(
     };
     let tooltip = match (orientation, kind) {
         (TabBarOrientation::Horizontal, ScrollArrowKind::Leading) => {
-            LocalizedString::literal("Scroll tabs left")
+            lit!("Scroll tabs left")
         }
         (TabBarOrientation::Horizontal, ScrollArrowKind::Trailing) => {
-            LocalizedString::literal("Scroll tabs right")
+            lit!("Scroll tabs right")
         }
         (TabBarOrientation::Vertical, ScrollArrowKind::Leading) => {
-            LocalizedString::literal("Scroll tabs up")
+            lit!("Scroll tabs up")
         }
         (TabBarOrientation::Vertical, ScrollArrowKind::Trailing) => {
-            LocalizedString::literal("Scroll tabs down")
+            lit!("Scroll tabs down")
         }
     };
     let button = IconButton::new(icon)
@@ -2052,11 +2053,11 @@ fn build_overflow_dropdown(
 ) -> WidgetId {
     let _ = ctx;
     let icon_size = crate::styles::recipe_button_style::BUTTON_ICON_SIZE;
-    let trigger = Button::new(LocalizedString::literal(""))
+    let trigger = Button::new(lit!(""))
         .variant(ButtonVariant::Ghost)
         .text_role(icon_role)
         .icon(IconWidget::chevron_down(icon_size), IconLocation::Leading)
-        .tooltip(LocalizedString::literal("Show all tabs"));
+        .tooltip(lit!("Show all tabs"));
 
     // Cap each row at the dropdown height so a click still hits a
     // sensible-sized button regardless of `entries.len()`.

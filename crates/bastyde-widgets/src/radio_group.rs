@@ -21,10 +21,10 @@
 //! ```ignore
 //! let selected = ctx.signal(0_usize);
 //! RadioGroup::new()
-//!     .label_literal("Theme")
-//!     .radio(RadioButton::new(0, selected.clone()).label_literal("Light"))
-//!     .radio(RadioButton::new(1, selected.clone()).label_literal("Dark"))
-//!     .radio(RadioButton::new(2, selected.clone()).label_literal("System"))
+//!     .label(lit!("Theme"))
+//!     .radio(RadioButton::new(0, selected.clone()).label(lit!("Light")))
+//!     .radio(RadioButton::new(1, selected.clone()).label(lit!("Dark")))
+//!     .radio(RadioButton::new(2, selected.clone()).label(lit!("System")))
 //! ```
 
 use std::cell::RefCell;

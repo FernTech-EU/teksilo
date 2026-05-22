@@ -83,7 +83,7 @@ pub struct DropZone {
 impl DropZone {
     /// Build a drop zone with the given prompt (e.g. `tr!("drop_files_here")`).
     /// The label may come from `tr!(...)` (translated) or
-    /// `LocalizedString::literal(...)`; it is resolved eagerly at construction
+    /// `lit!(...)`; it is resolved eagerly at construction
     /// and stored as a `String`. Locale changes rebuild the composite parent,
     /// which re-creates the `DropZone` with a fresh translation — the same
     /// model as [`Button::new`](crate::button::Button::new).
@@ -91,7 +91,7 @@ impl DropZone {
         Self {
             label: label.into().resolve_now(),
             subtitle: None,
-            browse_label: bastyde_i18n::LocalizedString::literal("Browse…").resolve_now(),
+            browse_label: lit!("Browse…").resolve_now(),
             extensions: Vec::new(),
             allow_multiple: true,
             show_browse_button: true,

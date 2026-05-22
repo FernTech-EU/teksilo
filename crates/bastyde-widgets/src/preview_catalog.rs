@@ -1022,10 +1022,7 @@ impl WidgetCatalog for GroupBox {
     }
     fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
         Box::new(
-            GroupBox::new(bastyde_i18n::LocalizedString::literal(
-                knobs.text("title").get(),
-            ))
-            .child(
+            GroupBox::new(lit!(knobs.text("title").get(),)).child(
                 VStack::new()
                     .spacing(8.0)
                     .child(Checkbox::new(Signal::new(true)).label(lit!("Sounds")))
@@ -1058,9 +1055,7 @@ impl WidgetCatalog for GroupHeader {
         vec![PreviewVariant::defaults("default")]
     }
     fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
-        Box::new(GroupHeader::new(bastyde_i18n::LocalizedString::literal(
-            knobs.text("label").get(),
-        )))
+        Box::new(GroupHeader::new(lit!(knobs.text("label").get(),)))
     }
 }
 register_widget_catalog_at!("crates/bastyde-widgets/src/group_header.rs", GroupHeader);
@@ -1159,10 +1154,7 @@ impl WidgetCatalog for Snackbar {
                     .style(TextStyleRole::Body)
                     .color(TextRole::Primary),
             );
-        Box::new(
-            Snackbar::new(bastyde_i18n::LocalizedString::literal(trigger_label))
-                .content(popup_content),
-        )
+        Box::new(Snackbar::new(lit!(trigger_label)).content(popup_content))
     }
 }
 register_widget_catalog_at!("crates/bastyde-widgets/src/snackbar.rs", Snackbar);
@@ -1185,18 +1177,10 @@ impl WidgetCatalog for Breadcrumb {
         fn build_path() -> Box<dyn Widget> {
             Box::new(
                 Breadcrumb::new()
-                    .item(BreadcrumbItem::new(bastyde_i18n::LocalizedString::literal(
-                        "Home",
-                    )))
-                    .item(BreadcrumbItem::new(bastyde_i18n::LocalizedString::literal(
-                        "Projects",
-                    )))
-                    .item(BreadcrumbItem::new(bastyde_i18n::LocalizedString::literal(
-                        "Bastyde",
-                    )))
-                    .item(BreadcrumbItem::new(bastyde_i18n::LocalizedString::literal(
-                        "crates",
-                    ))),
+                    .item(BreadcrumbItem::new(lit!("Home",)))
+                    .item(BreadcrumbItem::new(lit!("Projects",)))
+                    .item(BreadcrumbItem::new(lit!("Bastyde",)))
+                    .item(BreadcrumbItem::new(lit!("crates",))),
             )
         }
         vec![PreviewVariant::scenario("path", build_path)]
@@ -1764,18 +1748,15 @@ impl WidgetCatalog for TabWidget {
                     .child(
                         TabWidget::new(selected)
                             .static_tab(
-                                TabInfo::new()
-                                    .title(bastyde_i18n::LocalizedString::literal("Overview")),
+                                TabInfo::new().title(lit!("Overview")),
                                 Center::new().child(sample_text("Overview tab content")),
                             )
                             .static_tab(
-                                TabInfo::new()
-                                    .title(bastyde_i18n::LocalizedString::literal("Details")),
+                                TabInfo::new().title(lit!("Details")),
                                 Center::new().child(sample_text("Details tab content")),
                             )
                             .static_tab(
-                                TabInfo::new()
-                                    .title(bastyde_i18n::LocalizedString::literal("Settings")),
+                                TabInfo::new().title(lit!("Settings")),
                                 Center::new().child(sample_text("Settings tab content")),
                             ),
                     ),

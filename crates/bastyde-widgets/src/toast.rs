@@ -1285,10 +1285,10 @@ mod tests {
 
     #[test]
     fn builder_chain_typechecks() {
-        let _t = Toast::warning(bastyde_i18n::LocalizedString::literal("Heads up"))
+        let _t = Toast::warning(lit!("Heads up"))
             .body(lit!("Something happened"))
             .action(ToastAction::new(lit!("Open"), |_| {}))
-            .primary_action(bastyde_i18n::LocalizedString::literal("Fix"), |_| {})
+            .primary_action(lit!("Fix"), |_| {})
             .auto_dismiss_after(Duration::from_secs(5))
             .priority(ToastPriority::High)
             .id("dedup-key")

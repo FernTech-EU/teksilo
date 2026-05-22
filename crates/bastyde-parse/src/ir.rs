@@ -21,7 +21,7 @@ pub struct BatiRoot {
 /// An element: `Type[::ctor](args...) { body }`.
 pub struct BatiElement {
     /// The full callable path the user wrote. `Button("x")` stores
-    /// `Button`; `Button::new_literal("x")` stores the whole
+    /// `Button`; `Button::new(lit!("x"))` stores the whole
     /// `Button::new_literal` path. Lowering appends `::new` only when
     /// `has_explicit_ctor` is false.
     pub type_path: Path,

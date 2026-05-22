@@ -330,11 +330,8 @@ impl Widget for Root {
                 )
             });
 
-        let tooltip = TooltipContent::new(
-            "save-tip",
-            bastyde::i18n::LocalizedString::literal("Save the current document."),
-        )
-        .for_shortcut("app.save");
+        let tooltip = TooltipContent::new("save-tip", lit!("Save the current document."))
+            .for_shortcut("app.save");
         let save_button = Button::new(lit!("Save (button)"))
             .variant(ButtonVariant::Filled)
             .on_activate_fn(|ctx: &mut EventContext| {

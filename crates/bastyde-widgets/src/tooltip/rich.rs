@@ -52,7 +52,6 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, PaintContext, Widget};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_i18n::LocalizedString;
 use bastyde_tokens::{CornerRadius, TextRole, TextStyleRole};
 
 use crate::accordion::Accordion;
@@ -342,7 +341,7 @@ impl Widget for RichTooltipWidget {
             // vertically with the indicator on the same baseline.
             let mut accordion_title_style = theme.typography.tiny.clone();
             accordion_title_style.line_height = theme.typography.small.line_height;
-            let accordion = Accordion::new(LocalizedString::literal("More"), expanded)
+            let accordion = Accordion::new(lit!("More"), expanded)
                 .title_color(theme.colors.tooltip_text)
                 .title_style(accordion_title_style)
                 .content(more_widget);
@@ -645,7 +644,7 @@ mod tests {
         // link) suppresses it, since it's already persistent and has no
         // hover-to-sticky path. With identical content, the cascade
         // child therefore lays out shorter — no indicator footer row.
-        let make = || TooltipContent::new("k", LocalizedString::literal("Tooltip body"));
+        let make = || TooltipContent::new("k", lit!("Tooltip body"));
         let normal_h = rich_tooltip_height(make(), false);
         let cascade_h = rich_tooltip_height(make(), true);
         assert!(
@@ -663,9 +662,7 @@ mod tests {
         // A cascade child is persistent and focusable from the moment it
         // shows, so it reads as a non-modal `Dialog` advertising `Focus`
         // — not an ephemeral `Tooltip`.
-        let child =
-            RichTooltipWidget::new(TooltipContent::new("k", LocalizedString::literal("Body")))
-                .cascade_child();
+        let child = RichTooltipWidget::new(TooltipContent::new("k", lit!("Body"))).cascade_child();
         let mut cb = AccessNodeBuilder::new();
         child.accessibility(&mut cb);
         assert_eq!(
@@ -679,8 +676,7 @@ mod tests {
         );
 
         // A normal tooltip stays an ephemeral Tooltip until it dwell-promotes.
-        let normal =
-            RichTooltipWidget::new(TooltipContent::new("k", LocalizedString::literal("Body")));
+        let normal = RichTooltipWidget::new(TooltipContent::new("k", lit!("Body")));
         let mut nb = AccessNodeBuilder::new();
         normal.accessibility(&mut nb);
         assert_eq!(

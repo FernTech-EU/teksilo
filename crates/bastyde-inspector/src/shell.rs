@@ -229,7 +229,7 @@ fn empty_filler() -> impl Widget + 'static {
 fn build_panel(state: InspectorState) -> impl Widget + 'static {
     use bastyde_widgets::TabInfo;
     fn ti(label: &'static str) -> TabInfo {
-        TabInfo::new().title(bastyde_i18n::LocalizedString::literal(label))
+        TabInfo::new().title(lit!(label))
     }
     let tabs = TabWidget::new(state.active_tab_id.clone())
         // Tree tab is self-scrolling (it owns its own ScrollArea so it

@@ -19,7 +19,7 @@
 //! use bastyde::widgets::{Button, ButtonVariant, PopoverButton, IconWidget};
 //!
 //! PopoverButton::new(
-//!     Button::new_literal("Choose…")
+//!     Button::new(lit!("Choose…"))
 //!         .variant(ButtonVariant::Plain)
 //!         .trailing(IconWidget::chevron_down(12.0).access_hidden(true)),
 //! )

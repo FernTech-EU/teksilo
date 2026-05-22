@@ -244,7 +244,7 @@ Returned by `ctx.show_toast(...)` and `toast.present(ctx)`. Cheap
 to clone (`Rc<Inner>`).
 
 ```rust
-let h = ctx.show_toast(Toast::loading_literal("Working…"));
+let h = ctx.show_toast(Toast::loading(lit!("Working…")));
 
 // Some time later, in another handler:
 if h.is_alive() {

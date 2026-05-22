@@ -41,7 +41,7 @@ let model: ListModel<TabHandle> = ListModel::from_vec(vec![
         TabId::fresh(),
         "doc",
         TabInfo::new()
-            .title(LocalizedString::literal("Doc 1"))
+            .title(lit!("Doc 1"))
             .closable(true),
         DocState { title: "Doc 1".into(), edits: Signal::new(0) },
     ),
@@ -50,14 +50,14 @@ let model: ListModel<TabHandle> = ListModel::from_vec(vec![
 let tw = TabWidget::new(selected.clone())
     .static_tab(
         TabInfo::new()
-            .title(LocalizedString::literal("Welcome"))
+            .title(lit!("Welcome"))
             .pinned(true),
-        TextWidget::new_literal("Welcome page"),
+        TextWidget::new(lit!("Welcome page")),
     )
     .dynamic_tab::<DocState>("doc", |_handle, state| {
         Box::new(VStack::new()
-            .child(TextWidget::new_literal(state.title.clone()))
-            .child(TextWidget::new_literal("…"))) as Box<dyn Widget>
+            .child(TextWidget::new(lit!(state.title.clone())))
+            .child(TextWidget::new(lit!("…")))) as Box<dyn Widget>
     })
     .dynamic_model(model.clone())
     .reorderable(true)
@@ -77,7 +77,7 @@ struct DocItem { id: TabId, title: String, closable: bool, pinned: bool }
 
 let bar = TabBar::horizontal(
     model,   // ListModel<DocItem>
-    TabDelegate::new(|_, item: &DocItem| LocalizedString::literal(item.title.clone()))
+    TabDelegate::new(|_, item: &DocItem| lit!(item.title.clone()))
         .closable(|_, item| item.closable)
         .pinned(|_, item| item.pinned),
     selected,

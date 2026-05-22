@@ -83,7 +83,7 @@ type TreeDelegate<T> = dyn Fn(&T, &FlatEntry, bool, &TreeRowContext<'_, T>) -> B
 ///     let indent = entry.depth as f32 * 20.0;
 ///     Box::new(HStack::new()
 ///         .child(Padding::new(0.0, 0.0, 0.0, indent))
-///         .child(TextWidget::new_literal(&item.title)))
+///         .child(TextWidget::new(lit!(&item.title))))
 /// })
 /// .item_height(28.0)
 /// ```
@@ -153,7 +153,7 @@ impl<T: 'static> TreeView<T> {
     /// ```ignore
     /// TreeView::new_with_context(model, |item, entry, selected, ctx| {
     ///     Box::new(
-    ///         StandardTreeItem::new_literal(&item.title)
+    ///         StandardTreeItem::new(lit!(&item.title))
     ///             .from_entry(entry)
     ///             .selected(selected)
     ///             .on_toggle_rc(ctx.toggle_callback())

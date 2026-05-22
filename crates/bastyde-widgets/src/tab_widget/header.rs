@@ -20,6 +20,7 @@
 //!   rect, and only on keyboard focus (pointer focus does not paint
 //!   the ring — IntelliJ / VS Code convention).
 
+use bastyde_i18n::lit;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -325,7 +326,7 @@ impl Widget for TabHeader {
         // Locale signal binding for the reorder CustomAction
         // descriptions ("Move Left" / "Move Right" / "Move Up" /
         // "Move Down"). They're resolved inside `accessibility()`
-        // via `LocalizedString::literal(...).resolve_now()`; binding
+        // via `lit!(...).resolve_now()`; binding
         // the locale signal at `AccessibilityOnly` dirties the AT
         // cache when the locale flips so the descriptions refresh.
         ctx.locale_signal()
@@ -425,7 +426,7 @@ impl Widget for TabHeader {
                     .embedded()
                     .size(IconButtonSize::Compact)
                     .focusable(false)
-                    .tooltip(LocalizedString::literal("Close tab"))
+                    .tooltip(lit!("Close tab"))
                     .on_activate_fn(move |ctx| (close_fn)(ctx));
                 let close_id = ctx.add(close_button);
                 // Hover-only: the button is hidden when the
@@ -853,12 +854,12 @@ impl Widget for TabHeader {
             // dirties the AT cache on locale change so these refresh.
             let (prev_label, next_label) = match self.orientation {
                 super::delegate::TabBarOrientation::Horizontal => (
-                    LocalizedString::literal("Move Left").resolve_now(),
-                    LocalizedString::literal("Move Right").resolve_now(),
+                    lit!("Move Left").resolve_now(),
+                    lit!("Move Right").resolve_now(),
                 ),
                 super::delegate::TabBarOrientation::Vertical => (
-                    LocalizedString::literal("Move Up").resolve_now(),
-                    LocalizedString::literal("Move Down").resolve_now(),
+                    lit!("Move Up").resolve_now(),
+                    lit!("Move Down").resolve_now(),
                 ),
             };
             let mut actions = Vec::with_capacity(2);

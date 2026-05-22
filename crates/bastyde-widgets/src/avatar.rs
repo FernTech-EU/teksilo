@@ -380,7 +380,7 @@ impl Avatar {
     ///
     /// ```ignore
     /// let user_name: Signal<String> = ctx.signal(String::new());
-    /// Avatar::with_initials_literal("?")        // logged-out fallback
+    /// Avatar::with_initials(lit!("?"))        // logged-out fallback
     ///     .bind_name(user_name.clone())
     ///     .bind_image(user_avatar_signal)
     /// ```

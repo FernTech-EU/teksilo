@@ -49,7 +49,7 @@ part is optional — the macro emits `::new(args)` when you omit it:
 
 ```rust
 Button("Click")                 // → Button::new("Click")
-Button::new_literal("Click")    // → Button::new_literal("Click")
+Button::new(lit!("Click"))    // → Button::new(lit!("Click"))
 VStack                          // → VStack::new()
 Padding::uniform(24.0)          // → Padding::uniform(24.0)
 ```

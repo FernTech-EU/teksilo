@@ -132,8 +132,8 @@ PieChart::new(data)
     .legend_position(LegendPosition::Trailing)
     .center(
         VStack::new()
-            .child(TextWidget::new_literal("Total").style(TextStyleRole::Tiny))
-            .child(TextWidget::new_literal("").bind_text(total)),
+            .child(TextWidget::new(lit!("Total")).style(TextStyleRole::Tiny))
+            .child(TextWidget::new(lit!("")).bind_text(total)),
     )
 ```
 

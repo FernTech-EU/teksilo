@@ -25,7 +25,7 @@
 //! let checks = TreeCheckedModel::new(tree.clone());
 //!
 //! TreeView::new_with_context(tree, move |item, entry, selected, ctx| {
-//!     let mut row = StandardTreeItem::new_literal(item.title.clone())
+//!     let mut row = StandardTreeItem::new(lit!(item.title.clone()))
 //!         .from_entry(entry)
 //!         .selected(selected)
 //!         .leading_slot(IconWidget::from_svg(FOLDER_ICON).icon_size(16.0))

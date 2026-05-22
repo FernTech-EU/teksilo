@@ -47,9 +47,9 @@ enum Slot {
 /// ```ignore
 /// let page = Signal::new(0_usize);
 /// Switcher::new(page.clone())
-///     .child(TextWidget::new_literal("Page 0"))   // built at startup
-///     .child(TextWidget::new_literal("Page 1"))   // built when page.set(1)
-///     .child(TextWidget::new_literal("Page 2"))   // built when page.set(2)
+///     .child(TextWidget::new(lit!("Page 0")))   // built at startup
+///     .child(TextWidget::new(lit!("Page 1")))   // built when page.set(1)
+///     .child(TextWidget::new(lit!("Page 2")))   // built when page.set(2)
 /// ```
 pub struct Switcher {
     selected: Signal<usize>,

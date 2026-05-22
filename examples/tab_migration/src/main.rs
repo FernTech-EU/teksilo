@@ -54,9 +54,7 @@ fn new_doc(title: &str) -> TabHandle {
     TabHandle::dynamic(
         TabId::fresh(),
         "doc",
-        TabInfo::new()
-            .title(LocalizedString::literal(title.to_string()))
-            .closable(true),
+        TabInfo::new().title(lit!(title.to_string())).closable(true),
         DocState {
             title: title.to_string(),
             edits: Signal::new(0),

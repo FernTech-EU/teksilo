@@ -52,9 +52,9 @@ use bastyde::prelude::*;
 VStack::new()
     .spacing(8.0)
     .alignment(HAlignment::Center)
-    .child(TextWidget::new_literal("Title").style(TextStyleRole::BodyBold))
-    .child(TextWidget::new_literal("Subtitle"))
-    .child(Button::new_literal("Save"))
+    .child(TextWidget::new(lit!("Title")).style(TextStyleRole::BodyBold))
+    .child(TextWidget::new(lit!("Subtitle")))
+    .child(Button::new(lit!("Save")))
 ```
 
 **Sizing rule:** wants `Σ heights + spacing` on the main axis, `max(width)` on the cross axis. If any child reports `flex > 0` and the parent bounds the height, the VStack greedily claims the offered height so slack exists.
@@ -75,9 +75,9 @@ HStack::new()
     .spacing(gap)
     .alignment(VAlignment::Center)
     .child(IconWidget::checkmark(16.0))
-    .child(TextWidget::new_literal("Save"))
+    .child(TextWidget::new(lit!("Save")))
     .child(Spacer::new())
-    .child(Button::new_literal("Cancel"))           // pushed to trailing edge
+    .child(Button::new(lit!("Cancel")))           // pushed to trailing edge
 ```
 
 ### 2.3 `ZStack` — overlay stack
@@ -91,7 +91,7 @@ ZStack::new()
     .alignment(Alignment::TOP_TRAILING)
     .child(image_view)                              // the background
     .child(                                          // close button in the corner
-        Button::new_literal("×")
+        Button::new(lit!("×"))
             .on_activate_fn(|ctx| ctx.send_intent(AppIntent::Close)),
     )
 ```
@@ -346,7 +346,7 @@ A horizontal flow that wraps to the next line when a child won't fit. Each child
 Wrap::new()
     .spacing(8.0)                  // between items on a line
     .line_spacing(4.0)              // between lines
-    .children(tag_strings.iter().map(|t| Badge::new_literal(t.clone())))
+    .children(tag_strings.iter().map(|t| Badge::new(lit!(t.clone()))))
 ```
 
 Reports total height = `Σ line heights + line gaps`, where each line's height is the max child height on that line. Width reports the longest line (so an unconstrained `Wrap` collapses to its widest single-line case — wrap it in something that bounds width to actually trigger wrapping).
@@ -492,7 +492,7 @@ let drawer = FixedSize::new()
     .bind_width(drawer_w.clone())
     .child(drawer_content);
 
-let toggle = Button::new_literal("Open")
+let toggle = Button::new(lit!("Open"))
     .on_activate_fn({
         let drawer_w = drawer_w.clone();
         move |ctx| {

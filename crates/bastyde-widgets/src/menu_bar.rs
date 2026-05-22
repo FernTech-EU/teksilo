@@ -3,18 +3,18 @@
 //! # Bastyde
 //! ```ignore
 //! MenuBar::new()
-//!     .menu_literal("File", || Box::new(
+//!     .menu(lit!("File"), || Box::new(
 //!         MenuList::new()
-//!             .item(MenuItem::new_literal("New").on_activate_fn(|ctx| ctx.send_intent(AppIntent::New)))
+//!             .item(MenuItem::new(lit!("New")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::New)))
 //!             .separator()
-//!             .item(MenuItem::new_literal("Quit").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Quit)))
+//!             .item(MenuItem::new(lit!("Quit")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Quit)))
 //!     ))
-//!     .menu_literal("Edit", || Box::new(
+//!     .menu(lit!("Edit"), || Box::new(
 //!         MenuList::new()
-//!             .item(MenuItem::new_literal("Cut").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Cut)))
-//!             .item(MenuItem::new_literal("Copy").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Copy)))
+//!             .item(MenuItem::new(lit!("Cut")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Cut)))
+//!             .item(MenuItem::new(lit!("Copy")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Copy)))
 //!     ))
-//!     .trailing_slot(Button::new_literal("Settings").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Settings)))
+//!     .trailing_slot(Button::new(lit!("Settings")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Settings)))
 //! ```
 
 use bastyde_canvas::{Rect, Size, SizeProposal};

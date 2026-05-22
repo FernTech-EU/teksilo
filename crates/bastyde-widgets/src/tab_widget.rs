@@ -47,6 +47,7 @@
 //! tab, a chart-only metrics tab) are unreachable by Tab key unless
 //! opted in via [`TabInfo::focusable_panel(true)`](TabInfo::focusable_panel).
 
+use bastyde_i18n::lit;
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -791,30 +792,26 @@ impl Widget for TabWidget {
 
         // Translate `TabInfo` fields into the TabDelegate's
         // closure-shaped accessors.
-        let mut delegate = TabDelegate::new(|_, h: &TabHandle| {
-            h.info
-                .title
-                .clone()
-                .unwrap_or_else(|| bastyde_i18n::LocalizedString::literal(""))
-        })
-        .icon(|_, h: &TabHandle| h.info.icon.as_ref().map(|f| f()))
-        .closable(|_, h: &TabHandle| h.info.closable)
-        .pinned(|_, h: &TabHandle| h.info.pinned)
-        .enabled(|_, h: &TabHandle| h.info.initial_enabled)
-        .tooltip(|_, h: &TabHandle| {
-            // Pinned tabs render icon-only; promote `title` to the
-            // tooltip if the caller didn't set one explicitly so
-            // the user can still identify the tab on hover.
-            if h.info.pinned
-                && h.info.tooltip.is_none()
-                && h.info.rich_tooltip.is_none()
-                && h.info.composite_tooltip.is_none()
-            {
-                h.info.title.clone()
-            } else {
-                h.info.tooltip.clone()
-            }
-        });
+        let mut delegate =
+            TabDelegate::new(|_, h: &TabHandle| h.info.title.clone().unwrap_or_else(|| lit!("")))
+                .icon(|_, h: &TabHandle| h.info.icon.as_ref().map(|f| f()))
+                .closable(|_, h: &TabHandle| h.info.closable)
+                .pinned(|_, h: &TabHandle| h.info.pinned)
+                .enabled(|_, h: &TabHandle| h.info.initial_enabled)
+                .tooltip(|_, h: &TabHandle| {
+                    // Pinned tabs render icon-only; promote `title` to the
+                    // tooltip if the caller didn't set one explicitly so
+                    // the user can still identify the tab on hover.
+                    if h.info.pinned
+                        && h.info.tooltip.is_none()
+                        && h.info.rich_tooltip.is_none()
+                        && h.info.composite_tooltip.is_none()
+                    {
+                        h.info.title.clone()
+                    } else {
+                        h.info.tooltip.clone()
+                    }
+                });
         // Bypass the tooltip-clearing setters here: TabInfo already
         // enforces mutual exclusion across plain / rich / composite,
         // so each closure returns `Some` only for its flavor.

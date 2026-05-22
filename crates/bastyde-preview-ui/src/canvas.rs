@@ -81,7 +81,7 @@ impl PreviewCanvas {
         // Bind every knob signal at Rebuild level so a knob change
         // re-runs `entry.build(...)` with the fresh values. Most
         // widgets read knob values once at construction (e.g.,
-        // `Button::new_literal(label)` consumes the string by-value
+        // `Button::new(lit!(label))` consumes the string by-value
         // rather than `Prop::Bound`), so the only way to reflect the
         // edit is to reconstruct.
         knobs.bind_all(

@@ -152,7 +152,7 @@ macro_rules! compile_in_locales {
 /// [`LocalizedString::literal(x)`]: crate::LocalizedString::literal
 #[macro_export]
 macro_rules! lit {
-    ($e:expr) => {
+    ($e:expr $(,)?) => {
         $crate::LocalizedString::literal($e)
     };
 }

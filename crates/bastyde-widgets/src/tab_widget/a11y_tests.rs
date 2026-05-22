@@ -5,6 +5,7 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget::Widget;
 use bastyde_core::widget_tree::WidgetTree;
 use bastyde_data::ListModel;
+use bastyde_i18n::lit;
 
 use crate::tab_widget::header::{first_enabled_index, last_enabled_index};
 use crate::tab_widget::{TabBarOrientation, TabHandle, TabId, TabInfo, TabWidget};
@@ -29,10 +30,7 @@ fn make_tree(n: usize) -> (WidgetTree, Signal<Option<TabId>>) {
         .show_scroll_arrows(false)
         .show_overflow_dropdown(false);
     for i in 0..n {
-        widget = widget.static_tab(
-            TabInfo::new().title(bastyde_i18n::LocalizedString::literal(format!("Tab {i}"))),
-            FixedLeaf,
-        );
+        widget = widget.static_tab(TabInfo::new().title(lit!(format!("Tab {i}"))), FixedLeaf);
     }
     let _id = tree.add(widget);
     tree.layout(SizeProposal::exact(640.0, 320.0));
@@ -138,10 +136,7 @@ fn make_tree_with_orientation(
         widget = widget.vertical();
     }
     for i in 0..n {
-        widget = widget.static_tab(
-            TabInfo::new().title(bastyde_i18n::LocalizedString::literal(format!("Tab {i}"))),
-            FixedLeaf,
-        );
+        widget = widget.static_tab(TabInfo::new().title(lit!(format!("Tab {i}"))), FixedLeaf);
     }
     let _id = tree.add(widget);
     tree.layout(SizeProposal::exact(640.0, 320.0));
@@ -260,9 +255,7 @@ fn tab_panel_is_focusable_when_opted_in() {
         .show_scroll_arrows(false)
         .show_overflow_dropdown(false)
         .static_tab(
-            TabInfo::new()
-                .title(bastyde_i18n::LocalizedString::literal("About"))
-                .focusable_panel(true),
+            TabInfo::new().title(lit!("About")).focusable_panel(true),
             FixedLeaf,
         );
     let _ = tree.add(widget);
@@ -322,18 +315,8 @@ fn first_last_enabled_helpers() {
 fn dynamic_model_tab_count_is_reflected() {
     let selected: Signal<Option<TabId>> = Signal::new(None);
     let model: ListModel<TabHandle> = ListModel::from_vec(vec![
-        TabHandle::dynamic(
-            TabId::fresh(),
-            "doc",
-            TabInfo::new().title(bastyde_i18n::LocalizedString::literal("A")),
-            (),
-        ),
-        TabHandle::dynamic(
-            TabId::fresh(),
-            "doc",
-            TabInfo::new().title(bastyde_i18n::LocalizedString::literal("B")),
-            (),
-        ),
+        TabHandle::dynamic(TabId::fresh(), "doc", TabInfo::new().title(lit!("A")), ()),
+        TabHandle::dynamic(TabId::fresh(), "doc", TabInfo::new().title(lit!("B")), ()),
     ]);
 
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
@@ -352,7 +335,7 @@ fn dynamic_model_tab_count_is_reflected() {
     model.push(TabHandle::dynamic(
         TabId::fresh(),
         "doc",
-        TabInfo::new().title(bastyde_i18n::LocalizedString::literal("C")),
+        TabInfo::new().title(lit!("C")),
         (),
     ));
     tree.layout(SizeProposal::exact(640.0, 320.0));

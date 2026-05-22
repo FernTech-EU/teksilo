@@ -102,8 +102,8 @@ fn argument_free_property() {
 
 #[test]
 fn explicit_constructor() {
-    let out = fmt(r#"VStack { Button::new_literal("ok") }"#);
-    assert_eq!(out, "VStack {\n    Button::new_literal(\"ok\")\n}");
+    let out = fmt(r#"VStack { Button::new("ok") }"#);
+    assert_eq!(out, "VStack {\n    Button::new(\"ok\")\n}");
 }
 
 #[test]
@@ -236,12 +236,12 @@ fn closure_canonical_indent_is_stable() {
 
 #[test]
 fn multiline_string_literal_arg_is_stable() {
-    let canonical = "VStack {\n    TextWidget::new_literal(\"hello \\\n    world, line 2 \\\n    line 3\") {\n        style: BodyBold\n    }\n}";
+    let canonical = "VStack {\n    TextWidget::new(\"hello \\\n    world, line 2 \\\n    line 3\") {\n        style: BodyBold\n    }\n}";
     assert_eq!(fmt(canonical), canonical);
 }
 
 #[test]
 fn multiline_call_expr_arg_is_stable() {
-    let canonical = "HStack {\n    MinSizeForLabel::new(TextWidget::new_literal(\n        \"Fill\",\n    )) {\n        width: 220.0\n    }\n}";
+    let canonical = "HStack {\n    MinSizeForLabel::new(TextWidget::new(\n        \"Fill\",\n    )) {\n        width: 220.0\n    }\n}";
     assert_eq!(fmt(canonical), canonical);
 }

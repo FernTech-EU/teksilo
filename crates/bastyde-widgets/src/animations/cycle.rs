@@ -5,9 +5,9 @@
 //! ctx.add(
 //!     Cycle::new()
 //!         .period(Duration::from_secs(3))
-//!         .child(TextWidget::new_literal("Tip: press Cmd-K to search"))
-//!         .child(TextWidget::new_literal("Tip: hold Shift to multi-select"))
-//!         .child(TextWidget::new_literal("Tip: drag the divider to resize")),
+//!         .child(TextWidget::new(lit!("Tip: press Cmd-K to search")))
+//!         .child(TextWidget::new(lit!("Tip: hold Shift to multi-select")))
+//!         .child(TextWidget::new(lit!("Tip: drag the divider to resize"))),
 //! );
 //! ```
 //!

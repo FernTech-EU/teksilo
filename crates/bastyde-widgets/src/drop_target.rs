@@ -16,7 +16,7 @@
 //! // Wrap a panel; accept image files; show a hint while hovering.
 //! DropTarget::new()
 //!     .child(my_panel)
-//!     .hint(TextWidget::new_literal("Drop your image here"))
+//!     .hint(TextWidget::new(lit!("Drop your image here")))
 //!     .accept_external_extensions(["png", "jpg", "jpeg"])
 //!     .on_drop(|payload, _pos, _ctx| { import(payload.files()); true });
 //!
@@ -120,7 +120,7 @@ impl DropTarget {
     // ── Hint slot (optional) ──────────────────────────────────────────────────
 
     /// Widget shown centered inside a popup card while a drag with an accepted
-    /// payload hovers. Simple use: `TextWidget::new_literal("Drop here")`.
+    /// payload hovers. Simple use: `TextWidget::new(lit!("Drop here"))`.
     pub fn hint(mut self, widget: impl Widget + 'static) -> Self {
         self.pending_hint = Some(PendingChild::Deferred(Box::new(widget)));
         self

@@ -101,7 +101,7 @@ impl std::fmt::Debug for ToolBoxItem {
 
 impl ToolBoxItem {
     /// Build an item with an inline content widget. The label may come from
-    /// `tr!(...)` (translated) or `LocalizedString::literal(...)`.
+    /// `tr!(...)` (translated) or `lit!(...)`.
     pub fn new(label: impl Into<LocalizedString>, content: impl Widget + 'static) -> Self {
         let ls: LocalizedString = label.into();
         Self {

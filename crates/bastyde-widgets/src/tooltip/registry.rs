@@ -215,6 +215,7 @@ pub(crate) fn _reset_tooltip_registry() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
 
     #[test]
     fn parse_url_recognizes_colon_prefix() {
@@ -241,7 +242,7 @@ mod tests {
 
     #[test]
     fn content_builder_chain() {
-        let c = TooltipContent::new("save-as", LocalizedString::literal("Save the file as…"))
+        let c = TooltipContent::new("save-as", lit!("Save the file as…"))
             .with_shortcut_label("Ctrl+Shift+S");
         assert_eq!(c.key, "save-as");
         assert!(!c.has_more());
@@ -251,8 +252,8 @@ mod tests {
 
     #[test]
     fn content_with_more_sets_more() {
-        let c = TooltipContent::new("autosave", LocalizedString::literal("Autosaves."))
-            .with_more(LocalizedString::literal("Every 2 minutes."));
+        let c =
+            TooltipContent::new("autosave", lit!("Autosaves.")).with_more(lit!("Every 2 minutes."));
         assert!(c.has_more());
     }
 
@@ -260,9 +261,8 @@ mod tests {
     fn register_and_lookup_roundtrip() {
         _reset_tooltip_registry();
         install_tooltip_registry(vec![
-            TooltipContent::new("foo", LocalizedString::literal("Foo body")),
-            TooltipContent::new("bar", LocalizedString::literal("Bar body"))
-                .with_shortcut_label("Ctrl+B"),
+            TooltipContent::new("foo", lit!("Foo body")),
+            TooltipContent::new("bar", lit!("Bar body")).with_shortcut_label("Ctrl+B"),
         ]);
 
         let found = with_tooltip_registry(|r| {
@@ -281,10 +281,7 @@ mod tests {
     #[test]
     fn resolve_url_returns_content_for_registered_key() {
         _reset_tooltip_registry();
-        install_tooltip_registry(vec![TooltipContent::new(
-            "docs",
-            LocalizedString::literal("Documentation"),
-        )]);
+        install_tooltip_registry(vec![TooltipContent::new("docs", lit!("Documentation"))]);
 
         let body = with_tooltip_registry(|r| r.resolve_url(":docs").map(|c| c.text.resolve_now()))
             .flatten();

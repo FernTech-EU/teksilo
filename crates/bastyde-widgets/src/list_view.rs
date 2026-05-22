@@ -49,7 +49,7 @@ const SCROLLBAR_THICKNESS: f32 = 12.0;
 /// ```ignore
 /// ListView::new(model, |index, item, selected| {
 ///     Box::new(HStack::new()
-///         .child(TextWidget::new_literal(&item.title))
+///         .child(TextWidget::new(lit!(&item.title)))
 ///         .child(Spacer::new()))
 /// })
 /// .item_height(28.0)

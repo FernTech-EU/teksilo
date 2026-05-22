@@ -7,7 +7,7 @@
 //! caption" between groups of related controls.
 //!
 //! ```ignore
-//! GroupHeader::new_literal("Appearance")
+//! GroupHeader::new(lit!("Appearance"))
 //! ```
 //!
 //! Trivially composed from existing primitives:

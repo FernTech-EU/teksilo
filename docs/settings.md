@@ -371,7 +371,7 @@ ctx.add(Repeater::new(
     |_idx, project: &RecentProject| {
         let path = project.path.clone();
         Box::new(
-            Button::new_literal(project.display_name.clone())
+            Button::new(lit!(project.display_name.clone()))
                 .on_activate_fn(move |ctx| {
                     ctx.send_intent(AppIntent::OpenRecent(path.clone()));
                 }),

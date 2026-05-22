@@ -80,7 +80,7 @@ impl std::fmt::Debug for TextWidget {
 impl TextWidget {
     /// Construct a text widget whose content is a `LocalizedString`. The
     /// text may come from `tr!(...)` (reactive, re-resolves on locale
-    /// change) or from `LocalizedString::literal("…")` for genuinely
+    /// change) or from `lit!("…")` for genuinely
     /// non-translated strings.
     pub fn new(text: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = text.into();

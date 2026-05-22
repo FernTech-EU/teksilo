@@ -49,7 +49,7 @@ Button::new(tr!(save()))
 ```
 
 `.tooltip(...)` accepts `impl Into<LocalizedString>`. The grep-marker
-`.tooltip_literal("...")` exists as a `#[doc(hidden)]` shim for tests and
+`.tooltip(lit!("..."))` exists as a `#[doc(hidden)]` shim for tests and
 scaffolding.
 
 ### Rich tooltip from the registry
@@ -98,9 +98,9 @@ Button::new(tr!(province_info()))
                 Grid::new()
                     .columns(vec![TrackSize::Auto, TrackSize::Auto])
                     .child(TextWidget::new(tr!(food())))
-                    .child(TextWidget::new_literal(food_value))
+                    .child(TextWidget::new(lit!(food_value)))
                     .child(TextWidget::new(tr!(trade())))
-                    .child(TextWidget::new_literal(trade_value)),
+                    .child(TextWidget::new(lit!(trade_value))),
             ),
     );
 ```
@@ -138,7 +138,7 @@ The three setters are mutually exclusive — every setter clears the other two.
 
 | Setter | Sets | Clears |
 | --- | --- | --- |
-| `.tooltip(text)` / `.tooltip_literal(text)` | plain text | rich source, composite body |
+| `.tooltip(text)` / `.tooltip(lit!(text))` | plain text | rich source, composite body |
 | `.rich_tooltip(key)` / `.rich_tooltip_content(c)` | rich source | plain text, composite body |
 | `.composite_tooltip(w)` | composite body | plain text, rich source |
 
@@ -192,7 +192,7 @@ pub struct TooltipContent {
 | `.has_more()` / `.has_shortcut()` | Predicates used by the layout |
 
 The body is a `LocalizedString`, so production code uses `tr!(...)`; literal
-strings only show up in tests and demos via `LocalizedString::literal(...)`.
+strings only show up in tests and demos via `lit!(...)`.
 
 ### URL scheme inside the body
 
@@ -505,7 +505,7 @@ the rich source, and vice versa.
 | [`RadioButton`](../crates/bastyde-widgets/src/radio_button.rs) | `tooltip(text)` | — | — |
 | [`SplitButton`](../crates/bastyde-widgets/src/split_button.rs) | `tooltip(text)` | — | — |
 | [`IconButton`](../crates/bastyde-widgets/src/icon_button.rs) | `tooltip(text)` | — | — |
-| [`TextInput`](../crates/bastyde-widgets/src/text_input.rs) | `tooltip_literal(text)` | `rich_tooltip_key(key)` | `rich_tooltip(content)` |
+| [`TextInput`](../crates/bastyde-widgets/src/text_input.rs) | `tooltip(lit!(text))` | `rich_tooltip_key(key)` | `rich_tooltip(content)` |
 | [`ToolBox`](../crates/bastyde-widgets/src/tool_box.rs) | — | `tooltip(impl Into<RichTooltipSource>)` | `tooltip_content(content)` |
 
 `tooltip_literal` is a permanent `#[doc(hidden)]` shim that wraps a raw
@@ -525,7 +525,7 @@ fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
     let root = ctx.add(/* visible subtree */);
 
     if let Some(text) = self.tooltip_text.as_deref() {
-        let tooltip = ctx.add(TooltipWidget::new_literal(text));
+        let tooltip = ctx.add(TooltipWidget::new(lit!(text)));
         ctx.attach_tooltip(root, tooltip, Duration::from_millis(500));
     }
 

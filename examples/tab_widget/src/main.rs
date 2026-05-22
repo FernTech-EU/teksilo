@@ -93,8 +93,8 @@ fn new_doc_tab(n: u32) -> TabHandle {
         TabId::fresh(),
         "doc",
         TabInfo::new()
-            .title(LocalizedString::literal(title.clone()))
-            .tooltip(LocalizedString::literal(format!("Document #{n}")))
+            .title(lit!(title.clone()))
+            .tooltip(lit!(format!("Document #{n}")))
             .closable(true),
         DocState {
             title,
@@ -131,7 +131,7 @@ impl Widget for Root {
         // slot.
         let new_tab_btn = Button::new(lit!("+ New tab"))
             .variant(ButtonVariant::Ghost)
-            .tooltip(LocalizedString::literal("Open new document tab"))
+            .tooltip(lit!("Open new document tab"))
             .on_activate_fn(move |_ctx: &mut EventContext| {
                 let n = new_tab_n.get();
                 new_tab_n.set(n + 1);
@@ -141,7 +141,7 @@ impl Widget for Root {
         let is_dark = self.is_dark.clone();
         let theme_btn = Button::new(lit!("Theme"))
             .variant(ButtonVariant::Ghost)
-            .tooltip(LocalizedString::literal("Toggle theme"))
+            .tooltip(lit!("Toggle theme"))
             .on_activate_fn(move |ctx: &mut EventContext| {
                 let next = !is_dark.get();
                 is_dark.set(next);
@@ -155,7 +155,7 @@ impl Widget for Root {
         let orientation_for_btn = self.orientation.clone();
         let orient_btn = Button::new(lit!("Orient"))
             .variant(ButtonVariant::Ghost)
-            .tooltip(LocalizedString::literal("Toggle bar orientation"))
+            .tooltip(lit!("Toggle bar orientation"))
             .on_activate_fn(move |_ctx: &mut EventContext| {
                 let next = match orientation_for_btn.get() {
                     TabBarOrientation::Horizontal => TabBarOrientation::Vertical,
@@ -167,7 +167,7 @@ impl Widget for Root {
         let sizing_for_btn = self.sizing.clone();
         let size_btn = Button::new(lit!("Sizing"))
             .variant(ButtonVariant::Ghost)
-            .tooltip(LocalizedString::literal(
+            .tooltip(lit!(
                 "Toggle Shared (uniform tab widths) ↔ Independent (size to content)",
             ))
             .on_activate_fn(move |_ctx: &mut EventContext| {
@@ -211,8 +211,8 @@ impl Widget for Root {
             .static_tab_with_id(
                 self.welcome_id,
                 TabInfo::new()
-                    .title(LocalizedString::literal("Welcome"))
-                    .tooltip(LocalizedString::literal("Welcome — start here"))
+                    .title(lit!("Welcome"))
+                    .tooltip(lit!("Welcome — start here"))
                     .icon(|| IconWidget::checkmark(16.0))
                     .pinned(true),
                 welcome,
@@ -221,7 +221,7 @@ impl Widget for Root {
             .static_tab_with_id(
                 self.settings_id,
                 TabInfo::new()
-                    .title(LocalizedString::literal("Settings"))
+                    .title(lit!("Settings"))
                     .icon(|| IconWidget::checkmark(16.0)),
                 settings,
             )
@@ -229,10 +229,8 @@ impl Widget for Root {
             .static_tab_with_id(
                 self.locked_id,
                 TabInfo::new()
-                    .title(LocalizedString::literal("Locked"))
-                    .tooltip(LocalizedString::literal(
-                        "Disabled tabs cannot be activated",
-                    ))
+                    .title(lit!("Locked"))
+                    .tooltip(lit!("Disabled tabs cannot be activated",))
                     .enabled(false),
                 locked,
             )

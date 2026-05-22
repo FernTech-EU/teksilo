@@ -5,7 +5,7 @@
 //! Three columns, each demonstrating one tooltip tier and cascade
 //! depth:
 //!
-//! 1. **Plain** — single-line text via `.tooltip_literal(...)`.
+//! 1. **Plain** — single-line text via `.tooltip(lit!(...))`.
 //! 2. **Rich** — `[label](:key)` cascade three levels deep, plus
 //!    `.with_more(...)` Accordion bodies and shortcut chips.
 //! 3. **Composite** — `VStack` with header / `ProgressBar` / stat
@@ -40,49 +40,39 @@ fn build_tooltip_registry() -> Vec<TooltipContent> {
     vec![
         TooltipContent::new(
             KEY_A,
-            LocalizedString::literal(
-                "Level 1 of the cascade. Hover the [next link](:tip-b) to open level 2.",
-            ),
+            lit!("Level 1 of the cascade. Hover the [next link](:tip-b) to open level 2.",),
         )
-        .with_more(LocalizedString::literal(
+        .with_more(lit!(
             "Open the Accordion to read this long-form body without leaving the tooltip.",
         ))
         .with_shortcut_label("F1"),
         TooltipContent::new(
             KEY_B,
-            LocalizedString::literal(
-                "Level 2 of the cascade. Hover the [final link](:tip-c) for one more.",
-            ),
+            lit!("Level 2 of the cascade. Hover the [final link](:tip-c) for one more.",),
         )
-        .with_more(LocalizedString::literal(
+        .with_more(lit!(
             "Each nested tooltip parents its overlay to the previous one (OverlayLayer::InTree).",
         )),
         TooltipContent::new(
             KEY_C,
-            LocalizedString::literal(
-                "Level 3 — end of the cascade. Press Esc or click outside to dismiss.",
-            ),
+            lit!("Level 3 — end of the cascade. Press Esc or click outside to dismiss.",),
         )
         .with_shortcut_label("Esc"),
         TooltipContent::new(
             KEY_FOOD,
-            LocalizedString::literal(
+            lit!(
                 "**Food** modifies your population's growth rate. Linked to [trade](:stat-trade).",
             ),
         )
         .with_shortcut_label("F"),
         TooltipContent::new(
             KEY_TRADE,
-            LocalizedString::literal(
-                "**Trade** routes affect coin income. Linked to [happiness](:stat-happiness).",
-            ),
+            lit!("**Trade** routes affect coin income. Linked to [happiness](:stat-happiness).",),
         )
         .with_shortcut_label("T"),
         TooltipContent::new(
             KEY_HAPPINESS,
-            LocalizedString::literal(
-                "**Happiness** caps unrest. End of the inside-composite cascade.",
-            ),
+            lit!("**Happiness** caps unrest. End of the inside-composite cascade.",),
         ),
     ]
 }
@@ -146,14 +136,14 @@ fn tabbed_composite_body() -> impl Widget {
     let selected: Signal<Option<bastyde::widgets::tab_widget::TabId>> = Signal::new(None);
     let body = TabWidget::new(selected)
         .static_tab(
-            TabInfo::new().title(LocalizedString::literal("Stats")),
+            TabInfo::new().title(lit!("Stats")),
             VStack::new()
                 .spacing(4.0)
                 .child(TextWidget::new(lit!("Population: 12,400")))
                 .child(TextWidget::new(lit!("Garrison: 320"))),
         )
         .static_tab(
-            TabInfo::new().title(LocalizedString::literal("History")),
+            TabInfo::new().title(lit!("History")),
             TextWidget::new(lit!("Founded 1247 • 3 sieges • 1 plague")),
         );
     VStack::new()

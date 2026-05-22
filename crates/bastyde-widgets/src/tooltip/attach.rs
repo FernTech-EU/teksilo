@@ -155,7 +155,6 @@ mod tests {
     };
     use bastyde_canvas::{MockTextBackend, SizeProposal};
     use bastyde_core::widget_tree::WidgetTree;
-    use bastyde_i18n::LocalizedString;
     use bastyde_i18n::lit;
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -169,7 +168,7 @@ mod tests {
         _reset_tooltip_registry();
         install_tooltip_registry(vec![TooltipContent::new(
             "save-as",
-            LocalizedString::literal("Save the current file under a new name"),
+            lit!("Save the current file under a new name"),
         )]);
 
         let mut tree = tree_with_backend();
@@ -199,10 +198,7 @@ mod tests {
     #[test]
     fn button_rich_tooltip_overrides_plain_tooltip() {
         _reset_tooltip_registry();
-        install_tooltip_registry(vec![TooltipContent::new(
-            "help",
-            LocalizedString::literal("Help body"),
-        )]);
+        install_tooltip_registry(vec![TooltipContent::new("help", lit!("Help body"))]);
 
         let mut tree = tree_with_backend();
         // Plain set first, then rich: rich should win (latest setter
@@ -232,7 +228,7 @@ mod tests {
         _reset_tooltip_registry();
         install_tooltip_registry(vec![TooltipContent::new(
             "focus-key",
-            LocalizedString::literal("Focus-shown body"),
+            lit!("Focus-shown body"),
         )]);
 
         let mut tree = tree_with_backend();
@@ -256,10 +252,7 @@ mod tests {
     #[test]
     fn focus_promoted_tooltip_dismisses_when_focus_leaves_scope() {
         _reset_tooltip_registry();
-        install_tooltip_registry(vec![TooltipContent::new(
-            "leave-key",
-            LocalizedString::literal("Goes away"),
-        )]);
+        install_tooltip_registry(vec![TooltipContent::new("leave-key", lit!("Goes away"))]);
 
         let mut tree = tree_with_backend();
         let btn = tree.add(Button::new(lit!("Anchor")).rich_tooltip("leave-key"));
@@ -307,8 +300,7 @@ mod tests {
         _reset_tooltip_registry();
         // No install_tooltip_registry — we rely on inline content.
         let mut tree = tree_with_backend();
-        let content =
-            TooltipContent::new("inline-only", LocalizedString::literal("Inline content"));
+        let content = TooltipContent::new("inline-only", lit!("Inline content"));
         let btn = tree.add(Button::new(lit!("Go")).rich_tooltip_content(content));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         tree.pointer_move(tree.bounds(btn).center());

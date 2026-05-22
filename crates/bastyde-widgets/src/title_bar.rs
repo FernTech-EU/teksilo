@@ -19,7 +19,7 @@
 //!             .child(TitleBar::new(host)
 //!                 .background(theme.colors.surface_raised)
 //!                 .border(theme.colors.border, 1.0)
-//!                 .leading(TextWidget::new_literal("My App")))
+//!                 .leading(TextWidget::new(lit!("My App"))))
 //!             .child(Expand::new().child(/* body */)))
 //! })
 //! ```

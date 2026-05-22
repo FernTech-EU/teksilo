@@ -16,9 +16,9 @@
 //! use bastyde::widgets::{MessageBox, MessageBoxButtons, StandardButton};
 //!
 //! fn on_close(ctx: &mut EventContext) {
-//!     MessageBox::question_literal("Save changes?")
-//!         .text_literal("You have unsaved changes in report.skrib.")
-//!         .informative_text_literal("Your changes will be lost if you don't save them.")
+//!     MessageBox::question(lit!("Save changes?"))
+//!         .text(lit!("You have unsaved changes in report.skrib."))
+//!         .informative_text(lit!("Your changes will be lost if you don't save them."))
 //!         .buttons(MessageBoxButtons::SaveDiscardCancel)
 //!         .default_button(StandardButton::Save)
 //!         .escape_button(StandardButton::Cancel)

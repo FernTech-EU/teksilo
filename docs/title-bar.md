@@ -35,19 +35,19 @@ fn main() {
                             TitleBar::new(host)
                                 .height(40.0)
                                 .background(theme.colors.surface_pressed)
-                                .leading(TextWidget::new_literal("  My App"))
-                                .center(TextWidget::new_literal("drag · double-click to maximize")),
+                                .leading(TextWidget::new(lit!("  My App")))
+                                .center(TextWidget::new(lit!("drag · double-click to maximize"))),
                         ),
                         // X11 (and some stubs) don't support custom chrome.
-                        None => Box::new(TextWidget::new_literal(
+                        None => Box::new(TextWidget::new(lit!(
                             "(custom chrome unsupported — native decorations)",
-                        )),
+                        ))),
                     };
 
                     let body = Expand::new().child(
                         ZStack::new()
                             .child(RectWidget::new().background(theme.colors.surface_main))
-                            .child(TextWidget::new_literal("body content")),
+                            .child(TextWidget::new(lit!("body content"))),
                     );
 
                     let title_bar_id = tree.add_boxed(title_bar);

@@ -36,7 +36,7 @@ let proxy      = SortFilterListModel::new(model)
 let table = TableView::from_source(proxy.clone())
     .add_column(
         Column::new("name", "Name", |row, _| {
-            Box::new(TextWidget::new_literal(row.name.clone()))
+            Box::new(TextWidget::new(lit!(row.name.clone())))
         })
         .width(ColumnWidth::Flex(2.0))
         .sortable(true)
@@ -78,7 +78,7 @@ A column is a generic descriptor over the row type:
 ```rust
 pub struct Column<T: 'static> { /* … */ }
 
-Column::new("id", "ID", |row, ctx| Box::new(TextWidget::new_literal(row.id.to_string())))
+Column::new("id", "ID", |row, ctx| Box::new(TextWidget::new(lit!(row.id.to_string()))))
     .width(ColumnWidth::Fixed(64.0))   // Fixed | Flex(factor) | Auto
     .min_width(40.0)
     .max_width(200.0)
@@ -264,7 +264,7 @@ let column = Column::new("amount", "Amount", move |row, ctx| {
         // Swap in your editor while editing_cell_signal matches.
         Box::new(TextInputField::new(state_for(row.id)))
     } else {
-        Box::new(TextWidget::new_literal(format!("{}", row.amount)))
+        Box::new(TextWidget::new(lit!(format!("{}", row.amount))))
     }
 });
 ```

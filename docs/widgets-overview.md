@@ -214,7 +214,7 @@ Worked TreeView delegate using both new pieces:
 ```rust
 let tree_checks: TreeCheckedModel<Item> = state.app_state();
 TreeView::new_with_context(model, move |item, entry, selected, ctx| {
-    let mut row = StandardTreeItem::new_literal(&item.title)
+    let mut row = StandardTreeItem::new(lit!(&item.title))
         .from_entry(entry)
         .selected(selected)
         .on_toggle_rc(ctx.toggle_callback());

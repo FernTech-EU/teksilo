@@ -108,7 +108,7 @@ When the user asks about `bati!`, match against these situations:
 bati!(ctx =>
     VStack {
         spacing: 12.0
-        TextWidget::new_literal("Title") { style: t.body_bold.clone() }
+        TextWidget::new(lit!("Title")) { style: t.body_bold.clone() }
         Button("OK") { on_activate_fn: |ctx| ctx.send_intent(AppIntent::Ok) }
     }
 )
@@ -149,18 +149,18 @@ chains — see the limitations section):
 ```rust
 bati!(ctx =>
     Menu {
-        item: MenuItem::new_literal("Run") {
+        item: MenuItem::new(lit!("Run")) {
             on_activate_fn: |ctx| ctx.send_intent(AppIntent::Run)
             tooltip_literal: "Runs the thing"
         }
     }
 )
-// emits .item(MenuItem::new_literal("Run").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Run)).tooltip_literal("..."))
+// emits .item(MenuItem::new(lit!("Run")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Run)).tooltip(lit!("...")))
 ```
 
 The body reads uniformly with top-level elements — same `name: value`
 shape, no mental switch to Rust's method-chain syntax. Prefer this
-over `item: (MenuItem::new_literal("Run").on_activate_fn(...).tooltip(...))`.
+over `item: (MenuItem::new(lit!("Run")).on_activate_fn(...).tooltip(...))`.
 
 ## Reading `bati!` — translation shortcuts
 

@@ -1,3 +1,4 @@
+use bastyde_i18n::lit;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -79,7 +80,7 @@ fn expand_in_row_outer(tree: &WidgetTree, row_outer: WidgetId) -> WidgetId {
 }
 
 fn label(s: &str) -> bastyde_i18n::LocalizedString {
-    bastyde_i18n::LocalizedString::literal(s)
+    lit!(s)
 }
 
 // ─── TabWidget — static-only construction ───────────────────────────

@@ -137,12 +137,12 @@ impl Widget for AnimationsRoot {
             TabWidget::new(self.selected.clone())
                 .static_tab_with_id(
                     self.animated_tab,
-                    TabInfo::new().title(bastyde::i18n::LocalizedString::literal("Animated")),
+                    TabInfo::new().title(lit!("Animated")),
                     animated_page(),
                 )
                 .static_tab_with_id(
                     self.static_tab,
-                    TabInfo::new().title(bastyde::i18n::LocalizedString::literal("Static")),
+                    TabInfo::new().title(lit!("Static")),
                     static_page(),
                 ),
         );

@@ -181,7 +181,7 @@ Wiring with the new row widgets:
 let checks: CheckedModel = state.app_state();
 ListView::new(model, move |idx, item, _sel| {
     Box::new(
-        StandardListItem::new_literal(&item.name)
+        StandardListItem::new(lit!(&item.name))
             .checkbox(checks.signal_for(idx))
     )
 })
@@ -189,7 +189,7 @@ ListView::new(model, move |idx, item, _sel| {
 let tree_checks: TreeCheckedModel<Item> = state.app_state();
 TreeView::new_with_context(tree, move |item, entry, _sel, ctx| {
     Box::new(
-        StandardTreeItem::new_literal(&item.title)
+        StandardTreeItem::new(lit!(&item.title))
             .from_entry(entry)
             .tristate_checkbox(tree_checks.signal_for(entry.node_id))
             .on_toggle_rc(ctx.toggle_callback())

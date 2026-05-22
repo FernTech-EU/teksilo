@@ -504,18 +504,20 @@ impl Button {
                     }
                 }
             })
-            .on_access_action(move |action: bastyde_core::accesskit::Action,
-                                    ctx: &mut EventContext|
-                                    -> EventResponse {
-                if action == bastyde_core::accesskit::Action::Click {
-                    if let Some(ref act) = *action_for_access {
-                        act(ctx);
+            .on_access_action(
+                move |action: bastyde_core::accesskit::Action,
+                      ctx: &mut EventContext|
+                      -> EventResponse {
+                    if action == bastyde_core::accesskit::Action::Click {
+                        if let Some(ref act) = *action_for_access {
+                            act(ctx);
+                        }
+                        EventResponse::Handled
+                    } else {
+                        EventResponse::Ignored
                     }
-                    EventResponse::Handled
-                } else {
-                    EventResponse::Ignored
-                }
-            })
+                },
+            )
             .focusable(true)
             .cursor(CursorIcon::Pointer)
     }
