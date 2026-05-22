@@ -51,7 +51,7 @@ struct SnackbarSurface {
     /// so screen readers read out the caller-provided message
     /// the moment the snackbar appears. Falls back to the
     /// generic `a11y_snackbar_name` when unset.
-    announcement: Option<String>,
+    announcement: Option<bastyde_i18n::LocalizedString>,
     /// Per-call override for the snackbar surface chrome.
     style_override: Option<SharedSnackbarStyle>,
     /// Build state — the `SnackbarStyle::make_body` root.
@@ -69,7 +69,7 @@ impl SnackbarSurface {
         }
     }
 
-    fn with_announcement(mut self, text: Option<String>) -> Self {
+    fn with_announcement(mut self, text: Option<bastyde_i18n::LocalizedString>) -> Self {
         self.announcement = text;
         self
     }
@@ -151,7 +151,8 @@ impl Widget for SnackbarSurface {
         builder.set_live(bastyde_core::accesskit::Live::Polite);
         let name = self
             .announcement
-            .clone()
+            .as_ref()
+            .map(|a| a.resolve_now())
             .unwrap_or_else(|| bastyde_i18n::tr_widget!(a11y_snackbar_name()).resolve_now());
         builder.set_name(name);
     }
@@ -162,7 +163,7 @@ impl Widget for SnackbarSurface {
 }
 
 pub struct Snackbar {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     variant: ButtonVariant,
     enabled: bool,
     dismiss: DismissBehavior,
@@ -172,7 +173,7 @@ pub struct Snackbar {
     /// Optional explicit announcement string threaded through to
     /// the `SnackbarSurface`'s a11y node. When set, screen readers
     /// read this as the Alert's name when the snackbar appears.
-    announcement: Option<String>,
+    announcement: Option<bastyde_i18n::LocalizedString>,
     /// Per-call override for the snackbar surface chrome.
     style_override: Option<SharedSnackbarStyle>,
     root_child_id: Option<WidgetId>,
@@ -182,7 +183,7 @@ impl Snackbar {
     pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: ls,
             variant: ButtonVariant::Plain,
             enabled: true,
             dismiss: DismissBehavior::ClickOutside,
@@ -268,7 +269,7 @@ impl Snackbar {
     /// confirmations, status changes).
     pub fn announcement(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.announcement = Some(ls.resolve_now());
+        self.announcement = Some(ls);
         self
     }
 }
@@ -385,7 +386,7 @@ impl Widget for Snackbar {
             // Space/Enter (with the matched-KeyDown guard), and AccessKit
             // Click — so one handler covers all three activation paths.
             ctx.add(
-                Button::new(lit!(label))
+                Button::new(label)
                     .variant(style)
                     .enabled(enabled)
                     .on_activate_fn(move |ctx| {

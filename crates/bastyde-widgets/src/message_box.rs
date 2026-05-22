@@ -483,15 +483,15 @@ impl State {
 /// [`MessageBox::present`].
 pub struct MessageBox {
     severity: MessageBoxSeverity,
-    title: String,
-    text: Option<String>,
-    informative_text: Option<String>,
-    detailed_text: Option<String>,
+    title: bastyde_i18n::LocalizedString,
+    text: Option<bastyde_i18n::LocalizedString>,
+    informative_text: Option<bastyde_i18n::LocalizedString>,
+    detailed_text: Option<bastyde_i18n::LocalizedString>,
     buttons_config: Option<MessageBoxButtons>,
     extra_buttons: Vec<MessageBoxButton>,
     default_button: Option<StandardButton>,
     escape_button: Option<StandardButton>,
-    show_again_label: Option<String>,
+    show_again_label: Option<bastyde_i18n::LocalizedString>,
     show_again_state: Option<Signal<bool>>,
     on_result: Option<Box<dyn Fn(MessageBoxResult, &mut EventContext)>>,
     default_button_id: Cell<Option<WidgetId>>,
@@ -515,7 +515,7 @@ impl std::fmt::Debug for MessageBox {
 
 impl MessageBox {
     fn new_with_severity(severity: MessageBoxSeverity, title: impl Into<LocalizedString>) -> Self {
-        let title = title.into().resolve_now();
+        let title = title.into();
         Self {
             severity,
             title,
@@ -567,7 +567,7 @@ impl MessageBox {
     /// `text_primary`. Prefer a short, self-contained sentence —
     /// details belong in `informative_text`.
     pub fn text(mut self, text: impl Into<LocalizedString>) -> Self {
-        self.text = Some(text.into().resolve_now());
+        self.text = Some(text.into());
         self
     }
 
@@ -575,7 +575,7 @@ impl MessageBox {
     /// `typography.body` with `text_secondary`. Matches Qt's
     /// `setInformativeText`.
     pub fn informative_text(mut self, text: impl Into<LocalizedString>) -> Self {
-        self.informative_text = Some(text.into().resolve_now());
+        self.informative_text = Some(text.into());
         self
     }
 
@@ -583,7 +583,7 @@ impl MessageBox {
     /// for technical diagnostics (stack traces, error codes). Matches
     /// Qt's `setDetailedText`.
     pub fn detailed_text(mut self, text: impl Into<LocalizedString>) -> Self {
-        self.detailed_text = Some(text.into().resolve_now());
+        self.detailed_text = Some(text.into());
         self
     }
 
@@ -631,7 +631,7 @@ impl MessageBox {
     /// For external observation, use
     /// [`MessageBox::show_again_checkbox_state`] instead.
     pub fn show_again_checkbox(mut self, label: impl Into<LocalizedString>) -> Self {
-        self.show_again_label = Some(label.into().resolve_now());
+        self.show_again_label = Some(label.into());
         self
     }
 
@@ -668,7 +668,7 @@ impl MessageBox {
                 let mb = inner
                     .take()
                     .expect("MessageBox present closure called twice");
-                tree.add(ModalContainer::new(mb).title(lit!(dialog_title.clone())))
+                tree.add(ModalContainer::new(mb).title(dialog_title.clone()))
             })
             .presentation(ModalPresentation::Auto)
             .close_behavior(close_behavior)
@@ -715,20 +715,20 @@ impl Widget for MessageBox {
 
         let mut header_text_stack = VStack::new().spacing(6.0);
         header_text_stack = header_text_stack.child(
-            TextWidget::new(lit!(self.title.clone()))
+            TextWidget::new(self.title.clone())
                 .style(theme.typography.body_bold.clone())
                 .color(theme.colors.text_primary),
         );
         if let Some(text) = self.text.clone() {
             header_text_stack = header_text_stack.child(
-                TextWidget::new(lit!(text))
+                TextWidget::new(text)
                     .style(theme.typography.body.clone())
                     .color(theme.colors.text_primary),
             );
         }
         if let Some(info) = self.informative_text.clone() {
             header_text_stack = header_text_stack.child(
-                TextWidget::new(lit!(info))
+                TextWidget::new(info)
                     .style(theme.typography.body.clone())
                     .color(theme.colors.text_secondary),
             );
@@ -759,17 +759,17 @@ impl Widget for MessageBox {
         let detailed_child: Option<Box<dyn Widget>> = self.detailed_text.clone().map(|text| {
             let expanded = ctx.signal(false);
             let label: LocalizedString = bastyde_i18n::tr_widget!(messagebox_show_details());
-            let body = TextWidget::new(lit!(text))
+            let body = TextWidget::new(text)
                 .style(theme.typography.small.clone())
                 .color(theme.colors.text_secondary);
             let accordion: Box<dyn Widget> =
-                Box::new(Accordion::new(lit!(label.resolve_now()), expanded).content(body));
+                Box::new(Accordion::new(label, expanded).content(body));
             accordion
         });
 
         let checkbox_child: Option<Box<dyn Widget>> = self.show_again_label.clone().map(|label| {
             let cb: Box<dyn Widget> =
-                Box::new(Checkbox::new(checkbox_signal.clone()).label(lit!(label)));
+                Box::new(Checkbox::new(checkbox_signal.clone()).label(label));
             cb
         });
 
@@ -896,7 +896,7 @@ impl Widget for MessageBox {
     }
 
     fn accessible_title_hint(&self) -> Option<String> {
-        Some(self.title.clone())
+        Some(self.title.resolve_now())
     }
 
     fn initial_focus_hint(&self) -> Option<WidgetId> {
@@ -910,10 +910,13 @@ impl Widget for MessageBox {
 
 impl MessageBox {
     fn accessible_description(&self) -> Option<String> {
-        match (self.text.as_deref(), self.informative_text.as_deref()) {
+        match (
+            self.text.as_ref().map(|t| t.resolve_now()),
+            self.informative_text.as_ref().map(|i| i.resolve_now()),
+        ) {
             (None, None) => None,
-            (Some(t), None) => Some(t.to_string()),
-            (None, Some(i)) => Some(i.to_string()),
+            (Some(t), None) => Some(t),
+            (None, Some(i)) => Some(i),
             (Some(t), Some(i)) => Some(format!("{t}\n{i}")),
         }
     }

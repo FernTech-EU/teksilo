@@ -35,9 +35,9 @@ pub struct ToastSurfaceData {
     pub entry_id: u64,
     pub severity: ToastSeverity,
     pub priority: bastyde_core::styles::ToastPriority,
-    pub title: String,
-    pub body: Option<String>,
-    pub announcement: Option<String>,
+    pub title: bastyde_i18n::LocalizedString,
+    pub body: Option<bastyde_i18n::LocalizedString>,
+    pub announcement: Option<bastyde_i18n::LocalizedString>,
     pub actions: Rc<Vec<ToastAction>>,
     pub show_close_button: bool,
     pub on_click: Option<Rc<dyn Fn(&mut bastyde_core::widget::EventContext)>>,
@@ -183,7 +183,7 @@ impl ToastSurface {
     ) -> WidgetId {
         let callback = action.callback();
         let closes_toast = action.closes_toast_flag();
-        let label_owned = action.label().to_string();
+        let label_owned = action.label_ls();
         let tooltip_owned = action.tooltip_ref().cloned();
         let registry_for_handler = registry.clone();
         let activate = move |ctx: &mut bastyde_core::widget::EventContext| {
@@ -200,14 +200,14 @@ impl ToastSurface {
         // widget here.
         match action.style_ref() {
             ToastActionStyle::Link => {
-                let mut link = Link::new(lit!(label_owned)).on_activate_fn(activate);
+                let mut link = Link::new(label_owned).on_activate_fn(activate);
                 if let Some(tip) = tooltip_owned {
                     link = link.tooltip(tip);
                 }
                 ctx.add(link)
             }
             ToastActionStyle::Button { variant } => {
-                let mut btn = Button::new(lit!(label_owned))
+                let mut btn = Button::new(label_owned)
                     .variant(*variant)
                     .on_activate_fn(activate);
                 if let Some(tip) = tooltip_owned {
@@ -237,7 +237,7 @@ impl Widget for ToastSurface {
 
         // Title + optional body column.
         let title = ctx.add(
-            TextWidget::new(lit!(&self.data.title))
+            TextWidget::new(self.data.title.clone())
                 .style(TextStyleRole::BodyBold)
                 .bind_color(TextRole::Primary)
                 .single_line(),
@@ -247,7 +247,7 @@ impl Widget for ToastSurface {
             .add_child(title);
         if let Some(body) = &self.data.body {
             let body_widget = ctx.add(
-                TextWidget::new(lit!(body))
+                TextWidget::new(body.clone())
                     .style(TextStyleRole::Body)
                     .bind_color(TextRole::Secondary),
             );
@@ -410,11 +410,12 @@ impl Widget for ToastSurface {
         let name = self
             .data
             .announcement
-            .clone()
-            .unwrap_or_else(|| self.data.title.clone());
+            .as_ref()
+            .map(|a| a.resolve_now())
+            .unwrap_or_else(|| self.data.title.resolve_now());
         builder.set_name(name);
         if let Some(body) = &self.data.body {
-            builder.set_description(body.clone());
+            builder.set_description(body.resolve_now());
         }
     }
 

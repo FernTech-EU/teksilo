@@ -66,9 +66,9 @@ type UrlsCallback = Box<dyn FnMut(Vec<String>, &mut EventContext)>;
 
 /// A drop target for external (OS) drag-and-drop. See the module docs.
 pub struct DropZone {
-    label: String,
-    subtitle: Option<String>,
-    browse_label: String,
+    label: bastyde_i18n::LocalizedString,
+    subtitle: Option<bastyde_i18n::LocalizedString>,
+    browse_label: bastyde_i18n::LocalizedString,
     extensions: Vec<String>,
     allow_multiple: bool,
     show_browse_button: bool,
@@ -89,9 +89,9 @@ impl DropZone {
     /// model as [`Button::new`](crate::button::Button::new).
     pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         Self {
-            label: label.into().resolve_now(),
+            label: label.into(),
             subtitle: None,
-            browse_label: lit!("Browse…").resolve_now(),
+            browse_label: lit!("Browse…"),
             extensions: Vec::new(),
             allow_multiple: true,
             show_browse_button: true,
@@ -106,7 +106,7 @@ impl DropZone {
 
     /// Secondary line under the prompt (e.g. `tr!("png_or_jpeg")`).
     pub fn subtitle(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        self.subtitle = Some(text.into().resolve_now());
+        self.subtitle = Some(text.into());
         self
     }
 
@@ -142,7 +142,7 @@ impl DropZone {
 
     /// Override the Browse button's label (e.g. `tr!("browse")`).
     pub fn browse_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        self.browse_label = label.into().resolve_now();
+        self.browse_label = label.into();
         self
     }
 
@@ -300,11 +300,11 @@ impl Widget for DropZone {
             content = content.add_child(icon_id);
         }
 
-        content = content.child(TextWidget::new(lit!(self.label.clone())));
+        content = content.child(TextWidget::new(self.label.clone()));
 
         if let Some(subtitle) = &self.subtitle {
             content =
-                content.child(TextWidget::new(lit!(subtitle.clone())).color(TextRole::Secondary));
+                content.child(TextWidget::new(subtitle.clone()).color(TextRole::Secondary));
         }
 
         // Live-region status line: empty at rest, narrates hover / drop.
@@ -320,7 +320,7 @@ impl Widget for DropZone {
             let allow_multiple_browse = self.allow_multiple;
             let on_files_browse = on_files.clone();
             let announce_browse = announce.clone();
-            let browse = Button::new(lit!(self.browse_label.clone())).on_activate_fn(
+            let browse = Button::new(self.browse_label.clone()).on_activate_fn(
                 move |ctx: &mut EventContext| {
                     let mut request = FileDialogRequest::pick_file();
                     if !browse_extensions.is_empty() {

@@ -113,7 +113,7 @@ pub type ToastActionCallback = Rc<dyn Fn(&mut EventContext)>;
 /// One actionable element inside a [`Toast`] — a button or hyperlink
 /// the user can click to drive a domain action.
 pub struct ToastAction {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     on_invoke: ToastActionCallback,
     style: ToastActionStyle,
     closes_toast: bool,
@@ -130,7 +130,7 @@ impl ToastAction {
     ) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: ls,
             on_invoke: Rc::new(on_invoke),
             style: ToastActionStyle::default(),
             closes_toast: true,
@@ -193,8 +193,8 @@ impl ToastAction {
         self
     }
 
-    pub fn label(&self) -> &str {
-        &self.label
+    pub fn label(&self) -> String {
+        self.label.resolve_now()
     }
     pub fn style_ref(&self) -> &ToastActionStyle {
         &self.style
@@ -205,6 +205,12 @@ impl ToastAction {
     pub fn shortcut_id_ref(&self) -> Option<&str> {
         self.shortcut_id.as_deref()
     }
+    /// The action label as a `LocalizedString` (reactive source for
+    /// the rendered Link/Button).
+    pub(crate) fn label_ls(&self) -> bastyde_i18n::LocalizedString {
+        self.label.clone()
+    }
+
     pub fn tooltip_ref(&self) -> Option<&bastyde_i18n::LocalizedString> {
         self.tooltip.as_ref()
     }
@@ -317,8 +323,8 @@ pub type ToastDismissCallback = Rc<dyn Fn(ToastDismissCause, &mut EventContext)>
 /// See the module docs for the full conceptual overview.
 pub struct Toast {
     pub(crate) severity: ToastSeverity,
-    pub(crate) title: String,
-    pub(crate) body: Option<String>,
+    pub(crate) title: bastyde_i18n::LocalizedString,
+    pub(crate) body: Option<bastyde_i18n::LocalizedString>,
     pub(crate) leading: Option<Box<dyn Widget>>,
     pub(crate) actions: Vec<ToastAction>,
     pub(crate) auto_dismiss_after: Option<Duration>,
@@ -326,7 +332,7 @@ pub struct Toast {
     pub(crate) id: Option<String>,
     pub(crate) on_click: Option<Rc<dyn Fn(&mut EventContext)>>,
     pub(crate) on_dismiss: Option<ToastDismissCallback>,
-    pub(crate) announcement: Option<String>,
+    pub(crate) announcement: Option<bastyde_i18n::LocalizedString>,
     pub(crate) show_close_button: bool,
     pub(crate) closable_on_escape: bool,
     pub(crate) archive: bool,
@@ -355,7 +361,7 @@ impl Toast {
         let ls: bastyde_i18n::LocalizedString = title.into();
         Self {
             severity,
-            title: ls.resolve_now(),
+            title: ls,
             body: None,
             leading: None,
             actions: Vec::new(),
@@ -408,7 +414,7 @@ impl Toast {
     /// Optional secondary line below the title.
     pub fn body(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.body = Some(ls.resolve_now());
+        self.body = Some(ls);
         self
     }
 
@@ -500,7 +506,7 @@ impl Toast {
     /// ("3") but the spoken text needs context ("3 unread messages").
     pub fn announcement(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.announcement = Some(ls.resolve_now());
+        self.announcement = Some(ls);
         self
     }
 
@@ -845,9 +851,9 @@ mod tests {
                 .body(lit!("Written 1.2 MB to disk.")),
         );
         r.with_entry(h.entry_id(), |e| {
-            assert_eq!(e.title, "Saved!", "title updated in place");
+            assert_eq!(e.title.resolve_now(), "Saved!", "title updated in place");
             assert_eq!(
-                e.body.as_deref(),
+                e.body.as_ref().map(|b| b.resolve_now()).as_deref(),
                 Some("Written 1.2 MB to disk."),
                 "body updated in place"
             );
@@ -1049,7 +1055,7 @@ mod tests {
             entry_id: 1,
             severity,
             priority,
-            title: "x".to_string(),
+            title: bastyde_i18n::lit!("x"),
             body: None,
             announcement: None,
             actions: Rc::new(Vec::new()),
