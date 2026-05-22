@@ -334,8 +334,11 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         lit!("Snackbar"),
         Snackbar::new(tr!(overlays_file_saved_successfully()))
             .content(
+                // The snackbar surface is the dark `tooltip_bg`, so content
+                // text must use `TooltipText` to stay legible in light theme.
                 TextWidget::new(tr!(overlays_file_saved_successfully_2()))
-                    .style(TextStyleRole::Body),
+                    .style(TextStyleRole::Body)
+                    .color(TextRole::TooltipText),
             )
             .trigger(Button::new(tr!(overlays_show_snackbar())).variant(ButtonVariant::Filled))
             .auto_dismiss_after(std::time::Duration::from_secs(3)),
@@ -386,8 +389,10 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let snackbar_widget = ctx.add(
         Snackbar::new(tr!(overlays_file_saved_successfully()))
             .content(
+                // Dark `tooltip_bg` surface — content text needs `TooltipText`.
                 TextWidget::new(tr!(overlays_file_saved_successfully_2()))
-                    .style(TextStyleRole::Body),
+                    .style(TextStyleRole::Body)
+                    .color(TextRole::TooltipText),
             )
             .trigger(Button::new(tr!(overlays_show_snackbar())).variant(ButtonVariant::Filled))
             .auto_dismiss_after(Duration::from_secs(3)),

@@ -9,7 +9,6 @@ use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
 use bastyde_core::styles::{SharedSnackbarStyle, SnackbarStyleConfig};
 use bastyde_core::widget::{LayoutContext, PendingChild, Widget, WidgetPlacement};
-use bastyde_core::widget_builder::WidgetBuilder;
 use bastyde_core::widget_id::WidgetId;
 
 use crate::button::{Button, ButtonVariant};
@@ -204,6 +203,17 @@ impl Snackbar {
         self
     }
 
+    /// The snackbar body — the message (and optional inline action)
+    /// shown on the floating surface.
+    ///
+    /// The default surface is the high-contrast (dark) `tooltip_bg`,
+    /// the same one tooltips use, and it stays dark in light theme.
+    /// So any `TextWidget` you pass here must set
+    /// `.color(TextRole::TooltipText)` (and actions can use
+    /// `TooltipText` / `TooltipShortcut`) — the default `TextRole::Primary`
+    /// is dark and renders nearly invisible on the dark surface in light
+    /// theme. If you install a light-surface `SnackbarStyle`, color the
+    /// content to match that instead.
     pub fn content(mut self, content: impl Widget + 'static) -> Self {
         self.pending_content = Some(PendingChild::Deferred(Box::new(content)));
         self
@@ -301,24 +311,28 @@ impl Widget for Snackbar {
         );
         ctx.set_dormant(content_id);
 
-        let open_on_tap = {
-            let dismiss = dismiss.clone();
-            move |_event: &bastyde_core::TapEvent, ctx: &mut bastyde_core::widget::EventContext| {
-                if !enabled {
-                    return;
-                }
-                present_snackbar(
-                    ctx,
-                    self_id,
-                    content_id,
-                    dismiss.clone(),
-                    auto_dismiss_after,
-                    fade_duration,
-                );
-            }
-        };
-
         let root_id = if let Some(trigger) = self.pending_trigger.take() {
+            // A custom trigger is an arbitrary widget with no built-in
+            // activation, so we wire pointer / keyboard / AT activation
+            // by hand. (The default-Button branch below delegates all
+            // three to `Button::on_activate_fn`.)
+            let open_on_tap = {
+                let dismiss = dismiss.clone();
+                move |_event: &bastyde_core::TapEvent,
+                      ctx: &mut bastyde_core::widget::EventContext| {
+                    if !enabled {
+                        return;
+                    }
+                    present_snackbar(
+                        ctx,
+                        self_id,
+                        content_id,
+                        dismiss.clone(),
+                        auto_dismiss_after,
+                        fade_duration,
+                    );
+                }
+            };
             let handlers = bastyde_core::widget_builder::HandlerSet::new()
                 .focusable(true)
                 .cursor(bastyde_core::widget::CursorIcon::Pointer)
@@ -367,47 +381,22 @@ impl Widget for Snackbar {
             .name(label);
             ctx.add(overlay_trigger)
         } else {
+            // `Button::on_activate_fn` already fires on pointer tap,
+            // Space/Enter (with the matched-KeyDown guard), and AccessKit
+            // Click — so one handler covers all three activation paths.
             ctx.add(
                 Button::new(lit!(label))
                     .variant(style)
                     .enabled(enabled)
-                    .on_tap(open_on_tap)
-                    .on_key({
-                        let dismiss = dismiss.clone();
-                        move |event, ctx| match event {
-                            WidgetEvent::KeyUp {
-                                key: Key::Enter | Key::Space,
-                                ..
-                            } if enabled => {
-                                present_snackbar(
-                                    ctx,
-                                    self_id,
-                                    content_id,
-                                    dismiss.clone(),
-                                    auto_dismiss_after,
-                                    fade_duration,
-                                );
-                                EventResponse::Handled
-                            }
-                            _ => EventResponse::Ignored,
-                        }
-                    })
-                    .on_access_action({
-                        move |action, ctx| {
-                            if action == bastyde_core::accesskit::Action::Click && enabled {
-                                present_snackbar(
-                                    ctx,
-                                    self_id,
-                                    content_id,
-                                    dismiss.clone(),
-                                    auto_dismiss_after,
-                                    fade_duration,
-                                );
-                                EventResponse::Handled
-                            } else {
-                                EventResponse::Ignored
-                            }
-                        }
+                    .on_activate_fn(move |ctx| {
+                        present_snackbar(
+                            ctx,
+                            self_id,
+                            content_id,
+                            dismiss.clone(),
+                            auto_dismiss_after,
+                            fade_duration,
+                        );
                     }),
             )
         };
@@ -494,6 +483,42 @@ mod tests {
         let expected_x = (800.0 - bounds.width) / 2.0;
         assert!((bounds.x - expected_x).abs() < 1.0);
         assert!((bounds.y + bounds.height - (600.0 - 24.0)).abs() < 1.0);
+    }
+
+    #[test]
+    fn default_button_keyboard_activation_opens_snackbar() {
+        // The default-Button branch delegates all activation to
+        // `Button::on_activate_fn`, so a matched KeyDown + KeyUp pair on
+        // the focused trigger must present the snackbar — and inherits
+        // Button's lone-KeyUp guard for free.
+        use bastyde_core::event::Modifiers;
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        tree.add(Snackbar::new(lit!("Show snackbar")).content(FixedLeaf(220.0, 40.0)));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let trigger = tree.find_by_label("Show snackbar").unwrap();
+        tree.focus(trigger);
+
+        // A lone KeyUp (no matching KeyDown) must not activate.
+        tree.dispatch_event(WidgetEvent::KeyUp {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert!(tree.active_overlays().is_empty());
+
+        // A matched KeyDown + KeyUp pair presents the snackbar.
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+            text: None,
+        });
+        tree.dispatch_event(WidgetEvent::KeyUp {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert_eq!(tree.active_overlays().len(), 1);
     }
 
     #[test]
