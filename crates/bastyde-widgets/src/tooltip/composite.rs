@@ -321,7 +321,7 @@ mod tests {
     use super::*;
     use crate::button::Button;
     use crate::primitives::{TextWidget, VStack};
-    use crate::tooltip::attach::{DEFAULT_COMPOSITE_TOOLTIP_DELAY, attach_composite_tooltip};
+    use crate::tooltip::attach::attach_composite_tooltip;
     use bastyde_canvas::{MockTextBackend, SizeProposal};
     use bastyde_core::widget_tree::WidgetTree;
     use bastyde_i18n::lit;
@@ -358,7 +358,8 @@ mod tests {
             let body = VStack::new()
                 .child(TextWidget::new(lit!("Header")))
                 .child(TextWidget::new(lit!("Body")));
-            let tip = attach_composite_tooltip(ctx, anchor, body, DEFAULT_COMPOSITE_TOOLTIP_DELAY);
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            let tip = attach_composite_tooltip(ctx, anchor, body, delay);
             self.tooltip_id_sink.set(Some(tip));
             vec![anchor]
         }
@@ -391,7 +392,7 @@ mod tests {
             "composite tooltip should not appear instantly — waits for delay"
         );
 
-        tree.advance_time(DEFAULT_COMPOSITE_TOOLTIP_DELAY + Duration::from_millis(50));
+        tree.advance_time(Duration::from_millis(400) + Duration::from_millis(50));
         assert_eq!(
             tree.active_overlays().len(),
             1,
@@ -407,7 +408,7 @@ mod tests {
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         tree.pointer_move(tree.bounds(host).center());
-        tree.advance_time(DEFAULT_COMPOSITE_TOOLTIP_DELAY + Duration::from_millis(50));
+        tree.advance_time(Duration::from_millis(400) + Duration::from_millis(50));
         assert_eq!(tree.active_overlays().len(), 1);
 
         // Pointer leaves before sticky promotion → dismiss.
@@ -430,7 +431,7 @@ mod tests {
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         tree.pointer_move(tree.bounds(host).center());
-        tree.advance_time(DEFAULT_COMPOSITE_TOOLTIP_DELAY + Duration::from_millis(50));
+        tree.advance_time(Duration::from_millis(400) + Duration::from_millis(50));
         assert_eq!(tree.active_overlays().len(), 1);
 
         let content_id = tooltip_id_sink

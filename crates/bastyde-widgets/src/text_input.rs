@@ -667,23 +667,15 @@ impl Widget for TextInput {
         // Tooltip — three mutually-exclusive setters; setters clear
         // the others so exactly one branch runs.
         if let Some(content) = self.composite_tooltip_content.take() {
-            tooltip::attach_composite_tooltip_boxed(
-                ctx,
-                root_id,
-                content,
-                tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
         } else if let Some(source) = self.rich_tooltip_source.take() {
-            tooltip::attach_rich_tooltip_source(
-                ctx,
-                root_id,
-                source,
-                tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay;
+            tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
         } else if let Some(text) = self.tooltip_text.clone() {
             let tw = crate::tooltip::TooltipWidget::new(text);
             let tooltip_id = ctx.add(tw);
-            let delay = std::time::Duration::from_millis(500);
+            let delay = ctx.theme().motion.tooltip_delay;
             ctx.attach_tooltip(root_id, tooltip_id, delay);
         }
 

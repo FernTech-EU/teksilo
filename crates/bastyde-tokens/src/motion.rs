@@ -66,8 +66,27 @@ pub struct MotionTokens {
     /// motion without strobing.
     #[serde(with = "duration_millis")]
     pub duration_indeterminate_sweep: Duration,
+    /// ~200 ms — hover dwell before a plain or rich tooltip shows.
+    #[serde(with = "duration_millis", default = "default_tooltip_delay")]
+    pub tooltip_delay: Duration,
+    /// ~400 ms — hover dwell for heavyweight tooltips (composite surfaces,
+    /// scene-item tips). Longer so heavy content doesn't pop on transient
+    /// hover.
+    #[serde(with = "duration_millis", default = "default_tooltip_delay_heavy")]
+    pub tooltip_delay_heavy: Duration,
     /// Standard easing curve. Int UI uses one mild ease-out everywhere.
     pub easing_standard: Easing,
+}
+
+/// Serde default for [`MotionTokens::tooltip_delay`] — keeps themes
+/// serialized before this field deserializable.
+fn default_tooltip_delay() -> Duration {
+    Duration::from_millis(200)
+}
+
+/// Serde default for [`MotionTokens::tooltip_delay_heavy`].
+fn default_tooltip_delay_heavy() -> Duration {
+    Duration::from_millis(400)
 }
 
 impl Default for MotionTokens {
@@ -79,6 +98,8 @@ impl Default for MotionTokens {
             duration_slow: Duration::from_millis(300),
             duration_collapse: Duration::from_millis(200),
             duration_indeterminate_sweep: Duration::from_millis(900),
+            tooltip_delay: Duration::from_millis(200),
+            tooltip_delay_heavy: Duration::from_millis(400),
             easing_standard: Easing::EaseOut,
         }
     }
@@ -109,6 +130,7 @@ mod tests {
         assert!(m.duration_instant < m.duration_fast);
         assert!(m.duration_fast < m.duration_normal);
         assert!(m.duration_normal < m.duration_slow);
+        assert!(m.tooltip_delay <= m.tooltip_delay_heavy);
     }
 
     #[test]

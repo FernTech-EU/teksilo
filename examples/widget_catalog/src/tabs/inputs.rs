@@ -106,7 +106,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                 sigs.combo_selected.clone(),
                 |s: &String| s.clone(),
             )
-            .placeholder(lit!(tr!(inp_combo_placeholder()).resolve_now())),
+            .placeholder(tr!(inp_combo_placeholder())),
         ),
     );
 
@@ -147,7 +147,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
             sigs.combo_selected.clone(),
             |s: &String| s.clone(),
         )
-        .placeholder(lit!(tr!(inp_combo_placeholder()).resolve_now())),
+        .placeholder(tr!(inp_combo_placeholder())),
     );
 
     let cb_checked = sigs.checkbox_checked.clone();

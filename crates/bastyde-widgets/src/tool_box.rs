@@ -49,8 +49,7 @@ use crate::primitives::{
     VStack, ZStack,
 };
 use crate::tooltip::{
-    DEFAULT_RICH_TOOLTIP_DELAY, RichTooltipSource, TooltipContent, TooltipWidget,
-    attach_rich_tooltip_source,
+    RichTooltipSource, TooltipContent, TooltipWidget, attach_rich_tooltip_source,
 };
 
 // Large sentinel value used when binding `MaxSize::max_height` / `max_width`
@@ -557,10 +556,12 @@ impl Widget for ToolBoxHeader {
         // exclusive (last setter wins); rich takes precedence if both
         // were somehow set.
         if let Some(source) = self.rich_tooltip.take() {
-            attach_rich_tooltip_source(ctx, root_id, source, DEFAULT_RICH_TOOLTIP_DELAY);
+            let delay = ctx.theme().motion.tooltip_delay;
+            attach_rich_tooltip_source(ctx, root_id, source, delay);
         } else if let Some(text) = self.tooltip_text.take() {
             let tip_id = ctx.add(TooltipWidget::new(text));
-            ctx.attach_tooltip(root_id, tip_id, DEFAULT_RICH_TOOLTIP_DELAY);
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root_id, tip_id, delay);
         }
 
         // --- V2 attached handlers on the header's own node ---

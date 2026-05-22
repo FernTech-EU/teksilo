@@ -33,9 +33,8 @@ pub mod registry;
 pub mod rich;
 
 pub use attach::{
-    DEFAULT_COMPOSITE_TOOLTIP_DELAY, DEFAULT_RICH_TOOLTIP_DELAY, RichTooltipSource,
-    attach_composite_tooltip, attach_composite_tooltip_boxed, attach_rich_tooltip,
-    attach_rich_tooltip_content, attach_rich_tooltip_source,
+    RichTooltipSource, attach_composite_tooltip, attach_composite_tooltip_boxed,
+    attach_rich_tooltip, attach_rich_tooltip_content, attach_rich_tooltip_source,
 };
 pub use composite::CompositeTooltipWidget;
 pub use registry::{

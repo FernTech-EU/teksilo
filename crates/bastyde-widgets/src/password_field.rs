@@ -532,22 +532,15 @@ impl Widget for PasswordField {
 
         // Tooltips — mutually exclusive (setters clear the others).
         if let Some(content) = self.composite_tooltip_content.take() {
-            tooltip::attach_composite_tooltip_boxed(
-                ctx,
-                root_id,
-                content,
-                tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
         } else if let Some(source) = self.rich_tooltip_source.take() {
-            tooltip::attach_rich_tooltip_source(
-                ctx,
-                root_id,
-                source,
-                tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay;
+            tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
         } else if let Some(text) = self.tooltip_text.clone() {
             let tooltip_id = ctx.add(crate::tooltip::TooltipWidget::new(text));
-            ctx.attach_tooltip(root_id, tooltip_id, std::time::Duration::from_millis(500));
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(root_id, tooltip_id, delay);
         }
 
         self.root_child_id = Some(root_id);

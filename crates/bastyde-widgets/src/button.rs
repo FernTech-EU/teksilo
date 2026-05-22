@@ -742,23 +742,15 @@ impl bastyde_core::widget::Widget for Button {
         // mutually exclusive — every setter clears the other two so
         // exactly one branch runs.
         if let Some(content) = self.composite_tooltip_content.take() {
-            crate::tooltip::attach_composite_tooltip_boxed(
-                ctx,
-                root_id,
-                content,
-                crate::tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
         } else if let Some(source) = self.rich_tooltip_source.take() {
-            crate::tooltip::attach_rich_tooltip_source(
-                ctx,
-                root_id,
-                source,
-                crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
         } else if let Some(tooltip_text) = self.tooltip_text.clone() {
             let tooltip_widget = crate::tooltip::TooltipWidget::new(tooltip_text);
             let tooltip_id = ctx.add(tooltip_widget);
-            let delay = std::time::Duration::from_millis(200);
+            let delay = ctx.theme().motion.tooltip_delay;
             ctx.attach_tooltip(root_id, tooltip_id, delay);
         }
 

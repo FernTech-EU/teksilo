@@ -110,9 +110,10 @@ flips `Tooltip → Dialog`, dismiss swaps to `EscapeOrClickOutside`, and the
 surface becomes Tab-reachable. Rare interactive descendants (a "Pin"
 button, an internal `TabWidget`) work cleanly post-promotion.
 
-The default delay is `DEFAULT_COMPOSITE_TOOLTIP_DELAY` (400 ms — slower than
-the 200 ms rich-tooltip delay because composite surfaces are heavier and
-shouldn't pop on transient hover). Default `max_width` × `max_height` are
+The default delay is `theme.motion.tooltip_delay_heavy` (400 ms — slower than
+the 200 ms `tooltip_delay` used by plain/rich tooltips, because composite
+surfaces are heavier and shouldn't pop on transient hover). Default
+`max_width` × `max_height` are
 both 480 dp (`COMPOSITE_TOOLTIP_MAX_WIDTH` / `COMPOSITE_TOOLTIP_MAX_HEIGHT`
 constants in `bastyde-widgets/src/styles/recipe_tooltip_style.rs`),
 configurable per-instance with `.max_width(f32)` / `.max_height(f32)` on
@@ -244,30 +245,29 @@ the same machinery through `BuildContext`:
 ```rust
 // Plain tooltip — caller-managed delay.
 let tooltip_id = ctx.add(TooltipWidget::new(tr!(save_hint())));
-ctx.attach_tooltip(anchor_id, tooltip_id, Duration::from_millis(500));
+let delay = ctx.theme().motion.tooltip_delay;
+ctx.attach_tooltip(anchor_id, tooltip_id, delay);
 
 // Rich tooltip from the registry — recommended path.
-crate::tooltip::attach_rich_tooltip(
-    ctx,
-    anchor_id,
-    "save-as",
-    crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
-);
+let delay = ctx.theme().motion.tooltip_delay;
+crate::tooltip::attach_rich_tooltip(ctx, anchor_id, "save-as", delay);
 
 // Rich tooltip from inline content (no registry lookup).
+let delay = ctx.theme().motion.tooltip_delay;
 crate::tooltip::attach_rich_tooltip_content(
     ctx,
     anchor_id,
     TooltipContent::new("inline", tr!(inline_body())),
-    crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
+    delay,
 );
 
 // Source-driven — accepts either a key or an inline content.
+let delay = ctx.theme().motion.tooltip_delay;
 crate::tooltip::attach_rich_tooltip_source(
     ctx,
     anchor_id,
-    source,                                       // RichTooltipSource
-    crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
+    source, // RichTooltipSource
+    delay,
 );
 ```
 
@@ -294,11 +294,15 @@ The attach helpers do three things:
 
 ### Default delays
 
-| Path | Delay | Where it's defined |
-|------|-------|--------------------|
-| Rich tooltip | `200 ms` | `DEFAULT_RICH_TOOLTIP_DELAY` in [tooltip/attach.rs](../crates/bastyde-widgets/src/tooltip/attach.rs) |
-| `Button` plain tooltip | `200 ms` | inline literal in [button.rs](../crates/bastyde-widgets/src/button.rs) |
-| `Checkbox`, `RadioButton`, `MenuItem`, `SplitButton`, `Link`, `IconButton`, `TextInput` plain tooltip | `500 ms` | inline literal in each widget |
+All tooltip dwell delays are theme-defined on `MotionTokens`
+([motion.rs](../crates/bastyde-tokens/src/motion.rs)), so apps retune the feel
+in one place. Each widget reads the value at `build()` time via
+`ctx.theme().motion.*`.
+
+| Path | Field | Default |
+|------|-------|---------|
+| Plain + rich tooltips (all widgets) | `motion.tooltip_delay` | `200 ms` |
+| Composite tooltips + scene-item tips | `motion.tooltip_delay_heavy` | `400 ms` |
 
 There is no token for plain-tooltip delay yet; widgets that need a custom
 value pass an explicit `Duration` to `attach_tooltip`.

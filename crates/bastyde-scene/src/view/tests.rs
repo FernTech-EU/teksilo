@@ -5590,7 +5590,7 @@ fn lightweight_item_tooltip_shows_after_delay_then_dismisses_on_leave() {
 
     // Past the delay the point-anchored overlay appears, carrying the
     // item's resolved text.
-    tree.advance_time(SCENE_TOOLTIP_DELAY + std::time::Duration::from_millis(50));
+    tree.advance_time(bastyde_tokens::MotionTokens::default().tooltip_delay_heavy + std::time::Duration::from_millis(50));
     assert_eq!(
         tree.active_overlays().len(),
         1,
@@ -5629,7 +5629,7 @@ fn lightweight_item_without_tooltip_shows_nothing() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     tree.pointer_move(Point::new(40.0, 40.0));
-    tree.advance_time(SCENE_TOOLTIP_DELAY + std::time::Duration::from_millis(50));
+    tree.advance_time(bastyde_tokens::MotionTokens::default().tooltip_delay_heavy + std::time::Duration::from_millis(50));
     assert!(
         tree.active_overlays().is_empty(),
         "an item without a tooltip must never show one"
@@ -5652,7 +5652,7 @@ fn lightweight_item_tooltip_dismissed_on_pointer_down() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     tree.pointer_move(Point::new(40.0, 40.0));
-    tree.advance_time(SCENE_TOOLTIP_DELAY + std::time::Duration::from_millis(50));
+    tree.advance_time(bastyde_tokens::MotionTokens::default().tooltip_delay_heavy + std::time::Duration::from_millis(50));
     assert_eq!(tree.active_overlays().len(), 1);
 
     // A press retracts the hover tooltip — the user has committed.

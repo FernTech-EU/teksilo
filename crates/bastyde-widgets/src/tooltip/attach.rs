@@ -27,15 +27,6 @@ use crate::tooltip::composite::CompositeTooltipWidget;
 use crate::tooltip::registry::TooltipContent;
 use crate::tooltip::rich::{DWELL_PROMOTION, RichTooltipWidget};
 
-/// Default hover-to-show delay for rich tooltips — matches the plain
-/// tooltip delay used by Button, Link, and MenuItem today.
-pub const DEFAULT_RICH_TOOLTIP_DELAY: Duration = Duration::from_millis(200);
-
-/// Default hover-to-show delay for composite tooltips. Slower than the
-/// rich-tooltip delay because composite surfaces are heavier-weight
-/// (charts, grids, tabbed content) and shouldn't pop on transient hover.
-pub const DEFAULT_COMPOSITE_TOOLTIP_DELAY: Duration = Duration::from_millis(400);
-
 /// Source resolution for a rich tooltip — either a registry key (the
 /// common path) or an inline [`TooltipContent`] entry (one-offs that
 /// don't belong in the app-wide registry).
@@ -63,7 +54,8 @@ impl<T: Into<String>> From<T> for RichTooltipSource {
 ///
 /// ```ignore
 /// let root = ctx.add(/* visible subtree */);
-/// attach_rich_tooltip(ctx, root, "save-as-details", DEFAULT_RICH_TOOLTIP_DELAY);
+/// let delay = ctx.theme().motion.tooltip_delay;
+/// attach_rich_tooltip(ctx, root, "save-as-details", delay);
 /// ```
 pub fn attach_rich_tooltip(
     ctx: &mut BuildContext,
@@ -184,7 +176,7 @@ mod tests {
             "tooltip should not appear instantly — waits for delay"
         );
 
-        tree.advance_time(DEFAULT_RICH_TOOLTIP_DELAY + Duration::from_millis(50));
+        tree.advance_time(Duration::from_millis(200) + Duration::from_millis(50));
 
         assert_eq!(
             tree.active_overlays().len(),
@@ -210,7 +202,7 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(400.0, 200.0));
         tree.pointer_move(tree.bounds(btn).center());
-        tree.advance_time(DEFAULT_RICH_TOOLTIP_DELAY + Duration::from_millis(50));
+        tree.advance_time(Duration::from_millis(200) + Duration::from_millis(50));
 
         assert_eq!(tree.active_overlays().len(), 1);
         // The stale plain text must NOT be reachable — the rich tooltip
@@ -304,7 +296,7 @@ mod tests {
         let btn = tree.add(Button::new(lit!("Go")).rich_tooltip_content(content));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         tree.pointer_move(tree.bounds(btn).center());
-        tree.advance_time(DEFAULT_RICH_TOOLTIP_DELAY + Duration::from_millis(50));
+        tree.advance_time(Duration::from_millis(200) + Duration::from_millis(50));
 
         assert_eq!(tree.active_overlays().len(), 1);
 

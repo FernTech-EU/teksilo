@@ -77,12 +77,6 @@ const DEFAULT_MAX_ZOOM: f32 = 10.0;
 /// Maximum movement (scene-coord pixels) between PointerDown and
 /// PointerUp for the gesture to count as a tap rather than a drag.
 const TAP_MOVEMENT_THRESHOLD: f32 = 4.0;
-/// Hover dwell before a lightweight-item tooltip appears. Slightly
-/// longer than the widget-tier default (200 ms) because scene hover is
-/// exploratory — the pointer sweeps across many items while panning the
-/// eye, and a snappier delay would flash tooltips during that sweep.
-const SCENE_TOOLTIP_DELAY: Duration = Duration::from_millis(500);
-
 /// Take the tightening intersection of two optional zoom ranges:
 /// `(max(lo), min(hi))`. `None` on either side leaves the other
 /// untouched; `None` on both returns `None`. Used to compose
@@ -1885,6 +1879,10 @@ impl Widget for SceneView {
         } else {
             Some(ctx.theme().motion.duration_fast)
         };
+        // Scene hover is exploratory — the pointer sweeps across many items
+        // while the eye pans — so lightweight-item tips use the heavier
+        // (longer) tooltip dwell to avoid flashing during that sweep.
+        let tooltip_delay = ctx.theme().motion.tooltip_delay_heavy;
 
         let mut handlers = HandlerSet::new();
 
@@ -1927,6 +1925,7 @@ impl Widget for SceneView {
             let tooltip_content_id = tooltip_content_id;
             let tooltip_anchor_id = self_id;
             let tooltip_fade = tooltip_fade;
+            let tooltip_delay = tooltip_delay;
             handlers = handlers.on_pointer_event(move |ev, ctx| {
                 use bastyde_core::event::PointerButton;
                 use bastyde_core::event::WidgetEvent as Ev;
@@ -2070,7 +2069,7 @@ impl Widget for SceneView {
                                         on_dismiss: None,
                                         fade_duration: tooltip_fade,
                                     },
-                                    SCENE_TOOLTIP_DELAY,
+                                    tooltip_delay,
                                 );
                             } else {
                                 // Moved onto an item with no tooltip (or onto

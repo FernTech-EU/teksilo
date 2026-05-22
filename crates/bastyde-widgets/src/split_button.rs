@@ -553,27 +553,16 @@ impl Widget for SplitButton {
         // Attach the main-region tooltip if configured. Three
         // mutually-exclusive setters; setters clear the others.
         if let Some(content) = self.composite_tooltip_content.take() {
-            crate::tooltip::attach_composite_tooltip_boxed(
-                ctx,
-                main_region_id,
-                content,
-                crate::tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, main_region_id, content, delay);
         } else if let Some(source) = self.rich_tooltip_source.take() {
-            crate::tooltip::attach_rich_tooltip_source(
-                ctx,
-                main_region_id,
-                source,
-                crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, main_region_id, source, delay);
         } else if let Some(text) = self.tooltip_text.clone() {
             let tooltip_widget = crate::tooltip::TooltipWidget::new(text);
             let tooltip_id = ctx.add(tooltip_widget);
-            ctx.attach_tooltip(
-                main_region_id,
-                tooltip_id,
-                std::time::Duration::from_millis(500),
-            );
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(main_region_id, tooltip_id, delay);
         }
 
         // ---- Divider between main and chevron regions ----
@@ -632,19 +621,11 @@ impl Widget for SplitButton {
         // override via `.chevron_tooltip(...)` (plain),
         // `.chevron_rich_tooltip(...)`, or `.chevron_composite_tooltip(...)`.
         if let Some(content) = self.chevron_composite_tooltip_content.take() {
-            crate::tooltip::attach_composite_tooltip_boxed(
-                ctx,
-                chevron_region_id,
-                content,
-                crate::tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, chevron_region_id, content, delay);
         } else if let Some(source) = self.chevron_rich_tooltip_source.take() {
-            crate::tooltip::attach_rich_tooltip_source(
-                ctx,
-                chevron_region_id,
-                source,
-                crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, chevron_region_id, source, delay);
         } else {
             let chevron_text = self
                 .chevron_tooltip_text
@@ -652,11 +633,8 @@ impl Widget for SplitButton {
                 .unwrap_or_else(|| lit!("Show dropdown menu"));
             let tooltip_widget = crate::tooltip::TooltipWidget::new(chevron_text);
             let tooltip_id = ctx.add(tooltip_widget);
-            ctx.attach_tooltip(
-                chevron_region_id,
-                tooltip_id,
-                std::time::Duration::from_millis(500),
-            );
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(chevron_region_id, tooltip_id, delay);
         }
 
         // ---- Row: main | divider | chevron ----

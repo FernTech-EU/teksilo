@@ -745,23 +745,16 @@ impl Widget for TabHeader {
         // Attach tooltip via the framework helper. Three
         // mutually-exclusive sources (composite > rich > plain).
         if let Some(content) = self.composite_tooltip.take() {
-            crate::tooltip::attach_composite_tooltip_boxed(
-                ctx,
-                self_id,
-                content,
-                crate::tooltip::DEFAULT_COMPOSITE_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay_heavy;
+            crate::tooltip::attach_composite_tooltip_boxed(ctx, self_id, content, delay);
         } else if let Some(source) = self.rich_tooltip.take() {
-            crate::tooltip::attach_rich_tooltip_source(
-                ctx,
-                self_id,
-                source,
-                crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
-            );
+            let delay = ctx.theme().motion.tooltip_delay;
+            crate::tooltip::attach_rich_tooltip_source(ctx, self_id, source, delay);
         } else if let Some(tip) = self.tooltip.take() {
             let tip_widget = crate::tooltip::TooltipWidget::new(tip);
             let tip_id = ctx.add(tip_widget);
-            ctx.attach_tooltip(self_id, tip_id, std::time::Duration::from_millis(400));
+            let delay = ctx.theme().motion.tooltip_delay;
+            ctx.attach_tooltip(self_id, tip_id, delay);
         }
 
         vec![root_id]
