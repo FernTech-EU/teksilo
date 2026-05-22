@@ -660,15 +660,38 @@ impl Widget for ScrollArea {
         };
 
         // --- Step 2: Update shared reactive state ---
+        //
+        // CAUTION: this method mixes layout output with reactive-state writes.
+        // It is loop-safe today because (a) the `Signal<f32>` metrics below are
+        // NOT relayout-bound on the ScrollArea itself, and (b) the writes are
+        // guarded so they only fire on a genuine change. If anyone ever binds
+        // one of these metrics at `BindingLevel::Relayout` on the ScrollArea,
+        // it becomes an instant layout loop — bind them on the scrollbar
+        // children only.
+        //
+        // `content_size` / `viewport_size` / `viewport_origin` are `Cell`s, so
+        // their `set` never notifies — written unconditionally.
         self.content_size.set(placed_content_size);
         self.viewport_size
             .set(Size::new(viewport_width, viewport_height));
         self.viewport_origin.set(bounds.origin());
 
+        // The scrollbar children bind these `Signal<f32>` metrics for thumb
+        // size/position. `Signal::set` always notifies regardless of whether
+        // the value changed, so an unconditional write would re-dirty those
+        // children on every relayout that reaches this node (window resize,
+        // sibling content change, …) even when the metrics are identical.
+        // Guard with the same EPSILON pattern as `clamp_and_set_scroll`.
+        let set_if_changed = |sig: &Signal<f32>, v: f32| {
+            if (sig.get() - v).abs() > f32::EPSILON {
+                sig.set(v);
+            }
+        };
+
         let max_y = (placed_content_size.height - viewport_height).max(0.0);
         let max_x = (placed_content_size.width - viewport_width).max(0.0);
-        self.max_scroll_y.set(max_y);
-        self.max_scroll_x.set(max_x);
+        set_if_changed(&self.max_scroll_y, max_y);
+        set_if_changed(&self.max_scroll_x, max_x);
 
         let ratio_y = if placed_content_size.height > 0.0 {
             (viewport_height / placed_content_size.height).clamp(0.0, 1.0)
@@ -680,8 +703,8 @@ impl Widget for ScrollArea {
         } else {
             1.0
         };
-        self.viewport_ratio_y.set(ratio_y);
-        self.viewport_ratio_x.set(ratio_x);
+        set_if_changed(&self.viewport_ratio_y, ratio_y);
+        set_if_changed(&self.viewport_ratio_x, ratio_x);
 
         self.clamp_and_set_scroll();
         let scroll_y = self.scroll_y.get();
