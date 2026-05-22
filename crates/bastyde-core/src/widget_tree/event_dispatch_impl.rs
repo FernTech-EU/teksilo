@@ -1085,6 +1085,18 @@ impl WidgetTree {
                 }
             }
         }
+        // Content-keyed dismissals (`dismiss_overlay_by_content`). Drained
+        // unconditionally — independent of `dismiss_scope` and of the
+        // pending delayed-overlay list — so a handler can retract a shown
+        // reusable overlay it identifies only by content. Resolving the
+        // id here (not at call time) is what lets the caller skip
+        // tracking the `OverlayId`.
+        for content_id in ctx.overlay_content_dismissals {
+            if let Some(overlay_id) = self.overlay_manager.find_by_content(content_id) {
+                let dismissed = self.overlay_manager.dismiss(overlay_id);
+                self.dormant_dismissed_content(&dismissed, &mut *ops);
+            }
+        }
         // Apply pause/resume queue (ToastHost hover-pause). Drained
         // here so the handler-side `ctx.pause_overlay_auto_dismiss(id)`
         // is order-independent with `dismiss_overlay(id)` and the

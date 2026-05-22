@@ -77,6 +77,11 @@ const DEFAULT_MAX_ZOOM: f32 = 10.0;
 /// Maximum movement (scene-coord pixels) between PointerDown and
 /// PointerUp for the gesture to count as a tap rather than a drag.
 const TAP_MOVEMENT_THRESHOLD: f32 = 4.0;
+/// Hover dwell before a lightweight-item tooltip appears. Slightly
+/// longer than the widget-tier default (200 ms) because scene hover is
+/// exploratory — the pointer sweeps across many items while panning the
+/// eye, and a snappier delay would flash tooltips during that sweep.
+const SCENE_TOOLTIP_DELAY: Duration = Duration::from_millis(500);
 
 /// Take the tightening intersection of two optional zoom ranges:
 /// `(max(lo), min(hi))`. `None` on either side leaves the other
@@ -1863,6 +1868,24 @@ impl Widget for SceneView {
         let pan_dur = self.pan_anim_duration;
         let overscroll = self.overscroll_behavior;
 
+        // Reusable tooltip surface for lightweight scene items. Items
+        // have no `WidgetId`, so the per-widget `.tooltip()` attach path
+        // (arena-hover-keyed, `NearAnchor`-positioned) can't be used.
+        // Instead we keep ONE dormant `TooltipWidget` whose body is bound
+        // to a `Signal<String>`; the hover seam below sets the text and
+        // shows/dismisses it as a point-anchored (`AtPointer`) overlay,
+        // mirroring how the per-item cursor override is applied. Resolving
+        // the item's `LocalizedString` at show time keeps it locale-correct.
+        let tooltip_text = ctx.signal(String::new());
+        let tooltip_content_id =
+            ctx.add(bastyde_widgets::TooltipWidget::bound(tooltip_text.clone()));
+        ctx.set_dormant(tooltip_content_id);
+        let tooltip_fade = if prefers_reduced {
+            None
+        } else {
+            Some(ctx.theme().motion.duration_fast)
+        };
+
         let mut handlers = HandlerSet::new();
 
         // Track the latest pointer position so Ctrl+wheel can
@@ -1900,6 +1923,10 @@ impl Widget for SceneView {
             let drag_target_for_cursor = self.drag_target.clone();
             let hovered_item = self.hovered_item.clone();
             let pending_tap = self.pending_tap.clone();
+            let tooltip_text = tooltip_text.clone();
+            let tooltip_content_id = tooltip_content_id;
+            let tooltip_anchor_id = self_id;
+            let tooltip_fade = tooltip_fade;
             handlers = handlers.on_pointer_event(move |ev, ctx| {
                 use bastyde_core::event::PointerButton;
                 use bastyde_core::event::WidgetEvent as Ev;
@@ -2008,6 +2035,48 @@ impl Widget for SceneView {
                                 cb(true, ctx);
                             }
                             hovered_item.set(new_id);
+
+                            // Tooltip: retract the previous item's tooltip,
+                            // then (re)schedule for the new item. We only
+                            // dismiss the *shown* overlay here (active
+                            // stack); `show_overlay_after` already replaces
+                            // any stale *pending* show for the same content,
+                            // so calling `cancel_delayed_overlay` as well
+                            // would cancel the new show (drain order:
+                            // delayed-requests apply before cancels).
+                            ctx.dismiss_overlay_by_content(tooltip_content_id);
+                            if let Some(ls) = new_hit
+                                .as_ref()
+                                .and_then(|e| e.handlers.as_deref())
+                                .and_then(|h| h.tooltip.as_ref())
+                            {
+                                tooltip_text.set(ls.resolve_now());
+                                ctx.show_overlay_after(
+                                    bastyde_core::overlay::OverlayRequest {
+                                        content_id: tooltip_content_id,
+                                        anchor: tooltip_anchor_id,
+                                        // Drop the tooltip just below-right
+                                        // of the cursor so it doesn't sit
+                                        // under the pointer.
+                                        placement: bastyde_core::overlay::OverlayPlacement::AtPointer(
+                                            Point::new(position.x + 12.0, position.y + 16.0),
+                                        ),
+                                        // Manual: every dismiss path (item
+                                        // change, pointer-down, pointer-leave)
+                                        // is driven explicitly below.
+                                        dismiss: bastyde_core::overlay::DismissBehavior::Manual,
+                                        layer: bastyde_core::overlay::OverlayLayer::InTree,
+                                        parent_overlay: None,
+                                        on_dismiss: None,
+                                        fade_duration: tooltip_fade,
+                                    },
+                                    SCENE_TOOLTIP_DELAY,
+                                );
+                            } else {
+                                // Moved onto an item with no tooltip (or onto
+                                // empty space): cancel any pending show.
+                                ctx.cancel_delayed_overlay(tooltip_content_id);
+                            }
                         }
 
                         // Cursor: per-item override → grab/grabbing
@@ -2035,6 +2104,10 @@ impl Widget for SceneView {
                         modifiers,
                     } => {
                         cursor_pos.set(Some(*position));
+                        // Any press retracts a hover tooltip (shown or
+                        // pending) — the user has committed to an action.
+                        ctx.cancel_delayed_overlay(tooltip_content_id);
+                        ctx.dismiss_overlay_by_content(tooltip_content_id);
                         let scene_pt = to_scene(*position);
                         let hit = hit_handler_item(*position, scene_pt);
                         match button {
@@ -2107,6 +2180,10 @@ impl Widget for SceneView {
                     }
                     Ev::PointerLeave => {
                         cursor_pos.set(None);
+                        // Pointer left the view entirely — retract the
+                        // tooltip (shown or pending).
+                        ctx.cancel_delayed_overlay(tooltip_content_id);
+                        ctx.dismiss_overlay_by_content(tooltip_content_id);
                         // Clear any pending hover.
                         if let Some(prev) = hovered_item.take()
                             && let Some(prev_entry) =

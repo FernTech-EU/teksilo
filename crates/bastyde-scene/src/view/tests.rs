@@ -5560,3 +5560,109 @@ fn item_thumbnails_skips_invisible_and_logical_items() {
     assert_eq!(thumbs[0].1, bastyde_tokens::Color::RED);
     let _ = visible;
 }
+
+// -----------------------------------------------------------------
+// R5: lightweight-item tooltips (point-anchored overlay via hover)
+// -----------------------------------------------------------------
+
+#[test]
+fn lightweight_item_tooltip_shows_after_delay_then_dismisses_on_leave() {
+    use crate::items::RectItem;
+
+    let mut scene = Scene::new();
+    // Local rect (0,0,50,50) placed at (20,20) → scene rect (20,20)-(70,70).
+    let id = scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)).fill(bastyde_tokens::Color::RED),
+        Point::new(20.0, 20.0),
+    );
+    scene.handlers_mut(id).unwrap().tooltip(lit!("Item tip"));
+
+    let mut tree = WidgetTree::new();
+    tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // Hover over the item — nothing yet (dwell delay not elapsed).
+    tree.pointer_move(Point::new(40.0, 40.0));
+    assert!(
+        tree.active_overlays().is_empty(),
+        "tooltip must not show before the dwell delay"
+    );
+
+    // Past the delay the point-anchored overlay appears, carrying the
+    // item's resolved text.
+    tree.advance_time(SCENE_TOOLTIP_DELAY + std::time::Duration::from_millis(50));
+    assert_eq!(
+        tree.active_overlays().len(),
+        1,
+        "tooltip overlay should be shown after the dwell delay"
+    );
+    assert!(
+        tree.find_by_label("Item tip").is_some(),
+        "the reusable tooltip surface should carry the hovered item's text"
+    );
+
+    // Moving onto empty space retracts it.
+    tree.pointer_move(Point::new(300.0, 250.0));
+    assert!(
+        tree.active_overlays().is_empty(),
+        "tooltip must dismiss when the pointer leaves the item"
+    );
+}
+
+#[test]
+fn lightweight_item_without_tooltip_shows_nothing() {
+    use crate::items::RectItem;
+
+    let mut scene = Scene::new();
+    // Item carries a cursor override but no tooltip.
+    let id = scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)).fill(bastyde_tokens::Color::RED),
+        Point::new(20.0, 20.0),
+    );
+    scene
+        .handlers_mut(id)
+        .unwrap()
+        .cursor(bastyde_core::widget::CursorIcon::Pointer);
+
+    let mut tree = WidgetTree::new();
+    tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    tree.pointer_move(Point::new(40.0, 40.0));
+    tree.advance_time(SCENE_TOOLTIP_DELAY + std::time::Duration::from_millis(50));
+    assert!(
+        tree.active_overlays().is_empty(),
+        "an item without a tooltip must never show one"
+    );
+}
+
+#[test]
+fn lightweight_item_tooltip_dismissed_on_pointer_down() {
+    use crate::items::RectItem;
+
+    let mut scene = Scene::new();
+    let id = scene.add_item(
+        RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)).fill(bastyde_tokens::Color::RED),
+        Point::new(20.0, 20.0),
+    );
+    scene.handlers_mut(id).unwrap().tooltip(lit!("Tip"));
+
+    let mut tree = WidgetTree::new();
+    tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    tree.pointer_move(Point::new(40.0, 40.0));
+    tree.advance_time(SCENE_TOOLTIP_DELAY + std::time::Duration::from_millis(50));
+    assert_eq!(tree.active_overlays().len(), 1);
+
+    // A press retracts the hover tooltip — the user has committed.
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(40.0, 40.0),
+        button: bastyde_core::event::PointerButton::Primary,
+        modifiers: bastyde_core::event::Modifiers::NONE,
+    });
+    assert!(
+        tree.active_overlays().is_empty(),
+        "tooltip must dismiss on pointer-down"
+    );
+}

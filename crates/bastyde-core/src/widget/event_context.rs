@@ -31,6 +31,13 @@ pub struct EventContext<'ops> {
     pub(crate) dismiss_modal: bool,
     pub(crate) overlay_requests: Vec<crate::overlay::OverlayRequest>,
     pub(crate) overlay_dismissals: Vec<crate::overlay::OverlayId>,
+    /// Content widget ids whose currently-shown overlay (if any) should
+    /// be dismissed. Resolved to an `OverlayId` via
+    /// `OverlayManager::find_by_content` at drain time. Lets a handler
+    /// dismiss an overlay it can only identify by content (e.g. a single
+    /// reusable tooltip surface) — the symmetric companion to
+    /// [`cancel_delayed_overlay`](EventContext::cancel_delayed_overlay).
+    pub(crate) overlay_content_dismissals: Vec<crate::widget_id::WidgetId>,
     /// Overlay ids whose `auto_dismiss_after` timer should be paused
     /// or resumed after the handler returns (`true` = pause, `false`
     /// = resume). Drained by `WidgetTree::process_overlay_requests`
@@ -166,6 +173,7 @@ impl<'ops> EventContext<'ops> {
             dismiss_modal: false,
             overlay_requests: Vec::new(),
             overlay_dismissals: Vec::new(),
+            overlay_content_dismissals: Vec::new(),
             overlay_pause_requests: Vec::new(),
             dismiss_scope: None,
             pointer_capture: None,
@@ -514,6 +522,18 @@ impl<'ops> EventContext<'ops> {
     /// Dismiss an overlay by ID.
     pub fn dismiss_overlay(&mut self, id: crate::overlay::OverlayId) {
         self.overlay_dismissals.push(id);
+    }
+
+    /// Dismiss the currently-shown overlay whose content root is
+    /// `content_id`, if one is active. No-op when no overlay is showing
+    /// that content. Use this to dismiss an overlay you can only name by
+    /// its content widget — the symmetric companion to
+    /// [`cancel_delayed_overlay`](Self::cancel_delayed_overlay), which
+    /// cancels a *pending* delayed show for the same content. Together
+    /// they let a caller fully retract a reusable tooltip surface
+    /// (shown or pending) without tracking the `OverlayId`.
+    pub fn dismiss_overlay_by_content(&mut self, content_id: crate::widget_id::WidgetId) {
+        self.overlay_content_dismissals.push(content_id);
     }
 
     /// Queue a request to pause an overlay's `auto_dismiss_after`

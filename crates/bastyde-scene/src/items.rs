@@ -178,7 +178,10 @@ mod tests {
         h1.tooltip(lit!("Tip"));
         let mut h2 = crate::item_handlers::SceneItemHandlerSet::new();
         h2.tooltip(lit!("Tip"));
-        assert_eq!(h1.tooltip, h2.tooltip);
+        assert_eq!(
+            h1.tooltip.as_ref().map(|t| t.resolve_now()),
+            h2.tooltip.as_ref().map(|t| t.resolve_now())
+        );
     }
 
     #[test]

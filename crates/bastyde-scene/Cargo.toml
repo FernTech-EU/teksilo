@@ -13,10 +13,8 @@ bastyde-canvas = { workspace = true }
 bastyde-core = { workspace = true }
 bastyde-data = { workspace = true }
 bastyde-i18n = { workspace = true }
-accesskit = { workspace = true }
-
-[dev-dependencies]
-# Used by tests for end-to-end checks against real widgets. Not part of
-# the runtime dep graph — keeps bastyde-scene at the same tier as
-# bastyde-charts (no dep on bastyde-widgets).
+# Runtime dep: the scene reuses the widget catalog both as heavyweight
+# item content and to render lightweight-item tooltips (TooltipWidget).
+# bastyde-widgets does not depend on bastyde-scene, so this is acyclic.
 bastyde-widgets = { workspace = true }
+accesskit = { workspace = true }

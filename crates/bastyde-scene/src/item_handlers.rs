@@ -22,6 +22,7 @@ use std::rc::Rc;
 use bastyde_canvas::Point;
 use bastyde_core::event::{ButtonMask, Modifiers, PointerButton};
 use bastyde_core::widget::{CursorIcon, EventContext};
+use bastyde_i18n::LocalizedString;
 
 /// Box of an item-level event closure with a single non-event
 /// argument (used for `on_hover`'s `bool` payload).
@@ -120,11 +121,12 @@ pub struct SceneItemHandlerSet {
     /// Cursor icon shown while the pointer is over this item.
     /// Overrides the SceneView default.
     pub cursor: Option<CursorIcon>,
-    /// Tooltip string (already-resolved). The SceneView's hover
-    /// machinery surfaces this through the standard overlay
-    /// manager. R3 ships the cursor and tooltip plumbing; the
-    /// overlay activation is wired in R5 with `ensure_visible`.
-    pub tooltip: Option<String>,
+    /// Tooltip body for this item. Kept as a `LocalizedString` (not an
+    /// eagerly-resolved `String`) so a `tr!(...)` source follows the
+    /// active locale — the SceneView resolves it against the current
+    /// locale at show time. The SceneView's hover machinery surfaces it
+    /// as a point-anchored overlay through the standard overlay manager.
+    pub tooltip: Option<LocalizedString>,
     /// Whether the item accepts dropped payloads. R3 sets the
     /// flag; the cross-tier drop pipeline integrates in R4.
     pub accepts_drops: bool,
@@ -255,13 +257,14 @@ impl SceneItemHandlerSet {
         self
     }
 
-    /// Set a tooltip string. Accepts anything convertible into
+    /// Set a tooltip. Accepts anything convertible into
     /// [`LocalizedString`](bastyde_i18n::LocalizedString) — most commonly
-    /// `tr!(...)` for translated copy. Plain strings auto-convert.
-    /// The text is resolved eagerly at builder time.
-    pub fn tooltip(&mut self, t: impl Into<bastyde_i18n::LocalizedString>) -> &mut Self {
-        let ls: bastyde_i18n::LocalizedString = t.into();
-        self.tooltip = Some(ls.resolve_now());
+    /// `tr!(...)` for translated copy or `lit!(...)` for fixed text.
+    /// Stored unresolved; the SceneView resolves it against the active
+    /// locale when the tooltip is shown, so a `tr!(...)` source tracks
+    /// locale changes.
+    pub fn tooltip(&mut self, t: impl Into<LocalizedString>) -> &mut Self {
+        self.tooltip = Some(t.into());
         self
     }
 
@@ -311,7 +314,10 @@ mod tests {
         let mut h = SceneItemHandlerSet::new();
         h.cursor(CursorIcon::Pointer).tooltip(lit!("hello"));
         assert_eq!(h.cursor, Some(CursorIcon::Pointer));
-        assert_eq!(h.tooltip.as_deref(), Some("hello"));
+        assert_eq!(
+            h.tooltip.as_ref().map(|t| t.resolve_now()),
+            Some("hello".to_string())
+        );
     }
 
     #[test]
