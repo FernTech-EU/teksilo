@@ -42,9 +42,9 @@ use crate::text_input::TextInput;
 
 /// A single-field input modal.
 pub struct InputDialog {
-    title: String,
-    prompt: Option<String>,
-    placeholder: Option<String>,
+    title: bastyde_i18n::LocalizedString,
+    prompt: Option<bastyde_i18n::LocalizedString>,
+    placeholder: Option<bastyde_i18n::LocalizedString>,
     default_text: String,
     ok_label: Option<LocalizedString>,
     cancel_label: Option<LocalizedString>,
@@ -56,7 +56,7 @@ impl InputDialog {
     pub fn new(title: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = title.into();
         Self {
-            title: ls.resolve_now(),
+            title: ls,
             prompt: None,
             placeholder: None,
             default_text: String::new(),
@@ -69,14 +69,14 @@ impl InputDialog {
     /// Prompt rendered above the input field. Optional but recommended.
     pub fn prompt(mut self, text: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = text.into();
-        self.prompt = Some(ls.resolve_now());
+        self.prompt = Some(ls);
         self
     }
 
     /// Placeholder shown when the field is empty.
     pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.placeholder = Some(ls.resolve_now());
+        self.placeholder = Some(ls);
         self
     }
 
@@ -120,7 +120,7 @@ impl InputDialog {
                     .expect("InputDialog present closure called twice");
                 tree.add(
                     ModalContainer::new(InputDialogBody::new(dlg))
-                        .title(lit!(dialog_title.clone())),
+                        .title(dialog_title.clone()),
                 )
             })
             .presentation(ModalPresentation::Auto)
@@ -144,9 +144,9 @@ impl std::fmt::Debug for InputDialog {
 // ── InputDialogBody — the actual widget that renders inside the modal ─
 
 struct InputDialogBody {
-    title: String,
-    prompt: Option<String>,
-    placeholder: Option<String>,
+    title: bastyde_i18n::LocalizedString,
+    prompt: Option<bastyde_i18n::LocalizedString>,
+    placeholder: Option<bastyde_i18n::LocalizedString>,
     text: Signal<String>,
     ok_label: LocalizedString,
     cancel_label: LocalizedString,
@@ -202,13 +202,13 @@ impl std::fmt::Debug for InputDialogBody {
 
 impl Widget for InputDialogBody {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let title = TextWidget::new(lit!(&self.title))
+        let title = TextWidget::new(self.title.clone())
             .style(TextStyleRole::BodyBold)
             .single_line();
 
         let mut column = VStack::new().spacing(10.0).child(title);
         if let Some(p) = &self.prompt {
-            column = column.child(TextWidget::new(lit!(p)).style(TextStyleRole::Body));
+            column = column.child(TextWidget::new(p.clone()).style(TextStyleRole::Body));
         }
 
         // The bound text input. Submit-on-Enter accepts the dialog.
@@ -220,7 +220,7 @@ impl Widget for InputDialogBody {
             Self::fire(&on_result_for_submit, &fired_for_submit, Some(value), ctx);
         });
         if let Some(ph) = &self.placeholder {
-            input = input.placeholder(lit!(ph.clone()));
+            input = input.placeholder(ph.clone());
         }
         column = column.child(input);
 

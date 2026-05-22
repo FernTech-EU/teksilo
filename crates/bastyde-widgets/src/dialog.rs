@@ -343,8 +343,8 @@ fn queue_dialog_request(
 }
 
 pub struct DialogContent {
-    title: Option<String>,
-    supporting_text: Option<String>,
+    title: Option<bastyde_i18n::LocalizedString>,
+    supporting_text: Option<bastyde_i18n::LocalizedString>,
     pending_body: Option<PendingChild>,
     pending_footer: Option<PendingChild>,
     root_child_id: Option<WidgetId>,
@@ -362,14 +362,12 @@ impl DialogContent {
     }
 
     pub fn title(mut self, title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = title.into();
-        self.title = Some(ls.resolve_now());
+        self.title = Some(title.into());
         self
     }
 
     pub fn supporting_text(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
-        self.supporting_text = Some(ls.resolve_now());
+        self.supporting_text = Some(text.into());
         self
     }
 
@@ -417,7 +415,7 @@ impl Widget for DialogContent {
             let mut header = VStack::new().spacing(8.0);
             if let Some(title) = self.title.clone() {
                 header = header.child(
-                    TextWidget::new(lit!(title))
+                    TextWidget::new(title)
                         .style(TextStyleRole::BodyBold)
                         .color(TextRole::Primary)
                         .single_line(),
@@ -425,7 +423,7 @@ impl Widget for DialogContent {
             }
             if let Some(text) = self.supporting_text.clone() {
                 header = header.child(
-                    TextWidget::new(lit!(text))
+                    TextWidget::new(text)
                         .style(TextStyleRole::Body)
                         .color(TextRole::Secondary),
                 );
@@ -489,7 +487,7 @@ impl Widget for DialogContent {
     /// name without the caller having to thread the same string
     /// through twice.
     fn accessible_title_hint(&self) -> Option<String> {
-        self.title.clone()
+        self.title.as_ref().map(|t| t.resolve_now())
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -498,7 +496,7 @@ impl Widget for DialogContent {
 }
 
 pub struct Dialog {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     variant: ButtonVariant,
     enabled: bool,
     presentation: ModalPresentation,
@@ -510,9 +508,8 @@ pub struct Dialog {
 
 impl Dialog {
     pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: label.into(),
             variant: ButtonVariant::Filled,
             enabled: true,
             presentation: ModalPresentation::Auto,
@@ -622,7 +619,7 @@ impl Widget for Dialog {
                             &content_factory,
                             presentation,
                             close_behavior,
-                            &label,
+                            &label.resolve_now(),
                             Some(tap_dismiss.clone()),
                         );
                     }
@@ -641,7 +638,7 @@ impl Widget for Dialog {
                                 &content_factory,
                                 presentation,
                                 close_behavior,
-                                &label,
+                                &label.resolve_now(),
                                 Some(key_dismiss.clone()),
                             );
                             EventResponse::Handled
@@ -660,7 +657,7 @@ impl Widget for Dialog {
                                 &content_factory,
                                 presentation,
                                 close_behavior,
-                                &label,
+                                &label.resolve_now(),
                                 Some(action_dismiss.clone()),
                             );
                             EventResponse::Handled
@@ -685,7 +682,7 @@ impl Widget for Dialog {
             let action_open = is_open.clone();
             let action_dismiss = dismiss_callback.clone();
             ctx.add(
-                Button::new(lit!(label))
+                Button::new(label)
                     .variant(style)
                     .enabled(enabled)
                     .has_popup(bastyde_core::accesskit::HasPopup::Dialog)
@@ -703,7 +700,7 @@ impl Widget for Dialog {
                                 &content_factory,
                                 presentation,
                                 close_behavior,
-                                &label,
+                                &label.resolve_now(),
                                 Some(tap_dismiss.clone()),
                             );
                         }
@@ -722,7 +719,7 @@ impl Widget for Dialog {
                                     &content_factory,
                                     presentation,
                                     close_behavior,
-                                    &label,
+                                    &label.resolve_now(),
                                     Some(key_dismiss.clone()),
                                 );
                                 EventResponse::Handled
@@ -741,7 +738,7 @@ impl Widget for Dialog {
                                     &content_factory,
                                     presentation,
                                     close_behavior,
-                                    &label,
+                                    &label.resolve_now(),
                                     Some(action_dismiss.clone()),
                                 );
                                 EventResponse::Handled
