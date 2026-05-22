@@ -55,8 +55,8 @@ pub struct FilePickerField {
     default_file_name: Option<String>,
     filters: Vec<FilterEntry>,
     on_pick: Option<Box<dyn Fn(&FileDialogResult, &mut EventContext)>>,
-    placeholder: Option<String>,
-    label: Option<String>,
+    placeholder: Option<bastyde_i18n::LocalizedString>,
+    label: Option<bastyde_i18n::LocalizedString>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     root_child_id: Option<WidgetId>,
@@ -128,14 +128,14 @@ impl FilePickerField {
     /// Placeholder text shown when the field is empty.
     pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.placeholder = Some(ls.resolve_now());
+        self.placeholder = Some(ls);
         self
     }
 
     /// Accessible name for the path field.
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
+        self.label = Some(ls);
         self
     }
 
@@ -239,10 +239,10 @@ impl Widget for FilePickerField {
             .enabled(self.initial_enabled)
             .trailing_slot(browse);
         if let Some(ph) = self.placeholder.clone() {
-            input = input.placeholder(lit!(ph));
+            input = input.placeholder(ph);
         }
         if let Some(label) = self.label.clone() {
-            input = input.label(lit!(label));
+            input = input.label(label);
         }
         self.root_child_id = Some(ctx.add(input));
         self.children()

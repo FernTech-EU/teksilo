@@ -83,8 +83,8 @@ pub enum RevealMode {
 /// Secure single-line text entry. See the [module docs](self).
 pub struct PasswordField {
     text: Signal<String>,
-    placeholder: String,
-    label: String,
+    placeholder: bastyde_i18n::LocalizedString,
+    label: bastyde_i18n::LocalizedString,
     initial_enabled: bool,
     read_only: bool,
     max_length: Option<usize>,
@@ -130,8 +130,8 @@ impl PasswordField {
     pub fn new(password: Signal<String>) -> Self {
         Self {
             text: password,
-            placeholder: String::new(),
-            label: String::new(),
+            placeholder: bastyde_i18n::LocalizedString::literal(String::new()),
+            label: bastyde_i18n::LocalizedString::literal(String::new()),
             initial_enabled: true,
             read_only: false,
             max_length: None,
@@ -160,7 +160,7 @@ impl PasswordField {
     /// Placeholder shown when empty. Never masked.
     pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.placeholder = ls.resolve_now();
+        self.placeholder = ls;
         self
     }
 
@@ -168,7 +168,7 @@ impl PasswordField {
     /// Strongly recommended for screen-reader users.
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = ls.resolve_now();
+        self.label = ls;
         self
     }
 
@@ -383,7 +383,7 @@ impl Widget for PasswordField {
 
         // The field carries the `Role::PasswordInput` AT node, so the
         // accessible name belongs on it.
-        let field_id = if self.label.is_empty() {
+        let field_id = if self.label.resolve_now().is_empty() {
             ctx.add(field)
         } else {
             ctx.add(field.access_label(self.label.clone()))
@@ -400,14 +400,14 @@ impl Widget for PasswordField {
         );
 
         // Placeholder overlay (never masked) shares the field's column.
-        let text_column_id = if self.placeholder.is_empty() {
+        let text_column_id = if self.placeholder.resolve_now().is_empty() {
             ctx.add(
                 Expand::horizontal()
                     .respect_intrinsic()
                     .child_id(padded_field),
             )
         } else {
-            let ph = TextWidget::new(lit!(self.placeholder.clone()))
+            let ph = TextWidget::new(self.placeholder.clone())
                 .style(TextStyleRole::Body)
                 .color(TextRole::Secondary)
                 .single_line()

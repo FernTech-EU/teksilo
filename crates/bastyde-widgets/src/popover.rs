@@ -586,7 +586,7 @@ impl Widget for Popover {
             let action_dismiss = dismiss_callback.clone();
             let action_focus = initial_focus_slot;
             ctx.add(
-                Button::new(lit!(label))
+                Button::new(label)
                     .variant(style)
                     .enabled(enabled)
                     .has_popup(bastyde_core::accesskit::HasPopup::Dialog)

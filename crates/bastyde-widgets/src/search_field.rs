@@ -99,8 +99,8 @@ fn search_glyph(glyph_size: f32, slot_width: f32) -> impl Widget + 'static {
 /// A search input with optional inline suggestions popup.
 pub struct SearchField {
     text: Signal<String>,
-    placeholder: Option<String>,
-    label: Option<String>,
+    placeholder: Option<bastyde_i18n::LocalizedString>,
+    label: Option<bastyde_i18n::LocalizedString>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     suggestion_provider: Option<SuggestionProvider>,
@@ -171,13 +171,13 @@ impl SearchField {
 
     pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.placeholder = Some(ls.resolve_now());
+        self.placeholder = Some(ls);
         self
     }
 
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
+        self.label = Some(ls);
         self
     }
 
@@ -255,7 +255,7 @@ impl Widget for SearchField {
         let placeholder = self
             .placeholder
             .clone()
-            .unwrap_or_else(|| bastyde_i18n::tr_widget!(a11y_builtin_search()).resolve_now());
+            .unwrap_or_else(|| bastyde_i18n::tr_widget!(a11y_builtin_search()));
         let on_submit = self.on_submit.clone();
         let on_select = self.on_select.clone();
         let text_signal = self.text.clone();
@@ -264,7 +264,7 @@ impl Widget for SearchField {
         let dismissed_for_submit = dismissed.clone();
 
         let mut input = TextInput::new(self.text.clone())
-            .placeholder(lit!(placeholder))
+            .placeholder(placeholder)
             .show_clear_button(true)
             .leading_slot(search_glyph(sf::GLYPH_SIZE, sf::GLYPH_SLOT_WIDTH))
             .enabled(self.initial_enabled)
@@ -293,7 +293,7 @@ impl Widget for SearchField {
                 ctx.dismiss_all_except_hosts();
             });
         if let Some(label) = &self.label {
-            input = input.label(lit!(label.clone()));
+            input = input.label(label.clone());
         }
         let input_id = ctx.add(input);
 

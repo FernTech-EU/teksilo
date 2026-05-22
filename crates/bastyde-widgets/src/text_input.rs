@@ -73,7 +73,7 @@ pub enum ValidationState {
 pub struct TextInput {
     // ── Configuration forwarded to the inner TextInputField ─────────
     text: Signal<String>,
-    placeholder: String,
+    placeholder: bastyde_i18n::LocalizedString,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     read_only: bool,
@@ -107,7 +107,7 @@ pub struct TextInput {
     feedback_signal: Signal<ValidationFeedback>,
 
     // ── Configuration owned by this composite only ──────────────────
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
     /// Optional override for the frame's intrinsic minimum width
     /// (default 65 dp). Composing widgets like `DateEdit` /
     /// `TimeEdit` raise this so the frame stays at the design
@@ -153,7 +153,7 @@ impl TextInput {
     pub fn new(text: Signal<String>) -> Self {
         Self {
             text,
-            placeholder: String::new(),
+            placeholder: bastyde_i18n::LocalizedString::literal(String::new()),
             initial_enabled: true,
             read_only: false,
             max_length: None,
@@ -211,7 +211,7 @@ impl TextInput {
 
     pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.placeholder = ls.resolve_now();
+        self.placeholder = ls;
         self
     }
 
@@ -220,7 +220,7 @@ impl TextInput {
     /// carries `Role::TextInput` with the document's value.
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
+        self.label = Some(ls);
         self
     }
 
@@ -517,13 +517,13 @@ impl Widget for TextInput {
         // parent's offered width never reaches the `HStack` during
         // measurement — without auto-basis the column reports 0 dp and
         // the whole composite collapses to `MinSize`'s 65 dp floor.
-        let text_column_id = if !self.placeholder.is_empty() {
+        let text_column_id = if !self.placeholder.resolve_now().is_empty() {
             // Match the inner TextInputField's text style + single-line
             // behaviour so the placeholder layout box has the same
             // intrinsic height as the rich-text engine's frame. Without
             // `single_line()` the placeholder defaults to Wrap, which
             // can report extra vertical leading space.
-            let ph = TextWidget::new(lit!(self.placeholder.clone()))
+            let ph = TextWidget::new(self.placeholder.clone())
                 .style(TextStyleRole::Body)
                 .color(TextRole::Secondary)
                 .single_line()
@@ -778,7 +778,7 @@ impl Widget for TextInput {
         // pass-through label.
         builder.set_role(bastyde_core::accesskit::Role::GenericContainer);
         if let Some(ref label) = self.label {
-            builder.set_name(label);
+            builder.set_name(label.resolve_now());
         }
         // Framework a11y walker sets `set_disabled` from arena state.
     }
