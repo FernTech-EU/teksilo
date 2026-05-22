@@ -1113,7 +1113,10 @@ impl WidgetTree {
         for preserve_content in ctx.dismiss_descendant_overlays {
             self.dismiss_child_overlays_for_source(source_widget, preserve_content, &mut *ops);
         }
-        self.apply_tree_mutations(&ctx.tree_mutations);
+        self.apply_tree_mutations(std::mem::take(&mut ctx.tree_mutations));
+        if ctx.request_a11y_update {
+            self.a11y_dirty = true;
+        }
         for mut req in ctx.overlay_requests {
             if req.parent_overlay.is_none() {
                 req.parent_overlay = self.overlay_ancestor_for_widget(source_widget);
@@ -1272,14 +1275,44 @@ impl WidgetTree {
         }
     }
 
-    fn apply_tree_mutations(&mut self, mutations: &[crate::widget::TreeMutation]) {
+    fn apply_tree_mutations(&mut self, mutations: Vec<crate::widget::TreeMutation>) {
+        use crate::binding::BindingLevel;
         use crate::widget::TreeMutation;
 
         for mutation in mutations {
             match mutation {
-                TreeMutation::SetDormant(id) => self.arena.set_dormant(*id),
-                TreeMutation::Activate(id) => self.arena.activate(*id),
-                TreeMutation::Destroy(id) => self.arena.destroy(*id),
+                TreeMutation::SetDormant(id) => self.arena.set_dormant(id),
+                TreeMutation::Activate(id) => self.arena.activate(id),
+                TreeMutation::Destroy(id) => self.arena.destroy(id),
+                TreeMutation::WithWidgetMut { id, dirty, apply } => {
+                    // Run the typed mutation while `&mut arena` is live, then
+                    // drop the borrow before dirty-marking (the `mark_*` calls
+                    // re-borrow the arena). Only dirty-mark a live node so we
+                    // never call `mark_ancestors_need_layout` on a destroyed id.
+                    let existed = if let Some(any) =
+                        self.arena.get_mut(id).and_then(|n| n.widget.as_any_mut())
+                    {
+                        apply(any);
+                        true
+                    } else {
+                        false
+                    };
+                    if existed {
+                        match dirty {
+                            BindingLevel::RepaintOnly => self.arena.mark_needs_paint(id),
+                            BindingLevel::SubtreeRepaint => self.arena.mark_subtree_needs_paint(id),
+                            BindingLevel::Relayout => {
+                                self.arena.mark_needs_layout(id);
+                                self.arena.mark_ancestors_need_layout(id);
+                            }
+                            BindingLevel::Rebuild => {
+                                self.arena.mark_needs_rebuild(id);
+                                self.arena.mark_ancestors_need_layout(id);
+                            }
+                            BindingLevel::AccessibilityOnly => self.a11y_dirty = true,
+                        }
+                    }
+                }
             }
         }
     }
@@ -1356,6 +1389,119 @@ mod tests {
         let widget = tree.add(FillWidget::new());
         tree.layout(SizeProposal::exact(100.0, 50.0));
         tree.click(widget);
+    }
+
+    // A leaf that opts into typed introspection, so `with_widget_mut` /
+    // `widget_as_any(_mut)` can reach it (the default `as_any_mut` is `None`).
+    #[derive(Debug)]
+    struct Bumpable {
+        value: i32,
+    }
+
+    impl crate::widget::Widget for Bumpable {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &crate::widget::LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(10.0, 10.0).into()
+        }
+        fn as_any(&self) -> Option<&dyn std::any::Any> {
+            Some(self)
+        }
+        fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+            Some(self)
+        }
+    }
+
+    #[test]
+    fn with_widget_mut_applies_and_dirty_marks() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(Bumpable { value: 0 });
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let mut ctx = EventContext::new();
+        ctx.with_widget_mut::<Bumpable>(id, crate::binding::BindingLevel::Relayout, |b| {
+            b.value = 42;
+        });
+        tree.collect_from_ctx(ctx, id);
+
+        let value = tree
+            .widget_as_any(id)
+            .and_then(|a| a.downcast_ref::<Bumpable>())
+            .map(|b| b.value);
+        assert_eq!(value, Some(42), "the deferred closure must mutate the live widget");
+        assert!(
+            tree.needs_layout(),
+            "Relayout dirty level must mark the tree for relayout"
+        );
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "not the requested type")]
+    fn with_widget_mut_wrong_type_panics_in_debug() {
+        struct Other;
+        let mut tree = WidgetTree::new();
+        let id = tree.add(Bumpable { value: 0 });
+        let mut ctx = EventContext::new();
+        ctx.with_widget_mut::<Other>(id, crate::binding::BindingLevel::RepaintOnly, |_o: &mut Other| {});
+        // Bumpable opts into as_any_mut, so the closure runs and the
+        // wrong-type downcast trips the debug_assert.
+        tree.collect_from_ctx(ctx, id);
+    }
+
+    #[test]
+    fn with_widget_mut_closure_may_fire_observed_signals() {
+        // Reentrancy guard. The closure runs inside `apply_tree_mutations`
+        // while the target arena node is mutably borrowed. If it fires a
+        // `Signal` whose observer sets *another* signal — the exact
+        // `SceneView` shape (`item_change_signal` → bump `reconcile_dirty`) —
+        // nothing may double-borrow the arena. The arena borrow is scoped to
+        // the closure call and dropped before dirty-marking; signal/observer
+        // work touches the binding registry, not the arena.
+        use crate::signal::Signal;
+        let mut tree = WidgetTree::new();
+        let id = tree.add(Bumpable { value: 0 });
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        let trigger = Signal::new(0_u64);
+        let echo = Signal::new(0_u64);
+        let echo_for_obs = echo.clone();
+        let _obs = trigger.observe(move |v| echo_for_obs.set(*v));
+
+        let trigger_in = trigger.clone();
+        let mut ctx = EventContext::new();
+        ctx.with_widget_mut::<Bumpable>(id, crate::binding::BindingLevel::RepaintOnly, move |b| {
+            b.value = 7;
+            // Fires `_obs` synchronously, mid-deferred-apply.
+            trigger_in.set(99);
+        });
+        tree.collect_from_ctx(ctx, id); // must not panic / double-borrow
+
+        assert_eq!(echo.get(), 99, "the observer ran during the deferred mutation");
+        let value = tree
+            .widget_as_any(id)
+            .and_then(|a| a.downcast_ref::<Bumpable>())
+            .map(|b| b.value);
+        assert_eq!(value, Some(7));
+    }
+
+    #[test]
+    fn request_accessibility_update_forces_rewalk() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(Bumpable { value: 0 });
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        let _ = tree.sync_accessibility(); // populate cache, clears a11y_dirty
+        assert!(!tree.a11y_dirty, "sync_accessibility should clear the dirty flag");
+
+        let mut ctx = EventContext::new();
+        ctx.request_accessibility_update();
+        tree.collect_from_ctx(ctx, id);
+        assert!(
+            tree.a11y_dirty,
+            "request_accessibility_update must force an AT re-walk"
+        );
     }
 
     #[test]

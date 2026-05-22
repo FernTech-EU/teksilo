@@ -136,6 +136,12 @@ pub struct EventContext<'ops> {
     /// tree belongs to. Drained after dispatch via
     /// `WidgetTree::take_close_window_request`.
     pub(crate) close_window_requested: bool,
+    /// Set by [`request_accessibility_update`](EventContext::request_accessibility_update);
+    /// drained in `collect_from_ctx` to set `WidgetTree::a11y_dirty`, forcing the
+    /// next `sync_accessibility` to re-walk the AccessKit tree. The general lever for a
+    /// composing widget that restructured its subtree in a way that changes the AT tree
+    /// (relayout alone no longer re-walks AT).
+    pub(crate) request_a11y_update: bool,
 }
 
 /// Deferred edit to the tree's shortcut registry, queued on an
@@ -156,11 +162,35 @@ pub(crate) enum ShortcutMutation {
 }
 
 /// A structural change to the widget tree, deferred until after event dispatch.
-#[derive(Debug)]
 pub(crate) enum TreeMutation {
     SetDormant(WidgetId),
     Activate(WidgetId),
     Destroy(WidgetId),
+    /// Typed mutable access to a mounted widget, applied in
+    /// `apply_tree_mutations` where `&mut arena` is live. The boxed closure
+    /// downcasts the node's `as_any_mut()` to the requested concrete type;
+    /// `dirty` selects the post-mutation re-render level.
+    WithWidgetMut {
+        id: WidgetId,
+        dirty: crate::binding::BindingLevel,
+        apply: Box<dyn FnOnce(&mut dyn std::any::Any)>,
+    },
+}
+
+// Manual `Debug`: the `WithWidgetMut` closure is not `Debug`.
+impl std::fmt::Debug for TreeMutation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SetDormant(id) => f.debug_tuple("SetDormant").field(id).finish(),
+            Self::Activate(id) => f.debug_tuple("Activate").field(id).finish(),
+            Self::Destroy(id) => f.debug_tuple("Destroy").field(id).finish(),
+            Self::WithWidgetMut { id, dirty, .. } => f
+                .debug_struct("WithWidgetMut")
+                .field("id", id)
+                .field("dirty", dirty)
+                .finish_non_exhaustive(),
+        }
+    }
 }
 
 impl<'ops> EventContext<'ops> {
@@ -197,6 +227,7 @@ impl<'ops> EventContext<'ops> {
             cancel_key_capture: false,
             pending_shortcut_mutations: Vec::new(),
             close_window_requested: false,
+            request_a11y_update: false,
             window_ops: None,
             current_window: None,
         }
@@ -503,6 +534,59 @@ impl<'ops> EventContext<'ops> {
     /// Destroy a widget subtree (removes from arena entirely, state is gone).
     pub fn destroy(&mut self, id: WidgetId) {
         self.tree_mutations.push(TreeMutation::Destroy(id));
+    }
+
+    /// Imperatively mutate a mounted widget by id, downcasting to the
+    /// concrete type `W`.
+    ///
+    /// The mutation is **deferred**: the closure runs after the handler
+    /// returns, inside `apply_tree_mutations`, where the framework holds
+    /// `&mut` arena access (a handler cannot re-borrow the arena to reach
+    /// another node, so this is the only safe channel — the same model as
+    /// [`destroy`](Self::destroy)). After the closure runs, the target is
+    /// dirty-marked at `dirty` so the mutation takes visual effect.
+    ///
+    /// The target widget must override [`Widget::as_any_mut`] to return
+    /// `Some(self)`. If the id is gone or is not a `W`, the closure is a
+    /// no-op in release and a `debug_assert` failure in debug — it never
+    /// silently mutates the wrong widget.
+    ///
+    /// This is the supported way to reach, e.g., `SceneView::scene_mut()`
+    /// from a handler after the view is mounted:
+    /// ```ignore
+    /// ctx.with_widget_mut::<SceneView>(view_id, BindingLevel::Rebuild, |v| {
+    ///     v.scene_mut().add_widget(card, rect);
+    /// });
+    /// ```
+    pub fn with_widget_mut<W: 'static>(
+        &mut self,
+        id: WidgetId,
+        dirty: crate::binding::BindingLevel,
+        f: impl FnOnce(&mut W) + 'static,
+    ) {
+        self.tree_mutations.push(TreeMutation::WithWidgetMut {
+            id,
+            dirty,
+            apply: Box::new(move |any| match any.downcast_mut::<W>() {
+                Some(w) => f(w),
+                None => debug_assert!(
+                    false,
+                    "with_widget_mut: widget {id:?} is not the requested type (or does not \
+                     override Widget::as_any_mut)"
+                ),
+            }),
+        });
+    }
+
+    /// Request that the AccessKit tree be re-walked after this handler
+    /// returns. Use after a mutation that changes the accessibility tree
+    /// **shape** in a way the framework doesn't already detect (relayout
+    /// alone no longer re-walks AT; only events that change the AT tree
+    /// — focus, overlays, locale/shortcut rebinds — set the dirty flag).
+    /// The companion [`BuildContext::request_accessibility_update`] covers
+    /// the build-time path.
+    pub fn request_accessibility_update(&mut self) {
+        self.request_a11y_update = true;
     }
 
     /// Show an overlay (tooltip, menu, popover).

@@ -250,6 +250,16 @@ pub struct WidgetTree {
     /// `frame_tick`) can chain-request without needing &mut access
     /// to the tree — see [`FrameRequestHandle`].
     pub(crate) frame_tick_requested: std::rc::Rc<std::cell::Cell<bool>>,
+    /// Shared "accessibility re-walk requested" flag. Set via
+    /// [`request_accessibility_update`](Self::request_accessibility_update)
+    /// (or its `BuildContext` / `EventContext` wrappers) and drained at the
+    /// top of [`sync_accessibility`](Self::sync_accessibility) into
+    /// `a11y_dirty`. A relayout no longer re-walks the AT tree on its own, so
+    /// widgets that restructure their subtree in an AT-affecting way (e.g.
+    /// `SceneView` materialising / destroying scene widgets) need this lever.
+    /// `Rc<Cell>` so the shared `&self` paths can toggle it like
+    /// `frame_tick_requested`.
+    pub(crate) a11y_update_requested: std::rc::Rc<std::cell::Cell<bool>>,
     /// Delayed frame wake-up deadline. Widgets that need to schedule
     /// a future frame without pumping at full framerate (caret blink,
     /// etc.) store the target instant here via
@@ -386,6 +396,7 @@ impl WidgetTree {
             locale_signal: crate::signal::Signal::new(None),
             frame_tick: crate::signal::Signal::new(0.0_f32),
             frame_tick_requested: std::rc::Rc::new(std::cell::Cell::new(false)),
+            a11y_update_requested: std::rc::Rc::new(std::cell::Cell::new(false)),
             pending_wake_at: std::rc::Rc::new(std::cell::Cell::new(None)),
             last_frame_time: None,
             close_window_requested: false,
@@ -502,6 +513,21 @@ impl WidgetTree {
     /// those shared paths can toggle it without ceremony.
     pub fn request_frame(&self) {
         self.frame_tick_requested.set(true);
+    }
+
+    /// Request that the AccessKit tree be re-walked on the next
+    /// [`sync_accessibility`](Self::sync_accessibility). Takes `&self` (the
+    /// flag is a `Cell`) so handlers and `build()` closures reaching the tree
+    /// through a shared reference can request a re-walk without `&mut` access.
+    /// The drain at the top of `sync_accessibility` flips `a11y_dirty`.
+    pub fn request_accessibility_update(&self) {
+        self.a11y_update_requested.set(true);
+    }
+
+    /// Clone the shared "accessibility re-walk requested" flag, for the same
+    /// stash-and-toggle pattern as [`frame_request_handle`](Self::frame_request_handle).
+    pub fn a11y_request_handle(&self) -> std::rc::Rc<std::cell::Cell<bool>> {
+        self.a11y_update_requested.clone()
     }
 
     /// Whether a frame was explicitly requested. Exposed for tests and

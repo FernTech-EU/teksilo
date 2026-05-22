@@ -8,6 +8,13 @@ impl WidgetTree {
     /// the result to the `accesskit_winit::Adapter`.
     /// Caches the result and only rebuilds when layout has changed.
     pub fn sync_accessibility(&mut self) -> accesskit::TreeUpdate {
+        // Explicit re-walk request (e.g. `SceneView` materialised / destroyed a
+        // scene widget, or an a11y-only scene mutation). A relayout no longer
+        // sets `a11y_dirty` on its own, so this is the lever; drain it before
+        // the cache check below.
+        if self.a11y_update_requested.replace(false) {
+            self.a11y_dirty = true;
+        }
         // Shortcut registry rebinds bump
         // `ShortcutRegistry::version()`. The `access_shortcut_id`
         // resolution in the walker reads the live registry, so any

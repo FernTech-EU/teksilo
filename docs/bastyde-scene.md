@@ -464,6 +464,66 @@ deletes its children. Apps wanting to drop the parent without losing
 the children call `orphan(id)` first (which detaches children and
 re-buckets them in the spatial index), then `remove(id)`.
 
+`remove` also cleans the logical-AT maps for the removed item(s) — parents,
+relations, live, landmarks, categories — and re-roots any still-alive node
+that was AT-parented under a removed item, so the separate AccessKit tree
+never carries a dangling reference. See *Runtime mutation* below.
+
+---
+
+## Runtime mutation (after mount)
+
+`Scene` is owned by its `SceneView`. *Before* the view is mounted you mutate
+the scene through the value you still hold (`view.scene_mut()…`, as in the
+worked example below). *After* the view is in the widget tree, a handler
+reaches it through the deferred [`EventContext::with_widget_mut`] channel:
+
+```rust
+ctx.with_widget_mut::<SceneView>(view_id, BindingLevel::Rebuild, |view| {
+    let scene = view.scene_mut();
+    let act = scene.add_a11y_group(A11yGroup::builder().label(lit!("Act IV")));
+    scene.set_a11y_live(A11yNode::Group(act), Live::Polite);
+    let card = scene.add_widget(build_card(/* … */), rect);
+    scene.set_a11y_parent(A11yNode::Item(card), Some(A11yNode::Group(act)));
+    view.ensure_visible(rect, 40.0);
+});
+```
+
+The view **self-reconciles** on every scene mutation — visual *and*
+accessibility:
+
+- **Add** (`add_widget` / `add_item`) materialises into the arena on the next
+  rebuild; the spatial index already holds it from insertion.
+- **Remove** (`remove`) destroys the orphaned arena widget (no leak), drops it
+  from the materialised maps, and cleans the logical-AT maps.
+- **Move / transform / reparent / visibility / opacity / z / layer** — every
+  `ItemChange` variant drives a reconcile pass, so paint *and* the
+  screen-projected AccessKit bounds follow.
+- **Pure-a11y mutations** (`add_a11y_group`, `set_a11y_parent`, relations,
+  live, landmark, categories) don't change item geometry, so they ride a
+  *separate* `Scene::a11y_change_signal` — the AccessKit tree still re-walks.
+
+A relayout no longer re-walks the AccessKit tree on its own (it's gated on
+`a11y_dirty`), so `SceneView::build()` calls `ctx.request_accessibility_update()`
+when it reconciles — the lever that keeps assistive tech in lock-step with the
+visual scene. The call is **gated on a mutation-version delta**: `build()`
+re-walks AT only when [`Scene::mutation_version`] advanced since the last walk
+(any add / remove / move / reparent / visibility / a11y change). A `build()`
+driven *purely* by a per-frame `add_item_dynamic` animation does **not** re-walk
+AT every frame — re-walking 60×/s for sub-pixel bounds drift is waste a screen
+reader can't use — but when that animation **settles**, the final bounds are
+walked into AT exactly once. Discrete mutations always re-walk, even interleaved
+with an animation. Demo: `cargo run -p scene-corkboard` ("Add Act").
+
+### App-owned view state
+
+Pan / zoom / rotation default to view-owned signals. Inject app-owned ones with
+`bind_view_state(pan_x, pan_y, zoom, rotation)` so view state survives a
+rebuild-from-state, a "Reset View" button can snap it home, and a toolbar can
+read it. `initial_pan` / `initial_zoom` / `initial_rotation` seed starting
+values without giving up ownership. These builders run pre-mount, like the
+others.
+
 ---
 
 ## i18n
@@ -510,6 +570,12 @@ view.scene_mut().add_item(
     Point::ZERO,
 );
 ```
+
+These `scene_mut()` calls run **pre-mount** — the app still owns `view`. To
+mutate the same scene from a handler *after* the view is added to the tree, go
+through `ctx.with_widget_mut::<SceneView>(view_id, …)` (see *Runtime mutation*
+above); the live `scene-corkboard` example does exactly that for its "Add Act"
+button.
 
 ---
 

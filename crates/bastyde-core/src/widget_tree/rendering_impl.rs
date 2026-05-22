@@ -398,6 +398,24 @@ fn paint_widget_cached(
         clip_bounds
     };
 
+    // A *content*-transform node (a `SceneView`'s pan/zoom) places its children
+    // in the transformed (content) coordinate space — `place_children` writes
+    // each child's `node.bounds` in scene coords, and the pan/zoom is applied
+    // only at draw time via the `PushTransform` above. The cull clip we hand the
+    // children must therefore be in that same content space; otherwise the
+    // per-child offscreen check at the top of this fn compares scene-space child
+    // bounds against a screen-space clip and drops content that is panned into
+    // view (a card far down in scene coords reads as "outside the viewport"
+    // regardless of pan — the lightweight tier, painted in the node's own
+    // `paint()`, is unaffected, hence "connectors render but cards don't").
+    // Inverse-transform the screen-space clip into content space. The GPU
+    // `SetClip` (emitted in parent/screen space) is untouched — it stays the
+    // real viewport scissor.
+    let next_clip = match (content_transform, next_clip, transform.and_then(|t| t.inverse())) {
+        (true, Some(screen_clip), Some(inv)) => Some(inv.apply_rect(screen_clip)),
+        _ => next_clip,
+    };
+
     // Self-transform / plain clipping nodes emit their clip here — after the
     // node's own paint, inside any transform scope. Content-transform nodes
     // already emitted theirs above (in parent space).

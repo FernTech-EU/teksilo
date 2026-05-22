@@ -8,6 +8,7 @@
 //! composes those up the parent chain to derive each item's
 //! `scene_transform` and AABB for hit-test, paint and culling.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 
 use crate::a11y::{A11yCategory, A11yGroup, A11yGroupBuilder, A11yGroupId, A11yNode, A11yRelation};
@@ -294,6 +295,21 @@ pub struct Scene {
     /// [`ItemChange`] through this signal so apps can observe
     /// geometry / visibility / parent / z / opacity changes.
     item_change_signal: Signal<ItemChange>,
+    /// Reactive change counter for the *logical AT structure* (groups,
+    /// parents, relations, live, landmarks, categories). These mutations are
+    /// not item geometry, so they do not flow through `item_change_signal`;
+    /// `SceneView` observes this separately to re-walk the AccessKit tree. The
+    /// AT tree is fully separate from the visual scene, so it needs its own
+    /// notification channel.
+    a11y_change_signal: Signal<u64>,
+    /// Monotonic counter of *every* model mutation — item geometry / visibility
+    /// / structure (each [`ItemChange`] fire) **and** logical-AT structure (each
+    /// `bump_a11y_change`). Read via [`Scene::mutation_version`]. `SceneView`
+    /// gates its (expensive) AccessKit re-walk on this advancing, so a `build()`
+    /// triggered purely by dynamic-bounds churn it already accounted for doesn't
+    /// re-walk the AT tree every frame. A plain `Cell` because the bump path
+    /// (`bump_mutation`) is `&self` (shared with `bump_a11y_change`).
+    mutation_seq: Cell<u64>,
 
     // --- logical AT structure ----------------------------------------
     pub(crate) a11y_groups: Vec<A11yGroup>,
@@ -320,6 +336,8 @@ impl Scene {
             user_scene_rect: None,
             constraints: SceneConstraints::new(),
             item_change_signal: Signal::new(ItemChange::Added { id: ItemId(0) }),
+            a11y_change_signal: Signal::new(0),
+            mutation_seq: Cell::new(0),
             a11y_groups: Vec::new(),
             a11y_group_index: HashMap::new(),
             a11y_parents: HashMap::new(),
@@ -423,7 +441,12 @@ impl Scene {
     /// Called by [`SceneView`](crate::SceneView) at the start of each
     /// `build()` so signal-driven bounds propagate to bucketing
     /// without explicit app-side calls.
-    pub fn refresh_dynamic_bounds(&mut self) {
+    ///
+    /// Returns `true` if at least one dynamic entry's bounds changed this call.
+    /// `SceneView` uses the `true → false` transition (an animation settling) as
+    /// the one moment to walk the final animated bounds into the AccessKit tree,
+    /// since it otherwise suppresses per-frame AT re-walks during the animation.
+    pub fn refresh_dynamic_bounds(&mut self) -> bool {
         // Snapshot ids first to avoid borrow conflicts.
         let dynamic_ids: Vec<ItemId> = self
             .entries
@@ -431,6 +454,7 @@ impl Scene {
             .filter(|e| e.dynamic_bounds)
             .map(|e| e.id)
             .collect();
+        let mut changed = false;
         for id in dynamic_ids {
             let Some(&pos) = self.entry_index.get(&id) else {
                 continue;
@@ -441,8 +465,10 @@ impl Scene {
             let new = item.local_bounds();
             if new != self.entries[pos].local_bounds {
                 self.set_local_bounds(id, new);
+                changed = true;
             }
         }
+        changed
     }
 
     fn push_entry(&mut self, entry: SceneEntry) -> ItemId {
@@ -452,7 +478,7 @@ impl Scene {
         self.entry_index.insert(id, pos);
         let aabb = self.compute_scene_aabb(id).unwrap_or(Rect::ZERO);
         self.index.insert(id, aabb);
-        self.item_change_signal.set(ItemChange::Added { id });
+        self.emit_item_change(ItemChange::Added { id });
         id
     }
 
@@ -464,6 +490,59 @@ impl Scene {
     /// the Scene already reflects the new state.
     pub fn item_change_signal(&self) -> Signal<ItemChange> {
         self.item_change_signal.clone()
+    }
+
+    /// Reactive notification for logical-AT-structure mutations
+    /// (`add_a11y_group` / `remove_a11y_group` / `set_a11y_parent` /
+    /// `add_a11y_relation` / `set_a11y_live` / `set_a11y_landmark` /
+    /// `set_a11y_categories`). A monotonic counter bumped after each such
+    /// mutation. `SceneView` observes this to re-walk the AccessKit tree —
+    /// these changes don't flow through [`item_change_signal`](Self::item_change_signal)
+    /// because they aren't item geometry, and the AT tree is separate from the
+    /// visual scene.
+    pub fn a11y_change_signal(&self) -> Signal<u64> {
+        self.a11y_change_signal.clone()
+    }
+
+    /// Bump the logical-AT-structure change counter. Called at the end of every
+    /// a11y-structure mutator so observers re-walk AccessKit. Also advances the
+    /// unified [`mutation_version`](Self::mutation_version) so a logical-AT
+    /// mutation (which never fires `item_change_signal`) still un-gates the
+    /// SceneView's AT re-walk.
+    fn bump_a11y_change(&self) {
+        self.a11y_change_signal
+            .set(self.a11y_change_signal.get().wrapping_add(1));
+        self.bump_mutation();
+    }
+
+    /// Fire an [`ItemChange`] through `item_change_signal` and advance the
+    /// unified [`mutation_version`](Self::mutation_version). The single choke
+    /// point every geometry / visibility / structure mutation routes through, so
+    /// the version counts each one without per-site bookkeeping.
+    fn emit_item_change(&self, change: ItemChange) {
+        self.bump_mutation();
+        self.item_change_signal.set(change);
+    }
+
+    /// Advance the unified model-mutation counter (wrapping). Shared by
+    /// `emit_item_change` and `bump_a11y_change`; `&self` because both notify
+    /// paths are `&self`.
+    fn bump_mutation(&self) {
+        self.mutation_seq.set(self.mutation_seq.get().wrapping_add(1));
+    }
+
+    /// Monotonic counter of every model mutation applied so far — item geometry
+    /// / visibility / structure (each [`ItemChange`]) **and** logical-AT
+    /// structure (groups, parents, relations, live, landmarks, categories).
+    ///
+    /// [`SceneView`](crate::SceneView) snapshots this each `build()` and only
+    /// re-walks the (separate, expensive) AccessKit tree when it has advanced
+    /// since the previous walk — so an actively-animating
+    /// [`add_item_dynamic`](Self::add_item_dynamic) item, which rebuilds every
+    /// frame, does not issue an AT re-walk per frame. The counter wraps; compare
+    /// for equality, not ordering.
+    pub fn mutation_version(&self) -> u64 {
+        self.mutation_seq.get()
     }
 
     // -----------------------------------------------------------------
@@ -488,7 +567,7 @@ impl Scene {
             }
             self.entries[pos].local_pos = local_pos;
             self.rebucket_subtree(id);
-            self.item_change_signal.set(ItemChange::LocalPosChanged {
+            self.emit_item_change(ItemChange::LocalPosChanged {
                 id,
                 old,
                 new: local_pos,
@@ -521,7 +600,7 @@ impl Scene {
             // descendants' local frames are unchanged.
             let aabb = self.compute_scene_aabb(id).unwrap_or(Rect::ZERO);
             self.index.insert(id, aabb);
-            self.item_change_signal.set(ItemChange::LocalBoundsChanged {
+            self.emit_item_change(ItemChange::LocalBoundsChanged {
                 id,
                 old,
                 new: local_bounds,
@@ -542,8 +621,7 @@ impl Scene {
         if let Some(&pos) = self.entry_index.get(&id) {
             self.entries[pos].transform = transform;
             self.rebucket_subtree(id);
-            self.item_change_signal
-                .set(ItemChange::TransformChanged { id });
+            self.emit_item_change(ItemChange::TransformChanged { id });
         }
     }
 
@@ -651,7 +729,7 @@ impl Scene {
                 return;
             }
             self.entries[pos].flags = flags;
-            self.item_change_signal.set(ItemChange::FlagsChanged {
+            self.emit_item_change(ItemChange::FlagsChanged {
                 id,
                 old,
                 new: flags,
@@ -667,11 +745,9 @@ impl Scene {
             let new = self.entries[pos].flags;
             if old != new {
                 if flag == ItemFlags::IS_VISIBLE {
-                    self.item_change_signal
-                        .set(ItemChange::VisibilityChanged { id, visible: on });
+                    self.emit_item_change(ItemChange::VisibilityChanged { id, visible: on });
                 }
-                self.item_change_signal
-                    .set(ItemChange::FlagsChanged { id, old, new });
+                self.emit_item_change(ItemChange::FlagsChanged { id, old, new });
             }
         }
     }
@@ -721,8 +797,7 @@ impl Scene {
                 return;
             }
             self.entries[pos].opacity = new;
-            self.item_change_signal
-                .set(ItemChange::OpacityChanged { id, old, new });
+            self.emit_item_change(ItemChange::OpacityChanged { id, old, new });
         }
     }
 
@@ -912,8 +987,7 @@ impl Scene {
                 return;
             }
             self.entries[pos].z = z;
-            self.item_change_signal
-                .set(ItemChange::ZChanged { id, old, new: z });
+            self.emit_item_change(ItemChange::ZChanged { id, old, new: z });
         }
     }
 
@@ -969,7 +1043,7 @@ impl Scene {
                 return;
             }
             self.entries[pos].layer = layer;
-            self.item_change_signal.set(ItemChange::LayerChanged {
+            self.emit_item_change(ItemChange::LayerChanged {
                 id,
                 old,
                 new: layer,
@@ -1019,7 +1093,7 @@ impl Scene {
             }
             self.entries[pos].parent = parent;
             self.rebucket_subtree(child);
-            self.item_change_signal.set(ItemChange::ParentChanged {
+            self.emit_item_change(ItemChange::ParentChanged {
                 id: child,
                 old,
                 new: parent,
@@ -1123,10 +1197,30 @@ impl Scene {
         for (pos, entry) in self.entries.iter().enumerate() {
             self.entry_index.insert(entry.id, pos);
         }
+        // The AT tree is separate from the visual tree, but a visually-removed
+        // item must also vanish from AccessKit. Drop every logical-structure
+        // entry that targets a removed item. For `a11y_parents` this also
+        // re-roots any *still-alive* node that was AT-parented under a removed
+        // item — dropping the `(child → removed)` mapping makes the child fall
+        // back to the SceneView root (mirrors `remove_a11y_group`). Removal
+        // itself fires `ItemChange::Removed`, so `SceneView` already re-walks
+        // AT through the item-change observer; no `a11y_change_signal` bump
+        // is needed here.
+        let is_removed = |n: &A11yNode| matches!(n, A11yNode::Item(i) if removal_set.contains(i));
+        self.a11y_parents
+            .retain(|child, parent| !is_removed(child) && !is_removed(parent));
+        self.a11y_relations
+            .retain(|(from, _, to)| !is_removed(from) && !is_removed(to));
+        for removed_id in &removal_set {
+            let node = A11yNode::Item(*removed_id);
+            self.a11y_live.remove(&node);
+            self.a11y_landmarks.remove(&node);
+            self.a11y_categories.remove(&node);
+        }
+
         for removed_id in to_remove {
             self.index.remove(removed_id);
-            self.item_change_signal
-                .set(ItemChange::Removed { id: removed_id });
+            self.emit_item_change(ItemChange::Removed { id: removed_id });
         }
     }
 
@@ -1163,7 +1257,7 @@ impl Scene {
                 // so spatial-index AABBs are stale. Subtree-walk
                 // because grandchildren depend on the chain too.
                 self.rebucket_subtree(child);
-                self.item_change_signal.set(ItemChange::ParentChanged {
+                self.emit_item_change(ItemChange::ParentChanged {
                     id: child,
                     old: Some(id),
                     new: None,
@@ -1358,6 +1452,7 @@ impl Scene {
         let pos = self.a11y_groups.len();
         self.a11y_groups.push(group);
         self.a11y_group_index.insert(id, pos);
+        self.bump_a11y_change();
         id
     }
 
@@ -1381,6 +1476,7 @@ impl Scene {
         self.a11y_live.remove(&target);
         self.a11y_landmarks.remove(&target);
         self.a11y_categories.remove(&target);
+        self.bump_a11y_change();
     }
 
     /// Borrow a logical group by id.
@@ -1400,6 +1496,7 @@ impl Scene {
                 self.a11y_parents.remove(&child);
             }
         }
+        self.bump_a11y_change();
     }
 
     /// The currently-declared logical parent of a node.
@@ -1410,6 +1507,7 @@ impl Scene {
     /// Declare an AT relationship between two nodes.
     pub fn add_a11y_relation(&mut self, from: A11yNode, kind: A11yRelation, to: A11yNode) {
         self.a11y_relations.push((from, kind, to));
+        self.bump_a11y_change();
     }
 
     /// All declared AT relations.
@@ -1424,6 +1522,7 @@ impl Scene {
         } else {
             self.a11y_live.insert(node, live);
         }
+        self.bump_a11y_change();
     }
 
     /// Mark a node as a landmark by overriding its role. Pass
@@ -1434,6 +1533,7 @@ impl Scene {
         } else {
             self.a11y_landmarks.insert(node, role);
         }
+        self.bump_a11y_change();
     }
 
     /// Tag a node with rotor / quick-nav categories.
@@ -1443,6 +1543,7 @@ impl Scene {
         } else {
             self.a11y_categories.insert(node, categories.to_vec());
         }
+        self.bump_a11y_change();
     }
 
     /// Read declared categories for a node.

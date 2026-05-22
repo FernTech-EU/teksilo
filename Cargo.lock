@@ -4195,6 +4195,7 @@ dependencies = [
 name = "scene-corkboard"
 version = "0.4.0"
 dependencies = [
+ "accesskit",
  "bastyde",
  "bastyde-scene",
 ]

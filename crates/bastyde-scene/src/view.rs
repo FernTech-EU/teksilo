@@ -476,7 +476,7 @@ pub struct SceneView {
     /// only available inside `build`). Without this signal, the
     /// move was queued but never applied — items "snapped back"
     /// to their original positions on drag release.
-    drag_dirty: Signal<u64>,
+    reconcile_dirty: Signal<u64>,
 
     /// Latest pointer position seen on the SceneView (screen-space).
     /// Updated via an on_pointer_event handler in `build`. Used by
@@ -564,6 +564,23 @@ pub struct SceneView {
     /// the SceneView's; dropping it on a fresh `build()` un-installs
     /// the previous observer before re-installing.
     _item_cache_observer: RefCell<Option<bastyde_core::signal::ObserverHandle>>,
+    /// RAII guard for the logical-AT-structure observer wired in `build()`.
+    /// Held by `Self` so a re-build un-installs the previous observer before
+    /// re-installing. Drives a reconcile pass on `Scene::a11y_change_signal`
+    /// (group / parent / relation / live / landmark / category mutations),
+    /// which don't flow through `item_change_signal`.
+    _a11y_observer: RefCell<Option<bastyde_core::signal::ObserverHandle>>,
+    /// [`Scene::mutation_version`] as of the end of the build that last
+    /// requested an AccessKit re-walk. `None` until the first build. `build()`
+    /// re-walks AT only when the version has advanced past this since the last
+    /// walk (a structural / geometry / a11y mutation), so a `build()` driven
+    /// purely by per-frame dynamic-bounds churn does not re-walk AT 60×/s.
+    last_at_version: Option<u64>,
+    /// Whether [`Scene::refresh_dynamic_bounds`] reported a change on the
+    /// *previous* build. The `true → false` edge (an animation settling) walks
+    /// the final animated bounds into AT once — the one AT update the
+    /// version-delta gate would otherwise miss while suppressing the churn.
+    dynamic_churning: bool,
 }
 
 impl std::fmt::Debug for SceneView {
@@ -602,19 +619,8 @@ impl SceneView {
         // it's stable across rebuilds. The same instance is used by
         // `set_content_transform` in `build` and exposed publicly via
         // [`view_transform_signal`](Self::view_transform_signal).
-        let view_transform_signal = pan_x
-            .zip3(&pan_y, &zoom)
-            .zip(&rotation)
-            .zip(&bounds_origin_signal)
-            // Coalesce the five underlying sources into one. Without
-            // this, every animation tick that updates pan/zoom/rotation
-            // simultaneously would register five binding entries per
-            // observing widget, multiplying the per-tick dirty-poll
-            // work. `map_coalesced` collapses to a single composite
-            // source with the same dirty-on-any / clear-all semantics.
-            .map_coalesced(|(((px, py, z), r), bo)| {
-                compose_view(Vec2::new(*px + bo.x, *py + bo.y), *z, *r)
-            });
+        let view_transform_signal =
+            Self::compose_view_transform(&pan_x, &pan_y, &zoom, &rotation, &bounds_origin_signal);
         Self {
             scene,
             materialized: HashMap::new(),
@@ -650,7 +656,7 @@ impl SceneView {
             drag_target: Rc::new(Cell::new(None)),
             pending_item_move: Rc::new(Cell::new(None)),
             lightweight_bounds_snapshot: Rc::new(RefCell::new(Vec::new())),
-            drag_dirty: Signal::new(0),
+            reconcile_dirty: Signal::new(0),
             cursor_pos: Rc::new(Cell::new(None)),
             focus_order_callback: None,
             a11y_nested: false,
@@ -661,6 +667,9 @@ impl SceneView {
             foreground_paint: None,
             item_cache: Rc::new(RefCell::new(crate::cache::ItemCoordinateCache::new())),
             _item_cache_observer: RefCell::new(None),
+            _a11y_observer: RefCell::new(None),
+            last_at_version: None,
+            dynamic_churning: false,
         }
     }
 
@@ -1002,6 +1011,82 @@ impl SceneView {
         self
     }
 
+    /// Compose the derived view-transform signal from the four view-state
+    /// signals plus the bounds origin. Coalesced so a simultaneous pan/zoom/
+    /// rotation tick registers a single binding per observing widget (instead
+    /// of five). Called in `new` and re-called by
+    /// [`bind_view_state`](Self::bind_view_state) after the signals are swapped.
+    fn compose_view_transform(
+        pan_x: &Signal<f32>,
+        pan_y: &Signal<f32>,
+        zoom: &Signal<f32>,
+        rotation: &Signal<f32>,
+        bounds_origin: &Signal<Vec2>,
+    ) -> Signal<Transform2D> {
+        pan_x
+            .zip3(pan_y, zoom)
+            .zip(rotation)
+            .zip(bounds_origin)
+            .map_coalesced(|(((px, py, z), r), bo)| {
+                compose_view(Vec2::new(*px + bo.x, *py + bo.y), *z, *r)
+            })
+    }
+
+    /// Replace the view's pan / zoom / rotation signals with app-owned ones.
+    ///
+    /// The four view-state signals become the app's to hold, share, and
+    /// persist — so view state survives a *rebuild-from-state* (a wrapper that
+    /// reconstructs the `Scene` + `SceneView` keeps the same signals and the
+    /// viewport doesn't jump back to the origin), a "Reset View" button can
+    /// snap them, and two views could share one camera. The derived
+    /// [`view_transform_signal`](Self::view_transform_signal) is recomposed
+    /// from the injected signals.
+    ///
+    /// Must be called before the view is added to the tree (like the other
+    /// builder methods) — `build()` reads `view_transform_signal` once.
+    pub fn bind_view_state(
+        mut self,
+        pan_x: Signal<f32>,
+        pan_y: Signal<f32>,
+        zoom: Signal<f32>,
+        rotation: Signal<f32>,
+    ) -> Self {
+        // Recompose first (borrows the new signals), then move them into self.
+        self.view_transform_signal = Self::compose_view_transform(
+            &pan_x,
+            &pan_y,
+            &zoom,
+            &rotation,
+            &self.bounds_origin_signal,
+        );
+        self.pan_x = pan_x;
+        self.pan_y = pan_y;
+        self.zoom = zoom;
+        self.rotation = rotation;
+        self
+    }
+
+    /// Seed the initial pan offset (logical pixels). The view keeps ownership
+    /// of the signals; for app-owned signals use [`bind_view_state`](Self::bind_view_state).
+    pub fn initial_pan(self, x: f32, y: f32) -> Self {
+        self.pan_x.set(x);
+        self.pan_y.set(y);
+        self
+    }
+
+    /// Seed the initial zoom factor (clamped to the active zoom range).
+    pub fn initial_zoom(self, zoom: f32) -> Self {
+        let gated = self.gate_zoom_target(zoom);
+        self.zoom.set(gated);
+        self
+    }
+
+    /// Seed the initial rotation (radians).
+    pub fn initial_rotation(self, radians: f32) -> Self {
+        self.rotation.set(radians);
+        self
+    }
+
     /// Reactive accessor for the drag mode. Useful for toolbars
     /// that need to read the current mode (e.g. to highlight the
     /// active tool button) and write to it.
@@ -1153,10 +1238,24 @@ impl SceneView {
         &self.scene
     }
 
-    /// Mutable access to the underlying scene model. Intended for
-    /// pre-build configuration or runtime mutation
-    /// after `SceneView` has been added to the tree, fresh
-    /// `add_widget` calls take effect on the next rebuild.
+    /// Mutable access to the underlying scene model.
+    ///
+    /// Use it freely **before** the view is added to the tree (pre-build
+    /// configuration). **After** the view is mounted, a handler reaches it via
+    /// the deferred [`EventContext::with_widget_mut`] channel:
+    ///
+    /// ```ignore
+    /// ctx.with_widget_mut::<SceneView>(view_id, BindingLevel::Rebuild, |view| {
+    ///     view.scene_mut().add_widget(card, rect);
+    /// });
+    /// ```
+    ///
+    /// The view self-reconciles on every mutation: `add_widget` /
+    /// `add_item` materialise on the next rebuild, `remove` destroys the
+    /// orphaned arena widget and cleans its maps, and **both** the visual tree
+    /// and the *separate* AccessKit tree re-walk (geometry, reparents, and
+    /// pure-a11y mutations all reach assistive tech — `build()` requests an AT
+    /// re-walk, since a relayout no longer does so on its own).
     pub fn scene_mut(&mut self) -> &mut Scene {
         &mut self.scene
     }
@@ -1668,7 +1767,7 @@ impl SceneView {
 impl Widget for SceneView {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // Drain any pending drag-to-move commit. The drop closure
-        // queued `(target_id, delta)` and bumped `drag_dirty` which
+        // queued `(target_id, delta)` and bumped `reconcile_dirty` which
         // flagged this widget for rebuild. Translate the dragged
         // item's `local_pos` by the queued delta — descendants
         // follow automatically because their `local_pos` is
@@ -1695,17 +1794,43 @@ impl Widget for SceneView {
             self.marquee.set(None);
         }
 
+        // --- AccessKit re-walk gate (version delta) ----------------------
+        // Snapshot the model mutation version *before* refreshing dynamic
+        // bounds. If it advanced since the build that last walked AT, a discrete
+        // mutation happened — an app add / remove / move / reparent, a logical-AT
+        // change, or the drag-to-move drained just above — so the (separate)
+        // AccessKit tree must be re-walked. The per-frame dynamic-bounds churn
+        // from `refresh_dynamic_bounds` below is deliberately *excluded* from
+        // this comparison: an actively-animating `add_item_dynamic` item rebuilds
+        // every frame, and re-walking AT 60×/s for sub-pixel bounds drift is
+        // pure waste a screen reader can't use. `None` (first build) compares
+        // unequal, so the initial AT population is never gated out.
+        let version_before_refresh = self.scene.mutation_version();
+        let structural_at_change = self.last_at_version != Some(version_before_refresh);
+
         // Pull fresh `local_bounds` for every item flagged
         // `dynamic_bounds` (added via [`Scene::add_item_dynamic`]).
         // Static items pay nothing here; dynamic items get their
         // signal-driven AABBs read back into the entry + spatial
         // index so hit-test and viewport-cull stay correct.
-        self.scene.refresh_dynamic_bounds();
+        let dynamic_changed = self.scene.refresh_dynamic_bounds();
+        // The one AT update the version gate would otherwise miss: when a
+        // dynamic-bounds animation *settles* (changing last build, steady now),
+        // walk its final bounds into AT exactly once so the resting geometry is
+        // correct for assistive tech.
+        let dynamic_settled = self.dynamic_churning && !dynamic_changed;
+        self.dynamic_churning = dynamic_changed;
+        // Baseline for the next build's `structural_at_change` test: the version
+        // *after* this build's own (excluded) dynamic-bounds churn. Every scene
+        // mutation inside build() happens at or above this point (the drains and
+        // the refresh); materialise / orphan-reap / z-sort below only touch the
+        // arena, not the Scene model — so this snapshot is stable to end-of-build.
+        self.last_at_version = Some(self.scene.mutation_version());
 
         // Bind the drag-rebuild signal so the next drop triggers a
         // rebuild and the drains above run. `BindingLevel::Rebuild`
         // is the level that re-runs `build()` on signal change.
-        self.drag_dirty
+        self.reconcile_dirty
             .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
         // Wire the item-coordinate cache invalidation observer.
@@ -1720,27 +1845,59 @@ impl Widget for SceneView {
         // re-installing.
         {
             let cache = self.item_cache.clone();
-            let drag_dirty = self.drag_dirty.clone();
+            let reconcile_dirty = self.reconcile_dirty.clone();
             let handle = self.scene.item_change_signal().observe(move |change| {
                 use crate::scene::ItemChange;
+                // The item cache holds *local-coordinate* paint output, so only
+                // a geometry change or a removal can invalidate a cached frame;
+                // pos / transform / opacity / z / layer / flags are re-applied
+                // as wrapping scopes at replay and don't bake into the cache.
                 match *change {
-                    ItemChange::LocalBoundsChanged { id, .. } | ItemChange::Removed { id } => {
+                    ItemChange::Removed { id } | ItemChange::LocalBoundsChanged { id, .. } => {
                         cache.borrow_mut().evict(id);
-                    }
-                    // A z-change must restack the heavyweight arena children
-                    // (only `build()` reorders them) and a band change moves a
-                    // lightweight item between the paint / post_paint passes.
-                    // Both take effect on rebuild, so bump the rebuild signal.
-                    // Lightweight z is re-sorted every paint, so the rebuild is
-                    // harmless (and cheap — children are preserved) there too.
-                    ItemChange::ZChanged { .. } | ItemChange::LayerChanged { .. } => {
-                        drag_dirty.set(drag_dirty.get().wrapping_add(1));
                     }
                     _ => {}
                 }
+                // EVERY model mutation drives a reconcile pass. A relayout
+                // re-runs `build()` (materialise pending widgets, reap orphaned
+                // ones), re-places children (so screen-projected AccessKit
+                // bounds track moves/transforms), and — via `build()`'s
+                // `request_accessibility_update()` — forces an AT re-walk. A
+                // relayout alone no longer re-walks AT, and the visual scene
+                // and the *separate* AccessKit tree must both follow add /
+                // remove / move / reparent / visibility / opacity / z / layer:
+                // letting any variant fall through silently would desync
+                // assistive tech (and paint) from the model.
+                reconcile_dirty.set(reconcile_dirty.get().wrapping_add(1));
             });
             *self._item_cache_observer.borrow_mut() = Some(handle);
         }
+
+        // Second observer: logical-AT-structure mutations (groups, parents,
+        // relations, live, landmarks, categories) don't fire `item_change_signal`
+        // because they aren't item geometry. Drive a reconcile pass so the next
+        // `build()` calls `request_accessibility_update()` and the (separate)
+        // AccessKit tree re-walks — even for a mutation with no visual change.
+        {
+            let reconcile_dirty = self.reconcile_dirty.clone();
+            let handle = self.scene.a11y_change_signal().observe(move |_| {
+                reconcile_dirty.set(reconcile_dirty.get().wrapping_add(1));
+            });
+            *self._a11y_observer.borrow_mut() = Some(handle);
+        }
+
+        // Snapshot the ids that still have a `Widget` entry, used by the orphan
+        // pass below. Taken before the materialise loop, which neither adds nor
+        // removes entries (it only drains `pending`).
+        let live_widget_ids: std::collections::HashSet<ItemId> = self
+            .scene
+            .entries
+            .iter()
+            .filter_map(|e| match e.kind {
+                crate::scene::SceneEntryKind::Widget { .. } => Some(e.id),
+                crate::scene::SceneEntryKind::Item(_) => None,
+            })
+            .collect();
 
         // Materialise pending widgets (drained the first time, idempotent
         // afterwards). Also keeps the reverse lookup
@@ -1764,6 +1921,41 @@ impl Widget for SceneView {
                     // painted from `SceneView::paint` directly.
                 }
             }
+        }
+
+        // Reap widgets whose scene entry was removed at runtime. SceneView
+        // returns `preserves_children_on_rebuild() == true` (so a drag / marquee
+        // rebuild doesn't destroy the cards), which means the framework's
+        // pre-rebuild destroy loop is skipped — we must destroy our own orphans,
+        // or a removed widget leaks its arena node (plus its signal / animation /
+        // shortcut registrations) and `materialized` / `widget_to_item` grow
+        // unbounded. After the loop `materialized ⊇ live_widget_ids`, so any
+        // surplus entry is exactly an orphan.
+        if self.materialized.len() > live_widget_ids.len() {
+            let orphans: Vec<(ItemId, WidgetId)> = self
+                .materialized
+                .iter()
+                .filter(|(item_id, _)| !live_widget_ids.contains(*item_id))
+                .map(|(item_id, wid)| (*item_id, *wid))
+                .collect();
+            for (item_id, wid) in orphans {
+                ctx.destroy_subtree(wid);
+                self.materialized.remove(&item_id);
+                self.widget_to_item.remove(&wid);
+            }
+        }
+
+        // A relayout no longer re-walks the AccessKit tree, and this build may
+        // have materialised, reaped, moved, or reparented scene content — each
+        // changes the (separate) AT tree or its screen-projected bounds. Re-walk
+        // when the model actually changed since the last walk
+        // (`structural_at_change`, computed from the mutation-version delta
+        // above) or a dynamic-bounds animation just settled (`dynamic_settled`).
+        // `build()` is otherwise interaction-driven — pan / zoom animate via
+        // relayout, not rebuild — and a per-frame `add_item_dynamic` rebuild is
+        // gated out here, so this is not a per-frame AT cost.
+        if structural_at_change || dynamic_settled {
+            ctx.request_accessibility_update();
         }
 
         // Heavyweight z-order: sort the arena children by their scene-entry
@@ -2628,7 +2820,7 @@ impl Widget for SceneView {
             let pending_marquee_commit = self.pending_marquee_commit.clone();
             let drag_target = self.drag_target.clone();
             let pending_item_move = self.pending_item_move.clone();
-            let drag_dirty = self.drag_dirty.clone();
+            let reconcile_dirty = self.reconcile_dirty.clone();
             let view_xform_signal = self.view_transform_signal.clone();
             let bounds_snapshot = self.lightweight_bounds_snapshot.clone();
             let pan_x_for_drag = self.pan_x.clone();
@@ -2779,12 +2971,12 @@ impl Widget for SceneView {
                             // move (where `&mut self.scene` is
                             // available and `Scene::set_local_pos` can
                             // commit + re-bucket the spatial index).
-                            drag_dirty.set(drag_dirty.get().wrapping_add(1));
+                            reconcile_dirty.set(reconcile_dirty.get().wrapping_add(1));
                             return;
                         }
                         // Marquee commit path. Same drain-via-rebuild
                         // pattern as drag-to-move: post the pending
-                        // commit, bump `drag_dirty` so `build()` runs
+                        // commit, bump `reconcile_dirty` so `build()` runs
                         // and drains it (which also clears the
                         // marquee Cell so the visual lasso disappears
                         // after release).
@@ -2799,7 +2991,7 @@ impl Widget for SceneView {
                             None => Rect::ZERO,
                         };
                         pending_marquee_commit.set(Some((scene_rect, state.additive)));
-                        drag_dirty.set(drag_dirty.get().wrapping_add(1));
+                        reconcile_dirty.set(reconcile_dirty.get().wrapping_add(1));
                     }
                 }
             });
@@ -3125,7 +3317,7 @@ impl Widget for SceneView {
         // SceneView's children come from `Scene::add_widget` calls,
         // materialised once on the first build via
         // `ctx.add_boxed(pending.take())`. Subsequent rebuilds —
-        // triggered by `drag_dirty` to drain pending drag-to-move /
+        // triggered by `reconcile_dirty` to drain pending drag-to-move /
         // marquee commits — re-push the same `WidgetId`s without
         // calling `ctx.add_boxed` again (the `pending` slot is
         // already taken). The default rebuild semantics would

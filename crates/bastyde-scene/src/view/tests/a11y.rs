@@ -255,19 +255,17 @@ fn invisible_items_can_still_have_a11y_metadata_attached() {
 }
 
 // -----------------------------------------------------------------
-// Defensive: orphan a11y references survive item removal
+// Item removal cleans the logical-AT maps (separated-tree re-rooting)
 // -----------------------------------------------------------------
 
 #[test]
-fn a11y_parent_to_removed_item_is_left_dangling_by_design() {
-    // The doc for Scene::remove_a11y_group says it cleans up
-    // refs to the removed group. There's no equivalent cleanup
-    // for removing an Item — the a11y_parents map keeps the
-    // stale reference. The walker is expected to fall back
-    // gracefully (the parent target won't resolve and the child
-    // ends up at scene root). This test pins that behavior so a
-    // future change to cascade item removal into a11y_parents
-    // doesn't silently regress.
+fn removing_an_item_re_roots_its_a11y_children() {
+    // `Scene::remove` cleans the logical-AT maps for the removed item, the
+    // same way `remove_a11y_group` does for a removed group. A still-alive node
+    // whose declared a11y_parent was the removed item falls back to the
+    // SceneView root: its explicit-parent mapping is dropped. This keeps the
+    // (separate) AccessKit tree from carrying a dangling reference to a gone
+    // item — part of "a11y must follow any change".
     let mut scene = Scene::new();
     let parent_item = scene.add_item(rect_at(0.0, 0.0), Point::ZERO);
     let child_item = scene.add_item(rect_at(20.0, 0.0), Point::ZERO);
@@ -276,14 +274,10 @@ fn a11y_parent_to_removed_item_is_left_dangling_by_design() {
         Some(A11yNode::Item(parent_item)),
     );
     scene.remove(parent_item);
-    // Reference survives (intended for now; documenting
-    // current behaviour as a regression pin, not as desired
-    // semantics).
     assert_eq!(
         scene.a11y_parent_of(A11yNode::Item(child_item)),
-        Some(A11yNode::Item(parent_item)),
-        "current behaviour: a11y_parent ref to removed item is NOT cleaned up; \
-         change this test if cascade-cleanup is added later"
+        None,
+        "removing an item must drop a11y_parent refs that target it (the child re-roots)"
     );
     let _ = (parent_item, child_item);
 }

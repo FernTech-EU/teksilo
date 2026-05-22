@@ -5,6 +5,7 @@
 mod a11y;
 mod edge_cases;
 mod nested;
+mod runtime_mutation;
 
 use super::*;
 use bastyde_core::widget_tree::WidgetTree;
@@ -2236,7 +2237,7 @@ fn drag_to_move_translates_lightweight_item() {
 #[test]
 fn drag_to_move_persists_via_rebuild_signal_no_snap_back() {
     // Regression: real apps don't call `flush_pending_item_move`
-    // — they rely on the `drag_dirty` rebuild signal to drain
+    // — they rely on the `reconcile_dirty` rebuild signal to drain
     // the pending commit on the next layout pass. Drive a drag
     // end and then run a layout; the position must persist.
     // Drive a SECOND drag from the new position; the position
@@ -2279,18 +2280,18 @@ fn drag_to_move_persists_via_rebuild_signal_no_snap_back() {
     });
 
     // After Ended the on_drag closure must have posted a
-    // pending move and bumped drag_dirty.
+    // pending move and bumped reconcile_dirty.
     {
         let view = view_handle(&tree, view_id);
         assert!(
             view.pending_item_move.get().is_some(),
             "drag end must post pending_item_move"
         );
-        assert!(view.drag_dirty.get() > 0, "drag end must bump drag_dirty");
+        assert!(view.reconcile_dirty.get() > 0, "drag end must bump reconcile_dirty");
     }
 
     // Real apps' layout cycle runs after event dispatch, where
-    // drag_dirty (bumped on Ended) triggers the rebuild that
+    // reconcile_dirty (bumped on Ended) triggers the rebuild that
     // drains the pending commit.
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
@@ -2496,7 +2497,7 @@ fn parent_child_drag_persists_across_two_drags() {
 fn looping_item_animation_survives_drag_end_rebuild() {
     // Showcase regression: dropping a draggable square in section 5
     // froze the PulsingDot animations in section 8. Cause: the
-    // `drag_dirty` rebuild cancels animations owned by SceneView,
+    // `reconcile_dirty` rebuild cancels animations owned by SceneView,
     // and the items' `register_bindings` must re-register and
     // re-arm `animate_looping` so the loop resumes on the next
     // pending-pickup pass.
@@ -2572,7 +2573,7 @@ fn looping_item_animation_survives_drag_end_rebuild() {
         );
     }
 
-    // Drag the rect — Down/Move/Up. This bumps drag_dirty, which
+    // Drag the rect — Down/Move/Up. This bumps reconcile_dirty, which
     // triggers a SceneView rebuild on the next layout pass, which
     // is where the regression bites.
     tree.pointer_move(Point::new(20.0, 20.0));
