@@ -321,8 +321,8 @@ fn build_scope_panel(
 
     if supported.anonymous_metrics {
         column = column.child(scope_row(
-            tr_widget!(privacy_scope_anonymous_metrics_label()).resolve_now(),
-            tr_widget!(privacy_scope_anonymous_metrics_description()).resolve_now(),
+            tr_widget!(privacy_scope_anonymous_metrics_label()),
+            tr_widget!(privacy_scope_anonymous_metrics_description()),
             current_value(state, |s| s.anonymous_metrics),
             !matches!(state, ConsentState::Denied),
             telemetry.consent.clone(),
@@ -332,8 +332,8 @@ fn build_scope_panel(
     }
     if supported.crash_reports {
         column = column.child(scope_row(
-            tr_widget!(privacy_scope_crash_reports_label()).resolve_now(),
-            tr_widget!(privacy_scope_crash_reports_description()).resolve_now(),
+            tr_widget!(privacy_scope_crash_reports_label()),
+            tr_widget!(privacy_scope_crash_reports_description()),
             current_value(state, |s| s.crash_reports),
             !matches!(state, ConsentState::Denied),
             telemetry.consent.clone(),
@@ -343,8 +343,8 @@ fn build_scope_panel(
     }
     if supported.feature_flags {
         column = column.child(scope_row(
-            tr_widget!(privacy_scope_feature_flags_label()).resolve_now(),
-            tr_widget!(privacy_scope_feature_flags_description()).resolve_now(),
+            tr_widget!(privacy_scope_feature_flags_label()),
+            tr_widget!(privacy_scope_feature_flags_description()),
             current_value(state, |s| s.feature_flags),
             !matches!(state, ConsentState::Denied),
             telemetry.consent.clone(),
@@ -363,8 +363,8 @@ fn current_value(state: &ConsentState, f: impl FnOnce(&ConsentScope) -> bool) ->
 }
 
 fn scope_row(
-    label: String,
-    description: String,
+    label: bastyde_i18n::LocalizedString,
+    description: bastyde_i18n::LocalizedString,
     initial: bool,
     enabled: bool,
     consent: ConsentStore,
@@ -391,11 +391,11 @@ fn scope_row(
         .child(
             VStack::new()
                 .spacing(2.0)
-                .child(TextWidget::new(lit!(label.clone())).style(TextStyleRole::Body))
-                .child(TextWidget::new(lit!(description)).style(TextStyleRole::Small)),
+                .child(TextWidget::new(label.clone()).style(TextStyleRole::Body))
+                .child(TextWidget::new(description).style(TextStyleRole::Small)),
         )
         .child(Spacer::new())
-        .child(Toggle::new(signal).label(lit!(label)).enabled(enabled))
+        .child(Toggle::new(signal).label(label).enabled(enabled))
 }
 
 fn build_accept_reject(telemetry: &OpenedTelemetry, endpoint: &str) -> HStack {
