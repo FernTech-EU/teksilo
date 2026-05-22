@@ -268,7 +268,7 @@ impl Widget for PopoverSurface {
 }
 
 pub struct Popover {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     variant: ButtonVariant,
     enabled: bool,
     placement: OverlayPlacement,
@@ -307,7 +307,7 @@ impl Popover {
     pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: ls,
             variant: ButtonVariant::Plain,
             enabled: true,
             placement: OverlayPlacement::BelowPreferred,
@@ -452,7 +452,7 @@ impl Widget for Popover {
         let surface_cfg = bastyde_core::styles::PopoverStyleConfig {
             content: inner_content_id,
             variant: self.surface_variant,
-            name: label.clone(),
+            name: label.resolve_now(),
             placement: placement.clone(),
             show_caret,
             caret_size,

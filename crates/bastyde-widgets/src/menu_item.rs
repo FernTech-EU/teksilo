@@ -49,7 +49,7 @@ const DEFAULT_SUBMENU_CLOSE_DELAY: Duration = Duration::from_millis(150);
 
 /// A single menu item: icon + label + shortcut label + optional submenu chevron.
 pub struct MenuItem {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     icon: Option<IconWidget>,
     shortcut_label: Option<String>,
     /// Optional shortcut id. When set and [`shortcut_label`] is not,
@@ -92,7 +92,7 @@ impl MenuItem {
     pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: ls,
             icon: None,
             shortcut_label: None,
             shortcut_id: None,
@@ -124,8 +124,8 @@ impl MenuItem {
     /// Read the item's display label. Exposed so SplitButton (and any other
     /// compound widget that embeds a MenuItem) can mirror the label in its
     /// own chrome.
-    pub fn label(&self) -> &str {
-        &self.label
+    pub fn label(&self) -> String {
+        self.label.resolve_now()
     }
 
     /// Clone out a shared handle to the activation closure. Returns `None`
@@ -227,7 +227,7 @@ impl MenuItem {
     ) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: ls,
             icon: None,
             shortcut_label: None,
             shortcut_id: None,
@@ -335,7 +335,7 @@ impl Widget for MenuItem {
 
         // Label.
         let label = ctx.add(
-            TextWidget::new(lit!(&self.label))
+            TextWidget::new(self.label.clone())
                 .style(TextStyleRole::Body)
                 .bind_color(text_role.clone())
                 .single_line()
@@ -721,7 +721,7 @@ impl Widget for MenuItem {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::MenuItem);
-        builder.set_name(&self.label);
+        builder.set_name(self.label.resolve_now());
         // A submenu trigger exposes `has_popup(Menu)` so screen
         // readers announce the item as leading into a nested menu,
         // and `set_expanded` reflects whether the submenu is

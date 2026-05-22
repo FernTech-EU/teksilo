@@ -78,7 +78,7 @@ const UNBOUNDED: f32 = 10_000.0;
 /// are a small `IconWidget`, a `Checkbox` (checkable section), a
 /// `Badge` (count), or a `Button` (per-row action).
 pub struct ToolBoxItem {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     leading: Option<Box<dyn Widget>>,
     trailing: Option<Box<dyn Widget>>,
     /// Plain-text tooltip body. Mutually exclusive with `rich_tooltip`
@@ -111,7 +111,7 @@ impl ToolBoxItem {
     pub fn new(label: impl Into<LocalizedString>, content: impl Widget + 'static) -> Self {
         let ls: LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: ls,
             leading: None,
             trailing: None,
             tooltip_text: None,
@@ -125,7 +125,7 @@ impl ToolBoxItem {
     pub fn new_id(label: impl Into<LocalizedString>, content_id: WidgetId) -> Self {
         let ls: LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: ls,
             leading: None,
             trailing: None,
             tooltip_text: None,
@@ -311,7 +311,7 @@ fn last_enabled_index(enabled: &[bool]) -> Option<usize> {
 
 #[derive(Debug)]
 struct ToolBoxHeader {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     index: usize,
     /// Structural per-item enabled flag. Forwarded into the arena at
     /// build time; the arena is then the single source of truth (events,
@@ -345,7 +345,7 @@ struct ToolBoxHeader {
 impl ToolBoxHeader {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        label: String,
+        label: bastyde_i18n::LocalizedString,
         index: usize,
         initial_enabled: bool,
         selected: Signal<usize>,
@@ -478,7 +478,7 @@ impl Widget for ToolBoxHeader {
         // Label — single-line, clips with ellipsis if the header is
         // narrower than the text.
         let label_id = ctx.add(
-            TextWidget::new(lit!(&self.label))
+            TextWidget::new(self.label.clone())
                 .bind_color(text_role.clone())
                 .style(TextStyleRole::Body)
                 .single_line()
@@ -730,7 +730,7 @@ impl Widget for ToolBoxHeader {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         use bastyde_core::accesskit::{Action, Role};
         builder.set_role(Role::Button);
-        builder.set_name(&self.label);
+        builder.set_name(self.label.resolve_now());
         let is_active = self.selected.get() == self.index;
         builder.set_expanded(is_active);
         // Framework a11y walker auto-emits `set_disabled()` when
@@ -764,7 +764,7 @@ enum HeaderInteraction {
 
 #[derive(Debug)]
 struct ToolBoxPanel {
-    label: String,
+    label: bastyde_i18n::LocalizedString,
     selected: Signal<usize>,
     index: usize,
     content: Option<PendingChild>,
@@ -772,7 +772,7 @@ struct ToolBoxPanel {
 }
 
 impl ToolBoxPanel {
-    fn new(label: String, selected: Signal<usize>, index: usize, content: PendingChild) -> Self {
+    fn new(label: LocalizedString, selected: Signal<usize>, index: usize, content: PendingChild) -> Self {
         Self {
             label,
             selected,
@@ -842,7 +842,7 @@ impl Widget for ToolBoxPanel {
         // `Region` is the ARIA role for a labelled landmark section. Used
         // by screen readers to announce the panel as "Region: <label>".
         builder.set_role(Role::Region);
-        builder.set_name(&self.label);
+        builder.set_name(self.label.resolve_now());
         // Collapsed panels must be hidden from AT — they're kept in the
         // widget tree for animation purposes, but their content is at
         // height=0 and should not be navigable by screen readers.

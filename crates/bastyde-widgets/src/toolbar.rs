@@ -23,7 +23,7 @@ pub struct Toolbar {
     pending: Vec<PendingChild>,
     child_ids: Vec<WidgetId>,
     root_child_id: Option<WidgetId>,
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
 }
 
 impl Toolbar {
@@ -54,7 +54,7 @@ impl Toolbar {
     /// "Drawing", etc.).
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
+        self.label = Some(ls);
         self
     }
 }
@@ -135,7 +135,8 @@ impl Widget for Toolbar {
         builder.set_role(bastyde_core::accesskit::Role::Toolbar);
         let name = self
             .label
-            .clone()
+            .as_ref()
+            .map(|l| l.resolve_now())
             .unwrap_or_else(|| bastyde_i18n::tr_widget!(a11y_toolbar_name()).resolve_now());
         builder.set_name(name);
     }
