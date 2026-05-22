@@ -10,7 +10,6 @@
 //! No `paint()` method on this widget — the only canvas work happens
 //! inside the active `ToggleStyle::make_body` subtree.
 
-use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Rect, SizeProposal};
@@ -286,6 +285,7 @@ mod tests {
     use super::*;
     use bastyde_core::event::Modifiers;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn click_toggles_state() {

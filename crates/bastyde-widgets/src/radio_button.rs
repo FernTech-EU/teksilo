@@ -4,7 +4,6 @@
 //! `Signal<usize>` — selecting one automatically deselects others.
 //! V2 attached handlers — no event() override.
 
-use bastyde_i18n::lit;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -405,6 +404,7 @@ impl Widget for RadioButton {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_core::event::Modifiers;
     use bastyde_core::widget_tree::WidgetTree;
 

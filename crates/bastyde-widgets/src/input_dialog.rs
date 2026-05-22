@@ -21,7 +21,6 @@
 //!     .present(ctx);
 //! ```
 
-use bastyde_i18n::lit;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -293,6 +292,7 @@ impl Widget for InputDialogBody {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_core::widget_tree::WidgetTree;
 
     #[test]

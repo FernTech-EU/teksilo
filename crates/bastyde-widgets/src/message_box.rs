@@ -76,7 +76,6 @@
 //! `set_description(text + informative_text)` so screen readers
 //! announce the dialog and its body on open.
 
-use bastyde_i18n::lit;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -939,6 +938,7 @@ impl EventContextMessageBoxExt for EventContext<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_core::ModalContent;
     use bastyde_core::event::WidgetEvent;
     use bastyde_core::widget_tree::WidgetTree;

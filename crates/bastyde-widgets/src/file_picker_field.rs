@@ -16,7 +16,6 @@
 //!     .placeholder("Choose a file…")
 //! ```
 
-use bastyde_i18n::lit;
 use std::path::PathBuf;
 
 use bastyde_canvas::{Rect, SizeProposal};
@@ -298,6 +297,7 @@ fn apply_result(result: &FileDialogResult, text: &Signal<String>, kind: FilePick
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_core::widget_tree::WidgetTree;
 
     #[test]

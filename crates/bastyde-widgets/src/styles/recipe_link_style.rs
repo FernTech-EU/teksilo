@@ -9,7 +9,6 @@ use bastyde_core::build_context::BuildContext;
 use bastyde_core::signal::Signal;
 use bastyde_core::styles::{LinkStyle, LinkStyleConfig};
 use bastyde_core::widget_id::WidgetId;
-use bastyde_i18n::lit;
 use bastyde_tokens::{BorderRole, CornerRadius, TextRole, TextStyleRole};
 
 use crate::primitives::{FixedSize, RectWidget, TextWidget, VStack, ZStack};

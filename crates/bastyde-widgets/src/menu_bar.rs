@@ -27,7 +27,6 @@ use bastyde_core::widget::{
 };
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_i18n::lit;
 use bastyde_tokens::{SurfaceRole, TextStyleRole};
 
 use crate::menu_context::MenuContext;

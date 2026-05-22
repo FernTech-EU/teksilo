@@ -1,4 +1,3 @@
-use bastyde_i18n::lit;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -790,6 +789,7 @@ impl Widget for Dialog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_canvas::Size;
     use bastyde_core::widget_tree::WidgetTree;
     use bastyde_core::{ModalContent, ModalPresentation};

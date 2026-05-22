@@ -27,7 +27,6 @@
 //!     .add(ToolBoxItem::new("Build", build_widget).enabled(false))
 //! ```
 
-use bastyde_i18n::lit;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -954,6 +953,7 @@ impl Widget for ToolBox {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use crate::primitives::TextWidget;
     use bastyde_canvas::SizeProposal;
     use bastyde_core::accesskit;

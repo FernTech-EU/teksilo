@@ -22,15 +22,18 @@ use crate::items::{AccessSubtreeMode, ItemA11yOverrides};
 /// dirties the SceneView via `register_bindings`.
 #[derive(Debug)]
 enum TextSource {
-    Static(String),
     Bound(Signal<String>),
+    /// Localized text; resolved against the active locale on each paint.
+    /// `register_bindings` ties the locale signal to the SceneView so a
+    /// locale switch repaints and re-resolves.
+    Localized(bastyde_i18n::LocalizedString),
 }
 
 impl TextSource {
     fn current(&self) -> String {
         match self {
-            TextSource::Static(s) => s.clone(),
             TextSource::Bound(signal) => signal.get(),
+            TextSource::Localized(ls) => ls.resolve_now(),
         }
     }
 }
@@ -42,7 +45,7 @@ pub struct TextItem {
     text: TextSource,
     local_bounds: Rect,
     color: Color,
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
     flags: ItemFlags,
     a11y: ItemA11yOverrides,
 }
@@ -55,7 +58,7 @@ impl TextItem {
     pub fn new(text: impl Into<bastyde_i18n::LocalizedString>, local_bounds: Rect) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
         Self {
-            text: TextSource::Static(ls.resolve_now()),
+            text: TextSource::Localized(ls),
             local_bounds,
             color: Color::BLACK,
             label: None,
@@ -94,7 +97,7 @@ impl TextItem {
     /// Override the AT label (defaults to the current text content).
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
+        self.label = Some(ls);
         self
     }
 
@@ -121,7 +124,7 @@ impl SceneItem for TextItem {
     }
 
     fn label(&self) -> Option<String> {
-        self.label.clone().or_else(|| Some(self.text.current()))
+        self.label.as_ref().map(|l| l.resolve_now()).or_else(|| Some(self.text.current()))
     }
 
     fn initial_flags(&self) -> ItemFlags {
@@ -143,6 +146,10 @@ impl SceneItem for TextItem {
     fn register_bindings(&self, ctx: &mut BuildContext, view_id: WidgetId) {
         if let TextSource::Bound(signal) = &self.text {
             signal.bind_to(view_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
+        }
+        if matches!(self.text, TextSource::Localized(_)) {
+            ctx.locale_signal()
+                .bind_to(view_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
         }
     }
 }

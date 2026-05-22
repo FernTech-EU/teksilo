@@ -26,7 +26,6 @@
 #[cfg(test)]
 mod tests;
 
-use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Point, Rect, SizeProposal};

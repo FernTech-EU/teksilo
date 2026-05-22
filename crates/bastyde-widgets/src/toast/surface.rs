@@ -6,7 +6,6 @@
 //! chrome (background, padding, layout) is delegated to the active
 //! [`ToastStyle`] via `make_body`.
 
-use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Canvas, Path, Point, Rect, SizeProposal};

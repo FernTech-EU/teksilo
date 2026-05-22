@@ -51,7 +51,6 @@
 #[cfg(test)]
 mod tests;
 
-use bastyde_i18n::lit;
 use bastyde_i18n::localized;
 use std::rc::Rc;
 

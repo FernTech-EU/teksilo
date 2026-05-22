@@ -8,7 +8,6 @@
 //!
 //! V2 attached handlers — no event() override.
 
-use bastyde_i18n::lit;
 use std::rc::Rc;
 
 use bastyde_canvas::{Rect, Size, SizeProposal};
@@ -562,6 +561,7 @@ impl Widget for Checkbox {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
     use bastyde_core::event::Modifiers;
     use bastyde_core::widget_tree::WidgetTree;
 
