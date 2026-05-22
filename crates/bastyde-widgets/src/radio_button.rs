@@ -23,8 +23,8 @@ use crate::primitives::{HStack, MinSize, TextWidget, VStack};
 
 /// A radio button that sets a shared `Signal<usize>` to its value when selected.
 pub struct RadioButton {
-    label: Option<String>,
-    caption: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
+    caption: Option<bastyde_i18n::LocalizedString>,
     value: usize,
     selected: Signal<usize>,
     /// Initial enabled-state; forwarded to the arena at build time.
@@ -72,7 +72,7 @@ impl RadioButton {
 
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
+        self.label = Some(ls);
         self
     }
 
@@ -81,7 +81,7 @@ impl RadioButton {
     /// `text_secondary` style. Has no effect unless `label(...)` is also set.
     pub fn caption(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.caption = Some(ls.resolve_now());
+        self.caption = Some(ls);
         self
     }
 
@@ -212,7 +212,7 @@ impl Widget for RadioButton {
             .spacing(radio_dims::RADIO_LABEL_GAP)
             .add_child(body_id);
         if let Some(ref label) = self.label {
-            let label_widget = TextWidget::new(lit!(label))
+            let label_widget = TextWidget::new(label.clone())
                 .style(TextStyleRole::Body)
                 .color(TextRole::Primary)
                 .single_line()
@@ -220,7 +220,7 @@ impl Widget for RadioButton {
             let label_id = ctx.add(label_widget);
 
             let label_column_id = if let Some(ref caption) = self.caption {
-                let caption_widget = TextWidget::new(lit!(caption))
+                let caption_widget = TextWidget::new(caption.clone())
                     .style(TextStyleRole::Small)
                     .color(TextRole::Secondary)
                     .a11y_hidden();
@@ -376,10 +376,10 @@ impl Widget for RadioButton {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::RadioButton);
         if let Some(ref label) = self.label {
-            builder.set_name(label);
+            builder.set_name(label.resolve_now());
         }
         if let Some(ref caption) = self.caption {
-            builder.set_description(caption);
+            builder.set_description(caption.resolve_now());
         }
         // ARIA role="radio" uses aria-checked (→ AccessKit `toggled`),
         // not aria-selected. `selected` is for options, tabs, and grid cells.

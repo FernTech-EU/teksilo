@@ -41,7 +41,7 @@ pub struct Slider {
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     /// Accessible name, announced by screen readers as the control's label.
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
     variant: SliderVariant,
     tick_count: Option<u32>,
     style_override: Option<SharedSliderStyle>,
@@ -121,7 +121,7 @@ impl Slider {
     /// caller is responsible for labelling via a wrapping element.
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
+        self.label = Some(ls);
         self
     }
 }
@@ -385,7 +385,7 @@ impl Widget for Slider {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::Slider);
         if let Some(ref label) = self.label {
-            builder.set_name(label);
+            builder.set_name(label.resolve_now());
         }
         builder.set_numeric_value(self.value.get() as f64);
         builder.set_min_numeric_value(self.min as f64);

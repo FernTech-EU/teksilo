@@ -32,7 +32,7 @@ pub use bastyde_core::styles::ToggleVariant;
 /// An animated toggle switch bound to a `Signal<bool>`.
 pub struct Toggle {
     on: Signal<bool>,
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     variant: ToggleVariant,
@@ -60,7 +60,7 @@ impl Toggle {
 
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
+        self.label = Some(ls);
         self
     }
 
@@ -136,7 +136,7 @@ impl Widget for Toggle {
         let root = if let Some(ref label) = self.label {
             use crate::primitives::{HStack, TextWidget};
             use bastyde_tokens::TextStyleRole;
-            let label_widget = TextWidget::new(lit!(label.clone())).style(TextStyleRole::Body);
+            let label_widget = TextWidget::new(label.clone()).style(TextStyleRole::Body);
             let label_id = ctx.add(label_widget);
             ctx.add(
                 HStack::new()
@@ -270,7 +270,7 @@ impl Widget for Toggle {
         );
         builder.set_role(bastyde_core::accesskit::Role::Switch);
         if let Some(ref label) = self.label {
-            builder.set_name(label);
+            builder.set_name(label.resolve_now());
         }
         builder.set_toggled(self.on.get());
         // Framework a11y walker sets `set_disabled` from arena state.

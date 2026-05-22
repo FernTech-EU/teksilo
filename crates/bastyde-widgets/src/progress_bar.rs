@@ -52,7 +52,7 @@ pub struct ProgressBar {
     thickness: f32,
     track_color: Option<ColorProp>,
     fill_color: Option<ColorProp>,
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
     /// Per-call override for the stationary chrome (track + determinate fill).
     style_override: Option<SharedProgressBarStyle>,
     root_child_id: Option<WidgetId>,
@@ -132,7 +132,7 @@ impl ProgressBar {
     /// Accessible name for the progress bar.
     pub fn label(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.label = Some(ls.resolve_now());
+        self.label = Some(ls);
         self
     }
 }

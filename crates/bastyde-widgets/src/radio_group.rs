@@ -55,7 +55,7 @@ pub struct RadioGroup {
     pending: Vec<RadioGroupChild>,
     orientation: Orientation,
     spacing: f32,
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
     /// Shared buffer of sibling `WidgetId`s, populated during `build()`.
     /// Each child radio stores this same `Rc` so its `accessibility()`
     /// impl can publish the group membership.
@@ -92,7 +92,7 @@ impl RadioGroup {
     /// Screen readers announce this before individual radio labels.
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
+        self.label = Some(ls);
         self
     }
 
@@ -203,7 +203,7 @@ impl Widget for RadioGroup {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::RadioGroup);
         if let Some(ref name) = self.label {
-            builder.set_name(name);
+            builder.set_name(name.resolve_now());
         }
     }
 

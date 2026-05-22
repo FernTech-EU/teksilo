@@ -99,8 +99,8 @@ impl std::fmt::Debug for CheckKind {
 
 /// A checkbox that toggles a `Signal<bool>` or cycles a `Signal<CheckState>`.
 pub struct Checkbox {
-    label: Option<String>,
-    caption: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
+    caption: Option<bastyde_i18n::LocalizedString>,
     kind: CheckKind,
     /// Initial enabled-state; forwarded into the arena at build time.
     /// After build the arena is the single source of truth — see
@@ -185,7 +185,7 @@ impl Checkbox {
 
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();
-        self.label = Some(ls.resolve_now());
+        self.label = Some(ls);
         self
     }
 
@@ -194,7 +194,7 @@ impl Checkbox {
     /// style. Has no effect unless `label(...)` is also set.
     pub fn caption(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.caption = Some(ls.resolve_now());
+        self.caption = Some(ls);
         self
     }
 
@@ -350,7 +350,7 @@ impl Widget for Checkbox {
         if !self.labels_hidden
             && let Some(ref label) = self.label
         {
-            let label_widget = TextWidget::new(lit!(label))
+            let label_widget = TextWidget::new(label.clone())
                 .style(TextStyleRole::Body)
                 .color(TextRole::Primary)
                 .single_line()
@@ -358,7 +358,7 @@ impl Widget for Checkbox {
             let label_id = ctx.add(label_widget);
 
             let label_column_id = if let Some(ref caption) = self.caption {
-                let caption_widget = TextWidget::new(lit!(caption))
+                let caption_widget = TextWidget::new(caption.clone())
                     .style(TextStyleRole::Small)
                     .color(TextRole::Secondary)
                     .a11y_hidden();
@@ -529,10 +529,10 @@ impl Widget for Checkbox {
         );
         builder.set_role(bastyde_core::accesskit::Role::CheckBox);
         if let Some(ref label) = self.label {
-            builder.set_name(label);
+            builder.set_name(label.resolve_now());
         }
         if let Some(ref caption) = self.caption {
-            builder.set_description(caption);
+            builder.set_description(caption.resolve_now());
         }
         match self.check_state() {
             CheckState::Checked => builder.set_toggled(true),

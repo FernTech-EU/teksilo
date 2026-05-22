@@ -47,7 +47,7 @@ pub struct Spinner {
     arc_fraction: f32,
     stroke_fraction: f32,
     color: ColorProp,
-    label: Option<String>,
+    label: Option<bastyde_i18n::LocalizedString>,
     handle: Option<AnimatedQuadHandle>,
 }
 
@@ -101,7 +101,7 @@ impl Spinner {
     /// with no context.
     pub fn label(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();
-        self.label = Some(ls.resolve_now());
+        self.label = Some(ls);
         self
     }
 }
