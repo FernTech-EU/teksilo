@@ -67,7 +67,7 @@ pub enum IconLocation {
 /// A production-quality button widget — non-generic, composition-based.
 ///
 /// ```ignore
-/// Button::new_literal("Save")
+/// Button::new(lit!("Save"))
 ///     .variant(ButtonVariant::Filled)
 ///     .on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save))
 /// ```
@@ -77,7 +77,7 @@ pub enum IconLocation {
 type CommandFactory = Box<dyn Fn(&mut EventContext)>;
 
 pub struct Button {
-    /// Button label as a `Prop<String>`. `new(...)` / `new_literal(...)`
+    /// Button label as a `Prop<String>`. `new(...)` / `new(lit!(...))`
     /// store `Prop::Static(resolved)`; `bind_label(signal)` upgrades
     /// it to `Prop::Bound`, so the inner `TextWidget` re-renders
     /// reactively without rebuilding the Button. The accessibility
@@ -154,7 +154,7 @@ pub struct Button {
 
 impl Button {
     /// Construct a button from a `LocalizedString` label. The label may
-    /// come from `tr!(...)` (translated) or `LocalizedString::literal(...)`
+    /// come from `tr!(...)` (translated) or `lit!(...)`
     /// (explicit non-translated). The text is resolved eagerly at
     /// construction and stored as a plain `String`; locale changes rebuild
     /// the composite parent, which re-creates this `Button` with a fresh
@@ -389,7 +389,7 @@ impl Button {
     /// Construct the label `TextWidget` used inside the button's
     /// content layout. Always routes through `bind_text(prop)` —
     /// `Prop::Static` and `Prop::Bound` are both handled uniformly
-    /// by the TextWidget. `new_literal("")` seeds the placeholder
+    /// by the TextWidget. `new(lit!(""))` seeds the placeholder
     /// initial text; `bind_text` immediately overwrites it with the
     /// prop's current value (and tracks updates for `Prop::Bound`).
     fn make_label_text(&self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> TextWidget {
@@ -398,6 +398,126 @@ impl Button {
             .bind_color(color)
             .single_line()
             .a11y_hidden()
+    }
+
+    /// Take the configured icon, size it, and bind its tint to `color`.
+    /// Shared by every icon-bearing `IconLocation` arm so the size /
+    /// color wiring lives in one place.
+    ///
+    /// A non-`None` `icon_location` with no icon set is a programming
+    /// error — `.icon(...)` was never called. In debug builds the
+    /// `debug_assert!` surfaces the mistake (mirroring how `Checkbox`
+    /// asserts a missing accessible label); release falls back to an
+    /// empty path so the button still lays out instead of panicking.
+    fn make_icon(&mut self, color: impl Into<bastyde_core::color_prop::ColorProp>) -> IconWidget {
+        use crate::styles::recipe_button_style as btn;
+        debug_assert!(
+            self.icon.is_some(),
+            "Button: icon_location is {:?} but no icon was set via .icon(...)",
+            self.icon_location,
+        );
+        self.icon
+            .take()
+            .unwrap_or_else(|| {
+                IconWidget::from_path(bastyde_canvas::Path::new(), btn::BUTTON_ICON_SIZE)
+            })
+            .icon_size(btn::BUTTON_ICON_SIZE)
+            .bind_color(color)
+    }
+
+    /// Assemble the V2 attached-handler set (tap / hover / key / focus /
+    /// access-action) wired to `interaction`. Takes `self.action`. The
+    /// framework gates pointer / key / access events on
+    /// `arena.is_enabled(self_id)` before dispatch and the focus walker
+    /// skips disabled subtrees, so none of these closures need a
+    /// build-time enabled snapshot — that duality was removed in the
+    /// single-sourced-enabled refactor.
+    fn build_handler_set(&mut self, interaction: Signal<InteractionState>) -> HandlerSet {
+        // Re-wrap action into Rc so it can be shared between the tap,
+        // key, and access-action handlers.
+        let action_rc: Rc<Option<CommandFactory>> = Rc::new(self.action.take());
+        let action_for_tap = action_rc.clone();
+        let action_for_key = action_rc.clone();
+        let action_for_access = action_rc;
+
+        HandlerSet::new()
+            .on_tap({
+                let interaction = interaction.clone();
+                move |_pos, ctx: &mut EventContext| {
+                    if let Some(ref action) = *action_for_tap {
+                        action(ctx);
+                    }
+                    interaction.set(InteractionState::Hovered);
+                }
+            })
+            .on_hover({
+                let interaction = interaction.clone();
+                move |entered: bool, _ctx: &mut EventContext| {
+                    if entered {
+                        interaction.set(InteractionState::Hovered);
+                    } else {
+                        interaction.set(InteractionState::Idle);
+                    }
+                }
+            })
+            .on_key({
+                let interaction = interaction.clone();
+                move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
+                    match event {
+                        WidgetEvent::KeyDown {
+                            key: Key::Space | Key::Enter,
+                            ..
+                        } => {
+                            interaction.set(InteractionState::Pressed);
+                            EventResponse::Handled
+                        }
+                        WidgetEvent::KeyUp {
+                            key: Key::Space | Key::Enter,
+                            ..
+                        } => {
+                            // Fire only if we saw the matching KeyDown. A lone
+                            // KeyUp means the KeyDown was consumed elsewhere
+                            // (shortcut registry, focus transfer) and this
+                            // widget is not the activation target.
+                            if interaction.get() != InteractionState::Pressed {
+                                return EventResponse::Ignored;
+                            }
+                            if let Some(ref action) = *action_for_key {
+                                action(ctx);
+                            }
+                            interaction.set(InteractionState::Focused);
+                            EventResponse::Handled
+                        }
+                        _ => EventResponse::Ignored,
+                    }
+                }
+            })
+            .on_focus({
+                let interaction = interaction.clone();
+                move |gained: bool, _ctx: &mut EventContext| {
+                    if gained {
+                        if interaction.get() == InteractionState::Idle {
+                            interaction.set(InteractionState::Focused);
+                        }
+                    } else {
+                        interaction.set(InteractionState::Idle);
+                    }
+                }
+            })
+            .on_access_action(move |action: bastyde_core::accesskit::Action,
+                                    ctx: &mut EventContext|
+                                    -> EventResponse {
+                if action == bastyde_core::accesskit::Action::Click {
+                    if let Some(ref act) = *action_for_access {
+                        act(ctx);
+                    }
+                    EventResponse::Handled
+                } else {
+                    EventResponse::Ignored
+                }
+            })
+            .focusable(true)
+            .cursor(CursorIcon::Pointer)
     }
 }
 
@@ -522,80 +642,46 @@ impl bastyde_core::widget::Widget for Button {
                     .into()
             };
 
-        // Build the content (icon + label) based on icon_location
-        let content_id = match self.icon_location {
-            IconLocation::None => {
-                let text = self.make_label_text(text_role);
-                ctx.add(text)
-            }
+        // Build the content (icon + label) based on icon_location. The
+        // four directional arms (Leading/Trailing/Top/Bottom) share one
+        // body: build the icon + label, then assemble them into an
+        // HStack or VStack in icon-first / text-first order. Icon size /
+        // color wiring is centralized in `make_icon`.
+        let icon_location = self.icon_location;
+        let content_id = match icon_location {
+            IconLocation::None => ctx.add(self.make_label_text(text_role)),
             IconLocation::IconOnly => {
-                let icon = self.icon.take().unwrap_or_else(|| {
-                    IconWidget::from_path(bastyde_canvas::Path::new(), btn::BUTTON_ICON_SIZE)
-                });
-                let icon = icon.icon_size(btn::BUTTON_ICON_SIZE).bind_color(text_role);
+                let icon = self.make_icon(text_role);
                 ctx.add(icon)
             }
-            IconLocation::Leading => {
-                let icon = self.icon.take().unwrap_or_else(|| {
-                    IconWidget::from_path(bastyde_canvas::Path::new(), btn::BUTTON_ICON_SIZE)
-                });
-                let icon_id = ctx.add(
-                    icon.icon_size(btn::BUTTON_ICON_SIZE)
-                        .bind_color(text_role.clone()),
-                );
-                let text = self.make_label_text(text_role);
-                let text_id = ctx.add(text);
-                ctx.add(
-                    HStack::new()
-                        .spacing(btn::BUTTON_ICON_LABEL_GAP)
-                        .add_child(icon_id)
-                        .add_child(text_id),
-                )
-            }
-            IconLocation::Trailing => {
-                let text = self.make_label_text(text_role.clone());
-                let text_id = ctx.add(text);
-                let icon = self.icon.take().unwrap_or_else(|| {
-                    IconWidget::from_path(bastyde_canvas::Path::new(), btn::BUTTON_ICON_SIZE)
-                });
-                let icon_id = ctx.add(icon.icon_size(btn::BUTTON_ICON_SIZE).bind_color(text_role));
-                ctx.add(
-                    HStack::new()
-                        .spacing(btn::BUTTON_ICON_LABEL_GAP)
-                        .add_child(text_id)
-                        .add_child(icon_id),
-                )
-            }
-            IconLocation::Top => {
-                let icon = self.icon.take().unwrap_or_else(|| {
-                    IconWidget::from_path(bastyde_canvas::Path::new(), btn::BUTTON_ICON_SIZE)
-                });
-                let icon_id = ctx.add(
-                    icon.icon_size(btn::BUTTON_ICON_SIZE)
-                        .bind_color(text_role.clone()),
-                );
-                let text = self.make_label_text(text_role);
-                let text_id = ctx.add(text);
-                ctx.add(
-                    VStack::new()
-                        .spacing(btn::BUTTON_ICON_LABEL_GAP)
-                        .add_child(icon_id)
-                        .add_child(text_id),
-                )
-            }
-            IconLocation::Bottom => {
-                let text = self.make_label_text(text_role.clone());
-                let text_id = ctx.add(text);
-                let icon = self.icon.take().unwrap_or_else(|| {
-                    IconWidget::from_path(bastyde_canvas::Path::new(), btn::BUTTON_ICON_SIZE)
-                });
-                let icon_id = ctx.add(icon.icon_size(btn::BUTTON_ICON_SIZE).bind_color(text_role));
-                ctx.add(
-                    VStack::new()
-                        .spacing(btn::BUTTON_ICON_LABEL_GAP)
-                        .add_child(text_id)
-                        .add_child(icon_id),
-                )
+            // Leading | Trailing | Top | Bottom
+            loc => {
+                let icon_first = matches!(loc, IconLocation::Leading | IconLocation::Top);
+                let vertical = matches!(loc, IconLocation::Top | IconLocation::Bottom);
+                let icon = self.make_icon(text_role.clone());
+                let icon_id = ctx.add(icon);
+                let text_id = ctx.add(self.make_label_text(text_role));
+                let (first, second) = if icon_first {
+                    (icon_id, text_id)
+                } else {
+                    (text_id, icon_id)
+                };
+                let row: Box<dyn Widget> = if vertical {
+                    Box::new(
+                        VStack::new()
+                            .spacing(btn::BUTTON_ICON_LABEL_GAP)
+                            .add_child(first)
+                            .add_child(second),
+                    )
+                } else {
+                    Box::new(
+                        HStack::new()
+                            .spacing(btn::BUTTON_ICON_LABEL_GAP)
+                            .add_child(first)
+                            .add_child(second),
+                    )
+                };
+                ctx.add_boxed(row)
             }
         };
 
@@ -677,111 +763,7 @@ impl bastyde_core::widget::Widget for Button {
 
         self.root_child_id = Some(root_id);
 
-        // --- V2 attached handlers ---
-        let action = self.action.take();
-        let int_tap = interaction.clone();
-        let int_hover_enter = interaction.clone();
-        let int_hover_leave = interaction.clone();
-        let int_key = interaction.clone();
-        let int_focus = interaction.clone();
-        // Re-wrap action into Rc so it can be shared between tap, key, and access handlers
-        let action_rc: std::rc::Rc<Option<CommandFactory>> = std::rc::Rc::new(action);
-        let action_for_tap = action_rc.clone();
-        let action_for_key = action_rc.clone();
-        let action_for_access = action_rc.clone();
-
-        let handler_set = HandlerSet::new()
-            .on_tap({
-                let interaction = int_tap;
-                // The framework gates pointer/key events on
-                // `arena.is_enabled(self_id)` before dispatch, so a
-                // disabled subtree never reaches this closure. No
-                // redundant `if !enabled { return; }` guard — that
-                // path captured a build-time snapshot which is gone.
-                move |_pos, ctx: &mut EventContext| {
-                    if let Some(ref action) = *action_for_tap {
-                        action(ctx);
-                    }
-                    interaction.set(InteractionState::Hovered);
-                }
-            })
-            .on_hover({
-                let int_enter = int_hover_enter;
-                let int_leave = int_hover_leave;
-                move |entered: bool, _ctx: &mut EventContext| {
-                    if entered {
-                        int_enter.set(InteractionState::Hovered);
-                    } else {
-                        int_leave.set(InteractionState::Idle);
-                    }
-                }
-            })
-            .on_key({
-                let interaction = int_key;
-                move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
-                    match event {
-                        WidgetEvent::KeyDown {
-                            key: Key::Space | Key::Enter,
-                            ..
-                        } => {
-                            interaction.set(InteractionState::Pressed);
-                            EventResponse::Handled
-                        }
-                        WidgetEvent::KeyUp {
-                            key: Key::Space | Key::Enter,
-                            ..
-                        } => {
-                            // Fire only if we saw the matching KeyDown. A lone
-                            // KeyUp means the KeyDown was consumed elsewhere
-                            // (shortcut registry, focus transfer) and this
-                            // widget is not the activation target.
-                            if interaction.get() != InteractionState::Pressed {
-                                return EventResponse::Ignored;
-                            }
-                            if let Some(ref action) = *action_for_key {
-                                action(ctx);
-                            }
-                            interaction.set(InteractionState::Focused);
-                            EventResponse::Handled
-                        }
-                        _ => EventResponse::Ignored,
-                    }
-                }
-            })
-            .on_focus({
-                let interaction = int_focus;
-                move |gained: bool, _ctx: &mut EventContext| {
-                    if gained {
-                        if interaction.get() == InteractionState::Idle {
-                            interaction.set(InteractionState::Focused);
-                        }
-                    } else {
-                        interaction.set(InteractionState::Idle);
-                    }
-                }
-            })
-            .on_access_action({
-                // Framework gates this on `arena.is_enabled()`; no
-                // need for an inline `&& enabled` check.
-                move |action: bastyde_core::accesskit::Action,
-                      ctx: &mut EventContext|
-                      -> EventResponse {
-                    if action == bastyde_core::accesskit::Action::Click {
-                        if let Some(ref act) = *action_for_access {
-                            act(ctx);
-                        }
-                        EventResponse::Handled
-                    } else {
-                        EventResponse::Ignored
-                    }
-                }
-            })
-            // The focus walker skips disabled subtrees on its own —
-            // no need to AND with enabled here.
-            .focusable(true)
-            .cursor(CursorIcon::Pointer);
-
-        ctx.apply_self_handlers(handler_set);
+        ctx.apply_self_handlers(self.build_handler_set(interaction));
 
         vec![root_id]
     }
