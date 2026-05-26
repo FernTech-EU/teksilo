@@ -8,6 +8,7 @@ pub mod raster;
 pub mod render_frame;
 pub mod svg;
 pub mod text_backend;
+mod xml;
 
 pub use animated::AnimatedIcon;
 pub use canvas::Canvas;

@@ -90,25 +90,49 @@ fn detect_kind(path: &str) -> Option<ResourceKind> {
 }
 
 fn validate_svg(data: &[u8], path: &str) -> std::result::Result<(), String> {
+    use quick_xml::Reader;
+    use quick_xml::events::Event;
+
     let text = std::str::from_utf8(data).map_err(|e| format!("{path}: not valid UTF-8: {e}"))?;
-    let doc =
-        roxmltree::Document::parse(text).map_err(|e| format!("{path}: XML parse error: {e}"))?;
-    let root = doc.root_element();
-    if root.tag_name().name() != "svg" {
-        return Err(format!(
-            "{path}: root element is <{}>, expected <svg>",
-            root.tag_name().name()
-        ));
+    let mut reader = Reader::from_str(text);
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+                let name = e.local_name();
+                let name_str = std::str::from_utf8(name.as_ref()).unwrap_or("?");
+                if name_str != "svg" {
+                    return Err(format!(
+                        "{path}: root element is <{name_str}>, expected <svg>"
+                    ));
+                }
+                let mut has_viewbox = false;
+                let mut has_width = false;
+                let mut has_height = false;
+                for attr in e.attributes() {
+                    let attr = attr.map_err(|err| format!("{path}: XML parse error: {err}"))?;
+                    match attr.key.local_name().as_ref() {
+                        b"viewBox" => has_viewbox = true,
+                        b"width" => has_width = true,
+                        b"height" => has_height = true,
+                        _ => {}
+                    }
+                }
+                if !has_viewbox && (!has_width || !has_height) {
+                    return Err(format!(
+                        "{path}: missing viewBox and width/height attributes"
+                    ));
+                }
+                return Ok(());
+            }
+            Ok(Event::Eof) => {
+                return Err(format!("{path}: empty document, no <svg> root"));
+            }
+            Ok(_) => {} // skip declaration, comments, doctype, whitespace
+            Err(e) => return Err(format!("{path}: XML parse error: {e}")),
+        }
+        buf.clear();
     }
-    // Check viewBox or width/height
-    if root.attribute("viewBox").is_none()
-        && (root.attribute("width").is_none() || root.attribute("height").is_none())
-    {
-        return Err(format!(
-            "{path}: missing viewBox and width/height attributes"
-        ));
-    }
-    Ok(())
 }
 
 fn validate_png(data: &[u8], path: &str) -> std::result::Result<(), String> {

@@ -9,6 +9,7 @@ pub(crate) mod path_parser;
 
 use crate::geometry::{Point, Rect, Transform2D};
 use crate::path::Path;
+use crate::xml::{XmlElement, parse_dom};
 
 /// Error type for SVG parsing failures.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -43,27 +44,23 @@ pub struct SvgIcon {
 impl SvgIcon {
     /// Parse an SVG string into an `SvgIcon`.
     pub fn parse(svg_str: &str) -> Result<Self, SvgParseError> {
-        let doc = roxmltree::Document::parse(svg_str)
-            .map_err(|e| SvgParseError::XmlError(e.to_string()))?;
-
-        let svg_el = doc
-            .root_element()
-            .children()
-            .find(|n| n.is_element() && n.tag_name().name() == "svg")
-            .or_else(|| {
-                let root = doc.root_element();
-                if root.tag_name().name() == "svg" {
-                    Some(root)
-                } else {
-                    None
-                }
-            })
+        let root = parse_dom(svg_str)
+            .map_err(SvgParseError::XmlError)?
             .ok_or(SvgParseError::MissingSvgElement)?;
 
-        let view_box = parse_view_box(&svg_el)?;
+        // The document root must be (or contain) an <svg> element.
+        let svg_el = if root.tag_name() == "svg" {
+            &root
+        } else {
+            root.children()
+                .find(|n| n.tag_name() == "svg")
+                .ok_or(SvgParseError::MissingSvgElement)?
+        };
+
+        let view_box = parse_view_box(svg_el)?;
 
         let mut merged = Path::new();
-        walk_element(&svg_el, &Transform2D::IDENTITY, &mut merged)?;
+        walk_element(svg_el, &Transform2D::IDENTITY, &mut merged)?;
 
         Ok(SvgIcon {
             path: merged,
@@ -123,7 +120,7 @@ impl SvgIcon {
 
 // --- Internal helpers ---
 
-fn parse_view_box(svg_el: &roxmltree::Node) -> Result<Rect, SvgParseError> {
+fn parse_view_box(svg_el: &XmlElement) -> Result<Rect, SvgParseError> {
     if let Some(vb) = svg_el.attribute("viewBox") {
         let nums: Vec<f32> = vb
             .split(|c: char| c.is_ascii_whitespace() || c == ',')
@@ -160,7 +157,7 @@ fn parse_length(s: &str) -> Option<f32> {
 }
 
 fn walk_element(
-    node: &roxmltree::Node,
+    node: &XmlElement,
     parent_transform: &Transform2D,
     merged: &mut Path,
 ) -> Result<(), SvgParseError> {
@@ -171,7 +168,7 @@ fn walk_element(
         *parent_transform
     };
 
-    let tag = node.tag_name().name();
+    let tag = node.tag_name();
     match tag {
         "path" => {
             if let Some(d) = node.attribute("d") {
@@ -220,8 +217,8 @@ fn walk_element(
     }
 
     // Recurse into children (for <g>, <svg>, <defs>, etc.)
-    for child in node.children().filter(|c| c.is_element()) {
-        walk_element(&child, &transform, merged)?;
+    for child in node.children() {
+        walk_element(child, &transform, merged)?;
     }
 
     Ok(())
@@ -237,7 +234,7 @@ fn append_transformed(merged: &mut Path, path: &Path, transform: &Transform2D) {
 
 // --- Shape element parsers ---
 
-fn parse_rect_element(node: &roxmltree::Node) -> Option<Path> {
+fn parse_rect_element(node: &XmlElement) -> Option<Path> {
     let x = attr_f32(node, "x").unwrap_or(0.0);
     let y = attr_f32(node, "y").unwrap_or(0.0);
     let w = attr_f32(node, "width")?;
@@ -255,14 +252,14 @@ fn parse_rect_element(node: &roxmltree::Node) -> Option<Path> {
     }
 }
 
-fn parse_circle_element(node: &roxmltree::Node) -> Option<Path> {
+fn parse_circle_element(node: &XmlElement) -> Option<Path> {
     let cx = attr_f32(node, "cx").unwrap_or(0.0);
     let cy = attr_f32(node, "cy").unwrap_or(0.0);
     let r = attr_f32(node, "r")?;
     Some(Path::circle(Point::new(cx, cy), r))
 }
 
-fn parse_ellipse_element(node: &roxmltree::Node) -> Option<Path> {
+fn parse_ellipse_element(node: &XmlElement) -> Option<Path> {
     let cx = attr_f32(node, "cx").unwrap_or(0.0);
     let cy = attr_f32(node, "cy").unwrap_or(0.0);
     let rx = attr_f32(node, "rx")?;
@@ -275,7 +272,7 @@ fn parse_ellipse_element(node: &roxmltree::Node) -> Option<Path> {
     )))
 }
 
-fn parse_line_element(node: &roxmltree::Node) -> Option<Path> {
+fn parse_line_element(node: &XmlElement) -> Option<Path> {
     let x1 = attr_f32(node, "x1").unwrap_or(0.0);
     let y1 = attr_f32(node, "y1").unwrap_or(0.0);
     let x2 = attr_f32(node, "x2").unwrap_or(0.0);
@@ -283,12 +280,12 @@ fn parse_line_element(node: &roxmltree::Node) -> Option<Path> {
     Some(Path::line(Point::new(x1, y1), Point::new(x2, y2)))
 }
 
-fn parse_polygon_element(node: &roxmltree::Node) -> Option<Path> {
+fn parse_polygon_element(node: &XmlElement) -> Option<Path> {
     let points = parse_points_attr(node)?;
     Some(Path::polygon(&points))
 }
 
-fn parse_polyline_element(node: &roxmltree::Node) -> Option<Path> {
+fn parse_polyline_element(node: &XmlElement) -> Option<Path> {
     let points = parse_points_attr(node)?;
     if points.is_empty() {
         return None;
@@ -301,7 +298,7 @@ fn parse_polyline_element(node: &roxmltree::Node) -> Option<Path> {
     Some(path)
 }
 
-fn parse_points_attr(node: &roxmltree::Node) -> Option<Vec<Point>> {
+fn parse_points_attr(node: &XmlElement) -> Option<Vec<Point>> {
     let raw = node.attribute("points")?;
     let nums: Vec<f32> = raw
         .split(|c: char| c.is_ascii_whitespace() || c == ',')
@@ -314,7 +311,7 @@ fn parse_points_attr(node: &roxmltree::Node) -> Option<Vec<Point>> {
     Some(nums.chunks(2).map(|c| Point::new(c[0], c[1])).collect())
 }
 
-fn attr_f32(node: &roxmltree::Node, name: &str) -> Option<f32> {
+fn attr_f32(node: &XmlElement, name: &str) -> Option<f32> {
     node.attribute(name)?.parse::<f32>().ok()
 }
 
