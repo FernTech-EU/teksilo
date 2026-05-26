@@ -6,6 +6,26 @@ Thank you for your interest in contributing to Bastyde! This document provides g
 
 Please be respectful and constructive in all interactions. We aim to maintain a welcoming environment for everyone.
 
+## Authorship and review
+
+Bastyde is built under the following eight rules. They apply to your contributions too.
+
+1. Direct human communication is written by humans. PR messages, issues, posts, replies: no AI drafting, no AI polish. Common decency.
+
+2. Documentation may be drafted by AI; every line is reviewed by a human. API examples must compile against the current API. Claims are checked, not skimmed.
+
+3. Code, including tests, may be written by AI; every line is reviewed by a human. "Reviewed" means the reviewer understands the change well enough to defend it without the AI in the room. Vibe coding is forbidden. Plausible-looking code is not reviewed code.
+
+4. Data-integrity and security paths require human-authored design. Settings persistence and migrations, `PasswordField` and any secure-text handling, clipboard and external drag-and-drop boundaries, the arena state machine: the design, invariants, and failure modes are specified by a human before code is written. AI may implement; review is line-by-line and stricter than elsewhere.
+
+5. Architecture and public API are human. AI implements within them; it does not design them. The load-bearing surface is specified by a human: the `Widget` trait, `Signal`/`Prop`, the event model, anything downstream apps depend on.
+
+6. Authors and reviewers, both human, are the voluntary bottleneck. Final responsibility rests with them, not the AI. They may use any tool to help, AI included; what is missed lands on them regardless. They take their time; high-speed AI output is not a reason for high-speed work.
+
+7. The human who signs the work owns it, AI or not. Provenance is not disclosed in commits or PR text.
+
+8. No AI has ever been condemned by judges. Only humans and companies have. Stay sharp.
+
 ## How to Contribute
 
 ### Reporting Issues

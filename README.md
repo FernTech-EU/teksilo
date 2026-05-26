@@ -93,7 +93,27 @@ This is one developer's project. Architecture, design reviews, code review and f
 
 **Scale:** 30+ framework crates · 200k+ lines of Rust · 100+ widgets · 1000+ builder methods.
 
-## What's in the box
+## Authorship and review
+
+The rules under which Bastyde is built:
+
+1. Direct human communication is written by humans. PR messages, issues, posts, replies: no AI drafting, no AI polish. Common decency.
+
+2. Documentation may be drafted by AI; every line is reviewed by a human. API examples must compile against the current API. Claims are checked, not skimmed.
+
+3. Code, including tests, may be written by AI; every line is reviewed by a human. "Reviewed" means the reviewer understands the change well enough to defend it without the AI in the room. Vibe coding is forbidden. Plausible-looking code is not reviewed code.
+
+4. Data-integrity and security paths require human-authored design. Settings persistence and migrations, `PasswordField` and any secure-text handling, clipboard and external drag-and-drop boundaries, the arena state machine: the design, invariants, and failure modes are specified by a human before code is written. AI may implement; review is line-by-line and stricter than elsewhere.
+
+5. Architecture and public API are human. AI implements within them; it does not design them. The load-bearing surface is specified by a human: the `Widget` trait, `Signal`/`Prop`, the event model, anything downstream apps depend on.
+
+6. Authors and reviewers, both human, are the voluntary bottleneck. Final responsibility rests with them, not the AI. They may use any tool to help, AI included; what is missed lands on them regardless. They take their time; high-speed AI output is not a reason for high-speed work.
+
+7. The human who signs the work owns it, AI or not. Provenance is not disclosed in commits or PR text.
+
+8. No AI has ever been condemned by judges. Only humans and companies have. Stay sharp.
+
+## What's in the box (really, not a wishlist)
 
 **Widgets.** Around 100 widgets: buttons, lists, tables, trees, tabs, menus, dialogs, popovers, file/color/date pickers, calendar, charts, wizard, breadcrumb, masonry layout, split button, custom title bar, and rich text editor. The `widget-catalog` example shows most of them, others are in dedicated examples.
 
@@ -177,11 +197,9 @@ Reference documents live in `docs/`. Good entry points:
 What is not yet shipped:
 
 - **macOS native menu bar.** Menus work; they don't yet live in the system menu bar.
-- **CJK IME composition.** Latin and BiDi input compose correctly; Chinese, Japanese, and Korean input methods don't yet integrate with the input event flow.
-- **Cross-application drag and drop.** Intra-app DnD with typed payloads works fully; cross-app DnD via the OS clipboard needs platform IPC that isn't in place.
+- **CJK IME composition.** Latin and BiDi input compose correctly; Chinese, Japanese, and Korean input methods need to be tested by actual users.
 - **X11 custom title bars.** Wayland, Windows, and macOS backends ship. On X11 the custom-chrome operations return `PlatformError::Unsupported` rather than failing silently, and the window falls back to native server-side decorations.
 - **Mobile and web.** Linux and Windows are the primary targets; macOS works modulo the menu bar gap. No mobile or web targets.
-- **Typed errors everywhere.** A few subsystems (notably parts of `bastyde-settings` and some SVG and date-time parsers) still panic on paths that should return typed errors.
 - **API stability.** Pre-1.0; breaking changes are expected between minor versions.
 - **Issue response time.** Best-effort. Single maintainer.
 
