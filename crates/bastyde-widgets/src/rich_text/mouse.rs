@@ -16,7 +16,10 @@
 //!    cooperative recognizers in `bastyde-core::gesture` guarantee that
 //!    both fire in an escalating click sequence.
 
-use bastyde_canvas::Point;
+use std::cell::Cell;
+use std::rc::Rc;
+
+use bastyde_canvas::{Point, Rect};
 use bastyde_core::event::{EventResponse, PointerButton, ScrollDelta, WidgetEvent};
 use bastyde_core::widget::EventContext;
 use bastyde_text::text_document::{MoveMode, SelectionType};
@@ -27,6 +30,8 @@ use super::sync_cursor_signals;
 
 pub(super) fn handle_pointer_event(
     state: &SharedState,
+    v_scrollbar_bounds: &Rc<Cell<Rect>>,
+    h_scrollbar_bounds: &Rc<Cell<Rect>>,
     event: &WidgetEvent,
     ctx: &mut EventContext,
 ) -> EventResponse {
@@ -39,6 +44,18 @@ pub(super) fn handle_pointer_event(
             if *button != PointerButton::Primary {
                 // Secondary / middle are for the application's own
                 // context menu; let them bubble.
+                return EventResponse::Ignored;
+            }
+            // The wrapper's `on_pointer_event` runs in the preview
+            // pass on every event aimed at a descendant, including
+            // the overlay scrollbars. A press here would otherwise
+            // latch `drag_state = Selecting` against the text under
+            // the bar and then `EventResponse::Handled` would steal
+            // the subsequent PointerMove from the scrollbar's
+            // gesture arena.
+            if v_scrollbar_bounds.get().contains(*position)
+                || h_scrollbar_bounds.get().contains(*position)
+            {
                 return EventResponse::Ignored;
             }
             let shift = modifiers.shift();

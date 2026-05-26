@@ -27,11 +27,21 @@ impl RichTextEditorStyle for RecipeRichTextEditorStyle {
     fn make_body(&self, cfg: &RichTextEditorStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         // Read-only viewers stay frameless — they're typically rendered
         // inside an outer surface (Card, Panel) that owns the chrome.
+        // The widget-level `content_padding` knob is still honoured here:
+        // a user-set inset wraps the viewport in a Padding so the text
+        // gets the requested gutter against whatever surface the viewer
+        // is mounted in.
         if cfg.is_read_only {
-            return cfg.viewport;
+            return match cfg.content_padding {
+                Some((t, r, b, l)) => {
+                    ctx.add(Padding::new(t, r, b, l).child_id(cfg.viewport))
+                }
+                None => cfg.viewport,
+            };
         }
 
-        // Editable: TextInput-style focus-aware frame.
+        // Editable: TextInput-style focus-aware frame. The widget-level
+        // `content_padding` replaces the default field insets when set.
         let theme = ctx.theme_signal().get();
         let focus_ring_width = theme.shape.focus_ring_width;
         let field_border_width = field_dims::TEXT_FIELD_BORDER_WIDTH;
@@ -55,15 +65,13 @@ impl RichTextEditorStyle for RecipeRichTextEditorStyle {
             .border_width(border_width_signal)
             .corner_radius(CornerRadius::uniform(field_dims::TEXT_FIELD_CORNER_RADIUS));
         let bg_id = ctx.add(bg);
-        let padded = ctx.add(
-            Padding::new(
-                field_dims::TEXT_FIELD_PADDING_VERTICAL,
-                field_dims::TEXT_FIELD_PADDING_HORIZONTAL,
-                field_dims::TEXT_FIELD_PADDING_VERTICAL,
-                field_dims::TEXT_FIELD_PADDING_HORIZONTAL,
-            )
-            .child_id(cfg.viewport),
-        );
+        let (pt, pr, pb, pl) = cfg.content_padding.unwrap_or((
+            field_dims::TEXT_FIELD_PADDING_VERTICAL,
+            field_dims::TEXT_FIELD_PADDING_HORIZONTAL,
+            field_dims::TEXT_FIELD_PADDING_VERTICAL,
+            field_dims::TEXT_FIELD_PADDING_HORIZONTAL,
+        ));
+        let padded = ctx.add(Padding::new(pt, pr, pb, pl).child_id(cfg.viewport));
         ctx.add(ZStack::new().add_child(bg_id).add_child(padded))
     }
 }

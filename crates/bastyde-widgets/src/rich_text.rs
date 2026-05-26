@@ -51,6 +51,7 @@ pub use policy::{
     PolicyBundle, READ_ONLY_PRESET,
 };
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use bastyde_canvas::{Canvas, Point, Rect, Size, SizeProposal};
@@ -137,6 +138,24 @@ pub struct RichTextEditor {
     /// Horizontal scrollbar child id. `None` when
     /// `h_scroll_policy == ScrollPolicy::AlwaysOff`.
     h_scrollbar_id: Option<WidgetId>,
+    /// Scrollbar window-space bounds, written by `place_children` and
+    /// read by the wrapper's `on_pointer_event` handler. Used to bail
+    /// out of the drag-select latch when the press lands over an
+    /// overlay scrollbar — without this guard the preview-pass pointer
+    /// handler on the wrapper runs *before* the scrollbar (its child)
+    /// gets the event, sets `drag_state = Selecting` on text under the
+    /// overlay, and then steals every subsequent `PointerMove` with
+    /// `EventResponse::Handled`, so the scrollbar's gesture arena
+    /// never sees the drag.
+    v_scrollbar_bounds: Rc<Cell<Rect>>,
+    h_scrollbar_bounds: Rc<Cell<Rect>>,
+    /// Per-edge `(top, right, bottom, left)` padding between the text
+    /// content and the chrome. `None` lets the style apply its own
+    /// default (TextInput-style insets for editable, no padding for
+    /// read-only). Set via [`content_padding`](Self::content_padding) /
+    /// [`content_padding_symmetric`](Self::content_padding_symmetric) /
+    /// [`content_padding_each`](Self::content_padding_each).
+    content_padding: Option<(f32, f32, f32, f32)>,
 }
 
 impl std::fmt::Debug for RichTextEditor {
@@ -193,6 +212,9 @@ impl RichTextEditor {
             root_child_id: None,
             v_scrollbar_id: None,
             h_scrollbar_id: None,
+            v_scrollbar_bounds: Rc::new(Cell::new(Rect::ZERO)),
+            h_scrollbar_bounds: Rc::new(Cell::new(Rect::ZERO)),
+            content_padding: None,
         }
     }
 
@@ -202,6 +224,63 @@ impl RichTextEditor {
     /// `RecipeRichTextEditorStyle` for just this editor.
     pub fn style(mut self, style: impl RichTextEditorStyle) -> Self {
         self.style_override = Some(Rc::new(style));
+        self
+    }
+
+    /// Set a uniform padding (logical pixels) between the text content
+    /// and the editor's chrome. Replaces the style's default insets
+    /// (TextInput-style for editable, none for read-only). Use
+    /// [`content_padding_symmetric`](Self::content_padding_symmetric) or
+    /// [`content_padding_each`](Self::content_padding_each) for
+    /// per-axis / per-edge control.
+    pub fn content_padding(mut self, amount: f32) -> Self {
+        self.content_padding = Some((amount, amount, amount, amount));
+        self
+    }
+
+    /// Set vertical and horizontal padding (logical pixels) between the
+    /// text content and the editor's chrome. Replaces the style's
+    /// default insets.
+    pub fn content_padding_symmetric(mut self, vertical: f32, horizontal: f32) -> Self {
+        self.content_padding = Some((vertical, horizontal, vertical, horizontal));
+        self
+    }
+
+    /// Set per-edge padding `(top, right, bottom, left)` between the
+    /// text content and the editor's chrome. Replaces the style's
+    /// default insets.
+    pub fn content_padding_each(mut self, top: f32, right: f32, bottom: f32, left: f32) -> Self {
+        self.content_padding = Some((top, right, bottom, left));
+        self
+    }
+
+    /// Set just the top inset between the text and the chrome. Leaves
+    /// the other edges at their previously-set values, defaulting to
+    /// `0.0` for any edge never touched.
+    pub fn content_padding_top(mut self, top: f32) -> Self {
+        let (_, r, b, l) = self.content_padding.unwrap_or((0.0, 0.0, 0.0, 0.0));
+        self.content_padding = Some((top, r, b, l));
+        self
+    }
+
+    /// Set just the right inset between the text and the chrome.
+    pub fn content_padding_right(mut self, right: f32) -> Self {
+        let (t, _, b, l) = self.content_padding.unwrap_or((0.0, 0.0, 0.0, 0.0));
+        self.content_padding = Some((t, right, b, l));
+        self
+    }
+
+    /// Set just the bottom inset between the text and the chrome.
+    pub fn content_padding_bottom(mut self, bottom: f32) -> Self {
+        let (t, r, _, l) = self.content_padding.unwrap_or((0.0, 0.0, 0.0, 0.0));
+        self.content_padding = Some((t, r, bottom, l));
+        self
+    }
+
+    /// Set just the left inset between the text and the chrome.
+    pub fn content_padding_left(mut self, left: f32) -> Self {
+        let (t, r, b, _) = self.content_padding.unwrap_or((0.0, 0.0, 0.0, 0.0));
+        self.content_padding = Some((t, r, b, left));
         self
     }
 
@@ -2154,7 +2233,11 @@ impl Widget for RichTextEditor {
             })
             .on_pointer_event({
                 let state = self.state.clone();
-                move |event, ctx| self::mouse::handle_pointer_event(&state, event, ctx)
+                let v_sb = self.v_scrollbar_bounds.clone();
+                let h_sb = self.h_scrollbar_bounds.clone();
+                move |event, ctx| {
+                    self::mouse::handle_pointer_event(&state, &v_sb, &h_sb, event, ctx)
+                }
             })
             .on_scroll({
                 let state = self.state.clone();
@@ -2221,6 +2304,7 @@ impl Widget for RichTextEditor {
             viewport: viewport_id,
             is_focused,
             is_read_only,
+            content_padding: self.content_padding,
         };
         let root = style.make_body(&cfg, ctx);
         self.root_child_id = Some(root);
@@ -2329,6 +2413,8 @@ impl Widget for RichTextEditor {
             ScrollPolicy::Auto => max_x > 0.0,
             ScrollPolicy::AlwaysOff => false,
         };
+        let mut v_rect = Rect::ZERO;
+        let mut h_rect = Rect::ZERO;
         for (idx, child) in children.iter_mut().enumerate() {
             if idx == 0 {
                 child.origin = bastyde_canvas::Point::new(bounds.x, bounds.y);
@@ -2345,6 +2431,7 @@ impl Widget for RichTextEditor {
                         bounds.y,
                     );
                     child.size = Size::new(sb_thickness, h);
+                    v_rect = Rect::new(child.origin.x, child.origin.y, sb_thickness, h);
                 } else {
                     child.origin = bastyde_canvas::Point::new(bounds.x, bounds.y);
                     child.size = Size::ZERO;
@@ -2361,12 +2448,18 @@ impl Widget for RichTextEditor {
                         bounds.y + bounds.height - sb_thickness,
                     );
                     child.size = Size::new(w, sb_thickness);
+                    h_rect = Rect::new(child.origin.x, child.origin.y, w, sb_thickness);
                 } else {
                     child.origin = bastyde_canvas::Point::new(bounds.x, bounds.y);
                     child.size = Size::ZERO;
                 }
             }
         }
+        // Published to the wrapper's `on_pointer_event` so a press over
+        // an overlay scrollbar bypasses the drag-select latch — see
+        // [`v_scrollbar_bounds`](Self::v_scrollbar_bounds).
+        self.v_scrollbar_bounds.set(v_rect);
+        self.h_scrollbar_bounds.set(h_rect);
     }
 
     fn children(&self) -> Vec<WidgetId> {
