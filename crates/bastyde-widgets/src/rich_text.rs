@@ -1,10 +1,9 @@
 //! Rich text editor widget. Feature-gated behind the `rich-text` feature.
 //!
 //! See [`§27.10` of the architecture doc](../../../../../docs/architecture.md)
-//! for the design rationale. This crate ships `RichTextEditor` with two
-//! construction presets — M8a provides [`RichTextEditor::read_only`]
-//! (view documents, select/copy, click links). M8b will add
-//! [`RichTextEditor::editor`] (full editing).
+//! for the design rationale. Two construction presets:
+//! [`RichTextEditor::read_only`] (view documents, select/copy, click links)
+//! and [`RichTextEditor::editor`] (full editing).
 //!
 //! The widget owns its own `bastyde_text::RichTextEngine` (per-widget
 //! typesetter), subscribes to document events via `on_change` so
@@ -89,8 +88,7 @@ pub enum ScrollPolicy {
 }
 
 /// The main rich text widget. Construct via [`RichTextEditor::read_only`]
-/// (M8a) or [`RichTextEditor::editor`] (M8b, currently stubbed as
-/// `unimplemented!`).
+/// (view/select only) or [`RichTextEditor::editor`] (full editing).
 pub struct RichTextEditor {
     state: SharedState,
     v_scroll_policy: ScrollPolicy,
@@ -286,6 +284,9 @@ impl RichTextEditor {
 
     // --- Builder methods ------------------------------------------------
 
+    /// Set the line-wrap mode. `WrapMode::Word` (the default) wraps at word
+    /// boundaries; `WrapMode::None` allows horizontal overflow — pair with
+    /// `.h_scroll_policy(ScrollPolicy::Auto)` to expose a scroll bar.
     pub fn wrap_mode(self, mode: WrapMode) -> Self {
         {
             let mut st = self.state.borrow_mut();
@@ -314,6 +315,9 @@ impl RichTextEditor {
         self
     }
 
+    /// Set the initial zoom factor (`1.0` = 100 %). Applied before the first
+    /// layout pass. Use [`set_zoom_level`](Self::set_zoom_level) after the
+    /// widget is mounted.
     pub fn zoom(self, zoom: f32) -> Self {
         {
             let mut st = self.state.borrow_mut();
@@ -323,6 +327,8 @@ impl RichTextEditor {
         self
     }
 
+    /// Override the selection-highlight color. Defaults to the theme's
+    /// selection color when not set.
     pub fn selection_color(self, color: Color) -> Self {
         self.state
             .borrow_mut()
@@ -331,6 +337,7 @@ impl RichTextEditor {
         self
     }
 
+    /// Override the caret / insertion-point color.
     pub fn caret_color(self, color: Color) -> Self {
         self.state
             .borrow_mut()
@@ -339,6 +346,9 @@ impl RichTextEditor {
         self
     }
 
+    /// Pin the default text color, bypassing theme-driven updates. Once set,
+    /// dark / light mode changes no longer affect glyph color for this
+    /// editor. Omit to track the active theme automatically.
     pub fn text_color(self, color: Color) -> Self {
         let mut st = self.state.borrow_mut();
         st.engine.set_text_color(color.to_array());
@@ -347,16 +357,19 @@ impl RichTextEditor {
         self
     }
 
+    /// Set the vertical scroll-bar visibility policy.
     pub fn v_scroll_policy(mut self, policy: ScrollPolicy) -> Self {
         self.v_scroll_policy = policy;
         self
     }
 
+    /// Set the horizontal scroll-bar visibility policy.
     pub fn h_scroll_policy(mut self, policy: ScrollPolicy) -> Self {
         self.h_scroll_policy = policy;
         self
     }
 
+    /// Set the same scroll-bar visibility policy on both axes.
     pub fn scroll_policy(mut self, policy: ScrollPolicy) -> Self {
         self.v_scroll_policy = policy;
         self.h_scroll_policy = policy;
@@ -467,6 +480,9 @@ impl RichTextEditor {
 
     // --- Observable signals ---------------------------------------------
 
+    /// Reactive counter that bumps on every document change (content edits,
+    /// format changes, load events). Starts at `0`. Use as a change token to
+    /// invalidate external caches.
     pub fn document_version(&self) -> Signal<u64> {
         self.state.borrow().document_version.clone()
     }
@@ -496,6 +512,8 @@ impl RichTextEditor {
         self.state.borrow().cursor_anchor.clone()
     }
 
+    /// Reactive signal — `true` whenever the editor has a non-empty
+    /// selection. Updates synchronously after every cursor mutation.
     pub fn has_selection(&self) -> Signal<bool> {
         self.state.borrow().has_selection.clone()
     }
@@ -554,10 +572,14 @@ impl RichTextEditor {
         self.state.clone()
     }
 
+    /// Reactive vertical scroll offset in logical pixels. Bind to a
+    /// scroll bar or observe for scroll-position persistence.
     pub fn scroll_y(&self) -> Signal<f32> {
         self.state.borrow().scroll_y.clone()
     }
 
+    /// Reactive horizontal scroll offset in logical pixels. Non-zero
+    /// only when [`wrap_mode`](Self::wrap_mode) is `WrapMode::None`.
     pub fn scroll_x(&self) -> Signal<f32> {
         self.state.borrow().scroll_x.clone()
     }
@@ -871,6 +893,59 @@ impl RichTextEditor {
     /// the list entirely). Toolbar counterpart of Shift+Tab.
     pub fn outdent(&self) {
         keyboard::dedent_current_block(&mut self.state.borrow_mut());
+        sync_cursor_signals(&self.state);
+    }
+
+    // --- Blockquote commands ----------------------------------------------
+
+    /// True iff the caret currently sits inside a blockquote frame at
+    /// any nesting depth. Used by the toolbar to drive the toggle
+    /// button's pressed state and the context menu's label.
+    pub fn is_in_blockquote(&self) -> bool {
+        let st = self.state.borrow();
+        st.cursor.is_in_blockquote()
+    }
+
+    /// True iff the current selection spans more than one frame. The
+    /// "Toggle blockquote" affordance is disabled in this case because
+    /// wrapping a cross-frame range has no well-defined semantics
+    /// (different blocks already belong to different containers).
+    pub fn selection_spans_multiple_frames(&self) -> bool {
+        let st = self.state.borrow();
+        st.cursor.selection_spans_multiple_frames()
+    }
+
+    /// Wrap the current block (or selection) in a blockquote, or
+    /// unwrap the innermost enclosing blockquote if already inside one.
+    /// No-op (returns silently) when the selection spans multiple
+    /// frames.
+    pub fn toggle_blockquote(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.toggle_blockquote();
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Equivalent to pressing Tab inside a blockquote — wraps the
+    /// current block in a deeper nested quote. No-op when the caret is
+    /// not in a quote.
+    pub fn increase_blockquote_depth(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.increase_blockquote_depth();
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Equivalent to pressing Shift+Tab inside a blockquote — pops one
+    /// nesting level. At depth 1 unwraps the block to a plain
+    /// paragraph. No-op when the caret is not in a quote.
+    pub fn decrease_blockquote_depth(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.decrease_blockquote_depth();
+        }
         sync_cursor_signals(&self.state);
     }
 
@@ -1423,6 +1498,53 @@ impl EditorHandle {
         sync_cursor_signals(&self.state);
     }
 
+    // --- Blockquotes -------------------------------------------------------
+
+    /// True iff the caret currently sits inside a blockquote frame at
+    /// any nesting depth.
+    pub fn is_in_blockquote(&self) -> bool {
+        let st = self.state.borrow();
+        st.cursor.is_in_blockquote()
+    }
+
+    /// True iff the selection spans more than one frame — the
+    /// "Toggle blockquote" affordance should be disabled in this case.
+    pub fn selection_spans_multiple_frames(&self) -> bool {
+        let st = self.state.borrow();
+        st.cursor.selection_spans_multiple_frames()
+    }
+
+    /// Wrap the current block/selection in a blockquote, or unwrap the
+    /// innermost enclosing blockquote if already inside one. Toolbar
+    /// counterpart for a Ctrl+Shift+Q-style toggle.
+    pub fn toggle_blockquote(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.toggle_blockquote();
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Wrap the current block in a deeper nested quote. Equivalent to
+    /// Tab inside a blockquote.
+    pub fn increase_blockquote_depth(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.increase_blockquote_depth();
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Pop the caret out of one blockquote nesting level. Equivalent to
+    /// Shift+Tab inside a blockquote.
+    pub fn decrease_blockquote_depth(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.decrease_blockquote_depth();
+        }
+        sync_cursor_signals(&self.state);
+    }
+
     // --- Tables ------------------------------------------------------------
 
     /// Insert a fresh `rows × columns` table at the caret.
@@ -1778,13 +1900,10 @@ impl Widget for RichTextEditorBody {
         // — this is a render-pipeline concern, invisible to the
         // widget author.
 
-        // Bug-fix: `place_children` is only called when a widget has
-        // children, so for the M8a leaf editor the viewport was never
-        // recorded on the state. Pull it from the paint bounds now,
-        // flag a relayout if it changed, and update the typesetter.
-        // Also record the widget's origin in window space — event
-        // handlers (click / hit-test) subtract this from the incoming
-        // pointer position to obtain widget-local coordinates.
+        // `RichTextEditorBody` is a leaf, so the framework never calls
+        // `place_children` on it. Sync the viewport from paint bounds,
+        // flag a relayout if the size changed, and record the window-space
+        // origin so pointer handlers can convert to widget-local coordinates.
         st.viewport_origin = Point::new(bounds.x, bounds.y);
         let viewport_changed = (st.viewport_width - bounds.width).abs() > 0.5
             || (st.viewport_height - bounds.height).abs() > 0.5;

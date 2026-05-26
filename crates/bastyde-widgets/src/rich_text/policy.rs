@@ -28,6 +28,18 @@ pub enum EditCommandKind {
     NavigateTableCellDown,
     /// Exit a list item (Backspace at block-start, indent 0).
     ExitList,
+    /// Pop the cursor out of the innermost enclosing blockquote frame
+    /// (Backspace at the first position of the first quoted block;
+    /// Enter on an empty quoted paragraph; Delete at the last position
+    /// of the last quoted block).
+    ExitFrame,
+    /// Wrap the current block (or selection) in a blockquote, or
+    /// unwrap if already inside one. Toolbar / Ctrl+Shift+Q.
+    ToggleBlockquote,
+    /// Tab inside a blockquote (no list active) to nest deeper.
+    IncreaseBlockquoteDepth,
+    /// Shift+Tab inside a blockquote (no list active) to nest shallower.
+    DecreaseBlockquoteDepth,
     DeletePrev,
     DeleteNext,
     DeleteWordLeft,
@@ -89,6 +101,10 @@ impl EditCommandKind {
                 | Self::InsertBlockForced
                 | Self::InsertTab
                 | Self::ExitList
+                | Self::ExitFrame
+                | Self::ToggleBlockquote
+                | Self::IncreaseBlockquoteDepth
+                | Self::DecreaseBlockquoteDepth
                 | Self::NavigateTableCell
                 | Self::NavigateTableCellDown
                 | Self::DeletePrev
@@ -136,16 +152,20 @@ impl CommandFilter {
     }
 }
 
-/// How the caret is presented. `read_only` uses `StaticVisible` so
-/// keyboard users can still see the focus point; a pure viewer would
-/// pick `Hidden`.
+/// How the caret is presented. `read_only` hides the caret entirely
+/// (`Hidden`); custom presets may use `StaticVisible` for a focusable
+/// surface that shows a cursor without animation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaretPolicy {
     /// Caret blinks while the widget has focus (editor preset).
     Blinking,
-    /// Caret visible but not blinking (read-only preset).
+    /// Caret visible but not blinking. Use for focusable surfaces that
+    /// need a visible insertion point without distracting animation —
+    /// e.g. a custom read-only editor the user can navigate and copy
+    /// but that must not suggest editability. Neither built-in preset
+    /// uses this value; construct a custom `PolicyBundle` to opt in.
     StaticVisible,
-    /// Caret not rendered at all.
+    /// Caret not rendered at all (read-only preset).
     Hidden,
 }
 
@@ -183,6 +203,10 @@ impl ClipboardPolicy {
     pub fn allows_paste_unformatted(&self) -> bool {
         matches!(self, Self::Full)
     }
+    /// Always `true` — copying is allowed under every policy, including
+    /// `CopyAndSelectAllOnly`. Provided as a method (rather than a
+    /// hardcoded literal at call sites) so a future preset can diverge
+    /// without changing callers.
     pub fn allows_copy(&self) -> bool {
         true
     }

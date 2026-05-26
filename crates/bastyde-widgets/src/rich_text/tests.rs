@@ -3051,6 +3051,243 @@ fn editor_backspace_at_list_start_dedents_or_exits() {
     );
 }
 
+// ────────────────────────────────────────────────────────────────────────
+// Blockquote keyboard / toolbar behaviour (Phase C of the blockquote
+// management overhaul). The corresponding data-layer tests live in
+// /Users/cyril/Devel/text-document/crates/public_api/tests/blockquote_editing_tests.rs.
+// ────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn editor_tab_in_quote_increases_depth() {
+    let doc = TextDocument::new();
+    doc.set_markdown("> Quoted line.\n").unwrap().wait().unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let state = editor.state_handle();
+    editor.set_caret_position(0);
+    assert_eq!(state.borrow().cursor.blockquote_depth_at_cursor(), 1);
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    press_key(
+        &mut tree,
+        bastyde_core::event::Key::Tab,
+        bastyde_core::event::Modifiers::NONE,
+    );
+    tick_past_debounce(&mut tree);
+
+    assert_eq!(
+        state.borrow().cursor.blockquote_depth_at_cursor(),
+        2,
+        "Tab inside a depth-1 quote must produce depth-2"
+    );
+}
+
+#[test]
+fn editor_shift_tab_at_depth_1_unwraps_to_plain() {
+    let doc = TextDocument::new();
+    doc.set_markdown("> Quoted line.\n").unwrap().wait().unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let state = editor.state_handle();
+    editor.set_caret_position(0);
+    assert_eq!(state.borrow().cursor.blockquote_depth_at_cursor(), 1);
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    press_key(
+        &mut tree,
+        bastyde_core::event::Key::Tab,
+        bastyde_core::event::Modifiers::SHIFT,
+    );
+    tick_past_debounce(&mut tree);
+
+    assert_eq!(
+        state.borrow().cursor.blockquote_depth_at_cursor(),
+        0,
+        "Shift+Tab at depth 1 must unwrap to plain paragraph"
+    );
+}
+
+#[test]
+fn editor_backspace_at_quote_first_block_unwraps() {
+    let doc = TextDocument::new();
+    doc.set_markdown("> Quoted line.\n").unwrap().wait().unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let state = editor.state_handle();
+    editor.set_caret_position(0);
+    assert!(state.borrow().cursor.is_in_blockquote());
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    press_key(
+        &mut tree,
+        bastyde_core::event::Key::Backspace,
+        bastyde_core::event::Modifiers::NONE,
+    );
+    tick_past_debounce(&mut tree);
+
+    assert!(
+        !state.borrow().cursor.is_in_blockquote(),
+        "Backspace at the first block of a quote must unwrap the block"
+    );
+}
+
+// NOTE on coverage for Enter-on-empty-quoted-block and Tab-in-list-
+// inside-quote: the behaviours are confirmed at the data-layer in
+// /Users/cyril/Devel/text-document/crates/public_api/tests/blockquote_editing_tests.rs
+// (toggle/wrap/unwrap round-trips, depth changes). Widget-level setup
+// for these specific scenarios requires reproducing exact in-block
+// caret states that the headless test harness does not preserve
+// reliably across mock layouts (markdown imports trailing blocks,
+// insert_block leaves the caret in the new block at a position that
+// is_at_block_start-but-not-current_block_is_empty under certain mock
+// configurations). Skipped as widget tests; covered functionally by
+// the data-layer suite and verifiable via the end-to-end smoke run.
+
+#[test]
+fn editor_delete_at_last_pos_of_last_quoted_block_unwraps() {
+    let doc = TextDocument::new();
+    doc.set_markdown("> Quoted.\n").unwrap().wait().unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let state = editor.state_handle();
+    // Move caret to End so it lands at the end of the quoted block's
+    // content (not past it into any trailing paragraph the markdown
+    // parser may have produced).
+    editor.set_caret_position(0);
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    // Navigate to end of the block via the End key so the test doesn't
+    // depend on character_count semantics around trailing blocks.
+    press_key(
+        &mut tree,
+        bastyde_core::event::Key::End,
+        bastyde_core::event::Modifiers::NONE,
+    );
+    tick_past_debounce(&mut tree);
+    assert!(state.borrow().cursor.is_in_blockquote());
+    assert!(state.borrow().cursor.at_block_end());
+    assert!(state.borrow().cursor.is_last_block_in_current_frame());
+
+    press_key(
+        &mut tree,
+        bastyde_core::event::Key::Delete,
+        bastyde_core::event::Modifiers::NONE,
+    );
+    tick_past_debounce(&mut tree);
+
+    assert!(
+        !state.borrow().cursor.is_in_blockquote(),
+        "Delete at the end of the last quoted block must unwrap, not cross-frame merge"
+    );
+}
+
+#[test]
+fn editor_toggle_blockquote_wraps_then_unwraps() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello.").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let state = editor.state_handle();
+    editor.set_caret_position(0);
+    assert!(!state.borrow().cursor.is_in_blockquote());
+
+    editor.toggle_blockquote();
+    assert!(
+        state.borrow().cursor.is_in_blockquote(),
+        "first toggle must wrap"
+    );
+
+    editor.toggle_blockquote();
+    assert!(
+        !state.borrow().cursor.is_in_blockquote(),
+        "second toggle must unwrap"
+    );
+}
+
+// List-inside-quote Tab precedence: the keyboard handler checks
+// `is_cursor_in_list` BEFORE the blockquote branch (keyboard.rs ladder
+// in the Tab arm). That ordering is visually inspectable in the
+// source; a behavioural test would require the mock layout to
+// preserve `current_list()` membership across `toggle_blockquote`,
+// which today is brittle under headless tests (the wrap moves blocks
+// between frames). Tracking as a polish item for D3.
+
+/// User-reported bug: typing Enter at end of `> A`, then Enter again,
+/// previously inserted a line BEFORE A and lost a quote level. Expected:
+/// 1st Enter creates an empty quoted block after A (cursor on it),
+/// 2nd Enter exits the quote so the cursor sits AFTER A in a plain
+/// paragraph.
+#[test]
+fn editor_enter_then_enter_at_end_of_quote_exits_after_not_before() {
+    let doc = TextDocument::new();
+    doc.set_markdown("> A\n").unwrap().wait().unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let state = editor.state_handle();
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    // Position the caret at the end of "A" AFTER the widget is in the
+    // tree so the state's cursor isn't reset by widget mount.
+    state
+        .borrow()
+        .cursor
+        .set_position(1, bastyde_text::text_document::MoveMode::MoveAnchor);
+
+    // 1st Enter: still in quote, new empty block after A.
+    press_key(
+        &mut tree,
+        bastyde_core::event::Key::Enter,
+        bastyde_core::event::Modifiers::NONE,
+    );
+    tick_past_debounce(&mut tree);
+    assert!(
+        state.borrow().cursor.is_in_blockquote(),
+        "after 1st Enter the cursor must still be inside the quote (new empty block)"
+    );
+    assert!(
+        state.borrow().cursor.current_block_is_empty(),
+        "after 1st Enter the cursor's block must be the new empty one"
+    );
+
+    // 2nd Enter: empty quoted block → exit the quote.
+    press_key(
+        &mut tree,
+        bastyde_core::event::Key::Enter,
+        bastyde_core::event::Modifiers::NONE,
+    );
+    tick_past_debounce(&mut tree);
+    assert!(
+        !state.borrow().cursor.is_in_blockquote(),
+        "after 2nd Enter the cursor must be outside the quote (depth dropped)"
+    );
+
+    // The exported markdown must keep "> A" intact and not have an
+    // empty quoted paragraph BEFORE it.
+    let md = doc.to_markdown().unwrap();
+    let a_idx = md
+        .find("> A")
+        .unwrap_or_else(|| panic!("`> A` missing after Enter-Enter; got: {md:?}"));
+    let before_a = &md[..a_idx];
+    assert!(
+        !before_a.contains('>'),
+        "no quoted line must appear BEFORE `> A` after exiting the quote; got: {md:?}"
+    );
+}
+
 #[test]
 fn link_click_callback_installs_without_panicking() {
     // We can't reliably hit-test a link in a headless tree (no real

@@ -349,6 +349,21 @@ impl Widget for FormatToolbar {
             },
         ));
 
+        let blockquote_id = ctx.add(plain_btn(
+            res!("resources/icons/blockquote.svg"),
+            "Toggle blockquote",
+            {
+                let h = self.handle.clone();
+                move |_| h.toggle_blockquote()
+            },
+        ));
+        // NOTE: when the selection crosses a frame boundary,
+        // `EditorHandle::toggle_blockquote` returns silently — the
+        // underlying use case rejects the wrap with a typed error and
+        // nothing is mutated. A reactive "disable on cross-frame
+        // selection" signal would be a polish improvement; for now the
+        // button is always enabled and harmless on cross-frame ranges.
+
         let insert_table_id = ctx.add(plain_btn(
             res!("resources/icons/table.svg"),
             "Insert 3×3 table",
@@ -396,6 +411,8 @@ impl Widget for FormatToolbar {
                 .add_child(numbered_id)
                 .add_child(indent_id)
                 .add_child(outdent_id)
+                .child(Divider::vertical())
+                .add_child(blockquote_id)
                 .child(Divider::vertical())
                 .add_child(insert_table_id)
                 .child(Divider::vertical())

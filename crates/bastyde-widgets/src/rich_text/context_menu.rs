@@ -57,7 +57,6 @@
 //! command palette, etc.).
 
 use bastyde_i18n::lit;
-use std::rc::Rc;
 
 use bastyde_core::intent::Intent;
 use bastyde_core::widget::Widget;
@@ -66,7 +65,7 @@ use crate::menu_item::MenuItem;
 use crate::menu_list::MenuList;
 
 use super::clipboard as rt_clipboard;
-use super::policy::{ClipboardPolicy, PolicyBundle};
+use super::policy::{ClipboardPolicy, EditCommandKind, PolicyBundle};
 use super::state::SharedState;
 
 /// Intent fired when the user activates the **Cut** item of the
@@ -202,6 +201,33 @@ fn build_menu(state: SharedState, policy: PolicyBundle) -> MenuList {
         );
     }
 
+    // --- Toggle blockquote ---------------------------------------
+    // Only meaningful when the editor accepts mutations (read-only
+    // presets get the minimal menu — Cut/Copy/Paste/Select-All).
+    if policy.command_filter.accepts(EditCommandKind::ToggleBlockquote) {
+        let state_for_bq = state.clone();
+        let cross_frame_selection = state.borrow().cursor.selection_spans_multiple_frames();
+        let in_quote = state.borrow().cursor.is_in_blockquote();
+        let label = if in_quote {
+            lit!("Remove blockquote")
+        } else {
+            lit!("Toggle blockquote")
+        };
+        list = list.separator();
+        list = list.item(
+            MenuItem::new(label)
+                .enabled(!cross_frame_selection)
+                .on_activate_fn(move |evt_ctx| {
+                    {
+                        let st = state_for_bq.borrow();
+                        let _ = st.cursor.toggle_blockquote();
+                    }
+                    super::sync_cursor_signals(&state_for_bq);
+                    evt_ctx.request_frame();
+                }),
+        );
+    }
+
     // Separator before Select All under the full policy; read-only
     // presets keep the menu minimal (no separator).
     if matches!(policy.clipboard_policy, ClipboardPolicy::Full) {
@@ -270,11 +296,6 @@ pub(super) type RichTextContextMenuFactory = Box<
         &mut bastyde_core::widget::EventContext,
     ) -> Option<Box<dyn Widget>>,
 >;
-
-/// Keep the `Rc` re-export so callers that need the shared-state
-/// alias stay stable even if the internals move.
-#[allow(dead_code)]
-pub(super) type StateForFactory = Rc<std::cell::RefCell<super::state::EditorState>>;
 
 #[cfg(test)]
 mod tests {

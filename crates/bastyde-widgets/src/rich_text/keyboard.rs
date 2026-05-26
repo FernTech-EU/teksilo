@@ -266,6 +266,19 @@ pub(super) fn handle_key(
                             let _ = st.cursor.remove_current_block_from_list();
                         }
                     }
+                } else if st.cursor.at_block_start()
+                    && st.cursor.is_in_blockquote()
+                    && st.cursor.is_first_block_in_current_frame()
+                    && filter.accepts(EditCommandKind::ExitFrame)
+                {
+                    // Backspace at the very start of the first block of
+                    // a blockquote — unwrap one level so the block lifts
+                    // out of the quote. Without this, fallthrough would
+                    // delete the boundary `\n` and silently drag the
+                    // quoted paragraph into the preceding block (the
+                    // crash class A1/A2/A3 closed at the data layer;
+                    // here we make the UX intent explicit).
+                    let _ = st.cursor.unwrap_current_block_from_blockquote();
                 } else {
                     let _ = st.cursor.delete_previous_char();
                 }
@@ -280,6 +293,16 @@ pub(super) fn handle_key(
                     let _ = st.cursor.remove_selected_text();
                 } else if st.cursor.has_selection() {
                     let _ = st.cursor.remove_selected_text();
+                } else if st.cursor.at_block_end()
+                    && st.cursor.is_in_blockquote()
+                    && st.cursor.is_last_block_in_current_frame()
+                    && filter.accepts(EditCommandKind::ExitFrame)
+                {
+                    // Delete at the very end of the last block of a
+                    // blockquote — unwrap one level instead of merging
+                    // across the frame boundary into the following
+                    // block (symmetric with Backspace at-block-start).
+                    let _ = st.cursor.unwrap_current_block_from_blockquote();
                 } else {
                     let _ = st.cursor.delete_char();
                 }
@@ -308,6 +331,16 @@ pub(super) fn handle_key(
                     && filter.accepts(EditCommandKind::NavigateTableCellDown)
                 {
                     navigate_table_cell_down(&mut st, table_id, row, col, rows);
+                } else if st.cursor.is_in_blockquote()
+                    && st.cursor.current_block_is_empty()
+                    && filter.accepts(EditCommandKind::ExitFrame)
+                {
+                    // Enter on an empty paragraph inside a blockquote
+                    // unwraps one nesting level (user-confirmed
+                    // semantics). Inserting another empty block here
+                    // would trap the cursor inside the quote with no
+                    // intuitive way out.
+                    let _ = st.cursor.unwrap_current_block_from_blockquote();
                 } else {
                     let _ = st.cursor.insert_block();
                 }
@@ -335,6 +368,13 @@ pub(super) fn handle_key(
                     navigate_table_cell(&mut st, table_id, row, col, rows, cols, -1);
                 } else if is_cursor_in_list(&st) {
                     dedent_current_block(&mut st);
+                } else if st.cursor.is_in_blockquote()
+                    && filter.accepts(EditCommandKind::DecreaseBlockquoteDepth)
+                {
+                    // Shift+Tab inside a blockquote (no list active):
+                    // pop one nesting level. At depth 1 this unwraps to
+                    // a plain paragraph.
+                    let _ = st.cursor.decrease_blockquote_depth();
                 }
                 KeyAction::ClearPreferredX
             }
@@ -360,6 +400,14 @@ pub(super) fn handle_key(
                     navigate_table_cell(&mut st, table_id, row, col, rows, cols, 1);
                 } else if is_cursor_in_list(&st) {
                     indent_current_block(&mut st);
+                } else if st.cursor.is_in_blockquote()
+                    && filter.accepts(EditCommandKind::IncreaseBlockquoteDepth)
+                {
+                    // Tab inside a blockquote (no list active): wrap the
+                    // current block in a deeper nested quote. Order
+                    // matters — the list check above takes priority for
+                    // a list-inside-quote scenario.
+                    let _ = st.cursor.increase_blockquote_depth();
                 } else if filter.accepts(EditCommandKind::InsertTab) {
                     let _ = st.cursor.insert_text("\t");
                 }
