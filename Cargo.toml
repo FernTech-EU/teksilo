@@ -49,7 +49,7 @@ fixed_decimal = { version = "0.7", features = ["ryu"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 toml = "1.1"
-directories = "6"
+etcetera = "0.11"
 tempfile = "3"
 uuid = { version = "1", features = ["v4"] }
 ureq = { version = "3.3", default-features = false, features = ["rustls"] }

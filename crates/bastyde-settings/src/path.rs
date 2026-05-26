@@ -1,13 +1,13 @@
 //! OS-correct path resolution for application config and data dirs.
 //!
-//! Wraps [`directories::ProjectDirs`] so the rest of the crate has a single
-//! point of truth for where config files live, and so tests can supply a
-//! deterministic `tempdir`-rooted [`AppPaths`] without ever consulting the
-//! real OS dirs.
+//! Wraps `etcetera`'s native [`AppStrategy`] so the rest of the crate
+//! has a single point of truth for where config files live, and so
+//! tests can supply a deterministic `tempdir`-rooted [`AppPaths`]
+//! without ever consulting the real OS dirs.
 
 use std::path::{Path, PathBuf};
 
-use directories::ProjectDirs;
+use etcetera::{AppStrategy, AppStrategyArgs, choose_app_strategy};
 
 /// Resolves OS-correct application directories.
 ///
@@ -21,19 +21,26 @@ pub struct AppPaths {
 
 impl AppPaths {
     /// Resolve directories from the OS. The `(qualifier, organization,
-    /// application)` triple follows the
-    /// [`directories::ProjectDirs::from`] convention (e.g.
-    /// `("com", "FernTech", "Skribisto")`).
+    /// application)` triple feeds [`etcetera::AppStrategyArgs`] as
+    /// `(top_level_domain, author, app_name)` — same fields, different
+    /// names — and selects the platform-native strategy (XDG on Linux,
+    /// `%APPDATA%`-based on Windows, `~/Library/Application Support`
+    /// on macOS).
     ///
     /// Returns `None` when no usable home directory could be detected
     /// (a sandboxed or unconfigured environment). Callers who want to
     /// degrade gracefully should fall back to [`AppPaths::for_testing`]
     /// with an in-process directory.
     pub fn new(qualifier: &str, organization: &str, application: &str) -> Option<Self> {
-        let dirs = ProjectDirs::from(qualifier, organization, application)?;
+        let strategy = choose_app_strategy(AppStrategyArgs {
+            top_level_domain: qualifier.to_string(),
+            author: organization.to_string(),
+            app_name: application.to_string(),
+        })
+        .ok()?;
         Some(Self {
-            config_dir: dirs.config_dir().to_path_buf(),
-            data_dir: dirs.data_dir().to_path_buf(),
+            config_dir: strategy.config_dir(),
+            data_dir: strategy.data_dir(),
         })
     }
 
