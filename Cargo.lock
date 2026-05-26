@@ -4879,7 +4879,6 @@ dependencies = [
 name = "text-typeset"
 version = "1.4.5"
 dependencies = [
- "anyhow",
  "etagere",
  "fontdb",
  "rustybuzz",
