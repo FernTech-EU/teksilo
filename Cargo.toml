@@ -48,7 +48,7 @@ icu_locale_core = "2"
 fixed_decimal = { version = "0.7", features = ["ryu"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
-toml = "0.8"
+toml = "1.1"
 directories = "6"
 tempfile = "3"
 uuid = { version = "1", features = ["v4"] }
@@ -56,9 +56,9 @@ ureq = { version = "3", default-features = false, features = ["rustls"] }
 serde_json = "1"
 redb = "4"
 arboard = { version = "3.4", features = ["wayland-data-control"] }
-open = "5"
-roxmltree = "0.20"
-png = "0.17"
+open = "5.3"
+roxmltree = "0.21.1"
+png = "0.18"
 image-webp = "0.2"
 inventory = "0.3"
 bytemuck = { version = "1", features = ["derive"] }
@@ -66,7 +66,7 @@ bytemuck = { version = "1", features = ["derive"] }
 # is the modern BurntSushi-authored crate with a bundled IANA tz database.
 # Default features enable tzdb + tz-system so `Zoned::now()` resolves
 # the user's local "today" from the OS.
-jiff = "0.1"
+jiff = "0.2"
 text-document = { path = "../text-document/crates/public_api", version = "1.5.6" }
 text-typeset = { path = "../text-typeset", version = "1.4.5" }
 

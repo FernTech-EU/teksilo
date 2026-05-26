@@ -22,11 +22,14 @@ pub struct RasterIcon {
 impl RasterIcon {
     /// Decode a PNG image from raw bytes.
     pub fn decode_png(data: &[u8]) -> Result<Self, ImageDecodeError> {
-        let decoder = png::Decoder::new(data);
+        let decoder = png::Decoder::new(std::io::Cursor::new(data));
         let mut reader = decoder
             .read_info()
             .map_err(|e| ImageDecodeError::InvalidData(e.to_string()))?;
-        let mut buf = vec![0u8; reader.output_buffer_size()];
+        let buffer_size = reader.output_buffer_size().ok_or_else(|| {
+            ImageDecodeError::InvalidData("PNG output buffer size unavailable".into())
+        })?;
+        let mut buf = vec![0u8; buffer_size];
         let info = reader
             .next_frame(&mut buf)
             .map_err(|e| ImageDecodeError::InvalidData(e.to_string()))?;
