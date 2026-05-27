@@ -702,7 +702,6 @@ impl<W: Widget> WidgetWithHandlers<W> {
     }
 
     /// Take the handler set out, leaving defaults.
-    #[allow(dead_code)] // V2 API: used during widget insertion to extract handlers
     pub(crate) fn take_handler_set(&mut self) -> HandlerSet {
         std::mem::take(&mut self.handler_set)
     }

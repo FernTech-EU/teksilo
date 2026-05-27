@@ -114,7 +114,6 @@ pub(crate) struct EventHandlers {
     /// used e.g. to remove the dragged item on an `OsMove`.
     pub on_drag_ended: Option<Box<dyn FnMut(DropOutcome, &mut EventContext)>>,
 
-    #[allow(dead_code)] // V2 API: gesture arena for attached gesture recognizers
     pub gesture_arena: Option<GestureArena>,
 }
 

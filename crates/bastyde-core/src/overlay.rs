@@ -186,7 +186,6 @@ pub(crate) struct ActiveOverlay {
     pub anchor: WidgetId,
     pub placement: OverlayPlacement,
     pub dismiss: DismissBehavior,
-    #[allow(dead_code)] // Part of V2 overlay API, used for z-ordering
     pub layer: OverlayLayer,
     pub parent_overlay: Option<OverlayId>,
     /// Computed bounds after positioning.

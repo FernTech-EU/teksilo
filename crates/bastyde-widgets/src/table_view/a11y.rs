@@ -183,7 +183,6 @@ pub(crate) struct TreeRowA11y {
     selected: bool,
 }
 
-#[allow(dead_code)] // wired up by TreeTable
 impl TreeRowA11y {
     pub(crate) fn new(
         child: WidgetId,
