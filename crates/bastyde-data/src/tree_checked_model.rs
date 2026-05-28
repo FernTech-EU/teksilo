@@ -165,7 +165,7 @@ impl<T: 'static> TreeCheckedModel<T> {
         sig
     }
 
-    /// Two-state projection of [`signal_for`] for callers that want
+    /// Two-state projection of `signal_for` for callers that want
     /// to bind a leaf's check state to a `Signal<bool>`-shaped widget
     /// (e.g. a non-tristate `Checkbox`). The returned signal is
     /// **writable**: setting it to `true` calls `check(node)` (which

@@ -1,5 +1,5 @@
 //! `MonthsGrid` + `YearsGrid` — the coarser-grain bodies the calendar
-//! shows when [`CalendarMode`](super::CalendarMode) is `Months` or
+//! shows when [`CalendarMode`] is `Months` or
 //! `Years`. Both are 4×3 grids of clickable cells:
 //!
 //! - [`MonthsGrid`] → 12 localized month names (Jan..Dec). Clicking a

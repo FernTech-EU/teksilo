@@ -28,7 +28,7 @@
 //! - **Painted separator** — a thin middle-dot glyph (`·`), no text.
 //!   Visual only; AT users see the wrapper's `Role::DateTimeInput`. The
 //!   separator can be replaced with a custom string via
-//!   [`Self::separator`] (rendered as styled secondary text).
+//!   `separator` (rendered as styled secondary text).
 //! - **One trailing calendar button** — Int UI `IconButton::embedded()` with the
 //!   calendar glyph. Opens a single popover hosting `Calendar::single`
 //!   bound to the date half. Picking a cell commits the date and closes
@@ -124,8 +124,8 @@ pub struct DateTimeEdit {
     /// How the trailing (time) half claims horizontal space. The
     /// leading (date) half always sizes to its mask-derived natural
     /// width — the date stays put while the time half either matches
-    /// that natural width ([`WidthPolicy::Default`]) or absorbs
-    /// extra space ([`WidthPolicy::Fill`]).
+    /// that natural width (`WidthPolicy::Default`) or absorbs
+    /// extra space (`WidthPolicy::Fill`).
     time_width_policy: crate::date_edit::WidthPolicy,
     /// Composed validation feedback (severity-merged from both halves).
     feedback: Signal<ValidationFeedback>,
@@ -282,8 +282,8 @@ impl DateTimeEdit {
     /// How the trailing (time) half claims horizontal space. The
     /// leading (date) half always sizes to its natural mask width;
     /// the time half follows this policy. Default
-    /// [`WidthPolicy::Default`] (natural width); pass
-    /// [`WidthPolicy::Fill`] to make the time half absorb extra
+    /// `WidthPolicy::Default` (natural width); pass
+    /// `WidthPolicy::Fill` to make the time half absorb extra
     /// space the parent offers.
     pub fn time_width_policy(mut self, policy: crate::date_edit::WidthPolicy) -> Self {
         self.time_width_policy = policy;

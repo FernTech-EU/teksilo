@@ -1,6 +1,6 @@
 //! Column-width resolution + per-pane horizontal layout.
 //!
-//! [`ColumnSolver`] resolves a list of `ColumnWidth` declarations against
+//! `ColumnSolver` resolves a list of `ColumnWidth` declarations against
 //! the available pane width, in three passes:
 //!
 //! 1. `Fixed(px)` is clamped by `min_width` / `max_width`.

@@ -52,7 +52,7 @@ pub struct TextItem {
 
 impl TextItem {
     /// A static-text item in local coordinates. The `text` is
-    /// resolved eagerly via [`LocalizedString::resolve_now`] at
+    /// resolved eagerly via `LocalizedString::resolve_now` at
     /// construction; locale changes rebuild the composite parent,
     /// which re-creates this `TextItem` with a fresh translation.
     pub fn new(text: impl Into<bastyde_i18n::LocalizedString>, local_bounds: Rect) -> Self {

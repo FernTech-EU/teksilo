@@ -131,7 +131,7 @@ pub struct WidgetTree {
     /// third visibility-aware motion source — they all consult the
     /// same [`motion_visibility`](crate::motion_visibility) helpers.
     /// After every `render()` the tree calls
-    /// [`FrameTickScheduler::should_arm_frame_tick`] and re-arms
+    /// `FrameTickScheduler::should_arm_frame_tick` and re-arms
     /// `frame_tick_requested` if any subscriber's owner was painted
     /// this frame.
     pub(crate) frame_tick_scheduler: crate::frame_tick_scheduler::FrameTickScheduler,
@@ -248,7 +248,7 @@ pub struct WidgetTree {
     /// current one must re-request. Stored as `Rc<Cell>` so observers
     /// fired from inside the layout pass (`ctx.effect` closures on
     /// `frame_tick`) can chain-request without needing &mut access
-    /// to the tree — see [`FrameRequestHandle`].
+    /// to the tree — see `FrameRequestHandle`.
     pub(crate) frame_tick_requested: std::rc::Rc<std::cell::Cell<bool>>,
     /// Shared "accessibility re-walk requested" flag. Set via
     /// [`request_accessibility_update`](Self::request_accessibility_update)
@@ -282,7 +282,7 @@ pub struct WidgetTree {
     /// tree's local locale signal — the i18n thread-local would stay put
     /// and `tr!` lookups would not re-resolve.
     pub(crate) pending_locale_request: Option<String>,
-    /// The [`WindowState`] for this tree's hosting window. Populated
+    /// The `WindowState` for this tree's hosting window. Populated
     /// by the app-level window manager when the tree is registered;
     /// `None` for standalone trees. Cloned into every `EventContext`
     /// and `BuildContext` so widgets can bind to the current window's
@@ -405,9 +405,9 @@ impl WidgetTree {
         }
     }
 
-    /// Construct an [`EventContext`](crate::widget::EventContext)
+    /// Construct an [`EventContext`]
     /// pre-populated with the tree's app-state registry, hosting
-    /// [`WindowState`], and a `&mut dyn WindowOps` handle so handlers
+    /// `WindowState`, and a `&mut dyn WindowOps` handle so handlers
     /// can synchronously reach the multi-window API. Used by every
     /// dispatch site.
     pub(crate) fn make_event_context<'ops>(
@@ -469,7 +469,7 @@ impl WidgetTree {
     }
 
     /// Clone the shared wake-at deadline cell. Widgets stash this in
-    /// their state and call [`request_wake_at`] from frame-tick effects
+    /// their state and call `request_wake_at` from frame-tick effects
     /// to schedule a one-shot deadline without keeping the event loop
     /// in `Poll` mode. On the next `layout()` at or past the deadline,
     /// the tree auto-arms `frame_tick_requested` so the effect runs on
@@ -494,8 +494,8 @@ impl WidgetTree {
     /// The per-frame delta-seconds signal. Observers fire **only on frames
     /// the tree was asked to pump** via [`request_frame`](Self::request_frame);
     /// merely observing the signal does not keep the event loop awake.
-    /// See [`BuildContext::frame_tick`] for widget-side access and
-    /// [`BuildContext::request_frame`] for the opt-in request side.
+    /// See `BuildContext::frame_tick` for widget-side access and
+    /// `BuildContext::request_frame` for the opt-in request side.
     pub fn frame_tick(&self) -> crate::signal::Signal<f32> {
         self.frame_tick.clone()
     }
@@ -744,7 +744,7 @@ impl WidgetTree {
     }
 
     /// Drain overlays whose fade-out tween has completed (set up by
-    /// [`OverlayRequest::with_fade`]). Same dormant-and-restore-focus
+    /// `OverlayRequest::with_fade`). Same dormant-and-restore-focus
     /// flow as the normal dismiss path; called once per layout pass
     /// after `process_auto_dismiss_overlays_real` so an overlay that
     /// hits its auto-dismiss deadline kicks off its fade-out tween
@@ -1580,7 +1580,7 @@ impl WidgetTree {
     }
 
     /// Append an [`Action`](crate::action::Action) to a widget's arena
-    /// node. Invoked by [`BuildContext::register_action`]; not meant
+    /// node. Invoked by `BuildContext::register_action`; not meant
     /// to be called directly.
     pub(crate) fn push_action(&mut self, widget_id: WidgetId, action: crate::action::Action) {
         if let Some(node) = self.arena.get_mut(widget_id) {
@@ -1659,7 +1659,7 @@ impl WidgetTree {
     }
 
     /// Number of active widgets in the arena. Cheap; matches the
-    /// totals returned by [`widget_type_histogram`] when summed.
+    /// totals returned by `widget_type_histogram` when summed.
     pub fn active_widget_count(&self) -> usize {
         self.arena.active_ids_iter().count()
     }
@@ -2109,7 +2109,7 @@ impl WidgetTree {
     /// parent-space viewport (the node's bounds) rather than transforming the
     /// node itself. Hit-testing then keeps the whole viewport interactive at
     /// any pan / zoom. Used by `SceneView`; see
-    /// [`WidgetNode::content_transform`](crate::arena::WidgetNode::content_transform).
+    /// `WidgetNode::content_transform`.
     pub fn set_content_transform(
         &mut self,
         id: WidgetId,
@@ -2158,7 +2158,7 @@ impl WidgetTree {
     /// The bound signal registers at `BindingLevel::SubtreeRepaint`: when
     /// it flips, the entire subtree rooted at `id` is marked for repaint
     /// (not relayout — geometry doesn't change). Leaves like
-    /// [`crate::primitives::IconWidget`] then re-resolve their role color
+    /// `IconWidget` then re-resolve their role color
     /// using the new `PaintContext::effective_enabled` value, so a
     /// disabled subtree's icons and text dim automatically.
     pub fn enabled_when(&mut self, id: WidgetId, state: impl Into<crate::signal::Prop<bool>>) {

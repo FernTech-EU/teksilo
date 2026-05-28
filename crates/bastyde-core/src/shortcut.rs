@@ -6,7 +6,7 @@
 //! - [`Shortcut`] — a first-class, rebindable record with a stable
 //!   string id, localizable metadata, one or two keystrokes, a scope,
 //!   and an `on_activate` closure that produces an
-//!   [`Intent`](crate::intent::Intent) at activation time.
+//!   [`Intent`] at activation time.
 //! - [`ShortcutRegistry`] — a two-layer store: widget-declared
 //!   defaults (refreshed every build) plus persisted user overrides.
 //!   The effective view merges them.

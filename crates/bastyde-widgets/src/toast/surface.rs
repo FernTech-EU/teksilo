@@ -1,10 +1,10 @@
 //! `ToastSurface` — the rendered chrome of one toast.
 //!
-//! Built by [`ToastHost`] for each live entry. Owns the severity
+//! Built by `ToastHost` for each live entry. Owns the severity
 //! glyph, title + body column, action row, close button, and the
 //! `Role::Alert` / `Role::Status` AccessKit node mapping. The visual
 //! chrome (background, padding, layout) is delegated to the active
-//! [`ToastStyle`] via `make_body`.
+//! `ToastStyle` via `make_body`.
 
 use std::rc::Rc;
 
@@ -107,7 +107,7 @@ impl Widget for SeverityGlyph {
     }
 }
 
-/// One rendered toast — chrome owned by [`ToastStyle::make_body`],
+/// One rendered toast — chrome owned by `ToastStyle::make_body`,
 /// functional pieces (glyph, body, action row, close button) owned
 /// by this widget. Built fresh for each entry — there is no internal
 /// `Signal<Option<…>>` slot binding (the host rebuilds on changes).

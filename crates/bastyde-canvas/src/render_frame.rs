@@ -271,7 +271,7 @@ pub enum DecorationKind {
 /// scaled by the transform's zoom. Emitted by
 /// [`Canvas::draw_line`](crate::Canvas::draw_line) /
 /// [`Canvas::stroke_rect`](crate::Canvas::stroke_rect) when the stroke is
-/// [`StrokeSpace::Device`](crate::paint::StrokeSpace::Device).
+/// [`StrokeSpace::Device`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CosmeticLine {
     /// Start point [x, y] in logical pixels.

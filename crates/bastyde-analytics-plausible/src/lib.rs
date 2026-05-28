@@ -26,7 +26,7 @@
 //!
 //! 1. `PlausibleAdapter::builder().build()` spawns a worker thread
 //!    that owns the in-flight buffer and the HTTP client.
-//! 2. `record(event)` converts to [`OwnedEvent`] and sends through
+//! 2. `record(event)` converts to `OwnedEvent` and sends through
 //!    a channel to the worker. Non-blocking — the UI thread never
 //!    waits on HTTP.
 //! 3. The worker batches up to `max_batch_size` events or flushes

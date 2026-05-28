@@ -4,7 +4,7 @@
 //! `BastydeAppBuilder::settings(bundle)` consumes a `SettingsBundle`,
 //! opens the requested services against the app's [`AppPaths`], and
 //! registers each one in the application's `app_state` registry so it
-//! is reachable from any handler via the [`SettingsExt`] trait
+//! is reachable from any handler via the `SettingsExt` trait
 //! (`use bastyde_settings::SettingsExt;`).
 //!
 //! ## What's in the bundle
@@ -20,7 +20,7 @@
 //! projects/files, color palettes, saved searches) is **not** in the
 //! bundle. Apps construct an [`MruList<T>`](crate::MruList) for each
 //! such collection and register it themselves via
-//! [`BastydeAppBuilder::app_state(handle)`](bastyde_app::BastydeAppBuilder::app_state).
+//! `BastydeAppBuilder::app_state(handle)`.
 
 use std::time::Duration;
 

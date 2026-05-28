@@ -324,7 +324,7 @@ impl<'ops> EventContext<'ops> {
         self.pending_intents.push(intent);
     }
 
-    /// Run a closure with the given [`IntentSource`] active. Any
+    /// Run a closure with the given `IntentSource` active. Any
     /// `ctx.send_intent(...)` issued from within the closure will
     /// be tagged with this source instead of the dispatcher's
     /// default (`Handler` / `Shortcut` / `Accessibility`).
@@ -377,7 +377,7 @@ impl<'ops> EventContext<'ops> {
     }
 
     /// Cancel any key capture armed earlier in this handler or via
-    /// [`WidgetTree::begin_key_capture`] before the handler ran.
+    /// `WidgetTree::begin_key_capture` before the handler ran.
     pub fn cancel_key_capture(&mut self) {
         self.pending_key_capture = None;
         self.cancel_key_capture = true;
@@ -510,7 +510,7 @@ impl<'ops> EventContext<'ops> {
     /// originating Bastyde window.
     ///
     /// Returns `None` when called from a standalone `WidgetTree` (no
-    /// app-level [`WindowOps`] sink), or when the platform refuses to
+    /// app-level `WindowOps` sink), or when the platform refuses to
     /// surface a handle (rare; mostly during teardown).
     pub fn parent_window_handle(&self) -> Option<crate::raw_handle::ParentHandle> {
         self.window_ops.as_deref()?.current_parent_handle()
@@ -546,7 +546,7 @@ impl<'ops> EventContext<'ops> {
     /// [`destroy`](Self::destroy)). After the closure runs, the target is
     /// dirty-marked at `dirty` so the mutation takes visual effect.
     ///
-    /// The target widget must override [`Widget::as_any_mut`] to return
+    /// The target widget must override `Widget::as_any_mut` to return
     /// `Some(self)`. If the id is gone or is not a `W`, the closure is a
     /// no-op in release and a `debug_assert` failure in debug — it never
     /// silently mutates the wrong widget.
@@ -587,7 +587,7 @@ impl<'ops> EventContext<'ops> {
     /// **shape** in a way the framework doesn't already detect (relayout
     /// alone no longer re-walks AT; only events that change the AT tree
     /// — focus, overlays, locale/shortcut rebinds — set the dirty flag).
-    /// The companion [`BuildContext::request_accessibility_update`] covers
+    /// The companion `BuildContext::request_accessibility_update` covers
     /// the build-time path.
     pub fn request_accessibility_update(&mut self) {
         self.request_a11y_update = true;

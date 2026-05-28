@@ -6,7 +6,7 @@
 //! install it per-call (`Toggle::style(...)`) or theme-wide
 //! (`theme.style_slots.toggle = Some(Rc::new(MyToggle))`).
 //!
-//! The visual body is a tiny custom leaf widget ([`ToggleBody`]) that
+//! The visual body is a tiny custom leaf widget (`ToggleBody`) that
 //! paints track + knob on the canvas. We could compose
 //! `RectWidget(track) | Position(knob_x, RectWidget(knob))` instead,
 //! but no general-purpose absolute-positioning primitive exists today

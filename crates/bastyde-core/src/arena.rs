@@ -158,7 +158,7 @@ pub struct WidgetNode {
     /// Reused when `needs_paint` is false to avoid re-running `paint()`.
     pub(crate) cached_paint: Option<RenderFrame>,
     /// Cached foreground output for widgets that override
-    /// [`Widget::post_paint`](crate::widget::Widget::post_paint) — the
+    /// [`Widget::post_paint`] — the
     /// draws emitted *after* this widget's children. Separate frame from
     /// `cached_paint` because it lands at a different position in
     /// `draw_order` (after the child subtree). Reused on the same
@@ -497,7 +497,7 @@ impl WidgetArena {
     /// `event_pass_through` (such nodes pass through to whatever sits
     /// behind them but their descendants are still hit-testable). Does
     /// not consider overlays — for the full pointer-routing hit-test
-    /// see [`WidgetTree::hit_test`].
+    /// see `WidgetTree::hit_test`.
     ///
     /// `exclude`: if `Some(id)`, that widget (and any descendants
     /// within its subtree) are skipped during the walk. Used by the
@@ -533,7 +533,7 @@ impl WidgetArena {
     /// Like [`hit_test_in_subtree`](Self::hit_test_in_subtree) but also
     /// excludes a widget (and its descendants) from the walk. Lets the
     /// overlay / drag-and-drop hit-test reuse the single canonical recursion
-    /// in [`hit_test_recursive`] instead of duplicating it.
+    /// in `hit_test_recursive` instead of duplicating it.
     pub fn hit_test_in_subtree_excluding(
         &self,
         start: WidgetId,

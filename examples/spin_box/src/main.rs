@@ -11,7 +11,7 @@
 //! - A percentage SpinBox with suffix, wrap mode enabled, and a
 //!   custom single/page step combo.
 //! - An "Auto" SpinBox whose minimum shows
-//!   [`special_value_text`](bastyde_widgets::SpinBox::special_value_text).
+//!   `special_value_text`.
 //! - A scientific-notation adaptive-step SpinBox over six orders of
 //!   magnitude.
 //! - A read-only SpinBox that mirrors one of the other values.

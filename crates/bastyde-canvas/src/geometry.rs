@@ -40,7 +40,7 @@ pub struct Size {
 ///
 /// Lives in bastyde-canvas (not bastyde-tokens) because it's a generic
 /// geometry primitive, not a design token. Used by per-widget
-/// recipes (`ButtonRecipe::padding`), the [`crate::Padding`] widget
+/// recipes (`ButtonRecipe::padding`), the `Padding` widget
 /// primitive in bastyde-widgets, and any caller that needs to describe
 /// a rectangular inset. Pure data — `Send + Sync + Serialize`.
 #[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]

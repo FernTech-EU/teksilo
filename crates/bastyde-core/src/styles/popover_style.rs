@@ -14,7 +14,7 @@ pub enum PopoverVariant {
     #[default]
     Default,
     /// Menu popover (rounded, slightly-elevated). Distinct from
-    /// [`MenuItemStyle`] which paints the rows; this draws the
+    /// `MenuItemStyle` which paints the rows; this draws the
     /// surrounding container.
     Menu,
     /// Tooltip-flavored container (dark surface in IntUI even in

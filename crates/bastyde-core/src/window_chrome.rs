@@ -31,7 +31,7 @@ pub trait PlatformTitleBarHost {
     /// draws the traffic lights.
     fn renders_custom_controls(&self) -> bool;
 
-    /// Whether the application should install a [`WindowFrame`]-style overlay
+    /// Whether the application should install a `WindowFrame`-style overlay
     /// with invisible edge / corner resize strips. `true` on Windows and
     /// Wayland where the client draws the entire frame; `false` on macOS
     /// where the native `NSWindow` frame still services edge resize.

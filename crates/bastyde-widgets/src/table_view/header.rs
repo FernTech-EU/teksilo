@@ -131,12 +131,12 @@ pub(crate) struct HeaderCell {
     /// entry, non-empty string inserts/replaces it.
     filters_signal: Signal<HashMap<String, String>>,
     /// `true` while the pointer is inside the cell — drives the
-    /// `Hover` overlay supplied by [`TableStyle::make_header_cell`].
+    /// `Hover` overlay supplied by `TableStyle::make_header_cell`.
     /// Toggled by the cell's `on_hover` handler.
     is_hovered: Signal<bool>,
     /// `true` while an active column-resize drag is anchored on
     /// this cell — drives the `Pressed` overlay supplied by
-    /// [`TableStyle::make_header_cell`]. Toggled in lockstep with
+    /// `TableStyle::make_header_cell`. Toggled in lockstep with
     /// the `resize_state` writes in `on_pointer_event`.
     is_resizing: Signal<bool>,
 

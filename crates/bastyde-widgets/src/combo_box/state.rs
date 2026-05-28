@@ -3,7 +3,7 @@
 //! content, and the per-row `DropdownItem`.
 //!
 //! Nothing here is exposed beyond the crate — the public widget lives
-//! in [`super::ComboBox`](super::ComboBox).
+//! in [`super::ComboBox`].
 
 use std::cell::Cell;
 use std::rc::Rc;

@@ -485,7 +485,7 @@ impl WidgetTree {
         self.dispatch_to_widget_returning_handled(target, event, ops);
     }
 
-    /// Same as [`dispatch_to_widget`] but returns `true` when any
+    /// Same as `dispatch_to_widget` but returns `true` when any
     /// preview or bubble handler consumed the event. Used for keyboard
     /// events the framework wants to consume by default (Tab focus
     /// navigation): callers can dispatch first, then fall back to

@@ -11,10 +11,10 @@
 //! - **Value binding**: `Signal<Option<Time>>` — `None` shows the
 //!   placeholder.
 //! - **Pattern**: 24h default `%H:%M`; 12h is `%I:%M %p`. Override
-//!   via [`format_pattern`](Self::format_pattern). Add seconds with
-//!   [`seconds(SecondsMode::Editable)`](Self::seconds).
+//!   via `format_pattern`. Add seconds with
+//!   `seconds(SecondsMode::Editable)`.
 //! - **Keyboard** (preview-pass on the wrapper):
-//!   - Arrow Up / Down → ±[`step_minutes`](Self::step_minutes)
+//!   - Arrow Up / Down → ±`step_minutes`
 //!   - PageUp / PageDown → ±60 minutes
 //!   - Shift+ on either → ×10 multiplier (×600 max so values stay sane)
 //!
@@ -78,7 +78,7 @@ pub struct TimeEdit {
     /// in `build()` so observer handles outlive construction.
     required_source: Option<Signal<Time>>,
     /// Explicit 12h/24h override. `None` (default) means "derive from
-    /// the current locale" via [`prefers_12_hour_clock`]. Set via
+    /// the current locale" via `prefers_12_hour_clock`. Set via
     /// [`Self::format`] to lock a specific clock for the field.
     format: Option<TimeFormat>,
     seconds: SecondsMode,
@@ -151,7 +151,7 @@ impl TimeEdit {
 
     /// Lock the field to a specific clock (12h or 24h). When this
     /// builder is *not* called, the field defaults to the user's
-    /// current locale via [`prefers_12_hour_clock`] (12h for en-US /
+    /// current locale via `prefers_12_hour_clock` (12h for en-US /
     /// en-CA / en-AU / en-NZ / en-PH / en-IN / en-PK; 24h elsewhere).
     pub fn format(mut self, f: TimeFormat) -> Self {
         self.format = Some(f);
@@ -201,7 +201,7 @@ impl TimeEdit {
     }
 
     /// How parse failures are surfaced. See
-    /// [`ValidationBehavior`](crate::date_edit::ValidationBehavior).
+    /// [`ValidationBehavior`].
     pub fn validation_behavior(mut self, behavior: ValidationBehavior) -> Self {
         self.validation_behavior = behavior;
         self

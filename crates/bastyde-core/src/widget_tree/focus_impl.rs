@@ -339,7 +339,7 @@ impl WidgetTree {
     /// Single point of mutation for `self.hovered`. Updates both the
     /// internal field and the externally-observable Signal so debug
     /// tooling (the inspector's hover tooltip) doesn't have to poll.
-    /// Does **not** call [`update_hover_within_signals`] — call sites
+    /// Does **not** call `update_hover_within_signals` — call sites
     /// remain in charge of dispatching enter/leave because some sites
     /// (e.g. post-layout hover recovery) intentionally skip it.
     pub(crate) fn set_hovered(&mut self, value: Option<WidgetId>) {
@@ -350,7 +350,7 @@ impl WidgetTree {
     }
 
     /// Single point of mutation for `self.focused`. Mirror of
-    /// [`set_hovered`] for the focused chain. Drives the inspector's
+    /// `set_hovered` for the focused chain. Drives the inspector's
     /// Focus tab without requiring the tab to poll. Does not touch
     /// `focus_origin` or focus-within signals — call sites remain
     /// responsible for those (the bookkeeping varies by mutation

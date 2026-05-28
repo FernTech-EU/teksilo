@@ -2,8 +2,8 @@
 //!
 //! Two consumer paths share one ICU4X layer:
 //!
-//! 1. **Bundle-side** — `manager.rs` installs [`bastyde_format_callback`] via
-//!    `bundle.set_formatter(...)` and registers [`datetime_function`] as
+//! 1. **Bundle-side** — `manager.rs` installs `bastyde_format_callback` via
+//!    `bundle.set_formatter(...)` and registers `datetime_function` as
 //!    `DATETIME()`. This makes `{ NUMBER($n, ...) }` and `{ DATETIME($ts, ...) }`
 //!    inside `.ftl` messages render correctly across locales.
 //! 2. **Signal-side** — [`NumberFormatter`] and [`BastydeDateTimeFormatter`] take
@@ -469,7 +469,7 @@ fn format_number_via_memoizer(
 }
 
 /// Fluent custom function registered as `DATETIME` via
-/// `bundle.add_function("DATETIME", ...)`. Expects positional[0] to be a
+/// `bundle.add_function("DATETIME", ...)`. Expects `positional[0]` to be a
 /// `FluentValue::Custom(BastydeDateTime)`; merges named args (`dateStyle`,
 /// `timeStyle`) into a fresh copy and returns it as a Custom for the
 /// resolver to stringify via `FluentType::as_string`.

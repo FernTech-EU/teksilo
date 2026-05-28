@@ -6,7 +6,7 @@
 //!   scene-coord point to its screen position. Composed from four
 //!   `Signal<f32>` — `pan_x`, `pan_y`, `zoom`, `rotation` — kept
 //!   separate so each animates independently with its own epsilon.
-//! * The **item transform chain** ([`local_to_scene`]) walks a
+//! * The **item transform chain** (`local_to_scene`) walks a
 //!   scene-graph item's parent chain composing per-item local→parent
 //!   transforms into a single local→scene affine. Used by hit-test,
 //!   paint and the spatial index to project an item's local-coord

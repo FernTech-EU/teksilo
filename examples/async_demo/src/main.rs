@@ -3,7 +3,7 @@
 //! Run with: `cargo run -p async-demo`
 //!
 //! Two buttons:
-//! - **Load data** uses [`spawn_local`] + [`spawn_blocking`]: a worker thread
+//! - **Load data** uses `spawn_local` + `spawn_blocking`: a worker thread
 //!   does the slow work, and the result flows back into `Signal`s on resume
 //!   (the owned-handles model).
 //! - **Fetch + open window** uses `spawn_local_with`: the result is delivered

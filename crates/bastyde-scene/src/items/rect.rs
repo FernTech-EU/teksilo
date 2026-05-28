@@ -61,7 +61,7 @@ impl RectItem {
     }
 
     /// Human-readable label used for debug and the default AT name.
-    /// Accepts anything convertible into [`LocalizedString`] — most
+    /// Accepts anything convertible into `LocalizedString` — most
     /// commonly `tr!(...)`. Plain strings auto-convert.
     pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = label.into();

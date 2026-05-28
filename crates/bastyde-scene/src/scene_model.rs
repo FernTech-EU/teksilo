@@ -49,7 +49,7 @@ use crate::item::{ItemId, SceneItem};
 use crate::item_handlers::SceneItemHandlerSet;
 use crate::scene::{ItemChange, PanAxes, Scene, SceneLayer};
 
-/// A shared, cloneable handle to a [`Scene`]. See the [module docs](self).
+/// A shared, cloneable handle to a [`Scene`].
 pub struct SceneModel(pub(crate) Rc<RefCell<Scene>>);
 
 impl Clone for SceneModel {

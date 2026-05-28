@@ -9,7 +9,7 @@
 //!   translation macro) so apps that register bastyde-widgets'
 //!   framework locales see "Strg+Eingabe" in German, "Ctrl+Entrée"
 //!   in French, "Ctrl+Enter" in English, etc. Letters, digits,
-//!   character keys and F1..F12 fall through to [`Key::Display`]
+//!   character keys and F1..F12 fall through to `Key::Display`
 //!   — those names are universal.
 //!
 //! Apps that want full control can bypass this function entirely —

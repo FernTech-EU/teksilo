@@ -116,7 +116,7 @@ impl TextWidget {
         self
     }
 
-    /// Set the text style. Accepts a raw [`TextStyle`], a
+    /// Set the text style. Accepts a raw `TextStyle`, a
     /// [`TextStyleRole`](bastyde_tokens::TextStyleRole), or any value implementing
     /// `Into<TextStyleProp>`. Using a role resolves at paint/layout time, so
     /// theme typography changes take effect without a rebuild.

@@ -13,11 +13,11 @@
 //! widget keep that single rect.
 //!
 //! `TabStyle` carries two methods. `make_body` wraps a single tab
-//! header: a leaf [`TabBodyPainter`] (accent indicator + focus ring)
+//! header: a leaf `TabBodyPainter` (accent indicator + focus ring)
 //! sits behind the label / leading / trailing slot composition in a
-//! `ZStack`. `make_bar` wraps the whole strip: a [`TabBarChrome`]
+//! `ZStack`. `make_bar` wraps the whole strip: a `TabBarChrome`
 //! container stacks an optional backdrop `RectWidget`, a
-//! [`TabBarChromePainter`] leaf (content-pane separator +
+//! `TabBarChromePainter` leaf (content-pane separator +
 //! drag-reorder drop indicator), and the bar content — sizing to the
 //! content under the real proposal so its inner `Expand` fills the
 //! bar. Neither painter has an intrinsic size; each fills the bounds

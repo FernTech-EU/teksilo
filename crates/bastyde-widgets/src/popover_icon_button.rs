@@ -6,7 +6,7 @@
 //! across the popover-trigger family stays consistent.
 //!
 //! Default `has_popup` kind is [`HasPopup::Menu`] (icon-only buttons
-//! most commonly open menus). Override via [`Self::has_popup_kind`] if
+//! most commonly open menus). Override via `has_popup_kind` if
 //! the surface is really a Dialog or Listbox.
 //!
 //! ```ignore
@@ -25,7 +25,7 @@
 //! standard "this is a menu, not a single-action button" affordance.
 //! Skipped automatically at [`IconButtonSize::Compact`] (22 dp) where
 //! there isn't enough room without crowding the icon. Opt out via
-//! [`Self::show_disclosure_caret`].
+//! `show_disclosure_caret`.
 //!
 //! Decorative only — AT-hidden. The screen-reader story comes from
 //! `set_has_popup(...)` + `set_expanded(...)` on the underlying
@@ -46,8 +46,8 @@
 //! before passing the IconButton to `PopoverIconButton::new` is
 //! discarded — the activate slot is owned by the popover wiring. Apps
 //! that need a side-effect on open / close should use
-//! [`Self::on_open`] / [`Self::on_close`], or observe
-//! [`Self::open_signal`] from a `ctx.effect`.
+//! `on_open` / `on_close`, or observe
+//! `open_signal` from a `ctx.effect`.
 
 use std::rc::Rc;
 use std::time::Duration;

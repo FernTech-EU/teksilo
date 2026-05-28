@@ -319,7 +319,7 @@ pub struct SceneView {
     /// installed; only single-view `Once` widgets materialise.
     delegate: Option<Rc<dyn Fn(&dyn std::any::Any, ItemId) -> Option<Box<dyn Widget>>>>,
     /// Items whose payload changed since the last build (filled by the
-    /// `item_change` observer on [`ItemChange::PayloadChanged`]). Drained at
+    /// `item_change` observer on `ItemChange::PayloadChanged`). Drained at
     /// the top of `build`, where each is destroyed and re-materialised via the
     /// delegate. `Rc<RefCell>` so the observer closure can push without
     /// borrowing `model`.
@@ -515,8 +515,8 @@ pub struct SceneView {
     /// Whether this SceneView is logically nested inside another
     /// (chart-style outer chrome + inner data scene, or a preview
     /// pane inside a parent scene). Default `false` — every
-    /// SceneView reports itself as a top-level [`Role::Pane`]. When
-    /// `true`, the AT walker reports [`Role::Region`] instead so
+    /// SceneView reports itself as a top-level `Role::Pane`. When
+    /// `true`, the AT walker reports `Role::Region` instead so
     /// screen readers don't announce redundant landmarks.
     a11y_nested: bool,
     /// Optional label announced as the SceneView's own AT name.
@@ -568,7 +568,7 @@ pub struct SceneView {
     /// [`CacheMode::ItemCoordinate`](crate::cache::CacheMode::ItemCoordinate).
     /// Keyed by `ItemId`; the entry stores a [`RenderFrame`](bastyde_canvas::RenderFrame)
     /// recorded in the item's local coordinates and replayed via
-    /// [`Canvas::draw_render_frame`] when valid. Invalidated by an
+    /// `Canvas::draw_render_frame` when valid. Invalidated by an
     /// observer on [`Scene::item_change_signal`](crate::Scene::item_change_signal):
     /// `LocalBoundsChanged` / `OpacityChanged` / `Removed` for an id
     /// drop that id's entry. Apps that mutate item-internal state
@@ -828,8 +828,8 @@ impl SceneView {
 
     /// Mark this SceneView as logically nested inside another
     /// SceneView. Affects only the AT walker — the inner
-    /// SceneView reports [`Role::Region`] instead of the default
-    /// [`Role::Pane`], so screen readers don't announce a
+    /// SceneView reports `Role::Region` instead of the default
+    /// `Role::Pane`, so screen readers don't announce a
     /// redundant top-level landmark for what's logically a sub-
     /// region. Pair with [`a11y_label`](Self::a11y_label) to give
     /// the inner region a useful announce name.
@@ -1075,8 +1075,8 @@ impl SceneView {
     /// Configure how left-mouse drag-on-canvas behaves. Default
     /// [`DragMode::RubberBand`](crate::DragMode) — drag-on-an-item
     /// moves it (when `IS_DRAGGABLE`), drag-on-empty-space creates
-    /// a marquee. [`DragMode::ScrollHandDrag`] makes left-drag
-    /// pan the view unconditionally; [`DragMode::NoDrag`] disables
+    /// a marquee. `DragMode::ScrollHandDrag` makes left-drag
+    /// pan the view unconditionally; `DragMode::NoDrag` disables
     /// the on-drag handler entirely.
     pub fn drag_mode(self, mode: crate::item_handlers::DragMode) -> Self {
         self.drag_mode.set(mode);
@@ -1330,7 +1330,7 @@ impl SceneView {
     /// Mutable access to the underlying scene, as a borrow guard.
     ///
     /// Single-view escape hatch. For multi-view, mutate through the shared
-    /// [`SceneModel`](crate::SceneModel) handle ([`model`](Self::model)) — every
+    /// [`SceneModel`] handle ([`model`](Self::model)) — every
     /// mutator is `&self`, so a handler holding a clone can drive the scene
     /// directly (no `with_widget_mut` needed) and **all** views reconcile:
     ///
@@ -3945,7 +3945,7 @@ impl SceneView {
         }
     }
 
-    /// Apply an [`A11yRelation`] to the synthetic node identified by
+    /// Apply an `A11yRelation` to the synthetic node identified by
     /// `from_id` in the builder's collected children. No-op (with
     /// debug-assert) if `from_id` isn't found — the relation source
     /// must have been emitted into the logical tree first.

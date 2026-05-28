@@ -1,5 +1,5 @@
-//! Toolbar row that switches a live [`SyntaxHighlighter`] on the shared
-//! [`TextDocument`].
+//! Toolbar row that switches a live `SyntaxHighlighter` on the shared
+//! `TextDocument`.
 //!
 //! Demonstrates the document-level highlighter: a `SegmentedControl` picks
 //! between Off / Search / Syntax / Spell-check, and (in Search mode) a

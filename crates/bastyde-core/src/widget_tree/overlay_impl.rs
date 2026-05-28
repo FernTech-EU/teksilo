@@ -621,7 +621,7 @@ impl WidgetTree {
     /// Promote a shown tooltip from "ephemeral hover" to "sticky".
     ///
     /// - Flags the tooltip entry as sticky so
-    ///   [`tooltip_pointer_leave`](Self::tooltip_pointer_leave)
+    ///   `tooltip_pointer_leave`
     ///   no longer auto-dismisses it,
     /// - Swaps the overlay's dismiss behavior to
     ///   `EscapeOrClickOutside` so clicking anywhere off the tooltip
@@ -770,7 +770,7 @@ impl WidgetTree {
     /// Mutable access to the overlay manager. Used by the
     /// modal-presentation pipeline to wire up cascade-dismissal
     /// between paired overlays (e.g. the dialog scrim and the modal
-    /// panel) via [`OverlayManager::set_parent_overlay`].
+    /// panel) via `OverlayManager::set_parent_overlay`.
     pub fn overlay_manager_mut(&mut self) -> &mut crate::overlay::OverlayManager {
         &mut self.overlay_manager
     }

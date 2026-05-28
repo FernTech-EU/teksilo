@@ -40,7 +40,7 @@ impl TabId {
     }
 
     /// The underlying non-zero `u64`. Useful when persisting tabs
-    /// across sessions: serialize this, restore via [`from_raw`].
+    /// across sessions: serialize this, restore via `from_raw`.
     pub fn raw(self) -> NonZeroU64 {
         self.0
     }

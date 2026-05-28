@@ -11,7 +11,7 @@
 //! Two storage variants are supported via [`NotificationArchive`]:
 //! - `InMemory` — session-only.
 //! - `Persistent { path }` — file-backed via
-//!   [`PersistedListModel`](bastyde_settings::PersistedListModel).
+//!   [`PersistedListModel`].
 //!   Apps install via `ToastInstallOptions::archive = Some(
 //!   NotificationArchive::persistent(...))`; the registry's
 //!   `enqueue` push goes through the model and the on-disk file

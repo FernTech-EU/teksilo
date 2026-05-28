@@ -44,7 +44,7 @@ use bastyde_core::WindowPlacement;
 
 /// Interrogate the winit window for its current placement so an
 /// `OS-initiated` state change can be mirrored into the corresponding
-/// [`WindowState::placement`] signal without the observer pushing it
+/// `WindowState::placement` signal without the observer pushing it
 /// back out as a `WindowCommand` (re-entrancy guard on `from_os`).
 fn query_window_placement(win: &winit::window::Window) -> WindowPlacement {
     if win.is_minimized() == Some(true) {
@@ -1818,7 +1818,7 @@ impl BastydeAppBuilder {
 
     /// Identify the application for OS-correct path resolution. The
     /// `(qualifier, organization, application)` triple follows the
-    /// [`directories`] convention (e.g. `("com", "FernTech", "Skribisto")`).
+    /// `directories` convention (e.g. `("com", "FernTech", "Skribisto")`).
     /// Required when [`settings`](Self::settings) is used.
     ///
     /// # Panics
@@ -1849,7 +1849,7 @@ impl BastydeAppBuilder {
         self
     }
 
-    /// Read the currently-configured [`AppPaths`], if any. Used by
+    /// Read the currently-configured `AppPaths`, if any. Used by
     /// builder-extension traits (e.g. `install_toast` in `bastyde`)
     /// that need to open persistent files at install time before
     /// `run` fires.

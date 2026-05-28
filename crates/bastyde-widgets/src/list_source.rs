@@ -20,7 +20,7 @@ pub(crate) struct ListSource<T: 'static> {
     /// reorder in place.
     pub(crate) move_item_fn: Option<Rc<dyn Fn(usize, usize)>>,
     /// Only populated when backed by `ListModel` — external sources
-    /// can't remove items in place. Used by [`TabBar<T>`] to provide
+    /// can't remove items in place. Used by `TabBar<T>` to provide
     /// a default close-tab behavior when the caller doesn't pass an
     /// explicit `on_close` handler.
     pub(crate) remove_item_fn: Option<Rc<dyn Fn(usize)>>,

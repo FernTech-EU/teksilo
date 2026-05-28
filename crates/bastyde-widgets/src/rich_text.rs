@@ -24,8 +24,8 @@
 //! `place_children` / `paint` / `accessibility`), and the shared
 //! `sync_cursor_signals` helper used by both `keyboard` and `mouse`
 //! dispatch modules. Key / pointer / gesture handlers live in
-//! [`keyboard`] and [`mouse`]; the frame-tick loop lives in
-//! [`frame_loop`]; clipboard actions in [`clipboard`].
+//! `keyboard` and `mouse`; the frame-tick loop lives in
+//! `frame_loop`; clipboard actions in `clipboard`.
 
 mod clipboard;
 mod context_menu;
@@ -1164,7 +1164,7 @@ impl RichTextEditor {
 
     /// Paste from the system clipboard. Prefers an in-process fragment
     /// over HTML over plain text — see
-    /// [`rich_text/clipboard.rs`](crate::rich_text::clipboard).
+    /// `rich_text/clipboard.rs`.
     pub fn paste(&self, ctx: &bastyde_core::widget::EventContext) {
         {
             let mut st = self.state.borrow_mut();
@@ -1226,7 +1226,7 @@ impl RichTextEditor {
 
     /// Install a callback fired when the user Primary-clicks a link
     /// (an element with an anchor `href`). The callback receives the
-    /// href string and the active [`EventContext`].
+    /// href string and the active `EventContext`.
     ///
     /// The callback replaces any prior link-click callback on this
     /// builder chain. To stop observing, reconstruct the editor
@@ -1241,7 +1241,7 @@ impl RichTextEditor {
 
     /// Install a callback fired when the user Primary-clicks an inline
     /// image. The callback receives the image's resource name and the
-    /// active [`EventContext`].
+    /// active `EventContext`.
     pub fn on_image_activated(
         self,
         handler: impl Fn(&str, &mut bastyde_core::widget::EventContext) + 'static,

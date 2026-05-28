@@ -202,7 +202,7 @@ pub struct TabWidget {
     /// Bar orientation — **reactive**. `Horizontal` (default) places
     /// the bar above the content; `Vertical` places it on the leading
     /// edge with content on the trailing side. Bound at
-    /// [`BindingLevel::Rebuild`](bastyde_core::binding::BindingLevel::Rebuild)
+    /// [`BindingLevel::Rebuild`]
     /// in [`build`](Widget::build), so flipping it from outside the
     /// widget re-runs the build with the new layout (the inner
     /// content panes are memoized across this rebuild — their
@@ -226,7 +226,7 @@ pub struct TabWidget {
     /// or `.sizing_signal(...)` is called; defaulted by the bar
     /// (`TabSizing::Shared`) otherwise. When a signal is bound,
     /// the [`TabWidget`] also binds it at
-    /// [`BindingLevel::Rebuild`](bastyde_core::binding::BindingLevel::Rebuild)
+    /// [`BindingLevel::Rebuild`]
     /// so toggling the signal swaps Shared ↔ Independent live.
     sizing: Option<Signal<TabSizing>>,
     /// Surface color/role applied to **every** tab — selected, idle,

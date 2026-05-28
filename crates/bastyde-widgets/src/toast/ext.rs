@@ -1,5 +1,5 @@
 //! Extension methods on [`EventContext`] for showing and dismissing
-//! toasts. Mirrors the [`EventContextFileDialogExt`] pattern from
+//! toasts. Mirrors the `EventContextFileDialogExt` pattern from
 //! `bastyde-platform`.
 //!
 //! Apps `use bastyde_widgets::toast::EventContextToastExt;` (or
@@ -29,7 +29,7 @@ pub trait EventContextToastExt {
     fn show_toast(&mut self, toast: Toast) -> ToastHandle;
 
     /// Programmatically dismiss a toast by handle, with cause
-    /// [`ToastDismissCause::Programmatic`]. Equivalent to
+    /// `ToastDismissCause::Programmatic`. Equivalent to
     /// `handle.dismiss(ctx)`. No-op if the toast has already been
     /// dismissed.
     fn dismiss_toast(&mut self, handle: &ToastHandle);

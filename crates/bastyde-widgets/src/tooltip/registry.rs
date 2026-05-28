@@ -35,7 +35,7 @@ use bastyde_i18n::LocalizedString;
 /// keyboard shortcut hint.
 ///
 /// The shortcut is currently a literal label override. Registry-backed
-/// auto-lookup against the new [`ShortcutRegistry`] lands via a
+/// auto-lookup against the new `ShortcutRegistry` lands via a
 /// shortcut-id field once registry-backed lookup is wired.
 ///
 /// [`MenuItem`]: crate::menu_item::MenuItem
@@ -49,7 +49,7 @@ pub struct TooltipContent {
     /// inside a sticky tooltip. Same inline-markup pipeline as `text`.
     pub more: Option<LocalizedString>,
     /// Manual shortcut label override (e.g. "Ctrl+Shift+S"). Used
-    /// verbatim when set; takes precedence over [`shortcut_id`].
+    /// verbatim when set; takes precedence over `shortcut_id`.
     pub shortcut_label: Option<String>,
     /// Registered shortcut id — the tooltip renders the effective
     /// primary keystroke from the tree's
@@ -175,11 +175,9 @@ thread_local! {
 }
 
 /// Install the tooltip registry for the current thread. Called once
-/// by [`BastydeAppBuilder::register_tooltips`] before the first frame
+/// by `BastydeAppBuilder::register_tooltips` before the first frame
 /// builds. Panics in debug builds on double-install; logs and keeps
 /// the first installation in release.
-///
-/// [`BastydeAppBuilder::register_tooltips`]: bastyde_app::BastydeAppBuilder::register_tooltips
 pub fn install_tooltip_registry(contents: Vec<TooltipContent>) {
     let reg = TooltipRegistry {
         by_key: contents.into_iter().map(|c| (c.key.clone(), c)).collect(),

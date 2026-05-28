@@ -1,6 +1,6 @@
 //! `NotificationLogDialog` — one-line modal preset wrapping
-//! [`NotificationLog`](super::log::NotificationLog) inside a
-//! [`ModalContainer`](crate::dialog::ModalContainer).
+//! [`NotificationLog`] inside a
+//! [`ModalContainer`].
 //!
 //! ```ignore
 //! NotificationLogDialog::show(archive.clone(), ctx);

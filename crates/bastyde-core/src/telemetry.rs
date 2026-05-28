@@ -11,7 +11,7 @@
 //! crate higher.
 //!
 //! The framework's only insertion point is the dispatch tap in
-//! [`crate::widget_tree::WidgetTree::dispatch_intent`], which calls
+//! `crate::widget_tree::WidgetTree::dispatch_intent`, which calls
 //! `app_state::<dyn UsageReporter>()` if registered and emits an
 //! `intent.dispatched` event with the intent's `name`. Apps that don't
 //! install a reporter pay nothing.

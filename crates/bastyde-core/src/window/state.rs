@@ -14,14 +14,14 @@
 //!   that assigns through the `Signal` handle returned from the
 //!   getter. These fire the observer wired in [`WindowState::new`];
 //!   the observer pushes a [`WindowCommand`] into
-//!   [`WindowStateInner::pending_os_commands`], which the app-level
+//!   `WindowStateInner::pending_os_commands`, which the app-level
 //!   window manager drains once per tick and translates into a winit
 //!   call.
 //!
 //! - **OS-side writes** — the app-level window manager calls the
-//!   private `set_*_from_os` methods on [`WindowStateInner`] when a
+//!   private `set_*_from_os` methods on `WindowStateInner` when a
 //!   winit `WindowEvent` reports that the OS changed state. Those
-//!   setters flip the [`applying_from_os`](WindowStateInner) guard
+//!   setters flip the `applying_from_os` guard
 //!   before updating the signal; the observer sees the guard is set
 //!   and skips enqueuing a command. Without this guard, every
 //!   OS-initiated change would loop back into a redundant OS call —
@@ -123,7 +123,7 @@ impl WindowState {
     ///
     /// Wires an observer on every signal that pushes a matching
     /// [`WindowCommand`] onto the pending queue, guarded by
-    /// [`WindowStateInner::applying_from_os`].
+    /// `WindowStateInner::applying_from_os`.
     pub fn new(init: WindowStateInit) -> Self {
         let inner = Rc::new(WindowStateInner {
             id: init.id,

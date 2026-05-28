@@ -181,12 +181,12 @@ impl Widget for ModalContainer {
 /// Mounted by the modal-presentation pipeline (bastyde-app) as a separate
 /// `OverlayPlacement::FullViewport` overlay pushed BEFORE the centered
 /// modal overlay so it z-orders below the panel. The chrome itself is
-/// delegated to the active [`DialogStyle::make_scrim`]; clicking the
+/// delegated to the active `DialogStyle::make_scrim`; clicking the
 /// scrim dismisses the linked modal when the modal's
 /// [`ModalCloseBehavior`] permits click-outside dismissal.
 ///
 /// The dismissal cascade is wired via
-/// [`OverlayManager::set_parent_overlay`] AFTER both overlays are
+/// `OverlayManager::set_parent_overlay` AFTER both overlays are
 /// pushed — the scrim's `parent_overlay` is set to the modal's id, so
 /// any dismiss of the modal cascades through `dismiss_immediate` and
 /// also dismisses the scrim. The scrim's own `dismiss` behavior is

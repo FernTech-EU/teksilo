@@ -160,7 +160,7 @@ pub struct InspectorState {
     pub tab_ids: Vec<bastyde_widgets::TabId>,
     /// `TabWidget`-shaped projection of [`active_tab`](Self::active_tab).
     /// Bridged to `active_tab` by paired observers installed in
-    /// [`InspectorState::new`]; reads / writes flow either way and
+    /// `InspectorState::new`; reads / writes flow either way and
     /// the bridge stays alive for the lifetime of the
     /// [`InspectorState`] (the observer handles are stored in
     /// `_active_tab_bridge`).

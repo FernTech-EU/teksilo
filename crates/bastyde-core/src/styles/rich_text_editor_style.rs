@@ -28,7 +28,7 @@ pub struct RichTextEditorStyleConfig {
     /// Per-edge `(top, right, bottom, left)` padding between the text
     /// content and the chrome border. `None` means the style picks its
     /// own default (TextInput-style insets for editable, no padding for
-    /// read-only). Set via [`RichTextEditor::content_padding`].
+    /// read-only). Set via `RichTextEditor::content_padding`.
     pub content_padding: Option<(f32, f32, f32, f32)>,
 }
 

@@ -15,7 +15,7 @@
 //! `value.map(|c| c.to_hsv().0)` would clamp the visible hue back to
 //! 0° — which makes the HSV canvas snap from "red" back to "red at the
 //! top-left" the moment the user drags down to white. We avoid this by
-//! caching the last non-degenerate hue in [`ColorComponents`] and
+//! caching the last non-degenerate hue in `ColorComponents` and
 //! returning it whenever the bound color's saturation/value collapses.
 
 use std::cell::Cell;

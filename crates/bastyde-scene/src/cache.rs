@@ -1,11 +1,11 @@
 //! Item-coordinate paint caching.
 //!
 //! When a [`SceneItem`](crate::SceneItem) returns
-//! [`CacheMode::ItemCoordinate`] from [`SceneItem::cache_mode`],
+//! [`CacheMode::ItemCoordinate`] from `SceneItem::cache_mode`,
 //! the [`SceneView`](crate::SceneView) caches the item's paint
 //! output as a [`RenderFrame`] in **local item coordinates**. On
 //! subsequent paint passes the cached frame is replayed via
-//! [`Canvas::draw_render_frame`] instead of re-running
+//! `Canvas::draw_render_frame` instead of re-running
 //! `item.paint`. Cache validity is keyed by
 //! [`Scene::item_change_signal`](crate::Scene::item_change_signal):
 //! a `LocalBoundsChanged` event for an id evicts that id's entry.

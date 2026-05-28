@@ -25,7 +25,7 @@
 //!
 //! For overlays where the dismiss should be *deferred* until the
 //! fade-out completes (tooltip / popover / snackbar / dialog),
-//! prefer [`OverlayRequest::with_fade`](crate::OverlayRequest)
+//! prefer `OverlayRequest::with_fade`
 //! instead — that path coordinates the dismiss with the tween so the
 //! overlay survives until the opacity reaches zero.
 //!

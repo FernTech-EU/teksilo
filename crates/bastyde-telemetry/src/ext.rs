@@ -2,7 +2,7 @@
 //! `EventContext`.
 //!
 //! Same convention as
-//! [`bastyde_settings::SettingsExt`](bastyde_settings::SettingsExt). Apps
+//! [`bastyde_settings::SettingsExt`]. Apps
 //! `use bastyde_telemetry::TelemetryExt;` to reach `ctx.consent()`,
 //! `ctx.usage_reporter()`, etc.
 

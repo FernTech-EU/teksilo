@@ -2,7 +2,7 @@
 //! [`Toast`](crate::toast::Toast).
 //!
 //! Every toast presented through the registry is mirrored into a
-//! [`NotificationArchiveModel`](archive::NotificationArchiveModel)
+//! [`NotificationArchiveModel`]
 //! (when archiving is enabled via `ToastInstallOptions::archive`).
 //! The model is a [`ListModel<NotificationEntry>`](bastyde_data::ListModel)
 //! plus an unread-count signal — pre-shaped for binding to a
@@ -48,7 +48,7 @@ pub use log::NotificationLog;
 pub use log_dialog::NotificationLogDialog;
 
 /// A single archived notification — what
-/// [`NotificationLog`](crate::notification::log::NotificationLog) renders, what survives across
+/// [`NotificationLog`] renders, what survives across
 /// app restarts under `NotificationArchive::Persistent`. Owned, plain
 /// fields only; no closures, no `Rc<dyn Fn>`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

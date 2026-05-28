@@ -1,7 +1,7 @@
 //! `ColorSwatch` — single clickable color cell with `Role::ColorWell`.
 //!
 //! Public widget so apps can compose their own swatch rows / palettes
-//! outside of the bundled [`SwatchGrid`](super::swatch_grid::SwatchGrid).
+//! outside of the bundled `SwatchGrid`.
 //! Renders an optional checkerboard underlay when `color.a() < 1.0` so
 //! transparent swatches read correctly.
 

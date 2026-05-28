@@ -95,7 +95,7 @@ impl StreamBuffer {
     }
 }
 
-/// All per-pipeline streaming buffers owned by a [`Renderer`].
+/// All per-pipeline streaming buffers owned by a `Renderer`.
 ///
 /// Grouped so the renderer can `reset()` them all at once and so macros
 /// can pass a single handle around the render loop.

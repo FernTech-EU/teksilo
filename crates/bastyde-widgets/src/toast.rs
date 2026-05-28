@@ -14,10 +14,10 @@
 //! configured via builder methods, and presented with
 //! `ctx.show_toast(toast)` (see
 //! [`toast::ext::EventContextToastExt`](crate::toast::ext::EventContextToastExt))
-//! or `toast.present(ctx)`. A [`ToastHost`](crate::toast::host::ToastHost)
+//! or `toast.present(ctx)`. A [`ToastHost`]
 //! installed via `BastydeAppBuilder.install_toast(opts)` from the `bastyde`
 //! umbrella accepts the request, picks a free slot from its pool, and
-//! mounts a [`ToastSurface`](crate::toast::surface::ToastSurface) at the
+//! mounts a [`ToastSurface`] at the
 //! configured viewport corner using the
 //! [`OverlayPlacement::ViewportCorner`](bastyde_core::overlay::OverlayPlacement)
 //! variant.
@@ -48,7 +48,7 @@ pub use host::{ToastHost, ToastInstallOptions};
 pub use registry::ToastRegistry;
 pub use surface::ToastSurface;
 
-/// Toast severity — re-export of [`BannerSeverity`] so apps that mix
+/// Toast severity — re-export of `BannerSeverity` so apps that mix
 /// `Banner` and `Toast` share one severity vocabulary. The same
 /// `severity.surface()` / `severity.glyph_color(theme)` helpers apply.
 pub use bastyde_core::styles::BannerSeverity as ToastSeverity;
@@ -99,7 +99,7 @@ pub enum ToastActionStyle {
     /// below the body. Use for primary calls-to-action ("Retry",
     /// "Save", "Discard").
     Button {
-        /// Variant passed to the underlying [`Button`]. Filled for
+        /// Variant passed to the underlying `Button`. Filled for
         /// primaries, Plain / Tinted for secondaries.
         variant: crate::button::ButtonVariant,
     },
@@ -176,7 +176,7 @@ impl ToastAction {
         self
     }
 
-    /// Associate the action with a registered [`Shortcut`] id. Two
+    /// Associate the action with a registered `Shortcut` id. Two
     /// effects: the keystroke label is shown as a chip on the action,
     /// and the archived form of this action (in
     /// [`NotificationLog`](crate::notification::log::NotificationLog))
@@ -531,7 +531,7 @@ impl Toast {
     // ----- Present -----
 
     /// Submit the toast through the installed
-    /// [`ToastHost`](crate::toast::host::ToastHost). Equivalent to
+    /// [`ToastHost`]. Equivalent to
     /// `ctx.show_toast(self)`. Returns a [`ToastHandle`] for
     /// programmatic control. If `install_toast` was not called the
     /// returned handle is in the "dropped" state (`is_alive` returns

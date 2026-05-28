@@ -91,7 +91,7 @@ pub trait UsageReporter: 'static {
 ///
 /// `bastyde-telemetry::TelemetryBundle::open` constructs one of these
 /// and registers it into `app_state`. The dispatch tap in
-/// [`crate::widget_tree::WidgetTree::dispatch_intent`] looks it up
+/// `crate::widget_tree::WidgetTree::dispatch_intent` looks it up
 /// by `TypeId`, calls `record` if found.
 ///
 /// Carries the metadata the tap needs to assemble a complete

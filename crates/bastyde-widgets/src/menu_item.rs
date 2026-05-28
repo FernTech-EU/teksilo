@@ -52,7 +52,7 @@ pub struct MenuItem {
     label: bastyde_i18n::LocalizedString,
     icon: Option<IconWidget>,
     shortcut_label: Option<String>,
-    /// Optional shortcut id. When set and [`shortcut_label`] is not,
+    /// Optional shortcut id. When set and `shortcut_label` is not,
     /// the rendered trailing label is pulled from the tree's
     /// [`ShortcutRegistry`](bastyde_core::shortcut::ShortcutRegistry) and
     /// tracks user rebindings automatically (the build registers the

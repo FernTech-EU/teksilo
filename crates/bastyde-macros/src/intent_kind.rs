@@ -1,5 +1,5 @@
 //! `#[derive(IntentKind)]` — generates the typed DTO bridge between an
-//! app's intent enum and the framework's runtime [`Intent`].
+//! app's intent enum and the framework's runtime `Intent`.
 //!
 //! Each variant declares a `#[name = "..."]` attribute. The whole
 //! variant — including any fields it carries — becomes the intent's

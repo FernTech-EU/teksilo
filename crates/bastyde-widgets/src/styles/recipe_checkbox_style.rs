@@ -6,7 +6,7 @@
 //! and install it per-call (`Checkbox::style(...)`) or theme-wide
 //! (`theme.style_slots.checkbox = Some(Rc::new(MyCheckbox))`).
 //!
-//! The visual body is a small leaf widget ([`CheckboxBody`]) that paints
+//! The visual body is a small leaf widget (`CheckboxBody`) that paints
 //! the box + check / dash glyph directly onto the canvas. Same trade-off
 //! as `RecipeToggleStyle`: a leaf keeps paint-cost parity with the
 //! pre-refactor Checkbox; custom impls are free to compose primitives

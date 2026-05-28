@@ -6,7 +6,7 @@
 //! (intentional Int UI house style).
 //!
 //! These constructors aggregate raw token data from `bastyde-tokens` with
-//! the [`Theme`](crate::styles::Theme) struct. `ComponentStyles` was
+//! the [`Theme`] struct. `ComponentStyles` was
 //! removed; every widget now reads `pub const`s on its
 //! `recipe_<widget>_style` (themable) or owning widget module
 //! (group-4 composites). Theme-wide style installs go through

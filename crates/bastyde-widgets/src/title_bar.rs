@@ -5,7 +5,7 @@
 //! maximize / close). The platform plumbing — beginning a window drag,
 //! returning the right `WM_NCHITTEST` codes on Windows, repositioning the
 //! macOS traffic lights — lives behind the
-//! [`PlatformTitleBarHost`](bastyde_core::PlatformTitleBarHost) trait in
+//! [`PlatformTitleBarHost`] trait in
 //! `bastyde-platform`. The widget itself is platform-agnostic.
 //!
 //! Construct a `TitleBar` from inside the root-builder closure, fetching
@@ -64,7 +64,7 @@ pub type CloseAction = Rc<dyn Fn(&mut EventContext)>;
 /// ```
 ///
 /// The leading inset reserves space for the OS-drawn traffic lights on
-/// macOS. The drag region is a [`Spacer`](bastyde_widgets::Spacer)-style flex
+/// macOS. The drag region is a `Spacer`-style flex
 /// child that absorbs all leftover horizontal space and forwards
 /// pointer / drag / double-tap gestures to the platform host. The window
 /// controls (minimize / maximize / close) are rendered only when the host

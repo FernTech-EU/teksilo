@@ -21,7 +21,7 @@
 //!
 //! # Accessibility
 //!
-//! Root: [`Role::Group`](accesskit::Role::Group) with a localized
+//! Root: `Role::Group` with a localized
 //! label and `Live::Polite` so screen readers announce committed color
 //! changes. The HSV canvas's subtree is excluded from the AT tree
 //! (no ARIA precedent for 2D pointer gestures); the hue strip, alpha
@@ -244,7 +244,7 @@ impl ColorPicker {
     /// Show a Done / Cancel footer at the bottom of the picker.
     /// Default `false` for embedded use (the bound signal is the
     /// commit channel — there is no "uncommitted" state). Wrappers
-    /// that present the picker as a popover (e.g. [`ColorEdit`])
+    /// that present the picker as a popover (e.g. `ColorEdit`)
     /// flip this to `true` so the user has explicit accept / dismiss
     /// affordances; the buttons fire [`Self::on_done`] /
     /// [`Self::on_cancel`] respectively.

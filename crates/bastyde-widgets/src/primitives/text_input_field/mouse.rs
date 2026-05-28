@@ -1,6 +1,6 @@
 //! Pointer dispatch for the text input widget.
 //!
-//! Simplified from [`rich_text::mouse`]: no scroll handling (single-line),
+//! Simplified from `rich_text::mouse`: no scroll handling (single-line),
 //! no auto-scroll velocity, no link/image click detection. Right-click
 //! routes through the framework's `.context_menu(...)` plumbing — see
 //! `field.rs` build() — so this module only handles primary-button

@@ -23,7 +23,7 @@
 //!   and trailing days from the next month that fill the 6×7 grid) are
 //!   rendered with `TextRole::Disabled` and remain selectable (matching
 //!   macOS / Material). To prevent selection use
-//!   [`disabled_date_filter`](Self::disabled_date_filter).
+//!   `disabled_date_filter`.
 //! - **Keyboard** (matches the WAI-ARIA `grid` pattern):
 //!   - Arrow keys: move focus by one day.
 //!   - Home / End: first / last day of week.

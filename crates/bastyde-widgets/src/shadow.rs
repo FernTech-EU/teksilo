@@ -1,6 +1,6 @@
 //! Layered drop-shadow helper for elevated surfaces.
 //!
-//! Composes two [`Shadow`](bastyde_tokens::Shadow)s underneath a rounded rect:
+//! Composes two [`Shadow`]s underneath a rounded rect:
 //! - `outer` — the wide soft halo (typically `theme.shape.shadow_*`).
 //! - `inner` — the sharp short-blur rim that gives the surface a clearly
 //!   "lifted" edge instead of a vague glow (typically the matching

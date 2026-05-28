@@ -48,7 +48,7 @@ const MARKER_SUFFIX: &str = "-->";
 ///
 /// The rich fragment + plain text are also stashed on editor state
 /// for self-round-trip detection during paste: an intra-editor
-/// copy/paste pair re-inserts the original [`DocumentFragment`]
+/// copy/paste pair re-inserts the original `DocumentFragment`
 /// rather than round-tripping through HTML (cheaper and bit-exact).
 pub(crate) fn copy(state: &mut EditorState, ctx: &EventContext) {
     if !state.cursor.has_selection() {
@@ -111,7 +111,7 @@ pub(crate) fn cut(state: &mut EditorState, ctx: &EventContext) {
 ///
 /// 1. **Self-round-trip rich fragment** — if the system clipboard's
 ///    plain text matches what this editor last copied, reinsert the
-///    stored [`DocumentFragment`] so intra-editor formatting round-trips
+///    stored `DocumentFragment` so intra-editor formatting round-trips
 ///    losslessly (retains table cells, heading levels, spans that don't
 ///    serialise into HTML losslessly).
 /// 2. **External HTML payload** — if the clipboard carries `text/html`

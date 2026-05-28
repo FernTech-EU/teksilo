@@ -7,7 +7,7 @@
 //!
 //! * Per-button `Signal<bool>` mirroring inline format state
 //!   (Bold / Italic / Underline / Strikethrough). The signal is a
-//!   regular [`bastyde::Signal`] (not derived) — required because
+//!   regular `bastyde::Signal` (not derived) — required because
 //!   [`bastyde::widgets::IconButton::toggle`] writes back on click,
 //!   and derived signals are read-only.
 //! * A four-way mutually-exclusive alignment group. The same

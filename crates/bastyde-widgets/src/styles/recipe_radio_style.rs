@@ -7,7 +7,7 @@
 //! (`RadioButton::style(...)`) or theme-wide
 //! (`theme.style_slots.radio = Some(Rc::new(MyRadio))`).
 //!
-//! The body is a small leaf widget ([`RadioBody`]) that paints the
+//! The body is a small leaf widget (`RadioBody`) that paints the
 //! outer ring + inner dot directly to canvas — same trade-off as
 //! `RecipeCheckboxStyle` / `RecipeToggleStyle`.
 

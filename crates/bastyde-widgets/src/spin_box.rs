@@ -1,8 +1,8 @@
 //! `SpinBox` — numeric input with increment/decrement buttons.
 //!
-//! A generic composite over [`SpinValue`](self::value::SpinValue)
+//! A generic composite over [`SpinValue`]
 //! (integer and floating-point primitives), pairing the
-//! [`TextInputField`](crate::primitives::TextInputField) editing
+//! [`TextInputField`] editing
 //! primitive with a stacked pair of up/down step buttons. Semantics
 //! are a synthesis of Qt's `QSpinBox` / `QDoubleSpinBox`, WinUI 3's
 //! `NumberBox`, GTK's `GtkSpinButton`, and the W3C ARIA
@@ -36,7 +36,7 @@
 //!   set, the field shows that string instead of the formatted
 //!   number — Qt's "Auto" / "None" / "Unlimited" affordance.
 //! - **Adaptive step**: with
-//!   [`StepType::Adaptive`](StepType::Adaptive), the effective step
+//!   [`StepType::Adaptive`], the effective step
 //!   tracks the decimal magnitude of the current value (Qt's
 //!   `AdaptiveDecimalStepType`). Useful for values that span many
 //!   orders of magnitude in the same control.
@@ -162,7 +162,7 @@ pub enum WheelMode {
 #[derive(Debug, Clone)]
 pub enum WidthPolicy {
     /// Cap the widget at a fixed logical-pixel width. Default is
-    /// [`DEFAULT_PREFERRED_WIDTH`] (120 dp), matching Qt's
+    /// `DEFAULT_PREFERRED_WIDTH` (120 dp), matching Qt's
     /// `QSpinBox` sizeHint.
     Pixels(f32),
     /// Size the widget to fit this many reference digits (`'0'`)

@@ -1,4 +1,4 @@
-//! Built-in [`SceneItem`] implementations.
+//! Built-in `SceneItem` implementations.
 //!
 //! Five lightweight items cover the common decoration cases:
 //!
@@ -94,7 +94,7 @@ impl ItemA11yOverrides {
 macro_rules! item_a11y_builders {
     () => {
         /// Override the AT name announced for this item. Accepts
-        /// anything convertible into [`LocalizedString`] — most
+        /// anything convertible into `LocalizedString` — most
         /// commonly `tr!(...)` for translated labels, or any plain
         /// string (which auto-converts via `From<String>`).
         pub fn access_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {

@@ -107,8 +107,8 @@ pub struct DateRangeEdit {
     /// leading (start) half always sizes to its mask-derived
     /// natural width — the start date stays put while the end half
     /// either matches that natural width
-    /// ([`WidthPolicy::Default`]) or absorbs whatever extra space
-    /// the parent offers ([`WidthPolicy::Fill`]).
+    /// (`WidthPolicy::Default`) or absorbs whatever extra space
+    /// the parent offers (`WidthPolicy::Fill`).
     end_width_policy: crate::date_edit::WidthPolicy,
     /// Composed validation feedback (severity-merged from both halves).
     feedback: Signal<ValidationFeedback>,
@@ -221,8 +221,8 @@ impl DateRangeEdit {
     /// How the trailing (end) half claims horizontal space. The
     /// leading (start) half always sizes to its natural mask width;
     /// the end half follows this policy. Default
-    /// [`WidthPolicy::Default`] (natural width); pass
-    /// [`WidthPolicy::Fill`] to make the end half absorb extra
+    /// `WidthPolicy::Default` (natural width); pass
+    /// `WidthPolicy::Fill` to make the end half absorb extra
     /// space the parent offers.
     pub fn end_width_policy(mut self, policy: crate::date_edit::WidthPolicy) -> Self {
         self.end_width_policy = policy;

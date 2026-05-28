@@ -350,7 +350,7 @@ impl TextInputField {
 
     /// Override the intrinsic text-area height. The field is a
     /// pure leaf with no theme lookup of its own; by default it
-    /// reports [`DEFAULT_TEXT_HEIGHT`]. A wrapping composite like
+    /// reports `DEFAULT_TEXT_HEIGHT`. A wrapping composite like
     /// `TextInput` passes its theme's `text_field.height` minus
     /// border + padding here so the visuals line up with the
     /// rest of the form.

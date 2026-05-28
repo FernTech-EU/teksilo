@@ -1,6 +1,6 @@
 //! Keyboard dispatch for the text input widget.
 //!
-//! Simplified from [`rich_text::keyboard`]: no vertical navigation, no
+//! Simplified from `rich_text::keyboard`: no vertical navigation, no
 //! format toggles, no select-all escalation ladder, no preferred-X. Enter
 //! fires the on_submit command instead of inserting a newline.
 

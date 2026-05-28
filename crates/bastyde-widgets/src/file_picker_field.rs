@@ -1,4 +1,4 @@
-//! FilePickerField — a [`TextInput`](crate::text_input::TextInput) preset
+//! FilePickerField — a [`TextInput`] preset
 //! with a trailing **Browse…** button that opens a native file dialog
 //! and writes the chosen path back into the bound text signal.
 //!

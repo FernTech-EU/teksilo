@@ -115,7 +115,7 @@ impl TabInfo {
     }
 
     /// Set the leading icon via a factory closure. The closure is
-    /// called each time the [`TabHeader`](crate::tab_widget::TabHeader)
+    /// called each time the `TabHeader`
     /// is built — typically once per tab lifetime, plus any rebuild
     /// triggered by data-source mutations.
     pub fn icon(mut self, factory: impl Fn() -> IconWidget + 'static) -> Self {

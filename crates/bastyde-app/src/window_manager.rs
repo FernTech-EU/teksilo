@@ -728,7 +728,7 @@ impl WindowManager {
     }
 
     /// Route a Windows-side synthetic title-bar tap. The wndproc
-    /// posts a [`crate::TitleBarSyntheticEvent`] when `WM_NCLBUTTONUP`
+    /// posts a `TitleBarSyntheticEvent` when `WM_NCLBUTTONUP`
     /// fires on a button rect that the OS treated as non-client; we
     /// resolve the matching `WidgetId` via the host and synthesise a
     /// primary-button tap so the widget's normal `on_tap` handler
@@ -829,9 +829,9 @@ impl WindowManager {
     }
 
     /// Temporarily remove a managed window from the map. Used by
-    /// [`BastydeAppHandler::dispatch_in_window`] so the handler's
+    /// `BastydeAppHandler::dispatch_in_window` so the handler's
     /// `&mut tree` borrow does not collide with
-    /// [`WindowOpsImpl`](WindowOpsImpl)'s `&mut WindowManager` borrow.
+    /// [`WindowOpsImpl`]'s `&mut WindowManager` borrow.
     /// The caller must pair this with
     /// [`reinsert_managed`](Self::reinsert_managed) before the
     /// enclosing winit event returns.
@@ -846,13 +846,13 @@ impl WindowManager {
     }
 
     /// `pub(crate)` access to the windows map used by
-    /// [`WindowOpsImpl`](WindowOpsImpl).
+    /// [`WindowOpsImpl`].
     pub(crate) fn windows_map(&self) -> &HashMap<winit::window::WindowId, ManagedWindow> {
         &self.windows
     }
 
     /// `pub(crate)` access to the bastyde→winit id map used by
-    /// [`WindowOpsImpl`](WindowOpsImpl).
+    /// [`WindowOpsImpl`].
     pub(crate) fn bastyde_to_winit_map(
         &self,
     ) -> &HashMap<BastydeWindowId, winit::window::WindowId> {
@@ -1129,7 +1129,7 @@ fn apply_window_command(win: &winit::window::Window, cmd: WindowCommand) {
 /// Holds `&mut WindowManager` plus `&ActiveEventLoop` so
 /// [`open_window`](bastyde_core::WindowOps::open_window) can create the
 /// winit-level window synchronously before returning. Constructed by
-/// [`BastydeAppHandler::dispatch_in_window`] after temporarily removing
+/// `BastydeAppHandler::dispatch_in_window` after temporarily removing
 /// the dispatching window from `WindowManager::windows`; the removed
 /// tree is borrowed mutably for the handler run.
 pub struct WindowOpsImpl<'a> {

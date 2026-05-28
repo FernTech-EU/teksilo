@@ -485,7 +485,7 @@ impl ToastRegistry {
 
     /// Read-only snapshot of live entry ids — the host's `build()`
     /// uses this to know how many surfaces to construct, in what
-    /// order. The actual entry data is read via [`with_entry`].
+    /// order. The actual entry data is read via `with_entry`.
     pub(crate) fn live_entry_ids(&self) -> Vec<u64> {
         self.inner
             .borrow()

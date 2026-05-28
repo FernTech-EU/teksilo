@@ -4,7 +4,7 @@
 //! `TextInputField` displaying the formatted date; commit on Enter or
 //! blur parses the input against the active pattern, clamps to
 //! `[min_date, max_date]`, and writes the result back. A trailing
-//! calendar-icon button opens a [`Calendar`](crate::calendar::Calendar)
+//! calendar-icon button opens a [`Calendar`]
 //! popover anchored below the field for graphical date selection.
 //!
 //! # Behaviour
@@ -12,7 +12,7 @@
 //! - **Value binding**: `Signal<Option<Date>>` is the source of truth.
 //!   External writes re-format the text. `None` shows the placeholder.
 //! - **Pattern**: locale-derived strftime-subset (`%Y-%m-%d`,
-//!   `%m/%d/%Y`, …); override via [`format_pattern`](Self::format_pattern).
+//!   `%m/%d/%Y`, …); override via `format_pattern`.
 //! - **Step keys** (preview-pass on the field):
 //!   - Arrow Up / Down → ±1 day; Shift+ → ±7 days.
 //!   - Page Up / Page Down → ±1 month; Shift+ → ±1 year.

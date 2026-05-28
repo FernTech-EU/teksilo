@@ -149,12 +149,12 @@ pub(crate) struct TabHeader {
     tab_surface_role: Option<bastyde_core::color_prop::ColorProp>,
     /// Text role used for the label (and matching icon tint) when this
     /// tab is the selected one. Default: `TextRole::Primary` (the Int
-    /// UI editor-strip convention). Set by the parent [`TabBar`] via
+    /// UI editor-strip convention). Set by the parent `TabBar` via
     /// `selected_text_role(...)`.
     selected_text_role: TextRole,
     /// Text role used for the label (and matching icon tint) when this
     /// tab is idle (not selected, not disabled). Default:
-    /// `TextRole::Secondary`. Set by the parent [`TabBar`] via
+    /// `TextRole::Secondary`. Set by the parent `TabBar` via
     /// `idle_text_role(...)`.
     idle_text_role: TextRole,
     /// Per-call style override propagated from the parent `TabBar`'s

@@ -1,10 +1,10 @@
 //! Per-column filter popover UI.
 //!
 //! `HeaderCell` renders a small filter glyph (the unconditional
-//! [`FilterIndicator`] paint widget) after the sort indicator when the
+//! `FilterIndicator` paint widget) after the sort indicator when the
 //! column is `filterable`. With the `rich-text` feature enabled,
 //! tapping the glyph opens a [`Popover`] anchored to it whose content
-//! is a [`FilterPopoverContent`] widget — a [`TextInput`] with a
+//! is a `FilterPopoverContent` widget — a [`TextInput`] with a
 //! trailing [`IconButton::clear`] bound to the table's
 //! `filters_signal[col_id]` slot. Without `rich-text`, the popover
 //! trigger is not built (callers can still drive `filters_signal`

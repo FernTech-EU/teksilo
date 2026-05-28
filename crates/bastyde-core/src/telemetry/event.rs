@@ -206,7 +206,7 @@ impl IntentSource {
 
 // --- RemoteDataExport (Art. 15 + 20) -------------------------------
 
-/// Server-side data fetched by [`UsageReporter::fetch_remote_data`].
+/// Server-side data fetched by `UsageReporter::fetch_remote_data`.
 ///
 /// Self-describing: the `schema_version`, `endpoint`, and `adapter`
 /// fields make the exported document a complete RGPD Art. 20

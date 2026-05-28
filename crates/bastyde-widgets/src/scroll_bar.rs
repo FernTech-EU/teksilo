@@ -96,9 +96,9 @@ impl std::fmt::Debug for ScrollBar {
 impl ScrollBar {
     /// Create a new ScrollBar with shared state.
     ///
-    /// - `scroll_position`: shared Signal<f32> for current scroll offset
-    /// - `max_scroll`: shared Signal<f32> for maximum scroll offset
-    /// - `viewport_ratio`: shared Signal<f32> for viewport/content ratio (0.0..1.0)
+    /// - `scroll_position`: shared `Signal<f32>` for current scroll offset
+    /// - `max_scroll`: shared `Signal<f32>` for maximum scroll offset
+    /// - `viewport_ratio`: shared `Signal<f32>` for viewport/content ratio (0.0..1.0)
     pub fn new(
         orientation: ScrollBarOrientation,
         scroll_position: Signal<f32>,
@@ -152,7 +152,7 @@ impl ScrollBar {
         self
     }
 
-    /// Alias for [`visual`] using the new variant naming.
+    /// Alias for `visual` using the new variant naming.
     pub fn variant(mut self, variant: ScrollBarVariant) -> Self {
         self.variant = variant;
         self

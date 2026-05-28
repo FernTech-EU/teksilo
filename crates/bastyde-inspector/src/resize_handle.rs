@@ -3,7 +3,7 @@
 //! A 6-pixel-tall horizontal strip sitting between the user-root area
 //! and the panel switcher. While dragging, every `PointerMove` resizes
 //! `state.panel_height` so the handle's top edge tracks the cursor
-//! exactly — see [`HighlightLayer`] for the math used to keep the
+//! exactly — see `HighlightLayer` for the math used to keep the
 //! widget-local frame stable under live layout.
 
 use bastyde_canvas::{Canvas, Rect, SizeProposal};

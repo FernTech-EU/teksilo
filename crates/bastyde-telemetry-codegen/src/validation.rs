@@ -147,7 +147,7 @@ fn unix_secs_to_date(secs: u64) -> String {
 }
 
 /// Gregorian calendar decomposition.
-/// Algorithm: http://howardhinnant.github.io/date_algorithms.html
+/// Algorithm: <http://howardhinnant.github.io/date_algorithms.html>
 fn days_to_ymd(days: i64) -> (i64, i64, i64) {
     let z = days + 719468;
     let era = if z >= 0 { z } else { z - 146096 } / 146097;

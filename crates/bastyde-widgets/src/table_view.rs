@@ -1,7 +1,7 @@
 //! `TableView<T>` — generic, virtualized, accessible tabular widget.
 //!
 //! Built atop the [`ListModel<T>`](bastyde_data::ListModel) /
-//! [`ListDataSource`](bastyde_data::ListDataSource) data layer in
+//! [`ListDataSource`] data layer in
 //! `bastyde-data` and the `bastyde-tokens` `TableStyle`. Mirrors Qt's
 //! `QTableView`, SwiftUI's `Table`, and JavaFX's `TableView`.
 //! The core skeleton: single body pane, row-virtualized with alternating
@@ -77,7 +77,7 @@ impl PaneBoundaries {
     }
 }
 
-/// Drag payload for column reorder. Carried via [`DragPayload::typed`].
+/// Drag payload for column reorder. Carried via `DragPayload::typed`.
 #[derive(Debug, Clone)]
 pub(crate) struct ColumnReorderDragData {
     pub col_id: String,

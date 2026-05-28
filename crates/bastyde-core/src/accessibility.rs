@@ -56,7 +56,7 @@ pub enum SyntheticKind {
     /// A lightweight `SceneItem` rendered by `bastyde_scene::SceneView`.
     /// Items live outside the arena — `SceneView::accessibility`
     /// emits one synthetic child per visible item using
-    /// [`push_scene_item_child`](AccessNodeBuilder::push_scene_item_child).
+    /// `push_scene_child`.
     SceneItem = 5,
     /// A logical grouping declared via `Scene::add_a11y_group`.
     /// Pure AT structure — no visual counterpart. The parent's
@@ -206,7 +206,7 @@ impl AccessNodeBuilder {
     }
 
     /// Append one node to the `described_by` relationship list. Mirror of
-    /// the existing [`push_controlled`]; used by the override layer's
+    /// the existing `push_controlled`; used by the override layer's
     /// `access_described_by` builder method and by the framework's
     /// tooltip wiring.
     pub fn push_described_by(&mut self, id: NodeId) {
@@ -260,7 +260,7 @@ impl AccessNodeBuilder {
 
     /// Target URL for link-like widgets. Maps to `aria-url` / platform
     /// link metadata so screen readers can announce the destination
-    /// (e.g. "link, https://example.com"). Informational only — does
+    /// (e.g. "link, `https://example.com`"). Informational only — does
     /// not navigate when activated.
     pub fn set_url(&mut self, url: impl Into<String>) {
         self.inner.set_url(url.into());
@@ -296,7 +296,7 @@ impl AccessNodeBuilder {
     }
 
     /// 1-based index of this item in its parent set — maps to ARIA
-    /// `aria-posinset`. Pair with [`set_size_of_set`] on every item in
+    /// `aria-posinset`. Pair with `set_size_of_set` on every item in
     /// the set so AT can announce "tab 3 of 5", "row 12 of 200", etc.
     /// Use on `Role::Tab`, `Role::ListBoxOption`, `Role::Row`,
     /// `Role::MenuItem`, and similar collection items.
@@ -306,7 +306,7 @@ impl AccessNodeBuilder {
 
     /// Total number of items in this item's parent set — maps to ARIA
     /// `aria-setsize`. Set on every collection item alongside
-    /// [`set_position_in_set`]; the value should reflect the *logical*
+    /// `set_position_in_set`; the value should reflect the *logical*
     /// set size, not the visible window (e.g. report 200 for a
     /// virtualized 200-row list even when only 20 rows are realized).
     pub fn set_size_of_set(&mut self, size: usize) {
@@ -463,7 +463,7 @@ impl AccessNodeBuilder {
     }
 
     /// Run a mutator over a synthetic child node previously pushed
-    /// via [`push_scene_child`] (or its `_under` variant). Used by
+    /// via `push_scene_child` (or its `_under` variant). Used by
     /// the scene walker to apply cross-tree decorations (relations /
     /// live regions / landmarks) after the initial hierarchy emit.
     /// Returns `true` if the node was found.
@@ -675,7 +675,7 @@ impl AccessNodeBuilder {
         false
     }
 
-    /// Like [`push_scene_child`] but lets the caller pick the
+    /// Like `push_scene_child` but lets the caller pick the
     /// parent. `parent = None` attaches to the widget's own node
     /// (same behavior as `push_scene_child`); `parent = Some(...)`
     /// attaches to the previously-pushed scene-child with that id.
@@ -756,7 +756,7 @@ impl AccessNodeBuilder {
     }
 
     /// Push a `Role::TextRun` child under `parent_node` (usually a
-    /// paragraph NodeId returned from [`push_paragraph_child`], but
+    /// paragraph NodeId returned from `push_paragraph_child`, but
     /// may also be the widget's own node for inline editors).
     ///
     /// `element_id` is the stable id of the underlying text-document
@@ -774,7 +774,7 @@ impl AccessNodeBuilder {
     ///
     /// Returns the allocated synthetic `NodeId` so the caller can
     /// reference it later when attaching a `TextSelection` via
-    /// [`set_text_selection_to`].
+    /// `set_text_selection_to`.
     #[allow(clippy::too_many_arguments)]
     pub fn push_text_run_child(
         &mut self,
@@ -827,7 +827,7 @@ impl AccessNodeBuilder {
     }
 
     /// Declare a text selection that references TextRun children
-    /// previously emitted via [`push_text_run_child`]. Both the
+    /// previously emitted via `push_text_run_child`. Both the
     /// anchor and the focus are expressed as
     /// `(NodeId, character_index)` pairs where the character index
     /// is an index into the target TextRun's `character_lengths`

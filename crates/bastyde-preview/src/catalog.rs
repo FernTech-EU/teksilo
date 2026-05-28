@@ -11,7 +11,7 @@
 //! - [`CatalogEntry`] — object-safe erased trait. The `inventory` plugin
 //!   registry collects `&'static dyn CatalogEntry`. Each entry forwards
 //!   to the corresponding `WidgetCatalog` static methods. Authors do not
-//!   implement this directly — the [`register_widget_catalog!`] macro
+//!   implement this directly — the `register_widget_catalog!` macro
 //!   generates a small zero-sized type that implements it and submits it
 //!   to the inventory.
 

@@ -65,7 +65,7 @@ impl Wrap {
     }
 
     /// Compute the line layout: returns (sizes, line_breaks).
-    /// line_breaks[i] = true means a new line starts before child i.
+    /// `line_breaks[i]` = true means a new line starts before child `i`.
     fn compute_layout(
         &self,
         available_width: f32,

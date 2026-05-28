@@ -12,7 +12,7 @@
 //!
 //! **Click-style recognizers carry button + modifiers.** [`TapRecognizer`],
 //! [`DoubleTapRecognizer`], [`TripleTapRecognizer`], and
-//! [`LongPressRecognizer`] all default to [`ButtonMask::PRIMARY`] —
+//! [`LongPressRecognizer`] all default to `ButtonMask::PRIMARY` —
 //! left-click only — and emit [`TapEvent`]s carrying position, the
 //! finalising button, and modifier state. Multi-tap recognizers
 //! require button-match across the whole sequence. Widen the accepted

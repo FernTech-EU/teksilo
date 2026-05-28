@@ -4,12 +4,12 @@
 //! widget's historical `ScrollBarVisual`):
 //!
 //! - `Permanent` — full track + thumb, always visible. Single
-//!   [`FullBarPainter`] child sized to the parent's slot.
+//!   `FullBarPainter` child sized to the parent's slot.
 //! - `Overlay` — thin idle indicator that cross-fades to the full bar
 //!   on hover/drag. Two `Fade`-wrapped painters share the slot; the
 //!   `active` signal flips when either `is_hovered` or `is_dragging`
 //!   goes true.
-//! - `Thin` — thin idle indicator only. One [`ThinIndicatorPainter`]
+//! - `Thin` — thin idle indicator only. One `ThinIndicatorPainter`
 //!   child.
 //!
 //! The parent `ScrollBar` widget owns input handling (drag, track click,

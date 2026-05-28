@@ -14,7 +14,7 @@
 use std::fmt::Debug;
 
 mod sealed {
-    /// Private super-trait used to seal [`SpinValue`] against
+    /// Private super-trait used to seal `SpinValue` against
     /// downstream implementations. Only the primitive types
     /// enumerated in the parent module implement it.
     pub trait Sealed {}
@@ -31,7 +31,7 @@ mod sealed {
 /// Numeric primitive that a [`SpinBox`](super::SpinBox) can hold.
 ///
 /// Sealed: only the primitive integer and floating-point types
-/// implement this. See the [module docs](self) for the rationale.
+/// implement this. See the module docs for the rationale.
 ///
 /// Implementations must provide lossless parsing and round-trip
 /// formatting (`parse(format(v, d)) == Some(v)` for any finite value

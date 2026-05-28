@@ -22,7 +22,7 @@
 //!   rate forever.
 //!
 //! All three schedulers consult the shared
-//! [`motion_visibility`](crate::motion_visibility) helpers so the
+//! [`motion_visibility`] helpers so the
 //! "is my owner visible enough to keep waking?" decision is uniform.
 //!
 //! ## Lifecycle
@@ -50,7 +50,7 @@
 //! repaint independently of this scheduler. That repaint paints the
 //! subscriber, stamping its `last_painted_epoch` to match the new
 //! `paint_epoch`. The render-end re-arm (see
-//! [`should_arm_frame_tick`]) then detects the visible subscriber
+//! `should_arm_frame_tick`) then detects the visible subscriber
 //! and sets `frame_tick_requested` so the next tick fires.
 
 use std::cell::RefCell;

@@ -13,12 +13,12 @@
 //! opened via click, Enter, Space, or ArrowDown/ArrowUp.
 //!
 //! The widget is split across four internal modules:
-//! - [`state`] holds the interaction-state enum, the `ItemSource` accessor,
+//! - `state` holds the interaction-state enum, the `ItemSource` accessor,
 //!   and color/index helpers.
-//! - [`item`] holds the single-row `DropdownItem` widget.
-//! - [`panel`] holds the `DropdownPanel` overlay content and — under
+//! - `item` holds the single-row `DropdownItem` widget.
+//! - `panel` holds the `DropdownPanel` overlay content and — under
 //!   `rich-text` — the `FilteredItemList` inner widget.
-//! - [`tests`] holds the headless unit tests.
+//! - `tests` holds the headless unit tests.
 
 use bastyde_i18n::lit;
 use std::cell::{Cell, RefCell};
@@ -269,7 +269,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
 
     /// Placeholder text shown in the trigger when `selected` is `None`.
     /// Accepts a `tr!(...)` directly (resolved at build); use
-    /// [`placeholder_literal`](Self::placeholder_literal) for an
+    /// `placeholder_literal` for an
     /// untranslated string.
     pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         let ls: bastyde_i18n::LocalizedString = text.into();

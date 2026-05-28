@@ -1,6 +1,6 @@
 //! Shared keyboard handler for `TableView` and `TreeTable`.
 //!
-//! The handler is generic over [`RowNavigator`] so flat and tree
+//! The handler is generic over `RowNavigator` so flat and tree
 //! navigation reuse the same key matrix. Tree-specific arrow-left /
 //! arrow-right collapse/expand semantics fall through automatically
 //! because the trait's default `is_expanded` / `has_children` /

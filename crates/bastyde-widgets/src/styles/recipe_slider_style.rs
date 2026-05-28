@@ -1,7 +1,7 @@
 //! Default `SliderStyle` impl driven by paint-recipe data.
 //!
 //! `RecipeSliderStyle` ships the IntUI look out of the box. The visual
-//! body is a tiny private leaf widget ([`SliderBody`]) that paints
+//! body is a tiny private leaf widget (`SliderBody`) that paints
 //! track + fill + thumb + focus ring directly on the canvas. Same
 //! "leaf body" choice as `RecipeToggleStyle` and for the same reason —
 //! there's no general-purpose absolute-positioning primitive for the

@@ -1,6 +1,6 @@
 //! `TextInput` — styled single-line text field composite.
 //!
-//! Wraps the [`TextInputField`](crate::primitives::TextInputField)
+//! Wraps the [`TextInputField`]
 //! editing primitive in a bordered, padded frame with placeholder
 //! overlay, validation, optional clear button, and leading/trailing
 //! slots. All actual text editing is delegated to the field: every
@@ -8,7 +8,7 @@
 //! primitive.
 //!
 //! Most applications want `TextInput`. Choose
-//! [`TextInputField`](crate::primitives::TextInputField) directly
+//! [`TextInputField`] directly
 //! when you're building a composite of your own that already
 //! supplies its frame — `SpinBox` is the canonical in-tree example.
 //!

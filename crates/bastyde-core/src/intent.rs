@@ -52,7 +52,7 @@ pub struct Intent {
 
 impl Intent {
     /// A parameter-less intent. Defaults to
-    /// [`IntentSource::Programmatic`]; framework activation paths
+    /// `IntentSource::Programmatic`; framework activation paths
     /// override via [`Intent::with_source`] before dispatching.
     pub fn new(name: &'static str) -> Self {
         Self {
@@ -77,7 +77,7 @@ impl Intent {
     /// activation wrappers (button on_activate, menu on_select,
     /// shortcut activation, gesture on_recognized) right before
     /// dispatch. App code typically doesn't call this directly
-    /// — use [`EventContext::send_intent`] from inside the right
+    /// — use `EventContext::send_intent` from inside the right
     /// handler and the source is set automatically.
     ///
     /// (Note: `EventContext::send_intent` infers the source from

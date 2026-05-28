@@ -2,7 +2,7 @@
 //! toggle, masking, Caps Lock warning, and clipboard protection.
 //!
 //! A thin, ergonomic preset over a secure
-//! [`TextInputField`](crate::primitives::TextInputField) composed
+//! [`TextInputField`] composed
 //! `SpinBox`-style: the field + an embedded reveal button live inside
 //! one bordered frame with a unified focus halo. Masking happens at the
 //! text-engine layer (one echo glyph per source `char`), so the

@@ -5,10 +5,10 @@
 //! its row/column index. The cell delegate the user supplies typically
 //! produces a generic widget (Text, Button, …) that wouldn't carry table
 //! semantics by itself, so the body wraps each cell in a thin
-//! [`CellA11y`] node. `TableView`'s row containers themselves
-//! ([`BodyRow`](crate::table_view::body::BodyRow)) carry `Role::Row` and
+//! `CellA11y` node. `TableView`'s row containers themselves
+//! (`BodyRow`) carry `Role::Row` and
 //! row-index metadata directly. `TreeTable` adds an extra
-//! [`TreeRowA11y`] wrapper around the tree column to declare `set_level`
+//! `TreeRowA11y` wrapper around the tree column to declare `set_level`
 //! and `set_expanded` for the row.
 //!
 //! These wrappers do not paint or affect layout: they pass the proposed

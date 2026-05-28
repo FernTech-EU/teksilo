@@ -34,8 +34,8 @@
 use bastyde_canvas::Vec2;
 
 /// Snapshot of a SceneView's view transform: pan offset, zoom
-/// factor, and rotation in radians. Use [`SceneView::state`] to
-/// capture the current values; [`SceneView::restore_state`] to
+/// factor, and rotation in radians. Use `SceneView::state` to
+/// capture the current values; `SceneView::restore_state` to
 /// apply a saved snapshot.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SceneViewState {

@@ -349,7 +349,7 @@ impl HandlerSet {
     // -- Builder methods (mirror WidgetWithHandlers) --
 
     /// Set the on_tap handler. The closure receives a borrowed
-    /// [`TapEvent`](crate::gesture::TapEvent) carrying the position in
+    /// [`TapEvent`] carrying the position in
     /// widget-local coordinates, the finalising mouse button, and the
     /// modifier state at that moment.
     ///
@@ -379,7 +379,7 @@ impl HandlerSet {
     }
 
     /// Set the on_long_press handler. The callback receives a borrowed
-    /// [`TapEvent`](crate::gesture::TapEvent) whose modifiers are
+    /// [`TapEvent`] whose modifiers are
     /// captured from the held `Down` (since long-press recognises on a
     /// timer before any `Up`).
     pub fn on_long_press(mut self, f: impl FnMut(&TapEvent, &mut EventContext) + 'static) -> Self {
@@ -562,7 +562,7 @@ impl HandlerSet {
         self
     }
 
-    /// Bind a user-owned [`Signal<bool>`] that the framework will set
+    /// Bind a user-owned `Signal<bool>` that the framework will set
     /// to `true` whenever the focused widget is a *strict descendant*
     /// of this node, and `false` otherwise. Useful for unified focus
     /// halos around composite widgets (a chat composer that highlights
@@ -577,7 +577,7 @@ impl HandlerSet {
         self
     }
 
-    /// Bind a user-owned [`Signal<bool>`] that the framework will set
+    /// Bind a user-owned `Signal<bool>` that the framework will set
     /// to `true` whenever the hovered widget is a *strict descendant*
     /// of this node. Symmetric to [`focus_within`](Self::focus_within).
     pub fn hover_within(mut self, signal: crate::signal::Signal<bool>) -> Self {
@@ -998,7 +998,7 @@ impl<W: Widget> WidgetWithHandlers<W> {
     }
 
     /// Override the accessibility description (`Node::description`).
-    /// Same conversion rules as [`access_label`].
+    /// Same conversion rules as `access_label`.
     pub fn access_description(mut self, description: impl Into<Prop<String>>) -> Self {
         self.handler_set.access_mut().description = Some(description.into());
         self
@@ -1009,7 +1009,7 @@ impl<W: Widget> WidgetWithHandlers<W> {
         self.access_description(Prop::Static(description.into()))
     }
 
-    /// Long-form context hint. Alias of [`access_description`] —
+    /// Long-form context hint. Alias of `access_description` —
     /// AccessKit has no separate hint slot (SwiftUI's split is
     /// VoiceOver-specific). Provided for SwiftUI parity.
     pub fn access_hint(self, hint: impl Into<Prop<String>>) -> Self {
@@ -1022,7 +1022,7 @@ impl<W: Widget> WidgetWithHandlers<W> {
     }
 
     /// Override the accessibility value (`Node::value`).
-    /// Same conversion rules as [`access_label`].
+    /// Same conversion rules as `access_label`.
     pub fn access_value(mut self, value: impl Into<Prop<String>>) -> Self {
         self.handler_set.access_mut().value = Some(value.into());
         self

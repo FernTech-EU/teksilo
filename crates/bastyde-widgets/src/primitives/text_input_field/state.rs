@@ -1,7 +1,7 @@
 //! Shared mutable state for a single `TextInput` instance.
 //!
 //! Mirrors the `Rc<RefCell<State>>` pattern from
-//! [`rich_text::state`](super::super::rich_text) but stripped down
+//! `rich_text::state` but stripped down
 //! for single-line plain-text editing: no scroll bars, no rich
 //! formatting, no table/cell state, no image cache.
 

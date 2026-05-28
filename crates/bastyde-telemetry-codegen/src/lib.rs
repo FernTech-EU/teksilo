@@ -7,7 +7,7 @@
 //!   an `as_str()` method.
 //! - For each event: a typed `emit_<event_name>(reporter, install_id,
 //!   session_id, …props…)` free function that assembles an
-//!   [`bastyde_telemetry::Event`] and hands it to the reporter.
+//!   `bastyde_telemetry::Event` and hands it to the reporter.
 //!
 //! # Usage
 //!

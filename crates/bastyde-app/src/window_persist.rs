@@ -1,11 +1,11 @@
 //! Auto save / restore of window geometry, driven by the
-//! [`WindowStateService`](bastyde_settings::WindowStateService) registered
+//! [`WindowStateService`] registered
 //! via `BastydeAppBuilder::settings(...)`.
 //!
-//! Two integration points run inside [`WindowManager::create_window`]:
+//! Two integration points run inside `WindowManager::create_window`:
 //!
 //! 1. **Restore** — before the winit window is built, the saved
-//!    [`PerWindowState`](bastyde_settings::PerWindowState) (if any) is
+//!    [`PerWindowState`] (if any) is
 //!    sanitized against the current monitor and applied to the
 //!    [`WindowConfig`]. A coordinate from a now-disconnected monitor
 //!    is recentered onto the current primary; an oversized rectangle

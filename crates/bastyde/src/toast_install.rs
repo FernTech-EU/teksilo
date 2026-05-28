@@ -1,6 +1,6 @@
-//! `install_toast` — wire the Toast system into a [`BastydeAppBuilder`].
+//! `install_toast` — wire the Toast system into a `BastydeAppBuilder`.
 //!
-//! Mirrors the [`BastydeAppBuilderInspectorExt`] pattern (see
+//! Mirrors the `BastydeAppBuilderInspectorExt` pattern (see
 //! [`bastyde_inspector`]) — the extension trait declaration and its
 //! impl on `BastydeAppBuilder` live in the same crate (`bastyde`),
 //! which depends on both `bastyde-app` and `bastyde-widgets`, so the
@@ -22,16 +22,16 @@
 //!
 //! Internally the install:
 //!
-//! 1. Opens the [`NotificationArchiveModel`] from
+//! 1. Opens the `NotificationArchiveModel` from
 //!    `options.archive` (resolving the persistent path through
 //!    `configured_app_paths()` if `Persistent`).
-//! 2. Constructs a [`ToastRegistry`] bound to the archive.
+//! 2. Constructs a `ToastRegistry` bound to the archive.
 //! 3. Registers `Rc<NotificationArchiveModel>` + `ToastRegistry`
 //!    into `app_state`. `NotificationLog` / `NotificationCenterButton`
 //!    consume the archive handle; `EventContextToastExt::show_toast`
 //!    consumes the registry.
-//! 4. Registers a [`DefaultPostRoot`] hook that wraps every window's
-//!    root with a [`ZStack`] of `[user_root, ToastHost]`. The
+//! 4. Registers a `DefaultPostRoot` hook that wraps every window's
+//!    root with a `ZStack` of `[user_root, ToastHost]`. The
 //!    `DefaultPostRoot` fires for every window the app opens (initial
 //!    + runtime-opened) so the host installs everywhere automatically.
 

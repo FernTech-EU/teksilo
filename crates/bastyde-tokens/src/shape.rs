@@ -86,7 +86,7 @@ impl Default for Shadow {
 ///
 /// Shadows are paired: each `shadow_*` (the wide soft outer halo) has a
 /// matching `shadow_inner_*` (a sharp short-blur rim) so elevated
-/// surfaces can layer the two via [`bastyde_widgets::shadow::paint_layered_shadow`].
+/// surfaces can layer the two via `bastyde_widgets::shadow::paint_layered_shadow`.
 /// A `density` scalar (e.g. `DENSITY_TOOLTIP`, `DENSITY_SURFACE`,
 /// `DENSITY_DIALOG` in `bastyde-widgets/src/shadow.rs`) is passed by each
 /// call site to scale the inner rim's effective alpha, so individual

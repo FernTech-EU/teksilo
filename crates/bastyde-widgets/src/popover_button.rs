@@ -32,7 +32,7 @@
 //! `PopoverButton::build()` configures the inner Button by calling:
 //!
 //! - `.has_popup(self.has_popup)` — defaults to
-//!   [`HasPopup::Dialog`](bastyde_core::accesskit::HasPopup::Dialog).
+//!   [`HasPopup::Dialog`].
 //! - `.expanded_when(popover_open)` — drives the AT `set_expanded`
 //!   announcement.
 //! - `.on_activate_fn(...)` — toggles the popover.
@@ -41,8 +41,8 @@
 //! on the trigger Button. In particular, any `on_activate_fn` set on
 //! the Button before passing it to `PopoverButton::new` is discarded
 //! — the activate slot is owned by the popover wiring. Apps that
-//! need a side-effect on open / close should use [`Self::on_open`] /
-//! [`Self::on_close`], or observe [`Self::open_signal`] from a
+//! need a side-effect on open / close should use `on_open` /
+//! `on_close`, or observe `open_signal` from a
 //! `ctx.effect`.
 
 use std::rc::Rc;

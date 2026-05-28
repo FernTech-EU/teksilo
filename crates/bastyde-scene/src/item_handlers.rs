@@ -6,8 +6,8 @@
 //! invokes when pointer / hover / context-menu events land on the
 //! item, plus per-item cursor and tooltip overrides.
 //!
-//! Apps attach handlers via [`Scene::set_item_handlers`] /
-//! [`Scene::handlers_mut`] after `add_item`:
+//! Apps attach handlers via `Scene::set_item_handlers` /
+//! `Scene::handlers_mut` after `add_item`:
 //!
 //! ```ignore
 //! let id = scene.add_item(rect, Point::ZERO);
@@ -258,7 +258,7 @@ impl SceneItemHandlerSet {
     }
 
     /// Set a tooltip. Accepts anything convertible into
-    /// [`LocalizedString`](bastyde_i18n::LocalizedString) — most commonly
+    /// [`LocalizedString`] — most commonly
     /// `tr!(...)` for translated copy or `lit!(...)` for fixed text.
     /// Stored unresolved; the SceneView resolves it against the active
     /// locale when the tooltip is shown, so a `tr!(...)` source tracks

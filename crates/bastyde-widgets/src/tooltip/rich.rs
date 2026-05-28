@@ -18,7 +18,7 @@
 //! - The widget tracks visible-paint time via `paint()` interior
 //!   mutability and, every 500 ms, advances a `Signal<u32>` step
 //!   counter from 0 to 4.
-//! - The top-right [`DwellIndicator`] reads the step signal and
+//! - The top-right `DwellIndicator` reads the step signal and
 //!   paints an empty circle filling progressively in 4 wedges.
 //! - At step 4 the indicator flips to a pin icon and the widget's
 //!   `sticky` signal goes true. The widget tree (via
@@ -31,7 +31,7 @@
 //!   the correct pattern for a non-modal sticky panel (it never steals
 //!   focus from whatever the user was doing).
 //! - Cascade children (tooltips opened from a `[label](:key)` link via
-//!   [`RichTooltipWidget::cascade_child`]) **omit the indicator
+//!   `RichTooltipWidget::cascade_child`) **omit the indicator
 //!   entirely**: they're shown by an explicit click and are already
 //!   persistent, so there's no hover dwell-to-sticky path to visualize.
 //!   They also skip straight to the persistent a11y treatment — a

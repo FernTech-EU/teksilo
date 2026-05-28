@@ -111,7 +111,7 @@ pub fn attach_rich_tooltip_source(
 /// Attach a composite tooltip — third tier, hosting an arbitrary
 /// `impl Widget + 'static` body. Wires the same dwell-to-sticky
 /// machinery rich tooltips use, so the surface promotes to a
-/// `Role::Dialog` after the user dwells for [`DWELL_PROMOTION`].
+/// `Role::Dialog` after the user dwells for `DWELL_PROMOTION`.
 pub fn attach_composite_tooltip(
     ctx: &mut BuildContext,
     anchor_id: WidgetId,

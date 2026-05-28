@@ -195,7 +195,7 @@ impl<'a> BuildContext<'a> {
     /// Clone the shared wake-at deadline cell. Stash it on widget
     /// state and set `Some(instant)` from a frame-tick effect to
     /// schedule a one-shot deadline wake-up without keeping the event
-    /// loop in `Poll` mode. See [`WidgetTree::wake_at_handle`] for
+    /// loop in `Poll` mode. See `WidgetTree::wake_at_handle` for
     /// the underlying mechanism.
     pub fn wake_at_handle(&self) -> std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>> {
         self.tree.wake_at_handle()
@@ -451,7 +451,7 @@ impl<'a> BuildContext<'a> {
     }
 
     /// Move keyboard focus to `id`. Mirrors
-    /// [`EventContext::request_focus`] for use during `build()` — e.g.
+    /// `EventContext::request_focus` for use during `build()` — e.g.
     /// when a composing widget pre-builds an editor and needs focus to
     /// land on it as soon as the subtree is wired in.
     pub fn focus(&mut self, id: WidgetId) {

@@ -17,7 +17,7 @@
 //! The canvas is fundamentally a 2D pointer gesture with no ARIA
 //! precedent. Screen-reader users navigate the picker via the hue /
 //! saturation / value sliders or RGB / HSV / hex spinners — the
-//! containing [`ColorPicker`] excludes this widget's subtree from the
+//! containing `ColorPicker` excludes this widget's subtree from the
 //! AT tree via `.access_exclude_subtree()`. This widget itself emits a
 //! `Role::GenericContainer` placeholder so the override has something
 //! to prune.

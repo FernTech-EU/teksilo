@@ -2,7 +2,7 @@
 //! roving focus, mirroring the Calendar widget's grid pattern.
 //!
 //! Lays out its children in fixed-column rows using the existing
-//! [`Grid`](crate::primitives::Grid) primitive. Click / Enter / Space
+//! [`Grid`] primitive. Click / Enter / Space
 //! on any cell calls `on_select(color, ctx)`. Tab moves focus into the
 //! first cell; arrow keys move within the grid (Left/Right by 1,
 //! Up/Down by `columns`, Home/End to row bounds, Ctrl+Home/End to grid

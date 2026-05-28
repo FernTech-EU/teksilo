@@ -1,4 +1,4 @@
-//! SearchField — a [`TextInput`](crate::text_input::TextInput) preset
+//! SearchField — a [`TextInput`] preset
 //! configured for search workflows: leading magnifier glyph, default-on
 //! clear-X, and an optional anchored suggestions popover with keyboard
 //! navigation and the ARIA combobox-with-listbox accessibility pattern.

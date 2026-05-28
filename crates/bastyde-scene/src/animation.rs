@@ -11,7 +11,7 @@
 //! drop-cancel cleanup, paint-epoch visibility), the signal must
 //! register against the *SceneView's* `WidgetId`.
 //!
-//! That's exactly what [`SceneItem::register_bindings`] is for: it
+//! That's exactly what `SceneItem::register_bindings` is for: it
 //! fires inside `SceneView::build()` and receives a `BuildContext`
 //! whose `self_id()` is the SceneView's id. Item authors call
 //! [`register_animated_item_signal`] on every animated signal they

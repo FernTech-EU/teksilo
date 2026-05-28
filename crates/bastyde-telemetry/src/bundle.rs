@@ -4,7 +4,7 @@
 //! Mirrors [`bastyde_settings::SettingsBundle`] / `OpenedSettings`:
 //! construct a bundle with `with_*` methods, `bundle.open(paths,
 //! settings)` returns ready-to-register handles, the app registers
-//! them in `app_state` and accesses via the [`TelemetryExt`] trait.
+//! them in `app_state` and accesses via the `TelemetryExt` trait.
 
 use std::rc::Rc;
 use std::sync::Arc;

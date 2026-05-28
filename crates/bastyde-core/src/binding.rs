@@ -66,7 +66,7 @@ pub(crate) struct Binding {
     /// Clear the dirty flag on the source signal.
     pub clear_dirty: Rc<dyn Fn()>,
     /// Stable identity of the source signal — see
-    /// [`Signal::source_id`](crate::signal::Signal::source_id).
+    /// `Signal::source_id`.
     /// Used by [`BindingRegistry::register`] to look up the matching
     /// [`BindingGroup`] in O(1).
     pub source_id: usize,

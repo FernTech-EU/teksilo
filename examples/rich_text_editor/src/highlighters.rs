@@ -1,7 +1,7 @@
 //! Three `SyntaxHighlighter` implementations showcased by the editor's
 //! highlighter toolbar row.
 //!
-//! A highlighter lives on the [`TextDocument`] (not the widget) and produces
+//! A highlighter lives on the `TextDocument` (not the widget) and produces
 //! *shadow* [`HighlightFormat`] runs that overlay the real formatting at layout
 //! time — they never mutate stored data, never show up in undo/export, and are
 //! shared automatically by every editor bound to the same document. Each
@@ -19,7 +19,7 @@ use bastyde::text_document::{
 ///
 /// The query is shared (`Arc<RwLock<String>>`) because `SyntaxHighlighter` is
 /// `Send + Sync` and so cannot hold a (`Rc`-based) `Signal`. The controls
-/// widget writes the query and calls [`TextDocument::rehighlight`] to re-run.
+/// widget writes the query and calls `TextDocument::rehighlight` to re-run.
 #[derive(Clone)]
 pub struct SearchHighlighter {
     pub query: Arc<RwLock<String>>,

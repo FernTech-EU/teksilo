@@ -59,7 +59,7 @@ const BUFFER_ROWS: usize = 5;
 const SCROLLBAR_THICKNESS: f32 = 12.0;
 
 /// Hierarchical projection navigator. Adapts
-/// [`SortFilterTreeModel`](bastyde_data::SortFilterTreeModel)'s
+/// [`SortFilterTreeModel`]'s
 /// flat-list view to the [`RowNavigator`] interface used by the
 /// shared keyboard handler.
 pub(crate) struct TreeNavigator<T: 'static> {

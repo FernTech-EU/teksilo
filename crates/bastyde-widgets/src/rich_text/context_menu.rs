@@ -35,7 +35,7 @@
 //! (e.g. telemetry, undo-stack annotation, clipboard-manager mirroring).
 //! These intents reach ancestor Actions through the normal walk chain —
 //! the intent walk starts from the *editor* (via
-//! [`EventContext::send_intent`] which anchors on `source_widget`,
+//! `EventContext::send_intent` which anchors on `source_widget`,
 //! which for a PointerDown is the hit widget — but we're dispatching
 //! from inside the menu item, which is top-level, so the walk
 //! terminates without reaching the editor).
@@ -50,7 +50,7 @@
 //!
 //! ## Slot-based replacement
 //!
-//! [`RichTextEditor::context_menu`] accepts a user-provided factory
+//! `RichTextEditor::context_menu` accepts a user-provided factory
 //! that replaces the default entirely. The user's factory returns
 //! whatever widget they want — typically a `MenuList`, but any
 //! `Widget` works (a `Panel` with custom chrome, a domain-specific

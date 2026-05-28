@@ -83,7 +83,7 @@ impl WidgetTree {
 
     /// Drain any widgets flagged `needs_rebuild` that are currently
     /// active + have built children. Called from
-    /// [`process_state_changes`] after dirty bindings have been
+    /// `process_state_changes` after dirty bindings have been
     /// flushed, and again after overlay / tooltip activation so that
     /// widgets transitioning from dormant → active in the same
     /// layout pass get rebuilt *this* frame rather than the next.

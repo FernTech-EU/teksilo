@@ -17,7 +17,7 @@
 //! ## Layout semantics
 //!
 //! Layout-transparent — the child reports its full natural size at
-//! all opacity values. Identical layout footprint to [`Fade`].
+//! all opacity values. Identical layout footprint to `Fade`.
 //!
 //! ## Reduced motion
 //!

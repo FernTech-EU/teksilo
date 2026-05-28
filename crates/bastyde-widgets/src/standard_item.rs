@@ -58,7 +58,7 @@
 //! position/level/expanded/selected come from the parent's
 //! `ListItemA11y` / `TreeRowA11y` wrapper. The embedded `Checkbox`
 //! receives an `access_label*` override carrying the row label so
-//! screen readers announce "checkbox, checked, [label]" rather than
+//! screen readers announce "checkbox, checked, `[label]`" rather than
 //! a nameless `Role::CheckBox`. The chevron's `TwistArrow` is
 //! decorative (`set_hidden`); the row's expanded state is owned by
 //! the wrapper.

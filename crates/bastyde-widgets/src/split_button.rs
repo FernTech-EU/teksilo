@@ -4,12 +4,12 @@
 //! currently-selected item and, on click, fires that item's command
 //! (behaving like a regular [`Button`](crate::button::Button)). The right
 //! region is a narrow chevron zone that, on click, opens a
-//! [`MenuList`](crate::menu_list::MenuList) of related actions. Picking an
+//! [`MenuList`] of related actions. Picking an
 //! action from the dropdown fires it and promotes its index to become the
 //! new default for the session (IntelliJ's "remember last used"
 //! convention).
 //!
-//! SplitButton reuses [`MenuItem`](crate::menu_item::MenuItem) verbatim
+//! SplitButton reuses [`MenuItem`] verbatim
 //! for the dropdown rows — the caller passes real `MenuItem` values via
 //! `.item(...)`, so icons, shortcut labels, enabled flags, and separators
 //! all come for free.

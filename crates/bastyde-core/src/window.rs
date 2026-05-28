@@ -9,7 +9,7 @@
 //! single window — placement, title, size, position, focus, etc. App
 //! code writes to these signals to push state to the OS; OS-originated
 //! changes write back into the same signals via `*_from_os` setters
-//! guarded by [`WindowStateInner::applying_from_os`], so observers that
+//! guarded by `WindowStateInner::applying_from_os`, so observers that
 //! propagate writes to the OS do not re-loop.
 //!
 //! [`WindowCommand`] is the private queue element produced by those

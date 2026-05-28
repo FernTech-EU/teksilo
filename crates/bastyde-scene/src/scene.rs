@@ -258,7 +258,7 @@ pub(crate) struct SceneEntry {
 }
 
 /// How a heavyweight `Widget` entry makes its instance available to a
-/// [`SceneView`]. The two variants are the single-view and multi-view
+/// `SceneView`. The two variants are the single-view and multi-view
 /// production paths.
 pub(crate) enum WidgetSource {
     /// Single-view sugar ([`Scene::add_widget`]). The first `SceneView` to
@@ -983,7 +983,7 @@ impl Scene {
     /// Declare the scene's logical extent. `None` (the default)
     /// means "auto-compute from items each query"; `Some(rect)`
     /// fixes the extent regardless of item placement. Used by
-    /// [`SceneView`] for pan clamping and `fit_to_content`.
+    /// `SceneView` for pan clamping and `fit_to_content`.
     pub fn set_scene_rect(&mut self, rect: Option<Rect>) {
         self.user_scene_rect = rect;
     }

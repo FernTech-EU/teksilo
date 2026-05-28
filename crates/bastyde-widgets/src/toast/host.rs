@@ -2,7 +2,7 @@
 //!
 //! Installed by `install_toast(opts)` in the `bastyde` umbrella. The
 //! umbrella's `BastydeAppBuilderToastExt::install_toast` registers a
-//! [`DefaultPostRoot`](bastyde_app::DefaultPostRoot) closure that wraps
+//! `DefaultPostRoot` closure that wraps
 //! every window's root with a `ZStack` of `[user_root, ToastHost]`.
 //! The host renders its toast surfaces as direct children, positioned
 //! absolutely at the configured viewport corner. The wrapping ZStack
@@ -88,7 +88,7 @@ impl Default for ToastInstallOptions {
 
 /// Invisible sibling widget that owns the toast queue. Installed once
 /// per window by the `install_toast` extension trait via a
-/// [`DefaultPostRoot`] closure (see `bastyde::toast_install`).
+/// `DefaultPostRoot` closure (see `bastyde::toast_install`).
 ///
 /// Renders its toast surfaces as direct children positioned at the
 /// configured corner. Use `ZStack::new().child(user_root).child(host)`

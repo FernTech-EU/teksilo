@@ -2,7 +2,7 @@
 //! behind the winit window: we measure the standard traffic-light cluster
 //! at construction time to reserve the correct leading inset. Drag stays on
 //! winit's own surface; edge resize is handled natively by the `NSWindow`
-//! frame (we return `false` from [`needs_custom_resize_handles`], so the
+//! frame (we return `false` from `needs_custom_resize_handles`, so the
 //! application skips installing a `WindowFrame` overlay).
 
 use std::sync::Arc;

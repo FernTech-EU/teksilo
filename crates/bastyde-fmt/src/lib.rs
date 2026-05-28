@@ -131,7 +131,7 @@ fn normalize_to_crlf(s: &str) -> String {
 
 /// Re-indent a formatted block so its outermost `}` lands at the same
 /// column the user already had in source (see
-/// [`visit::observed_body_indent`]). The formatter emits with column-0
+/// `visit::observed_body_indent`). The formatter emits with column-0
 /// indents internally; this shifts every line except the first by
 /// `base_indent` spaces. Newlines emitted by the formatter remain
 /// `\n`-only — line-ending normalization (LF↔CRLF) is the caller's

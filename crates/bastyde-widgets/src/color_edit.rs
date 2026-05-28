@@ -10,7 +10,7 @@
 //! observers see live updates as the user drags within the popover
 //! (no commit step).
 //!
-//! Built on [`PopoverButton`](crate::popover_button::PopoverButton):
+//! Built on [`PopoverButton`]:
 //! the overlay wiring (dormant content + show / dismiss + AT
 //! `has_popup` + `expanded`) lives there. This file is just the
 //! ColorEdit-specific assembly — picker config pass-through, the
@@ -18,8 +18,8 @@
 //!
 //! # Accessibility
 //!
-//! The trigger declares [`Role::Button`](accesskit::Role::Button)
-//! (via Button), [`HasPopup::Dialog`](accesskit::HasPopup::Dialog)
+//! The trigger declares `Role::Button`
+//! (via Button), `HasPopup::Dialog`
 //! (via PopoverButton), and tracks the popover open state through
 //! `set_expanded`. The label binds reactively to the hex value so
 //! AT name updates as the picker mutates the bound color.

@@ -215,7 +215,7 @@ pub(crate) struct ActiveOverlay {
     /// regardless of dismiss path.
     pub on_dismiss: Option<OverlayDismissCallback>,
     /// Optional fade-in / fade-out state. Configured post-show via
-    /// [`OverlayManager::set_fade`]. When `Some`, all dismiss paths
+    /// `OverlayManager::set_fade`. When `Some`, all dismiss paths
     /// (auto, escape, click-outside, pointer-leave, manual) defer
     /// the actual removal until the fade-out tween completes.
     pub fade: Option<OverlayFadeState>,
@@ -266,7 +266,7 @@ pub struct OverlayManager {
     pub(crate) stack: Vec<ActiveOverlay>,
     next_id: u64,
     /// Latest known sim-clock value, mirrored from
-    /// [`WidgetTree::sim_clock`] via [`Self::set_sim_clock`]. Read by
+    /// `WidgetTree::sim_clock` via [`Self::set_sim_clock`]. Read by
     /// `dismiss` to stamp `dismissing_started_sim` in lockstep with
     /// `dismissing_started_real`. Defaults to `Instant::now()` so
     /// constructions outside a tree (tests of OverlayManager in
