@@ -299,8 +299,8 @@ impl Widget for Banner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bastyde_i18n::lit;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn banner_builds_and_lays_out() {

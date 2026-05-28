@@ -37,8 +37,8 @@ use bastyde::core::BindingLevel;
 use bastyde::prelude::*;
 use bastyde::widgets::{Button, Expand, HStack, Panel, Spacer, TextWidget, Toolbar, VStack};
 use bastyde_scene::{
-    A11yGroup, A11yGroupId, A11yNode, ItemFlags, ItemId, PathItem, RectItem, SceneLayer, SceneModel,
-    SceneSelection, SceneSelectionMode, SceneView,
+    A11yGroup, A11yGroupId, A11yNode, ItemFlags, ItemId, PathItem, RectItem, SceneLayer,
+    SceneModel, SceneSelection, SceneSelectionMode, SceneView,
 };
 
 const CARDS_PER_ROW: usize = 3;
@@ -266,16 +266,14 @@ fn add_act(model: &SceneModel, state: &mut CorkboardModel) -> (ItemId, Rect) {
     let r = card_rect(index);
     let act_number = state.acts.len() + 1;
 
-    let group =
-        model.add_a11y_group(A11yGroup::builder().label(lit!(format!("Act {act_number}"))));
+    let group = model.add_a11y_group(A11yGroup::builder().label(lit!(format!("Act {act_number}"))));
     // Live region: a screen reader announces the runtime addition.
     model.set_a11y_live(A11yNode::Group(group), Live::Polite);
 
     let card = model.add_widget_item(
         CardData {
             title: format!("Act {act_number} — new beat"),
-            body: "Added live via the shared SceneModel; both panes show it."
-                .to_string(),
+            body: "Added live via the shared SceneModel; both panes show it.".to_string(),
         },
         r,
     );
@@ -319,9 +317,12 @@ impl Camera {
         // Animate rather than `set`: a plain set does NOT cancel an in-flight
         // pan animation (the scroll handler pans via `animate_to`), so a reset
         // mid-scroll would be overridden on the next scheduler tick.
-        self.pan_x.animate_to(0.0, dur, bastyde::tokens::Easing::EaseOut);
-        self.pan_y.animate_to(0.0, dur, bastyde::tokens::Easing::EaseOut);
-        self.zoom.animate_to(rest_zoom, dur, bastyde::tokens::Easing::EaseOut);
+        self.pan_x
+            .animate_to(0.0, dur, bastyde::tokens::Easing::EaseOut);
+        self.pan_y
+            .animate_to(0.0, dur, bastyde::tokens::Easing::EaseOut);
+        self.zoom
+            .animate_to(rest_zoom, dur, bastyde::tokens::Easing::EaseOut);
         self.rotation
             .animate_to(0.0, dur, bastyde::tokens::Easing::EaseOut);
     }
@@ -429,13 +430,8 @@ fn main() {
                             .a11y_label(lit!("Overview pane")),
                     );
 
-                    let toolbar = build_toolbar(
-                        main_id,
-                        model.clone(),
-                        cork,
-                        main_cam,
-                        overview_cam,
-                    );
+                    let toolbar =
+                        build_toolbar(main_id, model.clone(), cork, main_cam, overview_cam);
 
                     tree.add(
                         VStack::new().child(toolbar).child(
@@ -573,13 +569,13 @@ mod tests {
         let overview_id = tree.add(build_pane(&model, &selection, &overview_cam));
         // Exactly main()'s structure: VStack { toolbar, Expand { HStack { … } } }.
         tree.add(
-            VStack::new()
-                .child(TextWidget::new(lit!("toolbar")))
-                .child(Expand::new().child(
+            VStack::new().child(TextWidget::new(lit!("toolbar"))).child(
+                Expand::new().child(
                     HStack::new()
                         .child(Expand::new().flex(2.0).child_id(main_id))
                         .child(Expand::new().child_id(overview_id)),
-                )),
+                ),
+            ),
         );
         tree.layout(SizeProposal::exact(1300.0, 640.0));
 
@@ -615,7 +611,11 @@ mod tests {
             CARDS.len() + 1,
             "Add Act must materialise one new card"
         );
-        assert_eq!(cork.acts.len(), acts_before + 1, "a new Act group is created");
+        assert_eq!(
+            cork.acts.len(),
+            acts_before + 1,
+            "a new Act group is created"
+        );
         assert!(
             tree.a11y_request_handle().get(),
             "Add Act must request an AccessKit re-walk"

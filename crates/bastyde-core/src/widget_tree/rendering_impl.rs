@@ -411,7 +411,11 @@ fn paint_widget_cached(
     // Inverse-transform the screen-space clip into content space. The GPU
     // `SetClip` (emitted in parent/screen space) is untouched — it stays the
     // real viewport scissor.
-    let next_clip = match (content_transform, next_clip, transform.and_then(|t| t.inverse())) {
+    let next_clip = match (
+        content_transform,
+        next_clip,
+        transform.and_then(|t| t.inverse()),
+    ) {
         (true, Some(screen_clip), Some(inv)) => Some(inv.apply_rect(screen_clip)),
         _ => next_clip,
     };

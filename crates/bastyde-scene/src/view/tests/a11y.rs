@@ -38,7 +38,10 @@ fn add_a11y_group_round_trips_label_and_role() {
             .role(Role::GenericContainer),
     );
     let g = scene.a11y_group(id).expect("group must be reachable by id");
-    assert_eq!(g.label.as_ref().map(|l| l.resolve_now()).as_deref(), Some("Inputs section"));
+    assert_eq!(
+        g.label.as_ref().map(|l| l.resolve_now()).as_deref(),
+        Some("Inputs section")
+    );
     assert_eq!(g.role, Role::GenericContainer);
 }
 

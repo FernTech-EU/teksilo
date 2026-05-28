@@ -738,15 +738,17 @@ impl SceneView {
         mut self,
         f: impl Fn(&P, ItemId) -> Box<dyn Widget> + 'static,
     ) -> Self {
-        self.delegate = Some(Rc::new(move |payload, id| match payload.downcast_ref::<P>() {
-            Some(typed) => Some(f(typed, id)),
-            None => {
-                debug_assert!(
-                    false,
-                    "SceneView delegate_typed: payload for {id:?} is not a {}",
-                    std::any::type_name::<P>()
-                );
-                None
+        self.delegate = Some(Rc::new(move |payload, id| {
+            match payload.downcast_ref::<P>() {
+                Some(typed) => Some(f(typed, id)),
+                None => {
+                    debug_assert!(
+                        false,
+                        "SceneView delegate_typed: payload for {id:?} is not a {}",
+                        std::any::type_name::<P>()
+                    );
+                    None
+                }
             }
         }));
         self
@@ -1429,11 +1431,7 @@ impl SceneView {
                 continue;
             }
             // Only this band; items default to Under.
-            if scene
-                .layer(id)
-                .unwrap_or(crate::scene::SceneLayer::Under)
-                != band
-            {
+            if scene.layer(id).unwrap_or(crate::scene::SceneLayer::Under) != band {
                 continue;
             }
             // Skip items whose chain is invisible or which carry the
@@ -2030,7 +2028,9 @@ impl Widget for SceneView {
             }
         } else {
             debug_assert!(
-                delegated.iter().all(|(id, _)| self.materialized.contains_key(id)),
+                delegated
+                    .iter()
+                    .all(|(id, _)| self.materialized.contains_key(id)),
                 "SceneView has `Delegated` items but no delegate installed — \
                  call `.delegate_typed::<P>(..)` (or `.delegate(..)`) before adding it to the tree"
             );
@@ -2372,9 +2372,10 @@ impl Widget for SceneView {
                                         // Drop the tooltip just below-right
                                         // of the cursor so it doesn't sit
                                         // under the pointer.
-                                        placement: bastyde_core::overlay::OverlayPlacement::AtPointer(
-                                            Point::new(position.x + 12.0, position.y + 16.0),
-                                        ),
+                                        placement:
+                                            bastyde_core::overlay::OverlayPlacement::AtPointer(
+                                                Point::new(position.x + 12.0, position.y + 16.0),
+                                            ),
                                         // Manual: every dismiss path (item
                                         // change, pointer-down, pointer-leave)
                                         // is driven explicitly below.

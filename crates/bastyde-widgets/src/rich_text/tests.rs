@@ -3060,7 +3060,10 @@ fn editor_backspace_at_list_start_dedents_or_exits() {
 #[test]
 fn editor_tab_in_quote_increases_depth() {
     let doc = TextDocument::new();
-    doc.set_markdown("> Quoted line.\n").unwrap().wait().unwrap();
+    doc.set_markdown("> Quoted line.\n")
+        .unwrap()
+        .wait()
+        .unwrap();
     let editor = RichTextEditor::editor(doc.clone());
     let state = editor.state_handle();
     editor.set_caret_position(0);
@@ -3088,7 +3091,10 @@ fn editor_tab_in_quote_increases_depth() {
 #[test]
 fn editor_shift_tab_at_depth_1_unwraps_to_plain() {
     let doc = TextDocument::new();
-    doc.set_markdown("> Quoted line.\n").unwrap().wait().unwrap();
+    doc.set_markdown("> Quoted line.\n")
+        .unwrap()
+        .wait()
+        .unwrap();
     let editor = RichTextEditor::editor(doc.clone());
     let state = editor.state_handle();
     editor.set_caret_position(0);
@@ -3116,7 +3122,10 @@ fn editor_shift_tab_at_depth_1_unwraps_to_plain() {
 #[test]
 fn editor_backspace_at_quote_first_block_unwraps() {
     let doc = TextDocument::new();
-    doc.set_markdown("> Quoted line.\n").unwrap().wait().unwrap();
+    doc.set_markdown("> Quoted line.\n")
+        .unwrap()
+        .wait()
+        .unwrap();
     let editor = RichTextEditor::editor(doc.clone());
     let state = editor.state_handle();
     editor.set_caret_position(0);

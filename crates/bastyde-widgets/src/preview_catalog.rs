@@ -1891,7 +1891,6 @@ fn scenario_for<W: WidgetCatalog>(name: &str) -> Box<dyn Widget> {
     }
 }
 
-
 // =========================================================================
 // Color picker family (HexColorInput, ColorPicker, ColorEdit)
 // =========================================================================

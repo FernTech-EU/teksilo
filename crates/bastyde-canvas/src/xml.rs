@@ -65,9 +65,7 @@ pub(crate) fn parse_dom(text: &str) -> Result<Option<XmlElement>, String> {
                 attach_or_root(&mut stack, &mut root, elem);
             }
             Ok(Event::End(_)) => {
-                let elem = stack
-                    .pop()
-                    .ok_or_else(|| "unmatched end tag".to_string())?;
+                let elem = stack.pop().ok_or_else(|| "unmatched end tag".to_string())?;
                 attach_or_root(&mut stack, &mut root, elem);
             }
             Ok(Event::Eof) => break,
@@ -85,11 +83,7 @@ pub(crate) fn parse_dom(text: &str) -> Result<Option<XmlElement>, String> {
     Ok(root)
 }
 
-fn attach_or_root(
-    stack: &mut [XmlElement],
-    root: &mut Option<XmlElement>,
-    elem: XmlElement,
-) {
+fn attach_or_root(stack: &mut [XmlElement], root: &mut Option<XmlElement>, elem: XmlElement) {
     if let Some(parent) = stack.last_mut() {
         parent.children.push(elem);
     } else {

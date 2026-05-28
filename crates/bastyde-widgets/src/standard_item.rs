@@ -787,10 +787,10 @@ impl Widget for StandardTreeItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bastyde_i18n::lit;
     use bastyde_canvas::SizeProposal;
     use bastyde_core::Theme;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     fn theme() -> Theme {
         bastyde_core::presets::intui::light()

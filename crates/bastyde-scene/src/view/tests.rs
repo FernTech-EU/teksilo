@@ -1034,7 +1034,10 @@ fn a11y_off_screen_mode_viewport_only_excludes_grown_items() {
 fn add_a11y_group_round_trip() {
     let mut scene = Scene::new();
     let id = scene.add_a11y_group(crate::a11y::A11yGroup::builder().label(lit!("Act 1")));
-    assert_eq!(scene.a11y_group(id).map(|g| g.label()), Some(Some("Act 1".to_string())));
+    assert_eq!(
+        scene.a11y_group(id).map(|g| g.label()),
+        Some(Some("Act 1".to_string()))
+    );
 }
 
 #[test]
@@ -2288,7 +2291,10 @@ fn drag_to_move_persists_via_rebuild_signal_no_snap_back() {
             view.pending_item_move.get().is_some(),
             "drag end must post pending_item_move"
         );
-        assert!(view.reconcile_dirty.get() > 0, "drag end must bump reconcile_dirty");
+        assert!(
+            view.reconcile_dirty.get() > 0,
+            "drag end must bump reconcile_dirty"
+        );
     }
 
     // Real apps' layout cycle runs after event dispatch, where
@@ -5613,7 +5619,10 @@ fn lightweight_item_tooltip_shows_after_delay_then_dismisses_on_leave() {
 
     // Past the delay the point-anchored overlay appears, carrying the
     // item's resolved text.
-    tree.advance_time(bastyde_tokens::MotionTokens::default().tooltip_delay_heavy + std::time::Duration::from_millis(50));
+    tree.advance_time(
+        bastyde_tokens::MotionTokens::default().tooltip_delay_heavy
+            + std::time::Duration::from_millis(50),
+    );
     assert_eq!(
         tree.active_overlays().len(),
         1,
@@ -5652,7 +5661,10 @@ fn lightweight_item_without_tooltip_shows_nothing() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     tree.pointer_move(Point::new(40.0, 40.0));
-    tree.advance_time(bastyde_tokens::MotionTokens::default().tooltip_delay_heavy + std::time::Duration::from_millis(50));
+    tree.advance_time(
+        bastyde_tokens::MotionTokens::default().tooltip_delay_heavy
+            + std::time::Duration::from_millis(50),
+    );
     assert!(
         tree.active_overlays().is_empty(),
         "an item without a tooltip must never show one"
@@ -5675,7 +5687,10 @@ fn lightweight_item_tooltip_dismissed_on_pointer_down() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     tree.pointer_move(Point::new(40.0, 40.0));
-    tree.advance_time(bastyde_tokens::MotionTokens::default().tooltip_delay_heavy + std::time::Duration::from_millis(50));
+    tree.advance_time(
+        bastyde_tokens::MotionTokens::default().tooltip_delay_heavy
+            + std::time::Duration::from_millis(50),
+    );
     assert_eq!(tree.active_overlays().len(), 1);
 
     // A press retracts the hover tooltip — the user has committed.

@@ -163,8 +163,8 @@ impl Widget for GroupHeader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bastyde_i18n::lit;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn builds_and_lays_out_with_proposed_width() {

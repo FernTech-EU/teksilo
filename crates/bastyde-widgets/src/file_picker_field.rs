@@ -297,8 +297,8 @@ fn apply_result(result: &FileDialogResult, text: &Signal<String>, kind: FilePick
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bastyde_i18n::lit;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn file_picker_builds() {

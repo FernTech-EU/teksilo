@@ -207,7 +207,10 @@ fn build_menu(state: SharedState, policy: PolicyBundle) -> MenuList {
     // --- Toggle blockquote ---------------------------------------
     // Only meaningful when the editor accepts mutations (read-only
     // presets get the minimal menu — Cut/Copy/Paste/Select-All).
-    if policy.command_filter.accepts(EditCommandKind::ToggleBlockquote) {
+    if policy
+        .command_filter
+        .accepts(EditCommandKind::ToggleBlockquote)
+    {
         let state_for_bq = state.clone();
         let cross_frame_selection = state.borrow().cursor.selection_spans_multiple_frames();
         let in_quote = state.borrow().cursor.is_in_blockquote();

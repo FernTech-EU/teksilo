@@ -446,9 +446,9 @@ impl Widget for Snackbar {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bastyde_i18n::lit;
     use bastyde_canvas::Size;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);

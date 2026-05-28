@@ -772,7 +772,12 @@ struct ToolBoxPanel {
 }
 
 impl ToolBoxPanel {
-    fn new(label: LocalizedString, selected: Signal<usize>, index: usize, content: PendingChild) -> Self {
+    fn new(
+        label: LocalizedString,
+        selected: Signal<usize>,
+        index: usize,
+        content: PendingChild,
+    ) -> Self {
         Self {
             label,
             selected,
@@ -954,12 +959,12 @@ impl Widget for ToolBox {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bastyde_i18n::lit;
     use crate::primitives::TextWidget;
     use bastyde_canvas::SizeProposal;
     use bastyde_core::accesskit;
     use bastyde_core::event::Modifiers;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     fn tree() -> WidgetTree {
         WidgetTree::new().with_theme(bastyde_core::presets::intui::light())

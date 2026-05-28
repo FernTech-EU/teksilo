@@ -117,10 +117,7 @@ impl InputDialog {
                 let dlg = inner
                     .take()
                     .expect("InputDialog present closure called twice");
-                tree.add(
-                    ModalContainer::new(InputDialogBody::new(dlg))
-                        .title(dialog_title.clone()),
-                )
+                tree.add(ModalContainer::new(InputDialogBody::new(dlg)).title(dialog_title.clone()))
             })
             .presentation(ModalPresentation::Auto)
             .close_behavior(ModalCloseBehavior::EscapeOrClickOutside)
@@ -292,8 +289,8 @@ impl Widget for InputDialogBody {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bastyde_i18n::lit;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn input_dialog_body_builds() {

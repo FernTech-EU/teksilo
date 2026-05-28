@@ -33,9 +33,7 @@ impl RichTextEditorStyle for RecipeRichTextEditorStyle {
         // is mounted in.
         if cfg.is_read_only {
             return match cfg.content_padding {
-                Some((t, r, b, l)) => {
-                    ctx.add(Padding::new(t, r, b, l).child_id(cfg.viewport))
-                }
+                Some((t, r, b, l)) => ctx.add(Padding::new(t, r, b, l).child_id(cfg.viewport)),
                 None => cfg.viewport,
             };
         }

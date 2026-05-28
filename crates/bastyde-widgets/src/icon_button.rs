@@ -989,9 +989,9 @@ fn default_eye_off_icon() -> IconWidget {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bastyde_i18n::lit;
     use bastyde_core::signal::Signal;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     /// Reactive enabled-state via `ctx.enabled_when(btn_id, signal)`
     /// must dim the IconButton's icon when the signal flips to false —

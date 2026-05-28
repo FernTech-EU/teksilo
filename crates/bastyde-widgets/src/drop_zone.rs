@@ -303,8 +303,7 @@ impl Widget for DropZone {
         content = content.child(TextWidget::new(self.label.clone()));
 
         if let Some(subtitle) = &self.subtitle {
-            content =
-                content.child(TextWidget::new(subtitle.clone()).color(TextRole::Secondary));
+            content = content.child(TextWidget::new(subtitle.clone()).color(TextRole::Secondary));
         }
 
         // Live-region status line: empty at rest, narrates hover / drop.

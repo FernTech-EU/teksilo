@@ -70,7 +70,8 @@ impl LinkStyle for RecipeLinkStyle {
             .map(move |(((h, p, f), v), d)| link_text_role(*h, *p, *f, *v, *d));
 
         let text_id = ctx.add(
-            TextWidget::new(bastyde_i18n::lit!("")).bind_text(cfg.text.clone())
+            TextWidget::new(bastyde_i18n::lit!(""))
+                .bind_text(cfg.text.clone())
                 .style(TextStyleRole::Body)
                 .bind_color(text_role.clone())
                 .single_line()

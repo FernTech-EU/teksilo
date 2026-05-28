@@ -361,10 +361,7 @@ mod tests {
         // framework bundle (`tooltip-more`) and follow the active locale.
         use bastyde_i18n::{I18nConfig, I18nManager};
         let cfg = I18nConfig::new()
-            .supported_locales([
-                "en-US".parse().unwrap(),
-                "fr-FR".parse().unwrap(),
-            ])
+            .supported_locales(["en-US".parse().unwrap(), "fr-FR".parse().unwrap()])
             .auto_detect_os_locale(false)
             .framework_locales(crate::framework_locales());
         let mgr = I18nManager::from_config(&cfg);

@@ -1430,7 +1430,11 @@ mod tests {
             .widget_as_any(id)
             .and_then(|a| a.downcast_ref::<Bumpable>())
             .map(|b| b.value);
-        assert_eq!(value, Some(42), "the deferred closure must mutate the live widget");
+        assert_eq!(
+            value,
+            Some(42),
+            "the deferred closure must mutate the live widget"
+        );
         assert!(
             tree.needs_layout(),
             "Relayout dirty level must mark the tree for relayout"
@@ -1445,7 +1449,11 @@ mod tests {
         let mut tree = WidgetTree::new();
         let id = tree.add(Bumpable { value: 0 });
         let mut ctx = EventContext::new();
-        ctx.with_widget_mut::<Other>(id, crate::binding::BindingLevel::RepaintOnly, |_o: &mut Other| {});
+        ctx.with_widget_mut::<Other>(
+            id,
+            crate::binding::BindingLevel::RepaintOnly,
+            |_o: &mut Other| {},
+        );
         // Bumpable opts into as_any_mut, so the closure runs and the
         // wrong-type downcast trips the debug_assert.
         tree.collect_from_ctx(ctx, id);
@@ -1479,7 +1487,11 @@ mod tests {
         });
         tree.collect_from_ctx(ctx, id); // must not panic / double-borrow
 
-        assert_eq!(echo.get(), 99, "the observer ran during the deferred mutation");
+        assert_eq!(
+            echo.get(),
+            99,
+            "the observer ran during the deferred mutation"
+        );
         let value = tree
             .widget_as_any(id)
             .and_then(|a| a.downcast_ref::<Bumpable>())
@@ -1493,7 +1505,10 @@ mod tests {
         let id = tree.add(Bumpable { value: 0 });
         tree.layout(SizeProposal::exact(100.0, 100.0));
         let _ = tree.sync_accessibility(); // populate cache, clears a11y_dirty
-        assert!(!tree.a11y_dirty, "sync_accessibility should clear the dirty flag");
+        assert!(
+            !tree.a11y_dirty,
+            "sync_accessibility should clear the dirty flag"
+        );
 
         let mut ctx = EventContext::new();
         ctx.request_accessibility_update();

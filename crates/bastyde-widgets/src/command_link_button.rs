@@ -343,8 +343,8 @@ impl Widget for CommandLinkButton {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bastyde_i18n::lit;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     #[test]
     fn builds_with_title_and_description() {

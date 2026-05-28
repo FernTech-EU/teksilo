@@ -653,7 +653,8 @@ impl Scene {
     /// `emit_item_change` and `bump_a11y_change`; `&self` because both notify
     /// paths are `&self`.
     fn bump_mutation(&self) {
-        self.mutation_seq.set(self.mutation_seq.get().wrapping_add(1));
+        self.mutation_seq
+            .set(self.mutation_seq.get().wrapping_add(1));
     }
 
     /// Monotonic counter of every model mutation applied so far — item geometry

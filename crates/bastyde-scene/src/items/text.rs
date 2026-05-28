@@ -124,7 +124,10 @@ impl SceneItem for TextItem {
     }
 
     fn label(&self) -> Option<String> {
-        self.label.as_ref().map(|l| l.resolve_now()).or_else(|| Some(self.text.current()))
+        self.label
+            .as_ref()
+            .map(|l| l.resolve_now())
+            .or_else(|| Some(self.text.current()))
     }
 
     fn initial_flags(&self) -> ItemFlags {

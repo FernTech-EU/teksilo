@@ -122,7 +122,9 @@ impl SceneModel {
     /// Multi-view heavyweight item: store a typed `payload`; each view builds
     /// its own widget instance from it via its delegate. Returns the [`ItemId`].
     pub fn add_widget_item<P: 'static>(&self, payload: P, rect: Rect) -> ItemId {
-        self.0.borrow_mut().add_widget_delegated(Rc::new(payload), rect)
+        self.0
+            .borrow_mut()
+            .add_widget_delegated(Rc::new(payload), rect)
     }
 
     /// Replace the payload of a `Delegated` heavyweight item; every view
@@ -458,17 +460,20 @@ mod tests {
         });
         let id = m1.add_widget_item(42u32, rect());
         assert_eq!(
-            m1.payload(id).and_then(|p| p.downcast_ref::<u32>().copied()),
+            m1.payload(id)
+                .and_then(|p| p.downcast_ref::<u32>().copied()),
             Some(42)
         );
         assert_eq!(
-            m2.payload(id).and_then(|p| p.downcast_ref::<u32>().copied()),
+            m2.payload(id)
+                .and_then(|p| p.downcast_ref::<u32>().copied()),
             Some(42)
         );
         m1.set_payload(id, 99u32);
         assert!(fired.get());
         assert_eq!(
-            m2.payload(id).and_then(|p| p.downcast_ref::<u32>().copied()),
+            m2.payload(id)
+                .and_then(|p| p.downcast_ref::<u32>().copied()),
             Some(99)
         );
     }
@@ -516,6 +521,9 @@ mod tests {
     fn item_change_signal_shared_across_handles() {
         let m1 = SceneModel::new();
         let m2 = m1.clone();
-        assert!(Signal::same(&m1.item_change_signal(), &m2.item_change_signal()));
+        assert!(Signal::same(
+            &m1.item_change_signal(),
+            &m2.item_change_signal()
+        ));
     }
 }

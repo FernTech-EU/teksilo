@@ -20,7 +20,11 @@ fn viewport() -> SizeProposal {
 }
 
 /// Borrow the mounted `SceneView` mutably and run `f` against its `Scene`.
-fn with_scene_mut<R>(tree: &mut WidgetTree, view_id: WidgetId, f: impl FnOnce(&mut Scene) -> R) -> R {
+fn with_scene_mut<R>(
+    tree: &mut WidgetTree,
+    view_id: WidgetId,
+    f: impl FnOnce(&mut Scene) -> R,
+) -> R {
     let view = tree
         .widget_as_any_mut(view_id)
         .and_then(|a| a.downcast_mut::<SceneView>())
@@ -86,7 +90,10 @@ fn runtime_remove_destroys_and_cleans() {
     assert_eq!(tree.children(view_id).len(), 2);
     {
         let view = view_ref(&tree, view_id);
-        assert!(view.widget_id_for(doomed).is_some(), "doomed must materialise");
+        assert!(
+            view.widget_id_for(doomed).is_some(),
+            "doomed must materialise"
+        );
         assert_eq!(
             view.scene().a11y_parent_of(A11yNode::Item(doomed)),
             Some(A11yNode::Group(group)),
@@ -379,7 +386,11 @@ fn heavyweight_child_far_in_scene_renders_when_panned_into_view() {
         Signal::new_animated(0.0),
     ));
     tree.layout(viewport());
-    assert_eq!(red_fill_count(&tree.render()), 0, "card off-screen at pan=0");
+    assert_eq!(
+        red_fill_count(&tree.render()),
+        0,
+        "card off-screen at pan=0"
+    );
 
     // Pan up by 900 so scene-y 1000 maps to screen-y ~100 — squarely in view.
     pan_y.set(-900.0);
@@ -411,11 +422,19 @@ fn reset_animate_to_overrides_in_flight_pan() {
     tree.layout(viewport());
 
     // Simulate a scroll: pan animates toward 300 (in-flight).
-    pan_x.animate_to(300.0, std::time::Duration::from_millis(200), bastyde_tokens::Easing::EaseOut);
+    pan_x.animate_to(
+        300.0,
+        std::time::Duration::from_millis(200),
+        bastyde_tokens::Easing::EaseOut,
+    );
     assert_eq!(pan_x.animation_target(), Some(300.0));
 
     // Reset must replace that target with 0.
-    pan_x.animate_to(0.0, std::time::Duration::from_millis(220), bastyde_tokens::Easing::EaseOut);
+    pan_x.animate_to(
+        0.0,
+        std::time::Duration::from_millis(220),
+        bastyde_tokens::Easing::EaseOut,
+    );
     assert_eq!(
         pan_x.animation_target(),
         Some(0.0),

@@ -106,7 +106,11 @@ impl std::fmt::Debug for BreadcrumbSegment {
 }
 
 impl BreadcrumbSegment {
-    fn new(label: bastyde_i18n::LocalizedString, action: Option<CommandFactory>, current: bool) -> Self {
+    fn new(
+        label: bastyde_i18n::LocalizedString,
+        action: Option<CommandFactory>,
+        current: bool,
+    ) -> Self {
         Self {
             label,
             action,

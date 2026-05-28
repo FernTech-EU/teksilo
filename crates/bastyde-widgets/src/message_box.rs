@@ -767,8 +767,7 @@ impl Widget for MessageBox {
         });
 
         let checkbox_child: Option<Box<dyn Widget>> = self.show_again_label.clone().map(|label| {
-            let cb: Box<dyn Widget> =
-                Box::new(Checkbox::new(checkbox_signal.clone()).label(label));
+            let cb: Box<dyn Widget> = Box::new(Checkbox::new(checkbox_signal.clone()).label(label));
             cb
         });
 
@@ -938,10 +937,10 @@ impl EventContextMessageBoxExt for EventContext<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bastyde_i18n::lit;
     use bastyde_core::ModalContent;
     use bastyde_core::event::WidgetEvent;
     use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
 
     /// Mirrors the focus resolution `bastyde_app::present_in_tree_modal_request`
     /// applies after the modal content subtree is built. Reproduced here

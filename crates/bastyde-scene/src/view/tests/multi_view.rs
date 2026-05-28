@@ -20,8 +20,9 @@ fn viewport() -> SizeProposal {
 
 /// A delegate that builds a `FillWidget` per `u32` payload and counts its
 /// invocations (so tests can prove a rebuild re-ran it).
-fn counting_delegate(counter: Rc<Cell<usize>>) -> impl Fn(&u32, ItemId) -> Box<dyn Widget> + 'static
-{
+fn counting_delegate(
+    counter: Rc<Cell<usize>>,
+) -> impl Fn(&u32, ItemId) -> Box<dyn Widget> + 'static {
     move |_payload, _id| {
         counter.set(counter.get() + 1);
         Box::new(FillWidget::new())
@@ -34,7 +35,13 @@ fn two_views(
     model: &SceneModel,
     sel_a: SceneSelection,
     sel_b: SceneSelection,
-) -> (WidgetTree, WidgetId, WidgetId, Rc<Cell<usize>>, Rc<Cell<usize>>) {
+) -> (
+    WidgetTree,
+    WidgetId,
+    WidgetId,
+    Rc<Cell<usize>>,
+    Rc<Cell<usize>>,
+) {
     let count_a = Rc::new(Cell::new(0));
     let count_b = Rc::new(Cell::new(0));
     let mut tree = WidgetTree::new();
@@ -115,7 +122,11 @@ fn set_payload_rebuilds_the_card_in_both_views() {
     model.set_payload(id, 2u32);
     tree.layout(viewport());
 
-    assert_eq!(ca.get(), 2, "view A re-invoked its delegate for the changed card");
+    assert_eq!(
+        ca.get(),
+        2,
+        "view A re-invoked its delegate for the changed card"
+    );
     assert_eq!(cb.get(), 2, "view B re-invoked its delegate too");
 }
 
@@ -136,7 +147,11 @@ fn remove_reaps_from_both_views() {
     tree.layout(viewport());
 
     assert_eq!(tree.children(a).len(), 1, "view A reaped the removed card");
-    assert_eq!(tree.children(b).len(), 1, "view B reaped it too (no orphan)");
+    assert_eq!(
+        tree.children(b).len(),
+        1,
+        "view B reaped it too (no orphan)"
+    );
     view_ref(&tree, a, |v| assert_eq!(v.widget_id_for(id), None));
     view_ref(&tree, b, |v| assert_eq!(v.widget_id_for(id), None));
 }
@@ -181,8 +196,16 @@ fn add_widget_once_is_single_view_only() {
             .child(Expand::new().child_id(b)),
     );
     tree.layout(viewport());
-    assert_eq!(tree.children(a).len(), 1, "first/owning view materialises the Once widget");
-    assert_eq!(tree.children(b).len(), 0, "second view gets nothing — Once is single-view");
+    assert_eq!(
+        tree.children(a).len(),
+        1,
+        "first/owning view materialises the Once widget"
+    );
+    assert_eq!(
+        tree.children(b).len(),
+        0,
+        "second view gets nothing — Once is single-view"
+    );
 }
 
 #[test]
