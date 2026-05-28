@@ -326,7 +326,16 @@ mod tests {
                 .iter()
                 .copied()
                 .filter(|id| {
-                    let r = items.iter().find(|(i, _)| i == id).unwrap().1;
+                    let r = items
+                        .iter()
+                        .find(|(i, _)| i == id)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "query returned id {id:?} not present in items — \
+                                 phantom id from GridHashIndex"
+                            )
+                        })
+                        .1;
                     rects_intersect(r, q)
                 })
                 .collect();

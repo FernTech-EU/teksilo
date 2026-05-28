@@ -198,11 +198,12 @@ impl Widget for PrivacySettings {
             .clone()
             .unwrap_or_else(|| "the application".to_string());
 
+        let scope_panel = build_scope_panel(ctx, &telemetry, &state, supported);
         let column = VStack::new()
             .spacing(if self.compact { 12.0 } else { 18.0 })
             .child(self.build_heading())
             .child(self.build_notice(&telemetry, &processor, &endpoint, pseudonymous))
-            .child(build_scope_panel(&telemetry, &state, supported))
+            .child(scope_panel)
             .child(build_accept_reject(&telemetry, &endpoint))
             .child_opt(
                 (self.show_identity_row && pseudonymous).then(|| build_identity_row(&telemetry)),
@@ -311,6 +312,7 @@ impl PrivacySettings {
 // ----- helpers (free functions so the build sites stay small) -------
 
 fn build_scope_panel(
+    ctx: &mut BuildContext,
     telemetry: &OpenedTelemetry,
     state: &ConsentState,
     supported: ConsentScope,
@@ -321,6 +323,7 @@ fn build_scope_panel(
 
     if supported.anonymous_metrics {
         column = column.child(scope_row(
+            ctx,
             tr_widget!(privacy_scope_anonymous_metrics_label()),
             tr_widget!(privacy_scope_anonymous_metrics_description()),
             current_value(state, |s| s.anonymous_metrics),
@@ -332,6 +335,7 @@ fn build_scope_panel(
     }
     if supported.crash_reports {
         column = column.child(scope_row(
+            ctx,
             tr_widget!(privacy_scope_crash_reports_label()),
             tr_widget!(privacy_scope_crash_reports_description()),
             current_value(state, |s| s.crash_reports),
@@ -343,6 +347,7 @@ fn build_scope_panel(
     }
     if supported.feature_flags {
         column = column.child(scope_row(
+            ctx,
             tr_widget!(privacy_scope_feature_flags_label()),
             tr_widget!(privacy_scope_feature_flags_description()),
             current_value(state, |s| s.feature_flags),
@@ -363,6 +368,7 @@ fn current_value(state: &ConsentState, f: impl FnOnce(&ConsentScope) -> bool) ->
 }
 
 fn scope_row(
+    ctx: &mut BuildContext,
     label: bastyde_i18n::LocalizedString,
     description: bastyde_i18n::LocalizedString,
     initial: bool,
@@ -378,13 +384,14 @@ fn scope_row(
     let signal = Signal::new(initial);
     let consent_for_observe = consent.clone();
     let endpoint_for_observe = endpoint;
-    // Observer is forgotten because the signal is owned by the
-    // Toggle, which is dropped on rebuild, dropping the observer
-    // chain via the standard Rc-cycle teardown.
-    std::mem::forget(signal.observe(move |&new_value| {
+    // Hand the ObserverHandle to BuildContext so it is dropped (and
+    // the observer detached) on rebuild — same lifecycle as ctx.effect,
+    // but the closure here borrows `consent` / `endpoint` by move.
+    let handle = signal.observe(move |&new_value| {
         let _ = consent_for_observe
             .set_or_grant_scope(&endpoint_for_observe, |scope| apply(scope, new_value));
-    }));
+    });
+    ctx.own_handle(handle);
 
     HStack::new()
         .spacing(12.0)

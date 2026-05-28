@@ -126,8 +126,12 @@ impl SceneModel {
     }
 
     /// Replace the payload of a `Delegated` heavyweight item; every view
-    /// rebuilds that item's widget on the next pass. No-op (debug-asserts) for
-    /// unknown ids, single-view `add_widget` entries, or lightweight items.
+    /// rebuilds that item's widget on the next pass.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `id` is unknown, refers to a single-view `add_widget` (Once)
+    /// entry, or refers to a lightweight item.
     pub fn set_payload<P: 'static>(&self, id: ItemId, payload: P) {
         self.0.borrow_mut().set_payload(id, Rc::new(payload));
     }

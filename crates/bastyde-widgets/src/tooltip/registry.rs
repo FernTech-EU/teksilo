@@ -188,8 +188,13 @@ pub fn install_tooltip_registry(contents: Vec<TooltipContent>) {
         let mut slot = slot.borrow_mut();
         if slot.is_some() {
             // Debug: enforce the install-once invariant. Release: keep
-            // the first installation and ignore the second.
+            // the first installation and warn so the misuse surfaces.
             debug_assert!(false, "tooltip registry already installed");
+            eprintln!(
+                "[bastyde-widgets::tooltip] install_tooltip_registry called twice — \
+                 keeping the first installation and ignoring the second. \
+                 Check that BastydeAppBuilder::register_tooltips is only invoked once."
+            );
             return;
         }
         *slot = Some(reg);

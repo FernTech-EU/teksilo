@@ -431,19 +431,21 @@ impl Scene {
     }
 
     /// Replace the type-erased payload of a `Delegated` heavyweight entry and
-    /// fire [`ItemChange::PayloadChanged`]. Debug-asserts (no-op in release)
-    /// for an unknown id, a `Once` widget entry, or a lightweight item.
+    /// fire [`ItemChange::PayloadChanged`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `id` is unknown, refers to a `Once` widget entry, or refers to
+    /// a lightweight item. These are all caller-side precondition violations:
+    /// the caller obtained `id` from `add_widget_item` and is responsible for
+    /// only passing it back to `set_payload` while the entry is alive.
     pub(crate) fn set_payload(&mut self, id: ItemId, payload: Rc<dyn std::any::Any>) {
         let Some(&pos) = self.entry_index.get(&id) else {
-            debug_assert!(false, "set_payload: unknown ItemId {id:?}");
-            return;
+            panic!("set_payload: unknown ItemId {id:?}");
         };
         match &mut self.entries[pos].kind {
             SceneEntryKind::Widget(WidgetSource::Delegated { payload: slot }) => *slot = payload,
-            _ => {
-                debug_assert!(false, "set_payload: {id:?} is not a Delegated widget entry");
-                return;
-            }
+            _ => panic!("set_payload: {id:?} is not a Delegated widget entry"),
         }
         // Entry borrow dropped above; `emit_item_change` is `&self`.
         self.emit_item_change(ItemChange::PayloadChanged { id });
@@ -466,10 +468,10 @@ impl Scene {
     pub(crate) fn drain_all_once(&mut self) -> Vec<(ItemId, Box<dyn Widget>)> {
         let mut out = Vec::new();
         for entry in self.entries.iter_mut() {
-            if let SceneEntryKind::Widget(WidgetSource::Once(pending)) = &mut entry.kind {
-                if let Some(w) = pending.take() {
-                    out.push((entry.id, w));
-                }
+            if let SceneEntryKind::Widget(WidgetSource::Once(pending)) = &mut entry.kind
+                && let Some(w) = pending.take()
+            {
+                out.push((entry.id, w));
             }
         }
         out
@@ -1209,10 +1211,10 @@ impl Scene {
             }
             // Reject self-parent and any parent in the child's
             // subtree (would create a cycle).
-            if let Some(p) = parent {
-                if p == child || self.is_descendant_of(p, child) {
-                    return;
-                }
+            if let Some(p) = parent
+                && (p == child || self.is_descendant_of(p, child))
+            {
+                return;
             }
             self.entries[pos].parent = parent;
             self.rebucket_subtree(child);
