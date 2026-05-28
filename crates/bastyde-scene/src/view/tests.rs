@@ -4738,7 +4738,7 @@ fn scene_constraints_helper_accessors_return_signals() {
     assert_eq!(pan_axes_sig.get(), crate::scene::PanAxes::Both);
     assert_eq!(pan_bounds_sig.get(), None);
     assert_eq!(zoom_range_sig.get(), None);
-    assert_eq!(zoomable_sig.get(), true);
+    assert!(zoomable_sig.get());
 
     scene.pan_axes(crate::scene::PanAxes::Horizontal);
     scene.set_pan_bounds(Some(Rect::new(0.0, 0.0, 10.0, 10.0)));
@@ -4748,7 +4748,7 @@ fn scene_constraints_helper_accessors_return_signals() {
     assert_eq!(pan_axes_sig.get(), crate::scene::PanAxes::Horizontal);
     assert_eq!(pan_bounds_sig.get(), Some(Rect::new(0.0, 0.0, 10.0, 10.0)));
     assert_eq!(zoom_range_sig.get(), Some(0.5..=3.0));
-    assert_eq!(zoomable_sig.get(), false);
+    assert!(!zoomable_sig.get());
 }
 
 // -----------------------------------------------------------------

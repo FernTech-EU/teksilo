@@ -304,6 +304,9 @@ impl ExternalDndBackend for NoopExternalDndBackend {
 // MemoryExternalDndBackend (test backend)
 // ============================================================
 
+/// Shared `(window_id, poster)` table held by the test backend and its guards.
+type AttachmentList = Arc<std::sync::Mutex<Vec<(BastydeWindowId, Arc<dyn AppEventPoster>)>>>;
+
 /// In-memory backend for headless tests. Records the `(window_id, poster)` of
 /// each attached window so a test can synthesize OS drag phases via
 /// [`Self::emit`], which posts an [`ExternalDndEventPayload`] exactly as a real
@@ -311,7 +314,7 @@ impl ExternalDndBackend for NoopExternalDndBackend {
 /// keep a clone after handing one to [`ExternalDndHandle::new`].
 #[derive(Clone, Default)]
 pub struct MemoryExternalDndBackend {
-    attachments: Arc<std::sync::Mutex<Vec<(BastydeWindowId, Arc<dyn AppEventPoster>)>>>,
+    attachments: AttachmentList,
     outbound: Arc<std::sync::Mutex<Vec<OutboundDragData>>>,
 }
 
@@ -320,7 +323,7 @@ pub struct MemoryExternalDndBackend {
 /// [`MemoryExternalDndBackend::attached_windows`].
 pub struct MemoryDndGuard {
     window_id: BastydeWindowId,
-    attachments: Arc<std::sync::Mutex<Vec<(BastydeWindowId, Arc<dyn AppEventPoster>)>>>,
+    attachments: AttachmentList,
     outbound: Arc<std::sync::Mutex<Vec<OutboundDragData>>>,
 }
 

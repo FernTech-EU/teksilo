@@ -48,16 +48,17 @@
 //!         literals across the document.
 //!       - **Spell** underlines a seeded set of misspelled words with a
 //!         red wavy spell-check underline.
-//!     The highlighter lives on the `TextDocument`, but whether to *show*
-//!     it is a per-view choice: the editable pane displays the highlights
-//!     while the read-only preview stays **bare** — search / spell / syntax
-//!     are authoring affordances, not part of the rendered document. The
-//!     `read_only` preset defaults to `show_highlights(false)`; a read-only
-//!     *syntax* viewer would opt back in with `.show_highlights(true)`. The
-//!     bare view also pulls a clean snapshot and ignores paint-only highlight
-//!     events, so it does zero work as you type in the search field. Either
-//!     way the shadow formatting never touches stored content (invisible to
-//!     undo / copy / export). See `highlighters.rs` and `highlight_controls.rs`.
+//!
+//! The highlighter lives on the `TextDocument`, but whether to *show*
+//! it is a per-view choice: the editable pane displays the highlights
+//! while the read-only preview stays **bare** — search / spell / syntax
+//! are authoring affordances, not part of the rendered document. The
+//! `read_only` preset defaults to `show_highlights(false)`; a read-only
+//! *syntax* viewer would opt back in with `.show_highlights(true)`. The
+//! bare view also pulls a clean snapshot and ignores paint-only highlight
+//! events, so it does zero work as you type in the search field. Either
+//! way the shadow formatting never touches stored content (invisible to
+//! undo / copy / export). See `highlighters.rs` and `highlight_controls.rs`.
 //!
 //! Run with: `cargo run -p rich-text-editor --features "rich-text clipboard"`
 

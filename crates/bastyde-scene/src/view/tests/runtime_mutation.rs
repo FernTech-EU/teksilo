@@ -28,7 +28,7 @@ fn with_scene_mut<R>(tree: &mut WidgetTree, view_id: WidgetId, f: impl FnOnce(&m
     f(&mut view.scene_mut())
 }
 
-fn view_ref<'t>(tree: &'t WidgetTree, view_id: WidgetId) -> &'t SceneView {
+fn view_ref(tree: &WidgetTree, view_id: WidgetId) -> &SceneView {
     tree.widget_as_any(view_id)
         .and_then(|a| a.downcast_ref::<SceneView>())
         .expect("view is a SceneView")
@@ -471,7 +471,7 @@ fn animating_dynamic_item_does_not_rewalk_at_every_frame() {
     scene.add_item_dynamic(DynRect { size: size.clone() }, Point::ZERO);
 
     let mut tree = WidgetTree::new();
-    let view_id = tree.add(SceneView::new(scene));
+    let _view_id = tree.add(SceneView::new(scene));
     tree.layout(viewport()); // build 1 — initial AT population
     let _ = tree.sync_accessibility(); // drain the initial request
     assert!(!tree.a11y_request_handle().get());

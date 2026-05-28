@@ -86,7 +86,7 @@ pub(crate) fn parse_dom(text: &str) -> Result<Option<XmlElement>, String> {
 }
 
 fn attach_or_root(
-    stack: &mut Vec<XmlElement>,
+    stack: &mut [XmlElement],
     root: &mut Option<XmlElement>,
     elem: XmlElement,
 ) {

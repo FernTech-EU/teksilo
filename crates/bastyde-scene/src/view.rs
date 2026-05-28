@@ -1892,11 +1892,11 @@ impl Widget for SceneView {
         // left untouched — a single-view widget has no source to rebuild from.
         let payload_dirty_ids: Vec<ItemId> = self.payload_dirty.borrow_mut().drain().collect();
         for id in payload_dirty_ids {
-            if self.model.payload(id).is_some() {
-                if let Some(wid) = self.materialized.remove(&id) {
-                    ctx.destroy_subtree(wid);
-                    self.widget_to_item.remove(&wid);
-                }
+            if self.model.payload(id).is_some()
+                && let Some(wid) = self.materialized.remove(&id)
+            {
+                ctx.destroy_subtree(wid);
+                self.widget_to_item.remove(&wid);
             }
         }
 
@@ -2240,10 +2240,7 @@ impl Widget for SceneView {
             let hovered_item = self.hovered_item.clone();
             let pending_tap = self.pending_tap.clone();
             let tooltip_text = tooltip_text.clone();
-            let tooltip_content_id = tooltip_content_id;
             let tooltip_anchor_id = self_id;
-            let tooltip_fade = tooltip_fade;
-            let tooltip_delay = tooltip_delay;
             handlers = handlers.on_pointer_event(move |ev, ctx| {
                 use bastyde_core::event::PointerButton;
                 use bastyde_core::event::WidgetEvent as Ev;

@@ -436,14 +436,13 @@ impl DragPayload {
             files = parsed.files;
             uris = parsed.uris;
         }
-        if text.is_none() {
-            if let Some(bytes) = self
+        if text.is_none()
+            && let Some(bytes) = self
                 .mime_data
                 .get("text/plain")
                 .or_else(|| self.mime_data.get("text/plain;charset=utf-8"))
-            {
-                text = Some(String::from_utf8_lossy(bytes).into_owned());
-            }
+        {
+            text = Some(String::from_utf8_lossy(bytes).into_owned());
         }
 
         OutboundDragData {

@@ -1543,17 +1543,14 @@ impl ApplicationHandler<AppEvent> for BastydeAppHandler {
                 // Try each framework-internal payload type in turn; the first
                 // that consumes it wins. Unrecognized payloads fall through to
                 // the title-bar / close-request downcast chain.
-                let payload = match self.try_route_file_dialog_payload(payload, event_loop) {
-                    Ok(()) => None,
-                    Err(payload) => Some(payload),
-                };
+                let payload = self
+                    .try_route_file_dialog_payload(payload, event_loop)
+                    .err();
                 let payload = match payload {
                     None => None,
-                    Some(payload) => match self.try_route_external_dnd_payload(payload, event_loop)
-                    {
-                        Ok(()) => None,
-                        Err(payload) => Some(payload),
-                    },
+                    Some(payload) => self
+                        .try_route_external_dnd_payload(payload, event_loop)
+                        .err(),
                 };
                 let payload = match payload {
                     None => None,
