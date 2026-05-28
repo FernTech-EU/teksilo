@@ -301,3 +301,12 @@ color-edit-trigger-empty-placeholder = —
 # Étiquette « plus » du repli des infobulles riches (le titre de l'accordéon
 # révélant le corps détaillé dans une infobulle riche épinglée).
 tooltip-more = Plus
+
+# Entrées du menu contextuel des champs de texte et de l'éditeur enrichi.
+menu-cut = Couper
+menu-copy = Copier
+menu-paste = Coller
+menu-paste-unformatted = Coller sans mise en forme
+menu-select-all = Tout sélectionner
+menu-toggle-blockquote = Basculer la citation
+menu-remove-blockquote = Retirer la citation

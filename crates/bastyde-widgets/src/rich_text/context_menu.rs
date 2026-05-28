@@ -56,11 +56,14 @@
 //! `Widget` works (a `Panel` with custom chrome, a domain-specific
 //! command palette, etc.).
 
-use bastyde_i18n::lit;
+use bastyde_i18n::tr_widget;
 
+use bastyde_core::event::Key;
 use bastyde_core::intent::Intent;
+use bastyde_core::shortcut::KeyStroke;
 use bastyde_core::widget::Widget;
 
+use crate::keystroke_format::format_keystroke;
 use crate::menu_item::MenuItem;
 use crate::menu_list::MenuList;
 
@@ -130,8 +133,8 @@ fn build_menu(state: SharedState, policy: PolicyBundle) -> MenuList {
     if policy.clipboard_policy.allows_cut() {
         let state_for_cut = state.clone();
         list = list.item(
-            MenuItem::new(lit!("Cut"))
-                .shortcut_label("Ctrl+X")
+            MenuItem::new(tr_widget!(menu_cut()))
+                .shortcut_label(format_keystroke(KeyStroke::ctrl(Key::X)))
                 .enabled(has_selection)
                 .on_activate_fn(move |evt_ctx| {
                     let mut st = state_for_cut.borrow_mut();
@@ -148,8 +151,8 @@ fn build_menu(state: SharedState, policy: PolicyBundle) -> MenuList {
     {
         let state_for_copy = state.clone();
         list = list.item(
-            MenuItem::new(lit!("Copy"))
-                .shortcut_label("Ctrl+C")
+            MenuItem::new(tr_widget!(menu_copy()))
+                .shortcut_label(format_keystroke(KeyStroke::ctrl(Key::C)))
                 .enabled(has_selection)
                 .on_activate_fn(move |evt_ctx| {
                     let mut st = state_for_copy.borrow_mut();
@@ -171,8 +174,8 @@ fn build_menu(state: SharedState, policy: PolicyBundle) -> MenuList {
     if policy.clipboard_policy.allows_paste() {
         let state_for_paste = state.clone();
         list = list.item(
-            MenuItem::new(lit!("Paste"))
-                .shortcut_label("Ctrl+V")
+            MenuItem::new(tr_widget!(menu_paste()))
+                .shortcut_label(format_keystroke(KeyStroke::ctrl(Key::V)))
                 .on_activate_fn(move |evt_ctx| {
                     let mut st = state_for_paste.borrow_mut();
                     rt_clipboard::paste(&mut st, evt_ctx);
@@ -188,8 +191,8 @@ fn build_menu(state: SharedState, policy: PolicyBundle) -> MenuList {
     if policy.clipboard_policy.allows_paste_unformatted() {
         let state_for_pu = state.clone();
         list = list.item(
-            MenuItem::new(lit!("Paste Unformatted"))
-                .shortcut_label("Ctrl+Shift+V")
+            MenuItem::new(tr_widget!(menu_paste_unformatted()))
+                .shortcut_label(format_keystroke(KeyStroke::ctrl_shift(Key::V)))
                 .on_activate_fn(move |evt_ctx| {
                     let mut st = state_for_pu.borrow_mut();
                     rt_clipboard::paste_unformatted(&mut st, evt_ctx);
@@ -209,9 +212,9 @@ fn build_menu(state: SharedState, policy: PolicyBundle) -> MenuList {
         let cross_frame_selection = state.borrow().cursor.selection_spans_multiple_frames();
         let in_quote = state.borrow().cursor.is_in_blockquote();
         let label = if in_quote {
-            lit!("Remove blockquote")
+            tr_widget!(menu_remove_blockquote())
         } else {
-            lit!("Toggle blockquote")
+            tr_widget!(menu_toggle_blockquote())
         };
         list = list.separator();
         list = list.item(
@@ -238,8 +241,8 @@ fn build_menu(state: SharedState, policy: PolicyBundle) -> MenuList {
     {
         let state_for_sa = state.clone();
         list = list.item(
-            MenuItem::new(lit!("Select All"))
-                .shortcut_label("Ctrl+A")
+            MenuItem::new(tr_widget!(menu_select_all()))
+                .shortcut_label(format_keystroke(KeyStroke::ctrl(Key::A)))
                 .enabled(doc_non_empty)
                 .on_activate_fn(move |evt_ctx| {
                     {

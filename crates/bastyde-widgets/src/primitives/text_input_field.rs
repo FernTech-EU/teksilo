@@ -55,13 +55,14 @@ mod mouse;
 pub(crate) mod state;
 pub mod validator;
 
-use bastyde_i18n::lit;
+use bastyde_i18n::tr_widget;
 use std::rc::Rc;
 
 use bastyde_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::event::EventResponse;
+use bastyde_core::event::{EventResponse, Key};
+use bastyde_core::shortcut::KeyStroke;
 use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::widget::{
     CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
@@ -73,6 +74,7 @@ use bastyde_text::{CursorAffinity, CursorDisplay, RichTextEngine, SharedTypesett
 use bastyde_tokens::TextStyle;
 
 use crate::button::InteractionState;
+use crate::keystroke_format::format_keystroke;
 use crate::menu_item::MenuItem;
 use crate::menu_list::{MenuList, MenuSeparator};
 use crate::rich_text::paint::{PaintParams, paint_frame};
@@ -1607,8 +1609,8 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
     Box::new(
         MenuList::new()
             .item(
-                MenuItem::new(lit!("Cut"))
-                    .shortcut_label("Ctrl+X")
+                MenuItem::new(tr_widget!(menu_cut()))
+                    .shortcut_label(format_keystroke(KeyStroke::ctrl(Key::X)))
                     .enabled(has_selection && copy_allowed)
                     .on_activate_fn(move |ctx| {
                         {
@@ -1620,8 +1622,8 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
                     }),
             )
             .item(
-                MenuItem::new(lit!("Copy"))
-                    .shortcut_label("Ctrl+C")
+                MenuItem::new(tr_widget!(menu_copy()))
+                    .shortcut_label(format_keystroke(KeyStroke::ctrl(Key::C)))
                     .enabled(has_selection && copy_allowed)
                     .on_activate_fn(move |ctx| {
                         let mut st = state_copy.borrow_mut();
@@ -1629,8 +1631,8 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
                     }),
             )
             .item(
-                MenuItem::new(lit!("Paste"))
-                    .shortcut_label("Ctrl+V")
+                MenuItem::new(tr_widget!(menu_paste()))
+                    .shortcut_label(format_keystroke(KeyStroke::ctrl(Key::V)))
                     .on_activate_fn(move |ctx| {
                         {
                             let mut st = state_paste.borrow_mut();
@@ -1642,8 +1644,8 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
             )
             .item(MenuSeparator)
             .item(
-                MenuItem::new(lit!("Select All"))
-                    .shortcut_label("Ctrl+A")
+                MenuItem::new(tr_widget!(menu_select_all()))
+                    .shortcut_label(format_keystroke(KeyStroke::ctrl(Key::A)))
                     .enabled(doc_non_empty)
                     .on_activate_fn(move |ctx| {
                         {

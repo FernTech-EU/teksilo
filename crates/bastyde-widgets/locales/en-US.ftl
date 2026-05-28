@@ -319,3 +319,12 @@ color-edit-trigger-empty-placeholder = —
 # Rich tooltip "more" disclosure label (the Accordion title revealing the
 # long-form body inside a sticky rich tooltip).
 tooltip-more = More
+
+# Built-in text-field / rich-text context menu items.
+menu-cut = Cut
+menu-copy = Copy
+menu-paste = Paste
+menu-paste-unformatted = Paste Unformatted
+menu-select-all = Select All
+menu-toggle-blockquote = Toggle blockquote
+menu-remove-blockquote = Remove blockquote
