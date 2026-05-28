@@ -148,31 +148,6 @@ impl EventHandlers {
         }
     }
 
-    /// Whether any handler is attached.
-    #[allow(dead_code)] // V2 API: used for fast-path event dispatch skipping
-    pub fn has_any(&self) -> bool {
-        self.on_tap.is_some()
-            || self.on_double_tap.is_some()
-            || self.on_triple_tap.is_some()
-            || self.on_long_press.is_some()
-            || self.on_drag.is_some()
-            || self.on_swipe.is_some()
-            || self.on_pinch.is_some()
-            || self.on_hover.is_some()
-            || self.on_key.is_some()
-            || self.on_key_preview.is_some()
-            || self.on_focus.is_some()
-            || self.on_pointer_event.is_some()
-            || self.on_scroll.is_some()
-            || self.on_access_action.is_some()
-            || self.on_access_action_request.is_some()
-            || self.on_drag_hover.is_some()
-            || self.on_drag_leave.is_some()
-            || self.on_drag_tick.is_some()
-            || self.on_drop.is_some()
-            || self.on_drag_ended.is_some()
-    }
-
     pub fn merge(self, other: EventHandlers) -> EventHandlers {
         EventHandlers {
             on_tap: merge_tap_handler(self.on_tap, other.on_tap),

@@ -64,6 +64,7 @@ fn outbound_restash(payload: crate::drag_payload::DragPayload) {
 }
 
 /// Whether a payload is currently parked. Test/diagnostic helper.
+#[cfg(test)]
 fn has_outbound_typed() -> bool {
     OUTBOUND.with(|s| s.borrow().payload.is_some())
 }

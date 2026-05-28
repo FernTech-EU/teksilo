@@ -5,9 +5,11 @@
 //! its row/column index. The cell delegate the user supplies typically
 //! produces a generic widget (Text, Button, …) that wouldn't carry table
 //! semantics by itself, so the body wraps each cell in a thin
-//! [`CellA11y`] node and each row in a [`RowA11y`] node. `TreeRowA11y` is
-//! the tree-flavoured row wrapper used by `TreeTable` — it adds
-//! `set_level` and `set_expanded`.
+//! [`CellA11y`] node. `TableView`'s row containers themselves
+//! ([`BodyRow`](crate::table_view::body::BodyRow)) carry `Role::Row` and
+//! row-index metadata directly. `TreeTable` adds an extra
+//! [`TreeRowA11y`] wrapper around the tree column to declare `set_level`
+//! and `set_expanded` for the row.
 //!
 //! These wrappers do not paint or affect layout: they pass the proposed
 //! size straight through to their single child and forward all bounds.
@@ -18,65 +20,6 @@ use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
 
 use bastyde_data::SortDirection;
-
-/// Wrapper that announces a `Role::Row` with positional metadata for
-/// callers that build their row as a single composed widget rather than
-/// the column-laid-out [`BodyRow`](crate::table_view::body::BodyRow).
-/// Reserved for `TreeTable`'s tree column and row-overrides.
-#[derive(Debug)]
-#[allow(dead_code)]
-pub(crate) struct RowA11y {
-    child: WidgetId,
-    /// 1-based row index within the table. Header is row 1; first body row is 2.
-    row_index_1based: usize,
-    selected: bool,
-}
-
-#[allow(dead_code)]
-impl RowA11y {
-    pub(crate) fn new(child: WidgetId, row_index_1based: usize, selected: bool) -> Self {
-        Self {
-            child,
-            row_index_1based,
-            selected,
-        }
-    }
-}
-
-impl Widget for RowA11y {
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        ctx: &LayoutContext,
-    ) -> bastyde_core::widget::LayoutResponse {
-        ctx.child_size(self.child, proposal)
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
-            .into()
-    }
-
-    fn place_children(
-        &self,
-        bounds: Rect,
-        _proposal: SizeProposal,
-        children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
-    ) {
-        for child in children.iter_mut() {
-            child.origin = bounds.origin();
-            child.size = bounds.size();
-        }
-    }
-
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(bastyde_core::accesskit::Role::Row);
-        builder.set_selected(self.selected);
-        builder.inner_mut().set_row_index(self.row_index_1based);
-    }
-
-    fn children(&self) -> Vec<WidgetId> {
-        vec![self.child]
-    }
-}
 
 /// Wrapper that announces a `Role::Cell` (or `Role::RowHeader`) with
 /// row/column indices and selection state.
@@ -169,9 +112,9 @@ impl Widget for CellA11y {
     }
 }
 
-/// `TreeTable`-flavoured row wrapper. Like [`RowA11y`] but additionally
-/// declares `set_level` (1-based depth) and `set_expanded` when the row
-/// has children.
+/// `TreeTable`-flavoured row wrapper. Announces `Role::Row` and, in
+/// addition to the row index, declares `set_level` (1-based depth) and
+/// `set_expanded` when the row has children.
 #[derive(Debug)]
 pub(crate) struct TreeRowA11y {
     child: WidgetId,

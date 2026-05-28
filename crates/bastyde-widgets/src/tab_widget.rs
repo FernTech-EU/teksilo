@@ -53,7 +53,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use bastyde_canvas::{Rect, Size, SizeProposal};
+use bastyde_canvas::{Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
@@ -1428,10 +1428,3 @@ impl Widget for AliasWidget {
         self.child_id.into_iter().collect()
     }
 }
-
-// Suppress unused-import warning (Size flows through Switcher's
-// children/place_children machinery).
-#[allow(dead_code)]
-const _: fn() = || {
-    let _ = Size::new(0.0, 0.0);
-};

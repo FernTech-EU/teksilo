@@ -133,7 +133,6 @@ fn scene_pan_at_bound_chains_to_outer_scrollarea() {
     use bastyde_canvas::Size;
     use bastyde_core::event::{ScrollDelta, WidgetEvent};
     use bastyde_core::widget::{LayoutContext, LayoutResponse, Widget};
-    use bastyde_core::widget_builder::WidgetBuilder;
     use bastyde_widgets::ScrollArea;
     use bastyde_widgets::primitives::VStack;
 
@@ -190,7 +189,6 @@ fn scene_overscroll_contain_does_not_chain_to_outer_scrollarea() {
     use bastyde_core::event::{ScrollDelta, WidgetEvent};
     use bastyde_core::overscroll::OverscrollBehavior;
     use bastyde_core::widget::{LayoutContext, LayoutResponse, Widget};
-    use bastyde_core::widget_builder::WidgetBuilder;
     use bastyde_widgets::ScrollArea;
     use bastyde_widgets::primitives::VStack;
 

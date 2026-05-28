@@ -36,8 +36,13 @@ use bastyde_preview::{
 use bastyde_tokens::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::primitives::{
-    Center, FixedSize, HStack, IconWidget, MaxSize, Padding, RectWidget, Spacer, TextWidget, VStack,
+    Center, FixedSize, HStack, IconWidget, Padding, Spacer, TextWidget, VStack,
 };
+// MaxSize / RectWidget are available for catalog impls in the section
+// below; not every impl needs them, so the import carries
+// `unused_imports` allow rather than gating each impl behind a feature.
+#[allow(unused_imports)]
+use crate::primitives::{MaxSize, RectWidget};
 use crate::{
     Accordion, Avatar, AvatarPresence, AvatarShape, AvatarSize, Badge, Breadcrumb, BreadcrumbItem,
     Button, ButtonVariant, Card, Checkbox, ComboBox, GroupBox, GroupHeader, IconButton,
@@ -1886,15 +1891,6 @@ fn scenario_for<W: WidgetCatalog>(name: &str) -> Box<dyn Widget> {
     }
 }
 
-/// Touch the `MaxSize` / `RectWidget` / `Center` imports so the
-/// shared section above doesn't trip an `unused-import` lint when
-/// individual catalog impls happen not to need every primitive.
-#[allow(dead_code)]
-fn _touch_imports() {
-    let _ = MaxSize::new(0.0, 0.0);
-    let _ = RectWidget::new();
-    let _ = Center::new();
-}
 
 // =========================================================================
 // Color picker family (HexColorInput, ColorPicker, ColorEdit)
