@@ -34,7 +34,9 @@ fn dark_mode_toolbar() -> impl Widget {
     bati!(
         Toolbar {
             HStack {
-                TextWidget::new(lit!("PasswordField demo")) { style: TextStyleRole::BodyBold }
+                TextWidget::new(lit!("PasswordField demo")) {
+                    style: TextStyleRole::BodyBold
+                }
                 Spacer
                 Button::new(lit!("Toggle Dark Mode")) {
                     on_activate_fn: move |ctx| {
@@ -222,7 +224,9 @@ fn main() {
                 .root(|tree, _state| {
                     bati!(tree => VStack {
                         child: dark_mode_toolbar()
-                        Expand { Root::new() }
+                        Expand {
+                            Root::new()
+                        }
                     })
                 }),
         )
