@@ -75,6 +75,15 @@ impl WidgetTree {
             std::collections::HashMap::new();
 
         let mut root = accesskit::Node::new(accesskit::Role::Window);
+        // Tag the root with the app's current locale (BCP-47, e.g. "fr-FR").
+        // AccessKit nodes inherit `language` from their ancestors, so setting
+        // it once on the Window node propagates to the whole tree. Without it,
+        // VoiceOver/Narrator have no language hint and fall back to a default
+        // (often English) TTS voice instead of the user's system voice. The
+        // locale is fed in by the app layer via `WidgetTree::set_locale`.
+        if let Some(locale) = self.locale_signal.get() {
+            root.set_language(locale);
+        }
         for &root_id in &roots {
             if self.arena.is_active(root_id) {
                 let child_nid = widget_id_to_node_id(root_id);
@@ -756,6 +765,32 @@ mod tests {
         assert_eq!(update.nodes[0].0, accesskit::NodeId(0));
         assert!(update.tree.is_some());
         assert_a11y_tree_valid(&update);
+    }
+
+    #[test]
+    fn root_node_carries_locale_as_language() {
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new().label("Bonjour"));
+
+        // No locale set yet → no language hint (VoiceOver uses its default).
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let update = tree.sync_accessibility();
+        assert_eq!(update.nodes[0].0, accesskit::NodeId(0));
+        assert_eq!(
+            update.nodes[0].1.language(),
+            None,
+            "no language before a locale is set"
+        );
+
+        // Once the app sets the locale, the root Window node carries it as a
+        // BCP-47 language tag, which AccessKit propagates to the whole subtree.
+        tree.set_locale("fr-FR".to_string());
+        let update = tree.sync_accessibility();
+        assert_eq!(
+            update.nodes[0].1.language(),
+            Some("fr-FR"),
+            "root node must advertise the active locale as its language"
+        );
     }
 
     #[test]

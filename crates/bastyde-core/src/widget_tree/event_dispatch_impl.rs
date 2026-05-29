@@ -314,19 +314,23 @@ impl WidgetTree {
                 }
             }
             WidgetEvent::AccessAction { target, action, .. } => {
-                if *action == accesskit::Action::Focus {
-                    if let Some(id) = target.filter(|id| self.arena.is_active(*id)) {
+                // An AT action (e.g. VoiceOver's VO+Space → `Action::Click`)
+                // always names the node it targets — the element under the
+                // assistive-technology cursor. It must be delivered to THAT
+                // node, never to whatever happens to hold keyboard focus.
+                // Falling back to `self.focused` would make VO+Space fire the
+                // focused control instead of the cursored one, and would mask
+                // a stale/inactive target by silently activating something
+                // else. If the target is missing or no longer active, drop the
+                // action rather than redirecting it.
+                if let Some(id) = target.filter(|id| self.arena.is_active(*id)) {
+                    if *action == accesskit::Action::Focus {
                         self.focus_with_origin_ops(
                             id,
                             crate::focus::FocusOrigin::Programmatic,
                             &mut *ops,
                         );
-                    }
-                } else {
-                    let dispatch_target = target
-                        .filter(|id| self.arena.is_active(*id))
-                        .or(self.focused);
-                    if let Some(id) = dispatch_target {
+                    } else {
                         self.dispatch_to_widget(id, &event, &mut *ops);
                     }
                 }
@@ -1765,10 +1769,25 @@ mod tests {
     }
 
     #[test]
-    fn access_action_routes_to_target_widget() {
+    fn access_action_routes_to_cursored_target_not_focus() {
+        // VoiceOver's VO+Space targets the node under the AT cursor (`b`),
+        // even when keyboard focus is on a different control (`a`). The action
+        // must fire on `b`, never get redirected to the focused `a`.
+        use crate::signal::Signal;
+        let a_fired = Signal::new(false);
+        let b_fired = Signal::new(false);
+        let a_cb = a_fired.clone();
+        let b_cb = b_fired.clone();
+
         let mut tree = WidgetTree::new();
-        let a = tree.add(FillWidget::new());
-        let b = tree.add(FillWidget::new());
+        let a = tree.add(
+            FillWidget::new()
+                .access_action(accesskit::Action::Click, move |_ctx| a_cb.set(true)),
+        );
+        let b = tree.add(
+            FillWidget::new()
+                .access_action(accesskit::Action::Click, move |_ctx| b_cb.set(true)),
+        );
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         tree.focus(a);
@@ -1778,21 +1797,41 @@ mod tests {
             target_node: crate::accessibility::widget_id_to_node_id(b),
             data: None,
         });
+
+        assert!(b_fired.get(), "the cursored target must receive the action");
+        assert!(
+            !a_fired.get(),
+            "the keyboard-focused widget must NOT receive an action targeting another node"
+        );
     }
 
     #[test]
-    fn access_action_falls_back_to_focused() {
+    fn access_action_without_target_is_dropped_not_redirected_to_focus() {
+        // An action with no (or an inactive) target must be dropped — never
+        // silently re-routed to whatever holds keyboard focus.
+        use crate::signal::Signal;
+        let fired = Signal::new(false);
+        let cb = fired.clone();
+
         let mut tree = WidgetTree::new();
-        let widget = tree.add(FillWidget::new());
+        let widget = tree.add(
+            FillWidget::new()
+                .access_action(accesskit::Action::Click, move |_ctx| cb.set(true)),
+        );
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         tree.focus(widget);
         tree.dispatch_event(WidgetEvent::AccessAction {
-            action: accesskit::Action::Focus,
+            action: accesskit::Action::Click,
             target: None,
             target_node: crate::accessibility::root_node_id(),
             data: None,
         });
+
+        assert!(
+            !fired.get(),
+            "a target-less action must not be redirected to the focused widget"
+        );
     }
 
     // NOTE: legacy `scoped_shortcut_fires_when_focused_in_subtree` test
