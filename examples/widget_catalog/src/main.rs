@@ -20,7 +20,7 @@ use bastyde::prelude::*;
 use bastyde::widgets::{
     Button, ButtonVariant, Expand, HStack, MenuBar, MenuItem, MenuList, Padding, ScrollArea,
     StatusBar, Switcher, TabId, TabInfo, TabWidget, TextWidget, TitleBar, Toggle, VStack,
-    WindowFrame,
+    WindowFrame, keystroke_format::format_keystroke,
 };
 
 mod cli;
@@ -213,23 +213,23 @@ fn build_title_bar(host: Rc<dyn PlatformTitleBarHost>, _theme: &Theme) -> impl W
 /// character input on macOS keyboards).
 fn build_menu_bar() -> impl Widget + 'static {
     MenuBar::new()
-        .menu(lit!("&File"), || {
+        .menu(tr!(app_menu_file()), || {
             Box::new(
                 MenuList::new().item(
-                    MenuItem::new(lit!("&Quit"))
-                        .shortcut_label("Ctrl+Q")
+                    MenuItem::new(tr!(app_menu_quit()))
+                        .shortcut_label(format_keystroke(KeyStroke::ctrl(Key::Q)))
                         .on_activate_fn(|ctx| ctx.close_window()),
                 ),
             )
         })
-        .menu(lit!("&Help"), || {
+        .menu(tr!(app_menu_help()), || {
             Box::new(
                 MenuList::new()
-                    .item(MenuItem::new(lit!("&Documentation")).on_activate_fn(|_| {
+                    .item(MenuItem::new(tr!(app_menu_documentation())).on_activate_fn(|_| {
                         println!("Documentation: https://github.com/FernTech/bastyde");
                     }))
                     .separator()
-                    .item(MenuItem::new(lit!("&About")).on_activate_fn(|_| {
+                    .item(MenuItem::new(tr!(app_menu_about())).on_activate_fn(|_| {
                         println!(
                             "Bastyde Widget Catalog — every public widget, classic vs bati! \
                              side-by-side.\nLicense: MPL2.0  •  Copyright (c) 2026 FernTech"

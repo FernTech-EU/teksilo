@@ -5,6 +5,13 @@ app-title = Bastyde — Catalogue de Widgets
 app-subtitle = glisser · double-clic pour agrandir · clic droit pour le menu
 app-unsupported-chrome = (chrome personnalisé non pris en charge sur cette plateforme — repli sur les décorations natives)
 
+# ── Barre de menu de l'application ───────────────────────────────────────
+app-menu-file = &Fichier
+app-menu-help = &Aide
+app-menu-quit = &Quitter
+app-menu-documentation = &Documentation
+app-menu-about = &À propos
+
 # ── View mode toggle ────────────────────────────────────────────────────
 mode-label = DSL bati!
 mode-tooltip = Bascule chaque onglet entre la version classique (constructeur) et la version macro bati! du même arbre.

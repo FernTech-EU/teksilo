@@ -9,6 +9,13 @@ app-title = Bastyde — Widget Catalog
 app-subtitle = drag · double-click maximize · right-click for menu
 app-unsupported-chrome = (custom chrome unsupported on this platform — falling back to native decorations)
 
+# ── Application MenuBar ────────────────────────────────────────────────
+app-menu-file = &File
+app-menu-help = &Help
+app-menu-quit = &Quit
+app-menu-documentation = &Documentation
+app-menu-about = &About
+
 # ── View mode toggle (TabWidget trailing slot) ──────────────────────────
 mode-label = bati! DSL
 mode-tooltip = Switch every tab between the classic builder and the bati! macro version of the same tree.
