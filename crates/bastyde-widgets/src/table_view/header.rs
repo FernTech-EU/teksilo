@@ -64,7 +64,11 @@ const DRAG_REORDER_THRESHOLD: f32 = 5.0;
 #[derive(Debug, Clone)]
 pub(crate) struct ResizeState {
     pub col_id: String,
-    /// Pointer x at PointerDown, in cell-local coordinates.
+    /// Pointer x at PointerDown, in **window** coordinates. Window-space
+    /// (not cell-local) so the delta stays stable across the relayouts a
+    /// Live-policy resize triggers: under RTL a widening column's
+    /// physical-left edge — and thus the cell's local origin — moves
+    /// mid-drag, so a cell-local anchor would drift. Window x doesn't.
     pub start_pointer_x: f32,
     /// Column width at PointerDown (in pixels).
     pub start_width: f32,
@@ -337,8 +341,17 @@ impl Widget for HeaderCell {
                 // Pointer events deliver `position` in window coords;
                 // the resize-zone test and the press-state distance
                 // check both want cell-local x, so subtract the cell's
-                // window-space leading edge captured in `place_children`.
+                // window-space physical-left edge captured in
+                // `place_children`. `local_x` is therefore always in
+                // `[0, cell_w]` regardless of direction.
                 let cell_x0 = cell_window_x.get();
+                // The column-resize boundary is shared with the *visual*
+                // neighbour: under LTR that's the column to the right
+                // (handle at the cell's physical-right edge, drag-right =
+                // wider). Under RTL columns run right-to-left, so the
+                // neighbour — and the handle — are at the physical-left
+                // edge and the drag sign inverts. Read direction live.
+                let rtl = ctx.is_rtl();
                 match event {
                     WidgetEvent::PointerMove { position } => {
                         let local_x = position.x - cell_x0;
@@ -350,8 +363,12 @@ impl Widget for HeaderCell {
                         if let Some(state) = active
                             && state.col_id == col_id
                         {
-                            let delta = local_x - state.start_pointer_x;
-                            let new_w = (state.start_width + delta).max(MIN_COLUMN_WIDTH);
+                            // Window-space delta — stable across the
+                            // relayouts a Live resize triggers (see
+                            // ResizeState::start_pointer_x).
+                            let delta = position.x - state.start_pointer_x;
+                            let signed = if rtl { -delta } else { delta };
+                            let new_w = (state.start_width + signed).max(MIN_COLUMN_WIDTH);
                             if policy == ColumnResizePolicy::Live {
                                 write_width(&widths_signal, &state.col_id, new_w);
                             }
@@ -386,7 +403,12 @@ impl Widget for HeaderCell {
                                 .get(width_index)
                                 .copied()
                                 .unwrap_or(0.0);
-                            if w > 0.0 && local_x > w - resize_zone {
+                            let in_zone = if rtl {
+                                local_x < resize_zone
+                            } else {
+                                local_x > w - resize_zone
+                            };
+                            if w > 0.0 && in_zone {
                                 ctx.set_cursor(CursorIcon::ColResize);
                                 return EventResponse::Handled;
                             }
@@ -405,11 +427,16 @@ impl Widget for HeaderCell {
                             .get(width_index)
                             .copied()
                             .unwrap_or(0.0);
-                        let in_resize = resizable && cell_w > 0.0 && local_x > cell_w - resize_zone;
+                        let in_resize_zone = if rtl {
+                            local_x < resize_zone
+                        } else {
+                            local_x > cell_w - resize_zone
+                        };
+                        let in_resize = resizable && cell_w > 0.0 && in_resize_zone;
                         if in_resize {
                             *resize_state.borrow_mut() = Some(ResizeState {
                                 col_id: col_id.clone(),
-                                start_pointer_x: local_x,
+                                start_pointer_x: position.x,
                                 start_width: cell_w,
                             });
                             is_resizing.set(true);
@@ -421,9 +448,16 @@ impl Widget for HeaderCell {
                         // running in the bubble pass can fire. Without
                         // this carve-out, the preview-pass handler
                         // would consume PointerDown and the popover
-                        // would never open.
-                        let filter_zone_start = cell_w - resize_zone - filter_zone_w;
-                        if filter_zone_w > 0.0 && cell_w > 0.0 && local_x > filter_zone_start {
+                        // would never open. The filter glyph sits at the
+                        // trailing inner edge — physical-right under LTR,
+                        // physical-left under RTL (the header HStack
+                        // reverses), just inside the resize handle.
+                        let in_filter_zone = if rtl {
+                            local_x < resize_zone + filter_zone_w
+                        } else {
+                            local_x > cell_w - resize_zone - filter_zone_w
+                        };
+                        if filter_zone_w > 0.0 && cell_w > 0.0 && in_filter_zone {
                             return EventResponse::Ignored;
                         }
                         // Record press: PointerUp without movement →
@@ -436,13 +470,14 @@ impl Widget for HeaderCell {
                         EventResponse::Handled
                     }
                     WidgetEvent::PointerUp { position, .. } => {
-                        let local_x = position.x - cell_x0;
-                        // Resize commit / release.
+                        // Resize commit / release. (Delta is window-space,
+                        // so no cell-local x is needed here.)
                         let taken = resize_state.borrow_mut().take();
                         if let Some(state) = taken {
                             if policy == ColumnResizePolicy::OnRelease {
-                                let delta = local_x - state.start_pointer_x;
-                                let new_w = (state.start_width + delta).max(MIN_COLUMN_WIDTH);
+                                let delta = position.x - state.start_pointer_x;
+                                let signed = if rtl { -delta } else { delta };
+                                let new_w = (state.start_width + signed).max(MIN_COLUMN_WIDTH);
                                 write_width(&widths_signal, &state.col_id, new_w);
                             }
                             is_resizing.set(false);
@@ -501,8 +536,9 @@ impl Widget for HeaderCell {
         children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
-        // Snapshot the cell's window-space leading edge so the
-        // pointer-event handler can convert window x to cell-local x.
+        // Snapshot the cell's window-space physical-left edge so the
+        // pointer-event handler can convert window x to cell-local x
+        // (`local_x ∈ [0, cell_w]` in both directions).
         self.cell_window_x.set(bounds.x);
         for child in children.iter_mut() {
             child.origin = bounds.origin();
@@ -638,7 +674,7 @@ impl Widget for HeaderRow {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
         let widths = self.widths.borrow();
         let total_children = children.len();
@@ -647,12 +683,23 @@ impl Widget for HeaderRow {
         } else {
             bounds.width / total_children as f32
         };
-        let mut x = bounds.x;
-        for (i, child) in children.iter_mut().enumerate() {
-            let w = widths.get(i).copied().unwrap_or(fallback_w);
-            child.origin = Point::new(x, bounds.y);
-            child.size = Size::new(w, bounds.height);
-            x += w;
+        // Mirror the body: preserve display order, reverse physical x in RTL.
+        if ctx.is_rtl() {
+            let mut x = bounds.right();
+            for (i, child) in children.iter_mut().enumerate() {
+                let w = widths.get(i).copied().unwrap_or(fallback_w);
+                x -= w;
+                child.origin = Point::new(x, bounds.y);
+                child.size = Size::new(w, bounds.height);
+            }
+        } else {
+            let mut x = bounds.x;
+            for (i, child) in children.iter_mut().enumerate() {
+                let w = widths.get(i).copied().unwrap_or(fallback_w);
+                child.origin = Point::new(x, bounds.y);
+                child.size = Size::new(w, bounds.height);
+                x += w;
+            }
         }
     }
 

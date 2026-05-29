@@ -233,6 +233,11 @@ pub struct TableView<T: 'static> {
     /// to classify a drop position.
     pane_boundaries: Rc<RefCell<PaneBoundaries>>,
     viewport_height: Rc<Cell<f32>>,
+    /// Width of the header strip (= the column band) snapshotted by
+    /// `place_children`. The reorder-drop handler needs it to mirror the
+    /// drop x under RTL, where the column content is right-anchored in
+    /// the band (`local.x` is measured from the strip's physical left).
+    header_strip_width: Rc<Cell<f32>>,
 
     // Header-cell shared state — tracked across the table so the
     // pointer-capture'd resize delivers PointerMove events back to the
@@ -310,6 +315,7 @@ impl<T: 'static> TableView<T> {
             display_indices: Rc::new(RefCell::new(Vec::new())),
             pane_boundaries: Rc::new(RefCell::new(PaneBoundaries::default())),
             viewport_height: Rc::new(Cell::new(600.0)),
+            header_strip_width: Rc::new(Cell::new(0.0)),
             resize_state: Rc::new(std::cell::RefCell::new(None)),
             table_id,
         }
@@ -1159,6 +1165,7 @@ impl<T: 'static> Widget for TableView<T> {
                 self.column_order_signal.clone(),
                 self.column_pinning_signal.clone(),
                 self.columns.iter().map(|c| c.id.clone()).collect(),
+                self.header_strip_width.clone(),
             );
             self.header_row_id = Some(header_row_id);
         }
@@ -1255,11 +1262,12 @@ impl<T: 'static> Widget for TableView<T> {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
         if children.is_empty() {
             return;
         }
+        let rtl = ctx.is_rtl();
         let row_h = self.effective_row_height();
         let header_h = self.effective_header_height();
         let body_height = (bounds.height - header_h).max(0.0);
@@ -1281,6 +1289,25 @@ impl<T: 'static> Widget for TableView<T> {
         } else {
             bounds.width
         };
+        // Under RTL the vertical scrollbar moves to the physical left
+        // (matching `ScrollArea`), so the body/header band shifts right
+        // by its thickness. `band_left` is the shared origin for the
+        // body pane, empty state, and header; `scrollbar_x` is the
+        // scrollbar's own physical x. The paint pass derives the same
+        // content region from these conventions so the two never drift.
+        let band_left = if rtl && needs_scrollbar {
+            bounds.x + SCROLLBAR_THICKNESS
+        } else {
+            bounds.x
+        };
+        let scrollbar_x = if rtl {
+            bounds.x
+        } else {
+            bounds.x + bounds.width - SCROLLBAR_THICKNESS
+        };
+        // The header strip spans the band; snapshot its width for the
+        // reorder-drop handler's RTL mirror.
+        self.header_strip_width.set(body_width);
 
         // Resolve column widths in display order, honoring any
         // user-resize overrides from `column_widths_signal`.
@@ -1309,7 +1336,7 @@ impl<T: 'static> Widget for TableView<T> {
         // its own bounds.
         if self.body_pane_id.is_some() {
             if let Some(child) = children.get_mut(next) {
-                child.origin = Point::new(bounds.x, body_origin_y);
+                child.origin = Point::new(band_left, body_origin_y);
                 child.size = Size::new(body_width, body_height);
             }
             next += 1;
@@ -1318,18 +1345,18 @@ impl<T: 'static> Widget for TableView<T> {
         // Empty-state child fills the body region (below the header).
         if self.empty_id.is_some() {
             if let Some(child) = children.get_mut(next) {
-                child.origin = Point::new(bounds.x, body_origin_y);
+                child.origin = Point::new(band_left, body_origin_y);
                 child.size = Size::new(body_width, body_height);
             }
             next += 1;
         }
 
-        // Scrollbar — alongside the body, below the header.
+        // Scrollbar — alongside the body, below the header. Physical
+        // left under RTL, physical right under LTR.
         if self.scrollbar_id.is_some() {
             if let Some(child) = children.get_mut(next) {
                 if needs_scrollbar {
-                    child.origin =
-                        Point::new(bounds.x + bounds.width - SCROLLBAR_THICKNESS, body_origin_y);
+                    child.origin = Point::new(scrollbar_x, body_origin_y);
                     child.size = Size::new(SCROLLBAR_THICKNESS, body_height);
                 } else {
                     child.origin = bounds.origin();
@@ -1344,7 +1371,7 @@ impl<T: 'static> Widget for TableView<T> {
         if self.header_row_id.is_some()
             && let Some(child) = children.get_mut(next)
         {
-            child.origin = Point::new(bounds.x, bounds.y);
+            child.origin = Point::new(band_left, bounds.y);
             child.size = Size::new(body_width, header_h);
         }
     }
@@ -1364,6 +1391,16 @@ impl<T: 'static> Widget for TableView<T> {
         } else {
             bounds.width
         };
+        // Physical left edge of the column content. Under RTL the band is
+        // right-aligned within `bounds` (the scrollbar took the left), so
+        // content runs from `bounds.right() - body_width` leftward —
+        // exactly where `place_children` reverse-placed the cells.
+        let rtl = ctx.layout_direction == bastyde_core::environment::LayoutDirection::RightToLeft;
+        let content_left = if rtl {
+            bounds.x + bounds.width - body_width_for_paint
+        } else {
+            bounds.x
+        };
 
         // Alt-row backgrounds — paint odd visible rows.
         if self.alternating_rows {
@@ -1374,7 +1411,7 @@ impl<T: 'static> Widget for TableView<T> {
             for row_idx in first_visible..last_visible {
                 if row_idx % 2 == 1 {
                     let y = body_origin_y + (row_idx as f32) * row_h - scroll_y;
-                    let rect = Rect::new(bounds.x, y, body_width_for_paint, row_h);
+                    let rect = Rect::new(content_left, y, body_width_for_paint, row_h);
                     canvas.fill_rect(rect, SurfaceRole::AltRow.resolve(colors));
                 }
             }
@@ -1393,7 +1430,7 @@ impl<T: 'static> Widget for TableView<T> {
                 if y + row_h < body_origin_y || y > body_origin_y + body_height {
                     continue;
                 }
-                let rect = Rect::new(bounds.x, y, body_width_for_paint, row_h);
+                let rect = Rect::new(content_left, y, body_width_for_paint, row_h);
                 canvas.fill_rect(rect, bg);
             }
         }
@@ -1409,18 +1446,33 @@ impl<T: 'static> Widget for TableView<T> {
             let last_visible = last_visible.min(row_count);
             for row_idx in first_visible..last_visible {
                 let y = body_origin_y + (row_idx as f32 + 1.0) * row_h - scroll_y - line_w;
-                let rect = Rect::new(bounds.x, y, body_width_for_paint, line_w);
+                let rect = Rect::new(content_left, y, body_width_for_paint, line_w);
                 canvas.fill_rect(rect, line_color);
             }
         }
 
         if matches!(self.grid_lines, GridLines::Vertical | GridLines::Both) {
-            let mut x = bounds.x;
-            for &w in widths.iter() {
-                x += w;
-                if x < bounds.x + body_width_for_paint - 0.5 {
-                    let rect = Rect::new(x - line_w, body_origin_y, line_w, body_height);
-                    canvas.fill_rect(rect, line_color);
+            let content_right = content_left + body_width_for_paint;
+            if rtl {
+                // Columns run right-to-left: accumulate from the right
+                // edge and draw the divider at each column's (physical)
+                // left boundary, skipping the outermost edge.
+                let mut x = content_right;
+                for &w in widths.iter() {
+                    x -= w;
+                    if x > content_left + 0.5 {
+                        let rect = Rect::new(x, body_origin_y, line_w, body_height);
+                        canvas.fill_rect(rect, line_color);
+                    }
+                }
+            } else {
+                let mut x = content_left;
+                for &w in widths.iter() {
+                    x += w;
+                    if x < content_right - 0.5 {
+                        let rect = Rect::new(x - line_w, body_origin_y, line_w, body_height);
+                        canvas.fill_rect(rect, line_color);
+                    }
                 }
             }
         }
@@ -1439,7 +1491,14 @@ impl<T: 'static> Widget for TableView<T> {
                 let inset = cp::FOCUS_RING_INSET;
                 let stroke = cp::GRID_LINE_THICKNESS.max(1.5);
                 let ring_color = BorderRole::Focused.resolve(colors);
-                let rx = bounds.x + x_off + inset;
+                // `x_off` is the leading-side offset (sum of widths before
+                // the focused column). Under RTL that offset is measured
+                // from the right edge of the content band.
+                let rx = if rtl {
+                    content_left + body_width_for_paint - x_off - cell_w + inset
+                } else {
+                    content_left + x_off + inset
+                };
                 let ry = y + inset;
                 let rw = (cell_w - inset * 2.0).max(0.0);
                 let rh = (row_h - inset * 2.0).max(0.0);
@@ -1515,6 +1574,7 @@ fn attach_header_reorder_handlers(
     column_order_signal: Signal<Vec<String>>,
     column_pinning_signal: Signal<HashMap<String, PinnedSide>>,
     column_ids: Vec<String>,
+    header_strip_width: Rc<Cell<f32>>,
 ) {
     let widths_for_drop = column_widths.clone();
     let display_for_drop = display_indices.clone();
@@ -1522,6 +1582,7 @@ fn attach_header_reorder_handlers(
     let order_for_drop = column_order_signal.clone();
     let pinning_for_drop = column_pinning_signal.clone();
     let ids_for_drop = column_ids;
+    let strip_width_for_drop = header_strip_width;
 
     ctx.apply_handlers(
         header_row_id,
@@ -1536,7 +1597,7 @@ fn attach_header_reorder_handlers(
                     bastyde_core::DropFeedback::NoFeedback
                 }
             })
-            .on_drop(move |mut payload, position, _ctx| {
+            .on_drop(move |mut payload, position, ctx| {
                 let drag = match payload.take_typed::<ColumnReorderDragData>() {
                     Some(d) => d,
                     None => return false,
@@ -1552,13 +1613,26 @@ fn attach_header_reorder_handlers(
                     return false;
                 }
 
-                // Compute insertion index from position.x: find the
-                // first column whose midpoint exceeds the drop x.
+                // `position` is local to the header strip (origin at its
+                // physical-left edge). Under RTL the columns are placed in
+                // display order from the strip's right edge leftward, so
+                // mirror the drop x against the strip width before running
+                // the left-to-right scan. (A drop in any non-content dead
+                // space then maps past the last column → append, matching
+                // LTR's trailing-end behaviour.)
+                let drop_x = if ctx.is_rtl() {
+                    strip_width_for_drop.get() - position.x
+                } else {
+                    position.x
+                };
+
+                // Compute insertion index in display order: find the
+                // first column whose midpoint exceeds the (mirrored) x.
                 let mut x = 0.0;
                 let mut insertion_display_idx = total;
                 for (i, w) in widths.iter().enumerate() {
                     let mid = x + w * 0.5;
-                    if position.x < mid {
+                    if drop_x < mid {
                         insertion_display_idx = i;
                         break;
                     }

@@ -1962,3 +1962,192 @@ fn nested_table_contain_blocks_chaining() {
         "Contain must prevent chaining: outer stays put"
     );
 }
+
+// ── RTL (right-to-left) column layout ───────────────────────────────────────
+
+use bastyde_core::environment::LayoutDirection;
+
+/// Re-lay a freshly built table under RTL at the same 400×200 viewport.
+fn relayout_rtl(tree: &mut WidgetTree) {
+    tree.set_layout_direction(LayoutDirection::RightToLeft);
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+}
+
+#[test]
+fn rtl_reverses_column_x_order_with_scrollbar() {
+    // 50 rows → vertical scrollbar present. Body = 400 − 12 = 388;
+    // id Fixed=60, name Flex=328. Under RTL the scrollbar moves to the
+    // physical left, so the band starts at x=12 and columns fill it from
+    // the right: id at 400−60=340, name at 340−328=12.
+    let (mut tree, table, _) = build_table(50);
+    relayout_rtl(&mut tree);
+
+    let cells = first_visible_row_cells(&tree, table);
+    assert_eq!(cells.len(), 2);
+    let id_cell = tree.bounds(cells[0]);
+    let name_cell = tree.bounds(cells[1]);
+
+    // Widths are direction-neutral.
+    assert!((id_cell.width - 60.0).abs() < 0.5, "id w {}", id_cell.width);
+    assert!(
+        (name_cell.width - 328.0).abs() < 0.5,
+        "name w {}",
+        name_cell.width
+    );
+    // Display column 0 (id) is now physically rightmost.
+    assert!(
+        id_cell.x > name_cell.x,
+        "RTL: id.x={} should be right of name.x={}",
+        id_cell.x,
+        name_cell.x
+    );
+    assert!((id_cell.x - 340.0).abs() < 0.5, "id.x {}", id_cell.x);
+    // The band shifted right by SCROLLBAR_THICKNESS (scrollbar now on the left).
+    assert!(
+        (name_cell.x - 12.0).abs() < 0.5,
+        "name.x {} (band should start at SCROLLBAR_THICKNESS)",
+        name_cell.x
+    );
+}
+
+#[test]
+fn rtl_right_anchors_content_without_scrollbar() {
+    // 5 rows → no scrollbar. Body = 400; id=60, name Flex=340. RTL fills
+    // from the right edge: id at 340, name at 0 (band_left = 0).
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let model = rows(5);
+    let table = tree.add(
+        TableView::new(model)
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    relayout_rtl(&mut tree);
+
+    let cells = first_visible_row_cells(&tree, table);
+    let id_cell = tree.bounds(cells[0]);
+    let name_cell = tree.bounds(cells[1]);
+    assert!((id_cell.x - 340.0).abs() < 0.5, "id.x {}", id_cell.x);
+    assert!(
+        name_cell.x.abs() < 0.5,
+        "name.x {} (content right-anchored, no scrollbar gap)",
+        name_cell.x
+    );
+}
+
+#[test]
+fn ltr_keeps_columns_left_to_right_control() {
+    // Control for the RTL tests: same table, LTR, id leftmost.
+    let (tree, table, _) = build_table(50);
+    let cells = first_visible_row_cells(&tree, table);
+    let id_cell = tree.bounds(cells[0]);
+    let name_cell = tree.bounds(cells[1]);
+    assert!(
+        id_cell.x < name_cell.x,
+        "LTR: id.x={} should be left of name.x={}",
+        id_cell.x,
+        name_cell.x
+    );
+    assert!(id_cell.x.abs() < 0.5, "id.x {}", id_cell.x);
+}
+
+#[test]
+fn rtl_swaps_arrow_key_column_navigation() {
+    // Columns run right-to-left, so ArrowLeft moves to the visually-left
+    // column = the higher display index, and ArrowRight moves back.
+    let (mut tree, table, _) = build_table(10);
+    tree.set_layout_direction(LayoutDirection::RightToLeft);
+    focus_at(&mut tree, table, 0, 0);
+
+    tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+    assert_eq!(
+        read_focused_cell(&tree, table),
+        Some((0, 1)),
+        "RTL ArrowLeft should advance to the next display column"
+    );
+    tree.press_key(Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(
+        read_focused_cell(&tree, table),
+        Some((0, 0)),
+        "RTL ArrowRight should step back toward column 0"
+    );
+    // Home/End stay logical (leading = column 0) regardless of direction.
+    tree.press_key(Key::End, Modifiers::NONE);
+    assert_eq!(read_focused_cell(&tree, table), Some((0, 1)));
+    tree.press_key(Key::Home, Modifiers::NONE);
+    assert_eq!(read_focused_cell(&tree, table), Some((0, 0)));
+}
+
+#[test]
+fn rtl_live_resize_tracks_without_drift() {
+    // Regression guard for the RTL-specific Live-resize drift: under RTL
+    // the resize handle is at a column's physical-LEFT edge, and widening
+    // moves that edge left. A cell-local drag anchor would shift with it
+    // mid-drag (the relayout below is the exact trigger); the window-space
+    // anchor keeps the delta honest. With the old cell-local anchor this
+    // test would read ~80 instead of ~100.
+    use crate::styles::recipe_table_style as cp;
+    use bastyde_canvas::Point;
+    use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(5))
+            .add_column(id_col()) // Fixed(60), display 0 → physical RIGHT under RTL
+            .add_column(name_col())
+            .row_height(20.0)
+            .show_internal_scrollbars(false),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    relayout_rtl(&mut tree);
+
+    // No scrollbar: id occupies window x [340, 400]; its RTL resize handle
+    // is just inside the physical-left edge at x≈340.
+    let resize_handle = cp::RESIZE_HANDLE_WIDTH;
+    let down_x = 340.0 + resize_handle * 0.5;
+    let down_y = cp::HEADER_HEIGHT * 0.5;
+
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(down_x, down_y),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    // Drag left in two steps with a relayout between — the relayout moves
+    // id's physical-left edge, which is what used to corrupt the delta.
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(down_x - 20.0, down_y),
+    });
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    tree.dispatch_event(WidgetEvent::PointerMove {
+        position: Point::new(down_x - 40.0, down_y),
+    });
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: Point::new(down_x - 40.0, down_y),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+
+    let id_w = {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        tv.column_widths_signal().get().get("id").copied().unwrap_or(0.0)
+    };
+    assert!(
+        (id_w - 100.0).abs() < 6.0,
+        "RTL drag-left by 40px should widen id from 60 to ~100 (no drift); got {}",
+        id_w
+    );
+}

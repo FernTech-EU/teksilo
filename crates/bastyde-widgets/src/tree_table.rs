@@ -941,11 +941,12 @@ impl<T: 'static> Widget for TreeTable<T> {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
         if children.is_empty() {
             return;
         }
+        let rtl = ctx.is_rtl();
         let row_h = self.effective_row_height();
         let header_h = self.effective_header_height();
         let body_height = (bounds.height - header_h).max(0.0);
@@ -968,6 +969,18 @@ impl<T: 'static> Widget for TreeTable<T> {
         } else {
             bounds.width
         };
+        // RTL mirror (see TableView::place_children): scrollbar to the
+        // physical left, body/header band shifted right by its thickness.
+        let band_left = if rtl && needs_scrollbar {
+            bounds.x + SCROLLBAR_THICKNESS
+        } else {
+            bounds.x
+        };
+        let scrollbar_x = if rtl {
+            bounds.x
+        } else {
+            bounds.x + bounds.width - SCROLLBAR_THICKNESS
+        };
 
         let overrides = self.column_widths_signal.get();
         let display = self.display_indices.borrow().clone();
@@ -985,7 +998,7 @@ impl<T: 'static> Widget for TreeTable<T> {
         let mut next = 0;
         if self.header_row_id.is_some() {
             if let Some(child) = children.get_mut(next) {
-                child.origin = Point::new(bounds.x, bounds.y);
+                child.origin = Point::new(band_left, bounds.y);
                 child.size = Size::new(body_width, header_h);
             }
             next += 1;
@@ -995,7 +1008,7 @@ impl<T: 'static> Widget for TreeTable<T> {
             if let Some(child) = children.get_mut(next + i) {
                 let (flat_idx, _) = self.row_entries[i];
                 let y = body_origin_y + flat_idx as f32 * row_h - scroll_y;
-                child.origin = Point::new(bounds.x, y);
+                child.origin = Point::new(band_left, y);
                 child.size = Size::new(body_width, row_h);
             }
         }
@@ -1005,8 +1018,7 @@ impl<T: 'static> Widget for TreeTable<T> {
             && let Some(child) = children.get_mut(next)
         {
             if needs_scrollbar {
-                child.origin =
-                    Point::new(bounds.x + bounds.width - SCROLLBAR_THICKNESS, body_origin_y);
+                child.origin = Point::new(scrollbar_x, body_origin_y);
                 child.size = Size::new(SCROLLBAR_THICKNESS, body_height);
             } else {
                 child.origin = bounds.origin();
@@ -1029,6 +1041,13 @@ impl<T: 'static> Widget for TreeTable<T> {
         } else {
             bounds.width
         };
+        // Physical left edge of the column content (see TableView::paint).
+        let rtl = ctx.layout_direction == bastyde_core::environment::LayoutDirection::RightToLeft;
+        let content_left = if rtl {
+            bounds.x + bounds.width - body_width_for_paint
+        } else {
+            bounds.x
+        };
 
         if self.alternating_rows {
             let first_visible = (scroll_y / row_h).floor().max(0.0) as usize;
@@ -1038,7 +1057,7 @@ impl<T: 'static> Widget for TreeTable<T> {
             for row_idx in first_visible..last_visible {
                 if row_idx % 2 == 1 {
                     let y = body_origin_y + (row_idx as f32) * row_h - scroll_y;
-                    let rect = Rect::new(bounds.x, y, body_width_for_paint, row_h);
+                    let rect = Rect::new(content_left, y, body_width_for_paint, row_h);
                     canvas.fill_rect(rect, SurfaceRole::AltRow.resolve(colors));
                 }
             }
@@ -1056,7 +1075,7 @@ impl<T: 'static> Widget for TreeTable<T> {
                 if y + row_h < body_origin_y || y > body_origin_y + body_height {
                     continue;
                 }
-                let rect = Rect::new(bounds.x, y, body_width_for_paint, row_h);
+                let rect = Rect::new(content_left, y, body_width_for_paint, row_h);
                 canvas.fill_rect(rect, bg);
             }
         }
@@ -1070,17 +1089,29 @@ impl<T: 'static> Widget for TreeTable<T> {
             let last_visible = last_visible.min(row_count);
             for row_idx in first_visible..last_visible {
                 let y = body_origin_y + (row_idx as f32 + 1.0) * row_h - scroll_y - line_w;
-                let rect = Rect::new(bounds.x, y, body_width_for_paint, line_w);
+                let rect = Rect::new(content_left, y, body_width_for_paint, line_w);
                 canvas.fill_rect(rect, line_color);
             }
         }
         if matches!(self.grid_lines, GridLines::Vertical | GridLines::Both) {
-            let mut x = bounds.x;
-            for &w in widths.iter() {
-                x += w;
-                if x < bounds.x + body_width_for_paint - 0.5 {
-                    let rect = Rect::new(x - line_w, body_origin_y, line_w, body_height);
-                    canvas.fill_rect(rect, line_color);
+            let content_right = content_left + body_width_for_paint;
+            if rtl {
+                let mut x = content_right;
+                for &w in widths.iter() {
+                    x -= w;
+                    if x > content_left + 0.5 {
+                        let rect = Rect::new(x, body_origin_y, line_w, body_height);
+                        canvas.fill_rect(rect, line_color);
+                    }
+                }
+            } else {
+                let mut x = content_left;
+                for &w in widths.iter() {
+                    x += w;
+                    if x < content_right - 0.5 {
+                        let rect = Rect::new(x - line_w, body_origin_y, line_w, body_height);
+                        canvas.fill_rect(rect, line_color);
+                    }
                 }
             }
         }
@@ -1099,7 +1130,11 @@ impl<T: 'static> Widget for TreeTable<T> {
                 let inset = cp::FOCUS_RING_INSET;
                 let stroke = cp::GRID_LINE_THICKNESS.max(1.5);
                 let ring_color = BorderRole::Focused.resolve(colors);
-                let rx = bounds.x + x_off + inset;
+                let rx = if rtl {
+                    content_left + body_width_for_paint - x_off - cell_w + inset
+                } else {
+                    content_left + x_off + inset
+                };
                 let ry = y + inset;
                 let rw = (cell_w - inset * 2.0).max(0.0);
                 let rh = (row_h - inset * 2.0).max(0.0);
@@ -1438,5 +1473,131 @@ mod tests {
             }
         }
         assert_eq!(rows, 3); // header + docs + src
+    }
+
+    // ── RTL (right-to-left) ──────────────────────────────────────────────
+
+    /// A tree of `n` collapsed roots — enough to force a vertical scrollbar.
+    fn wide_tree(n: u32) -> TreeModel<&'static str> {
+        let t = TreeModel::new();
+        for i in 0..n {
+            t.insert_root(i as usize, "node");
+        }
+        t
+    }
+
+    /// All `Role::Row` node bounds (header + body), for picking a body row.
+    fn row_bounds(tree: &WidgetTree, root: WidgetId) -> Vec<bastyde_canvas::Rect> {
+        let mut q = vec![root];
+        let mut out = Vec::new();
+        while let Some(n) = q.pop() {
+            if tree.accessibility_node(n).role() == Role::Row {
+                out.push(tree.bounds(n));
+            }
+            for c in tree.children(n) {
+                q.push(c);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn rtl_swaps_tree_expand_collapse_keys() {
+        use bastyde_core::environment::LayoutDirection;
+        use bastyde_core::event::{Key, Modifiers};
+
+        let proxy = SortFilterTreeModel::new(sample_tree());
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let table = tree.add(
+            TreeTable::from_projection(proxy.clone())
+                .add_column(name_col())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        // Roots start collapsed: docs + src visible.
+        assert_eq!(proxy.visible_count(), 2);
+
+        tree.set_layout_direction(LayoutDirection::RightToLeft);
+        tree.focus(table);
+        {
+            let any = tree.widget_as_any(table).unwrap();
+            any.downcast_ref::<TreeTable<&'static str>>()
+                .unwrap()
+                .set_focused_cell(0, 0);
+        }
+
+        // Under RTL the collapsed chevron points left, so ArrowLeft expands
+        // (toward the children) and ArrowRight collapses.
+        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+        assert_eq!(
+            proxy.visible_count(),
+            4,
+            "RTL ArrowLeft on the tree column should expand docs"
+        );
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        assert_eq!(
+            proxy.visible_count(),
+            2,
+            "RTL ArrowRight on the tree column should collapse docs"
+        );
+    }
+
+    #[test]
+    fn rtl_tree_band_shifts_for_left_scrollbar() {
+        use bastyde_core::environment::LayoutDirection;
+        // 50 roots → vertical scrollbar present. Under RTL it sits on the
+        // physical left, so the body band (and its rows) shift right by
+        // SCROLLBAR_THICKNESS.
+        let proxy = SortFilterTreeModel::new(wide_tree(50));
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let table = tree.add(
+            TreeTable::from_projection(proxy)
+                .add_column(name_col())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        tree.set_layout_direction(LayoutDirection::RightToLeft);
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+
+        let table_bounds = tree.bounds(table);
+        // Pick a body row (below the header, which sits at the top).
+        let body_row = row_bounds(&tree, table)
+            .into_iter()
+            .filter(|r| r.y > table_bounds.y + 5.0)
+            .max_by(|a, b| a.y.partial_cmp(&b.y).unwrap())
+            .expect("a body row");
+        assert!(
+            (body_row.x - SCROLLBAR_THICKNESS).abs() < 0.5,
+            "RTL body row should start at SCROLLBAR_THICKNESS, got x={}",
+            body_row.x
+        );
+        // LTR control: same table laid out left-to-right starts at 0.
+        let mut tree2 = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let proxy2 = SortFilterTreeModel::new(wide_tree(50));
+        let table2 = tree2.add(
+            TreeTable::from_projection(proxy2)
+                .add_column(name_col())
+                .row_height(20.0),
+        );
+        tree2.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        let tb2 = tree2.bounds(table2);
+        let body_row2 = row_bounds(&tree2, table2)
+            .into_iter()
+            .filter(|r| r.y > tb2.y + 5.0)
+            .max_by(|a, b| a.y.partial_cmp(&b.y).unwrap())
+            .expect("a body row");
+        assert!(body_row2.x.abs() < 0.5, "LTR body row x={}", body_row2.x);
     }
 }

@@ -82,7 +82,7 @@ impl Widget for BodyRow {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
         let widths = self.widths.borrow();
         let total_children = children.len();
@@ -95,12 +95,25 @@ impl Widget for BodyRow {
         } else {
             bounds.width / total_children as f32
         };
-        let mut x = bounds.x;
-        for (i, child) in children.iter_mut().enumerate() {
-            let w = widths.get(i).copied().unwrap_or(fallback_w);
-            child.origin = Point::new(x, bounds.y);
-            child.size = Size::new(w, bounds.height);
-            x += w;
+        // Display order is preserved; only the physical x reverses under
+        // RTL (the HStack model). Cell `i` is column display-index `i` in
+        // both directions — the AT/selection/width contract is unchanged.
+        if ctx.is_rtl() {
+            let mut x = bounds.right();
+            for (i, child) in children.iter_mut().enumerate() {
+                let w = widths.get(i).copied().unwrap_or(fallback_w);
+                x -= w;
+                child.origin = Point::new(x, bounds.y);
+                child.size = Size::new(w, bounds.height);
+            }
+        } else {
+            let mut x = bounds.x;
+            for (i, child) in children.iter_mut().enumerate() {
+                let w = widths.get(i).copied().unwrap_or(fallback_w);
+                child.origin = Point::new(x, bounds.y);
+                child.size = Size::new(w, bounds.height);
+                x += w;
+            }
         }
     }
 

@@ -153,6 +153,14 @@ pub struct EventContext<'ops> {
     /// composing widget that restructured its subtree in a way that changes the AT tree
     /// (relayout alone no longer re-walks AT).
     pub(crate) request_a11y_update: bool,
+    /// Layout direction (LTR/RTL) of the hosting tree, snapshotted at
+    /// handler-invocation time by `make_event_context`. Read via
+    /// [`is_rtl`](EventContext::is_rtl) so pointer / keyboard / drag
+    /// handlers can mirror their x-axis logic live — a runtime locale
+    /// switch dirties the tree but does **not** rebuild, so direction
+    /// must be read here rather than captured at `build()` time.
+    /// Defaults to `LeftToRight` for hand-constructed (test) contexts.
+    pub(crate) layout_direction: crate::environment::LayoutDirection,
 }
 
 /// Deferred edit to the tree's shortcut registry, queued on an
@@ -243,7 +251,32 @@ impl<'ops> EventContext<'ops> {
             current_window: None,
             tree_pointer_position: None,
             overlay_bounds_snapshot: Vec::new(),
+            layout_direction: crate::environment::LayoutDirection::LeftToRight,
         }
+    }
+
+    /// Snapshot the hosting tree's layout direction. Called by
+    /// `make_event_context` once per event batch so x-axis handlers
+    /// (resize, drag-reorder, arrow-key navigation) can mirror under
+    /// RTL without a rebuild.
+    pub(crate) fn with_layout_direction(
+        mut self,
+        direction: crate::environment::LayoutDirection,
+    ) -> Self {
+        self.layout_direction = direction;
+        self
+    }
+
+    /// Layout direction of the hosting tree at dispatch time.
+    pub fn layout_direction(&self) -> crate::environment::LayoutDirection {
+        self.layout_direction
+    }
+
+    /// Whether the hosting tree is laid out right-to-left. Mirrors
+    /// [`LayoutContext::is_rtl`](crate::widget::LayoutContext::is_rtl)
+    /// for the event-dispatch side.
+    pub fn is_rtl(&self) -> bool {
+        self.layout_direction == crate::environment::LayoutDirection::RightToLeft
     }
 
     /// Attach a per-dispatch snapshot of read-only tree query state

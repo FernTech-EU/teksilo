@@ -434,6 +434,7 @@ impl WidgetTree {
             .with_window_context(ops, self.window_state.clone())
             .with_drag_external(drag_is_external)
             .with_query_snapshot(self.last_pointer_position, overlay_snapshot)
+            .with_layout_direction(self.layout_direction)
     }
 
     /// Run a closure with a fresh [`EventContext`] anchored at this

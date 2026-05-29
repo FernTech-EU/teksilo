@@ -71,15 +71,32 @@ pub(crate) fn build_key_handler(
         let row = row.min(row_count - 1);
         let col = col.min(cfg.col_count - 1);
 
-        // Tree-aware ArrowLeft / ArrowRight (flat impls are
-        // no-ops, so this is safe to evaluate eagerly).
-        let on_tree_column = col == 0; // tree column is leftmost in
-        // current TreeTable scope
-        if matches!(key, Key::ArrowLeft) && on_tree_column && cfg.navigator.is_expanded(row) {
+        // Read layout direction live from the dispatch context (a runtime
+        // locale switch dirties the tree but does not rebuild, so a
+        // build-time capture would go stale).
+        let rtl = ctx.is_rtl();
+
+        // Tree-aware collapse / expand (flat impls are no-ops, so this is
+        // safe to evaluate eagerly). The keys follow the visual chevron:
+        // under LTR the collapsed chevron points right (ArrowRight
+        // expands, ArrowLeft collapses); under RTL it points left, so the
+        // two arrows swap.
+        let on_tree_column = col == 0; // tree column is the leading column
+        let is_collapse_key = if rtl {
+            matches!(key, Key::ArrowRight)
+        } else {
+            matches!(key, Key::ArrowLeft)
+        };
+        let is_expand_key = if rtl {
+            matches!(key, Key::ArrowLeft)
+        } else {
+            matches!(key, Key::ArrowRight)
+        };
+        if is_collapse_key && on_tree_column && cfg.navigator.is_expanded(row) {
             cfg.navigator.toggle_expanded(row);
             return EventResponse::Handled;
         }
-        if matches!(key, Key::ArrowRight)
+        if is_expand_key
             && on_tree_column
             && cfg.navigator.has_children(row)
             && !cfg.navigator.is_expanded(row)
@@ -94,18 +111,23 @@ pub(crate) fn build_key_handler(
         let new_pos: Option<(usize, usize)> = match key {
             Key::ArrowUp => cfg.navigator.prev_row(row).map(|r| (r, col)),
             Key::ArrowDown => cfg.navigator.next_row(row).map(|r| (r, col)),
+            // Visual-left moves to a higher display index under RTL
+            // (columns run right-to-left), so the two arrows swap their
+            // index delta. The clamps stay tied to the physical edge each
+            // arrow points at.
             Key::ArrowLeft => {
-                if col == 0 {
-                    None
+                if rtl {
+                    (col + 1 < cfg.col_count).then_some((row, col + 1))
                 } else {
-                    Some((row, col - 1))
+                    // `.then` (lazy) — `col - 1` must not be evaluated at col 0.
+                    (col > 0).then(|| (row, col - 1))
                 }
             }
             Key::ArrowRight => {
-                if col + 1 >= cfg.col_count {
-                    None
+                if rtl {
+                    (col > 0).then(|| (row, col - 1))
                 } else {
-                    Some((row, col + 1))
+                    (col + 1 < cfg.col_count).then_some((row, col + 1))
                 }
             }
             Key::Home if !modifiers.ctrl() => Some((row, 0)),
