@@ -217,6 +217,10 @@ mnu-menu-edit = Édition
 mnu-standalone-a = Élément autonome A
 mnu-with-shortcut = Avec raccourci
 mnu-disabled = Élément désactivé
+mnu-alignment = Alignement
+mnu-align-left = Gauche
+mnu-align-center = Centrer
+mnu-align-right = Droite
 
 # ── Overlays tab ────────────────────────────────────────────────────────
 ovr-tooltip-hover = Survolez-moi

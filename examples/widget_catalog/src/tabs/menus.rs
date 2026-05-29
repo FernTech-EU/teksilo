@@ -32,7 +32,16 @@ fn make_menu_bar() -> MenuBar {
                     .separator()
                     .item(MenuItem::new(tr!(demo_cut())).on_activate_fn(|_| println!("Cut")))
                     .item(MenuItem::new(tr!(demo_copy())).on_activate_fn(|_| println!("Copy")))
-                    .item(MenuItem::new(tr!(demo_paste())).on_activate_fn(|_| println!("Paste"))),
+                    .item(MenuItem::new(tr!(demo_paste())).on_activate_fn(|_| println!("Paste")))
+                    .separator()
+                    .item(MenuItem::submenu(tr!(mnu_alignment()), || {
+                        Box::new(
+                            MenuList::new()
+                                .item(MenuItem::new(tr!(mnu_align_left())).on_activate_fn(|_| println!("AlignLeft")))
+                                .item(MenuItem::new(tr!(mnu_align_center())).on_activate_fn(|_| println!("AlignCenter")))
+                                .item(MenuItem::new(tr!(mnu_align_right())).on_activate_fn(|_| println!("AlignRight"))),
+                        )
+                    })),
             )
         })
 }

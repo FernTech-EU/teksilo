@@ -221,6 +221,10 @@ mnu-menu-edit = Edit
 mnu-standalone-a = Standalone item A
 mnu-with-shortcut = With shortcut
 mnu-disabled = Disabled item
+mnu-alignment = Alignment
+mnu-align-left = Left
+mnu-align-center = Center
+mnu-align-right = Right
 
 # ── Overlays tab ────────────────────────────────────────────────────────
 ovr-tooltip-hover = Hover me

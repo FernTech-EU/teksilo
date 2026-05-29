@@ -221,6 +221,10 @@ mnu-menu-edit = تحرير
 mnu-standalone-a = عنصر مستقل أ
 mnu-with-shortcut = مع اختصار
 mnu-disabled = عنصر معطّل
+mnu-alignment = محاذاة
+mnu-align-left = يسار
+mnu-align-center = مركز
+mnu-align-right = يمين
 
 # ── علامة تبويب الطبقات العلوية ─────────────────────────────────────────
 ovr-tooltip-hover = حرّك المؤشر فوقي
