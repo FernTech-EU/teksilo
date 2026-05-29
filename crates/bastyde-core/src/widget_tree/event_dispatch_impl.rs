@@ -29,7 +29,7 @@ fn fire_event_handler_both(
 impl WidgetTree {
     /// Dispatch an event into the widget tree.
     ///
-    /// Routing rules (architecture Section 7.1):
+    /// Routing rules:
     /// - Pointer events -> hit testing against layout tree
     /// - Keyboard/IME events -> focused widget
     /// - AccessKit actions -> target widget directly

@@ -106,10 +106,9 @@ impl I18nManager {
         }
     }
 
-    /// Register application overrides for framework strings
-    /// (architecture §12.13.4). Each entry becomes a bundle in
-    /// `widget_overrides`, which is consulted before `widget_bundles`
-    /// in the §12.13.5 lookup precedence.
+    /// Register application overrides for framework strings.
+    /// Each entry becomes a bundle in `widget_overrides`, which is
+    /// consulted before `widget_bundles` in the widget-override lookup order.
     pub fn register_widget_overrides(&self, slice: &[(&str, &[&'static str])]) {
         let mut bundles = self.widget_overrides.borrow_mut();
         for (tag, resources) in slice {
@@ -122,7 +121,7 @@ impl I18nManager {
         }
     }
 
-    /// Resolve the initial locale per the §12.5 precedence:
+    /// Resolve the initial locale:
     /// `user_locale` → OS auto-detect (with partial matching) → fallback.
     pub fn resolve_initial_locale(cfg: &I18nConfig) -> LanguageIdentifier {
         if let Some(user) = &cfg.user_locale
@@ -174,7 +173,7 @@ impl I18nManager {
         }
     }
 
-    /// Bump only the version signal — used on hot-reload (§12.7) where the
+    /// Bump only the version signal — used on hot-reload where the
     /// active locale and direction are unchanged but the bundle contents
     /// have been replaced and observers need to re-resolve.
     pub fn bump_version(&self) {
@@ -186,7 +185,7 @@ impl I18nManager {
     /// bundle for `locale` with the parsed contents of `path`, then
     /// bumps the version signal so every `LocalizedString::to_signal()`
     /// observer re-resolves. Does **not** rebuild composite widgets
-    /// (per §12.7: hot-reload must not rebuild because the active
+    /// (hot-reload must not rebuild because the active
     /// locale and direction are unchanged — only the bundle content
     /// changed, and reactive bindings are sufficient to propagate).
     ///
@@ -255,8 +254,8 @@ impl I18nManager {
         key.to_string()
     }
 
-    /// Resolve a framework string (`tr_widget!`). Lookup precedence
-    /// (§12.13.5): app override active → framework active → app override
+    /// Resolve a framework string (`tr_widget!`). Lookup order:
+    /// app override active → framework active → app override
     /// source → framework source → key placeholder.
     pub fn resolve_widget(&self, key: &str, args: &[(&str, FluentValue<'_>)]) -> String {
         let active = self.active.get();

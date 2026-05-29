@@ -22,7 +22,7 @@ use super::parse_body;
 /// IR — the whole path is the callable, and lowering appends `::new`
 /// only when no explicit constructor was named. Determining "explicit"
 /// vs "implicit" is a snake_case / UpperCamel heuristic on the last
-/// segment, matching Rust's naming convention (spec §3.2).
+/// segment, matching Rust's naming convention.
 pub(crate) fn parse_element(input: ParseStream) -> Result<BatiElement> {
     let type_path: Path = input.parse()?;
     let head_span: Span = type_path

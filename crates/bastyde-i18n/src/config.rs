@@ -37,14 +37,13 @@ pub struct I18nConfig {
     /// Framework bundles supplied by libraries like `bastyde-widgets` via
     /// `framework_locales()`. Kept as raw `'static` slices so the i18n
     /// manager can construct the widget bundle at startup exactly like
-    /// the application bundle (architecture §12.13.3).
+    /// the application bundle.
     pub(crate) framework_locales: Vec<(&'static str, &'static [&'static str])>,
-    /// Application-supplied overrides for framework strings
-    /// (architecture §12.13.4). Same shape as `framework_locales`, but
-    /// loaded into `I18nManager.widget_overrides` — which is consulted
-    /// *before* the framework bundle in the §12.13.5 lookup precedence,
-    /// so an application's per-locale override takes priority over
-    /// whatever bastyde-widgets shipped.
+    /// Application-supplied overrides for framework strings.
+    /// Same shape as `framework_locales`, but loaded into
+    /// `I18nManager.widget_overrides` — which is consulted *before* the
+    /// framework bundle, so an application's per-locale override takes
+    /// priority over whatever bastyde-widgets shipped.
     pub(crate) widget_overrides: Vec<(&'static str, &'static [&'static str])>,
 }
 
@@ -89,11 +88,10 @@ impl I18nConfig {
         self
     }
 
-    /// Register application overrides for framework strings
-    /// (architecture §12.13.4). Takes the same `&[(&str, &[&str])]`
-    /// shape as `compile_in` / `framework_locales`, but the resulting
-    /// bundles are consulted *before* the framework bundle in the
-    /// §12.13.5 lookup precedence. Use this when the application
+    /// Register application overrides for framework strings.
+    /// Takes the same `&[(&str, &[&str])]` shape as `compile_in` /
+    /// `framework_locales`, but the resulting bundles are consulted
+    /// *before* the framework bundle. Use this when the application
     /// wants to retranslate or correct a framework-shipped string for
     /// a specific locale — for example, shipping a Japanese translation
     /// of bastyde-widgets' a11y labels when bastyde-widgets itself only

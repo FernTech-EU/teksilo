@@ -202,7 +202,7 @@ pub struct WidgetNode {
     /// `BuildContext::subscribe_event`. Each entry pairs a subscription id
     /// (used to remove the UI-side callback from `TreeAppContext`) with the
     /// opaque source-side handle whose `Drop` removes the subscriber from
-    /// the source's internal registry. See architecture §9.4.5.
+    /// the source's internal registry.
     pub(crate) subscription_handles: Vec<(SubscriptionId, SubscriptionHandle)>,
     /// Context menu factory — invoked on right-click to produce overlay content.
     pub(crate) context_menu_factory: Option<crate::widget_builder::ContextMenuFactory>,

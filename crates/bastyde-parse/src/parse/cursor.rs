@@ -4,7 +4,7 @@ use syn::parse::ParseStream;
 use syn::{Ident, Path, Token, token};
 
 /// Peek whether the current cursor is at an element-start prefix per
-/// spec §3.1 "commit on distinctive prefix":
+/// "commit on distinctive prefix":
 ///
 /// An UpperCamel `Ident` followed by `(` (positional args), `{` (body),
 /// or `::` (path continuation) commits to element parsing. A bare

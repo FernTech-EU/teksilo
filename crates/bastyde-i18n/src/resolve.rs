@@ -15,7 +15,7 @@ pub fn resolve_message(key: &str, args: &[(&str, FluentValue<'_>)]) -> String {
 }
 
 /// Runtime entry point for `tr_widget!`. Resolves a framework string,
-/// applying the §12.13.5 lookup precedence.
+/// applying the app-override → framework lookup precedence.
 pub fn resolve_message_widget(key: &str, args: &[(&str, FluentValue<'_>)]) -> String {
     with_active(|mgr| mgr.resolve_widget(key, args)).unwrap_or_else(|| key.to_string())
 }

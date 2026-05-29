@@ -7,7 +7,7 @@ use bastyde_parse::BatiElement;
 
 /// Emit the constructor call: either `TypePath::ctor(args)` when the
 /// user named an explicit ctor, or `TypePath::new(args)` otherwise
-/// (the spec §3.2 default). The emitted call's span is anchored on the
+/// (the `::new` default). The emitted call's span is anchored on the
 /// type path's head so "cannot find type X" lands on the user's token.
 pub(crate) fn lower_ctor_call(e: &BatiElement) -> TokenStream2 {
     let path = &e.type_path;

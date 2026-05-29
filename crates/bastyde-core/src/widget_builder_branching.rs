@@ -358,7 +358,7 @@ impl IntoBatiChild for WidgetId {
 // ---------------------------------------------------------------------------
 
 /// Dispatch trait the `bati!` macro uses for `if bare_ident { Element }`
-/// — spec §5.1 "reactive conditionals". The bare-identifier form
+/// — the `bati!` "reactive conditionals" pattern. The bare-identifier form
 /// lowers to a call on this trait; which impl fires (and thus whether
 /// the element is conditionally built or always built with bound
 /// visibility) is decided at monomorphization.

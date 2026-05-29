@@ -54,7 +54,7 @@ pub(crate) fn parse_property_args(input: ParseStream) -> Result<Vec<PropArg>> {
 
 /// Peek past a comma that sits at the current cursor and decide
 /// whether what follows looks like a body item. If yes, the comma is
-/// stray (spec §9.2) and the arg list should terminate so the body
+/// stray and the arg list should terminate so the body
 /// parser can surface the "use newlines, not commas" diagnostic.
 fn comma_begins_new_body_item(input: ParseStream) -> bool {
     let fork = input.fork();

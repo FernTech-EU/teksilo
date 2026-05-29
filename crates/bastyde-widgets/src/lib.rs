@@ -235,13 +235,13 @@ pub use wizard::{Wizard, WizardStep};
 /// The framework bundle: bastyde-widgets' own translatable strings, grouped
 /// by locale. Registered by applications via
 /// `I18nConfig::framework_locales(bastyde_widgets::framework_locales())`
-/// at startup (architecture §12.13).
+/// at startup.
 ///
 /// bastyde-widgets currently ships `en-US` (source) and `fr-FR`. Keys
 /// missing from a locale's bundle fall back to the en-US source via
 /// fluent-bundle's per-key fallback. Applications that need a locale
 /// bastyde-widgets doesn't ship can fill the gap with
-/// `I18nConfig::override_widget_strings(...)` — see §12.13.4.
+/// `I18nConfig::override_widget_strings(...)`.
 pub fn framework_locales() -> &'static [(&'static str, &'static [&'static str])] {
     &[
         ("en-US", &[include_str!("../locales/en-US.ftl")]),

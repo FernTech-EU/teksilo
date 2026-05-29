@@ -31,7 +31,7 @@ pub fn light() -> Theme {
 }
 
 /// IntUI dark theme. Shadows use ~4× stronger alphas than the light
-/// variant (Int UI v2 §3) so they read against dark surfaces.
+/// variant so they read against dark surfaces.
 pub fn dark() -> Theme {
     Theme {
         appearance: ThemeAppearance::Dark,

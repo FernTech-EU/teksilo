@@ -250,8 +250,8 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// (e.g. via `AccessNodeBuilder::attach_scene_child_under`).
     ///
     /// Used by `bastyde_scene::SceneView` to graft heavyweight
-    /// `Widget` items into an app-declared logical AT tree (Phase
-    /// 5b). Other layered containers can adopt the same pattern.
+    /// `Widget` items into an app-declared logical AT tree.
+    /// Other layered containers can adopt the same pattern.
     ///
     /// Default: `None` — no redirection.
     fn a11y_redirect_descendant(

@@ -1893,14 +1893,14 @@ pub struct BastydeAppBuilder {
     app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
     on_ready: Vec<Box<dyn FnOnce(AppEventProxy)>>,
     initial_window: Option<WindowConfig>,
-    /// Type-erased adapter for the application's backend event source
-    /// (architecture §9.4). Installed via `event_source<S>(source)`.
+    /// Type-erased adapter for the application's backend event source.
+    /// Installed via `event_source<S>(source)`.
     event_source: Option<EventSourceAdapter>,
-    /// Application-scoped values keyed by `TypeId` (architecture §9.5).
+    /// Application-scoped values keyed by `TypeId`.
     /// Installed via `app_state::<T>(value)` and reachable from any
     /// `BuildContext` via `ctx.app_state::<T>()`.
     app_state_registry: HashMap<TypeId, Box<dyn Any>>,
-    /// Internationalization configuration (architecture §12). Installed
+    /// Internationalization configuration. Installed
     /// via `i18n(I18nConfig)`. When present, an `I18nManager` is built at
     /// `build_headless` / `run` time and registered on the thread-local so
     /// `tr!`-expanded code can resolve translations.
@@ -2069,7 +2069,7 @@ impl BastydeAppBuilder {
         self
     }
 
-    /// Register a backend event source (architecture §9.4). Widgets can
+    /// Register a backend event source. Widgets can
     /// then call `BuildContext::subscribe_event(origin, callback)` from
     /// inside their `build()` method to receive events on the UI thread.
     ///
@@ -2081,7 +2081,7 @@ impl BastydeAppBuilder {
     }
 
     /// Register an application-defined value of type `T` that any widget
-    /// can retrieve via `BuildContext::app_state::<T>()` (architecture §9.5).
+    /// can retrieve via `BuildContext::app_state::<T>()`.
     ///
     /// Each type `T` may be registered at most once; a subsequent call
     /// with the same type replaces the previous value. To share multiple
@@ -2135,7 +2135,7 @@ impl BastydeAppBuilder {
         self
     }
 
-    /// Register an `I18nConfig` (architecture §12). Constructs an
+    /// Register an `I18nConfig`. Constructs an
     /// `I18nManager` at startup, installs it on the thread-local, and
     /// seeds the widget tree with the resolved initial locale and layout
     /// direction. Without this call, `tr!`-expanded code falls back to

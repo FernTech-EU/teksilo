@@ -63,7 +63,7 @@ pub fn tr(input: TokenStream) -> TokenStream {
 
 /// Compile-time-validating translation macro for framework-internal
 /// strings. Same surface as `tr!`, but routes to the framework bundle at
-/// runtime. Only used inside `bastyde-widgets` (architecture §12.13).
+/// runtime. Only used inside `bastyde-widgets`.
 #[proc_macro]
 pub fn tr_widget(input: TokenStream) -> TokenStream {
     tr_impl(input, SourceKind::Widget, /* signal */ false)
@@ -136,7 +136,7 @@ struct TrCall {
     /// The path segments of the key, e.g. `auth::login_title` parses
     /// as `[auth, login_title]`. A single-segment path remains the
     /// common case; multi-segment paths organize related keys
-    /// hierarchically (architecture §12.2.3).
+    /// hierarchically.
     key_path: Vec<Ident>,
     args: Vec<TrArg>,
 }
@@ -192,7 +192,7 @@ impl Parse for TrArg {
 // ---------------------------------------------------------------------------
 
 /// Where the macro reads its source-language messages from at expansion
-/// time. The two variants correspond to the two layouts §12.2 calls out:
+/// time. The two variants correspond to two supported layouts:
 /// a single flat `locales/en-US.ftl` file, or a `locales/en-US/`
 /// directory containing one or more `.ftl` files organized by feature.
 ///
@@ -386,7 +386,7 @@ fn load_key_map(path: &std::path::Path) -> std::result::Result<KeyMap, String> {
 /// file, and merge their messages into a single flat `KeyMap`. The
 /// order of files is deterministic (sorted by relative path) so that
 /// the error reported on duplicate keys is stable. Architecture
-/// §12.2.3: the directory layout is an organizational convention;
+/// The directory layout is an organizational convention;
 /// every key across every file is visible through a single flat
 /// lookup. Applications prevent collisions by prefixing keys (e.g.,
 /// `auth-login-title = Log in` in `auth.ftl`), and the macro's

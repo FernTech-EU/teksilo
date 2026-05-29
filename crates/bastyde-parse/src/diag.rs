@@ -47,7 +47,7 @@ pub fn is_widget_builder_method(name: &str) -> bool {
     )
 }
 
-/// Spec §9.2: a bare child element at body position inside a Category
+/// A bare child element at body position inside a Category
 /// B widget whose content is addressed by named slots. The list below
 /// tracks the set of widgets that have no `.child()` method in the V2
 /// builder API; if a user writes a bare child under one of them, the
@@ -70,7 +70,6 @@ pub fn category_b_bare_child(parent_ty: &str, child_span: Span) -> Error {
 /// `.child()`. `None` for every other type — including Category A
 /// containers (VStack, Panel, …) where bare children are legal.
 ///
-/// Kept in sync with spec §4.2.
 pub fn is_category_b_widget(ident: &str) -> bool {
     matches!(
         ident,

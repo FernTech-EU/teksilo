@@ -180,7 +180,7 @@ pub struct TreeAppContext {
     #[allow(clippy::type_complexity)]
     pub(crate) subscription_callbacks: RefCell<HashMap<SubscriptionId, Box<dyn Fn(&dyn Any)>>>,
     pub(crate) next_subscription_id: Cell<u64>,
-    /// Application-scoped values keyed by `TypeId` (architecture §9.5).
+    /// Application-scoped values keyed by `TypeId`.
     /// Populated at builder time, read-only after the tree starts running.
     pub(crate) app_state: HashMap<TypeId, Box<dyn Any>>,
 }
@@ -214,7 +214,7 @@ impl TreeAppContext {
         }
     }
 
-    /// Install an app-state registry (architecture §9.5). Consumes `self`
+    /// Install an app-state registry. Consumes `self`
     /// and returns a new context with the registry attached; the builder
     /// calls this after constructing the context and before wrapping it
     /// in `Rc`.
@@ -243,7 +243,7 @@ impl TreeAppContext {
     }
 
     /// Look up an app-state value of type `T` previously registered via
-    /// `BastydeAppBuilder::app_state` (architecture §9.5).
+    /// `BastydeAppBuilder::app_state`.
     pub fn app_state<T: 'static>(&self) -> Option<&T> {
         self.app_state
             .get(&TypeId::of::<T>())

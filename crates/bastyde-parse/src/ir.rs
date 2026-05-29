@@ -60,18 +60,18 @@ pub enum BodyItem {
     Child(BatiElement),
     /// `name = Element` — a binding that hoists `let name = ctx.add(...)`
     /// to the enclosing statement-forming block, then attaches via
-    /// `.add_child(name)` on the parent (spec §3.3).
+    /// `.add_child(name)` on the parent.
     Binding { name: Ident, element: BatiElement },
     /// `#{ expr }` at body position — the expr is expected to evaluate
-    /// to a `WidgetId` and attaches via `.add_child(expr)` (spec §6.1).
+    /// to a `WidgetId` and attaches via `.add_child(expr)`.
     /// The semantics are simple: always WidgetId. The full
     /// `IntoBatiChild` routing (widget-or-id dispatch) is not yet implemented.
     Escape { expr: Expr, span: Span },
-    /// `let pat = expr;` at body position — spec §5.4. Introduces a
+    /// `let pat = expr;` at body position. Introduces a
     /// local whose value is used by subsequent body items. Triggers
     /// statement-sequence lowering on the enclosing element.
     Let(Local),
-    /// `rust { ... }` imperative escape — spec §5.6. Two forms:
+    /// `rust { ... }` imperative escape. Two forms:
     /// expression-producing (block tail has no semicolon, lowered as
     /// `.child(block)`) and side-effect (block tail ends in `;`,
     /// emitted inline as a side-effect statement).
@@ -81,17 +81,17 @@ pub enum BodyItem {
         shape: RustShape,
     },
     /// `if cond { Element } [else if cond { Element }]* [else { Element }]?`
-    /// — spec §5.1. Lowers to `.child_opt(...)` (no-else) or
+    /// Lowers to `.child_opt(...)` (no-else) or
     /// `.child(BatiBranch{N}::...)` (with else branches).
     If(BatiIf),
-    /// `match expr { pat => Element, ... }` — spec §5.3. Lowers to
+    /// `match expr { pat => Element, ... }`. Lowers to
     /// `.child(match ... { ... BatiBranch{N}::... })` with arms
     /// dispatched by variant index.
     Match(BatiMatch),
-    /// `for pat in iter { Element }` — spec §5.2. Lowers to
+    /// `for pat in iter { Element }`. Lowers to
     /// `.children(iter.map(|pat| Element))`.
     For(BatiFor),
-    /// `..expr` — spec §5.5. Inlines an iterator of `WidgetId`s as
+    /// `..expr` — inlines an iterator of `WidgetId`s as
     /// children. Forces statement-sequence lowering on the parent.
     Spread { expr: Expr, span: Span },
 }

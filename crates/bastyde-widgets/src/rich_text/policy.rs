@@ -239,7 +239,7 @@ pub const EDITOR_PRESET: PolicyBundle = PolicyBundle {
 
 /// The read-only preset: only navigation + copy/select-all,
 /// `Document` role, no cut/paste. The caret is hidden entirely —
-/// view-only widgets ship without any caret affordance (§27.10.1).
+/// view-only widgets ship without any caret affordance.
 /// Applications that need a focusable read-only surface with a
 /// visible caret can construct a custom preset via `PolicyBundle`.
 pub const READ_ONLY_PRESET: PolicyBundle = PolicyBundle {

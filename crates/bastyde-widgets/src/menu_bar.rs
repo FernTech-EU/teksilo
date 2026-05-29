@@ -56,7 +56,7 @@ struct MenuBarEntry {
 
 /// A horizontal menu bar with dropdown menus.
 ///
-/// Supports the Slot system (architecture Section 5.3):
+/// Supports named content slots:
 /// - `leading_slot`: content before the menu buttons (e.g., app icon)
 /// - `trailing_slot`: content after the menu buttons (e.g., search, user avatar)
 pub struct MenuBar {

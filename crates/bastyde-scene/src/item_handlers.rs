@@ -64,7 +64,7 @@ impl SceneTapEvent {
 
 /// Rich tap-family handler storage type — what every Set's
 /// `on_tap` / `on_double_tap` / `on_context_menu` field actually
-/// holds after Unit 7. The Point-only convenience setter
+/// holds. The Point-only convenience setter
 /// [`SceneItemHandlerSet::on_tap`] wraps caller closures with a
 /// shim that extracts `event.position_scene`, so legacy call
 /// sites compile unchanged.
@@ -81,7 +81,7 @@ type SceneTapHandler = Rc<dyn Fn(&SceneTapEvent, &mut EventContext)>;
 /// * [`DragMode::RubberBand`] (default) — drag-on-empty-space
 ///   creates a marquee that selects items inside on release.
 ///   Drag-on-an-item dispatches to that item's drag handler if
-///   wired (R3 currently honours `IS_DRAGGABLE` for drag-to-move).
+///   wired (the drag pipeline honours `IS_DRAGGABLE` for drag-to-move).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DragMode {
     NoDrag,
@@ -127,8 +127,7 @@ pub struct SceneItemHandlerSet {
     /// locale at show time. The SceneView's hover machinery surfaces it
     /// as a point-anchored overlay through the standard overlay manager.
     pub tooltip: Option<LocalizedString>,
-    /// Whether the item accepts dropped payloads. R3 sets the
-    /// flag; the cross-tier drop pipeline integrates in R4.
+    /// Whether the item accepts dropped payloads.
     pub accepts_drops: bool,
 }
 

@@ -136,7 +136,7 @@ pub(crate) struct EditorState {
     /// border without polling.
     pub focus_signal: Signal<bool>,
 
-    /// Sticky preferred X for vertical navigation (§27.10.12). Set
+    /// Sticky preferred X for vertical navigation. Set
     /// the first time Up/Down/PageUp/PageDown is pressed, preserved
     /// across further vertical presses so the cursor keeps trying to
     /// land on the same visual column even when crossing short

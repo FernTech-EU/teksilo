@@ -228,7 +228,7 @@ pub struct WidgetTree {
     /// App-level subscription state: registered event source adapter,
     /// proxy poster, UI-side subscription callbacks. Default is empty;
     /// bastyde-app installs a populated context when an event source is
-    /// registered on the builder. See architecture §9.4.
+    /// registered on the builder.
     pub(crate) app_context: Rc<crate::event_source::TreeAppContext>,
     /// Active locale identifier. Cached for `Option<&str>` accessors; the
     /// reactive source of truth is `locale_signal`. Both are updated in
@@ -596,7 +596,7 @@ impl WidgetTree {
     /// Replace the per-tree app context. Called by `bastyde-app` when
     /// constructing a window so the widget tree can reach the registered
     /// event source adapter and post subscription events through the
-    /// event-loop proxy. See architecture §9.4.
+    /// event-loop proxy.
     pub fn set_app_context(&mut self, app_context: Rc<crate::event_source::TreeAppContext>) {
         self.app_context = app_context;
     }

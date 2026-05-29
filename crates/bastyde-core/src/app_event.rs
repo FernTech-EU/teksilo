@@ -35,7 +35,7 @@ pub enum AppEvent {
     /// An `.ftl` translation file registered via
     /// `I18nConfig::runtime_override(locale, path)` changed on disk.
     /// The bastyde-app handler calls `I18nManager::reload_from_path` and
-    /// bumps the translation version signal. Architecture §12.6.
+    /// bumps the translation version signal.
     I18nReload { locale: String, path: PathBuf },
 }
 

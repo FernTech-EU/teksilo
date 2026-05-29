@@ -1203,7 +1203,6 @@ impl Scene {
     /// or a descendant of `child`, the call is a no-op (no parent
     /// change, no rebucket, no signal fire). Without this guard
     /// the downstream `rebucket_subtree` walk loops indefinitely.
-    /// Added in Unit 9 alongside the regression test.
     pub fn set_item_parent(&mut self, child: ItemId, parent: Option<ItemId>) {
         if let Some(&pos) = self.entry_index.get(&child) {
             let old = self.entries[pos].parent;

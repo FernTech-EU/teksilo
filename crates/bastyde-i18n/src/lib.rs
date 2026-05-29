@@ -48,8 +48,7 @@ pub use thread_local::{
 pub use unic_langid::LanguageIdentifier;
 
 /// Declarative sugar for populating `I18nConfig::compile_in` when an
-/// application ships many locales × many `.ftl` files per locale
-/// (architecture §12.4).
+/// application ships many locales × many `.ftl` files per locale.
 ///
 /// # Example
 ///

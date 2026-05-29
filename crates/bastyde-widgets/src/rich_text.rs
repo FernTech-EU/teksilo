@@ -182,8 +182,7 @@ impl RichTextEditor {
     /// Uses the full editor preset: every command accepted, caret
     /// blinks, `MultilineTextInput` accessibility role, full clipboard
     /// support. Multiple editors on the same document share live edits
-    /// via per-widget `on_change` subscriptions — see §27.10.1 of the
-    /// architecture doc.
+    /// via per-widget `on_change` subscriptions.
     pub fn editor(document: TextDocument) -> Self {
         Self::construct(document, EDITOR_PRESET)
     }
