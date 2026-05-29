@@ -511,6 +511,20 @@ impl OverlayManager {
         self.stack.iter().find(|overlay| overlay.id == id)
     }
 
+    /// Public accessor for an overlay's currently-laid-out screen
+    /// rect. Returns `None` for unknown ids and for overlays that
+    /// have not yet been through a layout pass (`bounds == Rect::ZERO`
+    /// in that case, but we still hand it back — callers should not
+    /// trust a zero-sized rect for hit-test geometry).
+    ///
+    /// Used by [`MenuList`](../../bastyde_widgets/menu_list/struct.MenuList.html)'s
+    /// safe-triangle submenu hover gate, which needs the open
+    /// submenu's near-edge to test whether the cursor trajectory is
+    /// still headed toward the submenu.
+    pub fn bounds_for(&self, id: OverlayId) -> Option<Rect> {
+        self.overlay(id).map(|o| o.bounds)
+    }
+
     pub(crate) fn topmost_centered(&self) -> Option<&ActiveOverlay> {
         self.stack
             .iter()
@@ -1099,6 +1113,17 @@ impl OverlayManager {
             .iter()
             .find(|o| o.content_id == content_id)
             .map(|o| o.id)
+    }
+
+    /// Convenience accessor for the safe-triangle hover gate: returns
+    /// the bounds rect of the open overlay whose root content widget
+    /// id matches `content_id`, or `None` when no such overlay is
+    /// active. Equivalent to `find_by_content` + `bounds_for` chained.
+    pub fn bounds_for_content(&self, content_id: WidgetId) -> Option<Rect> {
+        self.stack
+            .iter()
+            .find(|o| o.content_id == content_id)
+            .map(|o| o.bounds)
     }
 
     /// Change the dismiss behavior of an active overlay in place.

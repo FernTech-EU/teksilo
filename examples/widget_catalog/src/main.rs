@@ -18,8 +18,9 @@ use bastyde::core::shortcut::{KeyStroke, Shortcut};
 use bastyde::core::widget::WidgetPlacement;
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    Button, ButtonVariant, Expand, HStack, Padding, ScrollArea, StatusBar, Switcher, TabId,
-    TabInfo, TabWidget, TextWidget, TitleBar, Toggle, VStack, WindowFrame,
+    Button, ButtonVariant, Expand, HStack, MenuBar, MenuItem, MenuList, Padding, ScrollArea,
+    StatusBar, Switcher, TabId, TabInfo, TabWidget, TextWidget, TitleBar, Toggle, VStack,
+    WindowFrame,
 };
 
 mod cli;
@@ -100,6 +101,13 @@ fn main() {
                         };
                         let title_bar_id = tree.add_boxed(title_bar);
 
+                        // ── Minimal MenuBar — File / Help ─────────────
+                        // Showcases mnemonics (Alt+F / Alt+H), the
+                        // window-level dispatcher (F10, bare-Alt-tap),
+                        // and in-menu mnemonic activation (just press
+                        // the underlined letter once a menu is open).
+                        let menu_bar = tree.add(build_menu_bar());
+
                         // ── Catalog body ─────────────────────────────
                         let catalog = tree.add(WidgetCatalog::new(
                             opts.clone(),
@@ -114,6 +122,7 @@ fn main() {
                             VStack::new()
                                 .spacing(0.0)
                                 .add_child(title_bar_id)
+                                .add_child(menu_bar)
                                 .add_child(catalog_filled),
                         );
 
@@ -189,6 +198,45 @@ fn build_title_bar(host: Rc<dyn PlatformTitleBarHost>, _theme: &Theme) -> impl W
         .center(center)
         .trailing(trailing)
         .close_action(|ctx| ctx.close_window())
+}
+
+/// Minimal menubar — `&File → &Quit` and `&Help → &Documentation,
+/// &About`. Demonstrates the window-level mnemonic dispatcher
+/// (Alt+F / Alt+H), bare-Alt-tap + F10 menubar focus, and in-menu
+/// mnemonic activation (open File, press 'Q' to quit; open Help,
+/// press 'D' or 'A'). All labels carry `&`-markers so the
+/// underlines appear while Alt is held.
+///
+/// On macOS the dispatcher install is skipped automatically — the
+/// menubar still renders and mouse-clicks work, but Alt-letter
+/// chords are left alone (Option+letter is reserved for accented
+/// character input on macOS keyboards).
+fn build_menu_bar() -> impl Widget + 'static {
+    MenuBar::new()
+        .menu(lit!("&File"), || {
+            Box::new(
+                MenuList::new().item(
+                    MenuItem::new(lit!("&Quit"))
+                        .shortcut_label("Ctrl+Q")
+                        .on_activate_fn(|ctx| ctx.close_window()),
+                ),
+            )
+        })
+        .menu(lit!("&Help"), || {
+            Box::new(
+                MenuList::new()
+                    .item(MenuItem::new(lit!("&Documentation")).on_activate_fn(|_| {
+                        println!("Documentation: https://github.com/FernTech/bastyde");
+                    }))
+                    .separator()
+                    .item(MenuItem::new(lit!("&About")).on_activate_fn(|_| {
+                        println!(
+                            "Bastyde Widget Catalog — every public widget, classic vs bati! \
+                             side-by-side.\nLicense: MPL2.0  •  Copyright (c) 2026 FernTech"
+                        );
+                    })),
+            )
+        })
 }
 
 // ---------------------------------------------------------------------------

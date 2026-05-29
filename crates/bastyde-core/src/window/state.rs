@@ -101,6 +101,37 @@ pub(crate) struct WindowStateInner {
     /// fields to show a Caps Lock warning.
     caps_lock: Signal<bool>,
 
+    /// `true` while the Alt key is currently held down. OS-driven only —
+    /// no observer and no app→OS command. Set by the window manager on
+    /// `Key::Alt` `KeyDown`/`KeyUp`. Read by:
+    ///
+    /// - `MenuLabel` to show / hide mnemonic underlines while Alt is held
+    ///   (matches the Win32 `WM_CHANGEUISTATE` underlining convention).
+    /// - `MenuBar` to detect bare-Alt-tap (true → false transition with
+    ///   `other_key_pressed_during_alt == false`) which focuses the
+    ///   first trigger.
+    alt_down: Signal<bool>,
+
+    /// Sticky flag that records whether any non-Alt key was pressed
+    /// while Alt was held. Set to `false` by the window manager on
+    /// every `Key::Alt` `KeyDown`; flipped to `true` by the manager
+    /// on any non-Alt `KeyDown` that arrives while `alt_down` is
+    /// `true`. Read by `MenuBar` at the Alt → release moment to
+    /// decide whether the user did a bare-Alt-tap (no other key
+    /// pressed → focus menubar) or used Alt as a modifier for a
+    /// real chord (skip).
+    ///
+    /// `Cell<bool>` rather than `Signal<bool>` — only the MenuBar
+    /// effect reads it at the transition moment, never reactively.
+    other_key_pressed_during_alt: Cell<bool>,
+
+    /// At-most-one menubar dispatcher per window. See
+    /// [`super::menubar_dispatcher`]. Wrapped in `Rc` so the slot
+    /// can be shared with the [`super::menubar_dispatcher::MenubarGuard`]
+    /// returned to the caller — when the guard drops, it clears the
+    /// slot iff it still points to the same dispatcher.
+    menubar_dispatcher: Rc<super::menubar_dispatcher::MenubarDispatcherSlot>,
+
     /// Commands queued by observers on app-side signal writes. Drained
     /// by the app-level window manager once per tick.
     pending_os_commands: RefCell<Vec<WindowCommand>>,
@@ -136,6 +167,9 @@ impl WindowState {
             resizable: Signal::new(init.resizable),
             always_on_top: Signal::new(init.always_on_top),
             caps_lock: Signal::new(false),
+            alt_down: Signal::new(false),
+            other_key_pressed_during_alt: Cell::new(false),
+            menubar_dispatcher: Rc::new(RefCell::new(None)),
             pending_os_commands: RefCell::new(Vec::new()),
             applying_from_os: Cell::new(false),
             _observer_handles: RefCell::new(Vec::new()),
@@ -245,6 +279,85 @@ impl WindowState {
         &self.inner.caps_lock
     }
 
+    /// Whether the Alt key is currently held down. OS-driven only — the
+    /// window manager flips this on `Key::Alt` `KeyDown` / `KeyUp`. Read
+    /// this to drive mnemonic-underline visibility on menus and menubars.
+    /// See the menubar key-dispatch documentation for the full Alt-tap
+    /// / Alt+letter / mnemonic-underline contract.
+    pub fn alt_down(&self) -> &Signal<bool> {
+        &self.inner.alt_down
+    }
+
+    /// Read whether any non-Alt key has been pressed during the
+    /// current Alt-hold window. `false` means the user has not
+    /// composed a chord since pressing Alt; the next Alt-release
+    /// counts as a bare-Alt-tap. Read by the MenuBar dispatcher.
+    pub fn other_key_pressed_during_alt(&self) -> bool {
+        self.inner.other_key_pressed_during_alt.get()
+    }
+
+    /// Install (or replace) the per-window menubar key dispatcher.
+    /// Returns a [`super::menubar_dispatcher::MenubarGuard`] that
+    /// clears the slot on drop iff it still points at this exact
+    /// dispatcher (`Rc::ptr_eq`).
+    ///
+    /// At most one dispatcher is supported per window. A second
+    /// install while another is still live `debug_assert!`s and
+    /// overwrites in release. This matches the "one MenuBar per
+    /// window" invariant the framework enforces upstream.
+    pub fn install_menubar_dispatcher(
+        &self,
+        dispatcher: Rc<dyn super::menubar_dispatcher::MenubarDispatcher>,
+    ) -> super::menubar_dispatcher::MenubarGuard {
+        let slot = self.inner.menubar_dispatcher.clone();
+        {
+            let mut slot_ref = slot.borrow_mut();
+            debug_assert!(
+                slot_ref.is_none(),
+                "WindowState: a menubar dispatcher is already installed for this \
+                 window — only one keyboard-dispatching MenuBar is supported per \
+                 window because the dispatcher slot routes F10 / Alt+letter / \
+                 Alt-tap to exactly one trigger set.\n\n\
+                 \
+                 Causes typically fall into one of:\n\
+                 \
+                 1. Two MenuBar widgets are mounted in the same window. Pick \
+                    the primary one — the one that should own F10 / Alt+letter \
+                    — and call `.no_dispatcher_install()` on every secondary \
+                    MenuBar (showcase content, embedded demos, settings \
+                    previews, …). Secondary MenuBars still render and respond \
+                    to mouse + arrow-key navigation; only the window-level \
+                    keyboard dispatch is left to the primary.\n\
+                 \
+                 2. A MenuBar was added with `tree.add_boxed(MenuBar::new()…)` \
+                    from inside another MenuBar's tab / popover / submenu. Same \
+                    fix: mark the inner one with `.no_dispatcher_install()`.\n\
+                 \
+                 3. The host widget that owns the MenuBar reconstructs a fresh \
+                    `MenuBar::new()` on every rebuild without dropping its \
+                    previous `MenubarGuard` first. `MenuBar::build` already \
+                    handles its own rebuild path; if you're hand-rolling the \
+                    install (custom MenubarDispatcher impl), drop the old \
+                    `MenubarGuard` BEFORE calling this method again."
+            );
+            *slot_ref = Some(dispatcher.clone());
+        }
+        super::menubar_dispatcher::MenubarGuard {
+            slot,
+            own: dispatcher,
+        }
+    }
+
+    /// Snapshot of the currently-installed menubar dispatcher. Used by
+    /// `bastyde-app`'s key-event arm to consult the menubar BEFORE
+    /// focus-based dispatch. Returns `None` when no `MenuBar` is
+    /// mounted in this window.
+    pub fn menubar_dispatcher(
+        &self,
+    ) -> Option<Rc<dyn super::menubar_dispatcher::MenubarDispatcher>> {
+        self.inner.menubar_dispatcher.borrow().clone()
+    }
+
     /// Request user attention (bouncing dock icon on macOS, flashing
     /// taskbar on Windows). Queues a [`WindowCommand::RequestAttention`]
     /// command for the next drain.
@@ -341,6 +454,30 @@ impl WindowState {
     pub fn set_caps_lock_from_os(&self, active: bool) {
         if self.inner.caps_lock.get() != active {
             self.inner.caps_lock.set(active);
+        }
+    }
+
+    /// Update Alt-held state from the OS. Resets the
+    /// `other_key_pressed_during_alt` flag on every Alt KeyDown
+    /// edge so each Alt-hold window starts fresh. Idempotent.
+    pub fn set_alt_from_os(&self, active: bool) {
+        if self.inner.alt_down.get() != active {
+            self.inner.alt_down.set(active);
+            if active {
+                // Fresh Alt-hold window — no other key has been
+                // pressed yet during this hold.
+                self.inner.other_key_pressed_during_alt.set(false);
+            }
+        }
+    }
+
+    /// Mark that a non-Alt key was pressed while Alt is currently
+    /// held. Sticky — only cleared by the next
+    /// [`set_alt_from_os(true)`](Self::set_alt_from_os) edge. No-op
+    /// when Alt is not held. Idempotent.
+    pub fn note_non_alt_keydown_during_alt(&self) {
+        if self.inner.alt_down.get() {
+            self.inner.other_key_pressed_during_alt.set(true);
         }
     }
 }
@@ -486,5 +623,71 @@ mod tests {
         let cmds = b.drain_os_commands();
         assert_eq!(cmds.len(), 1);
         assert_eq!(a.pending_command_count(), 0);
+    }
+
+    // --- Alt-down tracking ---
+
+    #[test]
+    fn alt_down_signal_defaults_false() {
+        let state = WindowState::new(init(1));
+        assert!(!state.alt_down().get());
+        assert!(!state.other_key_pressed_during_alt());
+    }
+
+    #[test]
+    fn set_alt_from_os_toggles_signal() {
+        let state = WindowState::new(init(1));
+        state.set_alt_from_os(true);
+        assert!(state.alt_down().get());
+        state.set_alt_from_os(false);
+        assert!(!state.alt_down().get());
+    }
+
+    #[test]
+    fn set_alt_from_os_does_not_enqueue_command() {
+        // Alt is keyboard-driven; the app cannot drive it.
+        let state = WindowState::new(init(1));
+        state.set_alt_from_os(true);
+        assert!(state.drain_os_commands().is_empty());
+    }
+
+    #[test]
+    fn alt_down_edge_resets_other_key_flag() {
+        let state = WindowState::new(init(1));
+        // Alt+letter chord: Alt down, then letter pressed.
+        state.set_alt_from_os(true);
+        state.note_non_alt_keydown_during_alt();
+        assert!(state.other_key_pressed_during_alt());
+        // Release Alt — flag persists (the consumer reads it on
+        // release to decide whether the tap is bare or chorded).
+        state.set_alt_from_os(false);
+        assert!(state.other_key_pressed_during_alt());
+        // Next Alt-down edge resets the flag so the new hold window
+        // starts fresh.
+        state.set_alt_from_os(true);
+        assert!(!state.other_key_pressed_during_alt());
+    }
+
+    #[test]
+    fn note_non_alt_keydown_is_noop_when_alt_not_held() {
+        let state = WindowState::new(init(1));
+        state.note_non_alt_keydown_during_alt();
+        assert!(!state.other_key_pressed_during_alt());
+    }
+
+    #[test]
+    fn alt_signal_observers_fire_on_transition() {
+        let state = WindowState::new(init(1));
+        let received: Rc<RefCell<Vec<bool>>> = Rc::new(RefCell::new(Vec::new()));
+        let received_w = Rc::downgrade(&received);
+        let _handle = state.alt_down().observe(move |v| {
+            if let Some(r) = received_w.upgrade() {
+                r.borrow_mut().push(*v);
+            }
+        });
+        state.set_alt_from_os(true);
+        state.set_alt_from_os(true); // idempotent — no second notify
+        state.set_alt_from_os(false);
+        assert_eq!(*received.borrow(), vec![true, false]);
     }
 }

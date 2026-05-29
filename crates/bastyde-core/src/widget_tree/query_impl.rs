@@ -11,6 +11,15 @@ impl WidgetTree {
         self.arena.bounds(id)
     }
 
+    /// Last known pointer position from a `PointerMove` event. Used
+    /// by the safe-triangle submenu hover gate to compare the
+    /// cursor trajectory against the open submenu's bounds without
+    /// requiring the gate's evaluation site to receive a fresh
+    /// `PointerMove` itself.
+    pub fn last_pointer_position(&self) -> Option<bastyde_canvas::Point> {
+        self.last_pointer_position
+    }
+
     /// Borrow the widget at `id` as `&dyn Any` for concrete-type
     /// introspection. Uses the `Widget::as_any` hook — widgets that
     /// haven't opted in return `None`. Primarily for tests that need

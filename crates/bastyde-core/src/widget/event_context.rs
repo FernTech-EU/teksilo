@@ -109,6 +109,17 @@ pub struct EventContext<'ops> {
     /// this tree belongs to. Cloned from the tree at construction.
     /// `None` for standalone trees.
     pub(crate) current_window: Option<crate::window::WindowState>,
+    /// Last `PointerMove` position observed by the tree. Snapshotted
+    /// at handler-invocation time so widgets that don't see the live
+    /// pointer event (e.g. an `on_hover` callback that fires on the
+    /// boundary edge) can still query "where is the cursor right
+    /// now". Read by the safe-triangle submenu hover gate.
+    pub(crate) tree_pointer_position: Option<bastyde_canvas::Point>,
+    /// Per-content-widget overlay bounds snapshotted at handler
+    /// invocation. A flat vec is fine — open overlays are typically
+    /// 0–3 per tree. Read by the safe-triangle submenu hover gate
+    /// via [`EventContext::overlay_bounds_for_content`].
+    pub(crate) overlay_bounds_snapshot: Vec<(WidgetId, bastyde_canvas::Rect)>,
     /// Intents queued by handlers via `send_intent`. Drained by the
     /// tree after event dispatch and routed source-widget → root.
     pub(crate) pending_intents: Vec<crate::intent::Intent>,
@@ -230,7 +241,25 @@ impl<'ops> EventContext<'ops> {
             request_a11y_update: false,
             window_ops: None,
             current_window: None,
+            tree_pointer_position: None,
+            overlay_bounds_snapshot: Vec::new(),
         }
+    }
+
+    /// Attach a per-dispatch snapshot of read-only tree query state
+    /// (current pointer position, overlay bounds). Called by
+    /// `WidgetTree::make_event_context` once per event batch. Test
+    /// `EventContext`s that don't go through that path stay with
+    /// empty snapshots — handlers must treat both reads as `None`-
+    /// safe.
+    pub(crate) fn with_query_snapshot(
+        mut self,
+        pointer: Option<bastyde_canvas::Point>,
+        overlays: Vec<(WidgetId, bastyde_canvas::Rect)>,
+    ) -> Self {
+        self.tree_pointer_position = pointer;
+        self.overlay_bounds_snapshot = overlays;
+        self
     }
 
     /// Attach the app-level window-ops sink and the hosting tree's
@@ -432,6 +461,27 @@ impl<'ops> EventContext<'ops> {
     /// The [`WindowState`](crate::window::WindowState) for the window
     /// hosting this handler. `None` only for handlers run outside
     /// of an app (hand-constructed `EventContext` in tests).
+    /// Cursor position at the moment this handler was invoked. `None`
+    /// when no `PointerMove` has reached the tree yet, or when the
+    /// context was constructed without a tree-side snapshot (e.g.
+    /// hand-built `EventContext`s in tests). Used by the safe-triangle
+    /// submenu hover gate.
+    pub fn tree_pointer_position(&self) -> Option<bastyde_canvas::Point> {
+        self.tree_pointer_position
+    }
+
+    /// Look up the bounds rect of an open overlay by its root content
+    /// widget id. Returns `None` when no such overlay is currently
+    /// active. The snapshot is taken once per dispatch; mid-handler
+    /// `show_overlay` calls will not appear here. Used by the
+    /// safe-triangle submenu hover gate.
+    pub fn overlay_bounds_for_content(&self, content_id: WidgetId) -> Option<bastyde_canvas::Rect> {
+        self.overlay_bounds_snapshot
+            .iter()
+            .find(|(cid, _)| *cid == content_id)
+            .map(|(_, r)| *r)
+    }
+
     pub fn window(&self) -> Option<&crate::window::WindowState> {
         self.current_window.as_ref()
     }

@@ -70,6 +70,10 @@ bastyde-text = { workspace = true, optional = true, features = ["rich-text"] }
 
 [dev-dependencies]
 accesskit_consumer = "0.35.0"
+# `menu_bar` unit tests fabricate `WidgetId`s without a real arena for
+# pure-function dispatcher coverage. Mirrors the convention used in
+# `bastyde-core::signal` / `bastyde-core::overlay` tests.
+slotmap = "1"
 # `notification::archive` tests round-trip `NotificationEntry` through
 # `tempfile` directories and TOML serialization.
 tempfile = { workspace = true }

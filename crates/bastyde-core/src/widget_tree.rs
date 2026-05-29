@@ -415,10 +415,25 @@ impl WidgetTree {
         ops: &'ops mut dyn crate::window::WindowOps,
     ) -> crate::widget::EventContext<'ops> {
         let drag_is_external = self.active_drag.as_ref().is_some_and(|d| d.is_external);
+        // Read-only snapshot of tree query state that handlers may
+        // need synchronously. Today this carries the last pointer
+        // position and a (content_id, bounds) slice of open overlays
+        // — both read by the safe-triangle submenu hover gate.
+        let overlay_snapshot: Vec<(crate::widget_id::WidgetId, bastyde_canvas::Rect)> = self
+            .overlay_manager
+            .active_content_ids()
+            .into_iter()
+            .filter_map(|cid| {
+                self.overlay_manager
+                    .bounds_for_content(cid)
+                    .map(|r| (cid, r))
+            })
+            .collect();
         crate::widget::EventContext::new()
             .with_app_context(self.app_context.clone())
             .with_window_context(ops, self.window_state.clone())
             .with_drag_external(drag_is_external)
+            .with_query_snapshot(self.last_pointer_position, overlay_snapshot)
     }
 
     /// Run a closure with a fresh [`EventContext`] anchored at this
@@ -1229,9 +1244,11 @@ impl WidgetTree {
     /// that widgets bind to via `theme_signal()` / `locale_signal()`.
     /// Test-only: force-mark a widget for rebuild on the next layout
     /// pass. Lets regression tests exercise the rebuild path without
-    /// needing to trip a Signal binding.
-    #[cfg(test)]
-    pub(crate) fn arena_mark_needs_rebuild_for_testing(&mut self, id: WidgetId) {
+    /// needing to trip a Signal binding. Exposed cross-crate (not
+    /// `#[cfg(test)]`-gated) so widget-crate tests in `bastyde-widgets`
+    /// and elsewhere can also drive rebuilds; the `_for_testing`
+    /// suffix marks it as not intended for application code.
+    pub fn arena_mark_needs_rebuild_for_testing(&mut self, id: WidgetId) {
         self.arena.mark_needs_rebuild(id);
     }
 

@@ -1,10 +1,17 @@
-//! Milestone 4: Menus & Dropdowns
+//! Menus & Dropdowns
 //!
-//! Demonstrates the overlay-based interactive widgets added in Milestone 4:
+//! Demonstrates the menu system:
 //! - ComboBox with dropdown selection
 //! - Context menu (right-click) with MenuList and MenuItem
-//! - MenuItem with icons, shortcut labels, disabled items, separators
-//! - Theme switching via context menu command
+//! - MenuBar with `&`-marker mnemonics (hold Alt to see the underlines;
+//!   Alt+F / Alt+E / Alt+V opens the matching menu; F10 focuses the
+//!   menubar; bare Alt-tap focuses the menubar)
+//! - MenuItem in all three modes: plain, checkable (two-state and
+//!   tri-state), and radio
+//! - In-menu mnemonic activation (open a menu, press the underlined letter)
+//! - Type-ahead inside menus (open the View menu, type a few letters)
+//! - Submenu hover + safe-triangle (open File → Recent and sweep
+//!   diagonally toward the submenu)
 //!
 //! Run with: `cargo run -p menus-and-dropdowns`
 
@@ -16,6 +23,7 @@ use bastyde::widgets::{
     MenuItem, MenuList, Padding, Panel, PopoverButton, PopoverIconButton, ScrollArea, Slider,
     Spacer, StatusBar, TextWidget, Toolbar, VStack,
 };
+use bastyde_data::CheckState;
 
 #[derive(Debug, IntentKind)]
 enum AppIntent {
@@ -44,7 +52,26 @@ impl Widget for Root {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let _theme = ctx.theme_signal().get();
 
+        // State for the View-menu showcase. All three patterns share the
+        // same MenuList-built `Signal`s so MenuList's auto-grouping
+        // (`Signal::same`) bundles the three radio items.
         let is_dark = ctx.signal(false);
+        let word_wrap = ctx.signal(true);
+        let inspector_state = ctx.signal(CheckState::Indeterminate);
+        // 0 = Light, 1 = Dark, 2 = System. Named `theme_radio_choice`
+        // (not `theme_choice`) to avoid shadowing the existing
+        // `Signal<Option<String>>` further down used by the
+        // SettingsPanel-style ComboBox demo.
+        let theme_radio_choice = ctx.signal(0_usize);
+
+        // The Toggle-Dark-Mode action inverts `is_dark` and applies
+        // the matching theme. The checkable menu item separately
+        // shows the current state via `.bind_checked(is_dark)` so
+        // the visible checkmark always matches the active theme;
+        // the View → Toggle Dark Mode item omits the mode-flip
+        // mutation and routes through this action instead so the
+        // toolbar Button and the menu item share one source of
+        // truth.
         let is_dark_for_action = is_dark.clone();
         ctx.register_action(Action::new("menus.toggle_dark_mode").on_invoke(
             move |_intent, ctx| {
@@ -672,95 +699,174 @@ impl Widget for Root {
             ScrollArea::from_id(padded).scroll_bar_style(bastyde::widgets::ScrollBarMode::Overlay),
         );
 
+        let word_wrap_for_view = word_wrap.clone();
+        let inspector_for_view = inspector_state.clone();
+        let theme_choice_for_view = theme_radio_choice.clone();
+
         let menu_bar = ctx.add(
             MenuBar::new()
                 .leading_slot(IconWidget::chevron_right(16.0).color(TextRole::Accent))
-                .menu(lit!("File"), || {
+                // `&File` parses to "File" with 'F' marked as the
+                // mnemonic. Hold Alt to see the underline; Alt+F opens
+                // this menu. Inside the menu, bare 'N' / 'O' / 'S' / 'Q'
+                // activates the matching item.
+                .menu(lit!("&File"), || {
                     Box::new(
                         MenuList::new()
                             .item(
-                                MenuItem::new(lit!("New"))
+                                MenuItem::new(lit!("&New"))
                                     .on_activate_fn(|_| println!("NewFile"))
                                     .shortcut_label("Ctrl+N"),
                             )
                             .item(
-                                MenuItem::new(lit!("Open"))
+                                MenuItem::new(lit!("&Open"))
                                     .on_activate_fn(|_| println!("OpenFile"))
                                     .shortcut_label("Ctrl+O"),
                             )
                             .item(
-                                MenuItem::new(lit!("Save"))
+                                MenuItem::new(lit!("&Save"))
                                     .on_activate_fn(|_| println!("SaveFile"))
                                     .shortcut_label("Ctrl+S"),
                             )
-                            .separator()
-                            .item(MenuItem::new(lit!("Quit")).on_activate_fn(|_| println!("Quit"))),
-                    )
-                })
-                .menu(lit!("Edit"), || {
-                    Box::new(
-                        MenuList::new()
-                            .item(
-                                MenuItem::new(lit!("Undo"))
-                                    .on_activate_fn(|_| println!("Undo"))
-                                    .shortcut_label("Ctrl+Z"),
-                            )
-                            .item(
-                                MenuItem::new(lit!("Redo"))
-                                    .on_activate_fn(|_| println!("Redo"))
-                                    .shortcut_label("Ctrl+Shift+Z"),
-                            )
-                            .separator()
-                            .item(
-                                MenuItem::new(lit!("Cut"))
-                                    .on_activate_fn(|_| println!("Cut"))
-                                    .shortcut_label("Ctrl+X"),
-                            )
-                            .item(
-                                MenuItem::new(lit!("Copy"))
-                                    .on_activate_fn(|_| println!("Copy"))
-                                    .shortcut_label("Ctrl+C"),
-                            )
-                            .item(
-                                MenuItem::new(lit!("Paste"))
-                                    .on_activate_fn(|_| println!("Paste"))
-                                    .shortcut_label("Ctrl+V"),
-                            )
-                            .separator()
-                            .item(
-                                MenuItem::new(lit!("Select All"))
-                                    .on_activate_fn(|_| println!("SelectAll"))
-                                    .shortcut_label("Ctrl+A"),
-                            ),
-                    )
-                })
-                .menu(lit!("View"), || {
-                    Box::new(
-                        MenuList::new()
-                            .item(MenuItem::submenu(lit!("Alignment"), || {
+                            // A submenu trigger. Hovering over "Recent"
+                            // opens the submenu after the 400ms delay;
+                            // sweeping diagonally toward the submenu
+                            // doesn't collapse it thanks to the
+                            // safe-triangle hover gate.
+                            .item(MenuItem::submenu(lit!("&Recent"), || {
                                 Box::new(
                                     MenuList::new()
                                         .item(
-                                            MenuItem::new(lit!("Left"))
-                                                .on_activate_fn(|_| println!("AlignLeft")),
+                                            MenuItem::new(lit!("project-alpha.toml"))
+                                                .on_activate_fn(|_| println!("Recent: alpha")),
                                         )
                                         .item(
-                                            MenuItem::new(lit!("Center"))
-                                                .on_activate_fn(|_| println!("AlignCenter")),
+                                            MenuItem::new(lit!("notes.md"))
+                                                .on_activate_fn(|_| println!("Recent: notes")),
                                         )
                                         .item(
-                                            MenuItem::new(lit!("Right"))
-                                                .on_activate_fn(|_| println!("AlignRight")),
-                                        )
-                                        .item(
-                                            MenuItem::new(lit!("Justify"))
-                                                .on_activate_fn(|_| println!("AlignJustify")),
+                                            MenuItem::new(lit!("budget.csv"))
+                                                .on_activate_fn(|_| println!("Recent: budget")),
                                         ),
                                 )
                             }))
                             .separator()
                             .item(
-                                MenuItem::new(lit!("Toggle Dark Mode")).on_activate_fn(|ctx| {
+                                MenuItem::new(lit!("&Quit")).on_activate_fn(|_| println!("Quit")),
+                            ),
+                    )
+                })
+                .menu(lit!("&Edit"), || {
+                    Box::new(
+                        MenuList::new()
+                            .item(
+                                MenuItem::new(lit!("&Undo"))
+                                    .on_activate_fn(|_| println!("Undo"))
+                                    .shortcut_label("Ctrl+Z"),
+                            )
+                            .item(
+                                MenuItem::new(lit!("&Redo"))
+                                    .on_activate_fn(|_| println!("Redo"))
+                                    .shortcut_label("Ctrl+Shift+Z"),
+                            )
+                            .separator()
+                            .item(
+                                MenuItem::new(lit!("Cu&t"))
+                                    .on_activate_fn(|_| println!("Cut"))
+                                    .shortcut_label("Ctrl+X"),
+                            )
+                            .item(
+                                MenuItem::new(lit!("&Copy"))
+                                    .on_activate_fn(|_| println!("Copy"))
+                                    .shortcut_label("Ctrl+C"),
+                            )
+                            .item(
+                                MenuItem::new(lit!("&Paste"))
+                                    .on_activate_fn(|_| println!("Paste"))
+                                    .shortcut_label("Ctrl+V"),
+                            )
+                            .separator()
+                            .item(
+                                MenuItem::new(lit!("Select &All"))
+                                    .on_activate_fn(|_| println!("SelectAll"))
+                                    .shortcut_label("Ctrl+A"),
+                            ),
+                    )
+                })
+                .menu(lit!("&View"), move || {
+                    Box::new(
+                        MenuList::new()
+                            // CHECKABLE — two-state. The checkmark
+                            // glyph in the leading slot follows
+                            // `word_wrap`.
+                            .item(
+                                MenuItem::new(lit!("&Word Wrap"))
+                                    .bind_checked(word_wrap_for_view.clone()),
+                            )
+                            // CHECKABLE — tri-state. Cycles
+                            // Unchecked↔Checked on click; Indeterminate
+                            // is the externally-supplied initial state
+                            // (shown as a dash glyph).
+                            .item(
+                                MenuItem::new(lit!("Show &Inspector"))
+                                    .bind_check_state(inspector_for_view.clone()),
+                            )
+                            .separator()
+                            // RADIO GROUP — three items sharing one
+                            // `Signal<usize>`. MenuList groups them by
+                            // signal identity and announces "2 of 3"
+                            // via `push_to_radio_group`. Clicking writes
+                            // the matching value into `theme_choice`.
+                            .item(
+                                MenuItem::new(lit!("&Light Theme"))
+                                    .radio(0, theme_choice_for_view.clone()),
+                            )
+                            .item(
+                                MenuItem::new(lit!("&Dark Theme"))
+                                    .radio(1, theme_choice_for_view.clone()),
+                            )
+                            .item(
+                                MenuItem::new(lit!("&System Theme"))
+                                    .radio(2, theme_choice_for_view.clone()),
+                            )
+                            .separator()
+                            .item(MenuItem::submenu(lit!("&Alignment"), || {
+                                Box::new(
+                                    MenuList::new()
+                                        .item(
+                                            MenuItem::new(lit!("&Left"))
+                                                .on_activate_fn(|_| println!("AlignLeft")),
+                                        )
+                                        .item(
+                                            MenuItem::new(lit!("&Center"))
+                                                .on_activate_fn(|_| println!("AlignCenter")),
+                                        )
+                                        .item(
+                                            MenuItem::new(lit!("&Right"))
+                                                .on_activate_fn(|_| println!("AlignRight")),
+                                        )
+                                        .item(
+                                            MenuItem::new(lit!("&Justify"))
+                                                .on_activate_fn(|_| println!("AlignJustify")),
+                                        ),
+                                )
+                            }))
+                            .separator()
+                            // Checkable view of the live `is_dark`
+                            // state plus an intent send. We do NOT
+                            // use `.bind_checked(...)` here — that
+                            // would flip the signal twice (once via
+                            // mode_activate, once via the action),
+                            // landing back on the original value. The
+                            // toolbar Button shares the same action,
+                            // so routing both clickers through the
+                            // action keeps one source of truth. The
+                            // visible checkmark would need a separate
+                            // reactive read of `is_dark`; the menu
+                            // rebuilds on every open so the role
+                            // alone (Plain) is acceptable here.
+                            .item(
+                                MenuItem::new(lit!("&Toggle Dark Mode")).on_activate_fn(|ctx| {
                                     ctx.send_intent(AppIntent::ToggleDarkMode);
                                 }),
                             ),

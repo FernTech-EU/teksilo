@@ -2,7 +2,23 @@
 //!
 //! Non-generic, closure-based command erasure (same pattern as Button).
 //! Supports icons, shortcut labels, disabled state, and submenu triggers.
+//!
+//! ### Modes
+//!
+//! Every item is one of three modes — `Plain` (the default), `Check`
+//! (two-state or tri-state checkmark), or `Radio` (one of N
+//! mutually-exclusive options) — selected through builder methods:
+//!
+//! - `.bind_checked(Signal<bool>)`     → `Role::MenuItemCheckBox`, checkmark glyph
+//! - `.bind_check_state(Signal<CheckState>)` → tri-state (`Checked` / `Indeterminate` / `Unchecked`)
+//! - `.radio(value, selected)`          → `Role::MenuItemRadio`, filled-dot glyph
+//!
+//! The three setters are mutually exclusive (last call wins). They are
+//! also mutually exclusive with `.icon(...)` — by Windows convention a
+//! checkable item carries no icon; if both are set the check/radio
+//! glyph wins and a debug assertion fires.
 
+use bastyde_data::CheckState;
 use bastyde_i18n::lit;
 use std::rc::Rc;
 use std::time::Duration;
@@ -20,7 +36,14 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{TextRole, TextStyleRole};
 
 use crate::keystroke_format::format_keystroke;
-use crate::primitives::{HStack, IconWidget, Spacer, TextWidget};
+use crate::primitives::{HStack, IconWidget, Spacer, Switcher, TextWidget};
+
+mod menu_label;
+mod mnemonic;
+mod safe_triangle;
+pub(crate) use menu_label::MenuLabel;
+pub(crate) use mnemonic::{ParsedMnemonic, parse_mnemonic};
+pub(crate) use safe_triangle::point_in_safe_triangle;
 
 /// Type-erased command factory. Stored as `Rc` (not `Box`) so the closure
 /// can be cloned and shared — in particular with SplitButton, which reads
@@ -47,6 +70,38 @@ enum MenuItemState {
 const DEFAULT_SUBMENU_OPEN_DELAY: Duration = Duration::from_millis(400);
 const DEFAULT_SUBMENU_CLOSE_DELAY: Duration = Duration::from_millis(150);
 
+/// Glyph size for the check / dash / radio-dot rendered in the
+/// 16dp `MENU_ICON_COLUMN_WIDTH` leading slot. 12dp matches the
+/// existing `chevron_right(12.0)` used for submenu triggers.
+const MENU_INDICATOR_GLYPH_SIZE: f32 = 12.0;
+
+/// Internal selection mode of a `MenuItem`. `Plain` is the default
+/// and produces `Role::MenuItem`. `Check` swaps the leading-slot
+/// icon for a checkmark (binary) or check/dash/spacer (tri-state)
+/// and emits `Role::MenuItemCheckBox`. `Radio` swaps the leading
+/// slot for a filled dot when the radio group's `selected` signal
+/// matches `value` and emits `Role::MenuItemRadio`.
+///
+/// The state signals are kept here unboxed so `accessibility()`
+/// can read the current value cheaply via `Signal::get()`.
+enum MenuItemMode {
+    Plain,
+    Check(CheckKind),
+    Radio {
+        value: usize,
+        selected: Signal<usize>,
+    },
+}
+
+/// Internal dual-mode for checkable items — mirrors `Checkbox`'s
+/// internal `CheckKind` exactly so MenuItem and Checkbox behave
+/// identically when they share the same `Signal<bool>` /
+/// `Signal<CheckState>`.
+enum CheckKind {
+    TwoState(Signal<bool>),
+    TriState(Signal<CheckState>),
+}
+
 /// A single menu item: icon + label + shortcut label + optional submenu chevron.
 pub struct MenuItem {
     label: bastyde_i18n::LocalizedString,
@@ -64,6 +119,17 @@ pub struct MenuItem {
     action: Option<CommandFactory>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
+    /// Plain / Check / Radio — see [`MenuItemMode`].
+    mode: MenuItemMode,
+    /// Sibling ids for radio-group AT announcement. Set by
+    /// [`MenuList::build`](crate::menu_list::MenuList::build) on
+    /// every radio-mode item that shares a `Signal<usize>` with
+    /// other items in the same list, via
+    /// `set_radio_group_ids(...)`. Used in `accessibility()` to
+    /// emit `push_to_radio_group(sibling_id)` so AT announces
+    /// "Theme Dark, 2 of 3". Empty for non-radio items and for
+    /// solitary radio items.
+    radio_group_ids: Option<Rc<std::cell::RefCell<Vec<WidgetId>>>>,
     submenu_factory: Option<Box<dyn Fn() -> Box<dyn Widget>>>,
     submenu_open_delay: Duration,
     // Build state
@@ -86,6 +152,19 @@ pub struct MenuItem {
     style_override: Option<SharedMenuItemStyle>,
     root_child_id: Option<WidgetId>,
     submenu_content_id: Option<WidgetId>,
+    /// Parsed mnemonic from the label, captured during `build()`. The
+    /// enclosing [`MenuList`](crate::menu_list::MenuList) reads this
+    /// to wire in-menu mnemonic activation (bare-letter Alt
+    /// shortcut) and the keyboard-driven type-ahead.
+    parsed_mnemonic: Option<ParsedMnemonic>,
+    /// Shared safe-triangle state owned by the enclosing
+    /// [`MenuList`](crate::menu_list::MenuList). Submenu triggers
+    /// write to it on hover-enter (stamp the anchor); sibling items
+    /// read it before firing their hover-switch so a diagonal
+    /// pointer trajectory toward the open submenu doesn't steal
+    /// focus. `None` for items that haven't been adopted by a
+    /// MenuList (e.g. solo menu items in tests).
+    safe_triangle: Option<crate::menu_list::SharedSafeTriangleState>,
 }
 
 impl MenuItem {
@@ -101,6 +180,8 @@ impl MenuItem {
             composite_tooltip_content: None,
             action: None,
             initial_enabled: true,
+            mode: MenuItemMode::Plain,
+            radio_group_ids: None,
             submenu_factory: None,
             submenu_open_delay: DEFAULT_SUBMENU_OPEN_DELAY,
             interaction: Signal::new(MenuItemState::Idle),
@@ -109,6 +190,8 @@ impl MenuItem {
             style_override: None,
             root_child_id: None,
             submenu_content_id: None,
+            parsed_mnemonic: None,
+            safe_triangle: None,
         }
     }
 
@@ -236,6 +319,8 @@ impl MenuItem {
             composite_tooltip_content: None,
             action: None,
             initial_enabled: true,
+            mode: MenuItemMode::Plain,
+            radio_group_ids: None,
             submenu_factory: Some(Box::new(factory)),
             submenu_open_delay: DEFAULT_SUBMENU_OPEN_DELAY,
             interaction: Signal::new(MenuItemState::Idle),
@@ -244,6 +329,8 @@ impl MenuItem {
             style_override: None,
             root_child_id: None,
             submenu_content_id: None,
+            parsed_mnemonic: None,
+            safe_triangle: None,
         }
     }
 
@@ -257,14 +344,126 @@ impl MenuItem {
     pub fn is_submenu(&self) -> bool {
         self.submenu_factory.is_some()
     }
+
+    /// Bind this item to a two-state `Signal<bool>`. The item renders
+    /// `Role::MenuItemCheckBox`; activation flips the signal. By
+    /// Windows convention, the leading icon slot becomes a checkmark
+    /// when the signal is `true`, blank otherwise.
+    ///
+    /// Mutually exclusive with [`bind_check_state`](Self::bind_check_state)
+    /// and [`radio`](Self::radio) — last call wins.
+    pub fn bind_checked(mut self, state: Signal<bool>) -> Self {
+        self.mode = MenuItemMode::Check(CheckKind::TwoState(state));
+        self
+    }
+
+    /// Bind this item to a tri-state `Signal<CheckState>`. The item
+    /// renders `Role::MenuItemCheckBox`; activation cycles
+    /// `Unchecked` ↔ `Checked` (per Windows / [`Checkbox`](crate::checkbox::Checkbox)
+    /// convention: `Indeterminate` is reserved for external sources
+    /// like `TreeCheckedModel`; clicking from `Indeterminate`
+    /// promotes to `Checked`).
+    ///
+    /// The leading-slot glyph is `checkmark` for `Checked`, `dash`
+    /// for `Indeterminate`, blank for `Unchecked` — matching the
+    /// Windows mixed-state convention.
+    ///
+    /// Mutually exclusive with [`bind_checked`](Self::bind_checked)
+    /// and [`radio`](Self::radio) — last call wins.
+    pub fn bind_check_state(mut self, state: Signal<CheckState>) -> Self {
+        self.mode = MenuItemMode::Check(CheckKind::TriState(state));
+        self
+    }
+
+    /// Bind this item to a radio group via a shared `Signal<usize>`.
+    /// Activation writes `value` into `selected`; all radio items
+    /// sharing the same `selected` signal observe the change and
+    /// update their leading-slot dot accordingly. The item renders
+    /// `Role::MenuItemRadio`.
+    ///
+    /// For "2 of 3"-style AT announcement, the enclosing
+    /// [`MenuList`](crate::menu_list::MenuList) groups radio items
+    /// by selection-signal identity and emits `push_to_radio_group`
+    /// relationships automatically — no app-side wiring required.
+    ///
+    /// Mutually exclusive with [`bind_checked`](Self::bind_checked)
+    /// and [`bind_check_state`](Self::bind_check_state) — last call
+    /// wins.
+    pub fn radio(mut self, value: usize, selected: Signal<usize>) -> Self {
+        self.mode = MenuItemMode::Radio { value, selected };
+        self
+    }
+
+    /// Internal accessor for [`MenuList::build`](crate::menu_list::MenuList::build)
+    /// — read whether this item is a radio with a given group-id
+    /// (the `Rc`-identity of its `selected` signal).
+    pub(crate) fn radio_selection_handle(&self) -> Option<(usize, Signal<usize>)> {
+        match &self.mode {
+            MenuItemMode::Radio { value, selected } => Some((*value, selected.clone())),
+            _ => None,
+        }
+    }
+
+    /// Internal setter for [`MenuList::build`](crate::menu_list::MenuList::build)
+    /// — install the sibling id buffer so `accessibility()` can
+    /// announce "2 of N" via `push_to_radio_group`.
+    pub(crate) fn set_radio_group_ids(&mut self, ids: Rc<std::cell::RefCell<Vec<WidgetId>>>) {
+        self.radio_group_ids = Some(ids);
+    }
+
+    /// Read the parsed mnemonic for this item's label. Populated
+    /// inside `build()`. Returns `None` for items that haven't been
+    /// built yet, or whose label contains no un-escaped `&` marker.
+    ///
+    /// Used by [`MenuList`](crate::menu_list::MenuList) to wire
+    /// in-menu mnemonic activation (bare-letter activation of the
+    /// matching item) — the lookup runs on every `KeyDown` so a
+    /// fresh `parse_mnemonic` per keypress would be wasteful.
+    pub(crate) fn mnemonic(&self) -> Option<&ParsedMnemonic> {
+        self.parsed_mnemonic.as_ref()
+    }
+
+    /// Pre-parse the label so that
+    /// [`MenuList::build`](crate::menu_list::MenuList::build) can
+    /// read this item's mnemonic *before* the item is committed to
+    /// the arena. Idempotent — calls after the first one are no-ops.
+    pub(crate) fn ensure_mnemonic_parsed(&mut self) {
+        if self.parsed_mnemonic.is_none() {
+            self.parsed_mnemonic = Some(parse_mnemonic(&self.label.resolve_now()));
+        }
+    }
+
+    /// Install the enclosing
+    /// [`MenuList`](crate::menu_list::MenuList)'s shared
+    /// safe-triangle state. Called by `MenuList::build` for every
+    /// item before it reaches the arena. The handle lets:
+    ///
+    /// - a submenu trigger stamp the anchor (pointer position at
+    ///   submenu-open time) and the open submenu's content id;
+    /// - a sibling item read the anchor + submenu id on hover and
+    ///   skip its dismiss / open call when the cursor is currently
+    ///   inside the safe triangle.
+    pub(crate) fn set_safe_triangle_state(
+        &mut self,
+        state: crate::menu_list::SharedSafeTriangleState,
+    ) {
+        self.safe_triangle = Some(state);
+    }
 }
 
 impl std::fmt::Debug for MenuItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mode = match &self.mode {
+            MenuItemMode::Plain => "Plain",
+            MenuItemMode::Check(CheckKind::TwoState(_)) => "Check(TwoState)",
+            MenuItemMode::Check(CheckKind::TriState(_)) => "Check(TriState)",
+            MenuItemMode::Radio { .. } => "Radio",
+        };
         f.debug_struct("MenuItem")
             .field("label", &self.label)
             .field("initial_enabled", &self.initial_enabled)
             .field("is_submenu", &self.submenu_factory.is_some())
+            .field("mode", &mode)
             .finish()
     }
 }
@@ -319,11 +518,84 @@ impl Widget for MenuItem {
         // Leading: icon column — always reserved at `icon_column_width`,
         // even when the item has no icon, so labels line up vertically
         // between icon'd and icon-less items.
+        //
+        // For Check / Radio modes the slot becomes a `Switcher`
+        // driven by the bound state signal, swapping between the
+        // glyph and a `Spacer`. The framework's binding system
+        // re-paints the leaf when the signal flips — no rebuild.
+        //
+        // Icon + Check/Radio are mutually exclusive (Windows
+        // convention). If both are set, `debug_assert!` fires and the
+        // check/radio mode wins in release.
         let leading = {
-            let icon_child_id = if let Some(icon) = self.icon.take() {
-                ctx.add(icon.bind_color(text_role.clone()))
-            } else {
-                ctx.add(Spacer::new())
+            let icon_child_id = match &self.mode {
+                MenuItemMode::Plain => {
+                    if let Some(icon) = self.icon.take() {
+                        ctx.add(icon.bind_color(text_role.clone()))
+                    } else {
+                        ctx.add(Spacer::new())
+                    }
+                }
+                MenuItemMode::Check(CheckKind::TwoState(s)) => {
+                    debug_assert!(
+                        self.icon.is_none(),
+                        "MenuItem: .icon() is mutually exclusive with .bind_checked()"
+                    );
+                    self.icon = None;
+                    // 0 = checkmark, 1 = spacer.
+                    let idx = s.map(|b| if *b { 0_usize } else { 1 });
+                    ctx.add(
+                        Switcher::new(idx)
+                            .child(
+                                IconWidget::checkmark(MENU_INDICATOR_GLYPH_SIZE)
+                                    .bind_color(text_role.clone()),
+                            )
+                            .child(Spacer::new()),
+                    )
+                }
+                MenuItemMode::Check(CheckKind::TriState(s)) => {
+                    debug_assert!(
+                        self.icon.is_none(),
+                        "MenuItem: .icon() is mutually exclusive with .bind_check_state()"
+                    );
+                    self.icon = None;
+                    // 0 = checkmark (Checked), 1 = dash (Indeterminate), 2 = spacer (Unchecked).
+                    let idx = s.map(|cs| match cs {
+                        CheckState::Checked => 0_usize,
+                        CheckState::Indeterminate => 1,
+                        CheckState::Unchecked => 2,
+                    });
+                    ctx.add(
+                        Switcher::new(idx)
+                            .child(
+                                IconWidget::checkmark(MENU_INDICATOR_GLYPH_SIZE)
+                                    .bind_color(text_role.clone()),
+                            )
+                            .child(
+                                IconWidget::dash(MENU_INDICATOR_GLYPH_SIZE)
+                                    .bind_color(text_role.clone()),
+                            )
+                            .child(Spacer::new()),
+                    )
+                }
+                MenuItemMode::Radio { value, selected } => {
+                    debug_assert!(
+                        self.icon.is_none(),
+                        "MenuItem: .icon() is mutually exclusive with .radio()"
+                    );
+                    self.icon = None;
+                    let v = *value;
+                    // 0 = filled dot (selected == value), 1 = spacer.
+                    let idx = selected.map(move |sel| if *sel == v { 0_usize } else { 1 });
+                    ctx.add(
+                        Switcher::new(idx)
+                            .child(
+                                IconWidget::radio_dot(MENU_INDICATOR_GLYPH_SIZE)
+                                    .bind_color(text_role.clone()),
+                            )
+                            .child(Spacer::new()),
+                    )
+                }
             };
             ctx.add(
                 crate::primitives::FixedSize::new()
@@ -333,14 +605,24 @@ impl Widget for MenuItem {
             )
         };
 
-        // Label.
-        let label = ctx.add(
-            TextWidget::new(self.label.clone())
-                .style(TextStyleRole::Body)
-                .bind_color(text_role.clone())
-                .single_line()
-                .a11y_hidden(),
-        );
+        // Label. Uses `MenuLabel` (not `TextWidget`) so a single `&`
+        // in the label is parsed as a mnemonic marker — stripped from
+        // the visible text and underlined when `alt_down` is held.
+        // The parsed form is cached so the enclosing MenuList can
+        // read it for type-ahead and in-menu mnemonic activation.
+        let parsed = parse_mnemonic(&self.label.resolve_now());
+        self.parsed_mnemonic = Some(parsed.clone());
+        let alt_down = ctx
+            .window()
+            .map(|w| w.alt_down().clone())
+            .unwrap_or_else(|| Signal::new(false));
+        let label_source: bastyde_core::signal::Prop<String> = self.label.clone().into();
+        let label = ctx.add(MenuLabel::new(
+            label_source,
+            alt_down,
+            text_role.clone(),
+            TextStyleRole::Body,
+        ));
 
         // Resolve the trailing shortcut text — manual label wins;
         // otherwise pull from the registry by id. Bind the registry's
@@ -459,6 +741,39 @@ impl Widget for MenuItem {
         let action_rc: std::rc::Rc<Option<CommandFactory>> = std::rc::Rc::new(action);
         let action_for_key = action_rc.clone();
 
+        // Shared closure that performs the bound-state mutation on
+        // activation — flips the check signal, cycles the tristate
+        // signal, or writes the radio value. Captured by both the
+        // tap and key handlers so click and Enter/Space have
+        // identical semantics. `None` for `Plain` and for submenu
+        // triggers (which never carry a bound state).
+        type ActivateFn = std::rc::Rc<dyn Fn()>;
+        let mode_activate: Option<ActivateFn> = match &self.mode {
+            MenuItemMode::Plain => None,
+            MenuItemMode::Check(CheckKind::TwoState(s)) => {
+                let s = s.clone();
+                Some(std::rc::Rc::new(move || s.set(!s.get())))
+            }
+            MenuItemMode::Check(CheckKind::TriState(s)) => {
+                let s = s.clone();
+                // Click toggles Unchecked <-> Checked. Indeterminate
+                // (driven by external aggregation models) promotes
+                // to Checked. Mirrors `Checkbox::toggle`.
+                Some(std::rc::Rc::new(move || match s.get() {
+                    CheckState::Unchecked => s.set(CheckState::Checked),
+                    CheckState::Checked => s.set(CheckState::Unchecked),
+                    CheckState::Indeterminate => s.set(CheckState::Checked),
+                }))
+            }
+            MenuItemMode::Radio { value, selected } => {
+                let v = *value;
+                let selected = selected.clone();
+                Some(std::rc::Rc::new(move || selected.set(v)))
+            }
+        };
+        let mode_activate_for_tap = mode_activate.clone();
+        let mode_activate_for_key = mode_activate.clone();
+
         let int_hover = interaction.clone();
         let self_id = ctx.self_id();
         let is_submenu = submenu_content_id.is_some();
@@ -469,11 +784,29 @@ impl Widget for MenuItem {
         // click outside) so `accessibility()` can report accurate
         // `set_expanded` without needing to track the overlay state
         // from inside the MenuItem's own handlers.
+        //
+        // Also clears the safe-triangle anchor when the overlay
+        // actually closes — keeping the anchor alive across
+        // hover-leave (so sibling hovers heading toward the
+        // submenu are properly gated) means we MUST clear it here
+        // once the submenu is finally gone.
         let submenu_open_signal = self.submenu_open.clone();
+        let submenu_content_id_for_dismiss = submenu_content_id;
+        let safe_triangle_for_dismiss = self.safe_triangle.clone();
         let submenu_dismiss_callback: bastyde_core::overlay::OverlayDismissCallback = {
             let open = submenu_open_signal.clone();
             std::rc::Rc::new(move || {
                 open.set(false);
+                if let (Some(sub_id), Some(state_rc)) = (
+                    submenu_content_id_for_dismiss,
+                    safe_triangle_for_dismiss.as_ref(),
+                ) {
+                    let mut state = state_rc.borrow_mut();
+                    if state.submenu_content_id == Some(sub_id) {
+                        state.submenu_content_id = None;
+                        state.anchor = None;
+                    }
+                }
             })
         };
 
@@ -492,6 +825,10 @@ impl Widget for MenuItem {
             let dismiss_for_tap = submenu_dismiss_callback.clone();
             let open_for_hover = submenu_open_signal.clone();
             let dismiss_for_hover = submenu_dismiss_callback.clone();
+            // Capture the safe-triangle shared state so we can stamp
+            // / clear the anchor on submenu open / close.
+            let safe_triangle_open = self.safe_triangle.clone();
+            let safe_triangle_close = self.safe_triangle.clone();
             // Framework gates events on `arena.is_enabled(self_id)`.
             handler_set = handler_set
                 .on_tap({
@@ -522,6 +859,18 @@ impl Widget for MenuItem {
                             int_hover.set(MenuItemState::Hovered);
                             ctx.dismiss_child_overlays_except(sub_id);
                             open_for_hover.set(true);
+                            // Stamp the safe-triangle anchor so sibling
+                            // hover-switches can suppress themselves
+                            // while the cursor is travelling toward
+                            // the open submenu. We use the current
+                            // cursor position; if unavailable, the
+                            // gate falls back to "no apex" (always
+                            // false → no suppression).
+                            if let Some(state_rc) = safe_triangle_open.as_ref() {
+                                let mut state = state_rc.borrow_mut();
+                                state.submenu_content_id = Some(sub_id);
+                                state.anchor = ctx.tree_pointer_position();
+                            }
                             ctx.show_overlay_after_with_focus(
                                 OverlayRequest {
                                     content_id: sub_id,
@@ -550,6 +899,29 @@ impl Widget for MenuItem {
                             // when the PointerLeave behavior tears
                             // the overlay down shortly afterward.
                             open_for_hover.set(false);
+                            // Clear the safe-triangle anchor ONLY when
+                            // the submenu never actually opened (the
+                            // 400 ms delay was cancelled while still
+                            // pending). When the overlay IS open, we
+                            // leave the anchor in place — sibling
+                            // hover handlers consult it during the
+                            // user's diagonal travel toward the
+                            // submenu, and the dismiss callback
+                            // installed above clears it the moment
+                            // the overlay actually closes. Clearing
+                            // on every hover-leave would defeat the
+                            // entire safe-triangle gate, because the
+                            // trigger's hover-leave fires *before* a
+                            // sibling's hover-enter.
+                            if let Some(state_rc) = safe_triangle_close.as_ref()
+                                && ctx.overlay_bounds_for_content(sub_id).is_none()
+                            {
+                                let mut state = state_rc.borrow_mut();
+                                if state.submenu_content_id == Some(sub_id) {
+                                    state.submenu_content_id = None;
+                                    state.anchor = None;
+                                }
+                            }
                         }
                     }
                 });
@@ -562,8 +934,22 @@ impl Widget for MenuItem {
                 .on_tap({
                     move |_pos, ctx: &mut EventContext| {
                         int_tap.set(MenuItemState::Pressed);
+                        // 1. Flip the bound state first (Check / Radio),
+                        //    so the user-supplied action sees the
+                        //    post-activation value.
+                        if let Some(ref activate) = mode_activate_for_tap {
+                            activate();
+                        }
+                        // 2. Invoke the user action if any.
                         if let Some(ref action) = *action_for_tap {
                             action(ctx);
+                        }
+                        // 3. Dismiss the chain when EITHER an action
+                        //    fired OR a mode flip happened. Plain items
+                        //    without an action used to no-op the click;
+                        //    Check/Radio items without an action still
+                        //    dismiss because the visible state changed.
+                        if action_for_tap.is_some() || mode_activate_for_tap.is_some() {
                             ctx.dismiss_self_overlay_chain();
                         }
                         // Reset to Idle after dispatching — the
@@ -578,9 +964,31 @@ impl Widget for MenuItem {
                     }
                 })
                 .on_hover({
+                    let safe_triangle_sibling = self.safe_triangle.clone();
                     move |entered: bool, ctx: &mut EventContext| {
                         if entered {
-                            ctx.dismiss_child_overlays();
+                            // Safe-triangle gate: if another submenu is
+                            // currently open AND the cursor is inside
+                            // the triangle anchored at the
+                            // submenu-open pointer position with its
+                            // base on the open submenu's near edge,
+                            // skip the dismiss — the user is en route
+                            // to the submenu and we don't want to
+                            // close it out from under them.
+                            let suppress = safe_triangle_sibling
+                                .as_ref()
+                                .and_then(|state_rc| {
+                                    let state = state_rc.borrow();
+                                    let sub_content_id = state.submenu_content_id?;
+                                    let anchor = state.anchor?;
+                                    let pointer = ctx.tree_pointer_position()?;
+                                    let bounds = ctx.overlay_bounds_for_content(sub_content_id)?;
+                                    Some(point_in_safe_triangle(pointer, anchor, bounds))
+                                })
+                                .unwrap_or(false);
+                            if !suppress {
+                                ctx.dismiss_child_overlays();
+                            }
                             int_hover.set(MenuItemState::Hovered);
                         } else {
                             int_hover.set(MenuItemState::Idle);
@@ -601,8 +1009,19 @@ impl Widget for MenuItem {
                         key: Key::Enter | Key::Space,
                         ..
                     } => {
+                        // Mirror the tap activation order: bound-state
+                        // mutation first, then user action, then chain
+                        // dismissal. Submenu triggers fall through to
+                        // the existing open path (they never carry a
+                        // bound mode signal).
+                        if let Some(ref activate) = mode_activate_for_key {
+                            activate();
+                        }
                         if let Some(ref action) = *action_for_key {
                             action(ctx);
+                            ctx.dismiss_self_overlay_chain();
+                        } else if mode_activate_for_key.is_some() {
+                            // Check/Radio with no user action — still dismiss.
                             ctx.dismiss_self_overlay_chain();
                         } else if let Some(sub_id) = sub_id {
                             ctx.dismiss_child_overlays_except(sub_id);
@@ -712,8 +1131,65 @@ impl Widget for MenuItem {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(bastyde_core::accesskit::Role::MenuItem);
-        builder.set_name(self.label.resolve_now());
+        use bastyde_core::accesskit::{HasPopup, Role, Toggled};
+
+        // Role reflects the mode: Plain → MenuItem, Check → MenuItemCheckBox,
+        // Radio → MenuItemRadio. Submenu triggers always render as
+        // Role::MenuItem (independent of mode — submenu+checkable is
+        // not a supported combination).
+        let role = match &self.mode {
+            MenuItemMode::Plain => Role::MenuItem,
+            MenuItemMode::Check(_) => Role::MenuItemCheckBox,
+            MenuItemMode::Radio { .. } => Role::MenuItemRadio,
+        };
+        builder.set_role(role);
+        // Use the stripped form for the announced name when we've
+        // parsed a mnemonic — screen readers say "Save", not
+        // "ampersand-Save". `parsed_mnemonic` is populated inside
+        // `build()`; before the first build (rare — accessibility
+        // walks always run post-build) we fall back to a fresh parse
+        // so the AT tree is correct even from cold.
+        let parsed_name = self
+            .parsed_mnemonic
+            .as_ref()
+            .map(|p| p.stripped.clone())
+            .unwrap_or_else(|| parse_mnemonic(&self.label.resolve_now()).stripped);
+        builder.set_name(parsed_name);
+
+        // Toggle state for Check / Radio. Mirrors `Checkbox`:
+        // `set_toggled(bool)` for binary, `inner_mut().set_toggled(Toggled::Mixed)`
+        // for tri-state Indeterminate.
+        match &self.mode {
+            MenuItemMode::Plain => {}
+            MenuItemMode::Check(CheckKind::TwoState(s)) => {
+                builder.set_toggled(s.get());
+            }
+            MenuItemMode::Check(CheckKind::TriState(s)) => match s.get() {
+                CheckState::Unchecked => builder.set_toggled(false),
+                CheckState::Checked => builder.set_toggled(true),
+                CheckState::Indeterminate => {
+                    builder.inner_mut().set_toggled(Toggled::Mixed);
+                }
+            },
+            MenuItemMode::Radio { value, selected } => {
+                builder.set_toggled(selected.get() == *value);
+            }
+        }
+
+        // Radio "2 of N" — push every group member id (including self)
+        // into the AT node so assistive tech can announce
+        // position-in-set. Only emitted for Radio items where the
+        // enclosing MenuList wired up the group buffer. Mirrors
+        // [`RadioButton::accessibility`] exactly.
+        if let (MenuItemMode::Radio { .. }, Some(buf)) = (&self.mode, self.radio_group_ids.as_ref())
+        {
+            for sibling in buf.borrow().iter().copied() {
+                builder.push_to_radio_group(bastyde_core::accessibility::widget_id_to_node_id(
+                    sibling,
+                ));
+            }
+        }
+
         // A submenu trigger exposes `has_popup(Menu)` so screen
         // readers announce the item as leading into a nested menu,
         // and `set_expanded` reflects whether the submenu is
@@ -723,13 +1199,27 @@ impl Widget for MenuItem {
         // queries accessibility the factory is always `None`,
         // but the content id survives.
         if self.submenu_content_id.is_some() {
-            builder.set_has_popup(bastyde_core::accesskit::HasPopup::Menu);
+            builder.set_has_popup(HasPopup::Menu);
             builder.set_expanded(self.submenu_open.get());
         }
         // Framework a11y walker sets `set_disabled` from arena state.
         builder.add_action(bastyde_core::accesskit::Action::Click);
         if let Some(ref shortcut) = self.resolved_shortcut {
             builder.set_keyboard_shortcut(shortcut.clone());
+        }
+
+        // Mnemonic — populates AccessKit's `access_key` field, which
+        // Windows Narrator announces as "Access key: F" on items
+        // carrying a single-character menu accelerator. Distinct from
+        // the (rebindable) `keyboard_shortcut` field above, which
+        // carries Ctrl+S-style accelerators. Empty / non-mnemonic
+        // labels emit nothing.
+        if let Some(parsed) = self.parsed_mnemonic.as_ref()
+            && let Some(k) = parsed.key_lower
+        {
+            builder
+                .inner_mut()
+                .set_access_key(k.to_ascii_uppercase().to_string());
         }
     }
 
@@ -738,5 +1228,276 @@ impl Widget for MenuItem {
             Some(id) => vec![id],
             None => Vec::new(),
         }
+    }
+
+    /// Opt into reflection so [`MenuList::build`](crate::menu_list::MenuList::build)
+    /// can downcast a pending boxed item and install its radio group
+    /// buffer before the item is added to the arena.
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::menu_list::MenuList;
+    use bastyde_core::accesskit::Role;
+    use bastyde_core::event::Modifiers;
+    use bastyde_core::widget_tree::WidgetTree;
+
+    fn tree() -> WidgetTree {
+        WidgetTree::new().with_theme(bastyde_core::presets::intui::light())
+    }
+
+    fn layout(tree: &mut WidgetTree) {
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+    }
+
+    // --- Role coverage ---
+
+    #[test]
+    fn plain_item_emits_role_menuitem() {
+        let mut t = tree();
+        let list_id = t.add(MenuList::new().item(MenuItem::new(lit!("Save"))));
+        layout(&mut t);
+        let item_id = first_descendant_with_role(&t, list_id, Role::MenuItem);
+        let info = t.accessibility_node(item_id);
+        assert_eq!(info.role(), Role::MenuItem);
+        assert_eq!(info.name(), Some("Save"));
+    }
+
+    #[test]
+    fn bind_checked_emits_role_menuitemcheckbox() {
+        let checked = Signal::new(false);
+        let mut t = tree();
+        let list_id =
+            t.add(MenuList::new().item(MenuItem::new(lit!("Word Wrap")).bind_checked(checked)));
+        layout(&mut t);
+        let item_id = first_descendant_with_role(&t, list_id, Role::MenuItemCheckBox);
+        let info = t.accessibility_node(item_id);
+        assert_eq!(info.role(), Role::MenuItemCheckBox);
+        assert_eq!(info.name(), Some("Word Wrap"));
+        assert!(!info.is_toggled());
+    }
+
+    #[test]
+    fn bind_check_state_emits_role_menuitemcheckbox() {
+        let state = Signal::new(CheckState::Unchecked);
+        let mut t = tree();
+        let list_id = t.add(
+            MenuList::new().item(MenuItem::new(lit!("Show Inspector")).bind_check_state(state)),
+        );
+        layout(&mut t);
+        let item_id = first_descendant_with_role(&t, list_id, Role::MenuItemCheckBox);
+        let info = t.accessibility_node(item_id);
+        assert_eq!(info.role(), Role::MenuItemCheckBox);
+    }
+
+    #[test]
+    fn radio_emits_role_menuitemradio() {
+        let sel = Signal::new(0_usize);
+        let mut t = tree();
+        let list_id =
+            t.add(MenuList::new().item(MenuItem::new(lit!("Light")).radio(0, sel.clone())));
+        layout(&mut t);
+        let item_id = first_descendant_with_role(&t, list_id, Role::MenuItemRadio);
+        let info = t.accessibility_node(item_id);
+        assert_eq!(info.role(), Role::MenuItemRadio);
+        assert!(info.is_toggled());
+    }
+
+    // --- Activation: state mutation ---
+
+    #[test]
+    fn bind_checked_click_flips_signal() {
+        let checked = Signal::new(false);
+        let mut t = tree();
+        let list_id = t.add(
+            MenuList::new().item(MenuItem::new(lit!("Word Wrap")).bind_checked(checked.clone())),
+        );
+        layout(&mut t);
+        let item_id = first_descendant_with_role(&t, list_id, Role::MenuItemCheckBox);
+        t.click(item_id);
+        assert!(checked.get());
+        // Re-add and click again to confirm round-trip — but the menu
+        // already dismissed; rebuild a fresh tree to test the second flip.
+        let mut t2 = tree();
+        let checked2 = Signal::new(true);
+        let list_id2 = t2.add(
+            MenuList::new().item(MenuItem::new(lit!("Word Wrap")).bind_checked(checked2.clone())),
+        );
+        layout(&mut t2);
+        let item_id2 = first_descendant_with_role(&t2, list_id2, Role::MenuItemCheckBox);
+        t2.click(item_id2);
+        assert!(!checked2.get());
+    }
+
+    #[test]
+    fn bind_check_state_click_cycles_two_states_not_three() {
+        // Mirror Checkbox: click toggles Unchecked <-> Checked only.
+        // Indeterminate (external) promotes to Checked on click.
+        let state = Signal::new(CheckState::Unchecked);
+        let mut t = tree();
+        let list_id = t.add(
+            MenuList::new().item(MenuItem::new(lit!("Inspector")).bind_check_state(state.clone())),
+        );
+        layout(&mut t);
+        let item_id = first_descendant_with_role(&t, list_id, Role::MenuItemCheckBox);
+        t.click(item_id);
+        assert_eq!(state.get(), CheckState::Checked);
+
+        let state2 = Signal::new(CheckState::Checked);
+        let mut t2 = tree();
+        let list_id2 = t2.add(
+            MenuList::new().item(MenuItem::new(lit!("Inspector")).bind_check_state(state2.clone())),
+        );
+        layout(&mut t2);
+        let item_id2 = first_descendant_with_role(&t2, list_id2, Role::MenuItemCheckBox);
+        t2.click(item_id2);
+        assert_eq!(state2.get(), CheckState::Unchecked);
+
+        let state3 = Signal::new(CheckState::Indeterminate);
+        let mut t3 = tree();
+        let list_id3 = t3.add(
+            MenuList::new().item(MenuItem::new(lit!("Inspector")).bind_check_state(state3.clone())),
+        );
+        layout(&mut t3);
+        let item_id3 = first_descendant_with_role(&t3, list_id3, Role::MenuItemCheckBox);
+        t3.click(item_id3);
+        // Indeterminate -> Checked (promotion, not cycle to Unchecked).
+        assert_eq!(state3.get(), CheckState::Checked);
+    }
+
+    #[test]
+    fn radio_click_writes_value_to_shared_signal() {
+        let sel = Signal::new(0_usize);
+        let mut t = tree();
+        let _list_id = t.add(
+            MenuList::new()
+                .item(MenuItem::new(lit!("Light")).radio(0, sel.clone()))
+                .item(MenuItem::new(lit!("Dark")).radio(1, sel.clone()))
+                .item(MenuItem::new(lit!("System")).radio(2, sel.clone())),
+        );
+        layout(&mut t);
+        // Find the "Dark" item by label.
+        let dark_id = t
+            .find_by_label("Dark")
+            .expect("Dark menu item should exist");
+        t.click(dark_id);
+        assert_eq!(sel.get(), 1);
+    }
+
+    #[test]
+    fn bind_checked_space_keypress_flips_signal() {
+        let checked = Signal::new(false);
+        let mut t = tree();
+        let list_id = t.add(
+            MenuList::new().item(MenuItem::new(lit!("Word Wrap")).bind_checked(checked.clone())),
+        );
+        layout(&mut t);
+        let item_id = first_descendant_with_role(&t, list_id, Role::MenuItemCheckBox);
+        t.focus(item_id);
+        t.press_key(Key::Space, Modifiers::NONE);
+        assert!(checked.get());
+    }
+
+    #[test]
+    fn radio_external_signal_change_reflects_in_at() {
+        // The bound `Signal<usize>` is the source of truth; clicking is
+        // only one path. An external write must flip every item's
+        // is_toggled() the next time the AT walker reads it.
+        let sel = Signal::new(0_usize);
+        let mut t = tree();
+        let list_id = t.add(
+            MenuList::new()
+                .item(MenuItem::new(lit!("Light")).radio(0, sel.clone()))
+                .item(MenuItem::new(lit!("Dark")).radio(1, sel.clone())),
+        );
+        layout(&mut t);
+        let light_id = t.find_by_label("Light").expect("Light exists");
+        let dark_id = t.find_by_label("Dark").expect("Dark exists");
+
+        assert!(t.accessibility_node(light_id).is_toggled());
+        assert!(!t.accessibility_node(dark_id).is_toggled());
+
+        sel.set(1);
+        let _ = list_id;
+        assert!(!t.accessibility_node(light_id).is_toggled());
+        assert!(t.accessibility_node(dark_id).is_toggled());
+    }
+
+    // --- Reactive role state ---
+
+    #[test]
+    fn bind_checked_at_state_reflects_signal() {
+        let checked = Signal::new(true);
+        let mut t = tree();
+        let list_id = t.add(
+            MenuList::new().item(MenuItem::new(lit!("Word Wrap")).bind_checked(checked.clone())),
+        );
+        layout(&mut t);
+        let item_id = first_descendant_with_role(&t, list_id, Role::MenuItemCheckBox);
+        assert!(t.accessibility_node(item_id).is_toggled());
+        checked.set(false);
+        assert!(!t.accessibility_node(item_id).is_toggled());
+    }
+
+    // --- Mnemonic plumbing ---
+
+    #[test]
+    fn ampersand_stripped_from_at_name() {
+        // The `&` marker is parsed out of the label so screen readers
+        // don't announce "ampersand Save" — they announce "Save".
+        let mut t = tree();
+        let list_id = t.add(MenuList::new().item(MenuItem::new(lit!("&Save"))));
+        layout(&mut t);
+        let item_id = first_descendant_with_role(&t, list_id, Role::MenuItem);
+        let info = t.accessibility_node(item_id);
+        assert_eq!(info.name(), Some("Save"));
+    }
+
+    #[test]
+    fn mnemonic_parsed_from_label_when_builder_returns() {
+        // Build the item, drop it back to inspect — the mnemonic
+        // accessor should reflect the parse.
+        let mut mi = MenuItem::new(lit!("&File"));
+        mi.ensure_mnemonic_parsed();
+        let m = mi.mnemonic().expect("mnemonic exists");
+        assert_eq!(m.stripped, "File");
+        assert_eq!(m.key_lower, Some('f'));
+    }
+
+    // --- Plain item AT smoke ---
+
+    #[test]
+    fn plain_item_with_no_action_is_inert_but_present() {
+        // A Plain item with no `.on_activate_fn` doesn't crash on click.
+        let mut t = tree();
+        let list_id = t.add(MenuList::new().item(MenuItem::new(lit!("Help"))));
+        layout(&mut t);
+        let item_id = first_descendant_with_role(&t, list_id, Role::MenuItem);
+        t.click(item_id);
+    }
+
+    // --- Helpers ---
+
+    fn first_descendant_with_role(t: &WidgetTree, from: WidgetId, role: Role) -> WidgetId {
+        // BFS through the tree starting at `from`.
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(from);
+        while let Some(id) = queue.pop_front() {
+            if t.accessibility_node(id).role() == role {
+                return id;
+            }
+            for child in t.children(id) {
+                queue.push_back(child);
+            }
+        }
+        panic!("no descendant of {from:?} has role {role:?}");
     }
 }

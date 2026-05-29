@@ -974,6 +974,7 @@ dependencies = [
  "open",
  "serde",
  "serde_json",
+ "slotmap",
  "tempfile",
  "thiserror 2.0.18",
  "toml",
@@ -2903,6 +2904,7 @@ name = "menus-and-dropdowns"
 version = "0.5.0"
 dependencies = [
  "bastyde",
+ "bastyde-data",
 ]
 
 [[package]]

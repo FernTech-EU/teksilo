@@ -663,6 +663,80 @@ impl BastydeAppHandler {
         self.wm.reinsert_managed(window_id, current);
     }
 
+    /// Apply a [`MenubarAction`](bastyde_core::window::MenubarAction)
+    /// decision from a window-level menubar dispatcher. Takes the
+    /// managed window aside the same way
+    /// [`Self::dispatch_in_window`] does so the action runs with
+    /// `WindowOps` wired up (focus changes need to repaint, etc.).
+    ///
+    /// - `OpenMenu`: focus the trigger and synthesise a primary click
+    ///   on it. The MenuBarTrigger's `on_tap` handler then runs the
+    ///   normal `MenuContext::open_at` path.
+    /// - `FocusTrigger`: focus the trigger and stop. Matches Win32
+    ///   F10 behaviour (menubar mode, no menu).
+    /// - `Intercept`: do nothing — the key was swallowed.
+    fn apply_menubar_action(
+        &mut self,
+        window_id: WindowId,
+        action: bastyde_core::window::MenubarAction,
+        event_loop: &ActiveEventLoop,
+    ) {
+        use bastyde_core::window::MenubarAction;
+        let Some(mut current) = self.wm.take_managed(window_id) else {
+            return;
+        };
+        let current_id = current.bastyde_id;
+
+        #[cfg(not(target_os = "macos"))]
+        let current_handle = current
+            .platform_window
+            .window()
+            .window_handle()
+            .ok()
+            .map(|h| h.as_raw());
+        let current_arc = Some(current.platform_window.window_arc());
+
+        {
+            let mut ops = crate::window_manager::WindowOpsImpl::new(
+                &mut self.wm,
+                event_loop,
+                current_id,
+                #[cfg(not(target_os = "macos"))]
+                current_handle,
+                current_arc,
+            );
+            match action {
+                MenubarAction::Intercept => {}
+                MenubarAction::FocusTrigger { trigger_id } => {
+                    current.tree.focus_ops(trigger_id, &mut ops);
+                }
+                MenubarAction::OpenMenu { trigger_id } => {
+                    current.tree.focus_ops(trigger_id, &mut ops);
+                    let pointer = current.tree.bounds(trigger_id).center();
+                    current.tree.dispatch_event_with_ops(
+                        WidgetEvent::PointerDown {
+                            position: pointer,
+                            button: bastyde_core::event::PointerButton::Primary,
+                            modifiers: bastyde_core::event::Modifiers::NONE,
+                        },
+                        &mut ops,
+                    );
+                    current.tree.dispatch_event_with_ops(
+                        WidgetEvent::PointerUp {
+                            position: pointer,
+                            button: bastyde_core::event::PointerButton::Primary,
+                            modifiers: bastyde_core::event::Modifiers::NONE,
+                        },
+                        &mut ops,
+                    );
+                }
+            }
+        }
+
+        Self::reconcile_ime(&mut current);
+        self.wm.reinsert_managed(window_id, current);
+    }
+
     /// Bring the winit window's OS-IME state in line with the focused
     /// widget's descriptor. Enablement + purpose are declarative: a focused
     /// text widget carries `Some(ImeContext { purpose })`, everything else
@@ -1312,11 +1386,40 @@ impl BastydeAppHandler {
                 }
             }
             WindowEvent::ModifiersChanged(mods) => {
-                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                // Capture state before the alt_down write so we can
+                // detect the falling edge without re-reading after.
+                let alt_tap_action = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     managed.current_modifiers = mods.state();
                     managed
                         .translation_state
                         .set_modifiers(event_translation::translate_modifiers(mods.state()));
+
+                    let new_alt = mods.state().alt_key();
+                    let prev_alt = managed.state.alt_down().get();
+                    let other_pressed = managed.state.other_key_pressed_during_alt();
+                    // Alt-tap tracking: surface the OS Alt-held edge on
+                    // the window's `alt_down` signal so `MenuLabel` can
+                    // gate mnemonic underlines and `MenuBar` can detect
+                    // bare-Alt-tap on the falling edge. winit reports
+                    // Alt presses through `ModifiersChanged` (not as a
+                    // `Key::Alt` KeyDown, which doesn't exist in our
+                    // Key enum), so this is the only correct hook.
+                    managed.state.set_alt_from_os(new_alt);
+                    // Detect the bare-Alt-tap pattern: true → false
+                    // with no non-Alt KeyDowns during the hold.
+                    if prev_alt && !new_alt && !other_pressed {
+                        managed
+                            .state
+                            .menubar_dispatcher()
+                            .and_then(|d| d.on_alt_tap())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                if let Some(action) = alt_tap_action {
+                    self.apply_menubar_action(window_id, action, event_loop);
                 }
             }
             WindowEvent::KeyboardInput {
@@ -1338,6 +1441,20 @@ impl BastydeAppHandler {
                         .state
                         .set_caps_lock_from_os(managed.caps_lock_active);
                 }
+
+                // Bare-Alt-tap detection: every non-Alt KeyDown while
+                // Alt is held flips the sticky flag, so the falling
+                // edge of `alt_down` only counts as a tap when no
+                // chord was composed. winit fires modifier keys
+                // through `ModifiersChanged`, not `KeyboardInput`, so
+                // every KeyDown we see here is a non-modifier and
+                // qualifies as an "other key" press.
+                if key_event.state == winit::event::ElementState::Pressed
+                    && event_translation::translate_key(&key_event.logical_key).is_some()
+                    && let Some(managed) = self.wm.get_by_winit_mut(window_id)
+                {
+                    managed.state.note_non_alt_keydown_during_alt();
+                }
                 let maybe_evt = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     event_translation::translate_key(&key_event.logical_key).map(|key| {
                         let modifiers =
@@ -1358,7 +1475,31 @@ impl BastydeAppHandler {
                     None
                 };
                 if let Some(evt) = maybe_evt {
-                    self.dispatch_in_window(window_id, evt, event_loop);
+                    // Window-level menubar pre-dispatch (F10 / Alt+letter):
+                    // intercepts BEFORE the normal focus-based path so the
+                    // event reaches the menubar even when focus is in a
+                    // TextInput or some other unrelated widget. Matches
+                    // Win32's `WM_SYSKEYDOWN` → `DefWindowProc` route.
+                    let intercept = if let WidgetEvent::KeyDown { key, modifiers, .. } = &evt {
+                        self.wm
+                            .get_by_winit_mut(window_id)
+                            .and_then(|m| {
+                                m.state.menubar_dispatcher().map(|d| {
+                                    d.try_handle(&bastyde_core::window::MenubarKeyEvent {
+                                        key: *key,
+                                        modifiers: *modifiers,
+                                    })
+                                })
+                            })
+                            .flatten()
+                    } else {
+                        None
+                    };
+                    if let Some(action) = intercept {
+                        self.apply_menubar_action(window_id, action, event_loop);
+                    } else {
+                        self.dispatch_in_window(window_id, evt, event_loop);
+                    }
                 }
                 if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     if let Some(trace) = &mut self.idle_trace {

@@ -148,6 +148,30 @@ impl IconWidget {
         Self::from_path(path, size)
     }
 
+    /// A short horizontal dash at the given size — used as the
+    /// indeterminate-state glyph for tristate menu items (mirrors
+    /// the Windows "mixed-state" convention).
+    pub fn dash(size: f32) -> Self {
+        let s = size;
+        let y_mid = s * 0.5;
+        let half_thickness = s * 0.06; // ~12% of size, matches Checkbox indeterminate bar
+        let mut path = Path::new();
+        path.move_to(Point::new(s * 0.2, y_mid - half_thickness));
+        path.line_to(Point::new(s * 0.8, y_mid - half_thickness));
+        path.line_to(Point::new(s * 0.8, y_mid + half_thickness));
+        path.line_to(Point::new(s * 0.2, y_mid + half_thickness));
+        path.close();
+        Self::from_path(path, size)
+    }
+
+    /// A small filled disc centered in the given size — used as the
+    /// selected-state glyph for radio menu items.
+    pub fn radio_dot(size: f32) -> Self {
+        let s = size;
+        let path = Path::circle(Point::new(s * 0.5, s * 0.5), s * 0.25);
+        Self::from_path(path, size)
+    }
+
     /// A downward-pointing chevron (▼) at the given size.
     pub fn chevron_down(size: f32) -> Self {
         let mut path = Path::new();

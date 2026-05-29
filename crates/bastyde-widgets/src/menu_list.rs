@@ -3,7 +3,10 @@
 //! Provides a themed surface (background, border, corner radius) and
 //! keyboard navigation (ArrowUp/Down, Enter, Escape).
 
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use bastyde_canvas::{Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
@@ -185,7 +188,41 @@ pub struct MenuList {
     /// piece with the trigger. Set by the opener based on the chosen
     /// placement; `None` leaves the full halo intact.
     attached_side: Option<crate::shadow::AttachedSide>,
+    /// Type-ahead buffer reset window. After this much time since the
+    /// last typed character with no match-extension, the buffer is
+    /// cleared on the next keypress. Defaults to 500 ms (Windows
+    /// menubar convention).
+    type_ahead_timeout: Duration,
 }
+
+/// Per-MenuList shared state for the safe-triangle submenu hover gate.
+/// Set by a submenu-trigger MenuItem when its submenu opens, cleared
+/// when the submenu closes. Consulted by sibling MenuItems before
+/// they fire `dismiss_child_overlays` / `show_overlay_after_with_focus`
+/// — if the cursor is currently inside the triangle apex'd at
+/// `anchor` and based at the open submenu's near edge, the sibling's
+/// hover-switch is skipped so the user can travel diagonally to the
+/// submenu without losing focus on the way.
+///
+/// `pub` for cross-crate access (MenuItem reads & writes it through a
+/// shared `Rc`-handle) but in practice only `MenuList`'s scope wires
+/// it up.
+#[derive(Debug, Default)]
+pub(crate) struct SafeTriangleState {
+    /// The currently-open submenu's root content widget id, or
+    /// `None` when no submenu is open. Looked up against the
+    /// per-dispatch overlay-bounds snapshot to recover the screen
+    /// rect.
+    pub submenu_content_id: Option<WidgetId>,
+    /// Pointer position at the moment the submenu opened — the
+    /// triangle apex. `None` when no submenu is open.
+    pub anchor: Option<bastyde_canvas::Point>,
+}
+
+/// Shared handle installed on every MenuItem that participates in
+/// safe-triangle gating. The same `Rc` is held by the MenuList and
+/// by each child MenuItem; updates flow both directions.
+pub(crate) type SharedSafeTriangleState = Rc<RefCell<SafeTriangleState>>;
 
 impl MenuList {
     pub fn new() -> Self {
@@ -196,7 +233,17 @@ impl MenuList {
             submenu_flags: Vec::new(),
             max_visible_items: None,
             attached_side: None,
+            type_ahead_timeout: Duration::from_millis(500),
         }
+    }
+
+    /// Override the type-ahead buffer reset window. Defaults to 500ms
+    /// to match Windows' menubar convention. Tests use
+    /// `Duration::ZERO` to force every keypress to start a fresh
+    /// search.
+    pub fn type_ahead_timeout(mut self, d: Duration) -> Self {
+        self.type_ahead_timeout = d;
+        self
     }
 
     /// Suppress drop-shadow drawing on the side that visually merges
@@ -282,14 +329,99 @@ impl Widget for MenuList {
         self.item_widget_ids.clear();
         let mut item_counter = 0_usize;
 
+        // Radio-group buffers keyed by `Signal<usize>` identity. Linear
+        // search is fine — a single menu rarely carries more than a
+        // handful of radio groups. The same shared `Rc<RefCell<Vec<…>>>`
+        // is installed on every member via
+        // [`MenuItem::set_radio_group_ids`](crate::menu_item::MenuItem::set_radio_group_ids)
+        // BEFORE the items reach the arena; the buffer's contents are
+        // filled in below as each member id is allocated. By the time
+        // the AT walker reads `MenuItem::accessibility`, all sibling
+        // ids are in place.
+        let mut radio_buffers: Vec<(Signal<usize>, Rc<RefCell<Vec<WidgetId>>>)> = Vec::new();
+        // Tracks which radio buffer (if any) each newly-added item
+        // belongs to, so we can push the item's id once known.
+        let mut pending_radio_pushes: Vec<(usize, Rc<RefCell<Vec<WidgetId>>>)> = Vec::new();
+
+        // Keyboard-navigation caches:
+        // * `resolved_labels[i]` is the ASCII-lowercased stripped
+        //   label of the item at item-array position `i`. Used by
+        //   the type-ahead branch in the keyboard handler.
+        // * `mnemonic_table[c]` maps a lowercase mnemonic char to
+        //   item-array position. Used by the in-menu mnemonic
+        //   branch ("press the underlined letter to activate").
+        // Both are sized to `item_widget_ids.len()`; separators
+        // contribute nothing.
+        let mut resolved_labels: Vec<String> = Vec::new();
+        let mut mnemonic_table: HashMap<char, usize> = HashMap::new();
+
+        // Safe-triangle shared state. Installed on every MenuItem in
+        // this list so a submenu trigger can stamp the anchor and
+        // sibling items can read it from their hover gate.
+        let safe_triangle: SharedSafeTriangleState =
+            Rc::new(RefCell::new(SafeTriangleState::default()));
+
         for entry in self.entries.drain(..) {
             match entry {
                 MenuEntry::Item(pending) => {
-                    let item_id = match pending {
-                        PendingChild::Id(id) => id,
-                        PendingChild::Deferred(w) => ctx.add_boxed(w),
+                    let (item_id, radio_buf, item_label, item_mnemonic) = match pending {
+                        PendingChild::Id(id) => (id, None, None, None),
+                        PendingChild::Deferred(mut w) => {
+                            // Single downcast pass: read the radio
+                            // selection signal AND the parsed mnemonic
+                            // AND install the safe-triangle shared
+                            // state, before moving the box into the
+                            // arena.
+                            let (radio_buf, item_label, item_mnemonic) = w
+                                .as_any_mut()
+                                .and_then(|a| a.downcast_mut::<crate::menu_item::MenuItem>())
+                                .map(|mi| {
+                                    // Ensure the label has been parsed
+                                    // for `&`-markers BEFORE the item
+                                    // builds — so `mnemonic()` returns
+                                    // a value even pre-build.
+                                    mi.ensure_mnemonic_parsed();
+                                    let label =
+                                        mi.mnemonic().map(|p| p.stripped.to_ascii_lowercase());
+                                    let mnemonic = mi.mnemonic().and_then(|p| p.key_lower);
+                                    let radio = mi.radio_selection_handle().map(|(_, sig)| {
+                                        let buf = if let Some((_, b)) = radio_buffers
+                                            .iter()
+                                            .find(|(s, _)| Signal::same(s, &sig))
+                                        {
+                                            b.clone()
+                                        } else {
+                                            let b = Rc::new(RefCell::new(Vec::new()));
+                                            radio_buffers.push((sig.clone(), b.clone()));
+                                            b
+                                        };
+                                        mi.set_radio_group_ids(buf.clone());
+                                        buf
+                                    });
+                                    mi.set_safe_triangle_state(safe_triangle.clone());
+                                    (radio, label, mnemonic)
+                                })
+                                .unwrap_or((None, None, None));
+                            (ctx.add_boxed(w), radio_buf, item_label, item_mnemonic)
+                        }
                     };
                     self.item_widget_ids.push(item_id);
+                    let item_idx = self.item_widget_ids.len() - 1;
+                    if let Some(buf) = radio_buf {
+                        pending_radio_pushes.push((item_idx, buf));
+                    }
+                    resolved_labels.push(item_label.unwrap_or_default());
+                    if let Some(c) = item_mnemonic {
+                        // First match wins on collision; debug_assert
+                        // catches the bug.
+                        if let Some(prev) = mnemonic_table.insert(c, item_idx) {
+                            debug_assert!(
+                                false,
+                                "MenuList: duplicate item mnemonic {:?} (items {} and {})",
+                                c, prev, item_idx
+                            );
+                        }
+                    }
 
                     // Wrap in a highlight container driven by focused_index
                     let wrapper = KeyboardHighlightWrapper {
@@ -305,6 +437,12 @@ impl Widget for MenuList {
                     vstack = vstack.child(MenuSeparator);
                 }
             }
+        }
+
+        // Fill each radio group's id list now that every item has a
+        // WidgetId. Each id is pushed exactly once.
+        for (item_idx, buf) in pending_radio_pushes {
+            buf.borrow_mut().push(self.item_widget_ids[item_idx]);
         }
 
         let vstack_id = ctx.add(vstack);
@@ -357,14 +495,21 @@ impl Widget for MenuList {
         let item_count = self.item_widget_ids.len();
         let item_ids = self.item_widget_ids.clone();
         let sub_flags = self.submenu_flags.clone();
+        // Type-ahead state. Shared across keypresses via `Rc` so the
+        // `Fn` closure can mutate the buffer without taking `&mut self`.
+        let type_ahead_buffer: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
+        let type_ahead_last_input: Rc<Cell<Option<Instant>>> = Rc::new(Cell::new(None));
+        let type_ahead_timeout = self.type_ahead_timeout;
+        let resolved_labels = Rc::new(resolved_labels);
+        let mnemonic_table = Rc::new(mnemonic_table);
         let handler_set = HandlerSet::new()
             .on_key(
                 move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
-                    match event {
-                        WidgetEvent::KeyDown {
-                            key: Key::ArrowDown,
-                            ..
-                        } => {
+                    let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
+                        return EventResponse::Ignored;
+                    };
+                    match key {
+                        Key::ArrowDown => {
                             if item_count == 0 {
                                 return EventResponse::Ignored;
                             }
@@ -377,9 +522,7 @@ impl Widget for MenuList {
                             focused_index.set(Some(next));
                             EventResponse::Handled
                         }
-                        WidgetEvent::KeyDown {
-                            key: Key::ArrowUp, ..
-                        } => {
+                        Key::ArrowUp => {
                             if item_count == 0 {
                                 return EventResponse::Ignored;
                             }
@@ -392,10 +535,21 @@ impl Widget for MenuList {
                             focused_index.set(Some(next));
                             EventResponse::Handled
                         }
-                        WidgetEvent::KeyDown {
-                            key: Key::Enter | Key::Space,
-                            ..
-                        } => {
+                        Key::Home => {
+                            if item_count == 0 {
+                                return EventResponse::Ignored;
+                            }
+                            focused_index.set(Some(0));
+                            EventResponse::Handled
+                        }
+                        Key::End => {
+                            if item_count == 0 {
+                                return EventResponse::Ignored;
+                            }
+                            focused_index.set(Some(item_count - 1));
+                            EventResponse::Handled
+                        }
+                        Key::Enter | Key::Space => {
                             // Activate the focused item via synthetic click.
                             if let Some(idx) = focused_index.get()
                                 && idx < item_ids.len()
@@ -405,10 +559,7 @@ impl Widget for MenuList {
                             }
                             EventResponse::Ignored
                         }
-                        WidgetEvent::KeyDown {
-                            key: Key::ArrowRight,
-                            ..
-                        } => {
+                        Key::ArrowRight => {
                             // Only open submenus; for non-submenu items, let it bubble
                             // to MenuOverlayHost which navigates to the next bar menu.
                             if let Some(idx) = focused_index.get()
@@ -420,15 +571,78 @@ impl Widget for MenuList {
                             }
                             EventResponse::Ignored
                         }
-                        WidgetEvent::KeyDown {
-                            key: Key::ArrowLeft | Key::Escape,
-                            ..
-                        } => {
+                        Key::ArrowLeft | Key::Escape => {
                             // Let it bubble to MenuOverlayHost (for bar navigation)
                             // or the tree-level Escape handler (for overlay dismissal).
                             EventResponse::Ignored
                         }
-                        _ => EventResponse::Ignored,
+                        _ => {
+                            // Letter handling: in-menu mnemonic
+                            // activation (bare letter) wins over
+                            // type-ahead, which wins over ignored.
+                            // We accept Shift here because Windows /
+                            // GNOME convention activates the
+                            // mnemonic regardless of Shift state
+                            // (otherwise Shift-Lock users couldn't
+                            // mnemonic-activate items at all). Ctrl
+                            // / Alt / Cmd chords fall through to the
+                            // global Shortcut/Action pipeline.
+                            if modifiers.ctrl() || modifiers.alt() || modifiers.super_key() {
+                                return EventResponse::Ignored;
+                            }
+                            let ch = match key {
+                                Key::Character(c) => Some(c.to_ascii_lowercase()),
+                                k => k.to_char().map(|c| c.to_ascii_lowercase()),
+                            };
+                            let Some(ch) = ch else {
+                                return EventResponse::Ignored;
+                            };
+                            if item_count == 0 {
+                                return EventResponse::Ignored;
+                            }
+
+                            // 1) Mnemonic match — explicit accelerator,
+                            //    activates the item.
+                            if let Some(&idx) = mnemonic_table.get(&ch)
+                                && idx < item_ids.len()
+                            {
+                                ctx.synthetic_click(item_ids[idx]);
+                                return EventResponse::Handled;
+                            }
+
+                            // 2) Type-ahead — incremental prefix match
+                            //    against the resolved labels.
+                            let now = Instant::now();
+                            let mut buf = type_ahead_buffer.borrow_mut();
+                            if let Some(prev) = type_ahead_last_input.get() {
+                                if now.duration_since(prev) > type_ahead_timeout {
+                                    buf.clear();
+                                }
+                            }
+                            buf.push(ch);
+                            type_ahead_last_input.set(Some(now));
+
+                            let start = focused_index.get().unwrap_or(0);
+                            // Search wrapping from start+1, then start
+                            // itself, so a single repeated letter
+                            // cycles through matching items.
+                            for offset in 1..=item_count {
+                                let i = (start + offset) % item_count;
+                                if let Some(label) = resolved_labels.get(i)
+                                    && label.starts_with(buf.as_str())
+                                {
+                                    focused_index.set(Some(i));
+                                    return EventResponse::Handled;
+                                }
+                            }
+                            if let Some(label) = resolved_labels.get(start)
+                                && label.starts_with(buf.as_str())
+                            {
+                                focused_index.set(Some(start));
+                                return EventResponse::Handled;
+                            }
+                            EventResponse::Ignored
+                        }
                     }
                 },
             )
@@ -559,5 +773,308 @@ mod tests {
         // 2 items × 24 = 48 px + padding ≈ 56 px. Much less than the
         // cap of 10 × 24 = 240 px.
         assert!(h < 100.0, "small menu should size to content, got {}", h);
+    }
+
+    // --- Keyboard activation: mnemonic, type-ahead, Home/End ---
+
+    use bastyde_core::event::{Key, Modifiers};
+    use bastyde_core::signal::Signal;
+    use std::cell::Cell as StdCell;
+    use std::rc::Rc as StdRc;
+
+    /// Build a menu list with an `on_activate_fn` for each entry that
+    /// flips the matching slot in `fired`. Returns the list's
+    /// `WidgetId` so the test can focus it and dispatch keys.
+    fn menu_with_activation_probe(
+        tree: &mut WidgetTree,
+        labels: &[&str],
+        fired: StdRc<StdCell<Option<usize>>>,
+    ) -> WidgetId {
+        let mut menu = MenuList::new();
+        for (i, label) in labels.iter().enumerate() {
+            let fired_for_this = fired.clone();
+            menu = menu.item(
+                MenuItem::new(lit!(*label)).on_activate_fn(move |_| fired_for_this.set(Some(i))),
+            );
+        }
+        tree.add(menu)
+    }
+
+    #[test]
+    fn mnemonic_letter_activates_matching_item() {
+        // Bare letter that matches an item's `&`-marker activates it
+        // immediately (no Enter required).
+        let fired = StdRc::new(StdCell::new(None));
+        let mut tree = light_tree();
+        let menu_id =
+            menu_with_activation_probe(&mut tree, &["&Save", "&Open", "&Quit"], fired.clone());
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+        tree.press_key(Key::O, Modifiers::NONE);
+        assert_eq!(fired.get(), Some(1), "Alt+O should activate 'Open'");
+    }
+
+    #[test]
+    fn mnemonic_letter_is_case_insensitive() {
+        let fired = StdRc::new(StdCell::new(None));
+        let mut tree = light_tree();
+        let menu_id = menu_with_activation_probe(&mut tree, &["&Save", "&Quit"], fired.clone());
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+        // The `S` Key variant produces lowercase 's' via `to_char`,
+        // matching the mnemonic 's' regardless of case.
+        tree.press_key(Key::S, Modifiers::NONE);
+        assert_eq!(fired.get(), Some(0));
+    }
+
+    #[test]
+    fn mnemonic_does_not_fire_with_ctrl_modifier() {
+        // Ctrl+S is an accelerator chord, not a menu mnemonic. The
+        // dispatcher should leave it alone so the Shortcut/Action
+        // pipeline can handle it instead.
+        let fired = StdRc::new(StdCell::new(None));
+        let mut tree = light_tree();
+        let menu_id = menu_with_activation_probe(&mut tree, &["&Save"], fired.clone());
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+        tree.press_key(Key::S, Modifiers::CTRL);
+        assert_eq!(fired.get(), None);
+    }
+
+    #[test]
+    fn mnemonic_fires_with_shift_modifier() {
+        // Windows / GNOME convention: bare letter activation works
+        // regardless of the Shift state (Shift-Lock users would
+        // otherwise be locked out of mnemonic activation). Only
+        // Ctrl / Alt / Cmd disqualify the keystroke from in-menu
+        // activation.
+        let fired = StdRc::new(StdCell::new(None));
+        let mut tree = light_tree();
+        let menu_id = menu_with_activation_probe(&mut tree, &["&Save", "&Quit"], fired.clone());
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+        tree.press_key(Key::S, Modifiers::SHIFT);
+        assert_eq!(fired.get(), Some(0));
+    }
+
+    #[test]
+    fn type_ahead_fires_with_shift_modifier() {
+        // Same Shift-tolerance applies to type-ahead navigation.
+        let fired = StdRc::new(StdCell::new(None));
+        let mut tree = light_tree();
+        let menu_id =
+            menu_with_activation_probe(&mut tree, &["Save", "Open", "Quit"], fired.clone());
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+        tree.press_key(Key::O, Modifiers::SHIFT);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(fired.get(), Some(1));
+    }
+
+    #[test]
+    fn type_ahead_first_letter_focuses_and_enter_activates() {
+        // No `&`-markers — letters drive type-ahead, not mnemonics.
+        // Pressing 'o' focuses the matching item; Enter activates it.
+        let fired = StdRc::new(StdCell::new(None));
+        let mut tree = light_tree();
+        let menu_id =
+            menu_with_activation_probe(&mut tree, &["Save", "Open", "Quit"], fired.clone());
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+        tree.press_key(Key::O, Modifiers::NONE);
+        // Type-ahead only focuses; nothing fired yet.
+        assert_eq!(fired.get(), None);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(fired.get(), Some(1));
+    }
+
+    #[test]
+    fn type_ahead_extends_prefix_within_timeout() {
+        // Typing 'q' then 'u' selects "Quit" (only item starting with "qu").
+        let fired = StdRc::new(StdCell::new(None));
+        let mut tree = light_tree();
+        let menu_id = menu_with_activation_probe(
+            &mut tree,
+            &["Save", "Open", "Quack", "Quit"],
+            fired.clone(),
+        );
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+        tree.press_key(Key::Q, Modifiers::NONE);
+        // 'q' alone matches "Quack" first (start+1 wrap → Save..Quack).
+        tree.press_key(Key::U, Modifiers::NONE);
+        // 'qu' still matches "Quack" — but the search starts from the
+        // currently focused item ("Quack"), and from current+1 wraps
+        // around to "Quit", which also starts with "qu". So Quit wins.
+        tree.press_key(Key::I, Modifiers::NONE);
+        // 'qui' — only "Quit" matches.
+        tree.press_key(Key::T, Modifiers::NONE);
+        // 'quit' — still "Quit".
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(fired.get(), Some(3));
+    }
+
+    #[test]
+    fn type_ahead_zero_timeout_treats_each_key_independently() {
+        // With `type_ahead_timeout(Duration::ZERO)`, every keypress
+        // clears the buffer first, so the search always restarts from
+        // a single-character prefix.
+        let fired = StdRc::new(StdCell::new(None));
+        let mut tree = light_tree();
+        let menu_id = {
+            let mut menu = MenuList::new().type_ahead_timeout(Duration::ZERO);
+            for (i, label) in ["Save", "Open", "Quit"].iter().enumerate() {
+                let fired_for_this = fired.clone();
+                menu = menu.item(
+                    MenuItem::new(lit!(*label))
+                        .on_activate_fn(move |_| fired_for_this.set(Some(i))),
+                );
+            }
+            tree.add(menu)
+        };
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+        tree.press_key(Key::S, Modifiers::NONE);
+        tree.press_key(Key::Q, Modifiers::NONE);
+        // 'q' wins the most recent search; Enter activates Quit.
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(fired.get(), Some(2));
+    }
+
+    #[test]
+    fn home_focuses_first_item() {
+        let fired = StdRc::new(StdCell::new(None));
+        let mut tree = light_tree();
+        let menu_id =
+            menu_with_activation_probe(&mut tree, &["Save", "Open", "Quit"], fired.clone());
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+        // Navigate down twice to land on index 2, then Home → index 0.
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        tree.press_key(Key::Home, Modifiers::NONE);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(fired.get(), Some(0));
+    }
+
+    #[test]
+    fn end_focuses_last_item() {
+        let fired = StdRc::new(StdCell::new(None));
+        let mut tree = light_tree();
+        let menu_id =
+            menu_with_activation_probe(&mut tree, &["Save", "Open", "Quit"], fired.clone());
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+        tree.press_key(Key::End, Modifiers::NONE);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(fired.get(), Some(2));
+    }
+
+    #[test]
+    fn arrow_down_wraps_past_last() {
+        let fired = StdRc::new(StdCell::new(None));
+        let mut tree = light_tree();
+        let menu_id = menu_with_activation_probe(&mut tree, &["A", "B", "C"], fired.clone());
+        tree.layout(SizeProposal::with_width(200.0));
+        tree.focus(menu_id);
+        for _ in 0..4 {
+            tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        }
+        // After 4 downs from "no focus", focus lands on index 0 (wrap).
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(fired.get(), Some(0));
+    }
+
+    #[test]
+    fn arrow_up_wraps_to_last() {
+        let fired = StdRc::new(StdCell::new(None));
+        let mut tree = light_tree();
+        let menu_id = menu_with_activation_probe(&mut tree, &["A", "B", "C"], fired.clone());
+        tree.layout(SizeProposal::with_width(200.0));
+        tree.focus(menu_id);
+        tree.press_key(Key::ArrowUp, Modifiers::NONE);
+        // From "no focus" (treated as index 0), Up wraps to last (index 2).
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(fired.get(), Some(2));
+    }
+
+    #[test]
+    fn type_ahead_no_match_does_not_change_focus() {
+        // Typing a letter that doesn't prefix any label should leave
+        // focus untouched — Enter then activates whatever was focused
+        // before (or nothing).
+        let fired = StdRc::new(StdCell::new(None));
+        let mut tree = light_tree();
+        let menu_id = menu_with_activation_probe(&mut tree, &["Save", "Open"], fired.clone());
+        tree.layout(SizeProposal::with_width(200.0));
+        tree.focus(menu_id);
+        // Focus the first item explicitly.
+        tree.press_key(Key::Home, Modifiers::NONE);
+        // Type a no-match letter.
+        tree.press_key(Key::Z, Modifiers::NONE);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        // Save (index 0) should still fire.
+        assert_eq!(fired.get(), Some(0));
+    }
+
+    #[test]
+    fn mnemonic_beats_type_ahead_when_both_match() {
+        // If a label like "&Open" is set up, pressing 'o' fires the
+        // mnemonic directly, even though type-ahead would also match
+        // "Open".
+        let fired = StdRc::new(StdCell::new(None));
+        let mut tree = light_tree();
+        let menu_id = menu_with_activation_probe(&mut tree, &["&Save", "&Open"], fired.clone());
+        tree.layout(SizeProposal::with_width(200.0));
+        tree.focus(menu_id);
+        tree.press_key(Key::O, Modifiers::NONE);
+        // Mnemonic fires immediately — no Enter needed.
+        assert_eq!(fired.get(), Some(1));
+    }
+
+    #[test]
+    fn empty_menu_ignores_letters() {
+        let mut tree = light_tree();
+        let menu_id = tree.add(MenuList::new());
+        tree.layout(SizeProposal::with_width(200.0));
+        tree.focus(menu_id);
+        // Should not panic and not handle the event.
+        tree.press_key(Key::A, Modifiers::NONE);
+        tree.press_key(Key::Home, Modifiers::NONE);
+        tree.press_key(Key::End, Modifiers::NONE);
+    }
+
+    #[test]
+    fn separator_does_not_interfere_with_navigation() {
+        let fired = StdRc::new(StdCell::new(None));
+        let mut tree = light_tree();
+        let menu_id = {
+            let mut menu = MenuList::new();
+            for (i, label) in ["Save", "Open", "Quit"].iter().enumerate() {
+                let fired_for_this = fired.clone();
+                menu = menu.item(
+                    MenuItem::new(lit!(*label))
+                        .on_activate_fn(move |_| fired_for_this.set(Some(i))),
+                );
+                if i == 0 {
+                    menu = menu.separator();
+                }
+            }
+            tree.add(menu)
+        };
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+        // Type-ahead should still find "Open" — separator skipped.
+        tree.press_key(Key::O, Modifiers::NONE);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(fired.get(), Some(1));
+    }
+
+    // Silence the unused-variable warning on the unused `list_id`
+    // binding inside `menu_label`-style tests above, since each test
+    // uses its locals.
+    #[allow(dead_code)]
+    fn _ignore_unused() {
+        let _: Option<Signal<bool>> = None;
     }
 }

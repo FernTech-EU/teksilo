@@ -14,7 +14,15 @@ pub fn refs() -> LocalizedString {
 }
 
 fn make_menu_bar() -> MenuBar {
+    // `no_dispatcher_install()` skips the per-window keyboard-dispatcher
+    // registration — the catalog's host window already mounts a
+    // primary MenuBar at the top of the chrome (File / Help / Quit /
+    // Documentation / About), and the slot is single-occupancy. This
+    // MenuBar is a visual showcase of the widget; mouse + arrow-key
+    // navigation still work, only F10 / Alt+letter routing is left
+    // to the primary one above.
     MenuBar::new()
+        .no_dispatcher_install()
         .menu(tr!(mnu_file()), || {
             Box::new(
                 MenuList::new()
@@ -37,9 +45,18 @@ fn make_menu_bar() -> MenuBar {
                     .item(MenuItem::submenu(tr!(mnu_alignment()), || {
                         Box::new(
                             MenuList::new()
-                                .item(MenuItem::new(tr!(mnu_align_left())).on_activate_fn(|_| println!("AlignLeft")))
-                                .item(MenuItem::new(tr!(mnu_align_center())).on_activate_fn(|_| println!("AlignCenter")))
-                                .item(MenuItem::new(tr!(mnu_align_right())).on_activate_fn(|_| println!("AlignRight"))),
+                                .item(
+                                    MenuItem::new(tr!(mnu_align_left()))
+                                        .on_activate_fn(|_| println!("AlignLeft")),
+                                )
+                                .item(
+                                    MenuItem::new(tr!(mnu_align_center()))
+                                        .on_activate_fn(|_| println!("AlignCenter")),
+                                )
+                                .item(
+                                    MenuItem::new(tr!(mnu_align_right()))
+                                        .on_activate_fn(|_| println!("AlignRight")),
+                                ),
                         )
                     })),
             )
