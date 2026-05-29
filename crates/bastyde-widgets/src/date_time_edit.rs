@@ -85,6 +85,7 @@ use crate::primitives::{
 use crate::time_edit::{
     SecondsMode, TimeFormat, build_time_validator, clamp_time, time_pattern_for,
 };
+use bastyde_i18n::LocalizedString;
 
 type OnValueChanged = Rc<dyn Fn(Option<DateTime>, &mut EventContext)>;
 
@@ -115,11 +116,11 @@ pub struct DateTimeEdit {
     /// (default), a thin painted middle-dot glyph is used. When set,
     /// the string is rendered as styled secondary text.
     separator: Option<String>,
-    placeholder: bastyde_i18n::LocalizedString,
+    placeholder: LocalizedString,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     read_only: bool,
-    label: Option<bastyde_i18n::LocalizedString>,
+    label: Option<LocalizedString>,
     validation_behavior: ValidationBehavior,
     /// How the trailing (time) half claims horizontal space. The
     /// leading (date) half always sizes to its mask-derived natural
@@ -168,7 +169,7 @@ impl DateTimeEdit {
             first_day_of_week: None,
             show_calendar_button: true,
             separator: None,
-            placeholder: bastyde_i18n::LocalizedString::literal(String::new()),
+            placeholder: LocalizedString::literal(String::new()),
             initial_enabled: true,
             read_only: false,
             label: None,
@@ -249,8 +250,8 @@ impl DateTimeEdit {
         self
     }
 
-    pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         self.placeholder = ls;
         self
     }
@@ -266,8 +267,8 @@ impl DateTimeEdit {
         self
     }
 
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }
@@ -910,7 +911,7 @@ impl DateTimeEdit {
             text_signal.clone(),
             mask_string,
             validator,
-            bastyde_i18n::LocalizedString::literal(String::new()),
+            LocalizedString::literal(String::new()),
             commit,
             "date-time-edit-time-name",
             Role::TimeInput,
@@ -936,7 +937,7 @@ impl DateTimeEdit {
         text_signal: Signal<String>,
         mask_string: &str,
         validator: crate::primitives::text_input_field::ValidatorFn,
-        placeholder: bastyde_i18n::LocalizedString,
+        placeholder: LocalizedString,
         commit: Rc<dyn Fn(&mut EventContext)>,
         a11y_label_key: &str,
         a11y_role: Role,

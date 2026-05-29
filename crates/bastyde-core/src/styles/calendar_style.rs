@@ -58,7 +58,7 @@ pub struct CalendarDayConfig {
     /// `TextWidget` itself so it can drive the text colour from
     /// `fill` (Selected → `OnAccent`, otherwise `Primary`). Accepts
     /// either a plain `String` or a `LocalizedString` from `tr!(…)` —
-    /// `bastyde_i18n::LocalizedString` implements `From<…> for String`,
+    /// `LocalizedString` implements `From<…> for String`,
     /// so `.into()` covers both shapes. Day numbers are pure digits
     /// in IntUI and pass through as untranslated literals, but a
     /// custom recipe is free to localize.

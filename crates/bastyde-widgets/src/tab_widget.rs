@@ -83,6 +83,7 @@ pub use bar::{
     DEFAULT_BAR_SLOT_SPACING, DEFAULT_MAX_TAB_WIDTH, DEFAULT_MIN_TAB_WIDTH,
     DEFAULT_PINNED_TAB_WIDTH, DEFAULT_TAB_SPACING, TabBar,
 };
+use bastyde_i18n::LocalizedString;
 pub use delegate::{ContextMenuFactory, TabBarOrientation, TabDelegate, TabSizing};
 pub use handle::{STATIC_KIND, TabHandle};
 pub use id::TabId;
@@ -371,11 +372,7 @@ impl TabWidget {
     /// content)`. `label` accepts `tr!(...)` (translated) or `lit!(...)`.
     /// This is the method the `bati!` `tab:` slot lowers to
     /// (`tab: lit!("Overview"), Card { … }`).
-    pub fn tab(
-        self,
-        label: impl Into<bastyde_i18n::LocalizedString>,
-        content: impl Widget + 'static,
-    ) -> Self {
+    pub fn tab(self, label: impl Into<LocalizedString>, content: impl Widget + 'static) -> Self {
         self.static_tab(TabInfo::new().title(label), content)
     }
 
@@ -383,7 +380,7 @@ impl TabWidget {
     /// `static_tab_id(TabInfo::new().title(label), id)`. This is what the
     /// `bati!` `tab:` slot lowers to when its content is an id binding
     /// (`#{…}` / `name = Element`).
-    pub fn tab_id(self, label: impl Into<bastyde_i18n::LocalizedString>, id: WidgetId) -> Self {
+    pub fn tab_id(self, label: impl Into<LocalizedString>, id: WidgetId) -> Self {
         self.static_tab_id(TabInfo::new().title(label), id)
     }
 

@@ -20,6 +20,7 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_data::ListModel;
 
 use crate::primitives::VStack;
+use bastyde_i18n::LocalizedString;
 
 /// A non-virtualized dynamic collection that creates one child widget
 /// per item in a `ListModel<T>`.
@@ -86,8 +87,8 @@ impl<T: 'static> Repeater<T> {
     /// Set an accessible name for the Repeater. Only takes effect
     /// alongside [`a11y_role`](Self::a11y_role); a hidden Repeater
     /// has no node to attach the name to.
-    pub fn a11y_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn a11y_label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.a11y_label = Some(ls.resolve_now());
         self
     }

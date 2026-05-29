@@ -22,10 +22,11 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{Color, TextRole, TextStyle};
 
 use crate::primitives::{Divider, Expand, HStack, TextWidget};
+use bastyde_i18n::LocalizedString;
 
 /// A labelled section header with a trailing rule line.
 pub struct GroupHeader {
-    label: bastyde_i18n::LocalizedString,
+    label: LocalizedString,
     /// Optional text-style override for the label. Defaults to
     /// `theme.typography.body` — IntelliJ/Jewel group headers render at
     /// normal body size, not as a smaller caption.
@@ -40,8 +41,8 @@ pub struct GroupHeader {
 }
 
 impl GroupHeader {
-    pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn new(label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         Self {
             label: ls,
             style: None,

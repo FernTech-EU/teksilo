@@ -56,6 +56,7 @@ use bastyde_tokens::{CornerRadius, TextRole, TextStyleRole};
 
 use crate::primitives::TextWidget;
 use crate::shadow::paint_layered_shadow;
+use bastyde_i18n::LocalizedString;
 
 /// Tooltip-specific wrapper around [`paint_layered_shadow`] — pulls the
 /// xs outer + inner shadow tokens and the per-component
@@ -131,8 +132,8 @@ impl TooltipWidget {
     /// Construct a tooltip from a localized string. With an `I18nManager`
     /// installed the body stays locale-reactive (re-resolves on locale
     /// change); otherwise it's a static snapshot.
-    pub fn new(text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn new(text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         Self {
             text: Prop::from(ls),
             style_override: None,

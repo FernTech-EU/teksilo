@@ -39,13 +39,14 @@ use crate::menu_item::MenuLabel;
 use crate::menu_item::ParsedMnemonic;
 use crate::menu_item::parse_mnemonic;
 use crate::primitives::{HStack, Padding, RectWidget, Spacer, ZStack};
+use bastyde_i18n::LocalizedString;
 
 // ---------------------------------------------------------------------------
 // MenuBarEntry — pending menu definition
 // ---------------------------------------------------------------------------
 
 struct MenuBarEntry {
-    label: bastyde_i18n::LocalizedString,
+    label: LocalizedString,
     factory: Box<dyn Fn() -> Box<dyn Widget>>,
 }
 
@@ -103,10 +104,10 @@ impl MenuBar {
 
     pub fn menu(
         mut self,
-        label: impl Into<bastyde_i18n::LocalizedString>,
+        label: impl Into<LocalizedString>,
         factory: impl Fn() -> Box<dyn Widget> + 'static,
     ) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+        let ls: LocalizedString = label.into();
         self.entries.push(MenuBarEntry {
             label: ls,
             factory: Box::new(factory),
@@ -223,7 +224,7 @@ impl std::fmt::Debug for MenuBar {
 
 #[derive(Debug)]
 struct MenuBarTrigger {
-    label: bastyde_i18n::LocalizedString,
+    label: LocalizedString,
     /// Mnemonic-stripped label name used for `AccessNodeBuilder::set_name`.
     /// Captured from the parsed label so screen readers announce "File",
     /// not "ampersand-File". Set in `build()`.

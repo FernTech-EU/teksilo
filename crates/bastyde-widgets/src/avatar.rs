@@ -53,6 +53,7 @@ use crate::styles::recipe_avatar_style::{
     AVATAR_FONT_RATIO_1CHAR, AVATAR_FONT_RATIO_2CHAR, AVATAR_ROUNDED_RADIUS_RATIO,
     auto_contrast_text, avatar_pixel_size, hash_pick_palette_color,
 };
+use bastyde_i18n::LocalizedString;
 
 // ─── The widget ────────────────────────────────────────────────────────────
 
@@ -156,8 +157,8 @@ struct RawImage {
 impl Avatar {
     /// Build an avatar from explicit initials. Uppercases and truncates
     /// to ≤ 2 chars. Empty input yields `"?"`.
-    pub fn with_initials(initials: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = initials.into();
+    pub fn with_initials(initials: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = initials.into();
         let raw = ls.resolve_now();
         Self::from_initials(normalize_initials(&raw))
     }
@@ -165,8 +166,8 @@ impl Avatar {
     /// Build an avatar from a name; initials are derived
     /// (`"Jane Doe" → "JD"`, `"jane.doe@x.com" → "JD"`,
     /// `"Cher" → "C"`, `"" → "?"`).
-    pub fn with_name(name: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = name.into();
+    pub fn with_name(name: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = name.into();
         let raw = ls.resolve_now();
         let initials = derive_initials(&raw);
         let mut a = Self::from_initials(initials);
@@ -251,8 +252,8 @@ impl Avatar {
     /// `image_visible(false)` or fails to register. Defaults to the
     /// derived initials if `with_image` was paired with `with_name`,
     /// otherwise `"?"`.
-    pub fn fallback_initials(mut self, initials: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = initials.into();
+    pub fn fallback_initials(mut self, initials: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = initials.into();
         let raw = ls.resolve_now();
         self.initials = normalize_initials(&raw);
         self
@@ -317,8 +318,8 @@ impl Avatar {
     /// Override the accessible name. When unset:
     /// * image-mode → `alt` if set, else the initials, else "Avatar"
     /// * initials-mode → the initials.
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls.resolve_now());
         self
     }
@@ -326,8 +327,8 @@ impl Avatar {
     /// Image alt text — distinct from `label` so a clickable avatar
     /// can have a button label like "Open user menu" while still
     /// describing the image as "Jane Doe".
-    pub fn alt(mut self, alt: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = alt.into();
+    pub fn alt(mut self, alt: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = alt.into();
         self.alt = Some(ls.resolve_now());
         self
     }

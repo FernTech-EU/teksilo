@@ -55,6 +55,7 @@ use self::state::{DEFAULT_MAX_VISIBLE_ITEMS, ItemSource, resolve_index};
 // Re-export so callers can write `ComboBox::new(...).variant(ComboBoxVariant::Filled)`
 // without reaching into `bastyde::core::styles`.
 pub use bastyde_core::styles::ComboBoxVariant;
+use bastyde_i18n::LocalizedString;
 
 /// A dropdown selection widget.
 ///
@@ -79,12 +80,12 @@ pub use bastyde_core::styles::ComboBoxVariant;
 pub struct ComboBox<T: Clone + PartialEq + 'static> {
     source: ItemSource<T>,
     selected: Signal<Option<T>>,
-    item_label: Rc<dyn Fn(&T) -> bastyde_i18n::LocalizedString>,
+    item_label: Rc<dyn Fn(&T) -> LocalizedString>,
     render_item: Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
-    placeholder: bastyde_i18n::LocalizedString,
+    placeholder: LocalizedString,
     /// Accessible label — independent of placeholder and current selection.
     /// Screen readers announce this as the name of the control.
-    label: Option<bastyde_i18n::LocalizedString>,
+    label: Option<LocalizedString>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     max_visible_items: usize,
@@ -145,7 +146,7 @@ impl ComboBox<String> {
         Self::new_with_item_source(
             ItemSource::from_vec(items),
             selected,
-            Rc::new(|s: &String| bastyde_i18n::LocalizedString::literal(s.clone())),
+            Rc::new(|s: &String| LocalizedString::literal(s.clone())),
         )
     }
 }
@@ -154,14 +155,14 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     fn new_with_item_source(
         source: ItemSource<T>,
         selected: Signal<Option<T>>,
-        item_label: Rc<dyn Fn(&T) -> bastyde_i18n::LocalizedString>,
+        item_label: Rc<dyn Fn(&T) -> LocalizedString>,
     ) -> Self {
         Self {
             source,
             selected,
             item_label,
             render_item: None,
-            placeholder: bastyde_i18n::LocalizedString::literal(String::new()),
+            placeholder: LocalizedString::literal(String::new()),
             label: None,
             initial_enabled: true,
             max_visible_items: DEFAULT_MAX_VISIBLE_ITEMS,
@@ -193,7 +194,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
         item_label: F,
     ) -> Self
     where
-        F: Fn(&T) -> bastyde_i18n::LocalizedString + 'static,
+        F: Fn(&T) -> LocalizedString + 'static,
     {
         Self::new_with_item_source(
             ItemSource::from_vec(items.into_iter().collect()),
@@ -207,7 +208,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     /// value disappears from the model, `selected` becomes `None`.
     pub fn from_model<F>(model: ListModel<T>, selected: Signal<Option<T>>, item_label: F) -> Self
     where
-        F: Fn(&T) -> bastyde_i18n::LocalizedString + 'static,
+        F: Fn(&T) -> LocalizedString + 'static,
     {
         Self::new_with_item_source(ItemSource::from_model(model), selected, Rc::new(item_label))
     }
@@ -216,7 +217,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     pub fn from_source<S, F>(source: S, selected: Signal<Option<T>>, item_label: F) -> Self
     where
         S: ListDataSource<Item = T> + 'static,
-        F: Fn(&T) -> bastyde_i18n::LocalizedString + 'static,
+        F: Fn(&T) -> LocalizedString + 'static,
     {
         Self::new_with_item_source(
             ItemSource::from_data_source(source),
@@ -228,7 +229,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     /// Override the display-label extractor. Rarely needed — prefer passing
     /// `item_label` to the constructor. Useful for the `ComboBox<String>`
     /// path when you want a non-identity projection.
-    pub fn item_label(mut self, f: impl Fn(&T) -> bastyde_i18n::LocalizedString + 'static) -> Self {
+    pub fn item_label(mut self, f: impl Fn(&T) -> LocalizedString + 'static) -> Self {
         self.item_label = Rc::new(f);
         self
     }
@@ -271,8 +272,8 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     /// Accepts a `tr!(...)` directly (resolved at build); use
     /// `placeholder_literal` for an
     /// untranslated string.
-    pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         self.placeholder = ls;
         self
     }
@@ -281,8 +282,8 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     /// (e.g. "Fruit", "Font family"). Independent of the visible
     /// placeholder and of the current selection — screen readers
     /// announce this as the name of the control.
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }

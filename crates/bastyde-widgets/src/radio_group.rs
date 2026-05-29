@@ -39,6 +39,7 @@ use bastyde_tokens::Orientation;
 
 use crate::primitives::{HStack, VStack};
 use crate::radio_button::RadioButton;
+use bastyde_i18n::LocalizedString;
 
 enum RadioGroupChild {
     /// A radio button whose `group_ids` buffer gets injected at build time.
@@ -55,7 +56,7 @@ pub struct RadioGroup {
     pending: Vec<RadioGroupChild>,
     orientation: Orientation,
     spacing: f32,
-    label: Option<bastyde_i18n::LocalizedString>,
+    label: Option<LocalizedString>,
     /// Shared buffer of sibling `WidgetId`s, populated during `build()`.
     /// Each child radio stores this same `Rc` so its `accessibility()`
     /// impl can publish the group membership.
@@ -90,8 +91,8 @@ impl RadioGroup {
 
     /// Accessible name for the group — e.g. "Theme", "Font family".
     /// Screen readers announce this before individual radio labels.
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }

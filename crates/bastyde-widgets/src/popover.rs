@@ -14,6 +14,7 @@ use bastyde_tokens::{CornerRadius, SurfaceRole};
 
 use crate::button::{Button, ButtonVariant};
 use crate::overlay_trigger::OverlayTrigger;
+use bastyde_i18n::LocalizedString;
 
 pub(crate) struct PopoverSurface {
     content_id: Option<WidgetId>,
@@ -267,7 +268,7 @@ impl Widget for PopoverSurface {
 }
 
 pub struct Popover {
-    label: bastyde_i18n::LocalizedString,
+    label: LocalizedString,
     variant: ButtonVariant,
     enabled: bool,
     placement: OverlayPlacement,
@@ -303,8 +304,8 @@ pub struct Popover {
 }
 
 impl Popover {
-    pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn new(label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         Self {
             label: ls,
             variant: ButtonVariant::Plain,

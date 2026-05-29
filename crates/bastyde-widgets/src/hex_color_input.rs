@@ -53,6 +53,7 @@ use bastyde_tokens::Color;
 
 use crate::primitives::text_input_field::{ValidationFeedback, ValidationOutcome, ValidatorFn};
 use crate::text_input::TextInput;
+use bastyde_i18n::LocalizedString;
 
 type OnValueChanged = Rc<dyn Fn(Option<Color>, &mut bastyde_core::widget::EventContext)>;
 type OnInvalid = Rc<dyn Fn(&str, &mut bastyde_core::widget::EventContext)>;
@@ -114,8 +115,8 @@ pub struct HexColorInput {
     short_form_enabled: bool,
     require_hash: bool,
     uppercase: bool,
-    label: Option<bastyde_i18n::LocalizedString>,
-    placeholder: Option<bastyde_i18n::LocalizedString>,
+    label: Option<LocalizedString>,
+    placeholder: Option<LocalizedString>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     read_only: bool,
@@ -221,12 +222,12 @@ impl HexColorInput {
         self
     }
 
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.label = Some(label.into());
         self
     }
 
-    pub fn placeholder(mut self, placeholder: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn placeholder(mut self, placeholder: impl Into<LocalizedString>) -> Self {
         self.placeholder = Some(placeholder.into());
         self
     }
@@ -540,7 +541,7 @@ fn format_hex(color: Color, alpha_enabled: bool, uppercase: bool) -> String {
     }
 }
 
-fn invalid_message(alpha_enabled: bool) -> bastyde_i18n::LocalizedString {
+fn invalid_message(alpha_enabled: bool) -> LocalizedString {
     let key = if alpha_enabled {
         "hex-color-input-invalid-with-alpha"
     } else {

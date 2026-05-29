@@ -36,6 +36,7 @@ use bastyde_tokens::{CornerRadius, Orientation, SurfaceRole};
 
 use crate::primitives::ZStack;
 use crate::styles::recipe_progress_bar_style::PROGRESS_BAR_CORNER_RADIUS;
+use bastyde_i18n::LocalizedString;
 
 const DEFAULT_THICKNESS: f32 = 4.0;
 /// ~15 Hz cadence — see module-level note in the original. The eye
@@ -52,7 +53,7 @@ pub struct ProgressBar {
     thickness: f32,
     track_color: Option<ColorProp>,
     fill_color: Option<ColorProp>,
-    label: Option<bastyde_i18n::LocalizedString>,
+    label: Option<LocalizedString>,
     /// Per-call override for the stationary chrome (track + determinate fill).
     style_override: Option<SharedProgressBarStyle>,
     root_child_id: Option<WidgetId>,
@@ -130,8 +131,8 @@ impl ProgressBar {
     }
 
     /// Accessible name for the progress bar.
-    pub fn label(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn label(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         self.label = Some(ls);
         self
     }

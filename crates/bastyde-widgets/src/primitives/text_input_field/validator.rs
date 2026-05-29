@@ -24,6 +24,7 @@
 //! lifecycle (decay, reset on re-edit) without leaking timing concerns
 //! into validator code.
 
+use bastyde_i18n::LocalizedString;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -45,14 +46,12 @@ pub enum ValidationOutcome {
     /// completed to start of year".
     Corrected {
         corrected: String,
-        message: bastyde_i18n::LocalizedString,
+        message: LocalizedString,
     },
     /// Input is rejected. The field reverts its text to the pre-edit
     /// value and the feedback signal carries `message` for composites
     /// to surface as an assertive error.
-    Invalid {
-        message: bastyde_i18n::LocalizedString,
-    },
+    Invalid { message: LocalizedString },
 }
 
 /// What composites render. Distinct from [`ValidationOutcome`]: the
@@ -76,14 +75,12 @@ pub enum ValidationFeedback {
     /// use it to decay the visual after `corrected_pulse_duration_ms`
     /// from the theme.
     Corrected {
-        message: bastyde_i18n::LocalizedString,
+        message: LocalizedString,
         since: Instant,
     },
     /// Last commit returned [`ValidationOutcome::Invalid`]. Persists
     /// until the user edits again or an external `Pristine` reset.
-    Invalid {
-        message: bastyde_i18n::LocalizedString,
-    },
+    Invalid { message: LocalizedString },
 }
 
 // Manual `PartialEq` (the derive is impossible — `LocalizedString` is not

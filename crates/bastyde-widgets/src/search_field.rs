@@ -72,6 +72,7 @@ use crate::primitives::{
     Center, FixedSize, MinSize, Padding, RectWidget, TextWidget, VStack, ZStack,
 };
 use crate::text_input::TextInput;
+use bastyde_i18n::LocalizedString;
 
 /// Default cap on the number of suggestions rendered in the popup.
 /// Lives in code (not in `SearchFieldStyle`) because it's a behavior
@@ -99,8 +100,8 @@ fn search_glyph(glyph_size: f32, slot_width: f32) -> impl Widget + 'static {
 /// A search input with optional inline suggestions popup.
 pub struct SearchField {
     text: Signal<String>,
-    placeholder: Option<bastyde_i18n::LocalizedString>,
-    label: Option<bastyde_i18n::LocalizedString>,
+    placeholder: Option<LocalizedString>,
+    label: Option<LocalizedString>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     suggestion_provider: Option<SuggestionProvider>,
@@ -169,14 +170,14 @@ impl SearchField {
         self
     }
 
-    pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         self.placeholder = Some(ls);
         self
     }
 
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }

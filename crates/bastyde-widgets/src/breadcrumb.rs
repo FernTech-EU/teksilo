@@ -12,6 +12,7 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{Color, CornerRadius};
 
 use crate::primitives::{HStack, IconWidget, Spacer};
+use bastyde_i18n::LocalizedString;
 
 const FALLBACK_CHAR_WIDTH: f32 = 8.0;
 const FALLBACK_LINE_HEIGHT: f32 = 16.0;
@@ -19,7 +20,7 @@ const FALLBACK_LINE_HEIGHT: f32 = 16.0;
 type CommandFactory = Box<dyn Fn(&mut EventContext)>;
 
 struct BreadcrumbEntry {
-    label: bastyde_i18n::LocalizedString,
+    label: LocalizedString,
     action: Option<CommandFactory>,
     current: bool,
 }
@@ -41,7 +42,7 @@ pub const BREADCRUMB_CORNER_RADIUS: f32 = 4.0;
 
 /// A single breadcrumb segment definition.
 pub struct BreadcrumbItem {
-    label: bastyde_i18n::LocalizedString,
+    label: LocalizedString,
     action: Option<CommandFactory>,
     current: bool,
 }
@@ -56,8 +57,8 @@ impl std::fmt::Debug for BreadcrumbItem {
 }
 
 impl BreadcrumbItem {
-    pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn new(label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         Self {
             label: ls,
             action: None,
@@ -65,8 +66,8 @@ impl BreadcrumbItem {
         }
     }
 
-    pub fn current(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn current(label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         Self {
             label: ls,
             action: None,
@@ -89,7 +90,7 @@ enum SegmentInteraction {
 }
 
 struct BreadcrumbSegment {
-    label: bastyde_i18n::LocalizedString,
+    label: LocalizedString,
     action: Option<CommandFactory>,
     current: bool,
     interaction: Signal<SegmentInteraction>,
@@ -106,11 +107,7 @@ impl std::fmt::Debug for BreadcrumbSegment {
 }
 
 impl BreadcrumbSegment {
-    fn new(
-        label: bastyde_i18n::LocalizedString,
-        action: Option<CommandFactory>,
-        current: bool,
-    ) -> Self {
+    fn new(label: LocalizedString, action: Option<CommandFactory>, current: bool) -> Self {
         Self {
             label,
             action,
@@ -402,7 +399,7 @@ enum BreadcrumbSlot {
 pub struct Breadcrumb {
     slots: Vec<BreadcrumbSlot>,
     trailing_slot: Option<PendingChild>,
-    label: Option<bastyde_i18n::LocalizedString>,
+    label: Option<LocalizedString>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -420,8 +417,8 @@ impl Breadcrumb {
     /// this breadcrumb from other nav landmarks on the page
     /// (e.g. "Files", "Settings"). Screen readers announce it as the
     /// name of the landmark when it gains focus or is summoned.
-    pub fn label(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn label(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         self.label = Some(ls);
         self
     }

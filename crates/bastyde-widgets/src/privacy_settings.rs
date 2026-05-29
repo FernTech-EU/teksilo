@@ -57,6 +57,7 @@ use crate::message_box::{MessageBox, MessageBoxButtons, StandardButton};
 use crate::panel::Panel;
 use crate::primitives::{HStack, Spacer, TextWidget, VStack};
 use crate::toggle::Toggle;
+use bastyde_i18n::LocalizedString;
 
 /// Settings widget for telemetry consent. Construct with
 /// [`PrivacySettings::new`] and embed in any container.
@@ -369,8 +370,8 @@ fn current_value(state: &ConsentState, f: impl FnOnce(&ConsentScope) -> bool) ->
 
 fn scope_row(
     ctx: &mut BuildContext,
-    label: bastyde_i18n::LocalizedString,
-    description: bastyde_i18n::LocalizedString,
+    label: LocalizedString,
+    description: LocalizedString,
     initial: bool,
     enabled: bool,
     consent: ConsentStore,

@@ -16,15 +16,16 @@ use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 
 use crate::button::InteractionState;
+use bastyde_i18n::LocalizedString;
 
 type CommandFactory = Box<dyn Fn(&mut EventContext)>;
 
 /// A clickable text link with underline.
 pub struct Link {
-    text: bastyde_i18n::LocalizedString,
+    text: LocalizedString,
     url: Option<String>,
     action: Option<CommandFactory>,
-    tooltip_text: Option<bastyde_i18n::LocalizedString>,
+    tooltip_text: Option<LocalizedString>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn bastyde_core::widget::Widget>>,
     interaction: Option<Signal<InteractionState>>,
@@ -42,8 +43,8 @@ pub struct Link {
 }
 
 impl Link {
-    pub fn new(text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn new(text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         Self {
             text: ls,
             url: None,
@@ -86,7 +87,7 @@ impl Link {
         self
     }
 
-    pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;

@@ -25,6 +25,7 @@ use crate::toast::registry::ToastRegistry;
 use crate::toast::{
     DEFAULT_TOAST_AUTO_DISMISS, ToastAction, ToastActionStyle, ToastDismissCause, ToastSeverity,
 };
+use bastyde_i18n::LocalizedString;
 
 /// Snapshot data passed to a `ToastSurface` for one live entry. Owned
 /// by the host's `LiveEntry` and cloned into the surface at build
@@ -34,9 +35,9 @@ pub struct ToastSurfaceData {
     pub entry_id: u64,
     pub severity: ToastSeverity,
     pub priority: bastyde_core::styles::ToastPriority,
-    pub title: bastyde_i18n::LocalizedString,
-    pub body: Option<bastyde_i18n::LocalizedString>,
-    pub announcement: Option<bastyde_i18n::LocalizedString>,
+    pub title: LocalizedString,
+    pub body: Option<LocalizedString>,
+    pub announcement: Option<LocalizedString>,
     pub actions: Rc<Vec<ToastAction>>,
     pub show_close_button: bool,
     pub on_click: Option<Rc<dyn Fn(&mut bastyde_core::widget::EventContext)>>,

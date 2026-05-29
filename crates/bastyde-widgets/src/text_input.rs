@@ -50,20 +50,21 @@ use crate::tooltip::{self, RichTooltipSource};
 // `TextInput::new(text).variant(TextInputVariant::Filled)` without a
 // deeper import path.
 pub use bastyde_core::styles::TextInputVariant;
+use bastyde_i18n::LocalizedString;
 
 /// Validation state for the text input field.
 #[derive(Debug, Clone, Default)]
 pub enum ValidationState {
     #[default]
     None,
-    Error(bastyde_i18n::LocalizedString),
-    Warning(bastyde_i18n::LocalizedString),
+    Error(LocalizedString),
+    Warning(LocalizedString),
     /// Last commit was auto-corrected; the field's value has already
     /// been replaced with the normalized form. The composite renders
     /// the message in secondary text and tints the border accent
     /// briefly (decay-managed by the framework's frame loop, not a
     /// concern of this enum).
-    Corrected(bastyde_i18n::LocalizedString),
+    Corrected(LocalizedString),
 }
 
 /// Styled single-line text input composite.
@@ -72,7 +73,7 @@ pub enum ValidationState {
 pub struct TextInput {
     // ── Configuration forwarded to the inner TextInputField ─────────
     text: Signal<String>,
-    placeholder: bastyde_i18n::LocalizedString,
+    placeholder: LocalizedString,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     read_only: bool,
@@ -106,7 +107,7 @@ pub struct TextInput {
     feedback_signal: Signal<ValidationFeedback>,
 
     // ── Configuration owned by this composite only ──────────────────
-    label: Option<bastyde_i18n::LocalizedString>,
+    label: Option<LocalizedString>,
     /// Optional override for the frame's intrinsic minimum width
     /// (default 65 dp). Composing widgets like `DateEdit` /
     /// `TimeEdit` raise this so the frame stays at the design
@@ -122,7 +123,7 @@ pub struct TextInput {
     /// Set by `.bind_validation_feedback(...)`; wired via `ctx.effect`
     /// in `build()` so the bridge outlives construction.
     feedback_to_bridge: Option<Signal<ValidationFeedback>>,
-    tooltip_text: Option<bastyde_i18n::LocalizedString>,
+    tooltip_text: Option<LocalizedString>,
     rich_tooltip_source: Option<RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn bastyde_core::widget::Widget>>,
 
@@ -152,7 +153,7 @@ impl TextInput {
     pub fn new(text: Signal<String>) -> Self {
         Self {
             text,
-            placeholder: bastyde_i18n::LocalizedString::literal(String::new()),
+            placeholder: LocalizedString::literal(String::new()),
             initial_enabled: true,
             read_only: false,
             max_length: None,
@@ -208,8 +209,8 @@ impl TextInput {
     // `TextInputField` forwards to it 1:1 at build time — the
     // `TextInput` composite just owns the framing around the field.
 
-    pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         self.placeholder = ls;
         self
     }
@@ -217,8 +218,8 @@ impl TextInput {
     /// Accessible name for the composite. Propagated to the outer
     /// container's a11y node; the inner `TextInputField` still
     /// carries `Role::TextInput` with the document's value.
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }
@@ -377,7 +378,7 @@ impl TextInput {
     }
 
     /// Attach a plain tooltip. Accepts `tr!(...)` or `lit!(...)`.
-    pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;

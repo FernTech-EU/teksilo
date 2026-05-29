@@ -7,6 +7,7 @@ use bastyde_core::accessibility::AccessNodeBuilder;
 use crate::flags::ItemFlags;
 use crate::item::{SceneItem, SceneItemA11yContext, SceneItemPaintContext};
 use crate::items::{AccessSubtreeMode, ItemA11yOverrides};
+use bastyde_i18n::LocalizedString;
 
 /// A raster image in a local-coord rectangle. The image is referenced
 /// by name (the Canvas image registry).
@@ -35,8 +36,8 @@ impl ImageItem {
     }
 
     /// Human-readable label.
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls.resolve_now());
         self
     }

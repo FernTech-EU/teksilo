@@ -98,8 +98,8 @@ enum CheckboxKind {
 /// Default visual for a row in a `ListView` (or any place that wants
 /// the canonical icon + label + trailing layout).
 pub struct StandardListItem {
-    label: bastyde_i18n::LocalizedString,
-    subtitle: Option<bastyde_i18n::LocalizedString>,
+    label: LocalizedString,
+    subtitle: Option<LocalizedString>,
     leading_slot: Option<Box<dyn Widget>>,
     center_slot: Option<Box<dyn Widget>>,
     trailing_slot: Option<Box<dyn Widget>>,

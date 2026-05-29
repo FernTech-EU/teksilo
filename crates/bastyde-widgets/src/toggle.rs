@@ -27,11 +27,12 @@ use bastyde_core::widget_id::WidgetId;
 // `Toggle::new(...).variant(ToggleVariant::Pill)` without a deeper
 // import path. Same pattern as `Button` re-exporting `ButtonVariant`.
 pub use bastyde_core::styles::ToggleVariant;
+use bastyde_i18n::LocalizedString;
 
 /// An animated toggle switch bound to a `Signal<bool>`.
 pub struct Toggle {
     on: Signal<bool>,
-    label: Option<bastyde_i18n::LocalizedString>,
+    label: Option<LocalizedString>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     variant: ToggleVariant,
@@ -57,8 +58,8 @@ impl Toggle {
         }
     }
 
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }

@@ -79,6 +79,7 @@ use crate::primitives::text_input_field::{TextInputField, ValidationFeedback};
 use crate::primitives::{
     Center, FixedSize, HStack, IconWidget, MinSize, Padding, RectWidget, VStack, ZStack,
 };
+use bastyde_i18n::LocalizedString;
 
 type OnRangeChanged = Rc<dyn Fn(Option<DateRange>, &mut EventContext)>;
 
@@ -95,13 +96,13 @@ pub struct DateRangeEdit {
     min_date: Option<Date>,
     max_date: Option<Date>,
     pattern: Option<String>,
-    placeholder_start: bastyde_i18n::LocalizedString,
-    placeholder_end: bastyde_i18n::LocalizedString,
+    placeholder_start: LocalizedString,
+    placeholder_end: LocalizedString,
     first_day_of_week: Option<Weekday>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     read_only: bool,
-    label: Option<bastyde_i18n::LocalizedString>,
+    label: Option<LocalizedString>,
     validation_behavior: ValidationBehavior,
     /// How the trailing (end) half claims horizontal space. The
     /// leading (start) half always sizes to its mask-derived
@@ -143,8 +144,8 @@ impl DateRangeEdit {
             min_date: None,
             max_date: None,
             pattern: None,
-            placeholder_start: bastyde_i18n::LocalizedString::literal(String::new()),
-            placeholder_end: bastyde_i18n::LocalizedString::literal(String::new()),
+            placeholder_start: LocalizedString::literal(String::new()),
+            placeholder_end: LocalizedString::literal(String::new()),
             first_day_of_week: None,
             initial_enabled: true,
             read_only: false,
@@ -181,12 +182,12 @@ impl DateRangeEdit {
         self
     }
 
-    pub fn placeholder_start(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn placeholder_start(mut self, text: impl Into<LocalizedString>) -> Self {
         self.placeholder_start = text.into();
         self
     }
 
-    pub fn placeholder_end(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn placeholder_end(mut self, text: impl Into<LocalizedString>) -> Self {
         self.placeholder_end = text.into();
         self
     }
@@ -207,8 +208,8 @@ impl DateRangeEdit {
         self
     }
 
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }

@@ -27,6 +27,7 @@ pub mod path;
 pub mod rect;
 pub mod text;
 
+use bastyde_i18n::LocalizedString;
 pub use group::GroupItem;
 pub use image::ImageItem;
 pub use path::PathItem;
@@ -53,8 +54,8 @@ pub enum AccessSubtreeMode {
 /// match so muscle memory carries over.
 #[derive(Debug, Default, Clone)]
 pub struct ItemA11yOverrides {
-    pub(crate) label: Option<bastyde_i18n::LocalizedString>,
-    pub(crate) description: Option<bastyde_i18n::LocalizedString>,
+    pub(crate) label: Option<LocalizedString>,
+    pub(crate) description: Option<LocalizedString>,
     pub(crate) role: Option<accesskit::Role>,
     pub(crate) hidden: bool,
     pub(crate) subtree_mode: AccessSubtreeMode,
@@ -97,18 +98,15 @@ macro_rules! item_a11y_builders {
         /// anything convertible into `LocalizedString` — most
         /// commonly `tr!(...)` for translated labels, or any plain
         /// string (which auto-converts via `From<String>`).
-        pub fn access_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-            let ls: bastyde_i18n::LocalizedString = label.into();
+        pub fn access_label(mut self, label: impl Into<LocalizedString>) -> Self {
+            let ls: LocalizedString = label.into();
             self.a11y.label = Some(ls);
             self
         }
 
         /// Long-form context appended to the item's announcement.
-        pub fn access_description(
-            mut self,
-            description: impl Into<bastyde_i18n::LocalizedString>,
-        ) -> Self {
-            let ls: bastyde_i18n::LocalizedString = description.into();
+        pub fn access_description(mut self, description: impl Into<LocalizedString>) -> Self {
+            let ls: LocalizedString = description.into();
             self.a11y.description = Some(ls);
             self
         }

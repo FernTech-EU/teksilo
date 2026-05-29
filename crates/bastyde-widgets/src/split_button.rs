@@ -44,6 +44,7 @@ use crate::menu_list::MenuList;
 use crate::primitives::{
     Center, FixedSize, HStack, IconWidget, MinSize, Padding, RectWidget, TextWidget, ZStack,
 };
+use bastyde_i18n::LocalizedString;
 
 /// One row of the SplitButton's dropdown: either a real MenuItem or a
 /// separator. Stored unbuilt until `build()` hands the items to a MenuList.
@@ -76,7 +77,7 @@ pub struct SplitButton {
     /// [`SplitButton::new`], `false` for [`SplitButton::new_static`].
     promote_on_select: bool,
     /// Tooltip shown on hover over the main (default-action) region.
-    tooltip_text: Option<bastyde_i18n::LocalizedString>,
+    tooltip_text: Option<LocalizedString>,
     /// Rich tooltip source for the main region (registry key or inline
     /// content). Mutually exclusive with `tooltip_text` and
     /// `composite_tooltip_content`.
@@ -87,7 +88,7 @@ pub struct SplitButton {
     /// Tooltip shown on hover over the trailing chevron region. Falls
     /// back to a generic "Show dropdown menu" label when not explicitly
     /// set, since the chevron region has no label of its own.
-    chevron_tooltip_text: Option<bastyde_i18n::LocalizedString>,
+    chevron_tooltip_text: Option<LocalizedString>,
     /// Rich tooltip source for the chevron region.
     chevron_rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     /// Composite tooltip body for the chevron region.
@@ -183,7 +184,7 @@ impl SplitButton {
 
     /// Attach a tooltip to the main (default-action) region. Same hover
     /// delay as [`Button::tooltip`](crate::button::Button::tooltip).
-    pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;
@@ -220,7 +221,7 @@ impl SplitButton {
     /// Override the tooltip shown on hover over the trailing chevron
     /// region. When unset, the chevron gets a default "Show dropdown
     /// menu" tooltip so its affordance isn't silent.
-    pub fn chevron_tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn chevron_tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
         self.chevron_tooltip_text = Some(text.into());
         self.chevron_rich_tooltip_source = None;
         self.chevron_composite_tooltip_content = None;

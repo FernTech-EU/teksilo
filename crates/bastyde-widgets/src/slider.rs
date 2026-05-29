@@ -30,6 +30,7 @@ use bastyde_tokens::Orientation;
 // `Slider::new(...).variant(SliderVariant::Discrete)` without a deeper
 // import path.
 pub use bastyde_core::styles::SliderVariant as SliderVariantExport;
+use bastyde_i18n::LocalizedString;
 
 /// A slider that drives a `Signal<f32>` between min and max.
 pub struct Slider {
@@ -41,7 +42,7 @@ pub struct Slider {
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     /// Accessible name, announced by screen readers as the control's label.
-    label: Option<bastyde_i18n::LocalizedString>,
+    label: Option<LocalizedString>,
     variant: SliderVariant,
     tick_count: Option<u32>,
     style_override: Option<SharedSliderStyle>,
@@ -119,8 +120,8 @@ impl Slider {
     /// Set an accessible name for the slider, announced by screen readers.
     /// ARIA requires sliders to have a label; when none is set here the
     /// caller is responsible for labelling via a wrapping element.
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }

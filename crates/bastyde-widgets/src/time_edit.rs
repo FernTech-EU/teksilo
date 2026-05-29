@@ -49,6 +49,7 @@ use crate::common::datetime::pattern::{
 use crate::date_edit::ValidationBehavior;
 use crate::primitives::text_input_field::{ValidationFeedback, ValidationOutcome};
 use crate::text_input::TextInput;
+use bastyde_i18n::LocalizedString;
 
 /// 12h vs 24h time formatting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -86,13 +87,13 @@ pub struct TimeEdit {
     min_time: Option<Time>,
     max_time: Option<Time>,
     step_minutes: u32,
-    placeholder: bastyde_i18n::LocalizedString,
+    placeholder: LocalizedString,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     read_only: bool,
     validation_behavior: ValidationBehavior,
     width_policy: crate::date_edit::WidthPolicy,
-    label: Option<bastyde_i18n::LocalizedString>,
+    label: Option<LocalizedString>,
     on_value_changed: Option<OnValueChanged>,
     text_signal: Signal<String>,
     focused: Signal<bool>,
@@ -121,7 +122,7 @@ impl TimeEdit {
             min_time: None,
             max_time: None,
             step_minutes: 1,
-            placeholder: bastyde_i18n::LocalizedString::literal(String::new()),
+            placeholder: LocalizedString::literal(String::new()),
             initial_enabled: true,
             read_only: false,
             validation_behavior: ValidationBehavior::AutoCorrect,
@@ -183,8 +184,8 @@ impl TimeEdit {
         self
     }
 
-    pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         self.placeholder = ls;
         self
     }
@@ -220,8 +221,8 @@ impl TimeEdit {
         self.feedback.clone()
     }
 
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }
@@ -714,7 +715,7 @@ pub(crate) fn try_clamp_time_recovery(
     raw: &str,
     min: Option<Time>,
     max: Option<Time>,
-) -> Option<(String, bastyde_i18n::LocalizedString)> {
+) -> Option<(String, LocalizedString)> {
     use crate::common::datetime::pattern::{PatternToken, SegmentKind};
     let mut cursor = raw;
     let mut hour24: Option<i8> = None;
@@ -722,7 +723,7 @@ pub(crate) fn try_clamp_time_recovery(
     let mut minute: Option<i8> = None;
     let mut second: Option<i8> = None;
     let mut period: Option<i8> = None;
-    let mut clamp_notes: Vec<bastyde_i18n::LocalizedString> = Vec::new();
+    let mut clamp_notes: Vec<LocalizedString> = Vec::new();
 
     for token in &pattern.tokens {
         if cursor.is_empty() {

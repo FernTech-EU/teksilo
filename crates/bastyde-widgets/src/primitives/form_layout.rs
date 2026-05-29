@@ -5,6 +5,7 @@ use bastyde_canvas::{Point, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
+use bastyde_i18n::LocalizedString;
 
 /// A resolved form row after `build()`.
 #[derive(Debug, Clone)]
@@ -86,8 +87,8 @@ impl FormLayout {
     /// the page. When unset, the widget demotes to a presentational
     /// `GenericContainer` — an unnamed landmark is worse than no
     /// landmark for AT users.
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.a11y_label = Some(ls.resolve_now());
         self
     }

@@ -32,6 +32,7 @@ use bastyde_core::animated_quad::{AnimatedQuadHandle, AnimatedQuadKind};
 use bastyde_core::color_prop::ColorProp;
 use bastyde_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
+use bastyde_i18n::LocalizedString;
 use bastyde_tokens::TextRole;
 
 const DEFAULT_SIZE: f32 = 20.0;
@@ -47,7 +48,7 @@ pub struct Spinner {
     arc_fraction: f32,
     stroke_fraction: f32,
     color: ColorProp,
-    label: Option<bastyde_i18n::LocalizedString>,
+    label: Option<LocalizedString>,
     handle: Option<AnimatedQuadHandle>,
 }
 
@@ -99,8 +100,8 @@ impl Spinner {
     /// Accessible name (e.g. "Loading", "Uploading file"). Without
     /// this, screen readers announce a bare "progress indicator"
     /// with no context.
-    pub fn label(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn label(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         self.label = Some(ls);
         self
     }

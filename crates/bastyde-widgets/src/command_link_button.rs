@@ -29,6 +29,7 @@ use bastyde_tokens::{
 use crate::button::InteractionState;
 use crate::primitives::icon_widget::IconWidget;
 use crate::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
+use bastyde_i18n::LocalizedString;
 
 /// CommandLinkButton design tokens. The widget is a group-4 composite
 /// with no dedicated recipe module.
@@ -41,8 +42,8 @@ pub const COMMAND_LINK_BUTTON_MIN_HEIGHT: f32 = 64.0;
 
 /// A large two-line CTA button: icon + title + subtitle.
 pub struct CommandLinkButton {
-    title: bastyde_i18n::LocalizedString,
-    description: Option<bastyde_i18n::LocalizedString>,
+    title: LocalizedString,
+    description: Option<LocalizedString>,
     icon: Option<IconWidget>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
@@ -52,8 +53,8 @@ pub struct CommandLinkButton {
 }
 
 impl CommandLinkButton {
-    pub fn new(title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = title.into();
+    pub fn new(title: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = title.into();
         Self {
             title: ls,
             description: None,
@@ -66,8 +67,8 @@ impl CommandLinkButton {
     }
 
     /// Optional descriptive subtitle rendered below the title.
-    pub fn description(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn description(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         self.description = Some(ls);
         self
     }

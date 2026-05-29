@@ -29,6 +29,7 @@ pub use bastyde_core::styles::BannerSeverity;
 use crate::icon_button::IconButton;
 use crate::primitives::{Expand, HStack, TextWidget, VStack};
 use crate::styles::recipe_banner_style as banner_tokens;
+use bastyde_i18n::LocalizedString;
 
 /// Small leaf widget that paints the severity glyph (circle or
 /// triangle). The glyph is a functional renderer — it draws domain
@@ -84,8 +85,8 @@ impl Widget for SeverityGlyph {
 /// A persistent inline status strip.
 pub struct Banner {
     severity: BannerSeverity,
-    title: bastyde_i18n::LocalizedString,
-    description: Option<bastyde_i18n::LocalizedString>,
+    title: LocalizedString,
+    description: Option<LocalizedString>,
     action: Option<Box<dyn Widget>>,
     on_dismiss: Option<Box<dyn Fn(&mut EventContext)>>,
     /// Per-call override for the banner strip chrome.
@@ -94,8 +95,8 @@ pub struct Banner {
 }
 
 impl Banner {
-    fn new(severity: BannerSeverity, title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = title.into();
+    fn new(severity: BannerSeverity, title: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = title.into();
         Self {
             severity,
             title: ls,
@@ -115,28 +116,28 @@ impl Banner {
     }
 
     /// Construct an info-severity banner.
-    pub fn info(title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn info(title: impl Into<LocalizedString>) -> Self {
         Self::new(BannerSeverity::Info, title)
     }
 
     /// Construct a success-severity banner.
-    pub fn success(title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn success(title: impl Into<LocalizedString>) -> Self {
         Self::new(BannerSeverity::Success, title)
     }
 
     /// Construct a warning-severity banner.
-    pub fn warning(title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn warning(title: impl Into<LocalizedString>) -> Self {
         Self::new(BannerSeverity::Warning, title)
     }
 
     /// Construct an error-severity banner.
-    pub fn error(title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn error(title: impl Into<LocalizedString>) -> Self {
         Self::new(BannerSeverity::Error, title)
     }
 
     /// Optional secondary line of text rendered below the title.
-    pub fn description(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn description(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         self.description = Some(ls);
         self
     }

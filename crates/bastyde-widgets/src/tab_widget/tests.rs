@@ -1,4 +1,5 @@
 use bastyde_i18n::lit;
+use bastyde_i18n::LocalizedString;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -79,7 +80,7 @@ fn expand_in_row_outer(tree: &WidgetTree, row_outer: WidgetId) -> WidgetId {
     panic!("no Expand[ScrollArea] child found in row_outer");
 }
 
-fn label(s: &str) -> bastyde_i18n::LocalizedString {
+fn label(s: &str) -> LocalizedString {
     lit!(s)
 }
 

@@ -136,6 +136,7 @@ pub enum StepType {
 }
 
 pub use bastyde_core::styles::ButtonLayout;
+use bastyde_i18n::LocalizedString;
 
 /// When the mouse wheel adjusts the value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -176,7 +177,7 @@ pub enum WidthPolicy {
 
 // ── Type aliases for builder closures ──────────────────────────────
 
-type TextFromValue<T> = Rc<dyn Fn(T) -> bastyde_i18n::LocalizedString>;
+type TextFromValue<T> = Rc<dyn Fn(T) -> LocalizedString>;
 type ValueFromText<T> = Rc<dyn Fn(&str) -> Option<T>>;
 type OnValueChangedFn<T> = Rc<dyn Fn(T, &mut EventContext)>;
 
@@ -208,7 +209,7 @@ pub struct SpinBox<T: SpinValue> {
     page_step: Option<T>,
     decimals: u8,
     suffix: String,
-    special_value_text: Option<bastyde_i18n::LocalizedString>,
+    special_value_text: Option<LocalizedString>,
     wrap_mode: WrapMode,
     step_type: StepType,
     button_layout: ButtonLayout,
@@ -219,8 +220,8 @@ pub struct SpinBox<T: SpinValue> {
     /// [`width`](SpinBox::width), [`width_chars`](SpinBox::width_chars),
     /// and [`fill_width`](SpinBox::fill_width) builder methods.
     width_policy: WidthPolicy,
-    label: Option<bastyde_i18n::LocalizedString>,
-    placeholder: bastyde_i18n::LocalizedString,
+    label: Option<LocalizedString>,
+    placeholder: LocalizedString,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     read_only: bool,
@@ -293,7 +294,7 @@ impl<T: SpinValue> SpinBox<T> {
             wheel_mode: WheelMode::Focused,
             width_policy: WidthPolicy::Pixels(DEFAULT_PREFERRED_WIDTH),
             label: None,
-            placeholder: bastyde_i18n::LocalizedString::literal(String::new()),
+            placeholder: LocalizedString::literal(String::new()),
             initial_enabled: true,
             read_only: false,
             text_from_value: None,
@@ -354,7 +355,7 @@ impl<T: SpinValue> SpinBox<T> {
     /// "Unlimited" affordances where the minimum has special
     /// semantics. When the field is focused the real number is
     /// shown instead so the user can type.
-    pub fn special_value_text(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn special_value_text(mut self, text: impl Into<LocalizedString>) -> Self {
         self.special_value_text = Some(text.into());
         self
     }
@@ -436,14 +437,14 @@ impl<T: SpinValue> SpinBox<T> {
         self
     }
 
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }
 
-    pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         self.placeholder = ls;
         self
     }
@@ -464,10 +465,7 @@ impl<T: SpinValue> SpinBox<T> {
     /// raw value; returns whatever string should appear in the
     /// field. Suffix and `special_value_text` still apply on top of
     /// the returned string.
-    pub fn text_from_value(
-        mut self,
-        f: impl Fn(T) -> bastyde_i18n::LocalizedString + 'static,
-    ) -> Self {
+    pub fn text_from_value(mut self, f: impl Fn(T) -> LocalizedString + 'static) -> Self {
         self.text_from_value = Some(Rc::new(f));
         self
     }
@@ -1332,8 +1330,8 @@ fn chevron_down_icon(size: f32) -> IconWidget {
 fn format_for_display<T: SpinValue>(
     value: T,
     decimals: u8,
-    special: Option<&bastyde_i18n::LocalizedString>,
-    custom: Option<&dyn Fn(T) -> bastyde_i18n::LocalizedString>,
+    special: Option<&LocalizedString>,
+    custom: Option<&dyn Fn(T) -> LocalizedString>,
     min: T,
     force_plain: bool,
 ) -> String {

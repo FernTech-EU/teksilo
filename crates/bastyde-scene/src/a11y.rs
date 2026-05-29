@@ -21,6 +21,7 @@ use bastyde_canvas::Rect;
 use bastyde_core::widget_id::WidgetId;
 
 use crate::item::ItemId;
+use bastyde_i18n::LocalizedString;
 
 // ---------------------------------------------------------------------------
 // Logical AT structure
@@ -119,16 +120,16 @@ impl A11yCategory {
 /// ```
 #[derive(Debug)]
 pub struct A11yGroupBuilder {
-    pub(crate) label: Option<bastyde_i18n::LocalizedString>,
+    pub(crate) label: Option<LocalizedString>,
     pub(crate) role: accesskit::Role,
 }
 
 impl A11yGroupBuilder {
     /// Human-readable label for the group, announced when AT clients
     /// land on the group node. Accepts anything convertible into
-    /// [`LocalizedString`](bastyde_i18n::LocalizedString).
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    /// [`LocalizedString`].
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }
@@ -148,7 +149,7 @@ impl A11yGroupBuilder {
 #[derive(Debug)]
 pub struct A11yGroup {
     pub(crate) id: A11yGroupId,
-    pub(crate) label: Option<bastyde_i18n::LocalizedString>,
+    pub(crate) label: Option<LocalizedString>,
     pub(crate) role: accesskit::Role,
 }
 

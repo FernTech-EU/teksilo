@@ -17,6 +17,7 @@ use bastyde_tokens::{TextRole, TextStyleRole};
 use crate::button::{Button, ButtonVariant};
 use crate::overlay_trigger::OverlayTrigger;
 use crate::primitives::{Divider, TextWidget, VStack};
+use bastyde_i18n::LocalizedString;
 
 type DialogFactory = std::rc::Rc<dyn Fn() -> Box<dyn Widget>>;
 
@@ -79,8 +80,8 @@ impl ModalContainer {
     /// Accessible title for the dialog. Screen readers announce this
     /// as the dialog's name. Should match the inner `DialogContent`'s
     /// visible title string.
-    pub fn title(mut self, title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = title.into();
+    pub fn title(mut self, title: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = title.into();
         self.title = Some(ls.resolve_now());
         self
     }
@@ -342,8 +343,8 @@ fn queue_dialog_request(
 }
 
 pub struct DialogContent {
-    title: Option<bastyde_i18n::LocalizedString>,
-    supporting_text: Option<bastyde_i18n::LocalizedString>,
+    title: Option<LocalizedString>,
+    supporting_text: Option<LocalizedString>,
     pending_body: Option<PendingChild>,
     pending_footer: Option<PendingChild>,
     root_child_id: Option<WidgetId>,
@@ -360,12 +361,12 @@ impl DialogContent {
         }
     }
 
-    pub fn title(mut self, title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn title(mut self, title: impl Into<LocalizedString>) -> Self {
         self.title = Some(title.into());
         self
     }
 
-    pub fn supporting_text(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn supporting_text(mut self, text: impl Into<LocalizedString>) -> Self {
         self.supporting_text = Some(text.into());
         self
     }
@@ -495,7 +496,7 @@ impl Widget for DialogContent {
 }
 
 pub struct Dialog {
-    label: bastyde_i18n::LocalizedString,
+    label: LocalizedString,
     variant: ButtonVariant,
     enabled: bool,
     presentation: ModalPresentation,
@@ -506,7 +507,7 @@ pub struct Dialog {
 }
 
 impl Dialog {
-    pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn new(label: impl Into<LocalizedString>) -> Self {
         Self {
             label: label.into(),
             variant: ButtonVariant::Filled,

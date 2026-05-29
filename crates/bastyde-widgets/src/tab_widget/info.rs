@@ -5,7 +5,7 @@
 //! [`crate::tab_widget::TabHandle`] so the same struct is reusable
 //! by both static and dynamic tab construction paths.
 //!
-//! Title and tooltip are [`bastyde_i18n::LocalizedString`] — they
+//! Title and tooltip are [`LocalizedString`] — they
 //! accept `tr!(...)` (locale-reactive) and convert from raw
 //! strings via `LocalizedString::literal`. Icon is a factory
 //! closure (no `IconWidget: Clone` requirement) so the same

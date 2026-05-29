@@ -19,16 +19,17 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{TextRole, TextStyleRole, VAlignment};
 
 use crate::primitives::{HStack, MinSize, TextWidget, VStack};
+use bastyde_i18n::LocalizedString;
 
 /// A radio button that sets a shared `Signal<usize>` to its value when selected.
 pub struct RadioButton {
-    label: Option<bastyde_i18n::LocalizedString>,
-    caption: Option<bastyde_i18n::LocalizedString>,
+    label: Option<LocalizedString>,
+    caption: Option<LocalizedString>,
     value: usize,
     selected: Signal<usize>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
-    tooltip_text: Option<bastyde_i18n::LocalizedString>,
+    tooltip_text: Option<LocalizedString>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn bastyde_core::widget::Widget>>,
     variant: RadioVariant,
@@ -69,8 +70,8 @@ impl RadioButton {
         self.group_ids = Some(ids);
     }
 
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }
@@ -78,8 +79,8 @@ impl RadioButton {
     /// Secondary explanatory text rendered below the label, left-aligned
     /// with the label (not the radio circle). Uses the `small` /
     /// `text_secondary` style. Has no effect unless `label(...)` is also set.
-    pub fn caption(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn caption(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         self.caption = Some(ls);
         self
     }
@@ -106,7 +107,7 @@ impl RadioButton {
         self
     }
 
-    pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;

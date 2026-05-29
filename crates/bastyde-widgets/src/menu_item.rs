@@ -37,6 +37,7 @@ use bastyde_tokens::{TextRole, TextStyleRole};
 
 use crate::keystroke_format::format_keystroke;
 use crate::primitives::{HStack, IconWidget, Spacer, Switcher, TextWidget};
+use bastyde_i18n::LocalizedString;
 
 mod menu_label;
 mod mnemonic;
@@ -104,7 +105,7 @@ enum CheckKind {
 
 /// A single menu item: icon + label + shortcut label + optional submenu chevron.
 pub struct MenuItem {
-    label: bastyde_i18n::LocalizedString,
+    label: LocalizedString,
     icon: Option<IconWidget>,
     shortcut_label: Option<String>,
     /// Optional shortcut id. When set and `shortcut_label` is not,
@@ -113,7 +114,7 @@ pub struct MenuItem {
     /// tracks user rebindings automatically (the build registers the
     /// registry's version signal as a Relayout binding on self).
     shortcut_id: Option<&'static str>,
-    tooltip_text: Option<bastyde_i18n::LocalizedString>,
+    tooltip_text: Option<LocalizedString>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn bastyde_core::widget::Widget>>,
     action: Option<CommandFactory>,
@@ -168,8 +169,8 @@ pub struct MenuItem {
 }
 
 impl MenuItem {
-    pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn new(label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         Self {
             label: ls,
             icon: None,
@@ -266,7 +267,7 @@ impl MenuItem {
 
     /// Attach a tooltip that appears after a hover delay, same mechanism
     /// as [`Button::tooltip`](crate::button::Button::tooltip).
-    pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;
@@ -305,10 +306,10 @@ impl MenuItem {
     /// pre-create the submenu content (typically a `MenuList`), which is kept
     /// dormant until the hover delay elapses.
     pub fn submenu(
-        label: impl Into<bastyde_i18n::LocalizedString>,
+        label: impl Into<LocalizedString>,
         factory: impl Fn() -> Box<dyn Widget> + 'static,
     ) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+        let ls: LocalizedString = label.into();
         Self {
             label: ls,
             icon: None,

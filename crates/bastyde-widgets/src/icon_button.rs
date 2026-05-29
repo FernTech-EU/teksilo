@@ -86,6 +86,7 @@ use crate::primitives::icon_widget::IconWidget;
 pub use bastyde_core::styles::IconButtonSize;
 
 use crate::button::InteractionState;
+use bastyde_i18n::LocalizedString;
 
 /// Type-erased action factory — captures the concrete command type.
 type ActionFactory = Box<dyn Fn(&mut EventContext)>;
@@ -96,7 +97,7 @@ type ActionFactory = Box<dyn Fn(&mut EventContext)>;
 pub struct IconButton {
     // Configuration (set via builder)
     icon: IconWidget,
-    tooltip_text: Option<bastyde_i18n::LocalizedString>,
+    tooltip_text: Option<LocalizedString>,
     /// Optional rich tooltip source — registry key or inline content.
     /// Mutually exclusive with `tooltip_text` and `composite_tooltip_content`.
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
@@ -269,7 +270,7 @@ impl IconButton {
 
     /// Attach a tooltip that appears after a hover delay. Required —
     /// the tooltip text doubles as the AT name for icon-only buttons.
-    pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;

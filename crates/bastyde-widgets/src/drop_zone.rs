@@ -59,6 +59,7 @@ use bastyde_tokens::{HAlignment, TextRole};
 
 use crate::button::Button;
 use crate::primitives::{TextWidget, VStack};
+use bastyde_i18n::LocalizedString;
 
 type FilesCallback = Box<dyn FnMut(Vec<PathBuf>, &mut EventContext)>;
 type TextCallback = Box<dyn FnMut(String, &mut EventContext)>;
@@ -66,9 +67,9 @@ type UrlsCallback = Box<dyn FnMut(Vec<String>, &mut EventContext)>;
 
 /// A drop target for external (OS) drag-and-drop. See the module docs.
 pub struct DropZone {
-    label: bastyde_i18n::LocalizedString,
-    subtitle: Option<bastyde_i18n::LocalizedString>,
-    browse_label: bastyde_i18n::LocalizedString,
+    label: LocalizedString,
+    subtitle: Option<LocalizedString>,
+    browse_label: LocalizedString,
     extensions: Vec<String>,
     allow_multiple: bool,
     show_browse_button: bool,
@@ -87,7 +88,7 @@ impl DropZone {
     /// and stored as a `String`. Locale changes rebuild the composite parent,
     /// which re-creates the `DropZone` with a fresh translation — the same
     /// model as [`Button::new`](crate::button::Button::new).
-    pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn new(label: impl Into<LocalizedString>) -> Self {
         Self {
             label: label.into(),
             subtitle: None,
@@ -105,7 +106,7 @@ impl DropZone {
     }
 
     /// Secondary line under the prompt (e.g. `tr!("png_or_jpeg")`).
-    pub fn subtitle(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn subtitle(mut self, text: impl Into<LocalizedString>) -> Self {
         self.subtitle = Some(text.into());
         self
     }
@@ -141,7 +142,7 @@ impl DropZone {
     }
 
     /// Override the Browse button's label (e.g. `tr!("browse")`).
-    pub fn browse_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn browse_label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.browse_label = label.into();
         self
     }

@@ -30,6 +30,7 @@ use bastyde_platform::file_dialog::{
 
 use crate::icon_button::IconButton;
 use crate::text_input::TextInput;
+use bastyde_i18n::LocalizedString;
 
 /// Which file-dialog kind the trailing button opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -49,13 +50,13 @@ type FilterEntry = (String, Vec<String>);
 pub struct FilePickerField {
     text: Signal<String>,
     kind: FilePickerKind,
-    title: Option<bastyde_i18n::LocalizedString>,
+    title: Option<LocalizedString>,
     starting_dir: Option<PathBuf>,
     default_file_name: Option<String>,
     filters: Vec<FilterEntry>,
     on_pick: Option<Box<dyn Fn(&FileDialogResult, &mut EventContext)>>,
-    placeholder: Option<bastyde_i18n::LocalizedString>,
-    label: Option<bastyde_i18n::LocalizedString>,
+    placeholder: Option<LocalizedString>,
+    label: Option<LocalizedString>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     root_child_id: Option<WidgetId>,
@@ -87,7 +88,7 @@ impl FilePickerField {
     }
 
     /// Title shown in the file-dialog window caption.
-    pub fn dialog_title(mut self, title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn dialog_title(mut self, title: impl Into<LocalizedString>) -> Self {
         self.title = Some(title.into());
         self
     }
@@ -125,15 +126,15 @@ impl FilePickerField {
     }
 
     /// Placeholder text shown when the field is empty.
-    pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         self.placeholder = Some(ls);
         self
     }
 
     /// Accessible name for the path field.
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }
@@ -157,7 +158,7 @@ impl std::fmt::Debug for FilePickerField {
 
 fn build_request_owned(
     kind: FilePickerKind,
-    title: Option<bastyde_i18n::LocalizedString>,
+    title: Option<LocalizedString>,
     starting_dir: Option<PathBuf>,
     default_file_name: Option<String>,
     filters: &[FilterEntry],

@@ -16,6 +16,7 @@ use bastyde_tokens::Color;
 use crate::flags::ItemFlags;
 use crate::item::{SceneItem, SceneItemA11yContext, SceneItemPaintContext};
 use crate::items::{AccessSubtreeMode, ItemA11yOverrides};
+use bastyde_i18n::LocalizedString;
 
 /// Text source for [`TextItem`]: either a static string or a live
 /// `Signal<String>`. Signal-bound text refreshes on each paint and
@@ -26,7 +27,7 @@ enum TextSource {
     /// Localized text; resolved against the active locale on each paint.
     /// `register_bindings` ties the locale signal to the SceneView so a
     /// locale switch repaints and re-resolves.
-    Localized(bastyde_i18n::LocalizedString),
+    Localized(LocalizedString),
 }
 
 impl TextSource {
@@ -45,7 +46,7 @@ pub struct TextItem {
     text: TextSource,
     local_bounds: Rect,
     color: Color,
-    label: Option<bastyde_i18n::LocalizedString>,
+    label: Option<LocalizedString>,
     flags: ItemFlags,
     a11y: ItemA11yOverrides,
 }
@@ -55,8 +56,8 @@ impl TextItem {
     /// resolved eagerly via `LocalizedString::resolve_now` at
     /// construction; locale changes rebuild the composite parent,
     /// which re-creates this `TextItem` with a fresh translation.
-    pub fn new(text: impl Into<bastyde_i18n::LocalizedString>, local_bounds: Rect) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn new(text: impl Into<LocalizedString>, local_bounds: Rect) -> Self {
+        let ls: LocalizedString = text.into();
         Self {
             text: TextSource::Localized(ls),
             local_bounds,
@@ -95,8 +96,8 @@ impl TextItem {
     }
 
     /// Override the AT label (defaults to the current text content).
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }

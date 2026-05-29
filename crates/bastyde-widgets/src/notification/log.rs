@@ -38,6 +38,7 @@ use crate::notification::{
 use crate::primitives::{HStack, Spacer, TextWidget, VStack};
 use crate::scroll_area::ScrollArea;
 use crate::standard_item::StandardListItem;
+use bastyde_i18n::LocalizedString;
 
 /// Configurable archive log. Shipped chrome:
 /// - mark-all-read + clear buttons in a toolbar row;
@@ -431,7 +432,7 @@ fn day_bucket_for(
     }
 }
 
-fn bucket_label(bucket: DayBucket) -> bastyde_i18n::LocalizedString {
+fn bucket_label(bucket: DayBucket) -> LocalizedString {
     match bucket {
         DayBucket::Today => bastyde_i18n::tr_widget!(notifications_bucket_today()),
         DayBucket::Yesterday => bastyde_i18n::tr_widget!(notifications_bucket_yesterday()),

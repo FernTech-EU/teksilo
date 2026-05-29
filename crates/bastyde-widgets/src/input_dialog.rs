@@ -41,9 +41,9 @@ use crate::text_input::TextInput;
 
 /// A single-field input modal.
 pub struct InputDialog {
-    title: bastyde_i18n::LocalizedString,
-    prompt: Option<bastyde_i18n::LocalizedString>,
-    placeholder: Option<bastyde_i18n::LocalizedString>,
+    title: LocalizedString,
+    prompt: Option<LocalizedString>,
+    placeholder: Option<LocalizedString>,
     default_text: String,
     ok_label: Option<LocalizedString>,
     cancel_label: Option<LocalizedString>,
@@ -73,8 +73,8 @@ impl InputDialog {
     }
 
     /// Placeholder shown when the field is empty.
-    pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         self.placeholder = Some(ls);
         self
     }
@@ -140,9 +140,9 @@ impl std::fmt::Debug for InputDialog {
 // ── InputDialogBody — the actual widget that renders inside the modal ─
 
 struct InputDialogBody {
-    title: bastyde_i18n::LocalizedString,
-    prompt: Option<bastyde_i18n::LocalizedString>,
-    placeholder: Option<bastyde_i18n::LocalizedString>,
+    title: LocalizedString,
+    prompt: Option<LocalizedString>,
+    placeholder: Option<LocalizedString>,
     text: Signal<String>,
     ok_label: LocalizedString,
     cancel_label: LocalizedString,

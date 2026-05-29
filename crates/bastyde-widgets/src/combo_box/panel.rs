@@ -32,6 +32,7 @@ use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
 
 use super::item::DropdownItem;
 use super::state::ItemSource;
+use bastyde_i18n::LocalizedString;
 
 /// Build the static (unfiltered) item list subtree.
 ///
@@ -53,7 +54,7 @@ pub(super) fn build_static_item_list<T: Clone + PartialEq + 'static>(
     ctx: &mut BuildContext,
     source: &ItemSource<T>,
     selected: &Signal<Option<T>>,
-    item_label: &Rc<dyn Fn(&T) -> bastyde_i18n::LocalizedString>,
+    item_label: &Rc<dyn Fn(&T) -> LocalizedString>,
     render_item: &Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
     max_visible_items: usize,
 ) -> WidgetId {
@@ -103,7 +104,7 @@ fn build_virtualized_list<T: Clone + PartialEq + 'static>(
     ctx: &mut BuildContext,
     source: &ItemSource<T>,
     selected: &Signal<Option<T>>,
-    item_label: &Rc<dyn Fn(&T) -> bastyde_i18n::LocalizedString>,
+    item_label: &Rc<dyn Fn(&T) -> LocalizedString>,
     render_item: &Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
     max_visible_items: usize,
     filtered_indices: Option<Vec<usize>>,
@@ -295,7 +296,7 @@ fn register_scroll_into_view<T: Clone + PartialEq + 'static>(
 pub(super) struct DropdownPanel<T: Clone + PartialEq + 'static> {
     pub(super) source: ItemSource<T>,
     pub(super) selected: Signal<Option<T>>,
-    pub(super) item_label: Rc<dyn Fn(&T) -> bastyde_i18n::LocalizedString>,
+    pub(super) item_label: Rc<dyn Fn(&T) -> LocalizedString>,
     pub(super) render_item: Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
     pub(super) max_visible_items: usize,
     /// Bumped on every model mutation so the panel rebuilds.
@@ -324,7 +325,7 @@ pub(super) struct DropdownPanel<T: Clone + PartialEq + 'static> {
 struct FilteredItemList<T: Clone + PartialEq + 'static> {
     source: ItemSource<T>,
     selected: Signal<Option<T>>,
-    item_label: Rc<dyn Fn(&T) -> bastyde_i18n::LocalizedString>,
+    item_label: Rc<dyn Fn(&T) -> LocalizedString>,
     render_item: Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
     max_visible_items: usize,
     version: Signal<u64>,

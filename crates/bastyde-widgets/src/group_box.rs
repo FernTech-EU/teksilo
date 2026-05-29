@@ -18,6 +18,7 @@ use bastyde_core::widget_id::WidgetId;
 
 use crate::Checkbox;
 use crate::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
+use bastyde_i18n::LocalizedString;
 use bastyde_tokens::{TextRole, TextStyleRole};
 
 /// GroupBox design tokens.
@@ -26,7 +27,7 @@ pub const GROUP_BOX_TITLE_CONTENT_SPACING: f32 = 8.0;
 pub const GROUP_BOX_CHECKBOX_GAP: f32 = 6.0;
 
 pub struct GroupBox {
-    title: bastyde_i18n::LocalizedString,
+    title: LocalizedString,
     checked: Option<Signal<bool>>,
     pending_content: Option<Box<dyn Widget>>,
     content_id: Option<WidgetId>,
@@ -34,8 +35,8 @@ pub struct GroupBox {
 }
 
 impl GroupBox {
-    pub fn new(title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = title.into();
+    pub fn new(title: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = title.into();
         Self {
             title: ls,
             checked: None,

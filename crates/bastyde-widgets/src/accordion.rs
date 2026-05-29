@@ -18,6 +18,7 @@ use bastyde_tokens::{BorderRole, Color, TextRole, TextStyle, TextStyleRole};
 
 use crate::animations::collapse::Collapse;
 use crate::primitives::{HStack, IconWidget, Spacer, TextWidget, VStack};
+use bastyde_i18n::LocalizedString;
 
 // ---------------------------------------------------------------------------
 // AccordionRegion — thin wrapper that exposes Role::Region for aria-controls.
@@ -93,7 +94,7 @@ pub struct Accordion {
     /// Header title. Kept as a `LocalizedString` (not eagerly resolved)
     /// so a `tr!(...)` / `tr_widget!(...)` source re-renders on locale
     /// change: the title `TextWidget` binds it as a reactive prop.
-    title: bastyde_i18n::LocalizedString,
+    title: LocalizedString,
     expanded: Signal<bool>,
     content_id: Option<WidgetId>,
     pending_content: Option<Box<dyn Widget>>,
@@ -112,7 +113,7 @@ pub struct Accordion {
 }
 
 impl Accordion {
-    pub fn new(title: impl Into<bastyde_i18n::LocalizedString>, expanded: Signal<bool>) -> Self {
+    pub fn new(title: impl Into<LocalizedString>, expanded: Signal<bool>) -> Self {
         Self {
             title: title.into(),
             expanded,

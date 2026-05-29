@@ -15,6 +15,7 @@ use crate::button::{Button, ButtonVariant};
 use crate::dialog::ModalContainer;
 use crate::overlay_trigger::OverlayTrigger;
 use crate::primitives::{Divider, HStack, Spacer, Switcher, TextWidget, VStack};
+use bastyde_i18n::LocalizedString;
 use bastyde_tokens::{TextRole, TextStyleRole};
 
 const DEFAULT_WIZARD_WIDTH: u32 = 640;
@@ -29,19 +30,19 @@ type WizardAction = Rc<dyn Fn(&mut EventContext)>;
 
 #[derive(Clone)]
 struct WizardStepInfo {
-    title: bastyde_i18n::LocalizedString,
-    supporting_text: Option<bastyde_i18n::LocalizedString>,
+    title: LocalizedString,
+    supporting_text: Option<LocalizedString>,
 }
 
 #[derive(Clone)]
 pub struct WizardStep {
-    title: bastyde_i18n::LocalizedString,
-    supporting_text: Option<bastyde_i18n::LocalizedString>,
+    title: LocalizedString,
+    supporting_text: Option<LocalizedString>,
     content_factory: Option<WizardStepFactory>,
 }
 
 impl WizardStep {
-    pub fn new(title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn new(title: impl Into<LocalizedString>) -> Self {
         Self {
             title: title.into(),
             supporting_text: None,
@@ -58,7 +59,7 @@ impl WizardStep {
         self
     }
 
-    pub fn supporting_text(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn supporting_text(mut self, text: impl Into<LocalizedString>) -> Self {
         self.supporting_text = Some(text.into());
         self
     }
@@ -82,15 +83,15 @@ impl std::fmt::Debug for WizardStep {
 
 fn queue_wizard_request(
     ctx: &mut EventContext,
-    label: &bastyde_i18n::LocalizedString,
+    label: &LocalizedString,
     steps: &[WizardStep],
     presentation: ModalPresentation,
     close_behavior: ModalCloseBehavior,
     size: (u32, u32),
-    back_label: &bastyde_i18n::LocalizedString,
-    cancel_label: &bastyde_i18n::LocalizedString,
-    next_label: &bastyde_i18n::LocalizedString,
-    finish_label: &bastyde_i18n::LocalizedString,
+    back_label: &LocalizedString,
+    cancel_label: &LocalizedString,
+    next_label: &LocalizedString,
+    finish_label: &LocalizedString,
     finish_action: Option<&WizardAction>,
 ) {
     if steps.is_empty() {
@@ -274,10 +275,10 @@ impl Widget for WizardHeader {
 struct WizardFooter {
     current_step: Signal<usize>,
     total_steps: usize,
-    back_label: bastyde_i18n::LocalizedString,
-    cancel_label: bastyde_i18n::LocalizedString,
-    next_label: bastyde_i18n::LocalizedString,
-    finish_label: bastyde_i18n::LocalizedString,
+    back_label: LocalizedString,
+    cancel_label: LocalizedString,
+    next_label: LocalizedString,
+    finish_label: LocalizedString,
     finish_action: Option<WizardAction>,
     root_child_id: Option<WidgetId>,
     back_button_id: Option<WidgetId>,
@@ -289,10 +290,10 @@ impl WizardFooter {
     fn new(
         current_step: Signal<usize>,
         total_steps: usize,
-        back_label: bastyde_i18n::LocalizedString,
-        cancel_label: bastyde_i18n::LocalizedString,
-        next_label: bastyde_i18n::LocalizedString,
-        finish_label: bastyde_i18n::LocalizedString,
+        back_label: LocalizedString,
+        cancel_label: LocalizedString,
+        next_label: LocalizedString,
+        finish_label: LocalizedString,
         finish_action: Option<WizardAction>,
     ) -> Self {
         Self {
@@ -462,10 +463,10 @@ impl Widget for WizardFooter {
 struct WizardFlow {
     steps: Vec<WizardStep>,
     current_step: Signal<usize>,
-    back_label: bastyde_i18n::LocalizedString,
-    cancel_label: bastyde_i18n::LocalizedString,
-    next_label: bastyde_i18n::LocalizedString,
-    finish_label: bastyde_i18n::LocalizedString,
+    back_label: LocalizedString,
+    cancel_label: LocalizedString,
+    next_label: LocalizedString,
+    finish_label: LocalizedString,
     finish_action: Option<WizardAction>,
     root_child_id: Option<WidgetId>,
 }
@@ -473,10 +474,10 @@ struct WizardFlow {
 impl WizardFlow {
     fn new(
         steps: Vec<WizardStep>,
-        back_label: bastyde_i18n::LocalizedString,
-        cancel_label: bastyde_i18n::LocalizedString,
-        next_label: bastyde_i18n::LocalizedString,
-        finish_label: bastyde_i18n::LocalizedString,
+        back_label: LocalizedString,
+        cancel_label: LocalizedString,
+        next_label: LocalizedString,
+        finish_label: LocalizedString,
         finish_action: Option<WizardAction>,
     ) -> Self {
         Self {
@@ -577,24 +578,24 @@ impl Widget for WizardFlow {
 }
 
 pub struct Wizard {
-    label: bastyde_i18n::LocalizedString,
+    label: LocalizedString,
     variant: ButtonVariant,
     enabled: bool,
     presentation: ModalPresentation,
     close_behavior: ModalCloseBehavior,
     size: (u32, u32),
     steps: Vec<WizardStep>,
-    back_label: bastyde_i18n::LocalizedString,
-    cancel_label: bastyde_i18n::LocalizedString,
-    next_label: bastyde_i18n::LocalizedString,
-    finish_label: bastyde_i18n::LocalizedString,
+    back_label: LocalizedString,
+    cancel_label: LocalizedString,
+    next_label: LocalizedString,
+    finish_label: LocalizedString,
     finish_action: Option<WizardAction>,
     pending_trigger: Option<Box<dyn Widget>>,
     root_child_id: Option<WidgetId>,
 }
 
 impl Wizard {
-    pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn new(label: impl Into<LocalizedString>) -> Self {
         Self {
             label: label.into(),
             variant: ButtonVariant::Filled,
@@ -648,22 +649,22 @@ impl Wizard {
         self
     }
 
-    pub fn back_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn back_label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.back_label = label.into();
         self
     }
 
-    pub fn cancel_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn cancel_label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.cancel_label = label.into();
         self
     }
 
-    pub fn next_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn next_label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.next_label = label.into();
         self
     }
 
-    pub fn finish_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn finish_label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.finish_label = label.into();
         self
     }

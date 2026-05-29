@@ -80,6 +80,7 @@ use crate::icon_button::{IconButton, IconButtonSize};
 use crate::primitives::IconWidget;
 use crate::primitives::text_input_field::{ValidationFeedback, ValidationOutcome};
 use crate::text_input::TextInput;
+use bastyde_i18n::LocalizedString;
 
 type OnValueChanged = Rc<dyn Fn(Option<Date>, &mut EventContext)>;
 
@@ -134,7 +135,7 @@ pub struct DateEdit {
     min_date: Option<Date>,
     max_date: Option<Date>,
     pattern: Option<String>,
-    placeholder: bastyde_i18n::LocalizedString,
+    placeholder: LocalizedString,
     first_day_of_week: Option<Weekday>,
     show_calendar_button: bool,
     calendar_popover_placement: OverlayPlacement,
@@ -147,7 +148,7 @@ pub struct DateEdit {
     /// [`WidthPolicy::Default`] — the field sizes to its natural
     /// mask-derived width and stays put.
     width_policy: WidthPolicy,
-    label: Option<bastyde_i18n::LocalizedString>,
+    label: Option<LocalizedString>,
     on_value_changed: Option<OnValueChanged>,
     /// Live feedback signal mirrored from the inner field, owned by
     /// `DateEdit` so the wrapper's `accessibility()` and the
@@ -189,7 +190,7 @@ impl DateEdit {
             min_date: None,
             max_date: None,
             pattern: None,
-            placeholder: bastyde_i18n::LocalizedString::literal(String::new()),
+            placeholder: LocalizedString::literal(String::new()),
             first_day_of_week: None,
             show_calendar_button: true,
             calendar_popover_placement: OverlayPlacement::BelowPreferred,
@@ -244,8 +245,8 @@ impl DateEdit {
         self
     }
 
-    pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         self.placeholder = ls;
         self
     }
@@ -304,8 +305,8 @@ impl DateEdit {
         self.feedback.clone()
     }
 
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }
@@ -1001,7 +1002,7 @@ pub(crate) fn try_clamp_recovery(
     raw: &str,
     min: Option<Date>,
     max: Option<Date>,
-) -> Option<(String, bastyde_i18n::LocalizedString)> {
+) -> Option<(String, LocalizedString)> {
     // Walk the pattern; for each digit segment, take whatever digit
     // run starts at the current cursor position. For literal tokens,
     // optionally consume the literal (lenient — same logic as
@@ -1010,7 +1011,7 @@ pub(crate) fn try_clamp_recovery(
     let mut year: Option<i16> = None;
     let mut month: Option<i8> = None;
     let mut day: Option<i8> = None;
-    let mut clamp_notes: Vec<bastyde_i18n::LocalizedString> = Vec::new();
+    let mut clamp_notes: Vec<LocalizedString> = Vec::new();
 
     for token in &pattern.tokens {
         if cursor.is_empty() {

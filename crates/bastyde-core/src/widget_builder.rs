@@ -977,7 +977,7 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// Replaces whatever the inner widget emitted via `set_name`.
     ///
     /// Accepts any `impl Into<Prop<String>>`. With the `i18n` feature,
-    /// `bastyde_i18n::LocalizedString` (produced by `tr!(...)`)
+    /// `LocalizedString` (produced by `tr!(...)`)
     /// implements `From<LocalizedString> for Prop<String>`, so
     /// `.access_label(tr!(save()))` stays reactive — the announced
     /// value re-resolves on locale change (the accessibility tree

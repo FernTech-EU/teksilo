@@ -65,6 +65,7 @@ use crate::item::ItemId;
 use crate::scene::Scene;
 use crate::scene_model::SceneModel;
 use crate::transform::{anchor_pan_for_pinch, compose_view};
+use bastyde_i18n::LocalizedString;
 
 /// Logical pixels of pan applied per `ScrollDelta::Lines` notch.
 /// Mirrors the convention used by `ScrollArea` (`line_height` ≈ 16 in
@@ -523,7 +524,7 @@ pub struct SceneView {
     /// When set, becomes the logical region name (e.g. "Chart
     /// data area" for an inner chart SceneView). Default `None`
     /// — the SceneView has no explicit name.
-    a11y_label: Option<bastyde_i18n::LocalizedString>,
+    a11y_label: Option<LocalizedString>,
     /// Coordinate space for `SceneItem` bounds reported to AT.
     /// Default `Screen` (view-projected). Apps with a logical
     /// fixed coordinate system (CAD canvases, blueprint editors)
@@ -855,8 +856,8 @@ impl SceneView {
     /// region should have a domain-specific name (e.g. "Chart
     /// data area"). Default `None` — the SceneView has no
     /// explicit AT name.
-    pub fn a11y_label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn a11y_label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.a11y_label = Some(ls);
         self
     }

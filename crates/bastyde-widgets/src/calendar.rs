@@ -97,6 +97,7 @@ use crate::styles::recipe_calendar_style as cal_recipe;
 
 use self::cell::DayCell;
 use self::header::CalendarHeader;
+use bastyde_i18n::LocalizedString;
 
 // ── Public types ──────────────────────────────────────────────────────
 
@@ -205,7 +206,7 @@ pub struct Calendar {
     min_date: Option<Date>,
     max_date: Option<Date>,
     disabled_date_filter: Option<DisabledDateFilter>,
-    label: Option<bastyde_i18n::LocalizedString>,
+    label: Option<LocalizedString>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     on_selection_changed: Option<OnSelectionChanged>,
@@ -319,8 +320,8 @@ impl Calendar {
 
     /// Override the AT label. Default: "Calendar, May 2026" (localized,
     /// derived from the visible month).
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }

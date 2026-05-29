@@ -8,6 +8,7 @@ use bastyde_core::widget_id::WidgetId;
 
 use crate::Panel;
 use crate::primitives::HStack;
+use bastyde_i18n::LocalizedString;
 
 /// Toolbar design tokens.
 pub const TOOLBAR_HEIGHT_COMPACT: f32 = 30.0;
@@ -23,7 +24,7 @@ pub struct Toolbar {
     pending: Vec<PendingChild>,
     child_ids: Vec<WidgetId>,
     root_child_id: Option<WidgetId>,
-    label: Option<bastyde_i18n::LocalizedString>,
+    label: Option<LocalizedString>,
 }
 
 impl Toolbar {
@@ -52,8 +53,8 @@ impl Toolbar {
     /// "Toolbar" string from the framework bundle. Use this when a window
     /// has multiple toolbars that need distinguishing ("Formatting",
     /// "Drawing", etc.).
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }

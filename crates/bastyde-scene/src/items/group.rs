@@ -12,6 +12,7 @@ use bastyde_tokens::Color;
 
 use crate::item::{SceneItem, SceneItemA11yContext, SceneItemPaintContext};
 use crate::items::{AccessSubtreeMode, ItemA11yOverrides};
+use bastyde_i18n::LocalizedString;
 
 /// A group container with optional fill / stroke / inline label, in
 /// local item coordinates.
@@ -52,8 +53,8 @@ impl GroupItem {
 
     /// Human-readable label, used as the default AT group name and
     /// (when `show_label` is enabled) rendered inline at top-leading.
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls.resolve_now());
         self
     }

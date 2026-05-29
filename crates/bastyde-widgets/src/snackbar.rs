@@ -12,6 +12,7 @@ use bastyde_core::widget_id::WidgetId;
 
 use crate::button::{Button, ButtonVariant};
 use crate::overlay_trigger::OverlayTrigger;
+use bastyde_i18n::LocalizedString;
 
 const DEFAULT_AUTO_DISMISS: Duration = Duration::from_secs(4);
 
@@ -50,7 +51,7 @@ struct SnackbarSurface {
     /// so screen readers read out the caller-provided message
     /// the moment the snackbar appears. Falls back to the
     /// generic `a11y_snackbar_name` when unset.
-    announcement: Option<bastyde_i18n::LocalizedString>,
+    announcement: Option<LocalizedString>,
     /// Per-call override for the snackbar surface chrome.
     style_override: Option<SharedSnackbarStyle>,
     /// Build state — the `SnackbarStyle::make_body` root.
@@ -68,7 +69,7 @@ impl SnackbarSurface {
         }
     }
 
-    fn with_announcement(mut self, text: Option<bastyde_i18n::LocalizedString>) -> Self {
+    fn with_announcement(mut self, text: Option<LocalizedString>) -> Self {
         self.announcement = text;
         self
     }
@@ -162,7 +163,7 @@ impl Widget for SnackbarSurface {
 }
 
 pub struct Snackbar {
-    label: bastyde_i18n::LocalizedString,
+    label: LocalizedString,
     variant: ButtonVariant,
     enabled: bool,
     dismiss: DismissBehavior,
@@ -172,15 +173,15 @@ pub struct Snackbar {
     /// Optional explicit announcement string threaded through to
     /// the `SnackbarSurface`'s a11y node. When set, screen readers
     /// read this as the Alert's name when the snackbar appears.
-    announcement: Option<bastyde_i18n::LocalizedString>,
+    announcement: Option<LocalizedString>,
     /// Per-call override for the snackbar surface chrome.
     style_override: Option<SharedSnackbarStyle>,
     root_child_id: Option<WidgetId>,
 }
 
 impl Snackbar {
-    pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn new(label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         Self {
             label: ls,
             variant: ButtonVariant::Plain,
@@ -266,8 +267,8 @@ impl Snackbar {
     /// the specific message. Set this whenever the snackbar
     /// conveys information the user needs to hear (errors,
     /// confirmations, status changes).
-    pub fn announcement(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn announcement(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         self.announcement = Some(ls);
         self
     }

@@ -12,6 +12,7 @@ use bastyde_tokens::Color;
 use crate::flags::ItemFlags;
 use crate::item::{SceneItem, SceneItemA11yContext, SceneItemPaintContext};
 use crate::items::{AccessSubtreeMode, ItemA11yOverrides};
+use bastyde_i18n::LocalizedString;
 
 /// An arbitrary vector path with optional fill and stroke, in local
 /// item coordinates.
@@ -71,8 +72,8 @@ impl PathItem {
     }
 
     /// Human-readable label.
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls.resolve_now());
         self
     }

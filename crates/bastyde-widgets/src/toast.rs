@@ -52,6 +52,7 @@ pub use surface::ToastSurface;
 /// `Banner` and `Toast` share one severity vocabulary. The same
 /// `severity.surface()` / `severity.glyph_color(theme)` helpers apply.
 pub use bastyde_core::styles::BannerSeverity as ToastSeverity;
+use bastyde_i18n::LocalizedString;
 
 /// Default auto-dismiss duration when the caller does not override
 /// it (matches IntelliJ `BALLOON` and Material Snackbar maximum).
@@ -113,22 +114,22 @@ pub type ToastActionCallback = Rc<dyn Fn(&mut EventContext)>;
 /// One actionable element inside a [`Toast`] — a button or hyperlink
 /// the user can click to drive a domain action.
 pub struct ToastAction {
-    label: bastyde_i18n::LocalizedString,
+    label: LocalizedString,
     on_invoke: ToastActionCallback,
     style: ToastActionStyle,
     closes_toast: bool,
     shortcut_id: Option<String>,
-    tooltip: Option<bastyde_i18n::LocalizedString>,
+    tooltip: Option<LocalizedString>,
 }
 
 impl ToastAction {
     /// Build an action with the default `Link` style and
     /// `closes_toast = true` (IntelliJ "expiring action" semantics).
     pub fn new(
-        label: impl Into<bastyde_i18n::LocalizedString>,
+        label: impl Into<LocalizedString>,
         on_invoke: impl Fn(&mut EventContext) + 'static,
     ) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+        let ls: LocalizedString = label.into();
         Self {
             label: ls,
             on_invoke: Rc::new(on_invoke),
@@ -142,7 +143,7 @@ impl ToastAction {
     /// Shorthand for `ToastAction::new(label, on_invoke).style(Button { Filled })`.
     /// The visual-weight default for primary calls-to-action.
     pub fn primary(
-        label: impl Into<bastyde_i18n::LocalizedString>,
+        label: impl Into<LocalizedString>,
         on_invoke: impl Fn(&mut EventContext) + 'static,
     ) -> Self {
         Self::new(label, on_invoke).style(ToastActionStyle::Button {
@@ -153,7 +154,7 @@ impl ToastAction {
     /// Shorthand for the destructive button variant — red-tinted for
     /// confirm-style "Delete" / "Discard" actions.
     pub fn destructive(
-        label: impl Into<bastyde_i18n::LocalizedString>,
+        label: impl Into<LocalizedString>,
         on_invoke: impl Fn(&mut EventContext) + 'static,
     ) -> Self {
         Self::new(label, on_invoke).style(ToastActionStyle::Button {
@@ -188,7 +189,7 @@ impl ToastAction {
     }
 
     /// Optional tooltip text shown when the pointer hovers the action.
-    pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
         self.tooltip = Some(text.into());
         self
     }
@@ -207,11 +208,11 @@ impl ToastAction {
     }
     /// The action label as a `LocalizedString` (reactive source for
     /// the rendered Link/Button).
-    pub(crate) fn label_ls(&self) -> bastyde_i18n::LocalizedString {
+    pub(crate) fn label_ls(&self) -> LocalizedString {
         self.label.clone()
     }
 
-    pub fn tooltip_ref(&self) -> Option<&bastyde_i18n::LocalizedString> {
+    pub fn tooltip_ref(&self) -> Option<&LocalizedString> {
         self.tooltip.as_ref()
     }
     pub fn callback(&self) -> ToastActionCallback {
@@ -323,8 +324,8 @@ pub type ToastDismissCallback = Rc<dyn Fn(ToastDismissCause, &mut EventContext)>
 /// See the module docs for the full conceptual overview.
 pub struct Toast {
     pub(crate) severity: ToastSeverity,
-    pub(crate) title: bastyde_i18n::LocalizedString,
-    pub(crate) body: Option<bastyde_i18n::LocalizedString>,
+    pub(crate) title: LocalizedString,
+    pub(crate) body: Option<LocalizedString>,
     pub(crate) leading: Option<Box<dyn Widget>>,
     pub(crate) actions: Vec<ToastAction>,
     pub(crate) auto_dismiss_after: Option<Duration>,
@@ -332,7 +333,7 @@ pub struct Toast {
     pub(crate) id: Option<String>,
     pub(crate) on_click: Option<Rc<dyn Fn(&mut EventContext)>>,
     pub(crate) on_dismiss: Option<ToastDismissCallback>,
-    pub(crate) announcement: Option<bastyde_i18n::LocalizedString>,
+    pub(crate) announcement: Option<LocalizedString>,
     pub(crate) show_close_button: bool,
     pub(crate) closable_on_escape: bool,
     pub(crate) archive: bool,
@@ -354,11 +355,8 @@ impl std::fmt::Debug for Toast {
 }
 
 impl Toast {
-    fn build_with_severity(
-        severity: ToastSeverity,
-        title: impl Into<bastyde_i18n::LocalizedString>,
-    ) -> Self {
-        let ls: bastyde_i18n::LocalizedString = title.into();
+    fn build_with_severity(severity: ToastSeverity, title: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = title.into();
         Self {
             severity,
             title: ls,
@@ -381,19 +379,19 @@ impl Toast {
     // ----- Constructors -----
 
     /// Info-severity toast (status confirmation, neutral notice).
-    pub fn info(title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn info(title: impl Into<LocalizedString>) -> Self {
         Self::build_with_severity(ToastSeverity::Info, title)
     }
     /// Success-severity toast ("Saved", "Connected", "Build finished").
-    pub fn success(title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn success(title: impl Into<LocalizedString>) -> Self {
         Self::build_with_severity(ToastSeverity::Success, title)
     }
     /// Warning-severity toast.
-    pub fn warning(title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn warning(title: impl Into<LocalizedString>) -> Self {
         Self::build_with_severity(ToastSeverity::Warning, title)
     }
     /// Error-severity toast. Defaults to `Live::Assertive`.
-    pub fn error(title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn error(title: impl Into<LocalizedString>) -> Self {
         Self::build_with_severity(ToastSeverity::Error, title)
     }
     /// Loading-style toast — Info severity with a
@@ -401,7 +399,7 @@ impl Toast {
     /// Persistent by default; the app calls
     /// [`ToastHandle::dismiss`] (typically from the operation's
     /// completion callback) or replaces it with a success/error toast.
-    pub fn loading(title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn loading(title: impl Into<LocalizedString>) -> Self {
         Self::build_with_severity(ToastSeverity::Info, title)
             .persistent()
             .leading(crate::spinner::Spinner::new(16.0))
@@ -412,8 +410,8 @@ impl Toast {
     // ----- Body content -----
 
     /// Optional secondary line below the title.
-    pub fn body(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn body(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         self.body = Some(ls);
         self
     }
@@ -434,7 +432,7 @@ impl Toast {
     }
     pub fn primary_action(
         self,
-        label: impl Into<bastyde_i18n::LocalizedString>,
+        label: impl Into<LocalizedString>,
         on_invoke: impl Fn(&mut EventContext) + 'static,
     ) -> Self {
         self.action(ToastAction::primary(label, on_invoke))
@@ -504,8 +502,8 @@ impl Toast {
     /// Override the screen-reader announcement text without changing
     /// the visible title. Useful when the visible title is iconic
     /// ("3") but the spoken text needs context ("3 unread messages").
-    pub fn announcement(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn announcement(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         self.announcement = Some(ls);
         self
     }

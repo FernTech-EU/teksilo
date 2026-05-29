@@ -12,10 +12,11 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::TextStyleRole;
 
 use crate::primitives::TextWidget;
+use bastyde_i18n::LocalizedString;
 
 /// A pill-shaped label for displaying tags, counts, or status.
 pub struct Badge {
-    label: bastyde_i18n::LocalizedString,
+    label: LocalizedString,
     color: Option<ColorProp>,
     text_color: Option<ColorProp>,
     /// Per-call override for the pill chrome.
@@ -24,7 +25,7 @@ pub struct Badge {
 }
 
 impl Badge {
-    pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn new(label: impl Into<LocalizedString>) -> Self {
         Self {
             label: label.into(),
             color: None,

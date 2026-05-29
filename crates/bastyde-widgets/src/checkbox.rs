@@ -25,6 +25,7 @@ use bastyde_data::CheckState;
 use bastyde_tokens::{TextRole, TextStyleRole, VAlignment};
 
 use crate::primitives::{HStack, MinSize, TextWidget, VStack};
+use bastyde_i18n::LocalizedString;
 
 // ---------------------------------------------------------------------------
 // Internal state wrapper
@@ -98,8 +99,8 @@ impl std::fmt::Debug for CheckKind {
 
 /// A checkbox that toggles a `Signal<bool>` or cycles a `Signal<CheckState>`.
 pub struct Checkbox {
-    label: Option<bastyde_i18n::LocalizedString>,
-    caption: Option<bastyde_i18n::LocalizedString>,
+    label: Option<LocalizedString>,
+    caption: Option<LocalizedString>,
     kind: CheckKind,
     /// Initial enabled-state; forwarded into the arena at build time.
     /// After build the arena is the single source of truth — see
@@ -112,7 +113,7 @@ pub struct Checkbox {
     /// or an `access_label*` override). Used by `StandardListItem` /
     /// `StandardTreeItem`.
     labels_hidden: bool,
-    tooltip_text: Option<bastyde_i18n::LocalizedString>,
+    tooltip_text: Option<LocalizedString>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn bastyde_core::widget::Widget>>,
     variant: CheckboxVariant,
@@ -182,8 +183,8 @@ impl Checkbox {
         self
     }
 
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = Some(ls);
         self
     }
@@ -191,8 +192,8 @@ impl Checkbox {
     /// Secondary explanatory text rendered below the label, left-aligned
     /// with the label (not the box). Uses the `small` / `text_secondary`
     /// style. Has no effect unless `label(...)` is also set.
-    pub fn caption(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn caption(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         self.caption = Some(ls);
         self
     }
@@ -224,7 +225,7 @@ impl Checkbox {
         self
     }
 
-    pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;

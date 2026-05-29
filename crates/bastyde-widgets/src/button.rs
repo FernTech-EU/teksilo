@@ -35,6 +35,7 @@ use crate::primitives::{HStack, TextWidget, VStack};
 /// Outlined → Plain`, and `Link → Ghost` accordingly. Other design
 /// languages (Material 3, macOS) honour the variants distinctly.
 pub use bastyde_core::styles::ButtonVariant;
+use bastyde_i18n::LocalizedString;
 
 /// Internal interaction state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,7 +103,7 @@ pub struct Button {
     initial_enabled: bool,
     icon: Option<IconWidget>,
     icon_location: IconLocation,
-    tooltip_text: Option<bastyde_i18n::LocalizedString>,
+    tooltip_text: Option<LocalizedString>,
     /// Optional rich tooltip source (registry key or inline content).
     /// Mutually exclusive with `tooltip_text` and `composite_tooltip_content`
     /// — every tooltip setter clears the other two so last-call wins.
@@ -159,8 +160,8 @@ impl Button {
     /// construction and stored as a plain `String`; locale changes rebuild
     /// the composite parent, which re-creates this `Button` with a fresh
     /// translation.
-    pub fn new(label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn new(label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         Self {
             label: bastyde_core::signal::Prop::Static(ls.resolve_now()),
             // Int UI default is a Plain (non-primary) button; the caller
@@ -252,7 +253,7 @@ impl Button {
     }
 
     /// Attach a tooltip that appears after a hover delay.
-    pub fn tooltip(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
+    pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
         self.tooltip_text = Some(text.into());
         self.rich_tooltip_source = None;
         self.composite_tooltip_content = None;

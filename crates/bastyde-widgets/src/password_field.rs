@@ -57,6 +57,7 @@ use crate::tooltip::{self, RichTooltipSource};
 // `PasswordField::new(p).echo_mode(EchoMode::RevealWhileTyping)` from a
 // single import path.
 pub use crate::primitives::text_input_field::{AtRevealPolicy, EchoMode};
+use bastyde_i18n::LocalizedString;
 
 /// The caps-lock indicator glyph: U+21EA UPWARDS WHITE ARROW FROM BAR,
 /// the conventional Caps Lock symbol (also used by macOS).
@@ -83,8 +84,8 @@ pub enum RevealMode {
 /// Secure single-line text entry. See the [module docs](self).
 pub struct PasswordField {
     text: Signal<String>,
-    placeholder: bastyde_i18n::LocalizedString,
-    label: bastyde_i18n::LocalizedString,
+    placeholder: LocalizedString,
+    label: LocalizedString,
     initial_enabled: bool,
     read_only: bool,
     max_length: Option<usize>,
@@ -106,7 +107,7 @@ pub struct PasswordField {
     at_reveal_policy: AtRevealPolicy,
 
     // ── Tooltips (mutually exclusive, last-call-wins) ───────────────
-    tooltip_text: Option<bastyde_i18n::LocalizedString>,
+    tooltip_text: Option<LocalizedString>,
     rich_tooltip_source: Option<RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn Widget>>,
 
@@ -130,8 +131,8 @@ impl PasswordField {
     pub fn new(password: Signal<String>) -> Self {
         Self {
             text: password,
-            placeholder: bastyde_i18n::LocalizedString::literal(String::new()),
-            label: bastyde_i18n::LocalizedString::literal(String::new()),
+            placeholder: LocalizedString::literal(String::new()),
+            label: LocalizedString::literal(String::new()),
             initial_enabled: true,
             read_only: false,
             max_length: None,
@@ -158,16 +159,16 @@ impl PasswordField {
     }
 
     /// Placeholder shown when empty. Never masked.
-    pub fn placeholder(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = text.into();
+    pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         self.placeholder = ls;
         self
     }
 
     /// Accessible name, applied to the `Role::PasswordInput` field node.
     /// Strongly recommended for screen-reader users.
-    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
-        let ls: bastyde_i18n::LocalizedString = label.into();
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = label.into();
         self.label = ls;
         self
     }

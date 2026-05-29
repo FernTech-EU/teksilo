@@ -76,7 +76,7 @@ const UNBOUNDED: f32 = 10_000.0;
 /// are a small `IconWidget`, a `Checkbox` (checkable section), a
 /// `Badge` (count), or a `Button` (per-row action).
 pub struct ToolBoxItem {
-    label: bastyde_i18n::LocalizedString,
+    label: LocalizedString,
     leading: Option<Box<dyn Widget>>,
     trailing: Option<Box<dyn Widget>>,
     /// Plain-text tooltip body. Mutually exclusive with `rich_tooltip`
@@ -309,7 +309,7 @@ fn last_enabled_index(enabled: &[bool]) -> Option<usize> {
 
 #[derive(Debug)]
 struct ToolBoxHeader {
-    label: bastyde_i18n::LocalizedString,
+    label: LocalizedString,
     index: usize,
     /// Structural per-item enabled flag. Forwarded into the arena at
     /// build time; the arena is then the single source of truth (events,
@@ -343,7 +343,7 @@ struct ToolBoxHeader {
 impl ToolBoxHeader {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        label: bastyde_i18n::LocalizedString,
+        label: LocalizedString,
         index: usize,
         initial_enabled: bool,
         selected: Signal<usize>,
@@ -764,7 +764,7 @@ enum HeaderInteraction {
 
 #[derive(Debug)]
 struct ToolBoxPanel {
-    label: bastyde_i18n::LocalizedString,
+    label: LocalizedString,
     selected: Signal<usize>,
     index: usize,
     content: Option<PendingChild>,

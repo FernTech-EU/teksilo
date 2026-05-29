@@ -33,6 +33,7 @@ use crate::toast::{
     Toast, ToastAction, ToastActionStyle, ToastDismissCallback, ToastDismissCause, ToastHandle,
     ToastHandleInner, ToastSeverity,
 };
+use bastyde_i18n::LocalizedString;
 
 /// Cheap to clone (`Rc<RefCell<…>>`). All public methods take `&self`
 /// and use interior mutability.
@@ -79,9 +80,9 @@ pub(crate) struct LiveEntry {
     pub(crate) entry_id: u64,
     pub(crate) severity: ToastSeverity,
     pub(crate) priority: ToastPriority,
-    pub(crate) title: bastyde_i18n::LocalizedString,
-    pub(crate) body: Option<bastyde_i18n::LocalizedString>,
-    pub(crate) announcement: Option<bastyde_i18n::LocalizedString>,
+    pub(crate) title: LocalizedString,
+    pub(crate) body: Option<LocalizedString>,
+    pub(crate) announcement: Option<LocalizedString>,
     pub(crate) actions: Rc<Vec<ToastAction>>,
     pub(crate) show_close_button: bool,
     pub(crate) closable_on_escape: bool,
