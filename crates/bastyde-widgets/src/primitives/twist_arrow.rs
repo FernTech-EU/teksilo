@@ -101,6 +101,13 @@ impl Widget for TwistArrow {
             path.line_to(Point::new(cx + r, cy - r * 0.4));
             path.line_to(Point::new(cx, cy + r * 0.6));
             path.close();
+        } else if ctx.layout_direction == bastyde_core::environment::LayoutDirection::RightToLeft {
+            // Collapsed glyph points toward the leading edge — left under
+            // RTL — so it mirrors the direction the subtree expands into.
+            path.move_to(Point::new(cx + r * 0.4, cy - r));
+            path.line_to(Point::new(cx - r * 0.6, cy));
+            path.line_to(Point::new(cx + r * 0.4, cy + r));
+            path.close();
         } else {
             path.move_to(Point::new(cx - r * 0.4, cy - r));
             path.line_to(Point::new(cx + r * 0.6, cy));

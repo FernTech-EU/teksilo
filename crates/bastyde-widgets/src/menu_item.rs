@@ -197,7 +197,6 @@ impl MenuItem {
     }
 
     /// Closure invoked on activation.
-    /// See architecture Section 9.2.6.
     /// Note: shortcut label auto-lookup is not available with this variant
     /// since there is no typed command to look up.
     pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
@@ -673,8 +672,34 @@ impl Widget for MenuItem {
             // Chevron column. Always reserved (Spacer when no submenu)
             // so the row's right edge sits at exactly the same X
             // regardless of submenu-ness.
+            //
+            // The submenu opens on the trailing edge
+            // (`OverlayPlacement::TrailingEdge`) — right under LTR, left
+            // under RTL — so the chevron must point the same way. Drive a
+            // `Switcher` off the locale's direction signal so it flips
+            // live on a locale change (0 = LTR → ▶, 1 = RTL → ◀). With no
+            // i18n manager installed there's no RTL, so fall back to the
+            // plain right-pointing chevron.
             let chevron_child_id = if submenu_content_id.is_some() {
-                ctx.add(IconWidget::chevron_right(12.0).bind_color(text_role.clone()))
+                match bastyde_i18n::current_direction() {
+                    Some(direction) => {
+                        let idx = direction.map(|d| {
+                            if *d == bastyde_core::environment::LayoutDirection::RightToLeft {
+                                1_usize
+                            } else {
+                                0
+                            }
+                        });
+                        ctx.add(
+                            Switcher::new(idx)
+                                .child(IconWidget::chevron_right(12.0).bind_color(text_role.clone()))
+                                .child(IconWidget::chevron_left(12.0).bind_color(text_role.clone())),
+                        )
+                    }
+                    None => {
+                        ctx.add(IconWidget::chevron_right(12.0).bind_color(text_role.clone()))
+                    }
+                }
             } else {
                 ctx.add(Spacer::new())
             };
