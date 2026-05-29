@@ -6,30 +6,41 @@ use bastyde_core::signal::Prop;
 use bastyde_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 
 /// A layout container that adds padding (insets) around a single child.
-/// Each inset accepts a static `f32` or a reactive `Signal<f32>` so a
-/// theme-derived inset can update without rebuilding the widget tree.
+///
+/// Horizontal insets are **leading/trailing** (logical), not left/right
+/// (physical), so they flip automatically in RTL locales. Each inset accepts
+/// a static `f32` or a reactive `Signal<f32>` so a theme-derived inset can
+/// update without rebuilding the widget tree.
+///
+/// The argument order for [`Padding::new`] follows the CSS shorthand convention:
+/// `(top, trailing, bottom, leading)`.
 #[derive(Debug)]
 pub struct Padding {
     top: Prop<f32>,
-    right: Prop<f32>,
+    trailing: Prop<f32>,
     bottom: Prop<f32>,
-    left: Prop<f32>,
+    leading: Prop<f32>,
     child_id: Option<WidgetId>,
     pending_child: Option<PendingChild>,
 }
 
 impl Padding {
+    /// Create a padding with explicit per-side insets.
+    ///
+    /// Argument order mirrors CSS shorthand: `(top, trailing, bottom, leading)`.
+    /// `trailing` and `leading` are **logical** — they map to physical right and
+    /// left in LTR and are swapped in RTL.
     pub fn new(
         top: impl Into<Prop<f32>>,
-        right: impl Into<Prop<f32>>,
+        trailing: impl Into<Prop<f32>>,
         bottom: impl Into<Prop<f32>>,
-        left: impl Into<Prop<f32>>,
+        leading: impl Into<Prop<f32>>,
     ) -> Self {
         Self {
             top: top.into(),
-            right: right.into(),
+            trailing: trailing.into(),
             bottom: bottom.into(),
-            left: left.into(),
+            leading: leading.into(),
             child_id: None,
             pending_child: None,
         }
@@ -39,9 +50,9 @@ impl Padding {
         let amount = amount.into();
         Self {
             top: amount.clone(),
-            right: amount.clone(),
+            trailing: amount.clone(),
             bottom: amount.clone(),
-            left: amount,
+            leading: amount,
             child_id: None,
             pending_child: None,
         }
@@ -52,9 +63,9 @@ impl Padding {
         let horizontal = horizontal.into();
         Self {
             top: vertical.clone(),
-            right: horizontal.clone(),
+            trailing: horizontal.clone(),
             bottom: vertical,
-            left: horizontal,
+            leading: horizontal,
             child_id: None,
             pending_child: None,
         }
@@ -73,7 +84,7 @@ impl Padding {
     }
 
     fn horizontal_inset(&self) -> f32 {
-        self.left.get() + self.right.get()
+        self.leading.get() + self.trailing.get()
     }
 
     fn vertical_inset(&self) -> f32 {
@@ -98,7 +109,7 @@ impl Widget for Padding {
             registry,
             bastyde_core::binding::BindingLevel::Relayout,
         );
-        self.right.register_if_bound(
+        self.trailing.register_if_bound(
             self_id,
             registry,
             bastyde_core::binding::BindingLevel::Relayout,
@@ -108,7 +119,7 @@ impl Widget for Padding {
             registry,
             bastyde_core::binding::BindingLevel::Relayout,
         );
-        self.left.register_if_bound(
+        self.leading.register_if_bound(
             self_id,
             registry,
             bastyde_core::binding::BindingLevel::Relayout,
@@ -144,14 +155,19 @@ impl Widget for Padding {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
         let top = self.top.get();
-        let left = self.left.get();
         let h_inset = self.horizontal_inset();
         let v_inset = self.vertical_inset();
+        // Flip leading/trailing to physical left/right for RTL locales.
+        let phys_left = if ctx.is_rtl() {
+            self.trailing.get()
+        } else {
+            self.leading.get()
+        };
         for child in children.iter_mut() {
-            child.origin = Point::new(bounds.x + left, bounds.y + top);
+            child.origin = Point::new(bounds.x + phys_left, bounds.y + top);
             child.size = Size::new(
                 (bounds.width - h_inset).max(0.0),
                 (bounds.height - v_inset).max(0.0),

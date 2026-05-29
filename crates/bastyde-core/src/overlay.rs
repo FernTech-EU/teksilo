@@ -986,26 +986,48 @@ impl OverlayManager {
             let content_size = overlay.bounds.size(); // Will be set from content layout
 
             overlay.bounds = match &overlay.placement {
-                OverlayPlacement::Below => Rect::new(
-                    anchor.x,
-                    anchor.y + anchor.height + 4.0,
-                    content_size.width.max(anchor.width),
-                    content_size.height,
-                ),
-                OverlayPlacement::Above => Rect::new(
-                    anchor.x,
-                    anchor.y - content_size.height - 4.0,
-                    content_size.width.max(anchor.width),
-                    content_size.height,
-                ),
-                OverlayPlacement::TrailingEdge => {
-                    let x_right = anchor.x + anchor.width + 2.0;
-                    let fits_right = x_right + content_size.width <= vw;
-                    let x = if fits_right {
-                        x_right
+                OverlayPlacement::Below => {
+                    let actual_width = content_size.width.max(anchor.width);
+                    // Align leading edges: in LTR the leading edge is anchor.x;
+                    // in RTL the leading edge is anchor.x + anchor.width (physical right).
+                    let x = if rtl {
+                        (anchor.x + anchor.width - actual_width)
+                            .min(vw - actual_width)
+                            .max(0.0)
                     } else {
-                        // Fallback: open to the leading edge
-                        anchor.x - content_size.width - 2.0
+                        anchor.x
+                    };
+                    Rect::new(x, anchor.y + anchor.height + 4.0, actual_width, content_size.height)
+                }
+                OverlayPlacement::Above => {
+                    let actual_width = content_size.width.max(anchor.width);
+                    let x = if rtl {
+                        (anchor.x + anchor.width - actual_width)
+                            .min(vw - actual_width)
+                            .max(0.0)
+                    } else {
+                        anchor.x
+                    };
+                    Rect::new(x, anchor.y - content_size.height - 4.0, actual_width, content_size.height)
+                }
+                OverlayPlacement::TrailingEdge => {
+                    // In LTR trailing is to the right; in RTL trailing is to the left.
+                    let x = if rtl {
+                        let x_left = anchor.x - content_size.width - 2.0;
+                        if x_left >= 0.0 {
+                            x_left
+                        } else {
+                            // Fallback: open to the leading side (right in RTL)
+                            anchor.x + anchor.width + 2.0
+                        }
+                    } else {
+                        let x_right = anchor.x + anchor.width + 2.0;
+                        if x_right + content_size.width <= vw {
+                            x_right
+                        } else {
+                            // Fallback: open to the leading side (left in LTR)
+                            anchor.x - content_size.width - 2.0
+                        }
                     };
                     let y = anchor.y.min(vh - content_size.height).max(0.0);
                     Rect::new(x, y, content_size.width, content_size.height)
@@ -1072,14 +1094,16 @@ impl OverlayManager {
                     } else {
                         anchor.y - content_size.height - 4.0
                     };
-                    // Clamp horizontally
-                    let x = anchor.x.min(vw - content_size.width).max(0.0);
-                    Rect::new(
-                        x,
-                        y,
-                        content_size.width.max(anchor.width),
-                        content_size.height,
-                    )
+                    let actual_width = content_size.width.max(anchor.width);
+                    // Align leading edges, same logic as Below.
+                    let x = if rtl {
+                        (anchor.x + anchor.width - actual_width)
+                            .min(vw - actual_width)
+                            .max(0.0)
+                    } else {
+                        anchor.x.min(vw - actual_width).max(0.0)
+                    };
+                    Rect::new(x, y, actual_width, content_size.height)
                 }
                 OverlayPlacement::ViewportCorner { corner, margin } => {
                     let (x, y) = corner.resolve(

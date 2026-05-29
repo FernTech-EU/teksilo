@@ -118,10 +118,15 @@ impl Widget for MinSize {
             },
         };
 
-        let child_size = self
+        // Use child_layout_response to capture flex so a Spacer (or any
+        // other flex child) inside MinSize is still seen as flex by the
+        // parent stack. Without this, MinSize(Spacer) would report flex=0
+        // and break the parent HStack's slack distribution.
+        let child_response = self
             .child_id
-            .and_then(|id| ctx.child_size(id, clamped_proposal))
-            .unwrap_or(Size::ZERO);
+            .and_then(|id| ctx.child_layout_response(id, clamped_proposal));
+        let child_size = child_response.as_ref().map(|r| r.size).unwrap_or(Size::ZERO);
+        let child_flex = child_response.map(|r| r.flex).unwrap_or(0.0);
 
         let w = match min_w {
             Some(min) => child_size.width.max(min),
@@ -131,7 +136,10 @@ impl Widget for MinSize {
             Some(min) => child_size.height.max(min),
             None => child_size.height,
         };
-        Size::new(w, h).into()
+        bastyde_core::widget::LayoutResponse {
+            size: Size::new(w, h),
+            flex: child_flex,
+        }
     }
 
     fn place_children(

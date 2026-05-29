@@ -19,7 +19,7 @@ use bastyde_core::styles::{MenuItemStyle, MenuItemStyleConfig};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{CornerRadius, SurfaceRole};
 
-use crate::primitives::{FixedSize, HStack, Padding, RectWidget, Spacer, ZStack};
+use crate::primitives::{FixedSize, HStack, MinSize, Padding, RectWidget, Spacer, ZStack};
 
 // IntUI design tokens for MenuItem / MenuList rows. The recipe owns
 // its own dimensions. The MenuList / MenuBar / ComboBox panel widgets
@@ -28,7 +28,10 @@ use crate::primitives::{FixedSize, HStack, Padding, RectWidget, Spacer, ZStack};
 // radius, border, shadow density) is owned by `PopoverStyle` (the
 // `Menu` variant).
 pub const MENU_ITEM_HEIGHT: f32 = 24.0;
+/// Right-side padding column (also used as chevron column width).
 pub const MENU_ITEM_PADDING_HORIZONTAL: f32 = 12.0;
+/// Leading-side padding before the icon/check column.
+pub const MENU_ITEM_PADDING_LEADING: f32 = 6.0;
 pub const MENU_ICON_COLUMN_WIDTH: f32 = 16.0;
 pub const MENU_ICON_LABEL_GAP: f32 = 6.0;
 pub const MENU_SHORTCUT_LEFT_GAP: f32 = 24.0;
@@ -65,7 +68,9 @@ impl MenuItemStyle for RecipeMenuItemStyle {
         }
 
         row = row.add_child(cfg.label);
-        row = row.child(Spacer::new());
+        // MinSize ensures the shortcut never abuts the label when the menu
+        // is narrower than label + shortcut combined.
+        row = row.child(MinSize::width(MENU_SHORTCUT_LEFT_GAP).child(Spacer::new()));
 
         if let Some(trailing) = cfg.trailing {
             row = row.add_child(trailing);
@@ -82,7 +87,7 @@ impl MenuItemStyle for RecipeMenuItemStyle {
         let body_line = body.size * body.line_height;
         let pad_v = ((MENU_ITEM_HEIGHT - body_line) * 0.5).max(0.0);
         let padding =
-            ctx.add(Padding::new(pad_v, 0.0, pad_v, MENU_ITEM_PADDING_HORIZONTAL).child_id(row_id));
+            ctx.add(Padding::new(pad_v, 0.0, pad_v, MENU_ITEM_PADDING_LEADING).child_id(row_id));
 
         // Background — Hover / Highlighted both use AccentSubtle (the
         // same row tint), Pressed uses Pressed, Disabled stays
