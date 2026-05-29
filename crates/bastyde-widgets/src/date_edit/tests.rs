@@ -124,7 +124,7 @@ fn clamp_recovery_clamps_out_of_range_day() {
     // Without an i18n manager installed, the message is the literal
     // Fluent key — assert it's the "with notes" variant, not the
     // bare "corrected to" one.
-    assert!(msg.contains("with-notes") || msg.contains("validation"));
+    assert!(msg.resolve_now().contains("with-notes") || msg.resolve_now().contains("validation"));
 }
 
 #[test]
@@ -134,7 +134,7 @@ fn clamp_recovery_clamps_out_of_range_month() {
     let (corrected, msg) =
         try_clamp_recovery(&pattern, "13/15/2026", None, None).expect("recovery");
     assert_eq!(corrected, "12/15/2026");
-    assert!(msg.contains("with-notes") || msg.contains("validation"));
+    assert!(msg.resolve_now().contains("with-notes") || msg.resolve_now().contains("validation"));
 }
 
 #[test]

@@ -317,7 +317,7 @@ fn typed_combo_box_renders_with_item_label() {
     let selected = Signal::new(None::<Fruit>);
     let cb = tree.add(
         ComboBox::from_items(fruit_list(), selected.clone(), |f: &Fruit| {
-            f.name.to_string()
+            lit!(f.name.to_string())
         })
         .placeholder(lit!("Pick a fruit")),
     );
@@ -337,7 +337,7 @@ fn model_backed_combo_reflects_insertions_via_clicks() {
     let cb = tree.add(ComboBox::from_model(
         model.clone(),
         selected.clone(),
-        |s: &String| s.clone(),
+        |s: &String| lit!(s.clone()),
     ));
     tree.layout(SizeProposal::exact(300.0, 400.0));
 
@@ -376,7 +376,7 @@ fn model_backed_combo_resets_selection_on_remove() {
     tree.add(ComboBox::from_model(
         model.clone(),
         selected.clone(),
-        |s: &String| s.clone(),
+        |s: &String| lit!(s.clone()),
     ));
     tree.layout(SizeProposal::exact(300.0, 200.0));
 
@@ -399,7 +399,7 @@ fn typed_selection_survives_reorder() {
     tree.add(ComboBox::from_model(
         model.clone(),
         selected.clone(),
-        |f: &Fruit| f.name.to_string(),
+        |f: &Fruit| lit!(f.name.to_string()),
     ));
     tree.layout(SizeProposal::exact(300.0, 200.0));
 
@@ -966,7 +966,7 @@ fn render_item_closure_receives_selection_snapshot_at_build() {
     let items = vec!["Apple".to_string(), "Banana".to_string()];
     let obs = observed.clone();
     let cb = tree.add(
-        ComboBox::from_items(items, selected.clone(), |s: &String| s.clone()).render_item(
+        ComboBox::from_items(items, selected.clone(), |s: &String| lit!(s.clone())).render_item(
             move |item, is_selected| {
                 obs.lock().unwrap().push((item.clone(), is_selected));
                 Box::new(crate::primitives::MinSize::new(10.0, 10.0))

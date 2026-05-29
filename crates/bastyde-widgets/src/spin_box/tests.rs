@@ -54,7 +54,7 @@ fn builder_chains_compile() {
             .page_step(10.0)
             .decimals(2)
             .suffix(" %")
-            .special_value_text("Auto")
+            .special_value_text(lit!("Auto"))
             .wrap_mode(WrapMode::Wrap)
             .step_type(StepType::Adaptive)
             .wheel_mode(WheelMode::Hover)
@@ -62,7 +62,7 @@ fn builder_chains_compile() {
             .placeholder(lit!("—"))
             .enabled(true)
             .read_only(false)
-            .text_from_value(|v: f64| format!("{:.1}", v))
+            .text_from_value(|v: f64| lit!(format!("{:.1}", v)))
             .value_from_text(|s: &str| s.trim().parse::<f64>().ok())
             .on_value_changed(|_v, _ctx| {}),
     );
@@ -392,7 +392,7 @@ fn suffix_and_special_value_text_build() {
     let _id = tree.add(
         SpinBox::new(value, 0, 60)
             .suffix(" s")
-            .special_value_text("Never"),
+            .special_value_text(lit!("Never")),
     );
     tree.layout(SizeProposal::exact(300.0, 60.0));
     tick(&mut tree);
@@ -470,7 +470,7 @@ fn reactive_suffix_survives_value_transitions() {
     let id = tree.add(
         SpinBox::new(value.clone(), 0, 3600)
             .suffix(" s")
-            .special_value_text("Never")
+            .special_value_text(lit!("Never"))
             .label(lit!("Timeout")),
     );
     tree.layout(SizeProposal::exact(300.0, 60.0));

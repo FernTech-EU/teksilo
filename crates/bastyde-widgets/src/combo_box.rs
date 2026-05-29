@@ -62,24 +62,24 @@ pub use bastyde_core::styles::ComboBoxVariant;
 /// // Simple: list of strings.
 /// let selected = ctx.signal(None::<String>);
 /// ComboBox::new(["Apple", "Banana", "Cherry"], selected)
-///     .placeholder("Select a fruit...")
+///     .placeholder(lit!("Select a fruit..."))
 ///
 /// // Typed items: any T: Clone + PartialEq, plus a label extractor.
 /// #[derive(Clone, PartialEq)] struct Fruit { name: String, emoji: &'static str }
 /// let selected = ctx.signal(None::<Fruit>);
 /// ComboBox::from_items(fruits, selected)
-///     .item_label(|f: &Fruit| format!("{} {}", f.emoji, f.name))
+///     .item_label(|f: &Fruit| lit!(format!("{} {}", f.emoji, f.name)))
 ///
 /// // Model-backed: reactive.
 /// let model = ListModel::from_vec(fruits);
 /// ComboBox::from_model(model, selected)
-///     .item_label(|f: &Fruit| f.name.clone())
+///     .item_label(|f: &Fruit| lit!(f.name.clone()))
 ///     .max_visible_items(6)
 /// ```
 pub struct ComboBox<T: Clone + PartialEq + 'static> {
     source: ItemSource<T>,
     selected: Signal<Option<T>>,
-    item_label: Rc<dyn Fn(&T) -> String>,
+    item_label: Rc<dyn Fn(&T) -> bastyde_i18n::LocalizedString>,
     render_item: Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
     placeholder: bastyde_i18n::LocalizedString,
     /// Accessible label — independent of placeholder and current selection.
@@ -145,7 +145,7 @@ impl ComboBox<String> {
         Self::new_with_item_source(
             ItemSource::from_vec(items),
             selected,
-            Rc::new(|s: &String| s.clone()),
+            Rc::new(|s: &String| bastyde_i18n::LocalizedString::literal(s.clone())),
         )
     }
 }
@@ -154,7 +154,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     fn new_with_item_source(
         source: ItemSource<T>,
         selected: Signal<Option<T>>,
-        item_label: Rc<dyn Fn(&T) -> String>,
+        item_label: Rc<dyn Fn(&T) -> bastyde_i18n::LocalizedString>,
     ) -> Self {
         Self {
             source,
@@ -193,7 +193,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
         item_label: F,
     ) -> Self
     where
-        F: Fn(&T) -> String + 'static,
+        F: Fn(&T) -> bastyde_i18n::LocalizedString + 'static,
     {
         Self::new_with_item_source(
             ItemSource::from_vec(items.into_iter().collect()),
@@ -207,7 +207,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     /// value disappears from the model, `selected` becomes `None`.
     pub fn from_model<F>(model: ListModel<T>, selected: Signal<Option<T>>, item_label: F) -> Self
     where
-        F: Fn(&T) -> String + 'static,
+        F: Fn(&T) -> bastyde_i18n::LocalizedString + 'static,
     {
         Self::new_with_item_source(ItemSource::from_model(model), selected, Rc::new(item_label))
     }
@@ -216,7 +216,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     pub fn from_source<S, F>(source: S, selected: Signal<Option<T>>, item_label: F) -> Self
     where
         S: ListDataSource<Item = T> + 'static,
-        F: Fn(&T) -> String + 'static,
+        F: Fn(&T) -> bastyde_i18n::LocalizedString + 'static,
     {
         Self::new_with_item_source(
             ItemSource::from_data_source(source),
@@ -228,7 +228,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     /// Override the display-label extractor. Rarely needed — prefer passing
     /// `item_label` to the constructor. Useful for the `ComboBox<String>`
     /// path when you want a non-identity projection.
-    pub fn item_label(mut self, f: impl Fn(&T) -> String + 'static) -> Self {
+    pub fn item_label(mut self, f: impl Fn(&T) -> bastyde_i18n::LocalizedString + 'static) -> Self {
         self.item_label = Rc::new(f);
         self
     }
@@ -434,18 +434,24 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         }));
         ctx.own_handle(observe_handle);
 
-        // Derive label text from selected signal + source.
+        // Derive label text from selected signal + source + locale.
+        // Uses `zip` so the label re-computes on both selection change
+        // and locale switch, enabling live re-translation.
         let source_for_label = self.source.clone();
         let item_label_for_trigger = self.item_label.clone();
         let placeholder = self.placeholder.clone();
         let hint_for_label = self.selected_index_hint.clone();
-        let label_text = self.selected.map(move |sel| match sel {
-            Some(v) => match resolve_index(&source_for_label, v, &hint_for_label) {
-                Some(_) => (item_label_for_trigger)(v),
+        let locale_signal = ctx.locale_signal();
+        let label_text = self
+            .selected
+            .zip(&locale_signal)
+            .map(move |(sel, _)| match sel {
+                Some(v) => match resolve_index(&source_for_label, v, &hint_for_label) {
+                    Some(_) => (item_label_for_trigger)(v).resolve_now(),
+                    None => placeholder.resolve_now(),
+                },
                 None => placeholder.resolve_now(),
-            },
-            None => placeholder.resolve_now(),
-        });
+            });
 
         // Label colour follows the disabled signal — the chrome style
         // owns bg / border / focus ring; the widget owns its label.
@@ -806,7 +812,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                             let n = source.len();
                             for i in 0..n {
                                 if let Some(v) = source.get(i) {
-                                    let label = (item_label_for_keys)(&v);
+                                    let label = (item_label_for_keys)(&v).resolve_now();
                                     if label.to_lowercase().starts_with(&prefix) {
                                         pick_at(i);
                                         break;
@@ -892,7 +898,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         // readers announce placeholders as hints rather than current values.
         match self.selected.get() {
             Some(v) => {
-                let label = (self.item_label)(&v);
+                let label = (self.item_label)(&v).resolve_now();
                 if !label.is_empty() {
                     builder.set_value(label);
                 }

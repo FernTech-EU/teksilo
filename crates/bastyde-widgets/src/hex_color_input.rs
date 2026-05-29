@@ -48,7 +48,7 @@ use bastyde_core::build_context::BuildContext;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
-use bastyde_i18n::{LocalizedString, resolve_message_widget};
+use bastyde_i18n::{localized, resolve_message_widget};
 use bastyde_tokens::Color;
 
 use crate::primitives::text_input_field::{ValidationFeedback, ValidationOutcome, ValidatorFn};
@@ -114,8 +114,8 @@ pub struct HexColorInput {
     short_form_enabled: bool,
     require_hash: bool,
     uppercase: bool,
-    label: Option<LocalizedString>,
-    placeholder: Option<LocalizedString>,
+    label: Option<bastyde_i18n::LocalizedString>,
+    placeholder: Option<bastyde_i18n::LocalizedString>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     read_only: bool,
@@ -221,12 +221,12 @@ impl HexColorInput {
         self
     }
 
-    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+    pub fn label(mut self, label: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         self.label = Some(label.into());
         self
     }
 
-    pub fn placeholder(mut self, placeholder: impl Into<LocalizedString>) -> Self {
+    pub fn placeholder(mut self, placeholder: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         self.placeholder = Some(placeholder.into());
         self
     }
@@ -344,19 +344,28 @@ impl Widget for HexColorInput {
                             // "case normalized" for the message.
                             let stripped = trimmed.strip_prefix('#').unwrap_or(trimmed);
                             let was_short_form = short_form_enabled && stripped.len() == 3;
+                            // Capture owned copies: the `localized` closure is
+                            // `'static`, so it can't borrow `trimmed`, and
+                            // `normalized` is still needed for `corrected`.
+                            let raw_owned = trimmed.to_string();
+                            let value_owned = normalized.clone();
                             let message = if was_short_form {
-                                resolve_message_widget(
-                                    "hex-color-input-corrected-shortform",
-                                    &[
-                                        ("raw", trimmed.to_string().into()),
-                                        ("value", normalized.clone().into()),
-                                    ],
-                                )
+                                localized(move || {
+                                    resolve_message_widget(
+                                        "hex-color-input-corrected-shortform",
+                                        &[
+                                            ("raw", raw_owned.clone().into()),
+                                            ("value", value_owned.clone().into()),
+                                        ],
+                                    )
+                                })
                             } else {
-                                resolve_message_widget(
-                                    "hex-color-input-corrected-uppercase",
-                                    &[("value", normalized.clone().into())],
-                                )
+                                localized(move || {
+                                    resolve_message_widget(
+                                        "hex-color-input-corrected-uppercase",
+                                        &[("value", value_owned.clone().into())],
+                                    )
+                                })
                             };
                             ValidationOutcome::Corrected {
                                 corrected: normalized,
@@ -531,13 +540,13 @@ fn format_hex(color: Color, alpha_enabled: bool, uppercase: bool) -> String {
     }
 }
 
-fn invalid_message(alpha_enabled: bool) -> String {
+fn invalid_message(alpha_enabled: bool) -> bastyde_i18n::LocalizedString {
     let key = if alpha_enabled {
         "hex-color-input-invalid-with-alpha"
     } else {
         "hex-color-input-invalid"
     };
-    resolve_message_widget(key, &[])
+    localized(move || resolve_message_widget(key, &[]))
 }
 
 #[derive(Debug, thiserror::Error)]

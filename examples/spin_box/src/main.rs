@@ -170,7 +170,7 @@ impl Widget for Root {
                                     .single_step(1)
                                     .page_step(60)
                                     .suffix(" s")
-                                    .special_value_text("Auto")
+                                    .special_value_text(lit!("Auto"))
                                     .label(lit!("Timeout")),
                                 timeout_text,
                             )

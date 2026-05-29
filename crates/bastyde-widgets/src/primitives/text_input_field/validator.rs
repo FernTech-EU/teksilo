@@ -28,7 +28,7 @@ use std::rc::Rc;
 use std::time::Instant;
 
 /// What a validator returns for a given commit attempt.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum ValidationOutcome {
     /// Input is valid as typed. The field commits unchanged and the
     /// feedback signal flips to [`ValidationFeedback::Valid`].
@@ -43,11 +43,16 @@ pub enum ValidationOutcome {
     /// for "day clamped to month length"; `"2026"` →
     /// `Corrected { corrected: "2026-01-01", … }` for "year-only
     /// completed to start of year".
-    Corrected { corrected: String, message: String },
+    Corrected {
+        corrected: String,
+        message: bastyde_i18n::LocalizedString,
+    },
     /// Input is rejected. The field reverts its text to the pre-edit
     /// value and the feedback signal carries `message` for composites
     /// to surface as an assertive error.
-    Invalid { message: String },
+    Invalid {
+        message: bastyde_i18n::LocalizedString,
+    },
 }
 
 /// What composites render. Distinct from [`ValidationOutcome`]: the
@@ -55,7 +60,7 @@ pub enum ValidationOutcome {
 /// feedback adds a `since` instant so the visual layer can decay an
 /// auto-correction announcement after a window without re-running the
 /// validator.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Default)]
 pub enum ValidationFeedback {
     /// No commit has happened yet, or the user is editing again after
     /// a previous outcome (typing always clears prior feedback).
@@ -70,10 +75,65 @@ pub enum ValidationFeedback {
     /// is the wall-clock instant the correction was applied; composites
     /// use it to decay the visual after `corrected_pulse_duration_ms`
     /// from the theme.
-    Corrected { message: String, since: Instant },
+    Corrected {
+        message: bastyde_i18n::LocalizedString,
+        since: Instant,
+    },
     /// Last commit returned [`ValidationOutcome::Invalid`]. Persists
     /// until the user edits again or an external `Pristine` reset.
-    Invalid { message: String },
+    Invalid {
+        message: bastyde_i18n::LocalizedString,
+    },
+}
+
+// Manual `PartialEq` (the derive is impossible — `LocalizedString` is not
+// `PartialEq` because its resolver is a closure). Two outcomes/feedbacks are
+// equal when they're the same variant with the same data and the same
+// *resolved* message text. This matches the prior derived semantics for the
+// `corrected` / `since` fields while comparing messages by what the user
+// actually sees.
+impl PartialEq for ValidationOutcome {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Valid, Self::Valid) => true,
+            (
+                Self::Corrected {
+                    corrected: c1,
+                    message: m1,
+                },
+                Self::Corrected {
+                    corrected: c2,
+                    message: m2,
+                },
+            ) => c1 == c2 && m1.resolve_now() == m2.resolve_now(),
+            (Self::Invalid { message: m1 }, Self::Invalid { message: m2 }) => {
+                m1.resolve_now() == m2.resolve_now()
+            }
+            _ => false,
+        }
+    }
+}
+
+impl PartialEq for ValidationFeedback {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Pristine, Self::Pristine) | (Self::Valid, Self::Valid) => true,
+            (
+                Self::Corrected {
+                    message: m1,
+                    since: s1,
+                },
+                Self::Corrected {
+                    message: m2,
+                    since: s2,
+                },
+            ) => s1 == s2 && m1.resolve_now() == m2.resolve_now(),
+            (Self::Invalid { message: m1 }, Self::Invalid { message: m2 }) => {
+                m1.resolve_now() == m2.resolve_now()
+            }
+            _ => false,
+        }
+    }
 }
 
 impl ValidationFeedback {
@@ -88,9 +148,11 @@ impl ValidationFeedback {
     }
 
     /// Human-readable message, if any.
-    pub fn message(&self) -> Option<&str> {
+    pub fn message(&self) -> Option<String> {
         match self {
-            Self::Corrected { message, .. } | Self::Invalid { message } => Some(message),
+            Self::Corrected { message, .. } | Self::Invalid { message } => {
+                Some(message.resolve_now())
+            }
             _ => None,
         }
     }
@@ -103,6 +165,7 @@ pub type ValidatorFn = Rc<dyn Fn(&str) -> ValidationOutcome>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_i18n::lit;
 
     #[test]
     fn feedback_is_invalid_helper() {
@@ -110,17 +173,12 @@ mod tests {
         assert!(!ValidationFeedback::Valid.is_invalid());
         assert!(
             !ValidationFeedback::Corrected {
-                message: "x".into(),
+                message: lit!("x"),
                 since: Instant::now(),
             }
             .is_invalid()
         );
-        assert!(
-            ValidationFeedback::Invalid {
-                message: "x".into()
-            }
-            .is_invalid()
-        );
+        assert!(ValidationFeedback::Invalid { message: lit!("x") }.is_invalid());
     }
 
     #[test]
@@ -129,18 +187,18 @@ mod tests {
         assert_eq!(ValidationFeedback::Valid.message(), None);
         assert_eq!(
             ValidationFeedback::Invalid {
-                message: "bad".into()
+                message: lit!("bad")
             }
             .message(),
-            Some("bad")
+            Some("bad".to_string())
         );
         assert_eq!(
             ValidationFeedback::Corrected {
-                message: "fixed".into(),
+                message: lit!("fixed"),
                 since: Instant::now(),
             }
             .message(),
-            Some("fixed")
+            Some("fixed".to_string())
         );
     }
 }

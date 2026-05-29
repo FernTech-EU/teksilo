@@ -11,6 +11,7 @@
 
 #[cfg(feature = "rich-text")]
 use bastyde_i18n::lit;
+#[cfg(feature = "rich-text")]
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -52,7 +53,7 @@ pub(super) fn build_static_item_list<T: Clone + PartialEq + 'static>(
     ctx: &mut BuildContext,
     source: &ItemSource<T>,
     selected: &Signal<Option<T>>,
-    item_label: &Rc<dyn Fn(&T) -> String>,
+    item_label: &Rc<dyn Fn(&T) -> bastyde_i18n::LocalizedString>,
     render_item: &Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
     max_visible_items: usize,
 ) -> WidgetId {
@@ -61,7 +62,10 @@ pub(super) fn build_static_item_list<T: Clone + PartialEq + 'static>(
         let mut vstack = VStack::new();
         for i in 0..total {
             if let Some(value) = source.get(i) {
-                let label = (item_label)(&value);
+                // Panel is ephemeral (rebuilt on open / panel_version change),
+                // so resolving the label at build time is acceptable even in
+                // reactive mode; the persistent trigger is the live-reactive one.
+                let label = (item_label)(&value).resolve_now();
                 vstack = vstack.child(DropdownItem {
                     value,
                     label,
@@ -99,7 +103,7 @@ fn build_virtualized_list<T: Clone + PartialEq + 'static>(
     ctx: &mut BuildContext,
     source: &ItemSource<T>,
     selected: &Signal<Option<T>>,
-    item_label: &Rc<dyn Fn(&T) -> String>,
+    item_label: &Rc<dyn Fn(&T) -> bastyde_i18n::LocalizedString>,
     render_item: &Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
     max_visible_items: usize,
     filtered_indices: Option<Vec<usize>>,
@@ -149,7 +153,10 @@ fn build_virtualized_list<T: Clone + PartialEq + 'static>(
     let item_label_for_delegate = item_label.clone();
     let render_item_for_delegate = render_item.clone();
     let delegate = move |index: usize, value: &T, _selected: bool| -> Box<dyn Widget> {
-        let label = (item_label_for_delegate)(value);
+        // Panel is ephemeral (rebuilt on open / panel_version change),
+        // so resolving the label at build time is acceptable even in
+        // reactive mode; the persistent trigger is the live-reactive one.
+        let label = (item_label_for_delegate)(value).resolve_now();
         Box::new(DropdownItem {
             value: value.clone(),
             label,
@@ -288,7 +295,7 @@ fn register_scroll_into_view<T: Clone + PartialEq + 'static>(
 pub(super) struct DropdownPanel<T: Clone + PartialEq + 'static> {
     pub(super) source: ItemSource<T>,
     pub(super) selected: Signal<Option<T>>,
-    pub(super) item_label: Rc<dyn Fn(&T) -> String>,
+    pub(super) item_label: Rc<dyn Fn(&T) -> bastyde_i18n::LocalizedString>,
     pub(super) render_item: Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
     pub(super) max_visible_items: usize,
     /// Bumped on every model mutation so the panel rebuilds.
@@ -317,7 +324,7 @@ pub(super) struct DropdownPanel<T: Clone + PartialEq + 'static> {
 struct FilteredItemList<T: Clone + PartialEq + 'static> {
     source: ItemSource<T>,
     selected: Signal<Option<T>>,
-    item_label: Rc<dyn Fn(&T) -> String>,
+    item_label: Rc<dyn Fn(&T) -> bastyde_i18n::LocalizedString>,
     render_item: Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
     max_visible_items: usize,
     version: Signal<u64>,
@@ -359,7 +366,10 @@ impl<T: Clone + PartialEq + 'static> Widget for FilteredItemList<T> {
                 if let Some(value) = self.source.get(i) {
                     let matches = match &self.filter {
                         Some(f) => f(&q, &value),
-                        None => (self.item_label)(&value).to_lowercase().contains(&q_lower),
+                        None => (self.item_label)(&value)
+                            .resolve_now()
+                            .to_lowercase()
+                            .contains(&q_lower),
                     };
                     if matches {
                         keep.push(i);
@@ -387,7 +397,10 @@ impl<T: Clone + PartialEq + 'static> Widget for FilteredItemList<T> {
             let mut vstack = VStack::new();
             for (pos, &i) in visible_indices.iter().enumerate() {
                 if let Some(value) = self.source.get(i) {
-                    let label = (self.item_label)(&value);
+                    // Panel is ephemeral (rebuilt on open / panel_version change),
+                    // so resolving the label at build time is acceptable even in
+                    // reactive mode; the persistent trigger is the live-reactive one.
+                    let label = (self.item_label)(&value).resolve_now();
                     vstack = vstack.child(DropdownItem {
                         value,
                         label,
@@ -612,6 +625,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
         // character candidates and be rejected as non-text).
         let source_for_nav = self.source.clone();
         let selected_for_nav = self.selected.clone();
+        #[cfg(feature = "rich-text")]
         let item_label_for_nav = self.item_label.clone();
         #[cfg(feature = "rich-text")]
         let search_query_for_nav = self.search_query.clone();
@@ -660,6 +674,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
                                         .map(|v| match &filter_for_nav {
                                             Some(f) => f(&q, &v),
                                             None => (item_label_for_nav)(&v)
+                                                .resolve_now()
                                                 .to_lowercase()
                                                 .contains(&q_lower),
                                         })

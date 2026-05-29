@@ -39,7 +39,7 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
-use bastyde_i18n::resolve_message_widget;
+use bastyde_i18n::{localized, resolve_message_widget};
 
 use crate::common::datetime::Time;
 use crate::common::datetime::pattern::{
@@ -360,10 +360,12 @@ impl Widget for TimeEdit {
                     }
                     return ValidationOutcome::Corrected {
                         corrected: formatted.clone(),
-                        message: resolve_message_widget(
-                            "validation-corrected-to",
-                            &[("value", formatted.clone().into())],
-                        ),
+                        message: localized(move || {
+                            resolve_message_widget(
+                                "validation-corrected-to",
+                                &[("value", formatted.clone().into())],
+                            )
+                        }),
                     };
                 }
                 if validation_behavior == ValidationBehavior::AutoCorrect
@@ -376,7 +378,9 @@ impl Widget for TimeEdit {
                     };
                 }
                 ValidationOutcome::Invalid {
-                    message: resolve_message_widget("time-edit-validation-not-a-time", &[]),
+                    message: localized(move || {
+                        resolve_message_widget("time-edit-validation-not-a-time", &[])
+                    }),
                 }
             })
         };
@@ -677,10 +681,12 @@ pub(crate) fn build_time_validator(
             }
             return ValidationOutcome::Corrected {
                 corrected: formatted.clone(),
-                message: resolve_message_widget(
-                    "validation-corrected-to",
-                    &[("value", formatted.clone().into())],
-                ),
+                message: localized(move || {
+                    resolve_message_widget(
+                        "validation-corrected-to",
+                        &[("value", formatted.clone().into())],
+                    )
+                }),
             };
         }
         if behavior == ValidationBehavior::AutoCorrect
@@ -692,7 +698,9 @@ pub(crate) fn build_time_validator(
             };
         }
         ValidationOutcome::Invalid {
-            message: resolve_message_widget("time-edit-validation-not-a-time", &[]),
+            message: localized(move || {
+                resolve_message_widget("time-edit-validation-not-a-time", &[])
+            }),
         }
     })
 }
@@ -706,7 +714,7 @@ pub(crate) fn try_clamp_time_recovery(
     raw: &str,
     min: Option<Time>,
     max: Option<Time>,
-) -> Option<(String, String)> {
+) -> Option<(String, bastyde_i18n::LocalizedString)> {
     use crate::common::datetime::pattern::{PatternToken, SegmentKind};
     let mut cursor = raw;
     let mut hour24: Option<i8> = None;
@@ -714,7 +722,7 @@ pub(crate) fn try_clamp_time_recovery(
     let mut minute: Option<i8> = None;
     let mut second: Option<i8> = None;
     let mut period: Option<i8> = None;
-    let mut clamp_notes: Vec<String> = Vec::new();
+    let mut clamp_notes: Vec<bastyde_i18n::LocalizedString> = Vec::new();
 
     for token in &pattern.tokens {
         if cursor.is_empty() {
@@ -781,14 +789,16 @@ pub(crate) fn try_clamp_time_recovery(
                         _ => "validation-segment-value",
                     };
                     let label = resolve_message_widget(segment_key, &[]);
-                    clamp_notes.push(resolve_message_widget(
-                        "validation-segment-clamped",
-                        &[
-                            ("segment", label.into()),
-                            ("raw", (raw_v as i64).into()),
-                            ("clamped", (clamped as i64).into()),
-                        ],
-                    ));
+                    clamp_notes.push(localized(move || {
+                        resolve_message_widget(
+                            "validation-segment-clamped",
+                            &[
+                                ("segment", label.clone().into()),
+                                ("raw", (raw_v as i64).into()),
+                                ("clamped", (clamped as i64).into()),
+                            ],
+                        )
+                    }));
                 }
                 match kind {
                     SegmentKind::Hour24 | SegmentKind::Hour24Short => hour24 = Some(clamped as i8),
@@ -810,19 +820,34 @@ pub(crate) fn try_clamp_time_recovery(
     let t = Time::new(hour, minute.unwrap_or(0), second.unwrap_or(0), 0).ok()?;
     let final_t = clamp_time(t, min, max);
     if final_t != t {
-        clamp_notes.push(resolve_message_widget("validation-clamped-to-range", &[]));
+        clamp_notes.push(localized(move || {
+            resolve_message_widget("validation-clamped-to-range", &[])
+        }));
     }
     let formatted = format_value(pattern, None, Some(final_t));
+    let formatted_for_msg = formatted.clone();
     let message = if clamp_notes.is_empty() {
-        resolve_message_widget(
-            "validation-corrected-to",
-            &[("value", formatted.clone().into())],
-        )
+        localized(move || {
+            resolve_message_widget(
+                "validation-corrected-to",
+                &[("value", formatted_for_msg.clone().into())],
+            )
+        })
     } else {
-        resolve_message_widget(
-            "validation-corrected-with-notes",
-            &[("notes", clamp_notes.join(", ").into())],
-        )
+        // For the notes case, we need to resolve all notes and join them.
+        // This requires a bit more work since we can't join LocalizedStrings directly.
+        // We'll resolve them at display time.
+        localized(move || {
+            let notes_str: String = clamp_notes
+                .iter()
+                .map(|n| n.resolve_now())
+                .collect::<Vec<_>>()
+                .join(", ");
+            resolve_message_widget(
+                "validation-corrected-with-notes",
+                &[("notes", notes_str.into())],
+            )
+        })
     };
     Some((formatted, message))
 }

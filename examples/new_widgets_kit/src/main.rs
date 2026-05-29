@@ -227,7 +227,7 @@ impl Root {
             .placeholder(lit!("No file selected"))
             .add_filter("Text", &["txt", "md"])
             .add_filter("Images", &["png", "jpg", "jpeg"])
-            .dialog_title("Choose a file");
+            .dialog_title(lit!("Choose a file"));
 
         ctx.add(
             VStack::new()

@@ -56,9 +56,11 @@ impl Widget for ValidationStrip {
         // both via signals derived from `feedback`. Pristine / Valid
         // states produce empty text → the TextWidget renders zero
         // size and the strip is invisible.
-        let text_signal = self.feedback.map(|fb| match fb {
+        // Zip with locale signal so messages re-resolve on locale change.
+        let locale_signal = ctx.locale_signal();
+        let text_signal = self.feedback.zip(&locale_signal).map(|(fb, _)| match fb {
             ValidationFeedback::Invalid { message }
-            | ValidationFeedback::Corrected { message, .. } => message.clone(),
+            | ValidationFeedback::Corrected { message, .. } => message.resolve_now(),
             _ => String::new(),
         });
 

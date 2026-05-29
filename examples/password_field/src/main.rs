@@ -102,7 +102,7 @@ impl Widget for Root {
                                 ValidationOutcome::Valid
                             } else {
                                 ValidationOutcome::Invalid {
-                                    message: format!("Use at least {MIN_LEN} characters"),
+                                    message: lit!(format!("Use at least {MIN_LEN} characters")),
                                 }
                             }
                         }),
@@ -118,7 +118,7 @@ impl Widget for Root {
                                     ValidationOutcome::Valid
                                 } else {
                                     ValidationOutcome::Invalid {
-                                        message: "Passwords don't match".into(),
+                                        message: lit!("Passwords don't match"),
                                     }
                                 }
                             }

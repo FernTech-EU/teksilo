@@ -176,7 +176,7 @@ pub enum WidthPolicy {
 
 // ── Type aliases for builder closures ──────────────────────────────
 
-type TextFromValue<T> = Rc<dyn Fn(T) -> String>;
+type TextFromValue<T> = Rc<dyn Fn(T) -> bastyde_i18n::LocalizedString>;
 type ValueFromText<T> = Rc<dyn Fn(&str) -> Option<T>>;
 type OnValueChangedFn<T> = Rc<dyn Fn(T, &mut EventContext)>;
 
@@ -208,7 +208,7 @@ pub struct SpinBox<T: SpinValue> {
     page_step: Option<T>,
     decimals: u8,
     suffix: String,
-    special_value_text: Option<String>,
+    special_value_text: Option<bastyde_i18n::LocalizedString>,
     wrap_mode: WrapMode,
     step_type: StepType,
     button_layout: ButtonLayout,
@@ -354,7 +354,7 @@ impl<T: SpinValue> SpinBox<T> {
     /// "Unlimited" affordances where the minimum has special
     /// semantics. When the field is focused the real number is
     /// shown instead so the user can type.
-    pub fn special_value_text(mut self, text: impl Into<String>) -> Self {
+    pub fn special_value_text(mut self, text: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         self.special_value_text = Some(text.into());
         self
     }
@@ -464,7 +464,10 @@ impl<T: SpinValue> SpinBox<T> {
     /// raw value; returns whatever string should appear in the
     /// field. Suffix and `special_value_text` still apply on top of
     /// the returned string.
-    pub fn text_from_value(mut self, f: impl Fn(T) -> String + 'static) -> Self {
+    pub fn text_from_value(
+        mut self,
+        f: impl Fn(T) -> bastyde_i18n::LocalizedString + 'static,
+    ) -> Self {
         self.text_from_value = Some(Rc::new(f));
         self
     }
@@ -555,7 +558,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             let initial = format_for_display(
                 self.value.get(),
                 decimals,
-                special_text.as_deref(),
+                special_text.as_ref(),
                 text_from_value.as_deref(),
                 min,
                 false,
@@ -593,7 +596,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                     let formatted = format_for_display(
                         *new_value,
                         decimals,
-                        special_text.as_deref(),
+                        special_text.as_ref(),
                         text_from_value.as_deref(),
                         min_cap,
                         false,
@@ -601,6 +604,30 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                     if text_signal.get() != formatted {
                         text_signal.set(formatted);
                     }
+                }
+            });
+        }
+
+        // Effect: re-format on locale change so special_value_text
+        // and custom formatters re-resolve with the new locale.
+        {
+            let text_signal = self.text_signal.clone();
+            let text_from_value = text_from_value.clone();
+            let special_text = special_text.clone();
+            let value_signal = self.value.clone();
+            let focused = self.focused.clone();
+            let locale_signal = ctx.locale_signal();
+            ctx.effect(&locale_signal, move |_| {
+                let formatted = format_for_display(
+                    value_signal.get(),
+                    decimals,
+                    special_text.as_ref(),
+                    text_from_value.as_deref(),
+                    min,
+                    focused.get(),
+                );
+                if text_signal.get() != formatted {
+                    text_signal.set(formatted);
                 }
             });
         }
@@ -630,7 +657,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                 let formatted = format_for_display(
                     new_value,
                     decimals,
-                    special_text.as_deref(),
+                    special_text.as_ref(),
                     text_from_value.as_deref(),
                     min,
                     false,
@@ -734,7 +761,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                 let formatted = format_for_display(
                     new_value,
                     decimals,
-                    special_text.as_deref(),
+                    special_text.as_ref(),
                     text_from_value.as_deref(),
                     min,
                     false,
@@ -1184,7 +1211,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         let display = format_for_display(
             value,
             self.decimals,
-            self.special_value_text.as_deref(),
+            self.special_value_text.as_ref(),
             self.text_from_value.as_deref(),
             self.min,
             false,
@@ -1305,8 +1332,8 @@ fn chevron_down_icon(size: f32) -> IconWidget {
 fn format_for_display<T: SpinValue>(
     value: T,
     decimals: u8,
-    special: Option<&str>,
-    custom: Option<&dyn Fn(T) -> String>,
+    special: Option<&bastyde_i18n::LocalizedString>,
+    custom: Option<&dyn Fn(T) -> bastyde_i18n::LocalizedString>,
     min: T,
     force_plain: bool,
 ) -> String {
@@ -1314,10 +1341,10 @@ fn format_for_display<T: SpinValue>(
         && let Some(special_text) = special
         && approx_eq(value, min)
     {
-        return special_text.to_string();
+        return special_text.resolve_now();
     }
     match custom {
-        Some(f) => f(value),
+        Some(f) => f(value).resolve_now(),
         None => value.format(decimals),
     }
 }

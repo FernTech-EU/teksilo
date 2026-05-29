@@ -254,7 +254,7 @@ impl Widget for FormatToolbar {
 
         let heading_picker_id = ctx.add(
             ComboBox::from_items(ALL_HEADING_LEVELS, heading_selected.clone(), |level| {
-                level.label().to_string()
+                lit!(level.label().to_string())
             })
             .label(lit!("Heading level"))
             .max_visible_items(7),

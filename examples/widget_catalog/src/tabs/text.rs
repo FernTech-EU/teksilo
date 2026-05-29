@@ -115,7 +115,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
             .label(tr!(txt_password_label()))
             .placeholder(tr!(txt_password_placeholder()))
             .validator({
-                let msg = tr!(txt_password_validation()).resolve_now();
+                let msg = tr!(txt_password_validation());
                 move |s| {
                     if s.chars().count() >= 8 {
                         bastyde::widgets::ValidationOutcome::Valid
@@ -180,7 +180,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
             .label(tr!(txt_password_label()))
             .placeholder(tr!(txt_password_placeholder()))
             .validator({
-                let msg = tr!(txt_password_validation()).resolve_now();
+                let msg = tr!(txt_password_validation());
                 move |s| {
                     if s.chars().count() >= 8 {
                         bastyde::widgets::ValidationOutcome::Valid

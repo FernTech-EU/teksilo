@@ -104,7 +104,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     tr!(inp_combo_cherry()).resolve_now(),
                 ],
                 sigs.combo_selected.clone(),
-                |s: &String| s.clone(),
+                |s: &String| lit!(s.clone()),
             )
             .placeholder(tr!(inp_combo_placeholder())),
         ),
@@ -145,7 +145,7 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                 tr!(inp_combo_cherry()).resolve_now(),
             ],
             sigs.combo_selected.clone(),
-            |s: &String| s.clone(),
+            |s: &String| lit!(s.clone()),
         )
         .placeholder(tr!(inp_combo_placeholder())),
     );

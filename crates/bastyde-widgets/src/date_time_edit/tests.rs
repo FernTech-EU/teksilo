@@ -77,10 +77,10 @@ fn compose_feedback_picks_more_severe() {
     use crate::primitives::text_input_field::ValidationFeedback;
     use std::time::Instant;
     let invalid = ValidationFeedback::Invalid {
-        message: "x".into(),
+        message: bastyde_i18n::lit!("x"),
     };
     let corrected = ValidationFeedback::Corrected {
-        message: "c".into(),
+        message: bastyde_i18n::lit!("c"),
         since: Instant::now(),
     };
     let valid = ValidationFeedback::Valid;

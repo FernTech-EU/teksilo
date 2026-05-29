@@ -49,7 +49,7 @@ type FilterEntry = (String, Vec<String>);
 pub struct FilePickerField {
     text: Signal<String>,
     kind: FilePickerKind,
-    title: Option<String>,
+    title: Option<bastyde_i18n::LocalizedString>,
     starting_dir: Option<PathBuf>,
     default_file_name: Option<String>,
     filters: Vec<FilterEntry>,
@@ -87,7 +87,7 @@ impl FilePickerField {
     }
 
     /// Title shown in the file-dialog window caption.
-    pub fn dialog_title(mut self, title: impl Into<String>) -> Self {
+    pub fn dialog_title(mut self, title: impl Into<bastyde_i18n::LocalizedString>) -> Self {
         self.title = Some(title.into());
         self
     }
@@ -157,7 +157,7 @@ impl std::fmt::Debug for FilePickerField {
 
 fn build_request_owned(
     kind: FilePickerKind,
-    title: Option<String>,
+    title: Option<bastyde_i18n::LocalizedString>,
     starting_dir: Option<PathBuf>,
     default_file_name: Option<String>,
     filters: &[FilterEntry],
@@ -168,7 +168,7 @@ fn build_request_owned(
         FilePickerKind::SaveFile => FileDialogRequest::save_file(),
     };
     if let Some(title) = title {
-        req = req.title(title);
+        req = req.title(title.resolve_now());
     }
     if let Some(dir) = starting_dir {
         req = req.starting_dir(dir);

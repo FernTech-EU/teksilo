@@ -436,10 +436,12 @@ impl Widget for DateEdit {
                     }
                     return ValidationOutcome::Corrected {
                         corrected: formatted.clone(),
-                        message: resolve_message_widget(
-                            "validation-corrected-to",
-                            &[("value", formatted.clone().into())],
-                        ),
+                        message: localized(move || {
+                            resolve_message_widget(
+                                "validation-corrected-to",
+                                &[("value", formatted.clone().into())],
+                            )
+                        }),
                     };
                 }
                 // 2. Strict parse failed. Try clamp-recovery: extract
@@ -455,7 +457,9 @@ impl Widget for DateEdit {
                 }
                 // 3. Truly unparseable. Reject.
                 ValidationOutcome::Invalid {
-                    message: resolve_message_widget("date-edit-validation-not-a-date", &[]),
+                    message: localized(move || {
+                        resolve_message_widget("date-edit-validation-not-a-date", &[])
+                    }),
                 }
             })
         };
@@ -953,10 +957,12 @@ pub(crate) fn build_date_validator(
             }
             return ValidationOutcome::Corrected {
                 corrected: formatted.clone(),
-                message: resolve_message_widget(
-                    "validation-corrected-to",
-                    &[("value", formatted.clone().into())],
-                ),
+                message: localized(move || {
+                    resolve_message_widget(
+                        "validation-corrected-to",
+                        &[("value", formatted.clone().into())],
+                    )
+                }),
             };
         }
         if behavior == ValidationBehavior::AutoCorrect
@@ -968,7 +974,9 @@ pub(crate) fn build_date_validator(
             };
         }
         ValidationOutcome::Invalid {
-            message: resolve_message_widget("date-edit-validation-not-a-date", &[]),
+            message: localized(move || {
+                resolve_message_widget("date-edit-validation-not-a-date", &[])
+            }),
         }
     })
 }
@@ -993,7 +1001,7 @@ pub(crate) fn try_clamp_recovery(
     raw: &str,
     min: Option<Date>,
     max: Option<Date>,
-) -> Option<(String, String)> {
+) -> Option<(String, bastyde_i18n::LocalizedString)> {
     // Walk the pattern; for each digit segment, take whatever digit
     // run starts at the current cursor position. For literal tokens,
     // optionally consume the literal (lenient — same logic as
@@ -1002,7 +1010,7 @@ pub(crate) fn try_clamp_recovery(
     let mut year: Option<i16> = None;
     let mut month: Option<i8> = None;
     let mut day: Option<i8> = None;
-    let mut clamp_notes: Vec<String> = Vec::new();
+    let mut clamp_notes: Vec<bastyde_i18n::LocalizedString> = Vec::new();
 
     for token in &pattern.tokens {
         if cursor.is_empty() {
@@ -1049,14 +1057,16 @@ pub(crate) fn try_clamp_recovery(
                         _ => "validation-segment-value",
                     };
                     let segment_label = resolve_message_widget(segment_key, &[]);
-                    clamp_notes.push(resolve_message_widget(
-                        "validation-segment-clamped",
-                        &[
-                            ("segment", segment_label.into()),
-                            ("raw", (raw_v as i64).into()),
-                            ("clamped", (clamped as i64).into()),
-                        ],
-                    ));
+                    clamp_notes.push(localized(move || {
+                        resolve_message_widget(
+                            "validation-segment-clamped",
+                            &[
+                                ("segment", segment_label.clone().into()),
+                                ("raw", (raw_v as i64).into()),
+                                ("clamped", (clamped as i64).into()),
+                            ],
+                        )
+                    }));
                 }
                 match kind {
                     SegmentKind::Year => year = Some(clamped as i16),
@@ -1076,32 +1086,48 @@ pub(crate) fn try_clamp_recovery(
     let raw_day = day.unwrap_or(1);
     let d = raw_day.min(last_day).max(1);
     if d != raw_day {
-        clamp_notes.push(resolve_message_widget(
-            "validation-day-clamped-to-month",
-            &[
-                ("raw", (raw_day as i64).into()),
-                ("clamped", (d as i64).into()),
-            ],
-        ));
+        clamp_notes.push(localized(move || {
+            resolve_message_widget(
+                "validation-day-clamped-to-month",
+                &[
+                    ("raw", (raw_day as i64).into()),
+                    ("clamped", (d as i64).into()),
+                ],
+            )
+        }));
     }
 
     let date = Date::new(y, m, d).ok()?;
     let final_date = clamp_date(date, min, max);
     if final_date != date {
-        clamp_notes.push(resolve_message_widget("validation-clamped-to-range", &[]));
+        clamp_notes.push(localized(move || {
+            resolve_message_widget("validation-clamped-to-range", &[])
+        }));
     }
 
     let formatted = format_value(pattern, Some(final_date), None);
+    let formatted_for_msg = formatted.clone();
     let message = if clamp_notes.is_empty() {
-        resolve_message_widget(
-            "validation-corrected-to",
-            &[("value", formatted.clone().into())],
-        )
+        localized(move || {
+            resolve_message_widget(
+                "validation-corrected-to",
+                &[("value", formatted_for_msg.clone().into())],
+            )
+        })
     } else {
-        resolve_message_widget(
-            "validation-corrected-with-notes",
-            &[("notes", clamp_notes.join(", ").into())],
-        )
+        // For the notes case, we need to resolve all notes and join them.
+        // We'll resolve them at display time.
+        localized(move || {
+            let notes_str: String = clamp_notes
+                .iter()
+                .map(|n| n.resolve_now())
+                .collect::<Vec<_>>()
+                .join(", ");
+            resolve_message_widget(
+                "validation-corrected-with-notes",
+                &[("notes", notes_str.into())],
+            )
+        })
     };
     Some((formatted, message))
 }

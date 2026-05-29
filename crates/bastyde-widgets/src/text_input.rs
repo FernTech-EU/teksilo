@@ -56,14 +56,14 @@ pub use bastyde_core::styles::TextInputVariant;
 pub enum ValidationState {
     #[default]
     None,
-    Error(String),
-    Warning(String),
+    Error(bastyde_i18n::LocalizedString),
+    Warning(bastyde_i18n::LocalizedString),
     /// Last commit was auto-corrected; the field's value has already
     /// been replaced with the normalized form. The composite renders
     /// the message in secondary text and tints the border accent
     /// briefly (decay-managed by the framework's frame loop, not a
     /// concern of this enum).
-    Corrected(String),
+    Corrected(bastyde_i18n::LocalizedString),
 }
 
 /// Styled single-line text input composite.
