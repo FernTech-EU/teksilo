@@ -1041,6 +1041,50 @@ mod tests {
     }
 
     #[test]
+    fn plain_button_is_a_leaf_no_group_node() {
+        // Regression: a Button's chrome is composed from layout primitives
+        // (Padding/Center/HStack/…) that emit empty GenericContainer /
+        // Unknown AT nodes. VoiceOver announces a GenericContainer as
+        // "group", so the button read as "<label>, button, group". The AT
+        // walker now collapses presentational nodes — assert the button is
+        // a clean leaf and no grouping node survives anywhere.
+        use bastyde_core::accessibility::widget_id_to_node_id;
+        use bastyde_core::accesskit::Role;
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let id = tree.add(Button::new(lit!("Valider")).on_activate_fn(|_| {}));
+        tree.layout(SizeProposal::exact(300.0, 80.0));
+        let _ = tree.render();
+        let update = tree.sync_accessibility();
+
+        assert!(
+            !update
+                .nodes
+                .iter()
+                .any(|(_, n)| n.role() == Role::GenericContainer),
+            "no GenericContainer ('group') node should remain in the AT tree"
+        );
+
+        let (_, btn) = update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == widget_id_to_node_id(id))
+            .expect("button node present");
+        assert_eq!(btn.role(), Role::Button);
+        assert_eq!(btn.label(), Some("Valider"));
+        let has_visible_child = btn.children().iter().any(|cid| {
+            update
+                .nodes
+                .iter()
+                .find(|(nid, _)| nid == cid)
+                .is_some_and(|(_, n)| !n.is_hidden())
+        });
+        assert!(
+            !has_visible_child,
+            "button should expose no visible AT child node (it is a leaf)"
+        );
+    }
+
+    #[test]
     fn theme_slot_supplies_button_style_when_no_override() {
         // End-to-end check that `theme.style_slots.button = Some(rc)`
         // actually feeds the widget when no per-call `.style(...)`
@@ -1156,3 +1200,4 @@ mod tests {
         );
     }
 }
+

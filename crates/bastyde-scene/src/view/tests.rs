@@ -1498,6 +1498,13 @@ impl Widget for PlainContainer {
     fn children(&self) -> Vec<WidgetId> {
         self.inner_id.into_iter().collect()
     }
+    fn accessibility(&self, builder: &mut bastyde_core::accessibility::AccessNodeBuilder) {
+        // Give the container a real AT identity so the presentational-node
+        // pruning pass doesn't collapse it — these tests exercise
+        // descendant relocation, which needs the container in the AT tree.
+        builder.set_role(bastyde_core::accesskit::Role::Group);
+        builder.set_name("container");
+    }
 }
 
 #[test]

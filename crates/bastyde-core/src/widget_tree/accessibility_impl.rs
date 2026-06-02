@@ -115,6 +115,92 @@ impl WidgetTree {
             .map(widget_id_to_node_id)
             .unwrap_or_else(root_node_id);
 
+        // ── Presentational-node pruning ───────────────────────────────
+        // Layout primitives (HStack/VStack/ZStack/Center/Padding/Expand/…)
+        // emit empty `GenericContainer` / `Unknown` AT nodes purely to
+        // carry visual structure. VoiceOver announces a `GenericContainer`
+        // as "group", so a Button whose chrome is composed from these
+        // primitives reads as "<label>, button, group". Browsers collapse
+        // such semantically-empty nodes out of the platform tree
+        // ("ignored" / "presentational" nodes); do the same — drop each
+        // empty container and PROMOTE its children to its parent (bounds
+        // are absolute, so promotion is structural only).
+        //
+        // A node is prunable only if it is a visible, content-free
+        // `GenericContainer`/`Unknown`: no name, value, live region,
+        // popup, relation, or focus/click action. The Window root, the
+        // focused node, and any relationship target are always kept.
+        {
+            use std::collections::{HashMap, HashSet};
+
+            // Nodes referenced by another node's relations must survive so
+            // the reference can't dangle.
+            let mut relation_targets: HashSet<accesskit::NodeId> = HashSet::new();
+            for (_, node) in &nodes {
+                relation_targets.extend(node.controls());
+                relation_targets.extend(node.described_by());
+                relation_targets.extend(node.labelled_by());
+            }
+
+            let prunable: HashSet<accesskit::NodeId> = nodes
+                .iter()
+                .filter(|(nid, node)| {
+                    *nid != root_node_id()
+                        && *nid != focus
+                        && !relation_targets.contains(nid)
+                        && is_presentational_container(node)
+                })
+                .map(|(nid, _)| *nid)
+                .collect();
+
+            if !prunable.is_empty() {
+                // Pre-pruning children lists, for chain resolution.
+                let children_map: HashMap<accesskit::NodeId, Vec<accesskit::NodeId>> = nodes
+                    .iter()
+                    .map(|(nid, node)| (*nid, node.children().to_vec()))
+                    .collect();
+
+                // A kept node's effective children: each prunable child is
+                // replaced by its own (recursively resolved) kept children,
+                // so chains of empty containers collapse in one pass. The
+                // AT tree is acyclic, so the memo is the only guard needed.
+                fn resolve(
+                    nid: accesskit::NodeId,
+                    children_map: &HashMap<accesskit::NodeId, Vec<accesskit::NodeId>>,
+                    prunable: &HashSet<accesskit::NodeId>,
+                    memo: &mut HashMap<accesskit::NodeId, Vec<accesskit::NodeId>>,
+                ) -> Vec<accesskit::NodeId> {
+                    if let Some(cached) = memo.get(&nid) {
+                        return cached.clone();
+                    }
+                    let mut out = Vec::new();
+                    if let Some(kids) = children_map.get(&nid) {
+                        for &c in kids {
+                            if prunable.contains(&c) {
+                                out.extend(resolve(c, children_map, prunable, memo));
+                            } else {
+                                out.push(c);
+                            }
+                        }
+                    }
+                    memo.insert(nid, out.clone());
+                    out
+                }
+
+                let mut memo: HashMap<accesskit::NodeId, Vec<accesskit::NodeId>> = HashMap::new();
+                for (nid, node) in &mut nodes {
+                    if prunable.contains(nid) {
+                        continue;
+                    }
+                    let resolved = resolve(*nid, &children_map, &prunable, &mut memo);
+                    if children_map.get(nid) != Some(&resolved) {
+                        node.set_children(resolved);
+                    }
+                }
+                nodes.retain(|(nid, _)| !prunable.contains(nid));
+            }
+        }
+
         // Strip relationship targets (controls, described_by) that reference
         // NodeIds absent from the emitted tree. Dormant widgets (e.g. inactive
         // tab panels) are excluded from the TreeUpdate; if a node still holds a
@@ -154,6 +240,8 @@ impl WidgetTree {
             synthetic_parents,
         )
     }
+
+    // (helper `is_presentational_container` is a module-level free fn below)
 
     /// Look up the owning widget for a synthetic AccessKit `NodeId`
     /// emitted by `push_text_run_child` / `push_paragraph_child`.
@@ -452,6 +540,40 @@ impl WidgetTree {
             .value()
             .map(|s| s.to_string())
     }
+}
+
+/// Whether an AT node is a purely-structural container that should be
+/// collapsed out of the tree (its children promoted to its parent).
+///
+/// True only for a content-free `GenericContainer` / `Unknown` node — the
+/// empty boxes layout primitives (HStack/VStack/Padding/Expand/…) emit.
+/// The check is exhaustive by construction: set aside the framework-applied
+/// children, bounds, and disabled flag, then compare against a fresh
+/// default node of the same role. Any author- or widget-set property —
+/// name, value, description, orientation, aria-current, identifier, live
+/// region, popup, action, relation, hidden flag, … — makes the node differ
+/// from the default and keeps it, so no semantic property can be missed.
+/// Callers additionally exempt the Window root, the focused node, and
+/// relationship targets.
+fn is_presentational_container(node: &accesskit::Node) -> bool {
+    use accesskit::Role;
+    if !matches!(node.role(), Role::GenericContainer | Role::Unknown) {
+        return false;
+    }
+    // Set aside the framework-applied structural bits (children, bounds,
+    // arena-driven disabled flag), then check the node carries no semantic
+    // content by comparing against a bare node of the same role.
+    //
+    // We compare the *Debug* form, not `==`: AccessKit's `clear_*` leaves
+    // residue in the private property-value vec (the index is unset but the
+    // value stays), so `PartialEq` never matches a fresh node. `Node`'s
+    // Debug renders only logically-set properties, so it reflects true
+    // content and is exhaustive — any author/widget property keeps the node.
+    let mut probe = node.clone();
+    probe.clear_children();
+    probe.clear_bounds();
+    probe.clear_disabled();
+    format!("{probe:?}") == format!("{:?}", accesskit::Node::new(node.role()))
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -874,7 +996,13 @@ mod tests {
     fn sync_accessibility_parent_child_relationship() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FillWidget::new().label("Child"));
-        let parent = tree.add(StackWidget::new().add_child(child));
+        // A label keeps the parent from being collapsed as a presentational
+        // container, so this exercises the parent→child push (not pruning).
+        let parent = tree.add(
+            StackWidget::new()
+                .add_child(child)
+                .access_label_literal("Parent"),
+        );
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         let update = tree.sync_accessibility();
@@ -890,6 +1018,38 @@ mod tests {
 
         let child_node_id = crate::accessibility::widget_id_to_node_id(child);
         assert!(parent_node.children().contains(&child_node_id));
+        assert_a11y_tree_valid(&update);
+    }
+
+    #[test]
+    fn presentational_containers_collapse_and_promote_children() {
+        // A chain of bare presentational containers (StackWidget → empty
+        // `Role::Unknown`) wrapping a labeled leaf collapses entirely: the
+        // leaf is promoted to its nearest semantic ancestor, and no empty
+        // grouping node remains (VoiceOver would announce one as "group").
+        // A *labeled* container is semantic and survives.
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(FillWidget::new().label("Leaf")); // Role::Label
+        let inner = tree.add(StackWidget::new().add_child(leaf)); // bare → pruned
+        let outer = tree.add(StackWidget::new().add_child(inner)); // bare → pruned
+        let labeled = tree.add(
+            StackWidget::new()
+                .add_child(outer)
+                .access_label_literal("Group"),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let update = tree.sync_accessibility();
+
+        assert!(find_node(&update, inner).is_none(), "bare inner pruned");
+        assert!(find_node(&update, outer).is_none(), "bare outer pruned");
+
+        let labeled_node = find_node(&update, labeled).expect("labeled group survives");
+        let leaf_nid = crate::accessibility::widget_id_to_node_id(leaf);
+        assert!(
+            labeled_node.children().contains(&leaf_nid),
+            "leaf promoted past both bare containers to the labeled ancestor"
+        );
+        assert!(find_node(&update, leaf).is_some(), "labeled leaf kept");
         assert_a11y_tree_valid(&update);
     }
 
@@ -1490,6 +1650,10 @@ mod tests {
             StackWidget::new()
                 .add_child(inner1)
                 .add_child(inner2)
+                // A label keeps `outer` from being collapsed as a
+                // presentational container, so the test exercises Exclude
+                // (not the new presentational-pruning pass).
+                .access_label_literal("Section")
                 .access_exclude_subtree(),
         );
         tree.layout(SizeProposal::exact(100.0, 50.0));
