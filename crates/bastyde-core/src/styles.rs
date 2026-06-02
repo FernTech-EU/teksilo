@@ -4,46 +4,86 @@
 //!
 //! See `docs/styling-system.md` for the full four-tier ladder.
 
-pub mod avatar_style;
-pub mod badge_style;
-pub mod banner_style;
-pub mod button_style;
-pub mod calendar_style;
-pub mod card_style;
-pub mod checkbox_style;
-pub mod color_picker_style;
-pub mod combo_box_style;
-pub mod component_style_slots;
-pub mod date_edit_style;
-pub mod dialog_style;
-pub mod drop_target_style;
-pub mod drop_zone_style;
-pub mod icon_button_style;
-pub mod link_style;
-pub mod list_container_style;
-pub mod menu_item_style;
-pub mod panel_style;
-pub mod popover_style;
-pub mod progress_bar_style;
-pub mod radio_style;
-pub mod recipe;
-pub mod rich_text_editor_style;
-pub mod scroll_bar_style;
-pub mod search_field_style;
-pub mod segmented_control_style;
-pub mod slider_style;
-pub mod snackbar_style;
-pub mod spin_box_style;
-pub mod standard_item_style;
-pub mod tab_style;
-pub mod table_style;
-pub mod text_input_style;
-pub mod theme;
-pub mod theme_appearance;
-pub mod theme_extension;
-pub mod toast_style;
-pub mod toggle_style;
-pub mod tooltip_style;
+#[path = "styles/avatar_style.rs"]
+mod avatar_style;
+#[path = "styles/badge_style.rs"]
+mod badge_style;
+#[path = "styles/banner_style.rs"]
+mod banner_style;
+#[path = "styles/button_style.rs"]
+mod button_style;
+#[path = "styles/calendar_style.rs"]
+mod calendar_style;
+#[path = "styles/card_style.rs"]
+mod card_style;
+#[path = "styles/checkbox_style.rs"]
+mod checkbox_style;
+#[path = "styles/color_picker_style.rs"]
+mod color_picker_style;
+#[path = "styles/combo_box_style.rs"]
+mod combo_box_style;
+#[path = "styles/component_style_slots.rs"]
+mod component_style_slots;
+#[path = "styles/date_edit_style.rs"]
+mod date_edit_style;
+#[path = "styles/dialog_style.rs"]
+mod dialog_style;
+#[path = "styles/drop_target_style.rs"]
+mod drop_target_style;
+#[path = "styles/drop_zone_style.rs"]
+mod drop_zone_style;
+#[path = "styles/icon_button_style.rs"]
+mod icon_button_style;
+#[path = "styles/link_style.rs"]
+mod link_style;
+#[path = "styles/list_container_style.rs"]
+mod list_container_style;
+#[path = "styles/menu_item_style.rs"]
+mod menu_item_style;
+#[path = "styles/panel_style.rs"]
+mod panel_style;
+#[path = "styles/popover_style.rs"]
+mod popover_style;
+#[path = "styles/progress_bar_style.rs"]
+mod progress_bar_style;
+#[path = "styles/radio_style.rs"]
+mod radio_style;
+#[path = "styles/recipe.rs"]
+mod recipe;
+#[path = "styles/rich_text_editor_style.rs"]
+mod rich_text_editor_style;
+#[path = "styles/scroll_bar_style.rs"]
+mod scroll_bar_style;
+#[path = "styles/search_field_style.rs"]
+mod search_field_style;
+#[path = "styles/segmented_control_style.rs"]
+mod segmented_control_style;
+#[path = "styles/slider_style.rs"]
+mod slider_style;
+#[path = "styles/snackbar_style.rs"]
+mod snackbar_style;
+#[path = "styles/spin_box_style.rs"]
+mod spin_box_style;
+#[path = "styles/standard_item_style.rs"]
+mod standard_item_style;
+#[path = "styles/tab_style.rs"]
+mod tab_style;
+#[path = "styles/table_style.rs"]
+mod table_style;
+#[path = "styles/text_input_style.rs"]
+mod text_input_style;
+#[path = "styles/theme.rs"]
+mod theme;
+#[path = "styles/theme_appearance.rs"]
+mod theme_appearance;
+#[path = "styles/theme_extension.rs"]
+mod theme_extension;
+#[path = "styles/toast_style.rs"]
+mod toast_style;
+#[path = "styles/toggle_style.rs"]
+mod toggle_style;
+#[path = "styles/tooltip_style.rs"]
+mod tooltip_style;
 
 pub use avatar_style::{
     AvatarCorner, AvatarPresence, AvatarShape, AvatarSize, AvatarStyle, AvatarStyleConfig,
