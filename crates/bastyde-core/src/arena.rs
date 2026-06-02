@@ -243,6 +243,53 @@ impl std::fmt::Debug for WidgetNode {
 }
 
 impl WidgetNode {
+    /// Construct a fresh node wrapping `widget`, parented at `parent`
+    /// (`None` for a root). All other fields take their insertion defaults;
+    /// the caller wires up `children` / parent back-links afterward.
+    pub(crate) fn new(widget: Box<dyn Widget>, parent: Option<WidgetId>) -> Self {
+        WidgetNode {
+            widget,
+            parent,
+            children: Vec::new(),
+            activation: ActivationState::Active,
+            dirty: DirtyFlags {
+                needs_layout: true,
+                needs_paint: true,
+                needs_rebuild: false,
+            },
+            bounds: bastyde_canvas::Rect::ZERO,
+            theme_override: None,
+            visible_state: None,
+            enabled_state: None,
+            tab_stop: None,
+            focus_within_signal: None,
+            hover_within_signal: None,
+            alignment_override: None,
+            clips_children: false,
+            ime: None,
+            event_pass_through: false,
+            opacity_prop: None,
+            transform_prop: None,
+            content_transform: false,
+            blur_prop: None,
+            cached_paint: None,
+            cached_post_paint: None,
+            last_painted_epoch: 0,
+            handlers: EventHandlers::new(),
+            external_handlers: EventHandlers::new(),
+            node_focusable: None,
+            node_tab_index: None,
+            node_cursor: None,
+            has_built_children: false,
+            effect_handles: Vec::new(),
+            subscription_handles: Vec::new(),
+            context_menu_factory: None,
+            actions: Vec::new(),
+            access_overrides: None,
+            access_subtree: crate::widget_builder::AccessSubtreeMode::default(),
+        }
+    }
+
     /// Does EITHER handler slot (own or external) have a handler of the
     /// requested kind? Use this when deciding whether to build a gesture
     /// arena, mark the node as a drop target, etc.
@@ -279,47 +326,7 @@ impl WidgetArena {
     pub fn insert(&mut self, widget: Box<dyn Widget>) -> WidgetId {
         self.roots_dirty = true;
         let children = widget.children();
-        let id = self.nodes.insert(WidgetNode {
-            widget,
-            parent: None,
-            children: Vec::new(),
-            activation: ActivationState::Active,
-            dirty: DirtyFlags {
-                needs_layout: true,
-                needs_paint: true,
-                needs_rebuild: false,
-            },
-            bounds: bastyde_canvas::Rect::ZERO,
-            theme_override: None,
-            visible_state: None,
-            enabled_state: None,
-            tab_stop: None,
-            focus_within_signal: None,
-            hover_within_signal: None,
-            alignment_override: None,
-            clips_children: false,
-            ime: None,
-            event_pass_through: false,
-            opacity_prop: None,
-            transform_prop: None,
-            content_transform: false,
-            blur_prop: None,
-            cached_paint: None,
-            cached_post_paint: None,
-            last_painted_epoch: 0,
-            handlers: EventHandlers::new(),
-            external_handlers: EventHandlers::new(),
-            node_focusable: None,
-            node_tab_index: None,
-            node_cursor: None,
-            has_built_children: false,
-            effect_handles: Vec::new(),
-            subscription_handles: Vec::new(),
-            context_menu_factory: None,
-            actions: Vec::new(),
-            access_overrides: None,
-            access_subtree: crate::widget_builder::AccessSubtreeMode::default(),
-        });
+        let id = self.nodes.insert(WidgetNode::new(widget, None));
         // Set up parent-child for declared children
         for &child_id in &children {
             if let Some(child_node) = self.nodes.get_mut(child_id) {
@@ -340,47 +347,7 @@ impl WidgetArena {
         );
         self.roots_dirty = true;
         let children = widget.children();
-        let id = self.nodes.insert(WidgetNode {
-            widget,
-            parent: Some(parent),
-            children: Vec::new(),
-            activation: ActivationState::Active,
-            dirty: DirtyFlags {
-                needs_layout: true,
-                needs_paint: true,
-                needs_rebuild: false,
-            },
-            bounds: bastyde_canvas::Rect::ZERO,
-            theme_override: None,
-            visible_state: None,
-            enabled_state: None,
-            tab_stop: None,
-            focus_within_signal: None,
-            hover_within_signal: None,
-            alignment_override: None,
-            clips_children: false,
-            ime: None,
-            event_pass_through: false,
-            opacity_prop: None,
-            transform_prop: None,
-            content_transform: false,
-            blur_prop: None,
-            cached_paint: None,
-            cached_post_paint: None,
-            last_painted_epoch: 0,
-            handlers: EventHandlers::new(),
-            external_handlers: EventHandlers::new(),
-            node_focusable: None,
-            node_tab_index: None,
-            node_cursor: None,
-            has_built_children: false,
-            effect_handles: Vec::new(),
-            subscription_handles: Vec::new(),
-            context_menu_factory: None,
-            actions: Vec::new(),
-            access_overrides: None,
-            access_subtree: crate::widget_builder::AccessSubtreeMode::default(),
-        });
+        let id = self.nodes.insert(WidgetNode::new(widget, Some(parent)));
         // Set up parent-child for declared children
         for &child_id in &children {
             if let Some(child_node) = self.nodes.get_mut(child_id) {
