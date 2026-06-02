@@ -1313,28 +1313,41 @@ impl Widget for TextInputField {
             // as a normal text input exposing the real value, mirroring
             // the web `type=password ↔ type=text` swap.
             builder.set_role(Role::TextInput);
+            // Keep the value on the input node so the focus announcement is
+            // unchanged: accesskit resolves `value()` from `data().value()`
+            // first, falling back to the TextRun text only when unset.
             if !text.is_empty() {
                 builder.set_value(&text);
             }
+
+            // Expose the editable content as a child `Role::TextRun`, NOT as
+            // `character_lengths` on the input node itself. accesskit_consumer's
+            // `supports_text_ranges()` is false for a childless input that only
+            // hosts character data on its own node, so the macOS adapter never
+            // fires `AXSelectedTextChanged` — VoiceOver reads the value once on
+            // focus but never echoes characters/words while typing. Emit the run
+            // even when empty so `supports_text_ranges()` is already true before
+            // the first keystroke (the change-diff's *old* node must support
+            // ranges too for the notification to fire). `position()` / `anchor()`
+            // are character indices (text-document is char-space), matching the
+            // TextRun's `character_index` contract — correct for multibyte text.
+            let char_lengths: Vec<u8> = text.chars().map(|c| c.len_utf8() as u8).collect();
+            let word_starts = compute_word_starts(&text);
+            let word_starts = (!word_starts.is_empty()).then_some(word_starts);
+            let run_id =
+                builder.push_text_run_child_on_self(0, text.clone(), char_lengths, word_starts);
+
             // While composing (IME preedit active), expose the composition
             // as a selection so screen readers / braille track the tentative
             // text — the composing characters are already in `value`. Falls
             // back to the live cursor/selection when not composing. (The
             // secure branch above never reaches here, so a password preedit
-            // is never exposed.)
+            // is never exposed.) Selection now references the TextRun child.
             let (anchor, pos) = match st.ime_preedit_range.clone() {
                 Some(range) => (range.start, range.end),
                 None => (st.cursor.anchor(), st.cursor.position()),
             };
-            builder.set_text_selection_on_self(anchor, pos);
-
-            let char_lengths: Vec<u8> = text.chars().map(|c| c.len_utf8() as u8).collect();
-            builder.inner_mut().set_character_lengths(char_lengths);
-
-            let word_starts = compute_word_starts(&text);
-            if !word_starts.is_empty() {
-                builder.inner_mut().set_word_starts(word_starts);
-            }
+            builder.set_text_selection_to((run_id, anchor), (run_id, pos));
         }
 
         if !st.placeholder.is_empty() {

@@ -826,6 +826,49 @@ impl AccessNodeBuilder {
         node_id
     }
 
+    /// Push a single `Role::TextRun` child attached **directly** to the
+    /// widget's own node (no intervening `Role::Paragraph`). This is the
+    /// single-line text-input shape: `Role::TextInput` → one
+    /// `Role::TextRun`.
+    ///
+    /// Required for screen-reader typing echo. accesskit_consumer's
+    /// `supports_text_ranges()` returns `false` for a text input that
+    /// only sets `character_lengths` on its *own* node — it needs a
+    /// `Role::TextRun` child. Without it the macOS adapter never emits
+    /// `AXSelectedTextChanged`, so VoiceOver reads the value once on
+    /// focus but never echoes characters/words while typing. Emit this
+    /// even when `value` / `character_lengths` are empty so
+    /// `supports_text_ranges()` is already true before the first
+    /// keystroke (the change-diff's *old* node must also support ranges
+    /// for the notification to fire). Target the caret/selection at the
+    /// returned `NodeId` via [`set_text_selection_to`](Self::set_text_selection_to).
+    pub fn push_text_run_child_on_self(
+        &mut self,
+        element_id: u64,
+        value: String,
+        character_lengths: Vec<u8>,
+        word_starts: Option<Vec<u8>>,
+    ) -> NodeId {
+        let Some(owner) = self.owner else {
+            debug_assert!(
+                false,
+                "push_text_run_child_on_self called on a builder with no owner — \
+                 widgets must only call this from Widget::accessibility"
+            );
+            return NodeId(0);
+        };
+        let node_id = synthetic_node_id(owner, element_id, SyntheticKind::TextRun);
+        let mut node = Node::new(Role::TextRun);
+        node.set_value(value);
+        node.set_character_lengths(character_lengths);
+        if let Some(ws) = word_starts {
+            node.set_word_starts(ws);
+        }
+        self.children_collected.push((node_id, node));
+        self.inner.push_child(node_id);
+        node_id
+    }
+
     /// Declare a text selection that references TextRun children
     /// previously emitted via `push_text_run_child`. Both the
     /// anchor and the focus are expressed as

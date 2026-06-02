@@ -420,6 +420,86 @@ fn focused_button_is_not_an_ime_surface() {
 }
 
 #[test]
+fn focused_field_emits_a_text_run_child_for_voiceover_echo() {
+    // Regression: VoiceOver echoes typed characters only when the macOS
+    // adapter fires `AXSelectedTextChanged`, which accesskit_consumer
+    // gates on `supports_text_ranges()` — and that requires a child
+    // `Role::TextRun`, NOT `character_lengths` hosted on the input node
+    // itself. A childless input reads its value once on focus but stays
+    // silent while typing. Lock in the TextRun child + its value /
+    // character_lengths, and that the selection targets that child.
+    use bastyde_core::accesskit::Role;
+
+    let (mut tree, text, id) = setup("");
+    focus_field(&mut tree, id);
+    // café — the final char is 2 UTF-8 bytes, so character_lengths must
+    // be per-char byte counts [1,1,1,2] and the caret a *character*
+    // index (4), not a byte offset.
+    text.set("café".to_string());
+    tick(&mut tree);
+    tick(&mut tree);
+
+    let update = tree.sync_accessibility();
+
+    let (input_id, input) = update
+        .nodes
+        .iter()
+        .find(|(_, n)| n.role() == Role::TextInput)
+        .expect("a Role::TextInput node is present");
+
+    // The input node must have a TextRun child (the thing that makes
+    // `supports_text_ranges()` true).
+    let (run_id, run) = update
+        .nodes
+        .iter()
+        .find(|(_, n)| n.role() == Role::TextRun)
+        .expect("focused field must emit a Role::TextRun child");
+    assert!(
+        input.children().contains(run_id),
+        "the TextRun must be a direct child of the input node"
+    );
+    assert_eq!(run.value(), Some("café"), "TextRun carries the value");
+    assert_eq!(
+        run.character_lengths(),
+        &[1u8, 1, 1, 2],
+        "character_lengths are per-char UTF-8 byte counts"
+    );
+
+    // The caret/selection must reference the TextRun child, with a
+    // character index (4), so AT range queries resolve.
+    let sel = input
+        .text_selection()
+        .expect("focused field exposes a text selection");
+    assert_eq!(
+        sel.focus.node, *run_id,
+        "selection targets the TextRun child, not the input node"
+    );
+    assert_eq!(
+        sel.focus.character_index, 4,
+        "caret is a character index past 'café' (not byte offset 5)"
+    );
+    let _ = input_id;
+}
+
+#[test]
+fn empty_focused_field_still_emits_a_text_run() {
+    // The run must exist even when empty: the change-diff's *old* node
+    // (empty field) has to `supports_text_ranges()` too, or the very
+    // first keystroke won't fire `AXSelectedTextChanged`.
+    use bastyde_core::accesskit::Role;
+
+    let (mut tree, _text, id) = setup("");
+    focus_field(&mut tree, id);
+    tick(&mut tree);
+
+    let update = tree.sync_accessibility();
+    assert!(
+        update.nodes.iter().any(|(_, n)| n.role() == Role::TextRun),
+        "an empty focused field must still emit a TextRun child"
+    );
+}
+
+#[test]
 fn composing_field_exposes_the_composition_as_an_at_selection() {
     let (mut tree, _text, id) = setup("");
     focus_field(&mut tree, id);
