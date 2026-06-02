@@ -2716,6 +2716,23 @@ fn handle_access_action_request(
             ctx.request_frame();
             EventResponse::Handled
         }
+        (Action::ReplaceSelectedText, Some(ActionData::Value(value))) => {
+            // Insert at the caret, replacing the active selection (if
+            // any) — NOT the whole document like `SetValue`. The AT-SPI
+            // (Linux) / UIA (Windows) braille-keyboard & dictation
+            // insertion path; macOS routes insertion through `SetValue`.
+            // We advertise the action in `accessibility()`, so service it.
+            let filter = state.borrow().policy.command_filter;
+            if !filter.accepts(EditCommandKind::InsertChar) {
+                return EventResponse::Ignored;
+            }
+            let st = state.borrow();
+            let _ = st.cursor.insert_text(value.as_ref());
+            drop(st);
+            sync_cursor_signals(state);
+            ctx.request_frame();
+            EventResponse::Handled
+        }
         (Action::ScrollIntoView, _) => {
             let mut st = state.borrow_mut();
             if let Some(new_y) = st.engine.ensure_caret_visible() {
