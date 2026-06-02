@@ -146,6 +146,18 @@ VoiceOver announces the card as one element: "New message · From Alice · Hey, 
 
 **What merge can't reach.** Widgets that don't expose their internals to the arena (e.g. a hand-rolled `paint()`-only widget that draws its own icon + label without inserting child `WidgetNode`s) have no descendants for the merge walker to find. Those widgets' authors should set `accessibility()` correctly internally; consumers can still use `.access_label(...)` to override the parent. This is an inherent property of the arena-based tree, not a deferred feature.
 
+### Automatic presentational collapse (no opt-in)
+
+Layout primitives (`HStack`, `VStack`, `ZStack`, `Center`, `Grid`, `Wrap`, `Padding`, `Expand`, `FixedSize`, …) emit empty `Role::GenericContainer` / `Role::Unknown` AT nodes purely to carry visual structure. VoiceOver announces a bare `GenericContainer` as **"group"**, so a composing control whose chrome is built from these primitives (a `Button`, a `Checkbox`, …) would otherwise read as "*Save, button, group*". To prevent that, the walker runs a final pass that **collapses semantically-empty container nodes and promotes their children to the parent** — the same "ignored / presentational node" pruning browsers do. Chains of nested empty containers collapse in one pass, so a `Button → Padding → Center → HStack → (hidden label)` subtree becomes a single childless `Role::Button` leaf.
+
+This is automatic and requires no annotation. A node is collapsed only when, after the framework's structural additions (children, bounds, arena-driven `disabled`) are set aside, it is a bare node of its role — i.e. role is `GenericContainer` or `Unknown` **and** it carries no name, value, description, live region, popup, relationship, identifier, action, or any other author/widget property. The moment a container gains semantic content it is kept:
+
+- An `HStack` with `.access_label(lit!("Toolbar"))` → `Role::GenericContainer` **with a name** → kept (a named group).
+- A `Panel` (`Role::Group`) or `GroupBox` → non-presentational role → kept.
+- The Window root, the currently-focused node, and any node referenced by another node's `controls` / `described_by` / `labelled_by` → always kept.
+
+So you rarely need `Exclude` just to silence layout scaffolding — that happens for free. Reach for `Exclude` / `Merge` only when you want to prune or combine descendants that *do* carry semantics (decorative icon clusters with labels, multi-line cards, …).
+
 ---
 
 ## Action callbacks
@@ -313,6 +325,8 @@ For each widget the AT walker visits, the sequence is:
     3. Re-apply `set_disabled()` from the arena's enabled-flag UNLESS the override has `disabled: Some(false)`.
     4. Tooltip → `push_described_by`.
     5. `builder.build(id)` → produces `(NodeId, accesskit::Node, synthetic_children)`.
+
+After every widget has been visited, one **tree-wide pass** runs over the assembled node list (see [Automatic presentational collapse](#automatic-presentational-collapse-no-opt-in)): semantically-empty `GenericContainer` / `Unknown` nodes are dropped and their children promoted to the parent, exempting the root, the focused node, and relationship targets. This is the only step that operates on the whole tree rather than per-widget.
 
 ---
 
