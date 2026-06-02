@@ -1574,6 +1574,20 @@ fn handle_access_action(
             ctx.request_frame();
             EventResponse::Handled
         }
+        (Action::ReplaceSelectedText, Some(ActionData::Value(value))) => {
+            // Insert at the caret, replacing the active selection (if
+            // any) — NOT the whole document like `SetValue`. This is the
+            // AT-SPI (Linux) / UIA (Windows) braille-keyboard and
+            // dictation insertion path; macOS routes insertion through
+            // `SetValue` instead, so this never fires there. We advertise
+            // the action in `accessibility()`, so we must service it.
+            let st = state.borrow();
+            let _ = st.cursor.insert_text(value.as_ref());
+            drop(st);
+            sync_cursor_signals(state);
+            ctx.request_frame();
+            EventResponse::Handled
+        }
         (Action::Focus, _) => {
             if let Some(id) = state.borrow().field_widget_id {
                 ctx.request_focus(id);

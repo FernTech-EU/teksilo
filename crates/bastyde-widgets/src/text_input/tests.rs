@@ -420,6 +420,54 @@ fn focused_button_is_not_an_ime_surface() {
 }
 
 #[test]
+fn replace_selected_text_inserts_at_caret() {
+    // The AT-SPI (Linux) / UIA (Windows) braille-keyboard & dictation
+    // insertion path. We advertise `Action::ReplaceSelectedText`, so it
+    // must insert at the caret, replacing any active selection — NOT
+    // wipe the whole field like `SetValue`.
+    use bastyde_core::accesskit::{Action, ActionData};
+    use bastyde_core::event::WidgetEvent;
+
+    let (mut tree, text, id) = setup("hi");
+    let field = tree
+        .first_focusable_descendant(id)
+        .expect("inner field is focusable");
+    tree.focus(field);
+
+    // Collapse the caret to the end (focus selects-all on keyboard focus).
+    tree.dispatch_event(WidgetEvent::AccessAction {
+        action: Action::SetTextSelection,
+        target: Some(field),
+        target_node: bastyde_core::accessibility::widget_id_to_node_id(field),
+        data: Some(ActionData::SetTextSelection(bastyde_core::accesskit::TextSelection {
+            anchor: bastyde_core::accesskit::TextPosition {
+                node: bastyde_core::accessibility::widget_id_to_node_id(field),
+                character_index: 2,
+            },
+            focus: bastyde_core::accesskit::TextPosition {
+                node: bastyde_core::accessibility::widget_id_to_node_id(field),
+                character_index: 2,
+            },
+        })),
+    });
+    tick(&mut tree);
+
+    tree.dispatch_event(WidgetEvent::AccessAction {
+        action: Action::ReplaceSelectedText,
+        target: Some(field),
+        target_node: bastyde_core::accessibility::widget_id_to_node_id(field),
+        data: Some(ActionData::Value("!".into())),
+    });
+    tick(&mut tree);
+
+    assert_eq!(
+        text.get(),
+        "hi!",
+        "ReplaceSelectedText inserts at the caret, it does not replace the document"
+    );
+}
+
+#[test]
 fn focused_field_emits_a_text_run_child_for_voiceover_echo() {
     // Regression: VoiceOver echoes typed characters only when the macOS
     // adapter fires `AXSelectedTextChanged`, which accesskit_consumer
