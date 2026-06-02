@@ -2,7 +2,7 @@
 
 **Version:** 0.3 — slim refresh
 **Date:** May 6, 2026
-**Author:** Cyril Jacquet, with architectural design by Claude (Anthropic)
+**Author:** Cyril Jacquet, with Claude (Anthropic) and Mistral Medium as sounding boards and formatting help.
 **Status:** Living reference — framework-internals doc; companion focused docs in this directory own the per-subsystem API surface
 
 > **Document scope.** This document covers the *framework-internals* topics
