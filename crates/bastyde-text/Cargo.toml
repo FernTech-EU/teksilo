@@ -61,6 +61,13 @@ system-emoji = ["dep:memmap2"]
 # `rich-text` feature.
 rich-text = ["dep:text-document"]
 
+# Hyphenation language coverage, forwarded to text-typeset's gates.
+# Western European is already active via text-typeset's own defaults;
+# enable `hyphenation-all-languages` to compile every hypher language
+# (~1.2 MB of read-only trie data) instead of just ~0.3 MB.
+hyphenation-western-european = ["text-typeset/hyphenation-western-european"]
+hyphenation-all-languages = ["text-typeset/hyphenation-all-languages"]
+
 [dependencies]
 bastyde-canvas = { workspace = true }
 bastyde-tokens = { workspace = true }

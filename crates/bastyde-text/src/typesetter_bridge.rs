@@ -288,6 +288,7 @@ impl TypesetterBridge {
             font_italic: None,
             font_size: Some(style.size),
             color: None,
+            ..Default::default()
         }
     }
 
