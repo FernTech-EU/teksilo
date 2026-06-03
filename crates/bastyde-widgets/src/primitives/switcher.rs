@@ -456,6 +456,90 @@ mod tests {
         );
     }
 
+    /// A non-selected mounted page must go *dormant*, not merely
+    /// unpainted. Dormant nodes are excluded from the AccessKit walk,
+    /// focus traversal, hit-test, and paint (all gate on `is_active`),
+    /// so this pins the `visible_when` → `set_dormant` wiring the
+    /// Switcher relies on to keep hidden tabs out of the a11y tree and
+    /// the tab order.
+    #[test]
+    fn hidden_page_is_dormant_and_excluded_from_at() {
+        let selected = Signal::new(0_usize);
+        let ids = Rc::new(RefCell::new(Vec::new()));
+        let mut tree = WidgetTree::new();
+        let _switcher = tree.add(
+            Switcher::new(selected.clone())
+                .capture_child_ids_into(ids.clone())
+                .child(FixedLeaf(50.0, 50.0))
+                .child(FixedLeaf(60.0, 60.0)),
+        );
+
+        // Visit page 0 then page 1 so BOTH pages are mounted.
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+        selected.set(1);
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+
+        let (page0, page1) = {
+            let ids = ids.borrow();
+            assert_eq!(ids.len(), 2, "both pages mounted after each is visited");
+            (ids[0], ids[1])
+        };
+
+        // Selected page: active + visible. Hidden page: dormant + invisible.
+        assert!(tree.is_active(page1), "selected page must be active");
+        assert!(tree.is_visible(page1), "selected page must be visible");
+        assert!(
+            !tree.is_active(page0),
+            "hidden page must be dormant — excluded from AT / focus / hit-test"
+        );
+        assert!(!tree.is_visible(page0), "hidden page must be invisible");
+
+        // Switching back reactivates page 0 and dormant-izes page 1.
+        selected.set(0);
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+        assert!(tree.is_active(page0) && tree.is_visible(page0));
+        assert!(
+            !tree.is_active(page1),
+            "previously-shown page must now be dormant"
+        );
+    }
+
+    /// `child_id` pages are pre-mounted by the caller, so unlike a
+    /// `Pending` page added via `child()` (which stays unbuilt until
+    /// selected — see `unvisited_pages_never_build`), a `PreMounted`
+    /// page is built eagerly on first build even when it is not the
+    /// selected index. Visibility still tracks selection, and switching
+    /// to it must not rebuild it.
+    #[test]
+    fn premounted_child_id_pages_build_eagerly_unlike_pending() {
+        let selected = Signal::new(0_usize);
+        let (page1, c1) = CountingLeaf::new(60.0, 60.0);
+
+        let mut tree = WidgetTree::new();
+        let p0 = tree.add(FixedLeaf(50.0, 50.0));
+        let p1 = tree.add(page1); // caller pre-mounts the page
+        let _switcher = tree.add(Switcher::new(selected.clone()).child_id(p0).child_id(p1));
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+
+        // Page 1 is NOT selected, yet it has already been built because
+        // it was pre-mounted via `child_id` — the eager path. A `Pending`
+        // page in the same position would have a build count of 0.
+        assert_eq!(
+            c1.get(),
+            1,
+            "PreMounted page builds eagerly even when not selected"
+        );
+        assert!(tree.is_visible(p0), "selected page visible");
+        assert!(!tree.is_visible(p1), "non-selected page hidden");
+
+        // Selecting page 1 reveals it without rebuilding.
+        selected.set(1);
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+        assert!(tree.is_visible(p1), "switched-to page visible");
+        assert!(!tree.is_visible(p0), "switched-from page hidden");
+        assert_eq!(c1.get(), 1, "switching must not rebuild the page");
+    }
+
     /// `Widget::declare_shortcuts` returned by a Pending Switcher page
     /// must be registered in the shortcut registry before the page is
     /// mounted — settings UIs depend on seeing the full keystroke
