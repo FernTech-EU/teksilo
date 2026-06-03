@@ -59,10 +59,17 @@ impl WidgetTree {
     }
 
     fn dispatch_event_impl(&mut self, event: WidgetEvent, ops: &mut dyn crate::window::WindowOps) {
-        if let WidgetEvent::KeyDown {
-            key: Key::ArrowLeft,
-            ..
-        } = &event
+        // The "back toward the parent overlay" key closes the top nested
+        // overlay (e.g. an open submenu over its parent menu). It is the
+        // inline-start arrow: ArrowLeft under LTR, ArrowRight under RTL.
+        // Without the RTL flip, ArrowLeft would navigate *into* a submenu
+        // in RTL menus yet still dismiss it here.
+        let overlay_back_key = match self.layout_direction {
+            crate::environment::LayoutDirection::RightToLeft => Key::ArrowRight,
+            crate::environment::LayoutDirection::LeftToRight => Key::ArrowLeft,
+        };
+        if let WidgetEvent::KeyDown { key, .. } = &event
+            && *key == overlay_back_key
             && self.overlay_manager.len() > 1
         {
             if let Some((_id, content_ids, focus_restore)) = self.overlay_manager.dismiss_top() {

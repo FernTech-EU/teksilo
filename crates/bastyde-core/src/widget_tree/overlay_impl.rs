@@ -1028,6 +1028,68 @@ mod tests {
         assert!(!tree.is_visible(content));
     }
 
+    /// Build two stacked overlays (a submenu over its parent menu) so the
+    /// nested-overlay "back" key path (`overlay_manager.len() > 1`) is live.
+    fn show_two_nested_overlays(tree: &mut WidgetTree) -> (WidgetId, WidgetId) {
+        let anchor = tree.add(FillWidget::new());
+        let c1 = tree.add(FillWidget::new());
+        let c2 = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let o1 = tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: c1,
+            anchor,
+            placement: crate::overlay::OverlayPlacement::Below,
+            dismiss: crate::overlay::DismissBehavior::Manual,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: c2,
+            anchor: c1,
+            placement: crate::overlay::OverlayPlacement::Below,
+            dismiss: crate::overlay::DismissBehavior::Manual,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: Some(o1),
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        (c1, c2)
+    }
+
+    #[test]
+    fn nested_overlay_back_key_dismisses_with_arrow_left_under_ltr() {
+        let mut tree = WidgetTree::new();
+        let _ = show_two_nested_overlays(&mut tree);
+        assert_eq!(tree.active_overlays().len(), 2);
+
+        // Wrong-direction arrow under LTR leaves both overlays open.
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        assert_eq!(tree.active_overlays().len(), 2);
+
+        // ArrowLeft (inline-start under LTR) closes the top nested overlay.
+        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+        assert_eq!(tree.active_overlays().len(), 1);
+    }
+
+    #[test]
+    fn nested_overlay_back_key_flips_to_arrow_right_under_rtl() {
+        let mut tree = WidgetTree::new();
+        tree.set_layout_direction(crate::environment::LayoutDirection::RightToLeft);
+        let _ = show_two_nested_overlays(&mut tree);
+        assert_eq!(tree.active_overlays().len(), 2);
+
+        // Under RTL, ArrowLeft navigates *into* a submenu — it must NOT
+        // dismiss the top overlay.
+        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+        assert_eq!(tree.active_overlays().len(), 2);
+
+        // ArrowRight is the inline-start ("back toward parent") key in RTL.
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        assert_eq!(tree.active_overlays().len(), 1);
+    }
+
     #[test]
     fn escape_does_not_dismiss_manual_overlay() {
         let mut tree = WidgetTree::new();
