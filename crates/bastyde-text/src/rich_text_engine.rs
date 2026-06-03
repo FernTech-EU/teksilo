@@ -176,6 +176,14 @@ impl RichTextEngine {
         self.flow.set_code_block_background(color);
     }
 
+    /// Auto-hyphenate justified blocks that don't set `hyphenate`
+    /// explicitly. Enable on prose / rich-text surfaces (paired with
+    /// justified alignment); leave off for single-line / label widgets.
+    /// Default `false`.
+    pub fn set_hyphenate_justified(&mut self, enabled: bool) {
+        self.flow.set_hyphenate_justified(enabled);
+    }
+
     /// Set the foreground used for monospaced runs (inline `code`,
     /// fenced code blocks) that carry no explicit `foreground_color`.
     /// `None` falls back to the engine's `text_color`. Wired from
@@ -314,6 +322,7 @@ impl RichTextEngine {
             code_block_background: self.flow.code_block_background(),
             code_block_foreground: self.flow.code_block_foreground(),
             echo_char: self.flow.echo_char(),
+            hyphenate_justified: self.flow.hyphenate_justified(),
         };
         let params = text_typeset::bridge::convert_block_with(&snap, &opts);
         {

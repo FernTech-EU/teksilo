@@ -196,6 +196,9 @@ impl RichTextEditor {
         // engine is correct: no renderer is ever invoked.
         let mut engine = RichTextEngine::private_default();
         engine.set_wrap_mode(WrapMode::Word);
+        // Prose editor: hyphenate justified paragraphs. Single-line / label
+        // widgets (e.g. TextInputField) deliberately don't enable this.
+        engine.set_hyphenate_justified(true);
         let state = EditorState::new(document, engine, policy, WrapMode::Word);
         Self {
             state,
@@ -471,6 +474,7 @@ impl RichTextEditor {
             let mut st = self.state.borrow_mut();
             let mut engine = RichTextEngine::private_with_registrar(registrar);
             engine.set_wrap_mode(st.wrap_mode);
+            engine.set_hyphenate_justified(true);
             st.engine = engine;
             st.needs_full_layout = true;
         }
@@ -2268,6 +2272,7 @@ impl Widget for RichTextEditor {
             let wrap = st.wrap_mode;
             let mut engine = RichTextEngine::from_shared(shared.clone());
             engine.set_wrap_mode(wrap);
+            engine.set_hyphenate_justified(true);
             st.engine = engine;
             st.needs_full_layout = true;
         }
