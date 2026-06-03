@@ -697,6 +697,15 @@ impl Widget for SplitButton {
                             key: Key::Space | Key::Enter,
                             ..
                         } => {
+                            // Lone-KeyUp guard: only fire if we saw the
+                            // matching KeyDown (state is Pressed). A lone
+                            // KeyUp means the KeyDown was consumed
+                            // elsewhere (shortcut, focus transfer) and
+                            // this widget is not the activation target.
+                            // Mirrors `build_interaction_handlers`.
+                            if int_for_key.get() != InteractionState::Pressed {
+                                return EventResponse::Ignored;
+                            }
                             let idx = selected_for_key.get();
                             if let Some(Some(action)) = actions_for_key.get(idx) {
                                 action(ctx);
@@ -880,6 +889,34 @@ mod tests {
             Some(1),
             "Enter must fire the currently-selected item's action"
         );
+    }
+
+    /// A lone Space/Enter KeyUp (no preceding KeyDown) must NOT fire the
+    /// default action — the lone-KeyUp guard, matching the rest of the
+    /// button family.
+    #[test]
+    fn lone_keyup_does_not_fire_default_action() {
+        let fired: StdRc<StdCell<u32>> = StdRc::new(StdCell::new(0));
+        let f = fired.clone();
+        let mut tree = themed_tree();
+        let split = tree.add(
+            SplitButton::new().item(MenuItem::new(lit!("A")).on_activate_fn(move |_| {
+                f.set(f.get() + 1)
+            })),
+        );
+        tree.layout(SizeProposal::exact(300.0, 60.0));
+        tree.focus(split);
+
+        // Lone KeyUp — must be a no-op.
+        tree.dispatch_event(bastyde_core::event::WidgetEvent::KeyUp {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(fired.get(), 0, "lone KeyUp must not fire the default action");
+
+        // Sanity: a full KeyDown+KeyUp DOES fire.
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(fired.get(), 1, "full KeyDown+KeyUp fires the default action");
     }
 
     /// ArrowDown opens the dropdown menu overlay.
