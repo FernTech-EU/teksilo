@@ -658,7 +658,12 @@ impl bastyde_core::widget::Widget for IconButton {
         if let Some(content) = self.composite_tooltip_content.take() {
             let delay = ctx.theme().motion.tooltip_delay_heavy;
             crate::tooltip::attach_composite_tooltip_boxed(ctx, root_id, content, delay);
-        } else if let Some(source) = self.rich_tooltip_source.take() {
+        } else if let Some(source) = self.rich_tooltip_source.clone() {
+            // Clone, not take: `accessibility()` needs the source to
+            // resolve the accessible name (an IconButton has no label,
+            // so its AT name comes from the tooltip). Taking it here left
+            // the rich-tooltip a11y name resolution reading a `None`
+            // source — falling back to the literal "Button".
             let delay = ctx.theme().motion.tooltip_delay;
             crate::tooltip::attach_rich_tooltip_source(ctx, root_id, source, delay);
         } else if let Some(tooltip_text) = self.tooltip_text.clone() {
@@ -730,14 +735,20 @@ impl bastyde_core::widget::Widget for IconButton {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::Button);
         // The accessible name is sourced from whichever tooltip flavor
-        // is configured. Plain text is used directly; for a rich
-        // tooltip we use the inline content's body text when
-        // available; for a composite tooltip the caller is expected
-        // to provide an explicit `.access_label(...)` via the
-        // accessibility-overrides API.
+        // is configured. Plain text is used directly; for a rich tooltip
+        // we use the inline content's body text, or — for a registry
+        // *key* — the registered content's text resolved from the
+        // tooltip registry; for a composite tooltip the caller must
+        // provide an explicit `.access_label(...)` via the
+        // accessibility-overrides API (no text to source from).
         let rich_name: Option<String> = self.rich_tooltip_source.as_ref().and_then(|s| match s {
             crate::tooltip::RichTooltipSource::Content(c) => Some(c.text.resolve_now()),
-            crate::tooltip::RichTooltipSource::Key(_) => None,
+            crate::tooltip::RichTooltipSource::Key(key) => {
+                crate::tooltip::with_tooltip_registry(|reg| {
+                    reg.get(key).map(|c| c.text.resolve_now())
+                })
+                .flatten()
+            }
         });
         debug_assert!(
             self.tooltip_text.is_some()
@@ -748,12 +759,14 @@ impl bastyde_core::widget::Widget for IconButton {
              Use .tooltip(tr!(…)) or a predefined constructor like IconButton::clear(). \
              For rich/composite tooltips, also pair with `.access_label(...)`."
         );
-        if let Some(ref text) = self.tooltip_text {
-            builder.set_name(text.resolve_now());
-        } else if let Some(ref text) = rich_name {
-            builder.set_name(text.as_str());
-        } else {
-            builder.set_name("Button");
+        // Set a name only when we resolved a real one. Never fall back
+        // to a literal "Button" — a misleading name ("Button, button")
+        // is worse for screen-reader users than an unnamed node, and the
+        // composite / unresolved-key paths are expected to carry an
+        // explicit `.access_label(...)` (enforced by the debug_assert),
+        // which the override layer applies after this method.
+        if let Some(text) = self.tooltip_text.as_ref().map(|t| t.resolve_now()).or(rich_name) {
+            builder.set_name(text);
         }
         // Note: `set_disabled()` is now driven by the framework's
         // accessibility walker from `arena.is_enabled(self_id)`. The
@@ -946,6 +959,26 @@ mod tests {
         });
         assert_eq!(fired.get(), 1, "full KeyDown+KeyUp fires the action once");
         assert!(toggle.get(), "full KeyDown+KeyUp flips the toggle");
+    }
+
+    /// Regression: a registry-*key* rich tooltip used to expose the
+    /// literal accessible name "Button". It must resolve the registered
+    /// content's text from the tooltip registry instead.
+    #[test]
+    fn icon_button_rich_tooltip_key_resolves_at_name_from_registry() {
+        crate::tooltip::install_tooltip_registry(vec![crate::tooltip::TooltipContent::new(
+            "docs",
+            lit!("Documentation"),
+        )]);
+        let mut tree = WidgetTree::new();
+        let btn = tree.add(IconButton::add().rich_tooltip("docs"));
+        tree.layout(bastyde_canvas::SizeProposal::exact(100.0, 100.0));
+        assert_eq!(
+            tree.accessibility_node(btn).name(),
+            Some("Documentation"),
+            "registry-key rich tooltip must resolve the AT name from the \
+             registry, never fall back to the literal \"Button\""
+        );
     }
 
     /// Reactive enabled-state via `ctx.enabled_when(btn_id, signal)`
