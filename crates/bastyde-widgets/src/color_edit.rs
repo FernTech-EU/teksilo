@@ -40,7 +40,7 @@ use bastyde_tokens::Color;
 
 use crate::button::Button;
 use crate::color_picker::{ColorPicker, ColorPickerLayout, ColorSwatch};
-use crate::popover_button::PopoverButton;
+use crate::popover_widget::PopoverButton;
 use crate::primitives::IconWidget;
 
 type OnVoid = Rc<dyn Fn()>;

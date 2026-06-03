@@ -1,8 +1,8 @@
 //! `DisclosureCaret` — a 6×6 dp right triangle painted in the
 //! bottom-right corner of a popover trigger to indicate "this opens a
 //! menu, not a single-action button". Shared between
-//! [`PopoverIconButton`](crate::popover_icon_button::PopoverIconButton)
-//! and [`PopoverButton`](crate::popover_button::PopoverButton).
+//! [`PopoverIconButton`](crate::popover_widget::PopoverIconButton)
+//! and [`PopoverButton`](crate::popover_widget::PopoverButton).
 //!
 //! The caret takes a caller-derived `Signal<TextRole>`; each wrapper
 //! computes the role from its own interaction state + variant policy

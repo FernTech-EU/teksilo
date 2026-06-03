@@ -602,7 +602,7 @@ impl Widget for SearchField {
         // Return BOTH the visible root AND the dormant suggestions
         // panel as children so the framework links `panel_id` under
         // this widget in the arena instead of leaving it an orphan
-        // root. See popover_button.rs for the same pattern.
+        // root. See popover_widget.rs for the same pattern.
         let mut out = vec![visible_root];
         if let Some(panel_id) = self.panel_content_id {
             out.push(panel_id);

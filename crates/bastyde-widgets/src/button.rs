@@ -310,7 +310,7 @@ impl Button {
     }
 
     /// Returns the configured visual variant. Used by wrappers like
-    /// [`PopoverButton`](crate::popover_button::PopoverButton) that
+    /// [`PopoverButton`](crate::popover_widget::PopoverButton) that
     /// derive their own chrome colors from the same recipe-resolution
     /// path the inner Button uses.
     pub fn current_variant(&self) -> ButtonVariant {
@@ -320,7 +320,7 @@ impl Button {
     /// Bind the button's internal interaction state to a caller-owned
     /// `Signal<InteractionState>` instead of letting `build()` allocate
     /// its own. Used by wrapper widgets like
-    /// [`PopoverButton`](crate::popover_button::PopoverButton) whose
+    /// [`PopoverButton`](crate::popover_widget::PopoverButton) whose
     /// disclosure caret needs to match the label's color across hover
     /// / press / focus / disabled states.
     ///

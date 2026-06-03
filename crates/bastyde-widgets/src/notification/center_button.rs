@@ -24,7 +24,7 @@ use crate::badge::Badge;
 use crate::icon_button::{IconButton, IconButtonSize};
 use crate::notification::log::NotificationLog;
 use crate::notification::{ArchivedAction, NotificationArchiveModel, NotificationEntry};
-use crate::popover_icon_button::PopoverIconButton;
+use crate::popover_widget::PopoverIconButton;
 use crate::primitives::ZStack;
 
 /// Bell-icon trigger + unread-count badge + popover that contains a

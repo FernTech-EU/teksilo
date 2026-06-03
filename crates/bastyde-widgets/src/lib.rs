@@ -62,9 +62,8 @@ pub mod panel;
 #[cfg(feature = "rich-text")]
 pub mod password_field;
 pub mod popover;
-pub mod popover_button;
 pub(crate) mod popover_caret;
-pub mod popover_icon_button;
+pub mod popover_widget;
 pub mod primitives;
 #[cfg(feature = "telemetry")]
 pub mod privacy_settings;
@@ -173,8 +172,7 @@ pub use panel::Panel;
 #[cfg(feature = "rich-text")]
 pub use password_field::{AtRevealPolicy, EchoMode, PasswordField, RevealMode};
 pub use popover::Popover;
-pub use popover_button::PopoverButton;
-pub use popover_icon_button::PopoverIconButton;
+pub use popover_widget::{PopoverButton, PopoverIconButton, PopoverTrigger, PopoverWidget};
 #[cfg(feature = "rich-text")]
 pub use primitives::TextInputField;
 #[cfg(feature = "rich-text")]

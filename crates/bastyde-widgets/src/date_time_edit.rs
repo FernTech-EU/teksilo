@@ -666,7 +666,7 @@ impl Widget for DateTimeEdit {
         // Return BOTH the visible root AND the dormant calendar
         // popover content as children so the framework links
         // `calendar_id` under this widget in the arena instead of
-        // leaving it an orphan root. See popover_button.rs for the
+        // leaving it an orphan root. See popover_widget.rs for the
         // same pattern.
         let mut out = vec![root_with_strip];
         if let Some(cal_id) = self.calendar_id {

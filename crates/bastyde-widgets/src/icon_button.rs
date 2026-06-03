@@ -201,7 +201,7 @@ impl IconButton {
     }
 
     /// Returns the configured size variant. Used by wrappers like
-    /// [`PopoverIconButton`](crate::popover_icon_button::PopoverIconButton)
+    /// [`PopoverIconButton`](crate::popover_widget::PopoverIconButton)
     /// that need to reason about the trigger's footprint at build time
     /// (e.g. to skip a corner decoration that wouldn't fit at Compact).
     pub fn size_variant(&self) -> IconButtonSize {
@@ -219,7 +219,7 @@ impl IconButton {
     /// Bind the button's internal interaction state to a caller-owned
     /// `Signal<InteractionState>` instead of letting `build()` allocate
     /// its own. Used by wrapper widgets like
-    /// [`PopoverIconButton`](crate::popover_icon_button::PopoverIconButton)
+    /// [`PopoverIconButton`](crate::popover_widget::PopoverIconButton)
     /// whose disclosure caret needs to match the icon's color across
     /// hover / press / focus / disabled states.
     ///
@@ -388,7 +388,7 @@ impl IconButton {
     /// (menu, dialog, listbox, …). Surfaced via `set_has_popup` in
     /// the a11y node so screen readers announce it as opening the
     /// named popup kind. Wired automatically by
-    /// [`PopoverIconButton`](crate::popover_icon_button::PopoverIconButton).
+    /// [`PopoverIconButton`](crate::popover_widget::PopoverIconButton).
     pub fn has_popup(mut self, kind: bastyde_core::accesskit::HasPopup) -> Self {
         self.has_popup = Some(kind);
         self

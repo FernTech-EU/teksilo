@@ -840,7 +840,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         // widget in the arena instead of leaving it an orphan root.
         // Hit-test walks all arena roots; an orphan dormant subtree
         // can leak into hit-tests at fallback bounds and intercept
-        // clicks meant for siblings. See popover_button.rs for the
+        // clicks meant for siblings. See popover_widget.rs for the
         // same pattern.
         vec![root_id, dropdown_id]
     }
