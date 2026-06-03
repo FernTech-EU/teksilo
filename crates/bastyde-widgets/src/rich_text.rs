@@ -1114,6 +1114,21 @@ impl RichTextEditor {
         sync_cursor_signals(&self.state);
     }
 
+    /// Set the document-wide default language (ISO 639-1 code, e.g. "en",
+    /// "fr", "de"). Blocks that don't set their own language inherit it
+    /// for hyphenation. Forces a full re-layout so the change takes effect
+    /// on the next frame. No-op-safe if the document rejects the update.
+    pub fn set_default_language(&self, language: &str) {
+        let _ = self.state.borrow().document.set_default_language(language);
+        self.state.borrow_mut().needs_full_layout = true;
+    }
+
+    /// The document-wide default language (ISO 639-1 code). Defaults to
+    /// `"en"` when never set.
+    pub fn default_language(&self) -> String {
+        self.state.borrow().document.default_language()
+    }
+
     // --- External handle -------------------------------------------------
 
     /// Cheap clone-able handle for external toolbars / palettes — see
