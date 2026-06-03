@@ -68,11 +68,9 @@ use bastyde_canvas::{Path, Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::signal::Signal;
 use bastyde_core::styles::{IconButtonStyleConfig, SharedIconButtonStyle};
-use bastyde_core::widget::{CursorIcon, EventContext, LayoutContext, WidgetPlacement};
-use bastyde_core::widget_builder::HandlerSet;
+use bastyde_core::widget::{EventContext, LayoutContext, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::TextRole;
 
@@ -673,117 +671,29 @@ impl bastyde_core::widget::Widget for IconButton {
         self.root_child_id = Some(root_id);
 
         // --- V2 attached handlers ---
-        let action = self.action.take();
-        let toggled_for_tap = self.toggled.clone();
-        let toggled_for_key = self.toggled.clone();
-        let toggled_for_access = self.toggled.clone();
-
-        let action_rc: std::rc::Rc<Option<ActionFactory>> = std::rc::Rc::new(action);
-        let action_for_tap = action_rc.clone();
-        let action_for_key = action_rc.clone();
-        let action_for_access = action_rc.clone();
-
-        let int_tap = interaction.clone();
-        let int_hover_enter = interaction.clone();
-        let int_hover_leave = interaction.clone();
-        let int_key = interaction.clone();
-        let int_focus = interaction.clone();
-
-        let handler_set = HandlerSet::new()
-            .on_tap({
-                let interaction = int_tap;
-                // The framework gates pointer/key events on
-                // `arena.is_enabled(self_id)` before dispatch, so a
-                // disabled subtree never reaches this closure. No
-                // need for a redundant `if !enabled { return; }`
-                // guard — the snapshot it captured is gone.
-                move |_pos, ctx: &mut EventContext| {
-                    if let Some(ref toggled) = toggled_for_tap {
-                        toggled.set(!toggled.get());
-                    }
-                    if let Some(ref action) = *action_for_tap {
-                        action(ctx);
-                    }
-                    interaction.set(InteractionState::Hovered);
+        // Bundle the optional action AND the toggle flip into the single
+        // `on_activate` closure consumed by the shared button-family
+        // helper (`build_interaction_handlers`). Routing the toggle
+        // through the helper means the lone-KeyUp guard now gates the
+        // toggle too — a stray KeyUp can no longer flip the toggle.
+        // (Framework gates dispatch on `arena.is_enabled`, so no inline
+        // enabled check is needed.)
+        let action: std::rc::Rc<Option<ActionFactory>> = std::rc::Rc::new(self.action.take());
+        let toggled = self.toggled.clone();
+        let on_activate: std::rc::Rc<dyn Fn(&mut EventContext)> =
+            std::rc::Rc::new(move |ctx: &mut EventContext| {
+                if let Some(ref toggled) = toggled {
+                    toggled.set(!toggled.get());
                 }
-            })
-            .on_hover({
-                let int_enter = int_hover_enter;
-                let int_leave = int_hover_leave;
-                move |entered: bool, _ctx: &mut EventContext| {
-                    if entered {
-                        int_enter.set(InteractionState::Hovered);
-                    } else {
-                        int_leave.set(InteractionState::Idle);
-                    }
+                if let Some(ref action) = *action {
+                    action(ctx);
                 }
-            })
-            .on_key({
-                let interaction = int_key;
-                move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
-                    match event {
-                        WidgetEvent::KeyDown {
-                            key: Key::Space | Key::Enter,
-                            ..
-                        } => {
-                            interaction.set(InteractionState::Pressed);
-                            EventResponse::Handled
-                        }
-                        WidgetEvent::KeyUp {
-                            key: Key::Space | Key::Enter,
-                            ..
-                        } => {
-                            if let Some(ref toggled) = toggled_for_key {
-                                toggled.set(!toggled.get());
-                            }
-                            if let Some(ref action) = *action_for_key {
-                                action(ctx);
-                            }
-                            interaction.set(InteractionState::Focused);
-                            EventResponse::Handled
-                        }
-                        _ => EventResponse::Ignored,
-                    }
-                }
-            })
-            .on_focus({
-                let interaction = int_focus;
-                move |gained: bool, _ctx: &mut EventContext| {
-                    if gained {
-                        if interaction.get() == InteractionState::Idle {
-                            interaction.set(InteractionState::Focused);
-                        }
-                    } else {
-                        interaction.set(InteractionState::Idle);
-                    }
-                }
-            })
-            .on_access_action({
-                // Framework gates this on `arena.is_enabled()`; no
-                // need for an inline `&& enabled` check.
-                move |action: bastyde_core::accesskit::Action,
-                      ctx: &mut EventContext|
-                      -> EventResponse {
-                    if action == bastyde_core::accesskit::Action::Click {
-                        if let Some(ref toggled) = toggled_for_access {
-                            toggled.set(!toggled.get());
-                        }
-                        if let Some(ref act) = *action_for_access {
-                            act(ctx);
-                        }
-                        EventResponse::Handled
-                    } else {
-                        EventResponse::Ignored
-                    }
-                }
-            })
-            // The focus walker skips disabled subtrees on its own
-            // (see `find_focusable_at_or_above`), so we don't AND
-            // with enabled here. The static `self.focusable` flag
-            // is the caller's intent (e.g. close-button-inside-tab
-            // wants `false`).
-            .focusable(self.focusable)
-            .cursor(CursorIcon::Pointer);
+            });
+        // The focus walker skips disabled subtrees on its own; the static
+        // `self.focusable` flag is the caller's intent (e.g. a
+        // close-button-inside-tab wants `false`).
+        let handler_set =
+            crate::button::build_interaction_handlers(interaction, on_activate, self.focusable);
 
         ctx.apply_self_handlers(handler_set);
 
@@ -990,9 +900,53 @@ fn default_eye_off_icon() -> IconWidget {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_core::event::{Key, Modifiers, WidgetEvent};
     use bastyde_core::signal::Signal;
     use bastyde_core::widget_tree::WidgetTree;
     use bastyde_i18n::lit;
+
+    /// A `KeyUp` with no preceding `KeyDown` (e.g. a shortcut consumed
+    /// the `KeyDown` and focus returned here) must NOT activate — it
+    /// must neither fire the action nor flip the toggle. Before the
+    /// shared `build_interaction_handlers` migration, IconButton lacked
+    /// the lone-KeyUp guard that Button had, so a stray KeyUp toggled
+    /// and fired. This is the regression test for that fix.
+    #[test]
+    fn icon_button_lone_keyup_does_not_activate() {
+        let fired = std::rc::Rc::new(std::cell::Cell::new(0u32));
+        let toggle = Signal::new(false);
+        let f = fired.clone();
+        let mut tree = WidgetTree::new();
+        let btn = tree.add(
+            IconButton::add()
+                .tooltip(lit!("Add"))
+                .toggle(toggle.clone())
+                .on_activate_fn(move |_| f.set(f.get() + 1)),
+        );
+        tree.layout(bastyde_canvas::SizeProposal::exact(100.0, 100.0));
+        tree.focus(btn);
+
+        // Lone KeyUp — must be a no-op.
+        tree.dispatch_event(WidgetEvent::KeyUp {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(fired.get(), 0, "lone KeyUp must not fire the action");
+        assert!(!toggle.get(), "lone KeyUp must not flip the toggle");
+
+        // Sanity: a full KeyDown+KeyUp DOES activate.
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+            text: None,
+        });
+        tree.dispatch_event(WidgetEvent::KeyUp {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(fired.get(), 1, "full KeyDown+KeyUp fires the action once");
+        assert!(toggle.get(), "full KeyDown+KeyUp flips the toggle");
+    }
 
     /// Reactive enabled-state via `ctx.enabled_when(btn_id, signal)`
     /// must dim the IconButton's icon when the signal flips to false —

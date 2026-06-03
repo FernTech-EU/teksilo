@@ -47,6 +47,104 @@ pub enum InteractionState {
     Disabled,
 }
 
+/// Build the interaction handler set shared by every activatable button
+/// (`Button`, `IconButton`, `CommandLinkButton`, and any future sibling).
+///
+/// Centralizes the parts that MUST stay identical across the family and
+/// historically drifted when copy-pasted:
+/// - hover/focus state tracking,
+/// - keyboard `Space`/`Enter` activation with the **lone-KeyUp guard**
+///   (a `KeyUp` with no preceding `KeyDown` — e.g. a shortcut consumed
+///   the `KeyDown` and focus returned here — must NOT activate),
+/// - the AT `Click` action.
+///
+/// `on_activate` runs on tap, keyboard activation, and AT click. Callers
+/// bundle their command action (and any extra side effect, e.g.
+/// `IconButton`'s toggle flip) into this single closure so the guard
+/// gates all activation paths uniformly. `focusable` is the node's
+/// focusability (`Button` is always focusable; `IconButton` exposes it).
+pub(crate) fn build_interaction_handlers(
+    interaction: Signal<InteractionState>,
+    on_activate: Rc<dyn Fn(&mut EventContext)>,
+    focusable: bool,
+) -> HandlerSet {
+    let act_tap = on_activate.clone();
+    let act_key = on_activate.clone();
+    let act_access = on_activate;
+    HandlerSet::new()
+        .on_tap({
+            let interaction = interaction.clone();
+            move |_pos: &bastyde_core::TapEvent, ctx: &mut EventContext| {
+                act_tap(ctx);
+                interaction.set(InteractionState::Hovered);
+            }
+        })
+        .on_hover({
+            let interaction = interaction.clone();
+            move |entered: bool, _ctx: &mut EventContext| {
+                interaction.set(if entered {
+                    InteractionState::Hovered
+                } else {
+                    InteractionState::Idle
+                });
+            }
+        })
+        .on_key({
+            let interaction = interaction.clone();
+            move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
+                match event {
+                    WidgetEvent::KeyDown {
+                        key: Key::Space | Key::Enter,
+                        ..
+                    } => {
+                        interaction.set(InteractionState::Pressed);
+                        EventResponse::Handled
+                    }
+                    WidgetEvent::KeyUp {
+                        key: Key::Space | Key::Enter,
+                        ..
+                    } => {
+                        // Lone-KeyUp guard: only activate if we saw the
+                        // matching KeyDown (state is Pressed).
+                        if interaction.get() != InteractionState::Pressed {
+                            return EventResponse::Ignored;
+                        }
+                        act_key(ctx);
+                        interaction.set(InteractionState::Focused);
+                        EventResponse::Handled
+                    }
+                    _ => EventResponse::Ignored,
+                }
+            }
+        })
+        .on_focus({
+            let interaction = interaction.clone();
+            move |gained: bool, _ctx: &mut EventContext| {
+                if gained {
+                    if interaction.get() == InteractionState::Idle {
+                        interaction.set(InteractionState::Focused);
+                    }
+                } else {
+                    interaction.set(InteractionState::Idle);
+                }
+            }
+        })
+        .on_access_action(
+            move |action: bastyde_core::accesskit::Action,
+                  ctx: &mut EventContext|
+                  -> EventResponse {
+                if action == bastyde_core::accesskit::Action::Click {
+                    act_access(ctx);
+                    EventResponse::Handled
+                } else {
+                    EventResponse::Ignored
+                }
+            },
+        )
+        .focusable(focusable)
+        .cursor(CursorIcon::Pointer)
+}
+
 /// Internal interaction state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IconLocation {
@@ -433,93 +531,15 @@ impl Button {
     /// build-time enabled snapshot — that duality was removed in the
     /// single-sourced-enabled refactor.
     fn build_handler_set(&mut self, interaction: Signal<InteractionState>) -> HandlerSet {
-        // Re-wrap action into Rc so it can be shared between the tap,
-        // key, and access-action handlers.
-        let action_rc: Rc<Option<CommandFactory>> = Rc::new(self.action.take());
-        let action_for_tap = action_rc.clone();
-        let action_for_key = action_rc.clone();
-        let action_for_access = action_rc;
-
-        HandlerSet::new()
-            .on_tap({
-                let interaction = interaction.clone();
-                move |_pos, ctx: &mut EventContext| {
-                    if let Some(ref action) = *action_for_tap {
-                        action(ctx);
-                    }
-                    interaction.set(InteractionState::Hovered);
-                }
-            })
-            .on_hover({
-                let interaction = interaction.clone();
-                move |entered: bool, _ctx: &mut EventContext| {
-                    if entered {
-                        interaction.set(InteractionState::Hovered);
-                    } else {
-                        interaction.set(InteractionState::Idle);
-                    }
-                }
-            })
-            .on_key({
-                let interaction = interaction.clone();
-                move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
-                    match event {
-                        WidgetEvent::KeyDown {
-                            key: Key::Space | Key::Enter,
-                            ..
-                        } => {
-                            interaction.set(InteractionState::Pressed);
-                            EventResponse::Handled
-                        }
-                        WidgetEvent::KeyUp {
-                            key: Key::Space | Key::Enter,
-                            ..
-                        } => {
-                            // Fire only if we saw the matching KeyDown. A lone
-                            // KeyUp means the KeyDown was consumed elsewhere
-                            // (shortcut registry, focus transfer) and this
-                            // widget is not the activation target.
-                            if interaction.get() != InteractionState::Pressed {
-                                return EventResponse::Ignored;
-                            }
-                            if let Some(ref action) = *action_for_key {
-                                action(ctx);
-                            }
-                            interaction.set(InteractionState::Focused);
-                            EventResponse::Handled
-                        }
-                        _ => EventResponse::Ignored,
-                    }
-                }
-            })
-            .on_focus({
-                let interaction = interaction.clone();
-                move |gained: bool, _ctx: &mut EventContext| {
-                    if gained {
-                        if interaction.get() == InteractionState::Idle {
-                            interaction.set(InteractionState::Focused);
-                        }
-                    } else {
-                        interaction.set(InteractionState::Idle);
-                    }
-                }
-            })
-            .on_access_action(
-                move |action: bastyde_core::accesskit::Action,
-                      ctx: &mut EventContext|
-                      -> EventResponse {
-                    if action == bastyde_core::accesskit::Action::Click {
-                        if let Some(ref act) = *action_for_access {
-                            act(ctx);
-                        }
-                        EventResponse::Handled
-                    } else {
-                        EventResponse::Ignored
-                    }
-                },
-            )
-            .focusable(true)
-            .cursor(CursorIcon::Pointer)
+        // Bundle the optional command action into the unified
+        // `on_activate` closure consumed by the shared family helper.
+        let action: Rc<Option<CommandFactory>> = Rc::new(self.action.take());
+        let on_activate: Rc<dyn Fn(&mut EventContext)> = Rc::new(move |ctx: &mut EventContext| {
+            if let Some(ref action) = *action {
+                action(ctx);
+            }
+        });
+        build_interaction_handlers(interaction, on_activate, true)
     }
 }
 

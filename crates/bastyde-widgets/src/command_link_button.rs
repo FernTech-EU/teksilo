@@ -17,10 +17,8 @@
 use bastyde_canvas::{Rect, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::signal::Signal;
-use bastyde_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
-use bastyde_core::widget_builder::HandlerSet;
+use bastyde_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{
     BorderRole, CornerRadius, HAlignment, SurfaceRole, TextRole, TextStyleRole, VAlignment,
@@ -209,91 +207,19 @@ impl Widget for CommandLinkButton {
             crate::primitives::MinSize::new(0.0, COMMAND_LINK_BUTTON_MIN_HEIGHT).child_id(zstack),
         );
 
-        // Attached handlers — same shape as Button but without
-        // shortcut / tooltip / has_popup machinery.
-        let action = self.action.take();
-        let action_rc: std::rc::Rc<Option<Box<dyn Fn(&mut EventContext)>>> =
-            std::rc::Rc::new(action);
-        let action_for_tap = action_rc.clone();
-        let action_for_key = action_rc.clone();
-        let action_for_access = action_rc.clone();
-
-        let int_tap = interaction.clone();
-        let int_hover_enter = interaction.clone();
-        let int_hover_leave = interaction.clone();
-        let int_key = interaction.clone();
-        let int_focus = interaction.clone();
-
-        // Framework gates events on `arena.is_enabled`; focus walker
-        // skips disabled subtrees.
-        let handlers = HandlerSet::new()
-            .focusable(true)
-            .cursor(CursorIcon::Pointer)
-            .on_tap(
-                move |_ev: &bastyde_core::TapEvent, ctx: &mut EventContext| {
-                    if let Some(ref a) = *action_for_tap {
-                        a(ctx);
-                    }
-                    int_tap.set(InteractionState::Hovered);
-                },
-            )
-            .on_hover(move |entered: bool, _ctx: &mut EventContext| {
-                if entered {
-                    int_hover_enter.set(InteractionState::Hovered);
-                } else {
-                    int_hover_leave.set(InteractionState::Idle);
+        // Attached handlers via the shared button-family helper
+        // (`build_interaction_handlers`) — same interaction/keyboard/AT
+        // contract as Button, including the lone-KeyUp guard. No
+        // shortcut / tooltip / has_popup machinery here.
+        let action: std::rc::Rc<Option<Box<dyn Fn(&mut EventContext)>>> =
+            std::rc::Rc::new(self.action.take());
+        let on_activate: std::rc::Rc<dyn Fn(&mut EventContext)> =
+            std::rc::Rc::new(move |ctx: &mut EventContext| {
+                if let Some(ref a) = *action {
+                    a(ctx);
                 }
-            })
-            .on_key(
-                move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
-                    match event {
-                        WidgetEvent::KeyDown {
-                            key: Key::Space | Key::Enter,
-                            ..
-                        } => {
-                            int_key.set(InteractionState::Pressed);
-                            EventResponse::Handled
-                        }
-                        WidgetEvent::KeyUp {
-                            key: Key::Space | Key::Enter,
-                            ..
-                        } => {
-                            if int_key.get() != InteractionState::Pressed {
-                                return EventResponse::Ignored;
-                            }
-                            if let Some(ref a) = *action_for_key {
-                                a(ctx);
-                            }
-                            int_key.set(InteractionState::Focused);
-                            EventResponse::Handled
-                        }
-                        _ => EventResponse::Ignored,
-                    }
-                },
-            )
-            .on_focus(move |gained: bool, _ctx: &mut EventContext| {
-                if gained {
-                    if int_focus.get() == InteractionState::Idle {
-                        int_focus.set(InteractionState::Focused);
-                    }
-                } else {
-                    int_focus.set(InteractionState::Idle);
-                }
-            })
-            .on_access_action(
-                move |action: bastyde_core::accesskit::Action,
-                      ctx: &mut EventContext|
-                      -> EventResponse {
-                    if action == bastyde_core::accesskit::Action::Click {
-                        if let Some(ref a) = *action_for_access {
-                            a(ctx);
-                        }
-                        EventResponse::Handled
-                    } else {
-                        EventResponse::Ignored
-                    }
-                },
-            );
+            });
+        let handlers = crate::button::build_interaction_handlers(interaction, on_activate, true);
         ctx.apply_self_handlers(handlers);
 
         self.root_child_id = Some(root);
@@ -344,6 +270,7 @@ impl Widget for CommandLinkButton {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bastyde_core::event::WidgetEvent;
     use bastyde_core::widget_tree::WidgetTree;
     use bastyde_i18n::lit;
 
