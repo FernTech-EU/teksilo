@@ -2335,7 +2335,7 @@ impl WidgetTree {
 
     /// Get the resolved theme for a specific widget (applying ancestor overrides).
     pub fn resolved_theme(&self, id: WidgetId) -> crate::styles::Theme {
-        self.arena.resolve_theme(id, &self.theme)
+        self.arena.resolve_theme(id, &self.theme).into_owned()
     }
 }
 

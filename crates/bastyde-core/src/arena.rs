@@ -946,10 +946,18 @@ impl WidgetArena {
     /// Resolve the effective theme for a widget by walking ancestors and
     /// applying any theme overrides encountered along the way.
     /// The base theme is the tree-level default.
-    pub fn resolve_theme(&self, id: WidgetId, base: &crate::styles::Theme) -> crate::styles::Theme {
-        // Fast path: if no widget has a theme override, skip the ancestor walk.
+    pub fn resolve_theme<'a>(
+        &self,
+        id: WidgetId,
+        base: &'a crate::styles::Theme,
+    ) -> std::borrow::Cow<'a, crate::styles::Theme> {
+        // Fast path: if no widget has a theme override, borrow the base
+        // theme — no clone. This is the per-widget hot path during layout
+        // and paint, so avoiding `Theme::clone()` (which clones the
+        // typography token strings and bumps ~34 style-slot `Rc`s) here
+        // saves that work on every node, every pass, in the common case.
         if self.theme_override_count == 0 {
-            return base.clone();
+            return std::borrow::Cow::Borrowed(base);
         }
 
         // Collect ancestor chain from root to widget
@@ -969,7 +977,7 @@ impl WidgetArena {
                 (ovr.func)(&mut theme);
             }
         }
-        theme
+        std::borrow::Cow::Owned(theme)
     }
 }
 
