@@ -194,7 +194,14 @@ fn intui_filled_recipe() -> ButtonRecipe {
         fill: PerStateRecipe {
             idle: FillRecipe::solid(SurfaceRole::Accent),
             hover: Some(FillRecipe::solid(SurfaceRole::AccentHover)),
-            pressed: Some(FillRecipe::solid(SurfaceRole::AccentPressed)),
+            // Int UI has no distinct pressed state — pressed falls back
+            // to hover (pressed → hover → idle). The button now provides
+            // the Pressed state on pointer-down (see
+            // `build_interaction_handlers`); whether to render it is a
+            // per-theme recipe decision, and IntUI declines. Other
+            // theme recipes (Material 3, macOS, …) set a distinct
+            // pressed fill here.
+            pressed: None,
             focused: None,
             disabled: Some(FillRecipe::solid(SurfaceRole::AccentDisabled)),
         },
@@ -220,7 +227,8 @@ fn intui_plain_recipe() -> ButtonRecipe {
         fill: PerStateRecipe {
             idle: FillRecipe::solid(SurfaceRole::Main),
             hover: Some(FillRecipe::solid(SurfaceRole::Hover)),
-            pressed: Some(FillRecipe::solid(SurfaceRole::Pressed)),
+            // Int UI has no distinct pressed state — falls back to hover.
+            pressed: None,
             focused: None,
             disabled: None,
         },
@@ -230,10 +238,8 @@ fn intui_plain_recipe() -> ButtonRecipe {
                 1.0,
                 RecipeColor::Border(BorderRole::Strong),
             )),
-            pressed: Some(BorderRecipe::solid(
-                1.0,
-                RecipeColor::Border(BorderRole::Strong),
-            )),
+            // No distinct pressed border — falls back to the hover border.
+            pressed: None,
             focused: Some(BorderRecipe::solid(
                 2.0,
                 RecipeColor::Border(BorderRole::Focused),
@@ -252,7 +258,8 @@ fn intui_ghost_recipe() -> ButtonRecipe {
         fill: PerStateRecipe {
             idle: FillRecipe::solid(SurfaceRole::Transparent),
             hover: Some(FillRecipe::solid(SurfaceRole::Hover)),
-            pressed: Some(FillRecipe::solid(SurfaceRole::Pressed)),
+            // Int UI has no distinct pressed state — falls back to hover.
+            pressed: None,
             focused: None,
             disabled: None,
         },

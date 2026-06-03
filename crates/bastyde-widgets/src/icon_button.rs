@@ -961,6 +961,51 @@ mod tests {
         assert!(toggle.get(), "full KeyDown+KeyUp flips the toggle");
     }
 
+    /// Int UI icon buttons have a distinct pressed (mouse-down) state
+    /// (unlike regular buttons). The shared `build_interaction_handlers`
+    /// now feeds the Pressed state on pointer-down, so the icon recipe's
+    /// pressed background renders on mouse-down — not only on keyboard
+    /// activation. Idle must NOT show the pressed background.
+    #[test]
+    fn icon_button_flashes_pressed_background_on_pointer_down() {
+        use bastyde_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+        let theme = bastyde_core::presets::intui::light();
+        let mut tree = WidgetTree::new();
+        tree.set_theme(theme.clone());
+        let btn = tree.add(IconButton::add().tooltip(lit!("Add")));
+        tree.layout(bastyde_canvas::SizeProposal::exact(100.0, 100.0));
+
+        let pressed = bastyde_tokens::SurfaceRole::Pressed
+            .resolve(&theme.colors)
+            .to_array();
+
+        // Idle: no pressed background.
+        let frame = tree.render();
+        assert!(
+            !frame.shapes.iter().any(|s| s.color == pressed),
+            "idle IconButton must not render the pressed background"
+        );
+
+        // Pointer-down inside the button → pressed flash.
+        let b = tree.bounds(btn);
+        let center = bastyde_canvas::Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0);
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: center,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(bastyde_canvas::SizeProposal::exact(100.0, 100.0));
+        let frame = tree.render();
+        assert!(
+            frame.shapes.iter().any(|s| s.color == pressed),
+            "IconButton must render the pressed background on pointer-down \
+             (Int UI icon buttons have a distinct pressed state); got shape \
+             colors = {:?}",
+            frame.shapes.iter().map(|s| s.color).collect::<Vec<_>>()
+        );
+    }
+
     /// Regression: a registry-*key* rich tooltip used to expose the
     /// literal accessible name "Button". It must resolve the registered
     /// content's text from the tooltip registry instead.

@@ -89,6 +89,31 @@ pub(crate) fn build_interaction_handlers(
                 });
             }
         })
+        // Pointer-down press state. The family PROVIDES the Pressed state
+        // on mouse-down so the *theme* decides whether to render it: Int
+        // UI regular buttons have no pressed state (their recipe resolves
+        // pressed → hover), while Int UI icon buttons and other themes do.
+        // Returns `Ignored` so the event still reaches the tap recognizer
+        // and `on_tap` activation fires. Reverts to Hovered on release
+        // only if still Pressed — a drag-out release already went to Idle
+        // via `on_hover(false)`, so the guard leaves it there.
+        .on_pointer_event({
+            let interaction = interaction.clone();
+            move |event: &WidgetEvent, _ctx: &mut EventContext| -> EventResponse {
+                match event {
+                    WidgetEvent::PointerDown { .. } => {
+                        interaction.set(InteractionState::Pressed);
+                    }
+                    WidgetEvent::PointerUp { .. } => {
+                        if interaction.get() == InteractionState::Pressed {
+                            interaction.set(InteractionState::Hovered);
+                        }
+                    }
+                    _ => {}
+                }
+                EventResponse::Ignored
+            }
+        })
         .on_key({
             let interaction = interaction.clone();
             move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {

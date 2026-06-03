@@ -101,6 +101,10 @@ fn plain_bg_role(
     is_pressed
         .zip3(is_hovered, is_disabled)
         .map(|(pressed, hovered, disabled)| {
+            // Int UI icon buttons DO have a distinct pressed (mouse-down)
+            // state — unlike regular buttons. The shared helper now feeds
+            // Pressed on pointer-down, so this renders on mouse-down too,
+            // not just keyboard activation.
             if *disabled {
                 SurfaceRole::Transparent
             } else if *pressed {
