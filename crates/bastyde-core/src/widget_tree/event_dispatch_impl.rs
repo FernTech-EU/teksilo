@@ -1287,7 +1287,24 @@ impl WidgetTree {
             match mutation {
                 TreeMutation::SetDormant(id) => self.arena.set_dormant(id),
                 TreeMutation::Activate(id) => self.arena.activate(id),
-                TreeMutation::Destroy(id) => self.arena.destroy(id),
+                TreeMutation::Destroy(id) => {
+                    // Route through `destroy_subtree`, NOT the bare
+                    // `arena.destroy`: the latter only unlinks nodes from
+                    // the slotmap and leaks everything the widget owned —
+                    // animation-scheduler entries (which hold strong
+                    // `Signal<f32>` clones, so the widget keeps animating
+                    // after it's gone), animated-quad slots, event-source
+                    // subscriptions, registered shortcuts, bindings, and
+                    // gesture ownership — and leaves `focused`/`hovered`
+                    // dangling at a removed id. This mirrors the build-time
+                    // `BuildContext::destroy_subtree`, including dismissing
+                    // any overlay that still references the subtree so the
+                    // manager doesn't retain a stale content reference.
+                    if let Some(overlay_id) = self.overlay_manager().find_by_content(id) {
+                        self.dismiss_overlay(overlay_id);
+                    }
+                    self.destroy_subtree(id);
+                }
                 TreeMutation::WithWidgetMut { id, dirty, apply } => {
                     // Run the typed mutation while `&mut arena` is live, then
                     // drop the borrow before dirty-marking (the `mark_*` calls
@@ -2671,6 +2688,82 @@ mod tests {
         );
         // Silence unused-variable warning for the signal.
         let _ = tick;
+    }
+
+    #[test]
+    fn ctx_destroy_cancels_animations_and_bindings_via_deferred_path() {
+        // Regression: `EventContext::destroy` queues
+        // `TreeMutation::Destroy`, which used to be applied with the
+        // bare `arena.destroy` — unlinking the node but leaking the
+        // animation-scheduler entry (it holds a strong `Signal<f32>`
+        // clone, so the widget kept animating after destruction) and
+        // the widget's bindings. It must route through
+        // `destroy_subtree` like every other destroy path does.
+        use crate::binding::BindingLevel;
+        use crate::signal::Signal;
+        use bastyde_tokens::Easing;
+        use std::time::{Duration, Instant};
+
+        #[derive(Debug)]
+        struct BoundLeaf {
+            tick: Signal<u64>,
+        }
+        impl crate::widget::Widget for BoundLeaf {
+            fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+                self.tick.bind_to(
+                    ctx.self_id(),
+                    ctx.binding_registry(),
+                    BindingLevel::Relayout,
+                );
+                Vec::new()
+            }
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &crate::widget::LayoutContext,
+            ) -> crate::widget::LayoutResponse {
+                proposal.resolve(10.0, 10.0).into()
+            }
+        }
+
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(BoundLeaf {
+            tick: Signal::new(0_u64),
+        });
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+        assert!(tree.binding_registry().len() >= 1);
+
+        // Seed an animation owned by the widget — exactly the strong
+        // `Signal<f32>` clone the scheduler outlives the widget with.
+        let anim = Signal::<f32>::new_animated(0.0);
+        tree.animation_scheduler.animate(
+            &anim,
+            widget,
+            1.0,
+            Duration::from_secs(10),
+            Easing::Linear,
+            Instant::now(),
+        );
+        assert_eq!(tree.animation_scheduler.active_count(), 1);
+
+        // Destroy via the deferred handler-time path.
+        let mut noop = crate::window::NoopWindowOps;
+        tree.run_with_event_context(&mut noop, |ctx| ctx.destroy(widget));
+
+        assert_eq!(
+            tree.animation_scheduler.active_count(),
+            0,
+            "ctx.destroy must cancel animations owned by the destroyed widget"
+        );
+        assert_eq!(
+            tree.binding_registry().len(),
+            0,
+            "ctx.destroy must unregister the destroyed widget's bindings"
+        );
+        assert!(
+            tree.arena.get(widget).is_none(),
+            "node must be removed from the arena"
+        );
     }
 
     #[test]
