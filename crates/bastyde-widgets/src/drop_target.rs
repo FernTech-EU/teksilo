@@ -44,6 +44,24 @@
 //! recipe scopes `Live::Polite` to the hint card so a screen reader announces
 //! the hint *appearing*. The hint is gated by `visible_when`, so it leaves the
 //! AT tree entirely while idle.
+//!
+//! ## Keyboard accessibility is the caller's responsibility
+//!
+//! An OS drag cannot be initiated from the keyboard, and — unlike
+//! [`DropZone`](crate::drop_zone::DropZone), which ships a keyboard-operable
+//! **Browse…** button as its WCAG 2.1.1 equivalent — `DropTarget` adds **no**
+//! keyboard affordance of its own. That is by design: `DropTarget` *wraps*
+//! existing content that is expected to already offer a keyboard path to the
+//! same outcome (e.g. a card you can drop a project onto *or* open with a
+//! context-menu "Link…" command). The drop is an **enhancement**, not the sole
+//! path.
+//!
+//! If you use `DropTarget` for an action that has *no* other affordance, you
+//! must add a keyboard equivalent yourself (a button, menu item, or shortcut) —
+//! otherwise the action is unreachable for keyboard-only users, and entirely
+//! unavailable on platforms with no external-DnD backend (e.g. X11, where OS
+//! drag-and-drop is a no-op). `DropZone` is the better choice when the drop
+//! *is* the primary action.
 
 use std::rc::Rc;
 
@@ -459,7 +477,7 @@ mod tests {
     use bastyde_core::widget_tree::WidgetTree;
     use bastyde_core::{ExternalDropData, NoopWindowOps};
     use bastyde_i18n::lit;
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::path::PathBuf;
     use std::rc::Rc;
 
@@ -557,6 +575,126 @@ mod tests {
         tree.end_external_drag(p, data, &mut noop);
 
         assert!(dropped.get(), "accepted file drop should fire on_drop");
+    }
+
+    /// The headline feature: an **internal** typed drag flows through
+    /// `accept_typed` (set implicitly by `on_drop_typed`) and the value is
+    /// extracted via `take_typed` before the callback runs.
+    #[test]
+    fn internal_typed_drop_extracts_value() {
+        #[derive(Debug, Clone, PartialEq)]
+        struct ProjectRef(u32);
+
+        // A source widget that starts a typed internal drag on drag-start.
+        #[derive(Debug)]
+        struct TypedDragSource;
+        impl Widget for TypedDragSource {
+            fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                let self_id = ctx.self_id();
+                let hs = HandlerSet::new().on_drag(move |phase, ctx| {
+                    if let bastyde_core::gesture::DragPhase::Started { .. } = phase {
+                        ctx.start_drag(self_id, DragPayload::typed(ProjectRef(7)));
+                    }
+                });
+                ctx.apply_self_handlers(hs);
+                Vec::new()
+            }
+            fn layout_response(
+                &self,
+                _proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> LayoutResponse {
+                Size::new(100.0, 80.0).into()
+            }
+        }
+
+        let mut tree = themed_tree();
+        let got: Rc<RefCell<Option<ProjectRef>>> = Rc::new(RefCell::new(None));
+        let g = got.clone();
+        let target = DropTarget::new()
+            .child(Fixed(100.0, 80.0))
+            .on_drop_typed::<ProjectRef>(move |project, _pos, _ctx| {
+                *g.borrow_mut() = Some(project);
+                true
+            });
+        let source_id = tree.add(TypedDragSource);
+        let target_id = tree.add(target);
+        let es = tree.add(crate::primitives::Expand::new().flex(1.0).child_id(source_id));
+        let et = tree.add(crate::primitives::Expand::new().flex(1.0).child_id(target_id));
+        tree.add(
+            crate::primitives::HStack::new()
+                .add_child(es)
+                .add_child(et),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        let from = tree.bounds(source_id).center();
+        let to = tree.bounds(target_id).center();
+        tree.drag(from, to);
+
+        assert_eq!(
+            *got.borrow(),
+            Some(ProjectRef(7)),
+            "internal typed drop must extract and deliver the typed value",
+        );
+    }
+
+    /// A typed drop target rejects a typed payload of the *wrong* type:
+    /// `accept_typed::<T>` fails, so the user callback never runs.
+    #[test]
+    fn internal_typed_drop_rejects_other_type() {
+        #[derive(Debug, Clone)]
+        struct ProjectRef(u32);
+        #[derive(Debug, Clone)]
+        struct OtherRef(u32);
+
+        #[derive(Debug)]
+        struct OtherSource;
+        impl Widget for OtherSource {
+            fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                let self_id = ctx.self_id();
+                let hs = HandlerSet::new().on_drag(move |phase, ctx| {
+                    if let bastyde_core::gesture::DragPhase::Started { .. } = phase {
+                        ctx.start_drag(self_id, DragPayload::typed(OtherRef(1)));
+                    }
+                });
+                ctx.apply_self_handlers(hs);
+                Vec::new()
+            }
+            fn layout_response(
+                &self,
+                _proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> LayoutResponse {
+                Size::new(100.0, 80.0).into()
+            }
+        }
+
+        let mut tree = themed_tree();
+        let fired = Rc::new(Cell::new(false));
+        let f = fired.clone();
+        let target = DropTarget::new()
+            .child(Fixed(100.0, 80.0))
+            .on_drop_typed::<ProjectRef>(move |_p, _pos, _ctx| {
+                f.set(true);
+                true
+            });
+        let source_id = tree.add(OtherSource);
+        let target_id = tree.add(target);
+        let es = tree.add(crate::primitives::Expand::new().flex(1.0).child_id(source_id));
+        let et = tree.add(crate::primitives::Expand::new().flex(1.0).child_id(target_id));
+        tree.add(
+            crate::primitives::HStack::new()
+                .add_child(es)
+                .add_child(et),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        let from = tree.bounds(source_id).center();
+        let to = tree.bounds(target_id).center();
+        tree.drag(from, to);
+
+        assert!(!fired.get(), "a payload of the wrong type must be rejected");
     }
 
     /// The accept filter rejects non-matching extensions: `on_drop` re-checks
