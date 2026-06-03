@@ -310,3 +310,18 @@ menu-paste-unformatted = Coller sans mise en forme
 menu-select-all = Tout sélectionner
 menu-toggle-blockquote = Basculer la citation
 menu-remove-blockquote = Retirer la citation
+
+# DropZone — annonces de la zone « live » (lecteurs d'écran).
+drop-zone-hover-file-one = Déposer pour ajouter 1 fichier
+drop-zone-hover-file-many = Déposer pour ajouter { $count } fichiers
+drop-zone-hover-text = Déposer pour ajouter du texte
+drop-zone-hover-link-one = Déposer pour ajouter 1 lien
+drop-zone-hover-link-many = Déposer pour ajouter { $count } liens
+drop-zone-hover-generic = Déposer ici
+drop-zone-hover-reject = Cet élément ne peut pas être déposé ici
+drop-zone-added-file-one = 1 fichier ajouté
+drop-zone-added-file-many = { $count } fichiers ajoutés
+drop-zone-added-text = Texte ajouté
+drop-zone-added-link-one = 1 lien ajouté
+drop-zone-added-link-many = { $count } liens ajoutés
+drop-zone-rejected = Élément non accepté

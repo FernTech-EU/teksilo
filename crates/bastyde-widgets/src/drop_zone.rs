@@ -36,7 +36,7 @@
 //! ARIA's `aria-grabbed` / `aria-dropeffect` are deprecated, so live-region
 //! announcements plus the Browse fallback are the supported pattern.
 
-use bastyde_i18n::lit;
+use bastyde_i18n::{lit, tr_widget};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -254,27 +254,60 @@ fn payload_accepted(
     false
 }
 
-/// A short human description of what's being dragged, for announcements.
-fn describe(payload: &DragPayload) -> String {
-    let n = payload.files().len();
-    if n == 1 {
-        return "1 file".to_string();
+/// Localized live-region announcement for a drag hovering over the zone.
+/// Singular vs plural is chosen here (in Rust) rather than via a Fluent
+/// select expression so the `tr_widget!` compile-time English fallback
+/// works for apps that don't register the framework bundle. Drop counts
+/// are always >= 1, so the `== 1` / `> 1` split is correct for both
+/// English and French.
+fn hover_announcement(payload: &DragPayload) -> String {
+    let files = payload.files().len();
+    if files == 1 {
+        return tr_widget!(drop_zone_hover_file_one()).resolve_now();
     }
-    if n > 1 {
-        return format!("{n} files");
+    if files > 1 {
+        return tr_widget!(drop_zone_hover_file_many(count = files as i64)).resolve_now();
     }
     if payload.text().is_some() {
-        return "text".to_string();
+        return tr_widget!(drop_zone_hover_text()).resolve_now();
     }
-    if !payload.uris().is_empty() {
-        let n = payload.uris().len();
-        return if n == 1 {
-            "1 link".to_string()
-        } else {
-            format!("{n} links")
-        };
+    let links = payload.uris().len();
+    if links == 1 {
+        return tr_widget!(drop_zone_hover_link_one()).resolve_now();
     }
-    "item".to_string()
+    if links > 1 {
+        return tr_widget!(drop_zone_hover_link_many(count = links as i64)).resolve_now();
+    }
+    // Wayland hover before the bytes arrive (formats-only) — generic prompt.
+    tr_widget!(drop_zone_hover_generic()).resolve_now()
+}
+
+/// Localized live-region announcement for a completed drop.
+fn added_announcement(payload: &DragPayload) -> String {
+    let files = payload.files().len();
+    if files >= 1 {
+        return added_files_announcement(files);
+    }
+    if payload.text().is_some() {
+        return tr_widget!(drop_zone_added_text()).resolve_now();
+    }
+    let links = payload.uris().len();
+    if links == 1 {
+        return tr_widget!(drop_zone_added_link_one()).resolve_now();
+    }
+    if links > 1 {
+        return tr_widget!(drop_zone_added_link_many(count = links as i64)).resolve_now();
+    }
+    added_files_announcement(files)
+}
+
+/// Localized "N file(s) added" — shared by drop success and Browse success.
+fn added_files_announcement(count: usize) -> String {
+    if count == 1 {
+        tr_widget!(drop_zone_added_file_one()).resolve_now()
+    } else {
+        tr_widget!(drop_zone_added_file_many(count = count as i64)).resolve_now()
+    }
 }
 
 impl Widget for DropZone {
@@ -343,7 +376,7 @@ impl Widget for DropZone {
                         if let Some(cb) = &on_files_cb {
                             (cb.borrow_mut())(paths, ctx);
                         }
-                        announce_cb.set(format!("{count} added"));
+                        announce_cb.set(added_files_announcement(count));
                     };
                     // Multi vs single picker per policy. Errors (no dialog
                     // installed) are ignored — the zone stays usable.
@@ -393,10 +426,10 @@ impl Widget for DropZone {
                 );
                 if ok {
                     hover_state.set(DropZoneVisualState::HoverAccept);
-                    hover_announce.set(format!("Drop to add {}", describe(payload)));
+                    hover_announce.set(hover_announcement(payload));
                 } else {
                     hover_state.set(DropZoneVisualState::HoverReject);
-                    hover_announce.set("This item can't be dropped here".to_string());
+                    hover_announce.set(tr_widget!(drop_zone_hover_reject()).resolve_now());
                 }
                 // Visuals are state-driven; no framework-drawn feedback.
                 DropFeedback::NoFeedback
@@ -416,10 +449,9 @@ impl Widget for DropZone {
                 );
                 state.set(DropZoneVisualState::Idle);
                 if !ok {
-                    announce.set("Item not accepted".to_string());
+                    announce.set(tr_widget!(drop_zone_rejected()).resolve_now());
                     return false;
                 }
-                let summary = describe(&payload);
                 if !payload.files().is_empty() {
                     if let Some(cb) = &on_files {
                         (cb.borrow_mut())(payload.files().to_vec(), ctx);
@@ -433,7 +465,7 @@ impl Widget for DropZone {
                         (cb.borrow_mut())(payload.uris().to_vec(), ctx);
                     }
                 }
-                announce.set(format!("Added {summary}"));
+                announce.set(added_announcement(&payload));
                 true
             });
         ctx.apply_self_handlers(handlers);

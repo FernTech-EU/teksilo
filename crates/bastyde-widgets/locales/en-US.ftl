@@ -328,3 +328,23 @@ menu-paste-unformatted = Paste Unformatted
 menu-select-all = Select All
 menu-toggle-blockquote = Toggle blockquote
 menu-remove-blockquote = Remove blockquote
+
+# DropZone live-region announcements. An OS drag-drop has no AT verb, so
+# a Live::Polite status line narrates hover / drop for screen readers.
+# Singular vs plural is selected in Rust (not a Fluent select expression)
+# so the `tr_widget!` compile-time English fallback works for apps that
+# don't register the framework bundle. Consumed by
+# crates/bastyde-widgets/src/drop_zone.rs.
+drop-zone-hover-file-one = Drop to add 1 file
+drop-zone-hover-file-many = Drop to add { $count } files
+drop-zone-hover-text = Drop to add text
+drop-zone-hover-link-one = Drop to add 1 link
+drop-zone-hover-link-many = Drop to add { $count } links
+drop-zone-hover-generic = Drop here
+drop-zone-hover-reject = This item can't be dropped here
+drop-zone-added-file-one = Added 1 file
+drop-zone-added-file-many = Added { $count } files
+drop-zone-added-text = Added text
+drop-zone-added-link-one = Added 1 link
+drop-zone-added-link-many = Added { $count } links
+drop-zone-rejected = Item not accepted
