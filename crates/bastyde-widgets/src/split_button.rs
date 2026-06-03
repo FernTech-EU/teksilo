@@ -743,7 +743,15 @@ impl Widget for SplitButton {
 
         ctx.apply_self_handlers(handler_set);
 
-        vec![root_id]
+        // Return BOTH the visible root AND the dormant menu content so
+        // the framework links `menu_id` under this SplitButton in the
+        // arena. Without this the menu stays an orphan root: it leaks on
+        // `destroy_subtree` (never reached from this widget's child list)
+        // and `arena.hit_test_at` walks its subtree on every click even
+        // while dormant. Mirrors `PopoverButton::build`. The layout pass
+        // skips dormant children automatically; `place_children` zeroes
+        // the slot if it ever surfaces active.
+        vec![root_id, menu_id]
     }
 
     fn layout_response(
@@ -767,7 +775,16 @@ impl Widget for SplitButton {
         children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
+        // The visible row fills our bounds; the menu content is owned by
+        // the overlay manager when shown and stays zero-sized otherwise.
+        // Dormant children are filtered out before placements reach here;
+        // zero the menu slot defensively if it ever surfaces active so we
+        // don't clobber the overlay's own positioning.
         for child in children.iter_mut() {
+            if Some(child.id) == self.menu_content_id {
+                child.size = bastyde_canvas::Size::ZERO;
+                continue;
+            }
             child.origin = bounds.origin();
             child.size = bounds.size();
         }
@@ -787,9 +804,101 @@ impl Widget for SplitButton {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        match self.root_child_id {
-            Some(id) => vec![id],
-            None => Vec::new(),
+        // Include the dormant menu content alongside the visible root so
+        // `set_dormant` cascades correctly and `arena.hit_test_at` can
+        // prune the menu subtree when it isn't visible.
+        let mut out = Vec::new();
+        if let Some(id) = self.root_child_id {
+            out.push(id);
         }
+        if let Some(id) = self.menu_content_id {
+            out.push(id);
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bastyde_core::event::Modifiers;
+    use bastyde_core::widget_tree::WidgetTree;
+    use std::cell::Cell as StdCell;
+    use std::rc::Rc as StdRc;
+
+    fn themed_tree() -> WidgetTree {
+        WidgetTree::new().with_theme(bastyde_core::presets::intui::light())
+    }
+
+    /// Regression: the dropdown menu must be linked as a child of the
+    /// SplitButton, not left as an orphan arena root. An orphan root
+    /// leaks on `destroy_subtree` (never reached from the widget's child
+    /// list) and is walked by `hit_test_at` on every click. Mirrors the
+    /// content-linking contract `PopoverButton` documents.
+    #[test]
+    fn menu_content_is_linked_as_child_not_orphan_root() {
+        let mut tree = themed_tree();
+        let split = tree.add(
+            SplitButton::new()
+                .item(MenuItem::new(lit!("Save")))
+                .item(MenuItem::new(lit!("Save As"))),
+        );
+        tree.layout(SizeProposal::exact(300.0, 60.0));
+
+        let children = tree.children(split);
+        assert_eq!(
+            children.len(),
+            2,
+            "SplitButton must expose both the visible root and the dormant menu"
+        );
+        let menu_id = children[1];
+        assert_eq!(
+            tree.parent(menu_id),
+            Some(split),
+            "menu must be parented under the SplitButton, not left an orphan root"
+        );
+    }
+
+    /// Enter activates the *currently-selected* item's action — the core
+    /// SplitButton contract (the primary region fires the default).
+    #[test]
+    fn enter_fires_current_default_action() {
+        let fired: StdRc<StdCell<Option<usize>>> = StdRc::new(StdCell::new(None));
+        let (f0, f1) = (fired.clone(), fired.clone());
+        let mut tree = themed_tree();
+        let split = tree.add(
+            SplitButton::new()
+                .initial_selected(1)
+                .item(MenuItem::new(lit!("A")).on_activate_fn(move |_| f0.set(Some(0))))
+                .item(MenuItem::new(lit!("B")).on_activate_fn(move |_| f1.set(Some(1)))),
+        );
+        tree.layout(SizeProposal::exact(300.0, 60.0));
+        tree.focus(split);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(
+            fired.get(),
+            Some(1),
+            "Enter must fire the currently-selected item's action"
+        );
+    }
+
+    /// ArrowDown opens the dropdown menu overlay.
+    #[test]
+    fn arrow_down_opens_the_menu() {
+        let mut tree = themed_tree();
+        let split = tree.add(
+            SplitButton::new()
+                .item(MenuItem::new(lit!("A")))
+                .item(MenuItem::new(lit!("B"))),
+        );
+        tree.layout(SizeProposal::exact(300.0, 60.0));
+        tree.focus(split);
+        assert!(tree.active_overlays().is_empty());
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "ArrowDown must open the dropdown menu overlay"
+        );
     }
 }
