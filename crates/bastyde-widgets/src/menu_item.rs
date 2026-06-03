@@ -1030,6 +1030,16 @@ impl Widget for MenuItem {
             let open_for_key = submenu_open_signal.clone();
             let dismiss_for_key = submenu_dismiss_callback.clone();
             move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
+                // The "open submenu / go deeper" key is inline-forward:
+                // ArrowRight under LTR, ArrowLeft under RTL (submenus open
+                // on the trailing edge, which mirrors). The inline-back
+                // key (ArrowLeft under LTR, ArrowRight under RTL) is left
+                // to bubble / to the framework's nested-overlay dismissal.
+                let open_submenu_key = if ctx.is_rtl() {
+                    Key::ArrowLeft
+                } else {
+                    Key::ArrowRight
+                };
                 match event {
                     WidgetEvent::KeyDown {
                         key: Key::Enter | Key::Space,
@@ -1070,11 +1080,9 @@ impl Widget for MenuItem {
                         interaction.set(MenuItemState::Pressed);
                         EventResponse::Handled
                     }
-                    // ArrowRight opens submenu (ignored on regular items)
-                    WidgetEvent::KeyDown {
-                        key: Key::ArrowRight,
-                        ..
-                    } => {
+                    // Inline-forward arrow opens submenu (ignored on
+                    // regular items). RTL-flipped via `open_submenu_key`.
+                    WidgetEvent::KeyDown { key, .. } if *key == open_submenu_key => {
                         if let Some(sub_id) = sub_id {
                             ctx.dismiss_child_overlays_except(sub_id);
                             ctx.activate(sub_id);

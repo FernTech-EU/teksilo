@@ -327,6 +327,11 @@ impl Widget for MenuBarTrigger {
             .on_key({
                 let menu_ctx = menu_ctx.clone();
                 move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
+                    // The menu bar lays out right-to-left under RTL, so the
+                    // visual "previous/next menu" arrows swap: ArrowLeft moves
+                    // to the next (visually-left) menu and ArrowRight to the
+                    // previous one.
+                    let (left_delta, right_delta) = if ctx.is_rtl() { (1, -1) } else { (-1, 1) };
                     match event {
                         WidgetEvent::KeyDown {
                             key: Key::ArrowDown | Key::Enter | Key::Space,
@@ -339,14 +344,14 @@ impl Widget for MenuBarTrigger {
                             key: Key::ArrowLeft,
                             ..
                         } => {
-                            menu_ctx.navigate(-1, ctx);
+                            menu_ctx.navigate(left_delta, ctx);
                             EventResponse::Handled
                         }
                         WidgetEvent::KeyDown {
                             key: Key::ArrowRight,
                             ..
                         } => {
-                            menu_ctx.navigate(1, ctx);
+                            menu_ctx.navigate(right_delta, ctx);
                             EventResponse::Handled
                         }
                         _ => EventResponse::Ignored,
@@ -463,20 +468,23 @@ impl Widget for MenuOverlayHost {
             .on_key({
                 let menu_ctx = menu_ctx.clone();
                 move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
-                    // These keys bubble up from the inner MenuList when it returns Ignored
+                    // These keys bubble up from the inner MenuList when it
+                    // returns Ignored. Under RTL the bar is laid out
+                    // right-to-left, so the previous/next arrows swap.
+                    let (left_delta, right_delta) = if ctx.is_rtl() { (1, -1) } else { (-1, 1) };
                     match event {
                         WidgetEvent::KeyDown {
                             key: Key::ArrowLeft,
                             ..
                         } => {
-                            menu_ctx.navigate(-1, ctx);
+                            menu_ctx.navigate(left_delta, ctx);
                             EventResponse::Handled
                         }
                         WidgetEvent::KeyDown {
                             key: Key::ArrowRight,
                             ..
                         } => {
-                            menu_ctx.navigate(1, ctx);
+                            menu_ctx.navigate(right_delta, ctx);
                             EventResponse::Handled
                         }
                         WidgetEvent::KeyDown {
@@ -807,6 +815,48 @@ mod tests {
         let info1 = t.accessibility_node(triggers[1]);
         assert_eq!(info0.name(), Some("File"));
         assert_eq!(info1.name(), Some("Edit"));
+    }
+
+    #[test]
+    fn trigger_arrow_navigation_ltr_right_goes_to_next() {
+        let mut t = tree_with_window();
+        let mb = t.add(
+            MenuBar::new()
+                .menu(lit!("&File"), || Box::new(MenuList::new()))
+                .menu(lit!("&Edit"), || Box::new(MenuList::new()))
+                .menu(lit!("&View"), || Box::new(MenuList::new())),
+        );
+        t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
+        let triggers = collect_descendants_with_role(&t, mb, Role::MenuItem);
+        assert_eq!(triggers.len(), 3);
+
+        // From the File trigger, ArrowRight opens the next (Edit) menu in LTR.
+        t.focus(triggers[0]);
+        t.press_key(Key::ArrowRight, Modifiers::NONE);
+        assert!(t.accessibility_node(triggers[1]).is_expanded());
+        assert!(!t.accessibility_node(triggers[0]).is_expanded());
+    }
+
+    #[test]
+    fn trigger_arrow_navigation_rtl_right_goes_to_previous() {
+        let mut t = tree_with_window();
+        t.set_layout_direction(bastyde_core::environment::LayoutDirection::RightToLeft);
+        let mb = t.add(
+            MenuBar::new()
+                .menu(lit!("&File"), || Box::new(MenuList::new()))
+                .menu(lit!("&Edit"), || Box::new(MenuList::new()))
+                .menu(lit!("&View"), || Box::new(MenuList::new())),
+        );
+        t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
+        let triggers = collect_descendants_with_role(&t, mb, Role::MenuItem);
+        assert_eq!(triggers.len(), 3);
+
+        // Under RTL the bar runs right-to-left, so ArrowRight moves to the
+        // *previous* menu — from File (index 0) that wraps to View (index 2).
+        t.focus(triggers[0]);
+        t.press_key(Key::ArrowRight, Modifiers::NONE);
+        assert!(t.accessibility_node(triggers[2]).is_expanded());
+        assert!(!t.accessibility_node(triggers[0]).is_expanded());
     }
 
     #[test]

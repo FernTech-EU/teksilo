@@ -508,6 +508,19 @@ impl Widget for MenuList {
                     let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
                         return EventResponse::Ignored;
                     };
+                    // Inline-forward (open submenu) vs inline-back arrows
+                    // mirror under RTL: forward is ArrowRight in LTR /
+                    // ArrowLeft in RTL; back is the opposite.
+                    let open_submenu_key = if ctx.is_rtl() {
+                        Key::ArrowLeft
+                    } else {
+                        Key::ArrowRight
+                    };
+                    let back_key = if ctx.is_rtl() {
+                        Key::ArrowRight
+                    } else {
+                        Key::ArrowLeft
+                    };
                     match key {
                         Key::ArrowDown => {
                             if item_count == 0 {
@@ -559,9 +572,11 @@ impl Widget for MenuList {
                             }
                             EventResponse::Ignored
                         }
-                        Key::ArrowRight => {
-                            // Only open submenus; for non-submenu items, let it bubble
-                            // to MenuOverlayHost which navigates to the next bar menu.
+                        k if *k == open_submenu_key => {
+                            // Inline-forward arrow: only opens submenus; for
+                            // non-submenu items let it bubble to
+                            // MenuOverlayHost, which navigates to the next bar
+                            // menu. RTL-flipped via `open_submenu_key`.
                             if let Some(idx) = focused_index.get()
                                 && idx < sub_flags.len()
                                 && sub_flags[idx]
@@ -571,9 +586,14 @@ impl Widget for MenuList {
                             }
                             EventResponse::Ignored
                         }
-                        Key::ArrowLeft | Key::Escape => {
-                            // Let it bubble to MenuOverlayHost (for bar navigation)
-                            // or the tree-level Escape handler (for overlay dismissal).
+                        k if *k == back_key => {
+                            // Inline-back arrow: bubble to MenuOverlayHost (bar
+                            // navigation) or the tree-level back/overlay
+                            // dismissal. RTL-flipped via `back_key`.
+                            EventResponse::Ignored
+                        }
+                        Key::Escape => {
+                            // Bubble to the tree-level Escape overlay dismissal.
                             EventResponse::Ignored
                         }
                         _ => {
@@ -996,6 +1016,53 @@ mod tests {
         // From "no focus" (treated as index 0), Up wraps to last (index 2).
         tree.press_key(Key::Enter, Modifiers::NONE);
         assert_eq!(fired.get(), Some(2));
+    }
+
+    fn menu_with_submenu(tree: &mut WidgetTree) -> WidgetId {
+        // Index 0 is a submenu trigger; index 1 is a plain item.
+        let menu = MenuList::new()
+            .item(MenuItem::submenu(lit!("More"), || {
+                Box::new(MenuList::new().item(MenuItem::new(lit!("Child"))))
+            }))
+            .item(MenuItem::new(lit!("Plain")));
+        tree.add(menu)
+    }
+
+    #[test]
+    fn submenu_opens_on_arrow_right_under_ltr() {
+        let mut tree = light_tree();
+        let menu_id = menu_with_submenu(&mut tree);
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+        tree.press_key(Key::ArrowDown, Modifiers::NONE); // focus submenu item (idx 0)
+        assert!(tree.active_overlays().is_empty());
+
+        // Inline-back arrow under LTR (ArrowLeft) does not open.
+        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+        assert!(tree.active_overlays().is_empty());
+
+        // Inline-forward arrow (ArrowRight) opens the submenu.
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        assert_eq!(tree.active_overlays().len(), 1);
+    }
+
+    #[test]
+    fn submenu_opens_on_arrow_left_under_rtl() {
+        let mut tree = light_tree();
+        tree.set_layout_direction(bastyde_core::environment::LayoutDirection::RightToLeft);
+        let menu_id = menu_with_submenu(&mut tree);
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+        tree.press_key(Key::ArrowDown, Modifiers::NONE); // focus submenu item (idx 0)
+        assert!(tree.active_overlays().is_empty());
+
+        // Under RTL, ArrowRight is the inline-back key — must NOT open.
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        assert!(tree.active_overlays().is_empty());
+
+        // ArrowLeft is inline-forward under RTL — opens the submenu.
+        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+        assert_eq!(tree.active_overlays().len(), 1);
     }
 
     #[test]
