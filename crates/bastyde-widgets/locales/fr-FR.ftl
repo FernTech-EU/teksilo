@@ -18,6 +18,7 @@ a11y-snackbar-name = Notification
 a11y-split-view-divider-name = Séparateur de vue divisée
 a11y-breadcrumb-current-page-value = page actuelle
 a11y-toolbar-name = Barre d'outils
+toolbar-more = Plus
 a11y-title-bar-name = Barre de titre de la fenêtre
 a11y-window-controls-name = Contrôles de la fenêtre
 a11y-window-minimize-name = Réduire

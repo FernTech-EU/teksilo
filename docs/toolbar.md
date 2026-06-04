@@ -227,7 +227,12 @@ pattern](https://www.w3.org/WAI/ARIA/apg/patterns/toolbar/):
   <kbd>←</kbd>/<kbd>→</kbd> (or <kbd>↑</kbd>/<kbd>↓</kbd> when vertical) arrow
   keys move focus among the visible controls, and <kbd>Home</kbd>/<kbd>End</kbd>
   jump to the ends. The roving suppression reaches *composite* controls (a
-  `ComboBox`, an `IconButton`) correctly — Tab doesn't get stuck on one.
+  `ComboBox`, an `IconButton`) correctly — Tab doesn't get stuck on one. Under
+  **RTL** the horizontal arrows mirror (<kbd>←</kbd> advances, <kbd>→</kbd> steps
+  back), resolved live so a locale change flips them.
+- All localizable strings — the chevron's "More" tooltip and the accessible
+  name — flow through the framework's Fluent bundle (`en-US` + `fr-FR` shipped),
+  so they translate and update reactively on a locale change.
 - The chevron announces `HasPopup::Menu` and its expanded state.
 - Collapsed commands are **dormant** (absent from the accessibility tree) — they
   are represented by their menu rows instead, so no command is announced twice.

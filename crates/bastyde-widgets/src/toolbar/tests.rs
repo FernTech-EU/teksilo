@@ -224,6 +224,49 @@ fn arrow_keys_move_roving_focus_between_actions() {
 }
 
 #[test]
+fn rtl_swaps_the_roving_arrow_direction() {
+    // On a horizontal bar under RTL the layout mirrors, so ArrowLeft advances
+    // (it is the "next" key) and ArrowRight steps back — the inverse of LTR.
+    use bastyde_core::environment::LayoutDirection;
+    use bastyde_core::event::{Key, Modifiers, WidgetEvent};
+    let tb = many_actions(4);
+    let mut tree = themed_tree();
+    tree.set_layout_direction(LayoutDirection::RightToLeft);
+    let id = tree.add(tb);
+    tree.layout(SizeProposal::exact(2000.0, 50.0)); // wide → nothing overflows
+
+    let first = tree
+        .first_focusable_descendant(id)
+        .expect("a focusable toolbar control");
+
+    // RTL: ArrowLeft is "next" → advances off the first control.
+    tree.focus(first);
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::ArrowLeft,
+        modifiers: Modifiers::NONE,
+        text: None,
+    });
+    assert_ne!(
+        tree.focused(),
+        Some(first),
+        "RTL: ArrowLeft should advance the roving focus"
+    );
+
+    // RTL: ArrowRight is "previous" → from the first control it clamps, staying.
+    tree.focus(first);
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::ArrowRight,
+        modifiers: Modifiers::NONE,
+        text: None,
+    });
+    assert_eq!(
+        tree.focused(),
+        Some(first),
+        "RTL: ArrowRight from the first control should stay put"
+    );
+}
+
+#[test]
 fn roving_tab_suppresses_a_composite_controls_inner_leaf() {
     // Regression for the "Tab gets stuck on the ComboBox" bug: a composite
     // control (here a ComboBox) exposes its focusable node as an inner leaf,

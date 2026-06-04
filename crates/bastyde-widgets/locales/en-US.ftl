@@ -31,6 +31,7 @@ a11y-snackbar-name = Snackbar
 a11y-split-view-divider-name = Split view divider
 a11y-breadcrumb-current-page-value = current page
 a11y-toolbar-name = Toolbar
+toolbar-more = More
 a11y-title-bar-name = Window title bar
 a11y-window-controls-name = Window controls
 a11y-window-minimize-name = Minimize

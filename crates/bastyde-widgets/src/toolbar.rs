@@ -608,7 +608,7 @@ impl Widget for Toolbar {
             }
             let chevron = PopoverIconButton::new(
                 IconButton::new(IconWidget::chevron_down(ICON_SIZE))
-                    .tooltip(bastyde_i18n::lit!("More")),
+                    .tooltip(bastyde_i18n::tr_widget!(toolbar_more())),
             )
             .content(menu)
             .placement(OverlayPlacement::BelowPreferred)
@@ -637,8 +637,19 @@ impl Widget for Toolbar {
                     let WidgetEvent::KeyDown { key, .. } = event else {
                         return EventResponse::Ignored;
                     };
+                    // Roving directions follow the *visual* axis, resolved at
+                    // event time so a locale change flips them live. On a
+                    // horizontal bar under RTL the layout mirrors (logical-first
+                    // sits at the right edge), so ArrowRight steps to the
+                    // previous control and ArrowLeft to the next — per the
+                    // WAI-ARIA toolbar pattern. Vertical bars are direction-
+                    // independent.
                     let (prev, next) = if horizontal {
-                        (Key::ArrowLeft, Key::ArrowRight)
+                        if ctx.is_rtl() {
+                            (Key::ArrowRight, Key::ArrowLeft)
+                        } else {
+                            (Key::ArrowLeft, Key::ArrowRight)
+                        }
                     } else {
                         (Key::ArrowUp, Key::ArrowDown)
                     };
