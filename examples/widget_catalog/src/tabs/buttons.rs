@@ -4,17 +4,8 @@
 use bastyde::prelude::*;
 use bastyde::widgets::{
     Button, ButtonVariant, CommandLinkButton, Divider, HStack, IconButton, IconLocation,
-    IconWidget, MenuItem, Panel, PopoverButton, PopoverIconButton, SplitButton, TextWidget, VStack,
+    IconWidget, MenuItem, PopoverButton, PopoverIconButton, SplitButton, TextWidget, VStack,
 };
-
-fn popover_surface(content: impl Widget + 'static) -> impl Widget + 'static {
-    Panel::new()
-        .background(SurfaceRole::Main)
-        .border_color(BorderRole::Default)
-        .corner_radius(8.0_f32)
-        .padding(12.0_f32)
-        .child(content)
-}
 
 use crate::shared::{Signals, section, tab_header};
 
@@ -114,19 +105,19 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let popover_btn = section(
         ctx,
         lit!("PopoverButton"),
-        PopoverButton::new(Button::new(tr!(btn_popover_trigger()))).content(popover_surface(
+        PopoverButton::new(Button::new(tr!(btn_popover_trigger()))).content(
             VStack::new()
                 .spacing(4.0)
                 .child(TextWidget::new(tr!(btn_popover_title())).style(TextStyleRole::BodyBold))
                 .child(TextWidget::new(tr!(btn_popover_body())).style(TextStyleRole::Small)),
-        )),
+        ),
     );
     let popover_icon = section(
         ctx,
         lit!("PopoverIconButton"),
-        PopoverIconButton::new(IconButton::add()).content(popover_surface(
+        PopoverIconButton::new(IconButton::add()).content(
             TextWidget::new(tr!(btn_popover_icon_body())).style(TextStyleRole::Small),
-        )),
+        ),
     );
     let split = section(
         ctx,
@@ -170,15 +161,15 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .variant(ButtonVariant::Plain),
     );
     let popover_btn_widget = ctx.add(
-        PopoverButton::new(Button::new(tr!(btn_popover_trigger()))).content(popover_surface(
+        PopoverButton::new(Button::new(tr!(btn_popover_trigger()))).content(
             VStack::new()
                 .spacing(4.0)
                 .child(TextWidget::new(tr!(btn_popover_title())).style(TextStyleRole::BodyBold))
                 .child(TextWidget::new(tr!(btn_popover_body())).style(TextStyleRole::Small)),
-        )),
+        ),
     );
     let popover_icon_widget = ctx.add(PopoverIconButton::new(IconButton::add()).content(
-        popover_surface(TextWidget::new(tr!(btn_popover_icon_body())).style(TextStyleRole::Small)),
+        TextWidget::new(tr!(btn_popover_icon_body())).style(TextStyleRole::Small),
     ));
 
     bati!(ctx => VStack {

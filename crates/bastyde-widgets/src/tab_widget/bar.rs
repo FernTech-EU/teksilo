@@ -2107,7 +2107,10 @@ fn build_overflow_dropdown(
 
     ctx.add(
         PopoverButton::new(trigger)
+            // `surface` is already a chromed `Panel` (Raised) — opt out
+            // of the auto popover surface to avoid double-chroming.
             .content(surface)
+            .bare()
             .placement(OverlayPlacement::BelowPreferred)
             .has_popup_kind(HasPopup::Menu),
     )

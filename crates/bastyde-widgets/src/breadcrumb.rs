@@ -639,6 +639,8 @@ impl Widget for Breadcrumb {
                 .tooltip(bastyde_i18n::tr_widget!(breadcrumb_overflow()));
             let chevron = PopoverButton::new(trigger)
                 .content(menu)
+                // `MenuList` self-chromes via the Menu `PopoverStyle`.
+                .bare()
                 .placement(OverlayPlacement::BelowPreferred)
                 .has_popup_kind(HasPopup::Menu);
             let chevron_id = ctx.add(chevron);

@@ -50,6 +50,7 @@ use bastyde_core::overlay::{
     DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
 };
 use bastyde_core::signal::Signal;
+use bastyde_core::styles::{PopoverStyle, PopoverStyleConfig, PopoverVariant, SharedPopoverStyle};
 use bastyde_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::TextRole;
@@ -175,6 +176,21 @@ pub struct PopoverWidget<T: PopoverTrigger> {
     on_open: Option<OnVoid>,
     on_close: Option<OnVoid>,
 
+    /// Which themed [`PopoverStyle`] surface to wrap the content in.
+    /// `Some(variant)` (the default — `PopoverVariant::Default`) routes
+    /// the content through the active popover style so it gets a
+    /// background, border, padding, and shadow for free. `None`
+    /// (`bare()`) adds the content raw — for content that is already
+    /// self-chromed (a `MenuList`, which itself routes through the Menu
+    /// `PopoverStyle`, or a hand-rolled surface `Panel`).
+    surface_variant: Option<PopoverVariant>,
+    /// Per-call style override (highest precedence over the theme slot
+    /// and the built-in `RecipePopoverStyle`). Mirrors `Popover::style`.
+    surface_style: Option<SharedPopoverStyle>,
+    /// Accessible name for the surface's `Role::Dialog` node. Empty by
+    /// default (the wrapped content usually carries its own role/name).
+    surface_name: String,
+
     content_id: Option<WidgetId>,
     root_child_id: Option<WidgetId>,
 }
@@ -215,6 +231,9 @@ impl<T: PopoverTrigger> PopoverWidget<T> {
             show_disclosure_caret: T::default_show_caret(),
             on_open: None,
             on_close: None,
+            surface_variant: Some(PopoverVariant::Default),
+            surface_style: None,
+            surface_name: String::new(),
             content_id: None,
             root_child_id: None,
         }
@@ -292,6 +311,45 @@ impl<T: PopoverTrigger> PopoverWidget<T> {
     pub fn open_signal(&self) -> Signal<bool> {
         self.popover_open.clone()
     }
+
+    /// Choose which themed [`PopoverVariant`] surface wraps the content.
+    /// Default is [`PopoverVariant::Default`] (elevated panel with
+    /// padding + shadow). The surface is resolved from the active
+    /// [`PopoverStyle`] (`theme.style_slots.popover`), so it themes
+    /// app-wide.
+    pub fn surface(mut self, variant: PopoverVariant) -> Self {
+        self.surface_variant = Some(variant);
+        self
+    }
+
+    /// Opt OUT of the themed surface: the content is added raw, with no
+    /// background / border / padding. Use when the content already
+    /// supplies its own chrome — a [`MenuList`](crate::MenuList) (which
+    /// routes through the Menu `PopoverStyle` itself) or a hand-rolled
+    /// surface `Panel`. Without this, such content would be
+    /// double-chromed.
+    pub fn bare(mut self) -> Self {
+        self.surface_variant = None;
+        self
+    }
+
+    /// Per-call [`PopoverStyle`] override for the surface (highest
+    /// precedence over the theme slot and the built-in default). Mirrors
+    /// [`Popover::style`](crate::Popover::style). No effect under
+    /// [`bare`](Self::bare).
+    pub fn surface_style(mut self, style: impl PopoverStyle) -> Self {
+        self.surface_style = Some(Rc::new(style));
+        self
+    }
+
+    /// Accessible name for the surface's `Role::Dialog` node. Defaults
+    /// to empty (the wrapped content usually carries its own role and
+    /// name). No effect under [`bare`](Self::bare) or for the Menu
+    /// variant (which is presentational).
+    pub fn surface_name(mut self, name: impl Into<String>) -> Self {
+        self.surface_name = name.into();
+        self
+    }
 }
 
 impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
@@ -300,7 +358,38 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
             .content
             .take()
             .expect("PopoverWidget::content(...) was not set");
-        let content_id = ctx.add_boxed(content);
+        // Materialize the inner content first so the surface style sees
+        // a ready WidgetId (same pattern as the `Popover` widget).
+        let inner_content_id = ctx.add_boxed(content);
+
+        // Wrap the inner content in the themed popover surface
+        // (background, border, padding, shadow) unless the caller opted
+        // out with `bare()`. The surface is resolved per-call > theme
+        // slot > built-in `RecipePopoverStyle`, so popovers theme
+        // app-wide via `theme.style_slots.popover`. The id that flows
+        // through the overlay machinery (dormant / gated / shown /
+        // returned-as-child) is the SURFACE; focus targets the inner
+        // content so it lands inside the chrome, not on the panel.
+        let content_id = match self.surface_variant {
+            None => inner_content_id,
+            Some(variant) => {
+                let style: SharedPopoverStyle = self
+                    .surface_style
+                    .clone()
+                    .or_else(|| ctx.theme().style_slots.popover.clone())
+                    .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle));
+                let cfg = PopoverStyleConfig {
+                    content: inner_content_id,
+                    variant,
+                    name: self.surface_name.clone(),
+                    placement: self.placement.clone(),
+                    show_caret: false,
+                    caret_size: 0.0,
+                };
+                style.make_body(&cfg, ctx)
+            }
+        };
+        let focus_id = inner_content_id;
         ctx.set_dormant(content_id);
         // Gate the content's activation on `popover_open` so it is the single
         // source of truth. Without this, when the PopoverWidget itself is woken
@@ -371,7 +460,7 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
                         req = req.with_fade(d);
                     }
                     ctx_evt.show_overlay(req);
-                    ctx_evt.request_focus(content_id);
+                    ctx_evt.request_focus(focus_id);
                     if let Some(cb) = on_open.as_ref() {
                         cb();
                     }
@@ -547,6 +636,59 @@ mod tests {
             modifiers: Modifiers::NONE,
         });
         assert!(open_signal.get(), "Enter should open the popover");
+    }
+
+    #[test]
+    fn default_wraps_content_in_themed_surface_bare_does_not() {
+        // A pure-leaf content (RectWidget has no children) makes the
+        // wrapping observable: with the default surface the overlay's
+        // content id is the PopoverSurface (which has children); under
+        // `bare()` it's the leaf itself (no children).
+        fn open_overlay_content(bare: bool) -> (WidgetTree, WidgetId) {
+            let mut tree = light_tree();
+            let mut pb =
+                PopoverButton::new(Button::new(lit!("Open"))).content(RectWidget::new());
+            if bare {
+                pb = pb.bare();
+            }
+            let open = pb.open_signal();
+            let id = tree.add(pb);
+            tree.layout(SizeProposal::exact(300.0, 120.0));
+            let button = tree
+                .first_focusable_descendant(id)
+                .expect("focusable inner Button");
+            tree.focus(button);
+            tree.dispatch_event(WidgetEvent::KeyDown {
+                key: Key::Enter,
+                modifiers: Modifiers::NONE,
+                text: None,
+            });
+            tree.dispatch_event(WidgetEvent::KeyUp {
+                key: Key::Enter,
+                modifiers: Modifiers::NONE,
+            });
+            assert!(open.get(), "Enter should open the popover");
+            tree.layout(SizeProposal::exact(300.0, 120.0));
+            let content = tree
+                .overlay_manager()
+                .active_content_ids()
+                .first()
+                .copied()
+                .expect("an active overlay content");
+            (tree, content)
+        }
+
+        let (tree_def, c_def) = open_overlay_content(false);
+        assert!(
+            !tree_def.children(c_def).is_empty(),
+            "default surface should wrap the content in chrome"
+        );
+
+        let (tree_bare, c_bare) = open_overlay_content(true);
+        assert!(
+            tree_bare.children(c_bare).is_empty(),
+            "bare() should add the leaf content raw, with no surface"
+        );
     }
 
     #[test]

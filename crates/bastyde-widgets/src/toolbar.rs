@@ -611,6 +611,9 @@ impl Widget for Toolbar {
                     .tooltip(bastyde_i18n::tr_widget!(toolbar_more())),
             )
             .content(menu)
+            // `MenuList` already routes through the Menu `PopoverStyle`
+            // for its own surface — don't double-chrome it.
+            .bare()
             .placement(OverlayPlacement::BelowPreferred)
             .has_popup_kind(HasPopup::Menu);
             let chevron_id = ctx.add(chevron);

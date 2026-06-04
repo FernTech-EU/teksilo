@@ -20,6 +20,9 @@ use bastyde_core::overlay::{DismissBehavior, OverlayPlacement};
 use bastyde_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_id::WidgetId;
 
+use bastyde_core::widget_builder::WidgetBuilder;
+use bastyde_tokens::Alignment;
+
 use crate::badge::Badge;
 use crate::icon_button::{IconButton, IconButtonSize};
 use crate::notification::log::NotificationLog;
@@ -135,15 +138,25 @@ impl Widget for NotificationCenterButton {
             log = log.on_action_invoked(move |e, a, ctx| cb(e, a, ctx));
         }
 
-        // Bell + popover combo. On open, mark archive entries read so
-        // the badge resets — bumps the unread_count signal, which
-        // re-rebuilds this widget and removes the badge.
-        let archive_for_open = archive.clone();
+        // `PopoverIconButton` wraps the content in the themed popover
+        // surface (background, border, padding, shadow) by default, so
+        // the chrome-less `NotificationLog` gets a proper surface for
+        // free — no manual `Panel` needed.
+
+        // Bell + popover combo. Mark archive entries read when the
+        // popover *closes*, NOT when it opens. `mark_all_read` bumps
+        // the unread-count signal, which fires this widget's `Rebuild`
+        // binding — and a rebuild on OPEN would tear down the
+        // `PopoverIconButton` (and its just-shown overlay) and replace
+        // it with a fresh, closed one, so the popover would flash and
+        // vanish, leaving only the cleared badge. Deferring to close
+        // lets the rebuild happen after the popover is already gone.
+        let archive_for_close = archive.clone();
         let pib = PopoverIconButton::new(trigger)
             .content(log)
             .placement(self.placement.clone())
             .dismiss_behavior(DismissBehavior::EscapeOrClickOutside)
-            .on_open(move || archive_for_open.mark_all_read());
+            .on_close(move || archive_for_close.mark_all_read());
         let pib_id = ctx.add(pib);
 
         // Compute the badge label for this build.
@@ -159,9 +172,22 @@ impl Widget for NotificationCenterButton {
         // Stack bell + badge. Badge is omitted entirely when there
         // are no unread (and `show_when_zero` is false) so the bell
         // renders bare.
-        let mut stack = ZStack::new().add_child(pib_id);
+        //
+        // The badge is pinned to the top-trailing corner (where count
+        // badges belong) via the stack alignment, and its whole subtree
+        // is marked hit-transparent. A `ZStack` centers its children by
+        // default, so the badge sat on top of the bell icon; `Badge` is
+        // a *composite* widget, so `event_pass_through` (per-node) would
+        // not help — its inner text/rect children still swallowed the
+        // tap, and the popover never opened whenever there were unread
+        // notifications (i.e. exactly when you'd press the bell).
+        // `hit_transparent` excludes the entire badge subtree from
+        // hit-testing, so the click falls through to the bell beneath.
+        let mut stack = ZStack::new()
+            .alignment(Alignment::TOP_TRAILING)
+            .add_child(pib_id);
         if unread_count > 0 || show_when_zero {
-            let badge_id = ctx.add(Badge::new(lit!(label)));
+            let badge_id = ctx.add(Badge::new(lit!(label)).hit_transparent(true));
             stack = stack.add_child(badge_id);
         }
         let root = ctx.add(stack);
@@ -261,6 +287,104 @@ mod tests {
             tree.find_by_label("2").is_some(),
             "badge with count '2' renders when unread_count > 0"
         );
+    }
+
+    /// Reproduces the real app: bell mounted at the BOTTOM of the
+    /// window (status bar), under the full-viewport pass-through toast
+    /// host installed by `install_toast`. Clicking it must open the
+    /// popover overlay, and the popover must land on-screen.
+    /// Mounts the bell at the bottom of the window (status-bar
+    /// position), optionally under the full-viewport pass-through toast
+    /// host installed by `install_toast`, with `unread` notifications in
+    /// the archive. Returns (active overlays before click, after click).
+    fn bell_popover_open_check(with_toast_host: bool, unread: usize) -> (usize, usize) {
+        use crate::primitives::{Expand, FixedSize, Spacer, VStack, ZStack};
+        use crate::toast::{ToastHost, ToastInstallOptions, ToastRegistry};
+
+        let archive = Rc::new(NotificationArchiveModel::in_memory());
+        for i in 0..unread {
+            archive.push(entry(&format!("n{i}")));
+        }
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+
+        // A spacer pushes the bell to the bottom edge (status bar).
+        let spacer = tree.add(FixedSize::new().bind_height(500.0).child(Spacer::new()));
+        let bell = tree.add(NotificationCenterButton::new(archive.clone()));
+        let user_root = tree.add(VStack::new().add_child(spacer).add_child(bell));
+
+        if with_toast_host {
+            // Mirror install_toast: ZStack { Expand(user_root), host }.
+            let opts = ToastInstallOptions {
+                archive: None,
+                ..ToastInstallOptions::default()
+            };
+            let registry = ToastRegistry::new(opts.clone());
+            let filled = tree.add(Expand::new().respect_intrinsic().child_id(user_root));
+            let host = tree.add(ToastHost::new(registry, opts));
+            tree.add(ZStack::new().add_child(filled).add_child(host));
+        }
+
+        tree.layout(SizeProposal::exact(400.0, 600.0));
+
+        let before = tree.active_overlays().len();
+        tree.click(bell);
+        tree.layout(SizeProposal::exact(400.0, 600.0));
+        let after = tree.active_overlays().len();
+        (before, after)
+    }
+
+    #[test]
+    fn bell_popover_opens_with_no_unread() {
+        // Empty archive → no badge → isolates the popover mechanism.
+        let (before, after) = bell_popover_open_check(false, 0);
+        assert_eq!(after, before + 1, "popover should open (no badge)");
+    }
+
+    /// Clicking an in-content action ("mark all read" / "clear") mutates
+    /// the archive, which changes `unread_count` and rebuilds the bell —
+    /// destroying the popover's owner. The overlay must NOT linger as an
+    /// invisible click-blocker; it must be fully dismissed.
+    #[test]
+    fn in_content_action_does_not_orphan_overlay() {
+        use crate::primitives::{FixedSize, Spacer, VStack};
+        let archive = Rc::new(NotificationArchiveModel::in_memory());
+        for i in 0..3 {
+            archive.push(entry(&format!("n{i}")));
+        }
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let spacer = tree.add(FixedSize::new().bind_height(500.0).child(Spacer::new()));
+        let bell = tree.add(NotificationCenterButton::new(archive.clone()));
+        tree.add(VStack::new().add_child(spacer).add_child(bell));
+        tree.layout(SizeProposal::exact(400.0, 600.0));
+
+        tree.click(bell);
+        tree.layout(SizeProposal::exact(400.0, 600.0));
+        assert_eq!(tree.active_overlays().len(), 1, "popover should be open");
+
+        // Simulate clicking "Mark all read" inside the log.
+        archive.mark_all_read();
+        tree.layout(SizeProposal::exact(400.0, 600.0));
+        assert_eq!(
+            tree.active_overlays().len(),
+            0,
+            "overlay must be dismissed (not left as an invisible click-blocker) \
+             after the in-content action rebuilds the bell"
+        );
+    }
+
+    #[test]
+    fn bell_popover_opens_with_unread_badge() {
+        // Regression: a centered, hit-testable badge swallowed the tap,
+        // so the popover never opened when there were unread items.
+        let (before, after) = bell_popover_open_check(false, 3);
+        assert_eq!(after, before + 1, "popover must open even with an unread badge");
+    }
+
+    #[test]
+    fn bell_popover_opens_under_toast_host_with_badge() {
+        let (before, after) = bell_popover_open_check(true, 3);
+        assert_eq!(after, before + 1, "popover must open under the toast host, with a badge");
     }
 
     #[test]

@@ -487,7 +487,7 @@ impl Widget for Root {
                     HStack::new()
                         .spacing(12.0)
                         .child(
-                            PopoverIconButton::new(IconButton::add().toolbar()).content(
+                            PopoverIconButton::new(IconButton::add().toolbar()).bare().content(
                                 MenuList::new()
                                     .item(
                                         MenuItem::new(lit!("New file"))
@@ -506,7 +506,7 @@ impl Widget for Root {
                             ),
                         )
                         .child(
-                            PopoverIconButton::new(IconButton::search().large()).content(
+                            PopoverIconButton::new(IconButton::search().large()).bare().content(
                                 MenuList::new()
                                     .item(
                                         MenuItem::new(lit!("Search files"))
@@ -531,6 +531,7 @@ impl Widget for Root {
                         Button::new(lit!("View options")).variant(ButtonVariant::Plain),
                     )
                     .show_disclosure_caret(true)
+                    .bare()
                     .content(
                         MenuList::new()
                             // Row of square, icon-only, flat IconButtons at
