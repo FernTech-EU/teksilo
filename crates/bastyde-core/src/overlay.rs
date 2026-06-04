@@ -669,8 +669,10 @@ impl OverlayManager {
     /// Internal: same shape as the original `dismiss`, but bypasses
     /// the fade gate. Used both by `dismiss` (no fade configured /
     /// already fading out) and by `process_pending_fade_dismissals`
-    /// when a fade-out tween has completed.
-    fn dismiss_immediate(&mut self, id: OverlayId) -> Vec<WidgetId> {
+    /// when a fade-out tween has completed. Also used by the orphaned-
+    /// overlay GC (`WidgetTree::gc_orphaned_overlays`), where fading is
+    /// impossible because the content widget is already destroyed.
+    pub(crate) fn dismiss_immediate(&mut self, id: OverlayId) -> Vec<WidgetId> {
         // Collect IDs to dismiss: the target + all descendants
         let mut to_dismiss = vec![id];
         let mut i = 0;

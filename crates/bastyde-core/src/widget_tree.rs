@@ -282,6 +282,14 @@ pub struct WidgetTree {
     /// tree's local locale signal — the i18n thread-local would stay put
     /// and `tr!` lookups would not re-resolve.
     pub(crate) pending_locale_request: Option<String>,
+    /// Raised by [`EventContext::set_theme`] during dispatch; drained by
+    /// the application event loop (see
+    /// `WindowManager::drain_pending_theme_requests`) so the switch is
+    /// routed through `WindowManager::set_theme`, which fans the new theme
+    /// out to *every* window. Applying via `WidgetTree::set_theme` inline
+    /// would only re-theme the originating window — the rest of the app
+    /// would stay on the old theme. Mirrors `pending_locale_request`.
+    pub(crate) pending_theme_request: Option<crate::styles::Theme>,
     /// The `WindowState` for this tree's hosting window. Populated
     /// by the app-level window manager when the tree is registered;
     /// `None` for standalone trees. Cloned into every `EventContext`
@@ -401,6 +409,7 @@ impl WidgetTree {
             last_frame_time: None,
             close_window_requested: false,
             pending_locale_request: None,
+            pending_theme_request: None,
             window_state: None,
         }
     }
@@ -1808,6 +1817,15 @@ impl WidgetTree {
         self.pending_locale_request.take()
     }
 
+    /// Drain the pending theme switch raised by
+    /// [`EventContext::set_theme`] during dispatch. The app layer
+    /// (`WindowManager::drain_pending_theme_requests`) routes it through
+    /// `WindowManager::set_theme` so the new theme is applied to every
+    /// window, not just the one whose handler requested it.
+    pub fn take_pending_theme_request(&mut self) -> Option<crate::styles::Theme> {
+        self.pending_theme_request.take()
+    }
+
     /// Drain all pending modal requests recorded during event handling.
     ///
     /// Each request includes the originating widget so higher layers can
@@ -1869,6 +1887,9 @@ impl WidgetTree {
                         }
                         if let Some(pass_through) = handler_set.event_pass_through {
                             node.event_pass_through = pass_through;
+                        }
+                        if let Some(hit_transparent) = handler_set.hit_transparent {
+                            node.hit_transparent = hit_transparent;
                         }
                         if handler_set.context_menu_factory.is_some() {
                             node.context_menu_factory = handler_set.context_menu_factory;
@@ -1949,7 +1970,6 @@ impl WidgetTree {
                 }
                 if let Some(node) = self.arena.get_mut(id) {
                     node.children = built_children;
-                    node.has_built_children = true;
                 }
             }
         }
@@ -1998,6 +2018,9 @@ impl WidgetTree {
                         }
                         if let Some(pass_through) = handler_set.event_pass_through {
                             node.event_pass_through = pass_through;
+                        }
+                        if let Some(hit_transparent) = handler_set.hit_transparent {
+                            node.hit_transparent = hit_transparent;
                         }
                         if handler_set.context_menu_factory.is_some() {
                             node.context_menu_factory = handler_set.context_menu_factory;
@@ -2072,7 +2095,6 @@ impl WidgetTree {
                     }
                     if let Some(node) = self.arena.get_mut(id) {
                         node.children = built_children;
-                        node.has_built_children = true;
                     }
                 }
             }

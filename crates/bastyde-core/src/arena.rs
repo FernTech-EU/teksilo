@@ -104,6 +104,16 @@ pub struct WidgetNode {
     /// `HighlightLayer` and `HoverProbe` to paint over the user's
     /// content without absorbing clicks. Default `false`.
     pub event_pass_through: bool,
+    /// When `true`, this widget AND its entire subtree are invisible to
+    /// hit-testing: the recursion returns immediately without descending
+    /// into children, so the point falls through to whatever sits
+    /// behind. Unlike [`event_pass_through`](Self::event_pass_through)
+    /// (which is per-node — descendants stay hittable), this excludes
+    /// the whole subtree. Use for purely decorative overlays whose
+    /// children are themselves widgets — a count badge over a button, a
+    /// watermark, a status dot — so they never steal clicks meant for
+    /// the control underneath. Default `false`.
+    pub hit_transparent: bool,
     /// Optional opacity multiplier (0..1) applied to this widget's
     /// entire subtree during paint. The render walker emits
     /// `SetOpacity(value)` before walking the widget's own paint and
@@ -193,8 +203,6 @@ pub struct WidgetNode {
     pub(crate) node_tab_index: Option<i32>,
     /// Cursor override set via HandlerSet.
     pub(crate) node_cursor: Option<CursorIcon>,
-    /// Whether build() returned children (for rebuild on environment change).
-    pub(crate) has_built_children: bool,
     /// RAII observer handles for effects registered during build().
     /// Dropped on rebuild or widget destruction.
     pub(crate) effect_handles: Vec<ObserverHandle>,
@@ -268,6 +276,7 @@ impl WidgetNode {
             clips_children: false,
             ime: None,
             event_pass_through: false,
+            hit_transparent: false,
             opacity_prop: None,
             transform_prop: None,
             content_transform: false,
@@ -280,7 +289,6 @@ impl WidgetNode {
             node_focusable: None,
             node_tab_index: None,
             node_cursor: None,
-            has_built_children: false,
             effect_handles: Vec::new(),
             subscription_handles: Vec::new(),
             context_menu_factory: None,
@@ -649,6 +657,14 @@ impl WidgetArena {
         if !self.is_active(id) || Some(id) == exclude {
             return None;
         }
+        // Decorative subtree: skip this node and ALL its descendants so
+        // the point falls through to whatever is painted behind. Checked
+        // before descending into children (the difference from
+        // `event_pass_through`, which is applied only after the children
+        // miss).
+        if self.get(id).map(|n| n.hit_transparent).unwrap_or(false) {
+            return None;
+        }
         // The input point arrives in this node's parent-effective space. A
         // `set_transform` scope is composed by the render walker around this
         // node's subtree, so hit-testing mirrors it by inverse-applying the
@@ -897,8 +913,7 @@ impl WidgetArena {
     }
 
     /// Collect widgets that need their `build()` re-run (data-driven rebuild).
-    /// Only returns active widgets with `has_built_children == true` and
-    /// `needs_rebuild == true`.
+    /// Only returns active widgets with `needs_rebuild == true`.
     ///
     /// Allocating wrapper around [`Self::needs_rebuild_iter`]. Prefer
     /// the iterator on hot paths.
@@ -907,13 +922,22 @@ impl WidgetArena {
     }
 
     /// Stream widgets that need `build()` re-run without allocating.
+    ///
+    /// `needs_rebuild` is set only by `BindingLevel::Rebuild` bindings —
+    /// i.e. on composing widgets that explicitly want `build()` re-run
+    /// when their data model changes. It is intentionally NOT gated on
+    /// the widget currently having children: a data-driven widget that
+    /// builds its children directly and starts EMPTY (e.g. the toast
+    /// host with no toasts yet, an empty list that renders rows without
+    /// a persistent container) must still rebuild to materialise its
+    /// FIRST child. `rebuild_single_widget` handles a childless widget
+    /// correctly (nothing to tear down, then it adopts `build()`'s
+    /// output).
     pub fn needs_rebuild_iter(&self) -> impl Iterator<Item = WidgetId> + '_ {
         self.nodes
             .iter()
             .filter(|(_, n)| {
-                n.activation == ActivationState::Active
-                    && n.has_built_children
-                    && n.dirty.needs_rebuild
+                n.activation == ActivationState::Active && n.dirty.needs_rebuild
             })
             .map(|(id, _)| id)
     }
@@ -1026,6 +1050,9 @@ impl WidgetArena {
             }
             if let Some(pass_through) = handler_set.event_pass_through {
                 node.event_pass_through = pass_through;
+            }
+            if let Some(hit_transparent) = handler_set.hit_transparent {
+                node.hit_transparent = hit_transparent;
             }
             if handler_set.context_menu_factory.is_some() {
                 node.context_menu_factory = handler_set.context_menu_factory;

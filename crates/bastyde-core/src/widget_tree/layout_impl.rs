@@ -96,6 +96,34 @@ impl WidgetTree {
         }
     }
 
+    /// Dismiss any active overlay whose content widget is no longer
+    /// alive in the arena. An overlay's owner can be torn down
+    /// out-of-band: a data-driven rebuild destroys the widget that
+    /// showed it (clicking "mark all read" inside a notification popover
+    /// rebuilds the bell that owns the overlay; closing a document tears
+    /// down a still-open inline popover). The content then disappears
+    /// visually, but the overlay ENTRY survives in the manager and keeps
+    /// intercepting clicks (the click-outside scrim) until the user
+    /// clicks elsewhere. This GC removes such orphans immediately (no
+    /// fade — the content is already gone). A normally-open overlay's
+    /// content stays active (gated `true`), so it is never touched.
+    pub(super) fn gc_orphaned_overlays(&mut self) {
+        let orphaned: Vec<crate::overlay::OverlayId> = self
+            .overlay_manager
+            .active_ids()
+            .into_iter()
+            .filter(|&id| {
+                self.overlay_manager
+                    .overlay(id)
+                    .map(|o| !self.arena.is_active(o.content_id))
+                    .unwrap_or(false)
+            })
+            .collect();
+        for id in orphaned {
+            self.overlay_manager.dismiss_immediate(id);
+        }
+    }
+
     /// Drain any widgets flagged `needs_rebuild` that are currently
     /// active + have built children. Called from
     /// `process_state_changes` after dirty bindings have been
@@ -250,6 +278,14 @@ impl WidgetTree {
         // shows fresh content in the *same* layout pass rather than
         // waiting for another paint-triggering event.
         self.process_pending_rebuilds(&mut *ops);
+
+        // Now that any data-driven rebuilds have torn down their old
+        // subtrees, drop any overlay whose content was destroyed out-of-
+        // band (e.g. clicking "mark all read" inside a notification
+        // popover rebuilds the bell that owns it). Without this the
+        // overlay lingers as an invisible click-blocker. Runs before the
+        // early-return so it takes effect even on otherwise-idle passes.
+        self.gc_orphaned_overlays();
 
         self.arena.refresh_roots();
 

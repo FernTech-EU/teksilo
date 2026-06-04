@@ -303,6 +303,10 @@ pub struct HandlerSet {
     /// hit-testing — events fall through to whatever sits behind it.
     /// Used by the debug inspector's overlay widgets.
     pub(crate) event_pass_through: Option<bool>,
+    /// When `Some(true)`, this node and its WHOLE subtree are invisible
+    /// to pointer hit-testing (decorative overlays — count badges,
+    /// watermarks). See [`super::arena::WidgetNode::hit_transparent`].
+    pub(crate) hit_transparent: Option<bool>,
     pub(crate) context_menu_factory: Option<ContextMenuFactory>,
     /// User-bound signal that the framework writes whenever the
     /// focused widget is a strict descendant of this node. See
@@ -336,6 +340,7 @@ impl HandlerSet {
             clips_children: None,
             ime: None,
             event_pass_through: None,
+            hit_transparent: None,
             context_menu_factory: None,
             focus_within: None,
             hover_within: None,
@@ -564,6 +569,17 @@ impl HandlerSet {
     /// and `HoverProbe` use this).
     pub fn event_pass_through(mut self, pass_through: bool) -> Self {
         self.event_pass_through = Some(pass_through);
+        self
+    }
+
+    /// Make this widget AND its whole subtree invisible to pointer
+    /// hit-testing. Stronger than [`event_pass_through`](Self::event_pass_through):
+    /// that one keeps descendants hittable, this one excludes them too.
+    /// For purely decorative composite overlays (a count badge over a
+    /// button, a watermark) whose own children would otherwise swallow
+    /// the click meant for the control underneath.
+    pub fn hit_transparent(mut self, transparent: bool) -> Self {
+        self.hit_transparent = Some(transparent);
         self
     }
 
@@ -886,6 +902,13 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// [`HandlerSet::event_pass_through`].
     pub fn event_pass_through(mut self, pass_through: bool) -> Self {
         self.handler_set.event_pass_through = Some(pass_through);
+        self
+    }
+
+    /// Make this widget and its whole subtree invisible to pointer
+    /// hit-testing. See [`HandlerSet::hit_transparent`].
+    pub fn hit_transparent(mut self, transparent: bool) -> Self {
+        self.handler_set.hit_transparent = Some(transparent);
         self
     }
 
@@ -1475,6 +1498,13 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
     /// [`HandlerSet::event_pass_through`].
     fn event_pass_through(self, pass_through: bool) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).event_pass_through(pass_through)
+    }
+
+    /// Make this widget and its whole subtree invisible to pointer
+    /// hit-testing (decorative overlays). See
+    /// [`HandlerSet::hit_transparent`].
+    fn hit_transparent(self, transparent: bool) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).hit_transparent(transparent)
     }
 
     /// Set a context-menu factory. See
