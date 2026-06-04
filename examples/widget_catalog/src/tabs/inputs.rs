@@ -84,14 +84,11 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let segmented = section(
         ctx,
         lit!("SegmentedControl"),
-        SegmentedControl::new(
-            vec![
-                tr!(inp_segment_first()).resolve_now(),
-                tr!(inp_segment_second()).resolve_now(),
-                tr!(inp_segment_third()).resolve_now(),
-            ],
-            sigs.segment_selected.clone(),
-        ),
+        SegmentedControl::new(sigs.segment_selected.clone()).segments([
+            tr!(inp_segment_first()),
+            tr!(inp_segment_second()),
+            tr!(inp_segment_third()),
+        ]),
     );
     let combo = section(
         ctx,
@@ -129,14 +126,13 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
 pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     // SegmentedControl + ComboBox have multi-arg constructors that
     // bati! ctor syntax can't express on its own — pre-register them.
-    let segmented_widget = ctx.add(SegmentedControl::new(
-        vec![
-            tr!(inp_segment_first()).resolve_now(),
-            tr!(inp_segment_second()).resolve_now(),
-            tr!(inp_segment_third()).resolve_now(),
-        ],
-        sigs.segment_selected.clone(),
-    ));
+    let segmented_widget = ctx.add(
+        SegmentedControl::new(sigs.segment_selected.clone()).segments([
+            tr!(inp_segment_first()),
+            tr!(inp_segment_second()),
+            tr!(inp_segment_third()),
+        ]),
+    );
     let combo_widget = ctx.add(
         ComboBox::from_items(
             vec![

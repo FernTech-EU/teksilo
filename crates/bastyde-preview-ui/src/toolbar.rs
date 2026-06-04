@@ -122,7 +122,7 @@ fn build_background_picker(ctx: &mut BuildContext, state: &AppState) -> WidgetId
         });
         ctx.own_handle(h);
     }
-    ctx.add(SegmentedControl::new(labels, idx_sig))
+    ctx.add(SegmentedControl::new(idx_sig).segments(labels.into_iter().map(|s| lit!(s))))
 }
 
 fn build_locale_picker(ctx: &mut BuildContext, state: &AppState) -> WidgetId {

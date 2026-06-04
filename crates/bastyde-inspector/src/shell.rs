@@ -327,10 +327,11 @@ fn build_toolbar(state: InspectorState) -> impl Widget + 'static {
         });
         bounds_index.attach_keepalive(h);
     }
-    let bounds_seg = SegmentedControl::new(
-        vec!["Off".to_string(), "Sel".to_string(), "All".to_string()],
-        bounds_index,
-    );
+    let bounds_seg = SegmentedControl::new(bounds_index).segments([
+        bastyde_i18n::lit!("Off"),
+        bastyde_i18n::lit!("Sel"),
+        bastyde_i18n::lit!("All"),
+    ]);
 
     let opacity_slider = FixedSize::new()
         .bind_width(Signal::new(120.0_f32))

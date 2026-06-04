@@ -1,12 +1,13 @@
 //! Tier-3 style protocol for `SegmentedControl`. See
 //! `docs/styling-system.md`.
 //!
-//! Themes the segmented-control chrome: the outer rounded frame, the
-//! per-segment hover tint, the selected-segment surface + border, the
-//! divider geometry between segments, the focus ring, and the
-//! per-segment label rendering. The `SegmentedControl` widget keeps
-//! its `Role::RadioGroup` + per-segment `Role::RadioButton` semantics
-//! and dispatches taps/keys; it owns no `paint()` of its own.
+//! Themes the segmented-control chrome *behind* the segments: the outer
+//! rounded frame, the per-segment hover tint, the selected-segment
+//! surface + border, the focus ring. Labels and icons are composed
+//! widgets owned by the `SegmentedControl` (so they stay locale- and
+//! theme-reactive); the chrome paints no text or icons. The widget keeps
+//! its `Role::RadioGroup` + per-segment `Role::RadioButton` semantics and
+//! dispatches taps/keys; it owns no `paint()` of its own.
 
 use std::rc::Rc;
 
@@ -17,8 +18,10 @@ use crate::widget_id::WidgetId;
 
 #[derive(Clone, Debug)]
 pub struct SegmentedControlStyleConfig {
-    /// Resolved per-segment labels — drawn by the recipe widget.
-    pub labels: Vec<String>,
+    /// Number of segments — the chrome divides its inner width evenly to
+    /// place the per-segment hover / selected backgrounds. Labels/icons
+    /// are composed widgets the chrome does not draw.
+    pub segment_count: usize,
     /// Current selection.
     pub selected: Signal<usize>,
     /// `Some(index)` while the pointer is over a segment. The recipe

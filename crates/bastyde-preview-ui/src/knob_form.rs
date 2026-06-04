@@ -299,8 +299,7 @@ fn build_choice(
 ) -> WidgetId {
     let sig = values.choice(decl.id);
     if options.len() <= 4 {
-        let labels: Vec<String> = options.iter().map(|s| s.to_string()).collect();
-        ctx.add(SegmentedControl::new(labels, sig))
+        ctx.add(SegmentedControl::new(sig).segments(options.iter().map(|s| lit!(s.to_string()))))
     } else {
         let items: Vec<String> = options.iter().map(|s| s.to_string()).collect();
         let initial = items.get(sig.get()).cloned();

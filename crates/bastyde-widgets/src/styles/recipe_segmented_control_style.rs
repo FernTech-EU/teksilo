@@ -35,7 +35,7 @@ pub struct RecipeSegmentedControlStyle;
 impl SegmentedControlStyle for RecipeSegmentedControlStyle {
     fn make_body(&self, cfg: &SegmentedControlStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         ctx.add(SegmentedControlChrome {
-            labels: cfg.labels.clone(),
+            segment_count: cfg.segment_count,
             selected: cfg.selected.clone(),
             hovered_segment: cfg.hovered_segment.clone(),
             focus_origin: cfg.focus_origin.clone(),
@@ -44,12 +44,13 @@ impl SegmentedControlStyle for RecipeSegmentedControlStyle {
     }
 }
 
-/// Internal recipe widget that paints the full segmented-control
-/// chrome (frame, per-segment hover, selected, labels, focus ring).
-/// Mirrors the pre-migration `SegmentedControl::paint` exactly,
-/// reading state from the same signals the widget owns.
+/// Internal recipe widget that paints the segmented-control chrome
+/// *behind* the segment cells: the rounded frame, per-segment hover
+/// tint, the selected-segment surface + border, and the keyboard focus
+/// ring. Labels and icons are composed widgets the `SegmentedControl`
+/// places on top — the chrome draws no text or icons.
 struct SegmentedControlChrome {
-    labels: Vec<String>,
+    segment_count: usize,
     selected: Signal<usize>,
     hovered_segment: Signal<Option<usize>>,
     focus_origin: Signal<Option<FocusOrigin>>,
@@ -60,7 +61,7 @@ struct SegmentedControlChrome {
 impl std::fmt::Debug for SegmentedControlChrome {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SegmentedControlChrome")
-            .field("segments", &self.labels.len())
+            .field("segments", &self.segment_count)
             .finish()
     }
 }
@@ -95,9 +96,9 @@ impl Widget for SegmentedControlChrome {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let id = ctx.self_id();
         let registry = ctx.binding_registry();
-        // Repaint on any state-signal change. Label changes are
-        // structural and live on the parent `SegmentedControl`'s
-        // rebuild path, so we don't bind to a labels signal here.
+        // Repaint on any state-signal change. The segment cells own their
+        // own (reactive) labels/icons, so the chrome binds only the
+        // background-state signals.
         self.selected
             .bind_to(id, registry, BindingLevel::RepaintOnly);
         self.hovered_segment
@@ -123,7 +124,7 @@ impl Widget for SegmentedControlChrome {
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let colors = &ctx.theme.colors;
         let shape = &ctx.theme.shape;
-        let n = self.labels.len();
+        let n = self.segment_count;
         if n == 0 {
             return;
         }
@@ -151,37 +152,23 @@ impl Widget for SegmentedControlChrome {
         };
         canvas.stroke_rounded_rect(visual, frame_cr, frame_border, bw);
 
-        // 2. Non-selected segments — hover tint + label.
+        // 2. Non-selected segments — hover tint only (the cell widget
+        //    draws the label/icon on top).
         for i in 0..n {
             if i == selected {
                 continue;
             }
-            let rect = Self::segment_rect(i, inner, n);
             if is_enabled && hovered == Some(i) {
+                let rect = Self::segment_rect(i, inner, n);
                 canvas.fill_rounded_rect(rect, frame_cr, colors.surface_hover);
             }
-            let text_color = if !is_enabled {
-                colors.text_disabled
-            } else {
-                colors.text_primary
-            };
-            let text_rect = Rect::new(
-                rect.x + SEGMENTED_CONTROL_PADDING_HORIZONTAL,
-                rect.y + SEGMENTED_CONTROL_PADDING_VERTICAL,
-                (rect.width - SEGMENTED_CONTROL_PADDING_HORIZONTAL * 2.0).max(0.0),
-                (rect.height - SEGMENTED_CONTROL_PADDING_VERTICAL * 2.0).max(0.0),
-            );
-            canvas.draw_text(
-                &self.labels[i],
-                text_rect,
-                &ctx.theme.typography.small,
-                text_color,
-            );
         }
 
-        // 3. Selected segment — extended by `bw` on all sides so the
-        //    stroke covers the frame border AND any adjacent hover
-        //    tint on middle segments.
+        // 3. Selected segment — surface + border, extended by `bw` on all
+        //    sides so the stroke covers the frame border AND any adjacent
+        //    hover tint on middle segments. The label/icon is drawn by the
+        //    cell widget; its tint follows this background reactively
+        //    (OnAccent when focused).
         if selected < n {
             let sel_base = Self::segment_rect(selected, inner, n);
             let sel = Rect::new(
@@ -190,36 +177,15 @@ impl Widget for SegmentedControlChrome {
                 sel_base.width + bw * 2.0,
                 sel_base.height + bw * 2.0,
             );
-            let (sel_bg, sel_border, sel_text) = if !is_enabled {
-                (
-                    colors.surface_selected_inactive,
-                    colors.border,
-                    colors.text_disabled,
-                )
+            let (sel_bg, sel_border) = if !is_enabled {
+                (colors.surface_selected_inactive, colors.border)
             } else if focused {
-                (colors.accent, colors.accent, colors.text_on_accent)
+                (colors.accent, colors.accent)
             } else {
-                (
-                    colors.surface_selected_inactive,
-                    colors.border_strong,
-                    colors.text_primary,
-                )
+                (colors.surface_selected_inactive, colors.border_strong)
             };
             canvas.fill_rounded_rect(sel, frame_cr, sel_bg);
             canvas.stroke_rounded_rect(sel, frame_cr, sel_border, bw);
-
-            let text_rect = Rect::new(
-                sel.x + SEGMENTED_CONTROL_PADDING_HORIZONTAL,
-                sel.y + SEGMENTED_CONTROL_PADDING_VERTICAL,
-                (sel.width - SEGMENTED_CONTROL_PADDING_HORIZONTAL * 2.0).max(0.0),
-                (sel.height - SEGMENTED_CONTROL_PADDING_VERTICAL * 2.0).max(0.0),
-            );
-            canvas.draw_text(
-                &self.labels[selected],
-                text_rect,
-                &ctx.theme.typography.small,
-                sel_text,
-            );
         }
 
         // 4. Focus ring — drawn OUTSIDE the visual, inside the reserved envelope.

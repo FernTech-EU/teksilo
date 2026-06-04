@@ -171,7 +171,7 @@ pub use repeater::Repeater;
 pub use scroll_area::{ScrollArea, ScrollBarMode, ScrollBarPolicy};
 pub use scroll_bar::{ScrollBar, ScrollBarOrientation};
 pub use search_field::SearchField;
-pub use segmented_control::SegmentedControl;
+pub use segmented_control::{Segment, SegmentedControl};
 pub use shortcut_settings::ShortcutSettings;
 pub use slider::Slider;
 pub use snackbar::Snackbar;

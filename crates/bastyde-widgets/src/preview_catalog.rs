@@ -626,9 +626,9 @@ impl WidgetCatalog for SegmentedControl {
         ]
     }
     fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
-        let labels = vec!["Day".to_string(), "Week".to_string(), "Month".to_string()];
         Box::new(
-            SegmentedControl::new(labels, knobs.choice("selected"))
+            SegmentedControl::new(knobs.choice("selected"))
+                .segments([lit!("Day"), lit!("Week"), lit!("Month")])
                 .enabled(knobs.bool_("enabled").get()),
         )
     }

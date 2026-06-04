@@ -161,15 +161,12 @@ impl Widget for HighlightControls {
             });
         }
 
-        let segmented = SegmentedControl::new(
-            vec![
-                "Off".to_string(),
-                "Search".to_string(),
-                "Syntax".to_string(),
-                "Spell".to_string(),
-            ],
-            mode.clone(),
-        );
+        let segmented = SegmentedControl::new(mode.clone()).segments([
+            lit!("Off"),
+            lit!("Search"),
+            lit!("Syntax"),
+            lit!("Spell"),
+        ]);
 
         // The SearchField's inner input is `MinSize::new(0, 0)`, so in a
         // Toolbar's HStack (intrinsic width, no stretch) it collapses to ~zero
