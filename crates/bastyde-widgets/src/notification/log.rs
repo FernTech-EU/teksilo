@@ -48,8 +48,8 @@ use bastyde_i18n::LocalizedString;
 ///   user's local timezone, recomputed on every archive mutation;
 /// - [`StandardListItem`] rows with unread-as-bold differentiation.
 ///
-/// A `rich-text`-gated SearchField filter and a severity-chip filter
-/// can be composed by apps using the existing widget toolkit.
+/// A SearchField filter and a severity-chip filter can be composed by
+/// apps using the existing widget toolkit.
 pub struct NotificationLog {
     archive: Rc<NotificationArchiveModel>,
     show_toolbar: bool,

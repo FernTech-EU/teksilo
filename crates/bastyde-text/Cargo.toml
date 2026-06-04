@@ -55,12 +55,6 @@ fonts-all = [
 # use `register_font(bytes)` directly.
 system-emoji = ["dep:memmap2"]
 
-# Enables `RichTextEngine` and the `FontRegistrar` trait. Pulls in
-# `text-document` directly so the engine can consume `FlowSnapshot`,
-# `TextCursor`, and `DocumentFragment`. Required by bastyde-widgets's
-# `rich-text` feature.
-rich-text = ["dep:text-document"]
-
 # Hyphenation language coverage, forwarded to text-typeset's gates.
 # Western European is already active via text-typeset's own defaults;
 # enable `hyphenation-all-languages` to compile every hypher language
@@ -72,7 +66,12 @@ hyphenation-all-languages = ["text-typeset/hyphenation-all-languages"]
 bastyde-canvas = { workspace = true }
 bastyde-tokens = { workspace = true }
 text-typeset = { workspace = true }
-text-document = { workspace = true, optional = true }
+# `text-document` is a mandatory dependency: `RichTextEngine` and the
+# `FontRegistrar` trait consume its `FlowSnapshot`, `TextCursor`, and
+# `DocumentFragment` types, and the whole text-input/rich-text widget
+# stack in bastyde-widgets is load-bearing (every text field derives
+# from it), so there is nothing to gate.
+text-document = { workspace = true }
 # Activated by the `system-emoji` feature. The bundled color-emoji
 # fonts can be ~180 MB on macOS — mmap lets the kernel page glyphs in
 # on demand instead of `fs::read`-ing the whole file into a heap Vec.

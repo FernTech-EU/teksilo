@@ -210,9 +210,9 @@ Callers that already use `SortFilterListModel<T>` /
 mutates the map.
 
 The editor inside the popover is a deliberately minimal text field:
-printable characters, Backspace, Delete (clear), and ImeCommit. It does
-**not** depend on the `rich-text` feature, so the filter UI is
-available in any TableView/TreeTable build.
+printable characters, Backspace, Delete (clear), and ImeCommit. It is
+self-contained, so the filter UI is available in any TableView/TreeTable
+build.
 
 The header's pointer handler reserves a **filter zone** at the trailing
 edge (resize handle + filter glyph + a small padding tolerance) so that

@@ -2,7 +2,7 @@
 //!
 //! M8a demo of `RichTextEditor::read_only`. Loads a markdown sample
 //! into a `TextDocument` and displays it in a read-only viewer. Run
-//! with: `cargo run -p rich-text-viewer --features rich-text`.
+//! with: `cargo run -p rich-text-viewer`.
 //!
 //! This example is deliberately minimal — it exercises the widget's
 //! layout, paint, and `on_change` event plumbing end to end without

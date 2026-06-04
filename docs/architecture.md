@@ -500,7 +500,7 @@ bastyde-core    bastyde-text ← text-typeset
     │   bastyde-telemetry ← uuid
     │
     ├── bastyde-widgets
-    │   └── [rich-text] ← text-document, text-typeset
+    │   └── bastyde-text ← text-document, text-typeset
     │
     │   bastyde-i18n ← fluent-rs, icu_decimal, icu_datetime, icu_calendar
     │
@@ -517,7 +517,7 @@ bastyde (umbrella, re-exports)
 
 `bastyde-text` depends only on `bastyde-canvas` (for the `TextBackend` trait) and `text-typeset`. It does not depend on `bastyde-core`, `text-document`, or any platform crate. The `TextBackend` trait is defined in `bastyde-canvas` so that the Canvas can call text rendering methods without knowing which backend implementation is active.
 
-The RichTextEditor widget (in `bastyde-widgets` behind the `rich-text` feature) depends directly on `text-document` and `text-typeset`. The application owns the `TextDocument` instance and passes it to the widget — Bastyde never owns or wraps the document model. The application depends on `text-document` directly for model access (highlighter, cursors, import/export). Cargo deduplicates the shared dependency automatically.
+The RichTextEditor widget (in `bastyde-widgets`) depends directly on `text-document` and `text-typeset`. The application owns the `TextDocument` instance and passes it to the widget — Bastyde never owns or wraps the document model. The application depends on `text-document` directly for model access (highlighter, cursors, import/export). Cargo deduplicates the shared dependency automatically.
 
 Platform-specific code (winit, wgpu, accesskit-winit) is confined to `bastyde-render` and `bastyde-platform`. Everything above them is platform-independent and headlessly testable.
 
@@ -586,7 +586,7 @@ The bulk of the original post-milestone question list has landed. The short list
 
 **Native menu bar on macOS.** The widget-based `MenuBar` (Milestone 4) is correct for Windows and Linux where menu bars live inside the window chrome. On macOS the OS expects menus to live in the global `NSMenu`. The remaining work is a platform abstraction that routes a single declarative menu description through either path.
 
-**Virtualized dropdowns.** `ComboBox` now virtualizes via `ListView` under `max_visible_items`: lists beyond the cap materialize only the visible rows (plus `ListView`'s small buffer) instead of building every `DropdownItem` eagerly. The searchable (`rich-text`) filtered path shares the same virtualized renderer. `MenuList` grew a `max_visible_items` builder that caps panel height and wraps the item column in a `ScrollArea`, but does **not** virtualize — its API still takes arbitrary `impl Widget` children, so true virtualization would require a model-driven MenuList rewrite (tracked as follow-up). The eager build is cheap enough that capped 100+ item menus are fine in practice.
+**Virtualized dropdowns.** `ComboBox` now virtualizes via `ListView` under `max_visible_items`: lists beyond the cap materialize only the visible rows (plus `ListView`'s small buffer) instead of building every `DropdownItem` eagerly. The searchable filtered path shares the same virtualized renderer. `MenuList` grew a `max_visible_items` builder that caps panel height and wraps the item column in a `ScrollArea`, but does **not** virtualize — its API still takes arbitrary `impl Widget` children, so true virtualization would require a model-driven MenuList rewrite (tracked as follow-up). The eager build is cheap enough that capped 100+ item menus are fine in practice.
 
 ---
 

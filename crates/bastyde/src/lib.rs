@@ -33,13 +33,14 @@ pub use bastyde_widgets as widgets;
 #[cfg(feature = "text")]
 pub use bastyde_text as text;
 
-/// Re-export of `text_document` when the `rich-text` feature is
-/// enabled, so applications can access the rich document model
-/// through the umbrella crate without adding a second direct
-/// workspace dependency. `bastyde-text` pulls in `text-document`
-/// under its own `rich-text` feature and re-exports it; this line
-/// just forwards the re-export one more level up.
-#[cfg(feature = "rich-text")]
+/// Re-export of `text_document`, so applications can access the rich
+/// document model through the umbrella crate without adding a second
+/// direct workspace dependency. `bastyde-text` depends on
+/// `text-document` and re-exports it; this line just forwards the
+/// re-export one more level up. Available whenever the `text` feature
+/// is enabled (on by default) — `bastyde_text` is a direct dependency
+/// of the umbrella only under that feature.
+#[cfg(feature = "text")]
 pub use bastyde_text::text_document;
 
 #[cfg(feature = "i18n")]

@@ -270,7 +270,7 @@ HStack::new()
 
 **Rendering primitives:** `RectWidget`, `TextWidget`
 
-**Text editing primitives:** `TextInputField` (gated behind `rich-text` feature)
+**Text editing primitives:** `TextInputField`
 
 ## Signals & Reactivity (V2)
 

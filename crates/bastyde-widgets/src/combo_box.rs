@@ -16,8 +16,8 @@
 //! - `state` holds the interaction-state enum, the `ItemSource` accessor,
 //!   and color/index helpers.
 //! - `item` holds the single-row `DropdownItem` widget.
-//! - `panel` holds the `DropdownPanel` overlay content and — under
-//!   `rich-text` — the `FilteredItemList` inner widget.
+//! - `panel` holds the `DropdownPanel` overlay content and the
+//!   `FilteredItemList` inner widget.
 //! - `tests` holds the headless unit tests.
 
 use bastyde_i18n::lit;
@@ -90,19 +90,15 @@ pub struct ComboBox<T: Clone + PartialEq + 'static> {
     initial_enabled: bool,
     max_visible_items: usize,
     /// When `true`, the dropdown panel includes a search field at the top
-    /// and the list is filtered live against the query. Only exposed under
-    /// the `rich-text` feature because it relies on `TextInput`.
-    #[cfg(feature = "rich-text")]
+    /// and the list is filtered live against the query.
     searchable: bool,
     /// Custom match predicate used in searchable mode. If unset, the
     /// default is a case-insensitive substring match on the label.
-    #[cfg(feature = "rich-text")]
     filter: Option<Rc<dyn Fn(&str, &T) -> bool>>,
     /// Search query signal, created lazily on the first build when
     /// `searchable` is enabled. Shared with the `DropdownPanel` so both
     /// the trigger-side a11y state and the panel's filter see the same
     /// value.
-    #[cfg(feature = "rich-text")]
     search_query: Option<Signal<String>>,
     /// Cached index of the currently-selected value in `source`. Validated
     /// on every read; a miss triggers a fresh O(n) scan. Shared across the
@@ -166,11 +162,8 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
             label: None,
             initial_enabled: true,
             max_visible_items: DEFAULT_MAX_VISIBLE_ITEMS,
-            #[cfg(feature = "rich-text")]
             searchable: false,
-            #[cfg(feature = "rich-text")]
             filter: None,
-            #[cfg(feature = "rich-text")]
             search_query: None,
             variant: ComboBoxVariant::default(),
             style_override: None,
@@ -315,10 +308,9 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     }
 }
 
-/// Searchable-mode builders. Gated behind the `rich-text` feature
-/// because the search field is a `TextInput`, which shares the
-/// `RichTextEditor` engine and therefore the `bastyde-text` dependency.
-#[cfg(feature = "rich-text")]
+/// Searchable-mode builders. The search field is a `TextInput`, which
+/// shares the `RichTextEditor` engine and therefore the `bastyde-text`
+/// dependency.
 impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     /// Show a search field at the top of the dropdown panel and filter
     /// the list live against the user's query. When `true`, items are
@@ -512,7 +504,6 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         // `searchable(true)` → `false` between rebuilds doesn't keep a
         // stale signal alive, while `true` → `true` preserves the
         // in-progress query across model mutations.
-        #[cfg(feature = "rich-text")]
         let search_query = if self.searchable {
             let existing = self.search_query.clone();
             let q = existing.unwrap_or_else(|| Signal::new(String::new()));
@@ -527,7 +518,6 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         // populated by the panel during its own `build` so the open
         // path below can `ctx.request_focus(..)` the search field as
         // soon as the overlay activates.
-        #[cfg(feature = "rich-text")]
         let search_input_slot: Rc<Cell<Option<WidgetId>>> = Rc::new(Cell::new(None));
         let dropdown_panel = DropdownPanel {
             source: self.source.clone(),
@@ -536,11 +526,8 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             render_item: self.render_item.clone(),
             max_visible_items: self.max_visible_items,
             version: panel_version,
-            #[cfg(feature = "rich-text")]
             search_query,
-            #[cfg(feature = "rich-text")]
             filter: self.filter.clone(),
-            #[cfg(feature = "rich-text")]
             search_input_slot: search_input_slot.clone(),
             root_child_id: None,
         };
@@ -582,7 +569,6 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         let open_overlay = {
             let is_open = self.is_open.clone();
             let dismiss_callback = dismiss_callback.clone();
-            #[cfg(feature = "rich-text")]
             let search_input_slot = search_input_slot.clone();
             Rc::new(move |ctx: &mut EventContext| {
                 is_open.set(true);
@@ -599,7 +585,6 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                 });
                 // Searchable mode: land focus in the search field so
                 // the user can start typing immediately after opening.
-                #[cfg(feature = "rich-text")]
                 if let Some(input_id) = search_input_slot.get() {
                     ctx.request_focus(input_id);
                 }
@@ -938,7 +923,6 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         // ARIA combobox pattern: when the popup is a filtered list, mark
         // `aria-autocomplete="list"` so assistive tech announces the
         // filter behavior. Only applied in searchable mode.
-        #[cfg(feature = "rich-text")]
         if self.searchable {
             builder.set_auto_complete(bastyde_core::accesskit::AutoComplete::List);
         }

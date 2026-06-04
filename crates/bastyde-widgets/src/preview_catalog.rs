@@ -1894,9 +1894,7 @@ fn scenario_for<W: WidgetCatalog>(name: &str) -> Box<dyn Widget> {
 // =========================================================================
 // Color picker family (HexColorInput, ColorPicker, ColorEdit)
 // =========================================================================
-// Gated behind `rich-text` because the widgets themselves are.
 
-#[cfg(feature = "rich-text")]
 mod color_family {
     use super::*;
     use crate::{ColorEdit, ColorPicker, ColorPickerLayout, HexColorInput};
@@ -2039,9 +2037,7 @@ mod color_family {
 // =========================================================================
 // Secure input family (PasswordField)
 // =========================================================================
-// Gated behind `rich-text` because the editing primitive is.
 
-#[cfg(feature = "rich-text")]
 mod secure_input_family {
     use super::*;
     use crate::{EchoMode, PasswordField, RevealMode};

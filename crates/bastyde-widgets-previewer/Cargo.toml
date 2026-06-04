@@ -14,7 +14,7 @@ repository.workspace = true
 # application (Skribisto, …) builds its own analogous thin binary
 # with its own widget set.
 [dependencies]
-bastyde-widgets = { workspace = true, features = ["preview", "rich-text"] }
+bastyde-widgets = { workspace = true, features = ["preview"] }
 bastyde-preview-ui = { workspace = true }
 bastyde-preview = { workspace = true }
 

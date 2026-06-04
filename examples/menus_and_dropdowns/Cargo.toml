@@ -7,8 +7,8 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-# `rich-text` enables the `TextInput`-backed `.searchable()` combo box
-# showcased in Section 1.
-bastyde = { workspace = true, features = ["rich-text"] }
+# The `TextInput`-backed `.searchable()` combo box showcased in
+# Section 1 comes in unconditionally with the default widget set.
+bastyde = { workspace = true }
 # Needed for the tri-state checkable menu item (CheckState).
 bastyde-data = { workspace = true }

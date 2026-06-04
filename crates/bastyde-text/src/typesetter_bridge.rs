@@ -315,10 +315,6 @@ impl TypesetterBridge {
     /// accessor, so every widget's glyphs land in the same GPU
     /// atlas. Marks the atlas as dirty for the next
     /// [`atlas_info`](Self::atlas_info) call.
-    ///
-    /// Exposed behind `#[cfg(feature = "rich-text")]` so the
-    /// default feature set keeps a minimal public surface.
-    #[cfg(feature = "rich-text")]
     pub fn service_mut(&mut self) -> &mut TextFontService {
         self.had_text_activity = true;
         self.rich_text_atlas_dirty = true;
@@ -328,7 +324,6 @@ impl TypesetterBridge {
     /// Current HiDPI display scale factor as last set by
     /// [`TextBackend::set_scale_factor`]. Reads through to the
     /// shared [`TextFontService`].
-    #[cfg(feature = "rich-text")]
     pub fn display_scale_factor(&self) -> f32 {
         self.service.scale_factor()
     }

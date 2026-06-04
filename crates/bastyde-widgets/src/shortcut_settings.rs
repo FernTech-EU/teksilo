@@ -96,9 +96,8 @@ impl ShortcutSettings {
     /// show everything.
     ///
     /// Apps typically drive this from a `TextInput` elsewhere in
-    /// their settings UI; keeping the filter external lets the
-    /// widget stay usable without pulling in the `rich-text` feature
-    /// that `TextInput` requires.
+    /// their settings UI; keeping the filter external keeps this
+    /// widget's own surface minimal rather than embedding a search box.
     pub fn with_filter(mut self, filter: Signal<String>) -> Self {
         self.filter = Some(filter);
         self

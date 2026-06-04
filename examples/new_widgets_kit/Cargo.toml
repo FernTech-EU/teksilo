@@ -11,7 +11,6 @@ name = "new-widgets-kit"
 path = "src/main.rs"
 
 [dependencies]
-# `rich-text` pulls in TextInput / RichTextEditor widgets + signals.
 # `file-dialog` is on by default (RfdAsyncBackend) — explicit here to
 # document the dependency for the FilePickerField demo.
-bastyde = { workspace = true, features = ["rich-text", "file-dialog"] }
+bastyde = { workspace = true, features = ["file-dialog"] }

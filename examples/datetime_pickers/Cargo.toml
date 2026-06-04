@@ -7,5 +7,5 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-bastyde = { workspace = true, features = ["rich-text"] }
+bastyde = { workspace = true }
 jiff = { workspace = true }

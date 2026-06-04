@@ -6,9 +6,6 @@ public API surfaces (struct, builder methods, enums, module doc) of one
 or more widgets, run `python3 tools/extract_widget_api.py <Widget…>`
 or `--all` for everything.
 
-Widgets gated behind the `rich-text` feature are marked **(rich-text)**;
-the feature is on by default in the `bastyde` umbrella crate.
-
 For per-subsystem docs (data binding, accessibility overrides,
 animation, drag-and-drop, multi-window, settings, i18n, theming,
 shortcuts/intents/actions), see [SUMMARY.md](SUMMARY.md).
@@ -91,8 +88,8 @@ Direct draw surfaces with no internal composition.
 - [IconWidget](../crates/bastyde-widgets/src/primitives/icon_widget.rs) — vector icon rendered through the path atlas; `IconMode` for tinted vs. raw.
 - [ImageWidget](../crates/bastyde-widgets/src/primitives/image_widget.rs) — bitmap with `ImageFit` (fill / contain / cover / none / scale-down).
 - [ImageMask](../crates/bastyde-widgets/src/primitives/image_mask.rs) — CPU-side anti-aliased alpha mask (`ImageMaskShape`); used by Avatar and other shaped-image patterns.
-- [ValidationStrip](../crates/bastyde-widgets/src/primitives/validation_strip.rs) **(rich-text)** — inline error/warning/success strip under a field.
-- [TextInputField](../crates/bastyde-widgets/src/primitives/text_input_field.rs) **(rich-text)** — primitive single-line editable text used inside the higher-level field widgets.
+- [ValidationStrip](../crates/bastyde-widgets/src/primitives/validation_strip.rs) — inline error/warning/success strip under a field.
+- [TextInputField](../crates/bastyde-widgets/src/primitives/text_input_field.rs) — primitive single-line editable text used inside the higher-level field widgets.
 
 ---
 
@@ -146,9 +143,7 @@ Themed framing, sectioning, and window-level structure.
 
 ---
 
-## Text input family — **(rich-text)**
-
-All gated behind the `rich-text` feature; on by default in `bastyde`.
+## Text input family
 
 - [TextInput](../crates/bastyde-widgets/src/text_input.rs) — styled single-line input on top of `TextInputField`; `ValidationState`.
 - [RichTextEditor](../crates/bastyde-widgets/src/rich_text.rs) — full editing surface with IME, formatting commands, undo/redo, intrinsic-mode sizing (`min_lines` / `max_lines`); also runs read-only as the rich-text viewer (`ScrollPolicy`).

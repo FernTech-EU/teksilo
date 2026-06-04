@@ -29,14 +29,13 @@ default = [
 widgets = ["dep:bastyde-widgets"]
 text = ["dep:bastyde-text", "bastyde-app/text"]
 i18n = ["dep:bastyde-i18n"]
-rich-text = ["widgets", "bastyde-widgets/rich-text"]
 # Debug-only in-app inspector (`F12`, picker, AllBounds overlay,
-# theme/locale switchers, models tab, …). Pulls in `rich-text`
-# transitively because the Tree tab's filter input requires it. The
-# crate itself is `cfg(debug_assertions)` — release builds compile to
-# a no-op — but the Cargo dep is unconditional; turn this feature off
-# if you want to drop the transitive `rich-text` cost too.
-inspector = ["dep:bastyde-inspector", "rich-text"]
+# theme/locale switchers, models tab, …). Pulls in `widgets` because
+# the Tree tab's filter input is a `TextInput`. The crate itself is
+# `cfg(debug_assertions)` — release builds compile to a no-op — but the
+# Cargo dep is unconditional; turn this feature off if you want to drop
+# the inspector cost too.
+inspector = ["dep:bastyde-inspector", "widgets"]
 # Toast notifications. The `BastydeAppBuilderToastExt::install_toast`
 # entry point lives in this crate (mirroring how `inspector` declares
 # `BastydeAppBuilderInspectorExt` in `bastyde-inspector`); the actual Toast

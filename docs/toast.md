@@ -682,8 +682,8 @@ by other overlay-shaped widgets:
   in place (no fade-out + fade-in), which matches the IntelliJ
   pattern. Apps that want a visual handoff can dismiss + show
   separately instead of using `Toast::id`.
-- **`rich-text`-gated SearchField filter in NotificationLog**:
-  documented as a future refinement. Apps can compose external
-  filtering with their own toolbar above the log.
+- **SearchField filter in NotificationLog**: documented as a future
+  refinement. Apps can compose external filtering with their own
+  toolbar above the log.
 - **Severity-chip filter in NotificationLog**: same — composable
   with `SegmentedControl`.

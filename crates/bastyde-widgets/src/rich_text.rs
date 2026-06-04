@@ -1,4 +1,4 @@
-//! Rich text editor widget. Feature-gated behind the `rich-text` feature.
+//! Rich text editor widget.
 //!
 //! See [`§27.10` of the architecture doc](../../../../../docs/architecture.md)
 //! for the design rationale. Two construction presets:

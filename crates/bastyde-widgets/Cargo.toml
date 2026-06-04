@@ -8,10 +8,6 @@ authors.workspace = true
 repository.workspace = true
 
 [features]
-# Rich-text widgets. bastyde-platform is now an unconditional dep of
-# the crate (used by the privacy widget for the file-dialog API),
-# so the `dep:bastyde-platform` gate it previously carried is dropped.
-rich-text = ["dep:bastyde-text"]
 # Preview catalog impls — opt-in `WidgetCatalog` implementations
 # alongside each widget, registered with the `inventory` crate so the
 # `bastyde-preview-ui` previewer GUI discovers them at link time. Off by
@@ -63,10 +59,19 @@ open = { workspace = true }
 jiff = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
 # text-typeset + text-document come through bastyde-text's re-exports
-# (`bastyde_text::text_document`, `bastyde_text::RichTextEngine`, …) under
-# its own `rich-text` feature. Widgets never name either crate
-# directly, keeping bastyde-widgets's dependency surface minimal.
-bastyde-text = { workspace = true, optional = true, features = ["rich-text"] }
+# (`bastyde_text::text_document`, `bastyde_text::RichTextEngine`, …).
+# Widgets never name either crate directly, keeping bastyde-widgets's
+# dependency surface minimal. Mandatory: the text-input / rich-text
+# widget stack is load-bearing for every text field in the framework.
+#
+# Declared directly (not `workspace = true`) so we can set
+# `default-features = false` — Cargo rejects overriding
+# `default-features` on a workspace-inherited dep. This keeps the Noto
+# fallback-font bundles (bastyde-text's `default` set) OFF at the widget
+# level, so font selection stays an app-level decision driven through
+# the umbrella's `fonts-*` features. The base Inter font is always
+# embedded by bastyde-text regardless.
+bastyde-text = { path = "../bastyde-text", version = "0.5.0", default-features = false }
 
 [dev-dependencies]
 accesskit_consumer = "0.35.0"

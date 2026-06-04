@@ -1084,7 +1084,6 @@ mod tests {
         assert_eq!(fired.get(), 2, "primary-click still activates");
     }
 
-    #[cfg(feature = "rich-text")]
     #[test]
     fn hidden_slot_marks_swatch_node_as_at_hidden() {
         // ColorSwatch declares `Role::ColorWell`. Dropped raw into a

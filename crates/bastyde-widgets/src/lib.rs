@@ -20,31 +20,23 @@ pub mod button;
 pub mod calendar;
 pub mod card;
 pub mod checkbox;
-#[cfg(feature = "rich-text")]
 pub mod color_edit;
-#[cfg(feature = "rich-text")]
 pub mod color_picker;
 pub mod combo_box;
 pub mod command_link_button;
 pub mod common;
-#[cfg(feature = "rich-text")]
 pub mod date_edit;
-#[cfg(feature = "rich-text")]
 pub mod date_range_edit;
-#[cfg(feature = "rich-text")]
 pub mod date_time_edit;
 pub mod dialog;
 pub(crate) mod drag_preview;
 pub mod drop_target;
 pub mod drop_zone;
-#[cfg(feature = "rich-text")]
 pub mod file_picker_field;
 pub mod group_box;
 pub mod group_header;
-#[cfg(feature = "rich-text")]
 pub mod hex_color_input;
 pub mod icon_button;
-#[cfg(feature = "rich-text")]
 pub mod input_dialog;
 pub mod keystroke_format;
 pub mod link;
@@ -59,7 +51,6 @@ pub mod message_box;
 pub mod notification;
 pub(crate) mod overlay_trigger;
 pub mod panel;
-#[cfg(feature = "rich-text")]
 pub mod password_field;
 pub mod popover;
 pub(crate) mod popover_caret;
@@ -71,18 +62,15 @@ pub mod progress_bar;
 pub mod radio_button;
 pub mod radio_group;
 pub mod repeater;
-#[cfg(feature = "rich-text")]
 pub mod rich_text;
 pub mod scroll_area;
 pub mod scroll_bar;
-#[cfg(feature = "rich-text")]
 pub mod search_field;
 pub mod segmented_control;
 pub mod shadow;
 pub mod shortcut_settings;
 pub mod slider;
 pub mod snackbar;
-#[cfg(feature = "rich-text")]
 pub mod spin_box;
 pub mod spinner;
 pub mod split_button;
@@ -92,9 +80,7 @@ pub mod status_bar;
 pub mod styles;
 pub mod tab_widget;
 pub mod table_view;
-#[cfg(feature = "rich-text")]
 pub mod text_input;
-#[cfg(feature = "rich-text")]
 pub mod time_edit;
 pub mod title_bar;
 pub mod toast;
@@ -129,30 +115,22 @@ pub use button::{Button, ButtonVariant, IconLocation};
 pub use calendar::{Calendar, DateRange, WeekNumberDisplay};
 pub use card::Card;
 pub use checkbox::Checkbox;
-#[cfg(feature = "rich-text")]
 pub use color_edit::ColorEdit;
-#[cfg(feature = "rich-text")]
 pub use color_picker::{ColorPicker, ColorPickerLayout, ColorSwatch, DEFAULT_SWATCHES};
 pub use combo_box::ComboBox;
 pub use command_link_button::CommandLinkButton;
 pub use common::scroll::OverscrollBehavior;
-#[cfg(feature = "rich-text")]
 pub use date_edit::DateEdit;
-#[cfg(feature = "rich-text")]
 pub use date_range_edit::DateRangeEdit;
-#[cfg(feature = "rich-text")]
 pub use date_time_edit::DateTimeEdit;
 pub use dialog::{Dialog, DialogContent, ModalContainer, ModalScrim};
 pub use drop_target::DropTarget;
 pub use drop_zone::DropZone;
-#[cfg(feature = "rich-text")]
 pub use file_picker_field::{FilePickerField, FilePickerKind};
 pub use group_box::GroupBox;
 pub use group_header::GroupHeader;
-#[cfg(feature = "rich-text")]
 pub use hex_color_input::HexColorInput;
 pub use icon_button::{BuiltInIcons, IconButton, IconButtonSize};
-#[cfg(feature = "rich-text")]
 pub use input_dialog::InputDialog;
 pub use link::Link;
 pub use list_view::ListView;
@@ -169,13 +147,10 @@ pub use notification::{
     NotificationLog, NotificationLogDialog, NotificationUpdate,
 };
 pub use panel::Panel;
-#[cfg(feature = "rich-text")]
 pub use password_field::{AtRevealPolicy, EchoMode, PasswordField, RevealMode};
 pub use popover::Popover;
 pub use popover_widget::{PopoverButton, PopoverIconButton, PopoverTrigger, PopoverWidget};
-#[cfg(feature = "rich-text")]
 pub use primitives::TextInputField;
-#[cfg(feature = "rich-text")]
 pub use primitives::text_input_field::{ValidationFeedback, ValidationOutcome};
 pub use primitives::{
     AspectRatio, Center, Divider, Expand, FixedSize, FormLayout, Grid, HStack, IconWidget,
@@ -190,13 +165,11 @@ pub use radio_group::RadioGroup;
 pub use repeater::Repeater;
 pub use scroll_area::{ScrollArea, ScrollBarMode, ScrollBarPolicy};
 pub use scroll_bar::{ScrollBar, ScrollBarOrientation};
-#[cfg(feature = "rich-text")]
 pub use search_field::SearchField;
 pub use segmented_control::SegmentedControl;
 pub use shortcut_settings::ShortcutSettings;
 pub use slider::Slider;
 pub use snackbar::Snackbar;
-#[cfg(feature = "rich-text")]
 pub use spin_box::{
     ButtonLayout as SpinButtonLayout, SpinBox, SpinValue, StepType, WheelMode, WrapMode,
 };
@@ -214,9 +187,7 @@ pub use table_view::{
     ColumnResizePolicy, ColumnWidth, EditTrigger, GridLines, PinnedSide, SortDirection,
     TabTraversal, TableSelectionMode, TableView, TruncationPolicy,
 };
-#[cfg(feature = "rich-text")]
 pub use text_input::{TextInput, ValidationState};
-#[cfg(feature = "rich-text")]
 pub use time_edit::{SecondsMode, TimeEdit, TimeFormat};
 pub use title_bar::{DragRegion, ResizeStrip, TitleBar, WindowControls, WindowFrame};
 pub use toast::{

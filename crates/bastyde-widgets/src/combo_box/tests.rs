@@ -1086,9 +1086,8 @@ fn accessibility_value_when_selection_present() {
     assert_eq!(node.placeholder(), None);
 }
 
-// ─── Searchable mode (rich-text feature) ──────────────────────────
+// ─── Searchable mode ──────────────────────────────────────────────
 
-#[cfg(feature = "rich-text")]
 #[test]
 fn searchable_filters_list_to_matching_items() {
     let mut tree = light_tree();
@@ -1135,7 +1134,6 @@ fn searchable_filters_list_to_matching_items() {
     );
 }
 
-#[cfg(feature = "rich-text")]
 #[test]
 fn searchable_custom_filter_is_consulted() {
     // Filter is called with (query, item). Route every item through
@@ -1172,7 +1170,6 @@ fn searchable_custom_filter_is_consulted() {
     assert!(tree.find_by_label("abcd").is_none());
 }
 
-#[cfg(feature = "rich-text")]
 #[test]
 fn accessibility_searchable_sets_autocomplete() {
     let mut tree = light_tree();
@@ -1232,7 +1229,6 @@ fn shift_tab_dismisses_open_simple_dropdown() {
     assert!(tree.active_overlays().is_empty());
 }
 
-#[cfg(feature = "rich-text")]
 #[test]
 fn tab_dismisses_open_searchable_dropdown() {
     let mut tree = light_tree();
@@ -1255,7 +1251,6 @@ fn tab_dismisses_open_searchable_dropdown() {
     );
 }
 
-#[cfg(feature = "rich-text")]
 #[test]
 fn shift_tab_dismisses_open_searchable_dropdown() {
     let mut tree = light_tree();
@@ -1278,7 +1273,6 @@ fn shift_tab_dismisses_open_searchable_dropdown() {
     );
 }
 
-#[cfg(feature = "rich-text")]
 #[test]
 fn arrow_keys_navigate_filtered_list_from_search() {
     // Regression: while typing in the search field, ArrowDown /
@@ -1318,7 +1312,6 @@ fn arrow_keys_navigate_filtered_list_from_search() {
     assert_eq!(selected.get().as_deref(), Some("Banana"));
 }
 
-#[cfg(feature = "rich-text")]
 #[test]
 fn enter_from_search_field_closes_dropdown() {
     let mut tree = light_tree();
@@ -1339,7 +1332,6 @@ fn enter_from_search_field_closes_dropdown() {
     );
 }
 
-#[cfg(feature = "rich-text")]
 #[test]
 fn searchable_opens_with_focus_in_search_field() {
     let mut tree = light_tree();
@@ -1373,7 +1365,6 @@ fn searchable_opens_with_focus_in_search_field() {
     );
 }
 
-#[cfg(feature = "rich-text")]
 #[test]
 fn accessibility_non_searchable_omits_autocomplete() {
     let mut tree = light_tree();

@@ -2,13 +2,11 @@
 //!
 //! `HeaderCell` renders a small filter glyph (the unconditional
 //! `FilterIndicator` paint widget) after the sort indicator when the
-//! column is `filterable`. With the `rich-text` feature enabled,
-//! tapping the glyph opens a [`Popover`] anchored to it whose content
-//! is a `FilterPopoverContent` widget — a [`TextInput`] with a
-//! trailing [`IconButton::clear`] bound to the table's
-//! `filters_signal[col_id]` slot. Without `rich-text`, the popover
-//! trigger is not built (callers can still drive `filters_signal`
-//! programmatically).
+//! column is `filterable`. Tapping the glyph opens a [`Popover`]
+//! anchored to it whose content is a `FilterPopoverContent` widget — a
+//! [`TextInput`] with a trailing [`IconButton::clear`] bound to the
+//! table's `filters_signal[col_id]` slot. Callers can also drive
+//! `filters_signal` programmatically.
 //!
 //! [`Popover`]: crate::popover::Popover
 //! [`TextInput`]: crate::text_input::TextInput
@@ -92,10 +90,8 @@ impl Widget for FilterIndicator {
     }
 }
 
-#[cfg(feature = "rich-text")]
 pub(crate) use rich::FilterPopoverContent;
 
-#[cfg(feature = "rich-text")]
 mod rich {
     use bastyde_i18n::lit;
     use std::cell::Cell;

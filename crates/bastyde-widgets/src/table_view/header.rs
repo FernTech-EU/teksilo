@@ -50,11 +50,8 @@ use super::ColumnReorderDragData;
 use super::body::SharedColumnWidths;
 use super::column::ColumnResizePolicy;
 use super::filter::FilterIndicator;
-#[cfg(feature = "rich-text")]
 use super::filter::FilterPopoverContent;
-#[cfg(feature = "rich-text")]
 use crate::popover::Popover;
-#[cfg(feature = "rich-text")]
 use bastyde_core::overlay::OverlayPlacement;
 
 const DRAG_REORDER_THRESHOLD: f32 = 5.0;
@@ -237,11 +234,8 @@ impl Widget for HeaderCell {
         // Filter popover trigger — appears at the trailing end of the
         // cell after the sort indicator. The Popover content is a
         // `TextInput` with a trailing clear `IconButton` bound back
-        // into `filters_signal`. Gated behind `rich-text` because
-        // `TextInput` itself lives there; without the feature the
-        // glyph and popover are simply not built (callers can still
-        // mutate `filters_signal` programmatically).
-        #[cfg(feature = "rich-text")]
+        // into `filters_signal`. Callers can also mutate
+        // `filters_signal` programmatically.
         if self.filterable {
             let filters_signal = self.filters_signal.clone();
             let col_id = self.col_id.clone();

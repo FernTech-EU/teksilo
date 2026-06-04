@@ -38,9 +38,9 @@ BastydeAppBuilder::new()
 ```
 
 The inspector ships behind the umbrella's `inspector` feature
-(default-on). To drop it (and the transitive `rich-text` chain it
-pulls in for the Tree-tab filter), depend on `bastyde` with
-`default-features = false` and re-add only the features you need.
+(default-on). To drop it (and the `bastyde-inspector` dependency it
+pulls in), depend on `bastyde` with `default-features = false` and
+re-add only the features you need.
 Apps that drop the feature can still call
 `install_inspector_in_debug` only if they take a direct dependency
 on `bastyde-inspector` themselves.

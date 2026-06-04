@@ -14,7 +14,7 @@ bastyde-canvas = { workspace = true }
 bastyde-data = { workspace = true }
 bastyde-app = { workspace = true }
 bastyde-i18n = { workspace = true }
-bastyde-widgets = { workspace = true, features = ["rich-text"] }
+bastyde-widgets = { workspace = true }
 bastyde-preview = { workspace = true }
 bastyde-render = { workspace = true }
 bastyde-platform = { workspace = true }

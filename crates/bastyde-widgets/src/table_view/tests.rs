@@ -1224,7 +1224,6 @@ fn empty_view_renders_when_no_rows() {
 
 // ── Filter popover ─────────────────────────────────────────────────────────
 
-#[cfg(feature = "rich-text")]
 #[test]
 fn filterable_column_exposes_filter_trigger_in_a11y_tree() {
     // The filter glyph is wrapped in a `Popover` whose default name
@@ -1267,7 +1266,6 @@ fn non_filterable_column_does_not_expose_filter_trigger() {
     );
 }
 
-#[cfg(feature = "rich-text")]
 #[test]
 fn filter_popover_opens_via_trigger_click() {
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
@@ -1294,7 +1292,6 @@ fn filter_popover_opens_via_trigger_click() {
     );
 }
 
-#[cfg(feature = "rich-text")]
 #[test]
 fn filter_popover_content_hosts_a_text_input() {
     use crate::table_view::filter::FilterPopoverContent;
@@ -1444,7 +1441,6 @@ fn resize_pointer_down_in_filter_zone_does_not_start_resize() {
 
 // ── Bugs reported from real interaction ────────────────────────────────────
 
-#[cfg(feature = "rich-text")]
 #[test]
 fn filter_popover_editor_gains_focus_on_mouse_click() {
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
