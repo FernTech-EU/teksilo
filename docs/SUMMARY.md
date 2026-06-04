@@ -79,6 +79,11 @@ directory.
   multi-window orchestration, modal dialogs, restore-from-state.
 - [title-bar.md](title-bar.md) — custom widget-level title bar plus the
   per-OS `PlatformTitleBarHost` for drag / zoom / close / inset.
+- [toolbar.md](toolbar.md) — `Toolbar` command bar with automatic overflow:
+  actions (priority / `always_overflow` / toggle), pinned + collapsible
+  custom widgets (`overflow_as` menu row, `overflow_widget` live embedded
+  control, the `ToolbarOverflow` trait), the `MenuList`-backed chevron menu,
+  display modes / orientation, and the ARIA roving-tabindex pattern.
 
 ## Data, persistence, telemetry
 

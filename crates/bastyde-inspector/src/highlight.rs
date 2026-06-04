@@ -73,6 +73,16 @@ impl Widget for HighlightLayer {
             ctx.binding_registry(),
             BindingLevel::RepaintOnly,
         );
+        self.state.overflow_overlay.bind_to(
+            self_id,
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+        self.state.overflow_snapshot.bind_to(
+            self_id,
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
         Vec::new()
     }
 
@@ -81,11 +91,18 @@ impl Widget for HighlightLayer {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        let opacity = self.state.overlay_opacity.get().clamp(0.0, 1.0);
+
+        // The overflow overlay is independent of `overlay_mode` — it paints
+        // whenever enabled, even with the inspector panel closed (mode == Off).
+        if self.state.overflow_overlay.get() {
+            paint_overflow(canvas, &self.state, opacity);
+        }
+
         let mode = self.state.overlay_mode.get();
         if mode == OverlayMode::Off {
             return;
         }
-        let opacity = self.state.overlay_opacity.get().clamp(0.0, 1.0);
 
         if mode == OverlayMode::AllBounds {
             // Bands paint first so the strokes drawn over them stay
@@ -201,6 +218,51 @@ fn paint_bands(canvas: &mut Canvas, state: &InspectorState, opacity: f32) {
     }
 }
 
+/// Paint Flutter-style yellow/black hazard stripes over each overflow strip,
+/// with a bright red border, so over-constrained layouts are impossible to
+/// miss in debug builds.
+fn paint_overflow(canvas: &mut Canvas, state: &InspectorState, opacity: f32) {
+    use bastyde_canvas::{Path, Point};
+
+    let strips = state.overflow_snapshot.get_ref();
+    if strips.is_empty() {
+        return;
+    }
+    let yellow = Color::from_rgba(0.98, 0.80, 0.10, 0.55 * opacity);
+    let black = Color::from_rgba(0.0, 0.0, 0.0, 0.55 * opacity);
+    let border = Color::from_rgba(0.95, 0.15, 0.10, 0.95 * opacity);
+    const PITCH: f32 = 10.0;
+
+    for strip in strips.iter() {
+        if strip.width <= 0.0 || strip.height <= 0.0 {
+            continue;
+        }
+        // Clip so the slanted bands stay inside the strip, then lay a yellow
+        // base and 45° black diagonals (band width = gap width = PITCH).
+        canvas.set_clip(*strip);
+        canvas.fill_rect(*strip, yellow);
+
+        let (y0, y1) = (strip.y, strip.bottom());
+        let h = y1 - y0;
+        // Start one band before the leading edge so the corner is covered.
+        let mut d = strip.x - h - PITCH;
+        let end = strip.right() + PITCH;
+        while d < end {
+            let mut p = Path::new();
+            p.move_to(Point::new(d, y0));
+            p.line_to(Point::new(d + PITCH, y0));
+            p.line_to(Point::new(d + PITCH + h, y1));
+            p.line_to(Point::new(d + h, y1));
+            p.close();
+            canvas.fill_path(&p, black);
+            d += 2.0 * PITCH;
+        }
+        canvas.clear_clip();
+
+        canvas.stroke_rounded_rect(*strip, bastyde_tokens::CornerRadius::ZERO, border, 1.5);
+    }
+}
+
 fn paint_all_bounds(
     canvas: &mut Canvas,
     _ctx: &PaintContext,
@@ -298,7 +360,21 @@ impl Widget for BoundsTracker {
         self.state
             .hover_id
             .bind_to(self_id, ctx.binding_registry(), BindingLevel::Relayout);
+        // Re-run the overflow walk when the toggle flips.
+        self.state.overflow_overlay.bind_to(
+            self_id,
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
         Vec::new()
+    }
+
+    /// `BoundsTracker` opts out of the per-pass layout cache defensively. Its
+    /// whole-tree snapshot into signals IS its purpose (not a by-product of
+    /// sizing), so we keep it running on every query rather than relying on the
+    /// idempotency the cache assumes.
+    fn cacheable_layout(&self) -> bool {
+        false
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
@@ -371,10 +447,96 @@ impl Widget for BoundsTracker {
             }
         }
 
+        // Overflow detection runs INDEPENDENT of `overlay_mode` (it is on by
+        // default and works with the panel closed). Walk the user-root
+        // subtrees and collect the regions where a distributing container's
+        // children spill past its bounds.
+        if self.state.overflow_overlay.get() {
+            if let Some(arena) = ctx.arena() {
+                let mut overflow: Vec<Rect> = Vec::new();
+                for &root in self.state.user_root_ids.get().iter() {
+                    collect_overflow(arena, root, &mut overflow);
+                }
+                let changed = *self.state.overflow_snapshot.get_ref() != overflow;
+                if changed {
+                    self.state.overflow_snapshot.set(overflow);
+                }
+            }
+        } else if !self.state.overflow_snapshot.get_ref().is_empty() {
+            self.state.overflow_snapshot.set(Vec::new());
+        }
+
         proposal.resolve(0.0, 0.0).into()
     }
 
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+}
+
+/// Recursively collect the **overhang strips** where a distributing
+/// container's children spill past its bounds. Only `HStack` / `VStack` /
+/// `Grid` / `FormLayout` are considered (so intentional overlap in `ZStack`,
+/// scene content, and overlays never false-positive), and containers that clip
+/// their children (`ScrollArea`, `MaxSize`) are skipped (their overflow is
+/// expected and clipped away).
+fn collect_overflow(arena: &WidgetArena, id: WidgetId, out: &mut Vec<Rect>) {
+    if !arena.is_active(id) {
+        return;
+    }
+    let Some(node) = arena.get(id) else { return };
+    let label = last_segment(node.widget.type_name());
+    let is_distributor = matches!(label, "HStack" | "VStack" | "Grid" | "FormLayout");
+    let children: Vec<WidgetId> = arena.children(id).to_vec();
+
+    if is_distributor && !node.clips_children && !children.is_empty() {
+        let parent = arena.bounds(id);
+        // Union of active children's bounds.
+        let (mut ux0, mut uy0) = (f32::INFINITY, f32::INFINITY);
+        let (mut ux1, mut uy1) = (f32::NEG_INFINITY, f32::NEG_INFINITY);
+        let mut any = false;
+        for &c in &children {
+            if !arena.is_active(c) {
+                continue;
+            }
+            let b = arena.bounds(c);
+            if b.width <= 0.0 || b.height <= 0.0 {
+                continue;
+            }
+            ux0 = ux0.min(b.x);
+            uy0 = uy0.min(b.y);
+            ux1 = ux1.max(b.right());
+            uy1 = uy1.max(b.bottom());
+            any = true;
+        }
+        if any {
+            const EPS: f32 = 0.5;
+            if ux1 > parent.right() + EPS {
+                out.push(Rect::new(
+                    parent.right(),
+                    parent.y,
+                    ux1 - parent.right(),
+                    parent.height,
+                ));
+            }
+            if ux0 < parent.x - EPS {
+                out.push(Rect::new(ux0, parent.y, parent.x - ux0, parent.height));
+            }
+            if uy1 > parent.bottom() + EPS {
+                out.push(Rect::new(
+                    parent.x,
+                    parent.bottom(),
+                    parent.width,
+                    uy1 - parent.bottom(),
+                ));
+            }
+            if uy0 < parent.y - EPS {
+                out.push(Rect::new(parent.x, uy0, parent.width, parent.y - uy0));
+            }
+        }
+    }
+
+    for c in children {
+        collect_overflow(arena, c, out);
+    }
 }
 
 /// Walks ancestors of `id` looking for any user_root_id. Returns
@@ -524,5 +686,86 @@ fn push_stack_gap_bands(
                 });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod overflow_tests {
+    use super::*;
+    use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_widgets::HStack;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    #[derive(Debug)]
+    struct FixedLeaf(f32, f32);
+    impl Widget for FixedLeaf {
+        fn layout_response(&self, _p: SizeProposal, _c: &LayoutContext) -> LayoutResponse {
+            bastyde_canvas::Size::new(self.0, self.1).into()
+        }
+    }
+
+    /// Runs `collect_overflow` from `root` during layout (where `ctx.arena()`
+    /// is available, as `BoundsTracker` does) and stashes the result.
+    #[derive(Debug)]
+    struct OverflowProbe {
+        root: WidgetId,
+        out: Rc<RefCell<Vec<Rect>>>,
+    }
+    impl Widget for OverflowProbe {
+        fn layout_response(&self, p: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+            if let Some(arena) = ctx.arena() {
+                let mut v = Vec::new();
+                collect_overflow(arena, self.root, &mut v);
+                *self.out.borrow_mut() = v;
+            }
+            p.resolve(0.0, 0.0).into()
+        }
+        fn cacheable_layout(&self) -> bool {
+            false
+        }
+    }
+
+    // The HStack is a root laid out at `exact(box_w)`, so the driver commits
+    // its bounds to `box_w` (a real constraint) while a rigid child keeps its
+    // natural width. The probe is a second root, laid out after the HStack in
+    // the same pass, so it sees the HStack's committed bounds.
+    fn run(child_w: f32, box_w: f32) -> Vec<Rect> {
+        let out = Rc::new(RefCell::new(Vec::new()));
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(FixedLeaf(child_w, 20.0));
+        let hstack = tree.add(HStack::new().add_child(leaf));
+        let _probe = tree.add(OverflowProbe {
+            root: hstack,
+            out: out.clone(),
+        });
+        tree.layout(SizeProposal::exact(box_w, 40.0));
+        out.borrow().clone()
+    }
+
+    #[test]
+    fn over_constrained_hstack_is_flagged() {
+        // 200px rigid child in a 100px box → 100px trailing overhang.
+        let strips = run(200.0, 100.0);
+        assert_eq!(
+            strips.len(),
+            1,
+            "expected one overhang strip, got {strips:?}"
+        );
+        assert!(
+            (strips[0].width - 100.0).abs() < 1.0,
+            "overhang width should be ~100, got {}",
+            strips[0].width
+        );
+    }
+
+    #[test]
+    fn fitting_hstack_is_not_flagged() {
+        // 50px child in a 100px box → no overflow.
+        let strips = run(50.0, 100.0);
+        assert!(
+            strips.is_empty(),
+            "fitting layout should not flag, got {strips:?}"
+        );
     }
 }

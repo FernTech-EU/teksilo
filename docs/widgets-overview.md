@@ -72,7 +72,8 @@ slack distribution math, and worked examples.
 - [FormLayout](../crates/bastyde-widgets/src/primitives/form_layout.rs) — labelled rows with column alignment for settings panels.
 - [Center](../crates/bastyde-widgets/src/primitives/center.rs) — claims available space and centers a single child.
 - [Expand](../crates/bastyde-widgets/src/primitives/expand.rs) — flex-basis-zero workhorse for ratio splits and full-bleed children.
-- [Padding](../crates/bastyde-widgets/src/primitives/padding.rs) — uniform or per-edge inset around a single child.
+- [Shrinkable](../crates/bastyde-widgets/src/primitives/shrinkable.rs) — shrink counterpart to `Expand`: opts a child into compression (down to a `min` floor) when a stack is over-constrained. Native shrink covers single-line / ellipsis text; controls (`Button` etc.) stay rigid and overflow via [`Toolbar`](#toolbar).
+- [Padding](../crates/bastyde-widgets/src/primitives/padding.rs) — uniform or per-edge inset around a single child (propagates flex/shrink/min).
 - [Spacer](../crates/bastyde-widgets/src/primitives/spacer.rs) — flexible empty space that consumes slack via `flex = 1.0`.
 - [Divider](../crates/bastyde-widgets/src/primitives/divider.rs) — 1 dp themed line, horizontal or vertical.
 - [FixedSize](../crates/bastyde-widgets/src/primitives/fixed_size.rs) — pins width/height regardless of parent proposal.
@@ -103,7 +104,7 @@ Themed framing, sectioning, and window-level structure.
 - [Card](../crates/bastyde-widgets/src/card.rs) — elevated panel with shadow and optional header/footer slots.
 - [GroupBox](../crates/bastyde-widgets/src/group_box.rs) — labelled bordered group for related controls.
 - [GroupHeader](../crates/bastyde-widgets/src/group_header.rs) — section header (label + trailing rule line) for settings forms.
-- [Toolbar](../crates/bastyde-widgets/src/toolbar.rs) — dense horizontal action strip on a `surface_secondary` panel.
+- [Toolbar](../crates/bastyde-widgets/src/toolbar.rs) — command bar (`ToolbarAction`/`ToolbarItem`) with **automatic overflow**: excess actions collapse into a `⌄` `MenuList` popover (Qt extension / NSToolbar overflow / WinUI CommandBar). Per-action overflow priority, `always_overflow`, toggle, pinned custom widgets, **collapsible custom widgets** (`overflow_as` menu row / `overflow_widget` live embedded control / the `ToolbarOverflow` trait), separators, flexible space, display mode, orientation, `is_overflowing()`. Full ARIA toolbar a11y (Role::Toolbar + orientation, roving tab-index + arrow nav, chevron `HasPopup::Menu`, no AT duplication of overflowed items). Built on `LayoutContext::measure_intrinsic`. Reference: [docs/toolbar.md](toolbar.md).
 - [StatusBar](../crates/bastyde-widgets/src/status_bar.rs) — bottom-of-window status text strip with `Role::Status`.
 - [Banner](../crates/bastyde-widgets/src/banner.rs) — persistent inline info / success / warning / error strip (`BannerSeverity`); `Role::Status` + `Live::Polite`.
 - [DropZone](../crates/bastyde-widgets/src/drop_zone.rs) — standalone "drop files here" target for external (OS) drag-and-drop; `accept_extensions` filter, `allow_multiple`, `on_files_dropped` / `on_text_dropped` / `on_urls_dropped`, keyboard Browse fallback; Tier-3 `DropZoneStyle`, `Role::Group` + `Live::Polite`. See [drag-and-drop.md §11.4](drag-and-drop.md).

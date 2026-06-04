@@ -439,16 +439,18 @@ fn replace_selected_text_inserts_at_caret() {
         action: Action::SetTextSelection,
         target: Some(field),
         target_node: bastyde_core::accessibility::widget_id_to_node_id(field),
-        data: Some(ActionData::SetTextSelection(bastyde_core::accesskit::TextSelection {
-            anchor: bastyde_core::accesskit::TextPosition {
-                node: bastyde_core::accessibility::widget_id_to_node_id(field),
-                character_index: 2,
+        data: Some(ActionData::SetTextSelection(
+            bastyde_core::accesskit::TextSelection {
+                anchor: bastyde_core::accesskit::TextPosition {
+                    node: bastyde_core::accessibility::widget_id_to_node_id(field),
+                    character_index: 2,
+                },
+                focus: bastyde_core::accesskit::TextPosition {
+                    node: bastyde_core::accessibility::widget_id_to_node_id(field),
+                    character_index: 2,
+                },
             },
-            focus: bastyde_core::accesskit::TextPosition {
-                node: bastyde_core::accessibility::widget_id_to_node_id(field),
-                character_index: 2,
-            },
-        })),
+        )),
     });
     tick(&mut tree);
 

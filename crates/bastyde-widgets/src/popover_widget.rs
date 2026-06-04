@@ -302,6 +302,15 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
             .expect("PopoverWidget::content(...) was not set");
         let content_id = ctx.add_boxed(content);
         ctx.set_dormant(content_id);
+        // Gate the content's activation on `popover_open` so it is the single
+        // source of truth. Without this, when the PopoverWidget itself is woken
+        // by an ancestor's `visible_when` re-activation (e.g. a Toolbar overflow
+        // chevron appearing), the activation cascade would wake the dormant
+        // content in-tree — its rows would "float" outside the (closed) popover.
+        // The per-pass visibility reconciliation keeps the content dormant
+        // whenever the popover is closed, and `arena.activate` skips it in the
+        // cascade because its gate is `false`.
+        ctx.visible_when(content_id, self.popover_open.clone());
         self.content_id = Some(content_id);
 
         let trigger = self

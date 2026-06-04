@@ -9,11 +9,17 @@ pub mod hstack;
 pub mod icon_widget;
 pub mod image_mask;
 pub mod image_widget;
+/// Shared main-then-cross negotiation for linear containers (`HStack`,
+/// `VStack`). Distributes the main axis (grow via `flex`, shrink via
+/// `shrink`/`min`) and measures each child's cross axis at its *final* main
+/// size — the height-for-width pass. Internal helper, not a widget.
+pub(crate) mod linear_layout;
 pub mod masonry;
 pub mod max_size;
 pub mod min_size;
 pub mod padding;
 pub mod rect_widget;
+pub mod shrinkable;
 pub mod spacer;
 pub mod switcher;
 /// `TextInputField` — raw editable text surface primitive. Gated
@@ -48,6 +54,7 @@ pub use max_size::MaxSize;
 pub use min_size::MinSize;
 pub use padding::Padding;
 pub use rect_widget::RectWidget;
+pub use shrinkable::Shrinkable;
 pub use spacer::Spacer;
 pub use switcher::Switcher;
 #[cfg(feature = "rich-text")]

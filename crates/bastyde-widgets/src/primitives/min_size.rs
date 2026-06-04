@@ -125,8 +125,13 @@ impl Widget for MinSize {
         let child_response = self
             .child_id
             .and_then(|id| ctx.child_layout_response(id, clamped_proposal));
-        let child_size = child_response.as_ref().map(|r| r.size).unwrap_or(Size::ZERO);
+        let child_size = child_response
+            .as_ref()
+            .map(|r| r.size)
+            .unwrap_or(Size::ZERO);
         let child_flex = child_response.map(|r| r.flex).unwrap_or(0.0);
+        let child_shrink = child_response.map(|r| r.shrink).unwrap_or(0.0);
+        let child_min = child_response.map(|r| r.min).unwrap_or(Size::ZERO);
 
         let w = match min_w {
             Some(min) => child_size.width.max(min),
@@ -136,10 +141,15 @@ impl Widget for MinSize {
             Some(min) => child_size.height.max(min),
             None => child_size.height,
         };
-        bastyde_core::widget::LayoutResponse {
-            size: Size::new(w, h),
-            flex: child_flex,
-        }
+
+        // Compose the compression floor: a shrinkable child may still shrink,
+        // but never below MinSize's own minimum nor the child's own floor.
+        // Clamp componentwise to the wanted size so `min <= size` holds.
+        let floor_w = child_min.width.max(min_w.unwrap_or(0.0)).min(w);
+        let floor_h = child_min.height.max(min_h.unwrap_or(0.0)).min(h);
+        bastyde_core::widget::LayoutResponse::flexible(Size::new(w, h), child_flex)
+            .with_shrink(child_shrink)
+            .with_min(Size::new(floor_w, floor_h))
     }
 
     fn place_children(

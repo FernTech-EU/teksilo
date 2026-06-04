@@ -710,6 +710,7 @@ impl bastyde_core::widget::Widget for IconButton {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
+        // Rigid like `Button`: size to content, no shrink (see Button's note).
         match self.root_child_id {
             Some(root_id) => ctx
                 .child_size(root_id, proposal)
@@ -765,7 +766,12 @@ impl bastyde_core::widget::Widget for IconButton {
         // composite / unresolved-key paths are expected to carry an
         // explicit `.access_label(...)` (enforced by the debug_assert),
         // which the override layer applies after this method.
-        if let Some(text) = self.tooltip_text.as_ref().map(|t| t.resolve_now()).or(rich_name) {
+        if let Some(text) = self
+            .tooltip_text
+            .as_ref()
+            .map(|t| t.resolve_now())
+            .or(rich_name)
+        {
             builder.set_name(text);
         }
         // Note: `set_disabled()` is now driven by the framework's

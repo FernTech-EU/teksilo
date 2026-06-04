@@ -41,6 +41,7 @@ cargo run -p chart-demo                         # BarChart / LineChart / PieChar
 cargo run -p toast-demo                         # Toast notifications + persistent NotificationLog + bell button + dialog
 cargo run -p async-demo                         # bastyde-async: spawn_local + spawn_blocking + spawn_local_with (opt-in async executor)
 cargo run -p tab-migration                      # Cross-TabWidget tab drag-and-drop (migrate tabs between two groups)
+cargo run -p over-constraint                     # Graceful shrink / layout priority / height-for-width + inspector overflow stripes (F12)
 ```
 
 ## Tools
@@ -227,7 +228,7 @@ pub trait Widget: std::fmt::Debug + 'static {
 }
 ```
 
-`layout_response` is the only required method. It returns a `LayoutResponse { size: Size, flex: f32 }` carrying both the size the widget wants and a flex weight for slack distribution. Most widgets just return a `Size` (auto-converts via `From<Size>` to `flex = 0`); flex-bearing widgets like `Spacer` and `Expand` return `LayoutResponse::flexible(size, flex)`.
+`layout_response` is the only required method. It returns a `LayoutResponse { size, flex, min, shrink }` carrying the wanted size, a grow weight (`flex`) for positive slack, a compression floor (`min`), and a shrink weight (`shrink`) for over-constraint deficits. Most widgets just return a `Size` (auto-converts via `From<Size>` to fully rigid: `flex = 0`, `shrink = 0`, `min = size`); grow-bearing widgets like `Spacer`/`Expand` use `LayoutResponse::flexible(size, flex)`; shrink-bearing ones (`Shrinkable`, single-line `TextWidget`) use `LayoutResponse::shrinkable(size, min, shrink)`. See **Layout Model** below.
 
 - **Leaf** (TextWidget, RectWidget): `layout_response` + `paint`
 - **Container** (VStack, HStack, ZStack): `layout_response` + `place_children` + `children`
@@ -243,9 +244,11 @@ pub trait Widget: std::fmt::Debug + 'static {
 
 ## Layout Model
 
-SwiftUI-style two-phase negotiation: parent proposes size → child responds with wanted size → parent places child. All in logical pixels. `Leading`/`Trailing` instead of Left/Right (RTL-aware).
+SwiftUI-style negotiation: parent proposes size → child responds with a `LayoutResponse` → parent distributes the main axis, measures the cross axis at each child's final main size, then places. All in logical pixels. `Leading`/`Trailing` instead of Left/Right (RTL-aware).
 
-**Flex distribution in stacks.** `HStack`/`VStack` honor every child's wanted size as a floor, then distribute any **slack** (`bounds − Σ wanted − spacing`) proportional to the child's `flex` weight (carried in the same `LayoutResponse` query — no separate trait method). Default flex is `0.0` (rigid). `Spacer` and `Expand` return `1.0`. Ratios are first-class:
+**`LayoutResponse { size, flex, min, shrink }`.** Four quantities drive a stack's distribution along its main axis: `size` (wanted/ideal — the growth floor), `flex` (grow weight for positive slack), `min` (hard compression floor), `shrink` (shrink weight for an over-constraint deficit). `flex` and `shrink` are independent (CSS-flexbox: grow vs shrink). `From<Size>` and `rigid`/`flexible` default to `min = size`, `shrink = 0` (fully rigid). See `LayoutResponse::shrinkable(size, min, shrink)` / `.with_min` / `.with_shrink`.
+
+**Grow (positive slack).** `HStack`/`VStack` honor every child's wanted size as a floor, then distribute leftover **slack** (`bounds − Σ wanted − spacing`) proportional to `flex`. Default flex `0.0` (rigid); `Spacer`/`Expand` return `1.0`. Ratios are first-class:
 
 ```rust
 HStack::new()
@@ -253,9 +256,17 @@ HStack::new()
     .child(Expand::new().flex(2).child(panel_b))   // 2/3 of slack
 ```
 
-`Expand::new()` defaults to `flex(1)` and stretches its child to its bounds. Default basis is **zero** (CSS flex-basis: 0) so ratios divide bounds cleanly. Call `.respect_intrinsic()` for **auto** basis, where the wrapped child's natural size acts as a floor and slack is added on top — useful in unconstrained parents (e.g. an outer `VStack` with `height = None`) where zero-basis would let the child overflow. Use `.align_child(Alignment::X)` to opt out of fill and align the child at its natural size. `Center::new()` is sugar for `Expand::new().align_child(CENTER)`.
+`Expand::new()` defaults to `flex(1)` and stretches its child to its bounds. Default basis is **zero** (CSS flex-basis: 0). Call `.respect_intrinsic()` for **auto** basis. `Center::new()` is sugar for `Expand::new().align_child(CENTER)`.
 
-**Layout primitives** (in [crates/bastyde-widgets/src/primitives/](crates/bastyde-widgets/src/primitives/)): `HStack`, `VStack`, `ZStack`, `Grid`, `Wrap`, `Padding`, `Spacer`, `Center`, `Expand`, `FixedSize`, `MinSize`, `MaxSize`, `AspectRatio`, `Switcher`, `Divider`, `IconWidget`, `ImageWidget`, `ImageMask`, `MasonryLayout`, `FormLayout`, `ValidationStrip`, `TextInputField`
+**Shrink (over-constraint).** When children exceed the bounds, the deficit is distributed across children with `shrink > 0` proportional to their shrink weight, **never below `min`** (iterative clamp-and-redistribute). Shrink is **opt-in**: rigid by default → overflow. The one widget that opts in natively is **single-line / ellipsis `TextWidget`** (truncates to fit; `.min_shrink_width` / `.no_shrink` to tune) — truncating *display text* is expected. **Controls are deliberately rigid** (`Button` / `IconButton` / `Badge` / `ComboBox` size to content and overflow): a truncated *action* label reads poorly, so the desktop convention is to overflow excess actions into a menu — see `Toolbar` below. Wrap `Padding` / `ZStack` / `MinSize` propagate flex+shrink+min; the `Shrinkable` wrapper (the shrink counterpart to `Expand`) opts arbitrary content in: `Shrinkable::new().min_width(40.0).child(w)`. "Compress A before B" = give A `shrink>0`, B `shrink=0`. A stack only advertises its aggregate grow/shrink to its parent on its **own main axis** (so an `HStack` with a horizontal `Spacer` inside a `VStack` doesn't grow vertically).
+
+**Height-for-width.** Because the main axis is decided before the cross axis is measured, a child whose height depends on its width (wrapped text, aspect-ratio image) reports the **correct** height at its final width, and that height propagates up the tree. A per-pass layout memoization cache (`WidgetArena::cached_layout_response`, keyed `(id, proposal)`, cleared each pass) keeps the main-then-cross queries O(n); widgets that mutate state in `layout_response` must keep it idempotent, or opt out via `Widget::cacheable_layout() -> false`. `LayoutContext::measure_intrinsic(id, proposal)` measures a widget's intrinsic size **regardless of activation** (even dormant/collapsed widgets + their dormant subtrees) — used by adaptive layouts (e.g. `Toolbar` overflow) that must size items they keep hidden.
+
+**Overflow `Toolbar`.** [`Toolbar`](crates/bastyde-widgets/src/toolbar.rs) is a command bar (`ToolbarAction` / `ToolbarItem`) that collapses excess commands into a trailing `⌄` menu (Qt extension / NSToolbar overflow / WinUI CommandBar). Per-action overflow `priority` (lowest collapses first), `always_overflow` (WinUI secondary commands), `toggle` (checkable), separators, flexible space, `display_mode`, `orientation`, `is_overflowing()` signal. **Custom widgets**: `ToolbarItem::custom(w)` is pinned (never collapses); make it collapsible by declaring an overflow form — `.overflow_as(action)` (a menu row; an icon-only control reuses its icon as the menu glyph), `.overflow_widget(|| Box::new(...))` (a *live* embedded control, e.g. a `ComboBox` bound to the same signal, that stays usable while collapsed), or implement the `ToolbarOverflow` trait + `ToolbarItem::collapsible(w)`. The chevron drop-down is a real `MenuList` (size-to-content, focus-on-open, arrow/Home/End/Enter nav) driven by `MenuList::item_when` (conditionally-visible menu rows). Full ARIA toolbar a11y: `Role::Toolbar` + orientation + name, roving tab-index with arrow / Home / End navigation (the roving suppression reaches composite controls — Tab doesn't stick on a `ComboBox`), chevron `HasPopup::Menu`; overflowed commands are dormant (no AT duplication), represented by their menu rows. Built on `measure_intrinsic` (so collapsed items reappear correctly as the bar widens). Reactive `access_hidden` (`impl Into<Prop<bool>>`) is a related primitive for reactively hiding any node from AT. Reference: [docs/toolbar.md](docs/toolbar.md).
+
+**Over-constraint debugging.** The debug inspector paints Flutter-style yellow/black **overflow hazard stripes** wherever a distributing container's children still spill past its bounds — on by default (F12). See [docs/inspector.md](docs/inspector.md). Demo: `cargo run -p over-constraint`.
+
+**Layout primitives** (in [crates/bastyde-widgets/src/primitives/](crates/bastyde-widgets/src/primitives/)): `HStack`, `VStack`, `ZStack`, `Grid`, `Wrap`, `Padding`, `Spacer`, `Center`, `Expand`, `Shrinkable`, `FixedSize`, `MinSize`, `MaxSize`, `AspectRatio`, `Switcher`, `Divider`, `IconWidget`, `ImageWidget`, `ImageMask`, `MasonryLayout`, `FormLayout`, `ValidationStrip`, `TextInputField`
 
 **Rendering primitives:** `RectWidget`, `TextWidget`
 

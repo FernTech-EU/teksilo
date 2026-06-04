@@ -194,17 +194,20 @@ impl WidgetTree {
             }
         }
 
-        // Filter out widgets with a `tab_stop` binding that
-        // evaluates to `false` — they're focusable via
-        // `request_focus` but excluded from Tab traversal. Implements
-        // the ARIA roving-tabindex pattern (HTML `tabindex="-1"`).
-        focusable.retain(|&id| {
-            self.arena
-                .get(id)
-                .and_then(|node| node.tab_stop.as_ref())
-                .map(|prop| prop.get())
-                .unwrap_or(true)
-        });
+        // Filter out widgets excluded from Tab traversal by a `tab_stop`
+        // binding that evaluates to `false` — they remain focusable via
+        // `request_focus` but are skipped by Tab. Implements the ARIA
+        // roving-tabindex pattern (HTML `tabindex="-1"`).
+        //
+        // The flag governs the node's whole **subtree**: a composite
+        // control (ComboBox, IconButton, the Toolbar chevron) exposes its
+        // real focusable node as an inner leaf, so a `tab_stop` set on the
+        // composing node must reach that leaf. We therefore walk up to the
+        // nearest ancestor (including the node itself) that carries an
+        // explicit `tab_stop` and use its value — closest wins, default
+        // `true`. Without this, setting `tab_stop(false)` on a composite
+        // would silently leak its inner leaf into the Tab order.
+        focusable.retain(|&id| self.tab_stop_effective(id));
 
         if focusable.is_empty() {
             return;
@@ -245,6 +248,27 @@ impl WidgetTree {
             crate::focus::FocusOrigin::Keyboard,
             &mut *ops,
         );
+    }
+
+    /// Whether `id` participates in Tab traversal, honoring a `tab_stop`
+    /// flag set anywhere on its ancestor chain. Walks up to the nearest
+    /// node (including `id`) carrying an explicit `tab_stop` prop and
+    /// returns its current value; defaults to `true` when no ancestor
+    /// constrains it. This makes `set_tab_stop` on a composite control
+    /// (whose focusable node is an inner leaf) govern the whole subtree —
+    /// the basis of the roving-tabindex pattern in `Toolbar` / `TabBar`.
+    fn tab_stop_effective(&self, id: WidgetId) -> bool {
+        let mut current = Some(id);
+        while let Some(cur) = current {
+            let Some(node) = self.arena.get(cur) else {
+                break;
+            };
+            if let Some(prop) = node.tab_stop.as_ref() {
+                return prop.get();
+            }
+            current = node.parent;
+        }
+        true
     }
 
     /// Check if a node is focusable (set via HandlerSet `.focusable(true)` in build).
@@ -453,6 +477,46 @@ mod tests {
 
         tree.press_key(Key::Tab, Modifiers::NONE);
         assert_eq!(tree.focused(), Some(a));
+    }
+
+    #[test]
+    fn tab_stop_on_composite_excludes_focusable_descendant() {
+        // The roving-tabindex case: a composite control (here a StackWidget
+        // standing in for ComboBox / IconButton) carries the `tab_stop` flag
+        // on its composing node, but its real focusable node is an inner
+        // leaf. Suppressing the composite must remove that leaf from Tab.
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(FillWidget::new().focusable());
+        let composite = tree.add(crate::test_widgets::StackWidget::new().add_child(leaf));
+        let other = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.set_tab_stop(composite, false);
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(
+            tree.focused(),
+            Some(other),
+            "Tab must skip the suppressed composite's inner leaf"
+        );
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(
+            tree.focused(),
+            Some(other),
+            "only the un-suppressed control participates in Tab"
+        );
+
+        // Re-enabling the composite brings its inner leaf back into Tab.
+        tree.set_tab_stop(composite, true);
+        tree.set_focused(None);
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        let first = tree.focused();
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        let second = tree.focused();
+        assert_ne!(
+            first, second,
+            "with the composite re-enabled, Tab visits both controls"
+        );
     }
 
     #[test]

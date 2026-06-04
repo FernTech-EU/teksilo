@@ -2143,7 +2143,11 @@ fn rtl_live_resize_tracks_without_drift() {
     let id_w = {
         let any = tree.widget_as_any(table).unwrap();
         let tv = any.downcast_ref::<TableView<Row>>().unwrap();
-        tv.column_widths_signal().get().get("id").copied().unwrap_or(0.0)
+        tv.column_widths_signal()
+            .get()
+            .get("id")
+            .copied()
+            .unwrap_or(0.0)
     };
     assert!(
         (id_w - 100.0).abs() < 6.0,

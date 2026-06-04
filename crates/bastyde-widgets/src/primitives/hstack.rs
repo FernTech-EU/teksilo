@@ -5,6 +5,8 @@ use bastyde_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, Wi
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::VAlignment;
 
+use crate::primitives::linear_layout::{self, Axis};
+
 /// Horizontal layout container that distributes children left-to-right
 /// based on their intrinsic sizes. Cross-axis alignment is controlled
 /// by `VAlignment` (default: `Center`).
@@ -83,41 +85,19 @@ impl Widget for HStack {
         if self.child_ids.is_empty() {
             return proposal.resolve(0.0, 0.0).into();
         }
-
-        // SwiftUI-shape negotiation: ask each child for its full
-        // LayoutResponse (wanted size + flex weight) in a single call.
-        let child_proposal = SizeProposal {
-            width: None,
-            height: proposal.height,
-        };
-
-        let mut total_wanted: f32 = 0.0;
-        let mut max_height: f32 = 0.0;
-        let mut total_flex: f32 = 0.0;
-        for &child_id in &self.child_ids {
-            if let Some(r) = ctx.child_layout_response(child_id, child_proposal) {
-                total_wanted += r.size.width;
-                max_height = max_height.max(r.size.height);
-                total_flex += r.flex;
-            }
-        }
-
-        let n = self.child_ids.len();
-        let spacing = self.spacing.get();
-        let total_spacing = spacing * (n as f32 - 1.0).max(0.0);
-        let content_width = total_wanted + total_spacing;
-
-        // If any child is flex (wants slack), greedily claim the parent's
-        // offered width so slack exists to distribute. Otherwise honestly
-        // report content_width.
-        let width = if total_flex > 0.0 {
-            proposal.width.unwrap_or(content_width)
-        } else {
-            content_width
-        };
-        let height = proposal.height.unwrap_or(max_height);
-
-        Size::new(width, height).into()
+        // Main-then-cross negotiation along the horizontal axis: grow on
+        // surplus (flex), shrink on a deficit (shrink/min), and measure each
+        // child's height at its final width (height-for-width). See
+        // [`linear_layout`].
+        let neg = linear_layout::negotiate(
+            &self.child_ids,
+            ctx,
+            proposal.width,
+            proposal.height,
+            self.spacing.get(),
+            Axis::Horizontal,
+        );
+        linear_layout::response(&neg)
     }
 
     fn place_children(
@@ -127,58 +107,31 @@ impl Widget for HStack {
         children: &mut [WidgetPlacement],
         ctx: &LayoutContext,
     ) {
-        let n = children.len();
-        if n == 0 {
+        if children.is_empty() {
             return;
         }
 
-        // Single-query negotiation: ask each child for size + flex.
-        let wanted_proposal = SizeProposal {
-            width: None,
-            height: Some(bounds.height),
-        };
+        let ids: Vec<WidgetId> = children.iter().map(|c| c.id).collect();
+        let neg = linear_layout::negotiate(
+            &ids,
+            ctx,
+            Some(bounds.width),
+            Some(bounds.height),
+            self.spacing.get(),
+            Axis::Horizontal,
+        );
+        let widths = &neg.children.main;
+        let heights = &neg.children.cross;
 
-        let mut wanted_widths: Vec<f32> = Vec::with_capacity(n);
-        let mut wanted_heights: Vec<f32> = Vec::with_capacity(n);
-        let mut flex_factors: Vec<f32> = Vec::with_capacity(n);
-        let mut total_wanted: f32 = 0.0;
-        let mut total_flex: f32 = 0.0;
-
-        for child in children.iter() {
-            let r = ctx
-                .child_layout_response(child.id, wanted_proposal)
-                .unwrap_or(bastyde_core::widget::LayoutResponse::ZERO);
-            wanted_widths.push(r.size.width);
-            wanted_heights.push(r.size.height);
-            flex_factors.push(r.flex);
-            total_wanted += r.size.width;
-            total_flex += r.flex;
-        }
-
-        // Slack is leftover space after honoring every child's wanted size
-        // and inter-child spacing. Distributed proportionally to flex.
+        // Place children along the main axis with cross-axis (vertical)
+        // alignment. In RTL mode, children are placed right-to-left.
         let spacing = self.spacing.get();
-        let total_spacing = spacing * (n as f32 - 1.0).max(0.0);
-        let slack = (bounds.width - total_wanted - total_spacing).max(0.0);
-
-        let mut final_widths: Vec<f32> = Vec::with_capacity(n);
-        for i in 0..n {
-            let bonus = if total_flex > 0.0 {
-                (flex_factors[i] / total_flex) * slack
-            } else {
-                0.0
-            };
-            final_widths.push(wanted_widths[i] + bonus);
-        }
-
-        // Place children with alignment on cross axis.
-        // In RTL mode, children are placed right-to-left.
         let rtl = ctx.is_rtl();
         if rtl {
             let mut x = bounds.right();
             for (i, child) in children.iter_mut().enumerate() {
-                let w = final_widths[i];
-                let h = wanted_heights[i];
+                let w = widths[i];
+                let h = heights[i];
                 let valign = ctx
                     .child_alignment(child.id)
                     .map(|a| a.vertical)
@@ -193,8 +146,8 @@ impl Widget for HStack {
         } else {
             let mut x = bounds.x;
             for (i, child) in children.iter_mut().enumerate() {
-                let w = final_widths[i];
-                let h = wanted_heights[i];
+                let w = widths[i];
+                let h = heights[i];
                 let valign = ctx
                     .child_alignment(child.id)
                     .map(|a| a.vertical)
@@ -260,6 +213,43 @@ mod tests {
         }
     }
 
+    use bastyde_core::widget::LayoutResponse;
+
+    /// A leaf with an explicit compression floor and shrink weight.
+    #[derive(Debug)]
+    struct ShrinkLeaf {
+        wanted: f32,
+        min: f32,
+        shrink: f32,
+        height: f32,
+    }
+    impl Widget for ShrinkLeaf {
+        fn layout_response(&self, _p: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            LayoutResponse::shrinkable(
+                Size::new(self.wanted, self.height),
+                Size::new(self.min, self.height),
+                self.shrink,
+            )
+        }
+    }
+
+    /// A height-for-width leaf: fixed "area", so its height is `area / width`
+    /// at whatever width it is finally given (narrower → taller). Shrinkable
+    /// down to `min_w`.
+    #[derive(Debug)]
+    struct AreaLeaf {
+        area: f32,
+        wanted_w: f32,
+        min_w: f32,
+    }
+    impl Widget for AreaLeaf {
+        fn layout_response(&self, p: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            let w = p.width.unwrap_or(self.wanted_w);
+            let h = self.area / w.max(1.0);
+            LayoutResponse::shrinkable(Size::new(w, h), Size::new(self.min_w, h), 1.0)
+        }
+    }
+
     #[test]
     fn children_get_intrinsic_widths() {
         let mut tree = WidgetTree::new();
@@ -271,6 +261,131 @@ mod tests {
         assert!((tree.bounds(a).width - 60.0).abs() < 0.01);
         assert!((tree.bounds(b).width - 40.0).abs() < 0.01);
         assert!((tree.bounds(b).x - 60.0).abs() < 0.01);
+    }
+
+    // ── Over-constraint: shrink (Part B) ────────────────────────────────────
+
+    #[test]
+    fn shrink_distributes_deficit_by_weight() {
+        // Two equal shrinkables, 60px deficit → 30px each.
+        let mut tree = WidgetTree::new();
+        let a = tree.add(ShrinkLeaf {
+            wanted: 80.0,
+            min: 20.0,
+            shrink: 1.0,
+            height: 20.0,
+        });
+        let b = tree.add(ShrinkLeaf {
+            wanted: 80.0,
+            min: 20.0,
+            shrink: 1.0,
+            height: 20.0,
+        });
+        let _stack = tree.add(HStack::new().add_child(a).add_child(b));
+        tree.layout(SizeProposal::exact(100.0, 40.0));
+        assert!(
+            (tree.bounds(a).width - 50.0).abs() < 0.01,
+            "a={}",
+            tree.bounds(a).width
+        );
+        assert!(
+            (tree.bounds(b).width - 50.0).abs() < 0.01,
+            "b={}",
+            tree.bounds(b).width
+        );
+    }
+
+    #[test]
+    fn shrink_priority_leaves_rigid_sibling_untouched() {
+        // Shrinkable label absorbs the whole deficit; rigid icon keeps its size.
+        let mut tree = WidgetTree::new();
+        let label = tree.add(ShrinkLeaf {
+            wanted: 80.0,
+            min: 10.0,
+            shrink: 1.0,
+            height: 20.0,
+        });
+        let icon = tree.add(FixedLeaf(40.0, 20.0)); // rigid: shrink == 0
+        let _stack = tree.add(HStack::new().add_child(label).add_child(icon));
+        tree.layout(SizeProposal::exact(100.0, 40.0)); // deficit = 120 - 100 = 20
+        assert!(
+            (tree.bounds(label).width - 60.0).abs() < 0.01,
+            "label={}",
+            tree.bounds(label).width
+        );
+        assert!(
+            (tree.bounds(icon).width - 40.0).abs() < 0.01,
+            "icon={}",
+            tree.bounds(icon).width
+        );
+    }
+
+    #[test]
+    fn shrink_clamps_at_min_with_residual_overflow() {
+        // Deficit exceeds available shrink room: clamp at min, do not go below.
+        let mut tree = WidgetTree::new();
+        let a = tree.add(ShrinkLeaf {
+            wanted: 80.0,
+            min: 50.0,
+            shrink: 1.0,
+            height: 20.0,
+        });
+        let _stack = tree.add(HStack::new().add_child(a));
+        tree.layout(SizeProposal::exact(30.0, 40.0)); // wants to shrink to 30, floored at 50
+        assert!(
+            (tree.bounds(a).width - 50.0).abs() < 0.01,
+            "a={}",
+            tree.bounds(a).width
+        );
+    }
+
+    #[test]
+    fn no_shrink_weight_overflows_unchanged() {
+        // A rigid child still overflows (no silent shrink without opt-in).
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FixedLeaf(80.0, 20.0));
+        let _stack = tree.add(HStack::new().add_child(a));
+        tree.layout(SizeProposal::exact(50.0, 40.0));
+        assert!(
+            (tree.bounds(a).width - 80.0).abs() < 0.01,
+            "a={}",
+            tree.bounds(a).width
+        );
+    }
+
+    // ── Height-for-width (Part B) ───────────────────────────────────────────
+
+    #[test]
+    fn height_for_width_grows_cross_axis_on_shrink() {
+        // AreaLeaf: area 4000, natural width 200 → height 20. Constrained to
+        // width 50, it shrinks to 50 and its height becomes 4000/50 = 80; the
+        // HStack's reported cross size must follow.
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(AreaLeaf {
+            area: 4000.0,
+            wanted_w: 200.0,
+            min_w: 10.0,
+        });
+        let stack = tree.add(HStack::new().add_child(leaf));
+        tree.layout(SizeProposal {
+            width: Some(50.0),
+            height: None, // ask the stack for its intrinsic height
+        });
+        assert!(
+            (tree.bounds(leaf).width - 50.0).abs() < 0.01,
+            "leaf w={}",
+            tree.bounds(leaf).width
+        );
+        assert!(
+            (tree.bounds(leaf).height - 80.0).abs() < 0.5,
+            "leaf h={}",
+            tree.bounds(leaf).height
+        );
+        assert!(
+            (tree.bounds(stack).height - 80.0).abs() < 0.5,
+            "stack height should follow height-for-width, got {}",
+            tree.bounds(stack).height
+        );
     }
 
     #[test]

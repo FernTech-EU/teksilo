@@ -27,7 +27,13 @@ use crate::scroll_area::ScrollArea;
 
 /// Marker for whether a pending item is a menu item or a separator.
 enum MenuEntry {
-    Item(PendingChild),
+    /// A menu item with an optional reactive visibility gate. When the gate
+    /// is `Some(false)` the item's row collapses to zero height (no gap) and
+    /// is skipped by keyboard navigation — the conditionally-shown menu row.
+    Item {
+        pending: PendingChild,
+        visible: Option<bastyde_core::signal::Prop<bool>>,
+    },
     Separator,
 }
 
@@ -174,6 +180,11 @@ pub struct MenuList {
     root_child_id: Option<WidgetId>,
     /// Widget IDs of actual menu items (not separators), for keyboard navigation.
     item_widget_ids: Vec<WidgetId>,
+    /// Per-item reactive visibility gate (parallel to `item_widget_ids`).
+    /// `None` → always visible; `Some(prop)` → the item is shown only while
+    /// the prop is `true`. Keyboard navigation skips items whose gate is
+    /// currently `false`.
+    item_visibility: Vec<Option<bastyde_core::signal::Prop<bool>>>,
     /// Whether each item (by index into item_widget_ids) is a submenu trigger.
     submenu_flags: Vec<bool>,
     /// When set and the item count (counting every entry — items *and*
@@ -230,6 +241,7 @@ impl MenuList {
             entries: Vec::new(),
             root_child_id: None,
             item_widget_ids: Vec::new(),
+            item_visibility: Vec::new(),
             submenu_flags: Vec::new(),
             max_visible_items: None,
             attached_side: None,
@@ -261,8 +273,43 @@ impl MenuList {
             .downcast_ref::<crate::menu_item::MenuItem>()
             .is_some_and(|mi| mi.is_submenu());
         self.submenu_flags.push(is_submenu);
-        self.entries
-            .push(MenuEntry::Item(PendingChild::Deferred(Box::new(widget))));
+        self.entries.push(MenuEntry::Item {
+            pending: PendingChild::Deferred(Box::new(widget)),
+            visible: None,
+        });
+        self
+    }
+
+    /// Add a menu item that is shown only while `visible` is `true`. When the
+    /// gate is `false` the row collapses to zero height (no gap) and keyboard
+    /// navigation skips it — the conditionally-shown menu row. Used e.g. by a
+    /// `Toolbar`'s overflow menu, where each row is present only while its
+    /// inline twin is collapsed.
+    pub fn item_when(
+        self,
+        widget: impl Widget + 'static,
+        visible: impl Into<bastyde_core::signal::Prop<bool>>,
+    ) -> Self {
+        self.item_boxed_when(Box::new(widget), visible)
+    }
+
+    /// [`item_when`](Self::item_when) for an already-boxed widget — used when
+    /// the row type is decided at runtime (e.g. a menu row that is either a
+    /// `MenuItem` or an embedded control).
+    pub fn item_boxed_when(
+        mut self,
+        widget: Box<dyn Widget>,
+        visible: impl Into<bastyde_core::signal::Prop<bool>>,
+    ) -> Self {
+        let is_submenu = widget
+            .as_any()
+            .and_then(|a| a.downcast_ref::<crate::menu_item::MenuItem>())
+            .is_some_and(|mi| mi.is_submenu());
+        self.submenu_flags.push(is_submenu);
+        self.entries.push(MenuEntry::Item {
+            pending: PendingChild::Deferred(widget),
+            visible: Some(visible.into()),
+        });
         self
     }
 
@@ -327,6 +374,7 @@ impl Widget for MenuList {
         // Build all entries into a VStack, wrapping items in highlight wrappers
         let mut vstack = VStack::new();
         self.item_widget_ids.clear();
+        self.item_visibility.clear();
         let mut item_counter = 0_usize;
 
         // Radio-group buffers keyed by `Signal<usize>` identity. Linear
@@ -363,7 +411,7 @@ impl Widget for MenuList {
 
         for entry in self.entries.drain(..) {
             match entry {
-                MenuEntry::Item(pending) => {
+                MenuEntry::Item { pending, visible } => {
                     let (item_id, radio_buf, item_label, item_mnemonic) = match pending {
                         PendingChild::Id(id) => (id, None, None, None),
                         PendingChild::Deferred(mut w) => {
@@ -406,6 +454,7 @@ impl Widget for MenuList {
                         }
                     };
                     self.item_widget_ids.push(item_id);
+                    self.item_visibility.push(visible.clone());
                     let item_idx = self.item_widget_ids.len() - 1;
                     if let Some(buf) = radio_buf {
                         pending_radio_pushes.push((item_idx, buf));
@@ -423,14 +472,21 @@ impl Widget for MenuList {
                         }
                     }
 
-                    // Wrap in a highlight container driven by focused_index
-                    let wrapper = KeyboardHighlightWrapper {
+                    // Wrap in a highlight container driven by focused_index.
+                    // A per-item visibility gate is applied to the WRAPPER (not
+                    // the inner item) so a hidden row collapses to zero height
+                    // — no empty gap — while keeping `item_widget_ids` pointing
+                    // at the real, clickable item for `synthetic_click`.
+                    let wrapper_id = ctx.add(KeyboardHighlightWrapper {
                         item_id,
                         index: item_counter,
                         focused_index: focused_index.clone(),
                         root_child_id: None,
-                    };
-                    vstack = vstack.child(wrapper);
+                    });
+                    if let Some(vis) = visible {
+                        ctx.visible_when(wrapper_id, vis);
+                    }
+                    vstack = vstack.add_child(wrapper_id);
                     item_counter += 1;
                 }
                 MenuEntry::Separator => {
@@ -502,6 +558,8 @@ impl Widget for MenuList {
         let type_ahead_timeout = self.type_ahead_timeout;
         let resolved_labels = Rc::new(resolved_labels);
         let mnemonic_table = Rc::new(mnemonic_table);
+        // Per-item visibility gates, so navigation skips collapsed rows.
+        let visibilities = Rc::new(self.item_visibility.clone());
         let handler_set = HandlerSet::new()
             .on_key(
                 move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
@@ -521,50 +579,66 @@ impl Widget for MenuList {
                     } else {
                         Key::ArrowLeft
                     };
+                    // Currently-visible item indices, in order. Hidden
+                    // (collapsed) rows are skipped by arrow / Home / End nav.
+                    let visible_indices: Vec<usize> = (0..item_count)
+                        .filter(|&i| {
+                            visibilities
+                                .get(i)
+                                .and_then(|o| o.as_ref())
+                                .map(|p| p.get())
+                                .unwrap_or(true)
+                        })
+                        .collect();
                     match key {
                         Key::ArrowDown => {
-                            if item_count == 0 {
+                            if visible_indices.is_empty() {
                                 return EventResponse::Ignored;
                             }
-                            let current = focused_index.get().unwrap_or(usize::MAX);
-                            let next = if current >= item_count - 1 {
-                                0
-                            } else {
-                                current + 1
+                            let pos = focused_index
+                                .get()
+                                .and_then(|c| visible_indices.iter().position(|&x| x == c));
+                            let next = match pos {
+                                Some(p) => visible_indices[(p + 1) % visible_indices.len()],
+                                None => visible_indices[0],
                             };
                             focused_index.set(Some(next));
                             EventResponse::Handled
                         }
                         Key::ArrowUp => {
-                            if item_count == 0 {
+                            if visible_indices.is_empty() {
                                 return EventResponse::Ignored;
                             }
-                            let current = focused_index.get().unwrap_or(0);
-                            let next = if current == 0 {
-                                item_count - 1
-                            } else {
-                                current - 1
+                            let n = visible_indices.len();
+                            let pos = focused_index
+                                .get()
+                                .and_then(|c| visible_indices.iter().position(|&x| x == c));
+                            let next = match pos {
+                                Some(p) => visible_indices[(p + n - 1) % n],
+                                None => visible_indices[n - 1],
                             };
                             focused_index.set(Some(next));
                             EventResponse::Handled
                         }
                         Key::Home => {
-                            if item_count == 0 {
+                            let Some(&first) = visible_indices.first() else {
                                 return EventResponse::Ignored;
-                            }
-                            focused_index.set(Some(0));
+                            };
+                            focused_index.set(Some(first));
                             EventResponse::Handled
                         }
                         Key::End => {
-                            if item_count == 0 {
+                            let Some(&last) = visible_indices.last() else {
                                 return EventResponse::Ignored;
-                            }
-                            focused_index.set(Some(item_count - 1));
+                            };
+                            focused_index.set(Some(last));
                             EventResponse::Handled
                         }
                         Key::Enter | Key::Space => {
-                            // Activate the focused item via synthetic click.
+                            // Activate the focused item via synthetic click —
+                            // but only if it is currently visible.
                             if let Some(idx) = focused_index.get()
+                                && visible_indices.contains(&idx)
                                 && idx < item_ids.len()
                             {
                                 ctx.synthetic_click(item_ids[idx]);
@@ -750,6 +824,45 @@ mod tests {
             h > 400.0,
             "uncapped menu should grow to fit all items, got height={}",
             h
+        );
+    }
+
+    #[test]
+    fn item_when_collapses_a_hidden_row_to_zero_height() {
+        use bastyde_core::signal::Signal;
+        // A gated row that is currently hidden must add no height — the menu
+        // is the same height as if the row weren't there; revealing it grows
+        // the menu by one row.
+        let gate = Signal::new(false);
+
+        let mut tree_gated = light_tree();
+        let menu_gated = MenuList::new()
+            .item(MenuItem::new(lit!("A")))
+            .item_when(MenuItem::new(lit!("Gated")), gate.clone())
+            .item(MenuItem::new(lit!("B")));
+        let id_gated = tree_gated.add(menu_gated);
+        tree_gated.layout(SizeProposal::with_width(300.0));
+        let h_hidden = tree_gated.bounds(id_gated).height;
+
+        let mut tree_two = light_tree();
+        let menu_two = MenuList::new()
+            .item(MenuItem::new(lit!("A")))
+            .item(MenuItem::new(lit!("B")));
+        let id_two = tree_two.add(menu_two);
+        tree_two.layout(SizeProposal::with_width(300.0));
+        let h_two = tree_two.bounds(id_two).height;
+
+        assert!(
+            (h_hidden - h_two).abs() < 0.5,
+            "a hidden item_when row must add no height: {h_hidden} vs {h_two}"
+        );
+
+        gate.set(true);
+        tree_gated.layout(SizeProposal::with_width(300.0));
+        let h_shown = tree_gated.bounds(id_gated).height;
+        assert!(
+            h_shown > h_hidden + 10.0,
+            "revealing the gated row must add a row's height: {h_shown} vs {h_hidden}"
         );
     }
 

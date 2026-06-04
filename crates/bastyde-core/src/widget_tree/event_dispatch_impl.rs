@@ -1805,12 +1805,10 @@ mod tests {
 
         let mut tree = WidgetTree::new();
         let a = tree.add(
-            FillWidget::new()
-                .access_action(accesskit::Action::Click, move |_ctx| a_cb.set(true)),
+            FillWidget::new().access_action(accesskit::Action::Click, move |_ctx| a_cb.set(true)),
         );
         let b = tree.add(
-            FillWidget::new()
-                .access_action(accesskit::Action::Click, move |_ctx| b_cb.set(true)),
+            FillWidget::new().access_action(accesskit::Action::Click, move |_ctx| b_cb.set(true)),
         );
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -1839,8 +1837,7 @@ mod tests {
 
         let mut tree = WidgetTree::new();
         let widget = tree.add(
-            FillWidget::new()
-                .access_action(accesskit::Action::Click, move |_ctx| cb.set(true)),
+            FillWidget::new().access_action(accesskit::Action::Click, move |_ctx| cb.set(true)),
         );
         tree.layout(SizeProposal::exact(200.0, 100.0));
 

@@ -179,8 +179,8 @@ pub use primitives::TextInputField;
 pub use primitives::text_input_field::{ValidationFeedback, ValidationOutcome};
 pub use primitives::{
     AspectRatio, Center, Divider, Expand, FixedSize, FormLayout, Grid, HStack, IconWidget,
-    ImageFit, ImageWidget, MasonryLayout, MaxSize, MinSize, Padding, RectWidget, Spacer, Switcher,
-    TextWidget, TrackSize, VStack, Wrap, ZStack,
+    ImageFit, ImageWidget, MasonryLayout, MaxSize, MinSize, Padding, RectWidget, Shrinkable,
+    Spacer, Switcher, TextWidget, TrackSize, VStack, Wrap, ZStack,
 };
 #[cfg(feature = "telemetry")]
 pub use privacy_settings::PrivacySettings;
@@ -225,7 +225,9 @@ pub use toast::{
 };
 pub use toggle::Toggle;
 pub use tool_box::{ToolBox, ToolBoxItem};
-pub use toolbar::Toolbar;
+pub use toolbar::{
+    Toolbar, ToolbarAction, ToolbarDisplayMode, ToolbarItem, ToolbarOrientation, ToolbarOverflow,
+};
 pub use tree_table::TreeTable;
 pub use tree_view::{TreeRowContext, TreeView};
 pub use wizard::{Wizard, WizardStep};

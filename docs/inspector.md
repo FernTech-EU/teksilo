@@ -116,7 +116,33 @@ appear dimmed in the Shortcuts tab.
   tooltip with type + size — see *Bounds overlay color legend*).
 - **Opacity slider** — dims the bounds-overlay strokes for dense UIs.
   Range 0.1 .. 1.0.
+- **Overflow toggle** — turns the overflow overlay on/off (see below).
+  A check mark in the label reflects the state.
 - **×** — closes the panel.
+
+## Overflow overlay
+
+Independent of the bounds-overlay mode and **on by default** in debug builds:
+wherever a distributing container's children spill past its bounds, the
+inspector paints Flutter-style **yellow/black hazard stripes** on the overhang
+plus a bright red border — so over-constrained layouts are impossible to miss.
+It paints even with the panel closed (any time the inspector is installed).
+
+Detection rules (in [highlight.rs](../crates/bastyde-inspector/src/highlight.rs),
+`collect_overflow`):
+
+- Only **distributing containers** are checked — `HStack`, `VStack`, `Grid`,
+  `FormLayout` — so intentional overlap (`ZStack`, scene content, overlays)
+  never false-positives.
+- Containers that **clip** their children (`ScrollArea`, `MaxSize`) are skipped
+  — their overflow is expected and clipped away.
+- An overhang under `0.5 px` is ignored (rounding noise).
+
+After [over-constraint handling](layout-primitives.md#35-height-for-width),
+shrinkable content compresses to fit and shows **no** stripes; stripes mean the
+layout genuinely cannot fit (only rigid children, or every shrinkable child
+already at its `min`). Toggle from the toolbar; the choice persists via
+`__bastyde_inspector.overflow_overlay`. Demo: `cargo run -p over-constraint`.
 
 ## Tabs
 

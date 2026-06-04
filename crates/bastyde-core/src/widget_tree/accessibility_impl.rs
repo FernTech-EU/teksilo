@@ -862,6 +862,28 @@ mod tests {
     }
 
     #[test]
+    fn access_hidden_bound_to_signal_toggles_reactively() {
+        use crate::signal::Signal;
+        use crate::widget_builder::WidgetBuilder;
+        let hidden = Signal::new(false);
+        let mut tree = WidgetTree::new();
+        let w = tree.add(ClickableWidget.access_hidden(hidden.clone()));
+        tree.layout(SizeProposal::exact(100.0, 30.0));
+        assert!(
+            !tree.accessibility_node(w).is_hidden(),
+            "node should be visible to AT while the signal is false"
+        );
+        hidden.set(true);
+        // `apply()` reads the prop fresh, so the pulled node reflects the flip.
+        assert!(
+            tree.accessibility_node(w).is_hidden(),
+            "node should hide from AT when the bound signal flips to true"
+        );
+        hidden.set(false);
+        assert!(!tree.accessibility_node(w).is_hidden());
+    }
+
+    #[test]
     fn accessibility_node_collects_actions() {
         let mut tree = WidgetTree::new();
         let widget = tree.add(ActionWidget);

@@ -15,6 +15,7 @@ use bastyde_settings::SettingsStore;
 use crate::state::{InspectorState, MAX_PANEL_HEIGHT, MIN_PANEL_HEIGHT, NUM_TABS, OverlayMode};
 
 const KEY_OPEN: &str = "__bastyde_inspector.open";
+const KEY_OVERFLOW: &str = "__bastyde_inspector.overflow_overlay";
 const KEY_BOUNDS_MODE: &str = "__bastyde_inspector.bounds_mode";
 const KEY_OVERLAY_OPACITY: &str = "__bastyde_inspector.overlay_opacity";
 const KEY_ACTIVE_TAB: &str = "__bastyde_inspector.active_tab";
@@ -25,6 +26,7 @@ const KEY_PANEL_HEIGHT: &str = "__bastyde_inspector.panel_height";
 /// same state simply re-applies the persisted seed values.
 pub(crate) fn wire(state: &InspectorState, store: &SettingsStore) {
     bridge_bool(&state.open, store, KEY_OPEN);
+    bridge_bool(&state.overflow_overlay, store, KEY_OVERFLOW);
     bridge_overlay_mode(&state.overlay_mode, store);
     bridge_f32(&state.overlay_opacity, store, KEY_OVERLAY_OPACITY);
     bridge_active_tab(&state.active_tab, store);

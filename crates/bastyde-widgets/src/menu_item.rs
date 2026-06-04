@@ -692,13 +692,15 @@ impl Widget for MenuItem {
                         });
                         ctx.add(
                             Switcher::new(idx)
-                                .child(IconWidget::chevron_right(12.0).bind_color(text_role.clone()))
-                                .child(IconWidget::chevron_left(12.0).bind_color(text_role.clone())),
+                                .child(
+                                    IconWidget::chevron_right(12.0).bind_color(text_role.clone()),
+                                )
+                                .child(
+                                    IconWidget::chevron_left(12.0).bind_color(text_role.clone()),
+                                ),
                         )
                     }
-                    None => {
-                        ctx.add(IconWidget::chevron_right(12.0).bind_color(text_role.clone()))
-                    }
+                    None => ctx.add(IconWidget::chevron_right(12.0).bind_color(text_role.clone())),
                 }
             } else {
                 ctx.add(Spacer::new())

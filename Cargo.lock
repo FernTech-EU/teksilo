@@ -2070,9 +2070,9 @@ dependencies = [
 
 [[package]]
 name = "harfrust"
-version = "0.7.0"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0431e8e389aa0f1e72bb9d1c2db8957a1a7a3580e8ed97db819c14837aac9b3e"
+checksum = "d12c7c642d4ce8c2e784b4751a6634bd89583912265add4a679a8882d123fbcd"
 dependencies = [
  "bitflags 2.11.1",
  "bytemuck",
@@ -2155,6 +2155,12 @@ name = "httparse"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
+
+[[package]]
+name = "hypher"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bef68590049bab63a464eee1a1158ac04c6f6613a546d8d90f78636b8b94f171"
 
 [[package]]
 name = "iana-time-zone"
@@ -3503,6 +3509,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "over-constraint"
+version = "0.5.0"
+dependencies = [
+ "bastyde",
+]
+
+[[package]]
 name = "owned_ttf_parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4744,6 +4757,7 @@ dependencies = [
  "serde_json",
  "text-document-common",
  "text-document-frontend",
+ "thiserror 2.0.18",
  "unicode-segmentation",
 ]
 
@@ -4757,6 +4771,7 @@ dependencies = [
  "flume",
  "im",
  "log",
+ "parking_lot",
  "pulldown-cmark",
  "ropey",
  "scraper",
@@ -4813,6 +4828,7 @@ dependencies = [
  "chrono",
  "flume",
  "log",
+ "parking_lot",
  "text-document-common",
  "text-document-direct-access",
  "text-document-editing",
@@ -4842,6 +4858,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "docx-rs",
+ "parking_lot",
  "regex",
  "serde",
  "serde_json",
@@ -4882,6 +4899,7 @@ dependencies = [
  "etagere",
  "fontdb",
  "harfrust",
+ "hypher",
  "icu_segmenter",
  "swash",
  "text-document",

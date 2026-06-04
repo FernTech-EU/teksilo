@@ -619,13 +619,17 @@ mod tests {
             });
         let source_id = tree.add(TypedDragSource);
         let target_id = tree.add(target);
-        let es = tree.add(crate::primitives::Expand::new().flex(1.0).child_id(source_id));
-        let et = tree.add(crate::primitives::Expand::new().flex(1.0).child_id(target_id));
-        tree.add(
-            crate::primitives::HStack::new()
-                .add_child(es)
-                .add_child(et),
+        let es = tree.add(
+            crate::primitives::Expand::new()
+                .flex(1.0)
+                .child_id(source_id),
         );
+        let et = tree.add(
+            crate::primitives::Expand::new()
+                .flex(1.0)
+                .child_id(target_id),
+        );
+        tree.add(crate::primitives::HStack::new().add_child(es).add_child(et));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         let from = tree.bounds(source_id).center();
@@ -681,13 +685,17 @@ mod tests {
             });
         let source_id = tree.add(OtherSource);
         let target_id = tree.add(target);
-        let es = tree.add(crate::primitives::Expand::new().flex(1.0).child_id(source_id));
-        let et = tree.add(crate::primitives::Expand::new().flex(1.0).child_id(target_id));
-        tree.add(
-            crate::primitives::HStack::new()
-                .add_child(es)
-                .add_child(et),
+        let es = tree.add(
+            crate::primitives::Expand::new()
+                .flex(1.0)
+                .child_id(source_id),
         );
+        let et = tree.add(
+            crate::primitives::Expand::new()
+                .flex(1.0)
+                .child_id(target_id),
+        );
+        tree.add(crate::primitives::HStack::new().add_child(es).add_child(et));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         let from = tree.bounds(source_id).center();

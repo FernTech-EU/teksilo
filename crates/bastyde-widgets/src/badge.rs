@@ -108,6 +108,7 @@ impl Widget for Badge {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
+        // Rigid: size to content, no shrink (see Button's note).
         if let Some(root) = self.root_child_id
             && let Some(size) = ctx.child_size(root, proposal)
         {

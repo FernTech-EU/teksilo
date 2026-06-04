@@ -59,7 +59,22 @@ impl WidgetTree {
             if is_active && !should_be_visible {
                 to_dormant.push(id);
             } else if !is_active && should_be_visible {
-                to_activate.push(id);
+                // Only wake a `visible_when(true)` node whose parent is active.
+                // A gated node inside a dormant ancestor (e.g. a row in a
+                // closed popover / overflow menu) must NOT escape that
+                // ancestor's dormancy and render on its own. When the ancestor
+                // is later activated, `arena.activate` wakes this node via the
+                // cascade (its gate is true). The dormancy invariant — an
+                // active node has an active parent — makes the immediate-parent
+                // check sufficient.
+                let parent_active = self
+                    .arena
+                    .parent(id)
+                    .map(|p| self.arena.is_active(p))
+                    .unwrap_or(true);
+                if parent_active {
+                    to_activate.push(id);
+                }
             }
         }
         // The accessibility walk skips dormant nodes, so any
@@ -245,6 +260,14 @@ impl WidgetTree {
             return;
         }
 
+        // Per-pass layout memoization: a widget's `layout_response` is a pure
+        // function of (state, proposal) within a pass, so memoizing across the
+        // main-then-cross queries that height-for-width negotiation issues keeps
+        // the pass O(n). Cleared here — once, dominating both the main-tree and
+        // overlay root recursions below — because geometry may change between
+        // passes. See `WidgetArena::cached_layout_response`.
+        self.arena.clear_layout_cache();
+
         let base_theme = self.theme.clone();
 
         let overlay_content_ids = self.overlay_manager.active_content_ids();
@@ -428,8 +451,10 @@ fn layout_widget_recursive(
             arena: Some(arena),
             extras,
         };
-        let node = arena.get(id).expect("widget id is active in arena");
-        node.widget.layout_response(proposal, &ctx).size
+        arena
+            .cached_layout_response(id, proposal, &ctx)
+            .map(|r| r.size)
+            .unwrap_or(bastyde_canvas::Size::ZERO)
     };
 
     let bounds = Rect::new(
@@ -552,6 +577,193 @@ mod tests {
         fn children(&self) -> Vec<WidgetId> {
             vec![self.child]
         }
+    }
+
+    // ── Per-pass layout memoization cache (Part C) ──────────────────────────
+
+    /// A childless leaf that counts how many times `layout_response` runs and
+    /// can opt out of caching. The driver does not recurse into a childless
+    /// leaf's placement, so the only calls come from a parent's `child_size`
+    /// queries — making the count a precise probe of the cache.
+    #[derive(Debug)]
+    struct CountingLeaf {
+        calls: std::rc::Rc<std::cell::Cell<u32>>,
+        cacheable: bool,
+    }
+
+    impl Widget for CountingLeaf {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            self.calls.set(self.calls.get() + 1);
+            Size::new(50.0, 20.0).into()
+        }
+        fn cacheable_layout(&self) -> bool {
+            self.cacheable
+        }
+    }
+
+    /// Queries its single child with the *same* proposal in both
+    /// `layout_response` and `place_children` — the pattern real stacks use
+    /// for height-for-width. With caching the child computes once; without it,
+    /// twice.
+    #[derive(Debug)]
+    struct DoubleQueryContainer {
+        child: WidgetId,
+    }
+
+    impl Widget for DoubleQueryContainer {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            ctx.child_size(self.child, SizeProposal::exact(50.0, 20.0))
+                .unwrap_or(Size::ZERO)
+                .into()
+        }
+        fn place_children(
+            &self,
+            bounds: Rect,
+            _proposal: SizeProposal,
+            children: &mut [WidgetPlacement],
+            ctx: &LayoutContext,
+        ) {
+            // Second query with the identical proposal.
+            let _ = ctx.child_size(self.child, SizeProposal::exact(50.0, 20.0));
+            for child in children.iter_mut() {
+                child.origin = bounds.origin();
+                child.size = bounds.size();
+            }
+        }
+        fn children(&self) -> Vec<WidgetId> {
+            vec![self.child]
+        }
+    }
+
+    #[test]
+    fn cache_dedupes_identical_child_queries_within_a_pass() {
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(CountingLeaf {
+            calls: calls.clone(),
+            cacheable: true,
+        });
+        let _root = tree.add(DoubleQueryContainer { child: leaf });
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        // Two identical `exact(50,20)` queries (layout_response + place_children)
+        // collapse to one real call; the driver does not recurse into the
+        // childless leaf.
+        assert_eq!(calls.get(), 1, "cacheable leaf should be computed once");
+    }
+
+    #[test]
+    fn cache_opt_out_recomputes_every_query() {
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(CountingLeaf {
+            calls: calls.clone(),
+            cacheable: false,
+        });
+        let _root = tree.add(DoubleQueryContainer { child: leaf });
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert_eq!(
+            calls.get(),
+            2,
+            "opt-out leaf must run on every query (side effects preserved)"
+        );
+    }
+
+    #[test]
+    fn cache_is_cleared_between_passes() {
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(CountingLeaf {
+            calls: calls.clone(),
+            cacheable: true,
+        });
+        let _root = tree.add(DoubleQueryContainer { child: leaf });
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        // A second pass with a different proposal must re-run layout — proving
+        // the cache is per-pass, not stale across passes (the `exact(50,20)`
+        // child key is identical between passes).
+        tree.layout(SizeProposal::exact(120.0, 60.0));
+        assert_eq!(
+            calls.get(),
+            2,
+            "each pass recomputes; cache cleared per pass"
+        );
+    }
+
+    // ── measure_intrinsic (Primitive 2) ─────────────────────────────────────
+
+    /// Probe: from its own `layout_response`, measures `target` two ways and
+    /// stashes the results — the normal (activation-gated) query and the
+    /// intrinsic (activation-ignoring) query.
+    #[derive(Debug)]
+    struct MeasureProbe {
+        target: WidgetId,
+        active_w: std::rc::Rc<std::cell::Cell<f32>>, // -1.0 == None
+        intrinsic_w: std::rc::Rc<std::cell::Cell<f32>>,
+    }
+    impl Widget for MeasureProbe {
+        fn layout_response(
+            &self,
+            p: SizeProposal,
+            ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            // Measure intrinsic FIRST, then the normal gated query: if the
+            // measure had polluted the cache, the gated query could wrongly
+            // return a size for the dormant target. `exact` because FillWidget
+            // fills its proposal (it has no intrinsic size of its own).
+            let probe = SizeProposal::exact(120.0, 30.0);
+            let intrinsic = ctx
+                .measure_intrinsic(self.target, probe)
+                .map(|s| s.width)
+                .unwrap_or(-1.0);
+            let active = ctx
+                .child_size(self.target, probe)
+                .map(|s| s.width)
+                .unwrap_or(-1.0);
+            self.intrinsic_w.set(intrinsic);
+            self.active_w.set(active);
+            p.resolve(0.0, 0.0).into()
+        }
+        fn cacheable_layout(&self) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn measure_intrinsic_sees_a_dormant_widget_normal_query_does_not() {
+        let active = std::rc::Rc::new(std::cell::Cell::new(0.0));
+        let intrinsic = std::rc::Rc::new(std::cell::Cell::new(0.0));
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(FillWidget::new());
+        tree.set_dormant(leaf);
+        let _probe = tree.add(MeasureProbe {
+            target: leaf,
+            active_w: active.clone(),
+            intrinsic_w: intrinsic.clone(),
+        });
+        tree.layout(SizeProposal::exact(200.0, 50.0));
+
+        // measure_intrinsic measures the dormant widget (FillWidget fills the
+        // 120px probe)…
+        assert!(
+            (intrinsic.get() - 120.0).abs() < 0.01,
+            "measure_intrinsic should size the dormant widget, got {}",
+            intrinsic.get()
+        );
+        // …and the normal gated query (run AFTER) still returns None — proving
+        // the measure bypassed, and did not seed, the per-pass cache.
+        assert_eq!(
+            active.get(),
+            -1.0,
+            "child_size must stay None for a dormant widget (no cache pollution)"
+        );
     }
 
     #[test]

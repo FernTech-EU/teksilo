@@ -547,6 +547,15 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         let dropdown_id = ctx.add(dropdown_panel);
         self.dropdown_content_id = Some(dropdown_id);
         ctx.set_dormant(dropdown_id);
+        // Make `is_open` the single source of truth for the panel's
+        // activation. The panel is reported by `children()` (for hit-test /
+        // a11y / teardown) but is an orphan arena root opened as an overlay;
+        // without this binding a framework re-activation (e.g. the combo
+        // reappearing from a `visible_when` collapse inside a `Toolbar`) can
+        // leave the panel active while closed, painting ghost option rows. The
+        // per-pass visibility reconciliation dormants it again whenever the
+        // combo is not open.
+        ctx.visible_when(dropdown_id, self.is_open.clone());
 
         // --- Handlers ---
         let self_id = ctx.self_id();
@@ -851,17 +860,20 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
         let min_height = crate::styles::recipe_combo_box_style::COMBO_BOX_HEIGHT;
+        const MIN_WIDTH: f32 = 120.0;
+        // Rigid: size to content (clamped to the combo's minimum), no shrink
+        // (see Button's note). Wrap in `Shrinkable` to opt into compression.
         match self.root_child_id {
             Some(id) => {
                 let child_size = ctx
                     .child_size(id, proposal)
                     .unwrap_or_else(|| proposal.resolve(0.0, 0.0));
                 Size::new(
-                    child_size.width.max(120.0),
+                    child_size.width.max(MIN_WIDTH),
                     child_size.height.max(min_height),
                 )
             }
-            None => proposal.resolve(120.0, min_height),
+            None => proposal.resolve(MIN_WIDTH, min_height),
         }
         .into()
     }

@@ -75,7 +75,12 @@ pub struct AccessibilityOverrides {
     pub description: Option<Prop<String>>,
     pub value: Option<Prop<String>>,
     pub role: Option<accesskit::Role>,
-    pub hidden: Option<bool>,
+    /// Reactive hidden-from-AT flag. `Some(prop)` where the prop reads
+    /// `true` hides the node from assistive technologies; `false` un-sets a
+    /// hidden state the inner widget emitted unconditionally. Bound props are
+    /// registered at `AccessibilityOnly` so the AT tree re-walks when they
+    /// flip (see the insertion paths in `widget_tree.rs`).
+    pub hidden: Option<Prop<bool>>,
     pub disabled: Option<bool>,
 
     // -- Tier 2: relationships / live / identity --------------------------
@@ -173,7 +178,7 @@ impl AccessibilityOverrides {
         if let Some(role) = self.role {
             b.set_role(role);
         }
-        match self.hidden {
+        match self.hidden.as_ref().map(|p| p.get()) {
             Some(true) => b.set_hidden(),
             Some(false) => b.clear_hidden(),
             None => {}
@@ -1039,11 +1044,14 @@ impl<W: Widget> WidgetWithHandlers<W> {
         self
     }
 
-    /// Hide (or un-hide) this node from assistive technologies.
+    /// Hide (or un-hide) this node from assistive technologies. Accepts a
+    /// plain `bool`, a `Signal<bool>`, or a `Prop<bool>`: a bound value makes
+    /// the node appear/disappear from the AT tree reactively (the binding is
+    /// registered at `AccessibilityOnly`, so the tree re-walks on change).
     /// `false` un-sets a hidden state the inner widget may have emitted
     /// unconditionally (e.g. `Panel::a11y_presentational`).
-    pub fn access_hidden(mut self, hidden: bool) -> Self {
-        self.handler_set.access_mut().hidden = Some(hidden);
+    pub fn access_hidden(mut self, hidden: impl Into<Prop<bool>>) -> Self {
+        self.handler_set.access_mut().hidden = Some(hidden.into());
         self
     }
 
@@ -1587,7 +1595,7 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         WidgetWithHandlers::new(self).access_role(role)
     }
 
-    fn access_hidden(self, hidden: bool) -> WidgetWithHandlers<Self> {
+    fn access_hidden(self, hidden: impl Into<Prop<bool>>) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).access_hidden(hidden)
     }
 

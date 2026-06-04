@@ -75,20 +75,35 @@ impl Widget for ZStack {
         // unspecified) don't inflate the stack's size.
         let mut max_w: f32 = 0.0;
         let mut max_h: f32 = 0.0;
+        let mut min_w: f32 = 0.0;
+        let mut min_h: f32 = 0.0;
+        let mut any_shrink = false;
         let mut any_queried = false;
         for &child_id in &self.child_ids {
-            if let Some(child_size) = ctx.child_size(child_id, SizeProposal::unspecified()) {
-                max_w = max_w.max(child_size.width);
-                max_h = max_h.max(child_size.height);
+            if let Some(r) = ctx.child_layout_response(child_id, SizeProposal::unspecified()) {
+                max_w = max_w.max(r.size.width);
+                max_h = max_h.max(r.size.height);
+                min_w = min_w.max(r.min.width);
+                min_h = min_h.max(r.min.height);
+                if r.shrink > 0.0 {
+                    any_shrink = true;
+                }
                 any_queried = true;
             }
         }
         if any_queried {
-            Size::new(max_w, max_h)
+            // Size = max of children. Propagate a shrink weight + compression
+            // floor when any child can shrink (so a ZStack wrapping shrinkable
+            // content stays shrinkable), but keep `flex = 0`: a ZStack does not
+            // claim growth slack.
+            let size = Size::new(max_w, max_h);
+            let min = Size::new(min_w.min(max_w), min_h.min(max_h));
+            bastyde_core::widget::LayoutResponse::rigid(size)
+                .with_shrink(if any_shrink { 1.0 } else { 0.0 })
+                .with_min(min)
         } else {
-            proposal.resolve(0.0, 0.0)
+            proposal.resolve(0.0, 0.0).into()
         }
-        .into()
     }
 
     fn place_children(

@@ -5,6 +5,8 @@ use bastyde_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, Wi
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::HAlignment;
 
+use crate::primitives::linear_layout::{self, Axis};
+
 /// Vertical layout container that distributes children top-to-bottom
 /// based on their intrinsic sizes. Cross-axis alignment is controlled
 /// by `HAlignment` (default: `Leading`).
@@ -82,38 +84,18 @@ impl Widget for VStack {
         if self.child_ids.is_empty() {
             return proposal.resolve(0.0, 0.0).into();
         }
-
-        // SwiftUI-shape negotiation: ask each child for its full
-        // LayoutResponse (wanted size + flex weight) in a single call.
-        let child_proposal = SizeProposal {
-            width: proposal.width,
-            height: None,
-        };
-
-        let mut total_wanted: f32 = 0.0;
-        let mut max_width: f32 = 0.0;
-        let mut total_flex: f32 = 0.0;
-        for &child_id in &self.child_ids {
-            if let Some(r) = ctx.child_layout_response(child_id, child_proposal) {
-                total_wanted += r.size.height;
-                max_width = max_width.max(r.size.width);
-                total_flex += r.flex;
-            }
-        }
-
-        let n = self.child_ids.len();
-        let spacing = self.spacing.get();
-        let total_spacing = spacing * (n as f32 - 1.0).max(0.0);
-        let content_height = total_wanted + total_spacing;
-
-        let width = proposal.width.unwrap_or(max_width);
-        let height = if total_flex > 0.0 {
-            proposal.height.unwrap_or(content_height)
-        } else {
-            content_height
-        };
-
-        Size::new(width, height).into()
+        // Main-then-cross negotiation along the vertical axis: grow on surplus
+        // (flex), shrink on a deficit (shrink/min), and measure each child's
+        // width at its final height. See [`linear_layout`].
+        let neg = linear_layout::negotiate(
+            &self.child_ids,
+            ctx,
+            proposal.height,
+            proposal.width,
+            self.spacing.get(),
+            Axis::Vertical,
+        );
+        linear_layout::response(&neg)
     }
 
     fn place_children(
@@ -123,58 +105,31 @@ impl Widget for VStack {
         children: &mut [WidgetPlacement],
         ctx: &LayoutContext,
     ) {
-        let n = children.len();
-        if n == 0 {
+        if children.is_empty() {
             return;
         }
 
-        // Single-query negotiation: ask each child for size + flex.
-        let wanted_proposal = SizeProposal {
-            width: Some(bounds.width),
-            height: None,
-        };
+        let ids: Vec<WidgetId> = children.iter().map(|c| c.id).collect();
+        let neg = linear_layout::negotiate(
+            &ids,
+            ctx,
+            Some(bounds.height),
+            Some(bounds.width),
+            self.spacing.get(),
+            Axis::Vertical,
+        );
+        // For the vertical axis, `main` is height and `cross` is width.
+        let heights = &neg.children.main;
+        let widths = &neg.children.cross;
 
-        let mut wanted_widths: Vec<f32> = Vec::with_capacity(n);
-        let mut wanted_heights: Vec<f32> = Vec::with_capacity(n);
-        let mut flex_factors: Vec<f32> = Vec::with_capacity(n);
-        let mut total_wanted: f32 = 0.0;
-        let mut total_flex: f32 = 0.0;
-
-        for child in children.iter() {
-            let r = ctx
-                .child_layout_response(child.id, wanted_proposal)
-                .unwrap_or(bastyde_core::widget::LayoutResponse::ZERO);
-            wanted_widths.push(r.size.width);
-            wanted_heights.push(r.size.height);
-            flex_factors.push(r.flex);
-            total_wanted += r.size.height;
-            total_flex += r.flex;
-        }
-
-        // Slack is leftover space after honoring every child's wanted size
-        // and inter-child spacing. Distributed proportionally to flex.
+        // Place children top-to-bottom with cross-axis (horizontal) alignment.
         let spacing = self.spacing.get();
-        let total_spacing = spacing * (n as f32 - 1.0).max(0.0);
-        let slack = (bounds.height - total_wanted - total_spacing).max(0.0);
-
-        let mut final_heights: Vec<f32> = Vec::with_capacity(n);
-        for i in 0..n {
-            let bonus = if total_flex > 0.0 {
-                (flex_factors[i] / total_flex) * slack
-            } else {
-                0.0
-            };
-            final_heights.push(wanted_heights[i] + bonus);
-        }
-
-        // Place children top-to-bottom with alignment on cross axis
         let rtl = ctx.is_rtl();
         let mut y = bounds.y;
         for (i, child) in children.iter_mut().enumerate() {
-            let w = wanted_widths[i];
-            let h = final_heights[i];
+            let w = widths[i];
+            let h = heights[i];
 
-            // Cross-axis alignment: check per-child override, then container default
             let halign = ctx
                 .child_alignment(child.id)
                 .map(|a| a.horizontal)
@@ -320,6 +275,32 @@ mod tests {
         tree.layout(SizeProposal::exact(200.0, 300.0));
 
         assert!((tree.bounds(b).y - 50.0).abs() < 0.01); // 40 + 10
+    }
+
+    #[test]
+    fn horizontal_flex_does_not_leak_into_vertical_growth() {
+        // Regression: an HStack with a horizontal Spacer (flex=1) nested in a
+        // VStack with vertical slack must NOT grow vertically. `flex` is an
+        // axis-agnostic scalar; a stack only advertises it on its own main axis.
+        use crate::primitives::hstack::HStack;
+        use crate::primitives::spacer::Spacer;
+
+        let mut tree = WidgetTree::new();
+        let row = tree.add(
+            HStack::new()
+                .child(FixedLeaf(40.0, 30.0))
+                .child(Spacer::new())
+                .child(FixedLeaf(40.0, 30.0)),
+        );
+        let _col = tree.add(VStack::new().add_child(row));
+        tree.layout(SizeProposal::exact(400.0, 500.0)); // 500 ≫ 30 → lots of vertical slack
+
+        // The row keeps its 30px content height; it does NOT stretch to 500.
+        assert!(
+            (tree.bounds(row).height - 30.0).abs() < 0.01,
+            "row should stay at content height 30, got {}",
+            tree.bounds(row).height
+        );
     }
 
     #[test]

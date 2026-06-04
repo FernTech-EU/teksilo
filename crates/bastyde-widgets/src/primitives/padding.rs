@@ -135,14 +135,20 @@ impl Widget for Padding {
         let h_inset = self.horizontal_inset();
         let v_inset = self.vertical_inset();
 
-        // Query child size if available, then add insets.
+        // Query the child, then add insets — forwarding its grow weight,
+        // shrink weight, and compression floor so a padded flexible/shrinkable
+        // child stays flexible/shrinkable (the floor grows by the insets).
         if let Some(child_id) = self.child_id {
             let inner_proposal = SizeProposal {
                 width: proposal.width.map(|w| (w - h_inset).max(0.0)),
                 height: proposal.height.map(|h| (h - v_inset).max(0.0)),
             };
-            if let Some(child_size) = ctx.child_size(child_id, inner_proposal) {
-                return (Size::new(child_size.width + h_inset, child_size.height + v_inset)).into();
+            if let Some(r) = ctx.child_layout_response(child_id, inner_proposal) {
+                let size = Size::new(r.size.width + h_inset, r.size.height + v_inset);
+                let min = Size::new(r.min.width + h_inset, r.min.height + v_inset);
+                return bastyde_core::widget::LayoutResponse::flexible(size, r.flex)
+                    .with_shrink(r.shrink)
+                    .with_min(min);
             }
         }
 

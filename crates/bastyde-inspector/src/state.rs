@@ -198,6 +198,18 @@ pub struct InspectorState {
     /// `HighlightLayer` to make per-axis spacing visible. Empty
     /// outside AllBounds.
     pub(crate) band_snapshot: Signal<Vec<crate::highlight::BandEntry>>,
+    /// Whether the overflow overlay is active. **On by default** in debug
+    /// builds (Flutter-style "loud" overflow): wherever a distributing
+    /// container's children exceed its bounds, hazard stripes are painted —
+    /// independent of [`overlay_mode`](Self::overlay_mode), so it works with
+    /// the inspector panel closed. Toggled from the toolbar and persisted via
+    /// `__bastyde_inspector.overflow_overlay`.
+    pub overflow_overlay: Signal<bool>,
+    /// Overhang strips (the regions where children spill past their
+    /// distributing parent) captured by `BoundsTracker` when
+    /// [`overflow_overlay`](Self::overflow_overlay) is on; painted as hazard
+    /// stripes by `HighlightLayer`. Empty when off or when nothing overflows.
+    pub(crate) overflow_snapshot: Signal<Vec<bastyde_canvas::Rect>>,
     /// Current panel height in logical pixels. Drives the panel slot's
     /// `FixedSize::bind_height`. Mutated by the panel resize handle
     /// (top-edge drag) and persisted via `__bastyde_inspector.panel_height`.
@@ -309,6 +321,8 @@ impl InspectorState {
             shortcut_version: Signal::new(0),
             overlay_version: Signal::new(0),
             band_snapshot: Signal::new(Vec::new()),
+            overflow_overlay: Signal::new(true),
+            overflow_snapshot: Signal::new(Vec::new()),
             panel_height: Signal::new(DEFAULT_PANEL_HEIGHT),
             tree_filter: Signal::new(String::new()),
             panel_drag_anchor: Signal::new(None),

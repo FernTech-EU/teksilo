@@ -11,15 +11,15 @@ This document is a working reference: each primitive comes with a one-line summa
 
 Bastyde layout is a SwiftUI-style two-phase negotiation, recursive over the widget tree:
 
-1. The parent calls `child.layout_response(proposal, ctx)`. The child returns a `LayoutResponse { size: Size, flex: f32 }` — the size it wants (a floor) plus a flex weight for slack distribution.
-2. The parent calls `child.place_children(bounds, …)` once it has decided how much space each child gets and where to put it.
+1. The parent calls `child.layout_response(proposal, ctx)`. The child returns a `LayoutResponse { size, flex, min, shrink }` — the size it wants (a floor for growth), a `flex` weight for positive-slack distribution, a `min` compression floor, and a `shrink` weight for over-constraint deficits. `flex` and `shrink` are independent (CSS-flexbox grow vs shrink); `From<Size>` defaults to fully rigid (`flex = 0`, `shrink = 0`, `min = size`).
+2. The parent decides each child's **main-axis** size (grow on surplus, shrink on a deficit), then measures each child's **cross axis** at its final main size (height-for-width), then calls `child.place_children(bounds, …)` to position them.
 
 `SizeProposal { width: Option<f32>, height: Option<f32> }` is the parent's offer. `Some(_)` means *use this exact value*; `None` means *measure yourself, this axis is open*. Stacks pass `None` on their main axis to let children declare their wanted size, and `Some(bounds.cross)` on the cross axis to let children fill it.
 
 **Three rules underlie every primitive in this document:**
 
 - **Honest sizing.** A widget that knows its size returns it. A widget that wants slack returns `flex > 0`. The parent makes the placement decision; the child does not place itself.
-- **Slack is a single rule.** In an `HStack`/`VStack`, `slack = bounds.main − Σ wanted − Σ spacing`; each child's final size is `wanted + (flex / Σ flex) × slack`. There is no special "spacer" or "expand" branch in the engine — `Spacer` and `Expand` are ordinary widgets that report `flex > 0`.
+- **Slack is a single rule.** In an `HStack`/`VStack`, `slack = bounds.main − Σ wanted − Σ spacing`. When `slack ≥ 0` each child's final size is `wanted + (flex / Σ flex) × slack`. When `slack < 0` (over-constraint) the deficit is distributed across children with `shrink > 0` proportional to their shrink weight, **never below `min`** (iterative clamp-and-redistribute). There is no special "spacer"/"expand"/"shrinkable" branch in the engine — they are ordinary widgets that report `flex > 0` / `shrink > 0`.
 - **Logical pixels, Leading / Trailing.** All values in `f32` logical px; the renderer multiplies by scale factor at the boundary. `Leading` / `Trailing` flip with `LayoutDirection::RightToLeft`.
 
 Everything in the rest of this document follows from those three rules.
@@ -188,6 +188,33 @@ Center::new().child(spinner)
 ```
 
 Claims all offered space; the child sits at its natural size, centered.
+
+### 3.4 `Shrinkable` — opt a child into compression
+
+[crates/bastyde-widgets/src/primitives/shrinkable.rs](../crates/bastyde-widgets/src/primitives/shrinkable.rs)
+
+The shrink counterpart to `Expand`. By default widgets are rigid: when a stack is over-constrained they keep their wanted size and overflow. Wrap a child in `Shrinkable` to let it absorb a share of the deficit, down to a floor:
+
+```rust
+// The label yields space before the (rigid) icon when the row is narrow:
+HStack::new()
+    .child(Shrinkable::new().min_width(40.0).child(long_label))
+    .child(icon) // rigid — shrink == 0, never compresses
+```
+
+`Shrinkable` preserves its child's `flex` (so a child can both grow and shrink) and forwards the proposal unchanged; when the stack compresses it, the child re-lays-out at the smaller size (a wrapped-text child re-wraps and reports its taller height via the height-for-width pass). The floor defaults to `0` on both axes — set `.min_width` / `.min_height`. Set `.shrink(w)` to weight how much of the deficit this child takes relative to siblings; `.shrink(0.0)` makes it rigid again.
+
+**"Compress A before B"** = give A `shrink > 0` and B `shrink = 0`: A absorbs the entire deficit (down to its floor) before B is touched.
+
+**Native shrink (no wrapper needed).** Single-line / ellipsis `TextWidget` opts in for you: it reports `shrink = 1` with a `min` of the ellipsis-glyph width, so display labels truncate-to-fit (tune with `.min_shrink_width`, disable with `.no_shrink`). **Controls (`Button`, `IconButton`, `Badge`, `ComboBox`) are deliberately rigid** — a truncated *action* reads poorly, so the desktop convention is to overflow excess actions into a menu rather than shrink them (see [`Toolbar`](../crates/bastyde-widgets/src/toolbar.rs)). The wrappers `Padding` / `ZStack` / `MinSize` propagate `flex` + `shrink` + `min`, so a shrinkable child stays shrinkable through them, and a stack advertises its aggregate grow/shrink to its parent only on its own main axis.
+
+### 3.5 Height-for-width
+
+A stack decides each child's main-axis size **first**, then measures the cross axis at that final size. So a child whose height depends on its width — wrapped text, an `AspectRatio` image — reports the **correct** height for the width it actually got, and that height propagates up the tree (a wrapped paragraph in a narrowed `Shrinkable` grows taller, and its row grows with it).
+
+To keep the resulting main-then-cross queries linear, `layout_response` is memoized per `(widget, proposal)` for the duration of a layout pass (`WidgetArena::cached_layout_response`, cleared each pass). A widget that *deliberately* writes state from `layout_response` (e.g. a debug probe) opts out via `Widget::cacheable_layout() -> false`.
+
+**Debugging over-constraint.** When children still spill past their distributing parent (nothing left to shrink), the debug inspector paints Flutter-style yellow/black hazard stripes on the overhang — on by default, F12. See [docs/inspector.md](inspector.md). Demo: `cargo run -p over-constraint`.
 
 ---
 

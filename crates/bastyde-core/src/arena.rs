@@ -310,6 +310,53 @@ pub struct WidgetArena {
     cached_roots: Vec<WidgetId>,
     /// Whether the cached_roots list needs rebuilding.
     roots_dirty: bool,
+    /// Per-pass memoization of `Widget::layout_response`, keyed by
+    /// `(WidgetId, ProposalKey)`. Cleared once at the start of every layout
+    /// pass (see `clear_layout_cache`). Height-for-width negotiation queries
+    /// each child along the main axis and again along the cross axis, so
+    /// without this the cost compounds super-linearly with nesting depth;
+    /// with it, each `(id, proposal)` is computed at most once per pass.
+    /// `RefCell` because layout runs through shared `&WidgetArena` borrows.
+    layout_cache: std::cell::RefCell<
+        std::collections::HashMap<(WidgetId, ProposalKey), crate::widget::LayoutResponse>,
+    >,
+    /// True while [`measure_intrinsic`](Self::measure_intrinsic) is running.
+    /// In this mode `cached_layout_response` measures even dormant widgets
+    /// (and their dormant subtrees) and bypasses the cache, so an adaptive
+    /// container can size an item it intends to keep hidden without that size
+    /// leaking into the normal per-pass cache.
+    measuring: std::cell::Cell<bool>,
+}
+
+/// Hashable key for a [`bastyde_canvas::SizeProposal`] used by the per-pass
+/// layout cache. Each axis is encoded to a `u64`: `None` → a sentinel
+/// distinct from any finite `f32`, `Some(v)` → the canonicalized `f32` bits
+/// (`-0.0` folded to `0.0`, all NaNs folded to one pattern) so two equal
+/// proposals always hash and compare equal.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+struct ProposalKey([u64; 2]);
+
+impl ProposalKey {
+    fn from_proposal(p: bastyde_canvas::SizeProposal) -> Self {
+        fn axis_bits(v: Option<f32>) -> u64 {
+            match v {
+                // `f32::to_bits()` widens into 0..=u32::MAX, so u64::MAX is a
+                // safe sentinel that no `Some(_)` can collide with.
+                None => u64::MAX,
+                Some(f) => {
+                    let canon = if f == 0.0 {
+                        0.0
+                    } else if f.is_nan() {
+                        f32::NAN
+                    } else {
+                        f
+                    };
+                    canon.to_bits() as u64
+                }
+            }
+        }
+        Self([axis_bits(p.width), axis_bits(p.height)])
+    }
 }
 
 impl WidgetArena {
@@ -319,7 +366,90 @@ impl WidgetArena {
             theme_override_count: 0,
             cached_roots: Vec::new(),
             roots_dirty: true,
+            layout_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
+            measuring: std::cell::Cell::new(false),
         }
+    }
+
+    /// Clear the per-pass layout memoization cache. Called once at the start of
+    /// each layout pass — geometry (and therefore `layout_response` results)
+    /// may change between passes, so the cache is valid only within one pass.
+    pub(crate) fn clear_layout_cache(&self) {
+        self.layout_cache.borrow_mut().clear();
+    }
+
+    /// Compute a widget's layout response, memoized per `(id, proposal)` for
+    /// the current layout pass. Returns `None` if the id is missing or
+    /// dormant. Widgets that opt out via `Widget::cacheable_layout() == false`
+    /// (e.g. the inspector's bounds tracker, which deliberately mutates signals
+    /// in `layout_response`) bypass the cache so their side effect fires on
+    /// every call.
+    ///
+    /// The key is `(id, proposal)` only: `layout_response` also reads the
+    /// `LayoutContext` (resolved theme, layout direction, text backend), but
+    /// those are a stable function of `id` within a single pass, so the pair
+    /// uniquely determines the input.
+    pub(crate) fn cached_layout_response(
+        &self,
+        id: WidgetId,
+        proposal: bastyde_canvas::SizeProposal,
+        ctx: &crate::widget::LayoutContext,
+    ) -> Option<crate::widget::LayoutResponse> {
+        let node = self.nodes.get(id)?;
+        let measuring = self.measuring.get();
+        if node.activation != ActivationState::Active && !measuring {
+            return None;
+        }
+        // While measuring intrinsic sizes (incl. of dormant subtrees), bypass
+        // the cache entirely so a dormant widget's size never pollutes the
+        // normal per-pass cache.
+        if measuring || !node.widget.cacheable_layout() {
+            return Some(node.widget.layout_response(proposal, ctx));
+        }
+        let key = (id, ProposalKey::from_proposal(proposal));
+        // Scope the shared borrow so it is released before `layout_response`
+        // runs — that call recurses into children, which borrow the same
+        // `layout_cache` (read, then write) and would otherwise alias.
+        {
+            if let Some(cached) = self.layout_cache.borrow().get(&key) {
+                return Some(*cached);
+            }
+        }
+        let resp = node.widget.layout_response(proposal, ctx);
+        self.layout_cache.borrow_mut().insert(key, resp);
+        Some(resp)
+    }
+
+    /// Measure a widget's intrinsic `layout_response` size for `proposal`,
+    /// **regardless of activation** — including dormant/collapsed widgets and
+    /// their dormant subtrees. Returns `None` only if the id is absent.
+    ///
+    /// Adaptive containers (e.g. an overflow [`Toolbar`](crate) that collapses
+    /// items into a menu) use this to size an item they intend to keep hidden,
+    /// so they can decide when to show it again as space grows — something
+    /// `child_layout_response` cannot do, since it returns `None` for inactive
+    /// widgets.
+    ///
+    /// Runs uncached (a dormant widget's size never enters the per-pass cache)
+    /// and is re-entrant-safe (saves/restores the measuring flag). Calls
+    /// `layout_response`, which must be idempotent (see
+    /// [`Widget::cacheable_layout`](crate::widget::Widget::cacheable_layout)).
+    pub(crate) fn measure_intrinsic(
+        &self,
+        id: WidgetId,
+        proposal: bastyde_canvas::SizeProposal,
+        ctx: &crate::widget::LayoutContext,
+    ) -> Option<bastyde_canvas::Size> {
+        if !self.nodes.contains_key(id) {
+            return None;
+        }
+        let prev = self.measuring.replace(true);
+        // `cached_layout_response` (and every nested child query during this
+        // call) sees `measuring == true`, so it bypasses the active check and
+        // the cache for the whole subtree.
+        let resp = self.cached_layout_response(id, proposal, ctx);
+        self.measuring.set(prev);
+        resp.map(|r| r.size)
     }
 
     /// Insert a widget into the arena as a root-level widget.
@@ -643,7 +773,20 @@ impl WidgetArena {
     }
 
     /// Activate a dormant widget subtree (triggers relayout and repaint).
-    /// Recursively activates all children.
+    /// Recursively activates all children, **except** those a descendant
+    /// widget has independently gated off via `visible_when(false)`.
+    ///
+    /// The directly-targeted `id` is always activated (the caller asked for
+    /// it). When recursing, a child whose own `visible_state` currently
+    /// evaluates to `false` is left dormant along with its subtree: it is
+    /// hidden by its own gate, not by the ancestor's dormancy, so a parent
+    /// reactivation must not wake it. This is what keeps a `ComboBox`'s
+    /// closed dropdown panel, a collapsed overlay, or any `visible_when`-
+    /// gated child from leaking back to the screen when an ancestor (e.g. a
+    /// `Toolbar` item reappearing from overflow) is re-activated. The
+    /// per-pass visibility reconciliation
+    /// ([`visibility_checks_iter`](Self::visibility_checks_iter)) still owns
+    /// the eventual activate/dormant transitions when the gate flips.
     pub fn activate(&mut self, id: WidgetId) {
         if let Some(node) = self.nodes.get_mut(id) {
             node.activation = ActivationState::Active;
@@ -652,6 +795,15 @@ impl WidgetArena {
         }
         let children: Vec<WidgetId> = self.children(id).to_vec();
         for child in children {
+            let gated_hidden = self
+                .nodes
+                .get(child)
+                .and_then(|n| n.visible_state.as_ref())
+                .map(|vs| !vs.get())
+                .unwrap_or(false);
+            if gated_hidden {
+                continue;
+            }
             self.activate(child);
         }
     }
@@ -991,6 +1143,64 @@ impl Default for WidgetArena {
 mod tests {
     use super::*;
     use crate::test_widgets::FillWidget;
+    use bastyde_canvas::SizeProposal;
+
+    fn key(w: Option<f32>, h: Option<f32>) -> ProposalKey {
+        ProposalKey::from_proposal(SizeProposal {
+            width: w,
+            height: h,
+        })
+    }
+
+    #[test]
+    fn activate_skips_a_child_gated_off_by_visible_state() {
+        // Reactivating a subtree must not wake a child that its own widget
+        // has gated off via `visible_when(false)` — e.g. a ComboBox's closed
+        // dropdown panel, or a collapsed overlay. Regression for ghost
+        // dropdown rows after a `visible_when` collapse→reappear cycle.
+        let mut arena = WidgetArena::new();
+        let parent = arena.insert(Box::new(FillWidget::new()));
+        let visible_child = arena.insert_child(parent, Box::new(FillWidget::new()));
+        let gated_child = arena.insert_child(parent, Box::new(FillWidget::new()));
+        // The gated child is hidden by its own visibility gate.
+        if let Some(node) = arena.get_mut(gated_child) {
+            node.visible_state = Some(Prop::Static(false));
+        }
+
+        arena.set_dormant(parent);
+        assert!(!arena.is_active(gated_child));
+
+        arena.activate(parent);
+        assert!(arena.is_active(parent), "the targeted node activates");
+        assert!(
+            arena.is_active(visible_child),
+            "an ungated child activates with its parent"
+        );
+        assert!(
+            !arena.is_active(gated_child),
+            "a visible_when(false) child stays dormant when its parent reactivates"
+        );
+    }
+
+    #[test]
+    fn proposal_key_distinguishes_none_from_zero() {
+        // `None` (ask for ideal) must not collide with `Some(0.0)` (give zero).
+        assert_ne!(key(None, None), key(Some(0.0), None));
+        assert_ne!(key(Some(0.0), None), key(None, Some(0.0)));
+    }
+
+    #[test]
+    fn proposal_key_canonicalizes_signed_zero_and_nan() {
+        assert_eq!(key(Some(-0.0), None), key(Some(0.0), None));
+        assert_eq!(key(Some(f32::NAN), None), key(Some(f32::NAN), None));
+    }
+
+    #[test]
+    fn proposal_key_separates_distinct_values_and_axes() {
+        assert_ne!(key(Some(1.0), None), key(Some(2.0), None));
+        // Same scalar on different axes must not collide.
+        assert_ne!(key(Some(10.0), None), key(None, Some(10.0)));
+    }
 
     #[test]
     fn insert_and_retrieve() {

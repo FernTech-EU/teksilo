@@ -900,9 +900,8 @@ mod tests {
         let f = fired.clone();
         let mut tree = themed_tree();
         let split = tree.add(
-            SplitButton::new().item(MenuItem::new(lit!("A")).on_activate_fn(move |_| {
-                f.set(f.get() + 1)
-            })),
+            SplitButton::new()
+                .item(MenuItem::new(lit!("A")).on_activate_fn(move |_| f.set(f.get() + 1))),
         );
         tree.layout(SizeProposal::exact(300.0, 60.0));
         tree.focus(split);
@@ -912,11 +911,19 @@ mod tests {
             key: Key::Enter,
             modifiers: Modifiers::NONE,
         });
-        assert_eq!(fired.get(), 0, "lone KeyUp must not fire the default action");
+        assert_eq!(
+            fired.get(),
+            0,
+            "lone KeyUp must not fire the default action"
+        );
 
         // Sanity: a full KeyDown+KeyUp DOES fire.
         tree.press_key(Key::Enter, Modifiers::NONE);
-        assert_eq!(fired.get(), 1, "full KeyDown+KeyUp fires the default action");
+        assert_eq!(
+            fired.get(),
+            1,
+            "full KeyDown+KeyUp fires the default action"
+        );
     }
 
     /// ArrowDown opens the dropdown menu overlay.

@@ -38,49 +38,104 @@ impl std::fmt::Debug for PendingChild {
 
 /// A widget's reply to a parent's layout query.
 ///
-/// Carries both the size the widget wants (a floor the parent must honor)
-/// and a flex weight that tells the parent how to distribute any leftover
-/// **slack** among siblings. `flex == 0.0` means rigid (no opinion on
-/// slack); `flex > 0.0` means the widget wants a share proportional to its
-/// weight.
+/// Carries four quantities that together describe how the widget participates
+/// in a stack's space distribution along the layout's main axis:
 ///
-/// Most widgets just return a `Size`; the `From<Size>` impl wraps it as a
-/// rigid response. Flex-bearing widgets (`Spacer`, `Expand`, …) construct
-/// `LayoutResponse { size, flex }` directly or use
-/// [`LayoutResponse::flexible`].
+/// - `size` — the widget's wanted/ideal size; the floor for **growth**.
+/// - `flex` — positive-slack **grow** weight. `0.0` = rigid (no claim on
+///   surplus); `> 0.0` = wants a share of surplus proportional to its weight.
+/// - `min` — the hard floor for **compression**. A parent must never shrink
+///   the widget below this. Defaults to `size` (i.e. "I do not shrink").
+/// - `shrink` — negative-slack **shrink** weight. `0.0` = will not compress
+///   (the widget overflows before it shrinks); `> 0.0` = absorbs a share of an
+///   over-constraint deficit proportional to its weight, down to `min`.
+///
+/// `flex` and `shrink` are independent — as in CSS flexbox (`flex-grow` vs
+/// `flex-shrink`), a widget may grow but not shrink, or shrink but not grow.
+/// Most widgets just return a `Size`; the `From<Size>` impl wraps it as fully
+/// rigid (`flex = 0`, `shrink = 0`, `min = size`). Grow-bearing widgets
+/// (`Spacer`, `Expand`) use [`LayoutResponse::flexible`]; shrink-bearing ones
+/// (`Shrinkable`, single-line `TextWidget`) use [`LayoutResponse::shrinkable`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LayoutResponse {
     pub size: Size,
     pub flex: f32,
+    pub min: Size,
+    pub shrink: f32,
 }
 
 impl LayoutResponse {
     pub const ZERO: Self = Self {
         size: Size::ZERO,
         flex: 0.0,
+        min: Size::ZERO,
+        shrink: 0.0,
     };
 
+    /// A fully rigid response: wanted `size`, no growth, no compression
+    /// (`min == size`).
     pub fn rigid(size: Size) -> Self {
-        Self { size, flex: 0.0 }
+        Self {
+            size,
+            flex: 0.0,
+            min: size,
+            shrink: 0.0,
+        }
     }
 
+    /// A grow-bearing response: wanted `size` with grow weight `flex`. Does
+    /// not shrink (`min == size`).
     pub fn flexible(size: Size, flex: f32) -> Self {
         Self {
             size,
             flex: flex.max(0.0),
+            min: size,
+            shrink: 0.0,
         }
     }
 
-    /// Builder: set the flex weight on an existing response.
+    /// A shrink-bearing response: wanted `size`, compressible down to `min`
+    /// with shrink weight `shrink`. Does not grow (`flex == 0`). `min` is
+    /// clamped componentwise to be no larger than `size`.
+    pub fn shrinkable(size: Size, min: Size, shrink: f32) -> Self {
+        Self {
+            size,
+            flex: 0.0,
+            min: Size::new(min.width.min(size.width), min.height.min(size.height)),
+            shrink: shrink.max(0.0),
+        }
+    }
+
+    /// Builder: set the grow weight on an existing response.
     pub fn with_flex(mut self, flex: f32) -> Self {
         self.flex = flex.max(0.0);
+        self
+    }
+
+    /// Builder: set the shrink weight on an existing response.
+    pub fn with_shrink(mut self, shrink: f32) -> Self {
+        self.shrink = shrink.max(0.0);
+        self
+    }
+
+    /// Builder: set the compression floor (clamped componentwise ≤ `size`).
+    pub fn with_min(mut self, min: Size) -> Self {
+        self.min = Size::new(
+            min.width.min(self.size.width),
+            min.height.min(self.size.height),
+        );
         self
     }
 }
 
 impl From<Size> for LayoutResponse {
     fn from(size: Size) -> Self {
-        Self { size, flex: 0.0 }
+        Self {
+            size,
+            flex: 0.0,
+            min: size,
+            shrink: 0.0,
+        }
     }
 }
 
@@ -113,16 +168,50 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         Vec::new()
     }
 
-    /// Respond to the parent's size proposal with this widget's wanted size
-    /// and flex weight.
+    /// Respond to the parent's size proposal with this widget's wanted size,
+    /// grow/shrink weights, and compression floor (see [`LayoutResponse`]).
     ///
-    /// Most widgets just return a `Size` (auto-converts via `From<Size>` to
-    /// a rigid response with `flex = 0`). Flex-bearing widgets (`Spacer`,
-    /// `Expand`) return a [`LayoutResponse`] with a non-zero flex.
+    /// Most widgets just return a `Size` (auto-converts via `From<Size>` to a
+    /// fully rigid response). Grow-bearing widgets (`Spacer`, `Expand`) return
+    /// a non-zero `flex`; shrink-bearing widgets (`Shrinkable`, single-line
+    /// `TextWidget`) return a non-zero `shrink` with a `min` floor.
     ///
-    /// The parent honors `size` as a floor and distributes any leftover
-    /// **slack** among siblings proportional to `flex`.
+    /// The parent honors `size` as a floor for growth and distributes positive
+    /// slack proportional to `flex`; when over-constrained it distributes the
+    /// deficit proportional to `shrink`, never below `min`.
+    ///
+    /// **Determinism / height-for-width contract.** This must be a *deterministic
+    /// function of the widget's state and the `proposal`*: two calls with the
+    /// same proposal in one layout pass must return the same value. The result
+    /// must be correct *for the proposal given* — in particular a
+    /// height-for-width widget queried with `{width: Some(w), height: None}`
+    /// must return its height *at width `w`*. The framework memoizes results per
+    /// `(widget, proposal)` within a pass (see
+    /// [`cacheable_layout`](Self::cacheable_layout)) to keep negotiation O(n).
+    ///
+    /// Side effects are permitted **as long as they are idempotent** — the cache
+    /// may skip them on a repeat query, so a side effect (e.g. snapshotting
+    /// measured state into a `Signal`) must be safe to run any number of times
+    /// ≥ 1 per pass and leave the same final state. Most measuring widgets
+    /// (`Collapse`, `SceneView`, inspector tabs) satisfy this with a guarded or
+    /// overwriting set. A side effect that must run on *every* call (e.g. a call
+    /// counter) is non-idempotent — opt out via `cacheable_layout`.
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse;
+
+    /// Whether this widget's [`layout_response`](Self::layout_response) may be
+    /// memoized by the per-pass layout cache. Defaults to `true`.
+    ///
+    /// Override to `false` only when `layout_response` has a **non-idempotent**
+    /// side effect that must run on every call (a call counter, a one-shot
+    /// trigger). Idempotent side effects — the common case, e.g. overwriting a
+    /// measured size into a `Signal` — do **not** need to opt out: the cache may
+    /// skip a redundant identical-proposal repeat, but the value was already
+    /// written and the final state is correct. The debug inspector's
+    /// `BoundsTracker` opts out defensively (its whole-tree snapshot is the
+    /// payload, not a by-product of sizing).
+    fn cacheable_layout(&self) -> bool {
+        true
+    }
 
     /// Position children within the allocated bounds.
     fn place_children(

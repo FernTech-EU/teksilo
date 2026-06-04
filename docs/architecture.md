@@ -64,7 +64,7 @@ Bastyde builds on established crates rather than reinventing solved problems. **
 
 ## 2. Layout Model
 
-Full reference: [`layout-primitives.md`](layout-primitives.md). The protocol is SwiftUI-style two-phase negotiation — the parent proposes a size, the child responds with `LayoutResponse { size, flex }`, the parent places. Slack distribution, flex weights, zero-basis vs `respect_intrinsic`, container alignment, per-child alignment overrides, and the size-wrapper primitives (`Expand`, `FixedSize`, `MinSize`, `MaxSize`, `Center`, `Padding`, `Spacer`, `Divider`) all live there.
+Full reference: [`layout-primitives.md`](layout-primitives.md). The protocol is SwiftUI-style negotiation — the parent proposes a size, the child responds with `LayoutResponse { size, flex, min, shrink }`, the parent decides the main axis (grow via `flex`, shrink via `shrink`/`min`), measures the cross axis at each child's final main size (**height-for-width**), and places. Slack distribution, the shrink/over-constraint model, the `Shrinkable` wrapper, zero-basis vs `respect_intrinsic`, container/per-child alignment, and the size-wrapper primitives (`Expand`, `Shrinkable`, `FixedSize`, `MinSize`, `MaxSize`, `Center`, `Padding`, `Spacer`, `Divider`) all live there. A per-pass memoization cache (`WidgetArena::cached_layout_response`, keyed `(id, proposal)`, cleared each pass) keeps the main-then-cross queries O(n); widgets that mutate state in `layout_response` opt out via `Widget::cacheable_layout() -> false`.
 
 What's *not* in the focused doc and stays here:
 

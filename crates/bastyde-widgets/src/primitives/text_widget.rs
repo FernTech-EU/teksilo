@@ -36,6 +36,14 @@ pub struct TextWidget {
     /// a rebuild.
     style: TextStyleProp,
     overflow: TextOverflow,
+    /// Whether single-line / ellipsis text reports a shrink weight so an
+    /// over-constrained stack truncates it (down to [`Self::min_shrink_width`]) rather
+    /// than overflowing. Default `true`. Ignored in `Wrap` mode (wrap text is
+    /// height-variable and opts into shrink via `Shrinkable` instead).
+    shrink: bool,
+    /// Explicit compression floor for ellipsis text. `None` measures the
+    /// width of the ellipsis glyph at layout time.
+    min_shrink_width: Option<f32>,
     max_lines: Option<usize>,
     text_backend: Option<Rc<RefCell<dyn bastyde_canvas::TextBackend>>>,
     /// When enabled, text is parsed as inline markup
@@ -89,6 +97,8 @@ impl TextWidget {
             color: ColorProp::TextRole(TextRole::Primary),
             style: TextStyleProp::default(),
             overflow: TextOverflow::default(),
+            shrink: true,
+            min_shrink_width: None,
             max_lines: None,
             text_backend: None,
             markup: false,
@@ -138,6 +148,21 @@ impl TextWidget {
     /// with a trailing "…" instead of wrapping onto multiple lines.
     pub fn single_line(self) -> Self {
         self.overflow(TextOverflow::Ellipsis(EllipsisMode::Trailing))
+    }
+
+    /// Override the compression floor for single-line / ellipsis text — the
+    /// narrowest width an over-constrained stack may shrink this label to
+    /// before truncating stops. Defaults to the ellipsis-glyph width.
+    pub fn min_shrink_width(mut self, min: f32) -> Self {
+        self.min_shrink_width = Some(min.max(0.0));
+        self
+    }
+
+    /// Opt this label out of native shrink: it reports a rigid size and
+    /// overflows (rather than truncating) when its stack is over-constrained.
+    pub fn no_shrink(mut self) -> Self {
+        self.shrink = false;
+        self
     }
 
     /// Cap the paragraph at `n` lines when wrapping. Only meaningful
@@ -403,7 +428,9 @@ impl Widget for TextWidget {
             return (size).into();
         }
 
-        match self.overflow {
+        let is_ellipsis = matches!(self.overflow, TextOverflow::Ellipsis(_));
+
+        let size = match self.overflow {
             TextOverflow::Wrap => match max_width {
                 Some(w) => {
                     let layout = backend.layout_paragraph(&text, &style, w, self.max_lines);
@@ -422,20 +449,45 @@ impl Widget for TextWidget {
                 let layout = backend.layout_single_line(&text, &style, max_width);
                 Size::new(layout.width, layout.height)
             }
-            TextOverflow::Ellipsis(mode) => {
+            TextOverflow::Ellipsis(mode) => match max_width {
                 // Middle / Leading: compute the truncated display string
                 // first, then measure it unconstrained.
-                let Some(max_w) = max_width else {
+                None => {
                     let layout = backend.layout_single_line(&text, &style, None);
-                    return (Size::new(layout.width, layout.height)).into();
-                };
-                let truncated =
-                    bastyde_canvas::ellipsis::ellipsize(&text, &style, max_w, mode, &mut *backend);
-                let layout = backend.layout_single_line(&truncated, &style, None);
-                Size::new(layout.width, layout.height)
-            }
+                    Size::new(layout.width, layout.height)
+                }
+                Some(max_w) => {
+                    let truncated = bastyde_canvas::ellipsis::ellipsize(
+                        &text,
+                        &style,
+                        max_w,
+                        mode,
+                        &mut *backend,
+                    );
+                    let layout = backend.layout_single_line(&truncated, &style, None);
+                    Size::new(layout.width, layout.height)
+                }
+            },
+        };
+
+        // Single-line / ellipsis labels opt into shrink (they are height-stable
+        // — truncating never changes their line height). An over-constrained
+        // stack compresses them down to the ellipsis-glyph width (or the
+        // caller's `min_shrink_width`) and they ellipsize instead of
+        // overflowing. Wrap text stays rigid; opt it in with `Shrinkable`.
+        if is_ellipsis && self.shrink {
+            let min_w = self
+                .min_shrink_width
+                .unwrap_or_else(|| backend.layout_single_line("…", &style, None).width)
+                .min(size.width);
+            bastyde_core::widget::LayoutResponse::shrinkable(
+                size,
+                Size::new(min_w, size.height),
+                1.0,
+            )
+        } else {
+            size.into()
         }
-        .into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -603,6 +655,58 @@ mod tests {
     fn wrap_is_the_default_mode() {
         let w = TextWidget::new(lit!("Hello"));
         assert_eq!(w.overflow, TextOverflow::Wrap);
+    }
+
+    #[test]
+    fn ellipsis_label_shrinks_to_fit_in_narrow_stack() {
+        use crate::primitives::hstack::HStack;
+        let mut tree = tree_with_mock_backend();
+        // "hello world" = 11 chars × 8px = 88px natural width.
+        let label = tree.add(TextWidget::new(lit!("hello world")).single_line());
+        let _stack = tree.add(HStack::new().add_child(label));
+        tree.layout(SizeProposal::exact(40.0, 20.0));
+        // Single-line text opts into shrink: it compresses to fit the 40px
+        // stack and ellipsizes, instead of overflowing to 88px.
+        assert!(
+            (tree.bounds(label).width - 40.0).abs() < 1.0,
+            "ellipsis label should shrink to ~40, got {}",
+            tree.bounds(label).width
+        );
+    }
+
+    #[test]
+    fn no_shrink_label_overflows_in_narrow_stack() {
+        use crate::primitives::hstack::HStack;
+        let mut tree = tree_with_mock_backend();
+        let label = tree.add(
+            TextWidget::new(lit!("hello world"))
+                .single_line()
+                .no_shrink(),
+        );
+        let _stack = tree.add(HStack::new().add_child(label));
+        tree.layout(SizeProposal::exact(40.0, 20.0));
+        // Opted out → keeps its full 88px and overflows.
+        assert!(
+            (tree.bounds(label).width - 88.0).abs() < 1.0,
+            "no_shrink label should overflow at 88, got {}",
+            tree.bounds(label).width
+        );
+    }
+
+    #[test]
+    fn wrap_text_does_not_shrink_natively() {
+        use crate::primitives::hstack::HStack;
+        let mut tree = tree_with_mock_backend();
+        // Wrap mode (default) is height-variable → rigid; overflows rather than
+        // shrinking. (Opt in via `Shrinkable`.)
+        let label = tree.add(TextWidget::new(lit!("hello world")));
+        let _stack = tree.add(HStack::new().add_child(label));
+        tree.layout(SizeProposal::exact(40.0, 20.0));
+        assert!(
+            (tree.bounds(label).width - 88.0).abs() < 1.0,
+            "wrap label should not natively shrink, got {}",
+            tree.bounds(label).width
+        );
     }
 
     #[test]

@@ -1875,6 +1875,19 @@ impl WidgetTree {
                         // mode. Mirrored here because this insertion path
                         // bypasses `apply_handler_set`.
                         if handler_set.access.is_some() {
+                            // Register a bound `access_hidden` prop at
+                            // AccessibilityOnly so the AT tree re-walks when it
+                            // flips. (Disjoint field borrow: `node` borrows
+                            // `self.arena`, this reads `self.binding_registry`.)
+                            if let Some(hidden) =
+                                handler_set.access.as_ref().and_then(|a| a.hidden.as_ref())
+                            {
+                                hidden.register_if_bound(
+                                    id,
+                                    &self.binding_registry,
+                                    crate::binding::BindingLevel::AccessibilityOnly,
+                                );
+                            }
                             node.access_overrides = handler_set.access;
                         }
                         if let Some(mode) = handler_set.access_subtree {
@@ -1990,6 +2003,19 @@ impl WidgetTree {
                         // Builder-level accessibility overrides + subtree
                         // mode. Same rationale as in `insert_widget`.
                         if handler_set.access.is_some() {
+                            // Register a bound `access_hidden` prop at
+                            // AccessibilityOnly so the AT tree re-walks when it
+                            // flips. (Disjoint field borrow: `node` borrows
+                            // `self.arena`, this reads `self.binding_registry`.)
+                            if let Some(hidden) =
+                                handler_set.access.as_ref().and_then(|a| a.hidden.as_ref())
+                            {
+                                hidden.register_if_bound(
+                                    id,
+                                    &self.binding_registry,
+                                    crate::binding::BindingLevel::AccessibilityOnly,
+                                );
+                            }
                             node.access_overrides = handler_set.access;
                         }
                         if let Some(mode) = handler_set.access_subtree {

@@ -336,6 +336,23 @@ fn build_toolbar(state: InspectorState) -> impl Widget + 'static {
         .bind_width(Signal::new(120.0_f32))
         .child(Slider::new(state.overlay_opacity.clone(), 0.1, 1.0));
 
+    // Overflow-overlay toggle. Independent of the Off/Sel/All segmented
+    // control; on by default. A check mark in the label reflects the state.
+    let overflow_label = state.overflow_overlay.map(|on| {
+        if *on {
+            "Overflow ✓".to_string()
+        } else {
+            "Overflow".to_string()
+        }
+    });
+    let overflow_target = state.overflow_overlay.clone();
+    let overflow_button = Button::new(lit!("Overflow"))
+        .bind_label(overflow_label)
+        .on_activate_fn(move |_ctx| {
+            let next = !overflow_target.get();
+            overflow_target.set(next);
+        });
+
     let open_state_for_close = state.open.clone();
     let close_button = Button::new(lit!("×")).on_activate_fn(move |_ctx| {
         open_state_for_close.set(false);
@@ -347,6 +364,7 @@ fn build_toolbar(state: InspectorState) -> impl Widget + 'static {
             .child(pick_button)
             .child(bounds_seg)
             .child(opacity_slider)
+            .child(overflow_button)
             .child(Expand::new().flex(1.0).child(empty_filler()))
             .child(close_button),
     )

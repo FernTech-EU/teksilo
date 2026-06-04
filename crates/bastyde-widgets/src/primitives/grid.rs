@@ -96,6 +96,7 @@ impl Grid {
         gap: f32,
         available: Option<f32>,
         child_sizes: &[f32], // max child size per track
+        child_mins: &[f32],  // compression floor per track (0 if no shrinkable child)
     ) -> Vec<f32> {
         let n = tracks.len();
         let total_gap = gap * (n as f32 - 1.0).max(0.0);
@@ -149,7 +150,15 @@ impl Grid {
             if total_fr > 0.0 {
                 for (i, track) in tracks.iter().enumerate() {
                     if let TrackSize::Fractional(fr) = *track {
-                        resolved[i] = remaining * fr / total_fr;
+                        // Share the remainder by flex weight, but never below a
+                        // track's compression floor. The floor is non-zero only
+                        // when a child in that track opted into shrink with a
+                        // `min < size`; rigid children contribute no floor, so
+                        // their fractional columns still shrink (CSS-`fr`
+                        // semantics). A track held at its floor may push the row
+                        // past `available` — the intended residual overflow.
+                        let share = remaining * fr / total_fr;
+                        resolved[i] = share.max(child_mins.get(i).copied().unwrap_or(0.0));
                     }
                 }
             }
@@ -194,22 +203,30 @@ impl Widget for Grid {
         let intrinsic_proposal = SizeProposal::unspecified();
         let mut col_max = vec![0.0_f32; num_cols];
         let mut row_max = vec![0.0_f32; num_rows];
+        // Per-column compression floor: the max `min.width` of *shrinkable*
+        // children in the column. Rigid children contribute nothing, so their
+        // fractional columns still shrink freely.
+        let mut col_min = vec![0.0_f32; num_cols];
 
         for (i, &child_id) in self.child_ids.iter().enumerate() {
             let (row, col) = self.cell_for(i);
             if row >= num_rows || col >= num_cols {
                 continue;
             }
-            if let Some(child_size) = ctx.child_size(child_id, intrinsic_proposal) {
-                col_max[col] = col_max[col].max(child_size.width);
-                row_max[row] = row_max[row].max(child_size.height);
+            if let Some(r) = ctx.child_layout_response(child_id, intrinsic_proposal) {
+                col_max[col] = col_max[col].max(r.size.width);
+                row_max[row] = row_max[row].max(r.size.height);
+                if r.shrink > 0.0 {
+                    col_min[col] = col_min[col].max(r.min.width);
+                }
             }
         }
 
         // Resolve column tracks against the parent's width proposal.
         let col_gap = self.column_gap.get();
         let row_gap = self.row_gap.get();
-        let col_sizes = Self::resolve_tracks(&self.columns, col_gap, proposal.width, &col_max);
+        let col_sizes =
+            Self::resolve_tracks(&self.columns, col_gap, proposal.width, &col_max, &col_min);
 
         // Pass 2: for every child whose column is *narrower* than its
         // intrinsic width (typical of Fractional columns receiving the
@@ -237,7 +254,15 @@ impl Widget for Grid {
             }
         }
 
-        let row_sizes = Self::resolve_tracks(&self.rows, row_gap, proposal.height, &row_max);
+        // Rows are not floored by `min` (the compression model targets the
+        // main/horizontal axis); pass zeros.
+        let row_sizes = Self::resolve_tracks(
+            &self.rows,
+            row_gap,
+            proposal.height,
+            &row_max,
+            &vec![0.0_f32; num_rows],
+        );
 
         let total_col_gap = col_gap * (num_cols as f32 - 1.0).max(0.0);
         let total_row_gap = row_gap * (num_rows as f32 - 1.0).max(0.0);
@@ -275,21 +300,31 @@ impl Widget for Grid {
         let intrinsic_proposal = SizeProposal::unspecified();
         let mut col_max = vec![0.0_f32; num_cols];
         let mut row_max = vec![0.0_f32; num_rows];
+        let mut col_min = vec![0.0_f32; num_cols];
 
         for (i, child) in children.iter().enumerate() {
             let (row, col) = self.cell_for(original_indices[i]);
             if row >= num_rows || col >= num_cols {
                 continue;
             }
-            if let Some(child_size) = ctx.child_size(child.id, intrinsic_proposal) {
-                col_max[col] = col_max[col].max(child_size.width);
-                row_max[row] = row_max[row].max(child_size.height);
+            if let Some(r) = ctx.child_layout_response(child.id, intrinsic_proposal) {
+                col_max[col] = col_max[col].max(r.size.width);
+                row_max[row] = row_max[row].max(r.size.height);
+                if r.shrink > 0.0 {
+                    col_min[col] = col_min[col].max(r.min.width);
+                }
             }
         }
 
         let col_gap = self.column_gap.get();
         let row_gap = self.row_gap.get();
-        let col_sizes = Self::resolve_tracks(&self.columns, col_gap, Some(bounds.width), &col_max);
+        let col_sizes = Self::resolve_tracks(
+            &self.columns,
+            col_gap,
+            Some(bounds.width),
+            &col_max,
+            &col_min,
+        );
 
         // Pass 2: re-measure Fractional cells whose column shrank, so
         // their row height reflects wrap-induced growth.
@@ -311,7 +346,13 @@ impl Widget for Grid {
             }
         }
 
-        let row_sizes = Self::resolve_tracks(&self.rows, row_gap, Some(bounds.height), &row_max);
+        let row_sizes = Self::resolve_tracks(
+            &self.rows,
+            row_gap,
+            Some(bounds.height),
+            &row_max,
+            &vec![0.0_f32; num_rows],
+        );
 
         // Compute cell origins
         let mut col_origins = Vec::with_capacity(num_cols);
@@ -398,6 +439,78 @@ mod tests {
         ) -> bastyde_core::widget::LayoutResponse {
             Size::new(self.0, self.1).into()
         }
+    }
+
+    /// A shrinkable leaf with an explicit `min` width floor.
+    #[derive(Debug)]
+    struct ShrinkLeaf {
+        w: f32,
+        h: f32,
+        min: f32,
+    }
+    impl Widget for ShrinkLeaf {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> bastyde_core::widget::LayoutResponse {
+            bastyde_core::widget::LayoutResponse::shrinkable(
+                Size::new(self.w, self.h),
+                Size::new(self.min, self.h),
+                1.0,
+            )
+        }
+    }
+
+    #[test]
+    fn fractional_column_floors_shrinkable_child_at_min() {
+        // A Fractional column whose only child is shrinkable (min 80) must not
+        // shrink the column below 80, even when the fr share would be smaller.
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FixedLeaf(50.0, 20.0));
+        let b = tree.add(ShrinkLeaf {
+            w: 200.0,
+            h: 20.0,
+            min: 80.0,
+        });
+        let _grid = tree.add(
+            Grid::new()
+                .columns(vec![TrackSize::Fixed(50.0), TrackSize::Fractional(1.0)])
+                .rows(vec![TrackSize::Fixed(40.0)])
+                .add_child(a)
+                .add_child(b),
+        );
+        // Total 100: col0 Fixed 50 leaves 50 for the fr column — below the 80
+        // floor, so it clamps to 80 (residual overflow).
+        tree.layout(SizeProposal::exact(100.0, 60.0));
+        assert!(
+            (tree.bounds(b).width - 80.0).abs() < 0.01,
+            "fractional column should floor at min 80, got {}",
+            tree.bounds(b).width
+        );
+    }
+
+    #[test]
+    fn fractional_column_still_shrinks_rigid_child_below_intrinsic() {
+        // Regression guard: a *rigid* child (min == size) must NOT floor the
+        // fractional column — CSS-`fr` semantics keep shrinking it.
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FixedLeaf(50.0, 20.0));
+        let b = tree.add(FixedLeaf(200.0, 20.0)); // rigid, intrinsic 200
+        let _grid = tree.add(
+            Grid::new()
+                .columns(vec![TrackSize::Fixed(50.0), TrackSize::Fractional(1.0)])
+                .rows(vec![TrackSize::Fixed(40.0)])
+                .add_child(a)
+                .add_child(b),
+        );
+        tree.layout(SizeProposal::exact(100.0, 60.0));
+        // fr column gets 100 - 50 = 50, below the rigid child's 200 intrinsic.
+        assert!(
+            (tree.bounds(b).width - 50.0).abs() < 0.01,
+            "rigid child's fractional column should shrink to 50, got {}",
+            tree.bounds(b).width
+        );
     }
 
     #[test]

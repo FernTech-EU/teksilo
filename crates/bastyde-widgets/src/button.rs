@@ -104,10 +104,10 @@ pub(crate) fn build_interaction_handlers(
                     WidgetEvent::PointerDown { .. } => {
                         interaction.set(InteractionState::Pressed);
                     }
-                    WidgetEvent::PointerUp { .. } => {
-                        if interaction.get() == InteractionState::Pressed {
-                            interaction.set(InteractionState::Hovered);
-                        }
+                    WidgetEvent::PointerUp { .. }
+                        if interaction.get() == InteractionState::Pressed =>
+                    {
+                        interaction.set(InteractionState::Hovered);
                     }
                     _ => {}
                 }
@@ -812,6 +812,12 @@ impl bastyde_core::widget::Widget for Button {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
+        // A Button is rigid: it sizes to its content and does NOT shrink in an
+        // over-constrained row (a truncated action label like "Sav…" reads
+        // poorly — the desktop convention is to overflow excess actions into a
+        // menu; see `Toolbar`). We therefore take only the content's SIZE and
+        // drop its grow/shrink weights. The label still truncates if a caller
+        // explicitly constrains the button (e.g. via `FixedSize` / `Shrinkable`).
         match self.root_child_id {
             Some(root_id) => ctx
                 .child_size(root_id, proposal)
@@ -980,6 +986,38 @@ mod tests {
         assert!(
             slot_w >= plain_w + 200.0,
             "expected slot button to be at least 200dp wider than plain (plain={plain_w}, slot={slot_w})",
+        );
+    }
+
+    #[test]
+    fn button_is_rigid_and_does_not_shrink_in_a_tight_row() {
+        // A Button is rigid: in an over-constrained row it keeps its natural
+        // width (overflows) rather than truncating its action label. The
+        // desktop convention is to overflow excess actions into a menu (see
+        // `Toolbar`), not to silently truncate buttons.
+        use crate::primitives::hstack::HStack;
+        let mut tree = WidgetTree::new()
+            .with_theme(bastyde_core::presets::intui::light())
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                bastyde_canvas::MockTextBackend::new(),
+            )));
+        let btn = tree.add(Button::new(lit!("Save Document As…")).on_activate_fn(|_| {}));
+        let _row = tree.add(HStack::new().add_child(btn));
+
+        tree.layout(SizeProposal::unspecified());
+        let natural = tree.bounds(btn).width;
+        // Squeeze the row far below natural — the Button keeps its full width.
+        tree.layout(SizeProposal::exact(70.0, 40.0));
+        let squeezed = tree.bounds(btn).width;
+
+        assert!(
+            natural > 100.0,
+            "expected a wide natural button, got {natural}"
+        );
+        assert!(
+            (squeezed - natural).abs() < 0.5,
+            "button should stay rigid at its natural width \
+             (natural={natural}, squeezed={squeezed})"
         );
     }
 
@@ -1245,4 +1283,3 @@ mod tests {
         );
     }
 }
-

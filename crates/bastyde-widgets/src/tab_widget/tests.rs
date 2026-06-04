@@ -1,5 +1,5 @@
-use bastyde_i18n::lit;
 use bastyde_i18n::LocalizedString;
+use bastyde_i18n::lit;
 use std::cell::Cell;
 use std::rc::Rc;
 

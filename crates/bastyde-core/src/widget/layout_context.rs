@@ -66,12 +66,30 @@ impl<'a> LayoutContext<'a> {
         child_id: WidgetId,
         proposal: bastyde_canvas::SizeProposal,
     ) -> Option<LayoutResponse> {
+        // Routed through the arena's per-pass memoization cache so the
+        // main-then-cross queries that height-for-width negotiation issues do
+        // not recompute the same `(child, proposal)` repeatedly. The cache
+        // handles the active-state check and the `cacheable_layout()` opt-out.
         let arena = self.arena?;
-        if !arena.is_active(child_id) {
-            return None;
-        }
-        let node = arena.get(child_id)?;
-        Some(node.widget.layout_response(proposal, self))
+        arena.cached_layout_response(child_id, proposal, self)
+    }
+
+    /// Measure a widget's intrinsic size for `proposal`, **regardless of
+    /// activation** — works even for dormant/collapsed widgets (and their
+    /// dormant subtrees), unlike [`child_size`](Self::child_size) /
+    /// [`child_layout_response`](Self::child_layout_response), which return
+    /// `None` for inactive widgets.
+    ///
+    /// Intended for adaptive layouts that hide some children but still need
+    /// their size to decide when to reveal them — e.g. an overflow `Toolbar`
+    /// collapsing actions into a chevron menu. Runs uncached and re-entrant-
+    /// safe; calls `layout_response`, which must be idempotent.
+    pub fn measure_intrinsic(
+        &self,
+        id: WidgetId,
+        proposal: bastyde_canvas::SizeProposal,
+    ) -> Option<bastyde_canvas::Size> {
+        self.arena?.measure_intrinsic(id, proposal, self)
     }
 
     /// Query a child widget's wanted size only (drops the flex weight).
