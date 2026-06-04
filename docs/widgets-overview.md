@@ -116,7 +116,7 @@ Themed framing, sectioning, and window-level structure.
 - [SplitView](../crates/bastyde-widgets/src/split_view.rs) — two-pane resizable splitter with drag handle.
 - [TabWidget](../crates/bastyde-widgets/src/tab_widget.rs) — tab bar + content switcher; data-source-driven `TabBar<T>` underneath. See [tab-widget.md](tab-widget.md).
 - [Wizard](../crates/bastyde-widgets/src/wizard.rs) — multi-step flow with header, footer, and step switching (`WizardStep`).
-- [Breadcrumb](../crates/bastyde-widgets/src/breadcrumb.rs) — clickable path segments with chevron separators (`BreadcrumbItem`).
+- [Breadcrumb](../crates/bastyde-widgets/src/breadcrumb.rs) — clickable path segments with chevron separators (`BreadcrumbItem`). **Automatic overflow**: when too narrow the middle crumbs collapse into a trailing-of-root `…` `MenuList` dropdown (Windows Explorer / web breadcrumb pattern) while the root + current crumb stay; `is_overflowing()` signal. RTL-aware separators (chevron mirrors). Built on `measure_intrinsic` + `MenuList::item_when`.
 - [TitleBar](../crates/bastyde-widgets/src/title_bar.rs) — custom window title bar with drag region, resize strip, and window controls. See [title-bar.md](title-bar.md).
 
 ---

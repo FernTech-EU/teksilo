@@ -1,8 +1,14 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use bastyde_canvas::{Canvas, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
+use bastyde_core::accesskit::HasPopup;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
+use bastyde_core::environment::LayoutDirection;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
+use bastyde_core::overlay::OverlayPlacement;
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{
     CursorIcon, EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
@@ -11,13 +17,19 @@ use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{Color, CornerRadius};
 
+use crate::button::{Button, ButtonVariant};
+use crate::menu_item::MenuItem;
+use crate::menu_list::MenuList;
+use crate::popover_widget::PopoverButton;
 use crate::primitives::{HStack, IconWidget, Spacer};
 use bastyde_i18n::LocalizedString;
 
 const FALLBACK_CHAR_WIDTH: f32 = 8.0;
 const FALLBACK_LINE_HEIGHT: f32 = 16.0;
 
-type CommandFactory = Box<dyn Fn(&mut EventContext)>;
+/// Shared activation closure. `Rc` (not `Box`) so a crumb's action can be
+/// fired from BOTH its inline segment AND its row in the overflow menu.
+type CommandFactory = Rc<dyn Fn(&mut EventContext)>;
 
 struct BreadcrumbEntry {
     label: LocalizedString,
@@ -77,7 +89,7 @@ impl BreadcrumbItem {
 
     /// Closure invoked on activation.
     pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
-        self.action = Some(Box::new(f));
+        self.action = Some(Rc::new(f));
         self
     }
 }
@@ -150,10 +162,9 @@ impl Widget for BreadcrumbSegment {
 
         let interactive = self.is_interactive();
         let action = self.action.take();
-        let action_rc = std::rc::Rc::new(action);
-        let action_for_tap = action_rc.clone();
-        let action_for_key = action_rc.clone();
-        let action_for_access = action_rc.clone();
+        let action_for_tap = action.clone();
+        let action_for_key = action.clone();
+        let action_for_access = action;
 
         let handler_set = HandlerSet::new()
             .on_tap({
@@ -162,7 +173,7 @@ impl Widget for BreadcrumbSegment {
                     if !interactive {
                         return;
                     }
-                    if let Some(ref action) = *action_for_tap {
+                    if let Some(ref action) = action_for_tap {
                         action(ctx);
                     }
                     interaction.set(SegmentInteraction::Hovered);
@@ -210,7 +221,7 @@ impl Widget for BreadcrumbSegment {
                             key: Key::Enter | Key::Space,
                             ..
                         } => {
-                            if let Some(ref action) = *action_for_key {
+                            if let Some(ref action) = action_for_key {
                                 action(ctx);
                             }
                             interaction.set(SegmentInteraction::Focused);
@@ -222,7 +233,7 @@ impl Widget for BreadcrumbSegment {
             })
             .on_access_action(move |action, ctx: &mut EventContext| {
                 if interactive && action == bastyde_core::accesskit::Action::Click {
-                    if let Some(ref action) = *action_for_access {
+                    if let Some(ref action) = action_for_access {
                         action(ctx);
                     }
                     EventResponse::Handled
@@ -356,6 +367,17 @@ impl Widget for BreadcrumbSegment {
 struct BreadcrumbSeparator;
 
 impl Widget for BreadcrumbSeparator {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Repaint on locale change so the chevron can flip with the layout
+        // direction (it points toward the next crumb: right in LTR, left in
+        // RTL).
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        ctx.locale_signal()
+            .bind_to(self_id, registry, BindingLevel::RepaintOnly);
+        Vec::new()
+    }
+
     fn layout_response(
         &self,
         _proposal: SizeProposal,
@@ -374,9 +396,14 @@ impl Widget for BreadcrumbSeparator {
             size,
         );
         // Role-based: IconWidget resolves against the current theme at paint,
-        // so this stays reactive across theme switches without a build-time
-        // capture.
-        let icon = IconWidget::chevron_right(size).color(bastyde_tokens::TextRole::Secondary);
+        // so this stays reactive across theme switches. The chevron mirrors
+        // under RTL — it always points toward the *next* crumb.
+        let icon = if ctx.layout_direction == LayoutDirection::RightToLeft {
+            IconWidget::chevron_left(size)
+        } else {
+            IconWidget::chevron_right(size)
+        }
+        .color(bastyde_tokens::TextRole::Secondary);
         icon.paint(icon_bounds, canvas, ctx);
     }
 
@@ -395,12 +422,44 @@ enum BreadcrumbSlot {
     Id(WidgetId),
 }
 
-/// A breadcrumb navigation row.
+/// Menu-form of a collapsible crumb — the row shown in the overflow `…` menu.
+struct CrumbMenuForm {
+    slot: usize,
+    label: LocalizedString,
+    action: Option<CommandFactory>,
+}
+
+/// A breadcrumb navigation row with **automatic overflow**: when the trail is
+/// too wide, the middle crumbs collapse into a trailing-of-root `…` menu while
+/// the root and the current (last) crumb stay visible — the standard breadcrumb
+/// collapse (Windows Explorer / web breadcrumbs / macOS path bar).
 pub struct Breadcrumb {
     slots: Vec<BreadcrumbSlot>,
     trailing_slot: Option<PendingChild>,
     label: Option<LocalizedString>,
+
+    // Reactive state.
+    /// Per-slot collapsed flag (`true` = hidden in the `…` menu). Only
+    /// collapsible slots are ever set; index-aligned with the slots.
+    collapsed: Signal<Vec<bool>>,
+    /// Whether any crumb is currently collapsed (drives the chevron).
+    is_overflowing: Signal<bool>,
+
+    // Build state.
+    /// Per-slot "unit" id (the slot's segment, plus its leading separator for
+    /// slots after the first) — measured to compute overflow.
+    unit_ids: Vec<WidgetId>,
+    /// Per-slot: can this crumb collapse? (Entry crumbs that are neither first
+    /// nor last; pre-registered `item_id` crumbs never collapse.)
+    collapsible: Vec<bool>,
+    /// Menu-form per collapsible crumb, for the overflow `…` menu rows.
+    menu_forms: Rc<Vec<CrumbMenuForm>>,
+    /// The `[separator, …-button]` unit id (measured + gated on overflow).
+    ellipsis_unit_id: Option<WidgetId>,
+    trailing_id: Option<WidgetId>,
     root_child_id: Option<WidgetId>,
+    /// Cached flags to avoid redundant signal writes.
+    last_flags: RefCell<Vec<bool>>,
 }
 
 impl Breadcrumb {
@@ -409,7 +468,15 @@ impl Breadcrumb {
             slots: Vec::new(),
             trailing_slot: None,
             label: None,
+            collapsed: Signal::new(Vec::new()),
+            is_overflowing: Signal::new(false),
+            unit_ids: Vec::new(),
+            collapsible: Vec::new(),
+            menu_forms: Rc::new(Vec::new()),
+            ellipsis_unit_id: None,
+            trailing_id: None,
             root_child_id: None,
+            last_flags: RefCell::new(Vec::new()),
         }
     }
 
@@ -434,6 +501,9 @@ impl Breadcrumb {
 
     /// Insert a pre-registered widget as a breadcrumb segment slot.
     /// The caller is responsible for the segment's visual + interaction.
+    /// Note: a pre-registered crumb never collapses into the overflow menu
+    /// (the breadcrumb has no label/action to synthesize a menu row from) —
+    /// it is treated like the root/current crumbs as always-visible.
     pub fn item_id(mut self, id: WidgetId) -> Self {
         self.slots.push(BreadcrumbSlot::Id(id));
         self
@@ -447,6 +517,12 @@ impl Breadcrumb {
     pub fn trailing_slot_id(mut self, id: WidgetId) -> Self {
         self.trailing_slot = Some(PendingChild::Id(id));
         self
+    }
+
+    /// Reactive signal that is `true` whenever any crumb is collapsed into the
+    /// overflow `…` menu — for adaptive chrome.
+    pub fn is_overflowing(&self) -> Signal<bool> {
+        self.is_overflowing.clone()
     }
 }
 
@@ -467,32 +543,138 @@ impl std::fmt::Debug for Breadcrumb {
 impl Widget for Breadcrumb {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let slots = std::mem::take(&mut self.slots);
-        let slot_count = slots.len();
-        let mut row = HStack::new().spacing(4.0);
+        let n = slots.len();
 
-        for (index, slot) in slots.into_iter().enumerate() {
-            match slot {
-                BreadcrumbSlot::Entry(entry) => {
-                    row = row.child(BreadcrumbSegment::new(
-                        entry.label,
-                        entry.action,
-                        entry.current,
-                    ));
+        let mut unit_ids: Vec<WidgetId> = Vec::with_capacity(n);
+        let mut collapsible: Vec<bool> = Vec::with_capacity(n);
+        let mut menu_forms: Vec<CrumbMenuForm> = Vec::new();
+
+        for (i, slot) in slots.into_iter().enumerate() {
+            let is_first = i == 0;
+            let is_last = i + 1 == n;
+
+            // Resolve the slot to a segment id + (for Entry slots) a menu form.
+            let (seg_id, form): (WidgetId, Option<(LocalizedString, Option<CommandFactory>)>) =
+                match slot {
+                    BreadcrumbSlot::Entry(entry) => {
+                        let action = entry.action;
+                        let seg = BreadcrumbSegment::new(
+                            entry.label.clone(),
+                            action.clone(),
+                            entry.current,
+                        );
+                        (ctx.add(seg), Some((entry.label, action)))
+                    }
+                    BreadcrumbSlot::Id(id) => (id, None),
+                };
+
+            // A crumb can collapse only if it's an Entry and neither the root
+            // nor the current (last) crumb.
+            let can_collapse = form.is_some() && !is_first && !is_last;
+            collapsible.push(can_collapse);
+
+            // The unit is the segment, prefixed by a leading separator for
+            // every crumb after the first. The separator lives inside the unit
+            // so it hides together with its crumb — no dangling chevrons.
+            let unit_id = if is_first {
+                seg_id
+            } else {
+                let sep_id = ctx.add(BreadcrumbSeparator);
+                ctx.add(
+                    HStack::new()
+                        .spacing(0.0)
+                        .add_child(sep_id)
+                        .add_child(seg_id),
+                )
+            };
+            unit_ids.push(unit_id);
+
+            if can_collapse {
+                let collapsed = self.collapsed.clone();
+                ctx.visible_when(
+                    unit_id,
+                    collapsed.map(move |flags| flags.get(i).copied() != Some(true)),
+                );
+                if let Some((label, action)) = form {
+                    menu_forms.push(CrumbMenuForm {
+                        slot: i,
+                        label,
+                        action,
+                    });
                 }
-                BreadcrumbSlot::Id(id) => {
-                    row = row.add_child(id);
-                }
-            }
-            if index + 1 < slot_count {
-                row = row.child(BreadcrumbSeparator);
             }
         }
+
+        self.collapsible = collapsible;
+        self.menu_forms = Rc::new(menu_forms);
+        self.collapsed.set(vec![false; n]);
+        *self.last_flags.borrow_mut() = vec![false; n];
+
+        // Overflow chevron: a `…` PopoverButton (HasPopup::Menu) whose content
+        // is a `MenuList` with one row per collapsible crumb, each gated via
+        // `item_when(collapsed[slot])`. Only currently-collapsed rows are shown
+        // (zero-height + nav-skipped otherwise), so the menu reconciles
+        // reactively as the trail resizes — no rebuild of the dormant popover.
+        let has_collapsible = self.collapsible.iter().any(|&c| c);
+        self.ellipsis_unit_id = if has_collapsible {
+            let menu_forms = self.menu_forms.clone();
+            let mut menu = MenuList::new();
+            for form in menu_forms.iter() {
+                let slot = form.slot;
+                let action = form.action.clone();
+                let mut row = MenuItem::new(form.label.clone()).enabled(action.is_some());
+                if let Some(act) = action {
+                    row = row.on_activate_fn(move |ctx| {
+                        act(ctx);
+                        ctx.dismiss_self_overlay_chain();
+                    });
+                }
+                let collapsed = self.collapsed.clone();
+                let visible = collapsed.map(move |flags| flags.get(slot).copied() == Some(true));
+                menu = menu.item_when(row, visible);
+            }
+
+            let trigger = Button::new(bastyde_i18n::lit!("…"))
+                .variant(ButtonVariant::Ghost)
+                .tooltip(bastyde_i18n::tr_widget!(breadcrumb_overflow()));
+            let chevron = PopoverButton::new(trigger)
+                .content(menu)
+                .placement(OverlayPlacement::BelowPreferred)
+                .has_popup_kind(HasPopup::Menu);
+            let chevron_id = ctx.add(chevron);
+
+            let sep_id = ctx.add(BreadcrumbSeparator);
+            let unit_id = ctx.add(
+                HStack::new()
+                    .spacing(0.0)
+                    .add_child(sep_id)
+                    .add_child(chevron_id),
+            );
+            ctx.visible_when(unit_id, self.is_overflowing.clone());
+            Some(unit_id)
+        } else {
+            None
+        };
+
+        // Assemble the row: [root] [… (after root)] [crumb 1] … [current]
+        // [Spacer trailing?].
+        let mut row = HStack::new().spacing(0.0);
+        for (i, &uid) in unit_ids.iter().enumerate() {
+            row = row.add_child(uid);
+            if i == 0 {
+                if let Some(eu) = self.ellipsis_unit_id {
+                    row = row.add_child(eu);
+                }
+            }
+        }
+        self.unit_ids = unit_ids;
 
         if let Some(trailing) = self.trailing_slot.take() {
             let trailing_id = match trailing {
                 PendingChild::Id(id) => id,
                 PendingChild::Deferred(w) => ctx.add_boxed(w),
             };
+            self.trailing_id = Some(trailing_id);
             row = row.child(Spacer::new()).add_child(trailing_id);
         }
 
@@ -506,10 +688,46 @@ impl Widget for Breadcrumb {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
-        self.root_child_id
-            .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
-            .into()
+        let Some(root) = self.root_child_id else {
+            return proposal.resolve(0.0, 0.0).into();
+        };
+
+        // Natural width = sum of every crumb unit's INTRINSIC width (measured
+        // regardless of its current collapse state, so this is stable and the
+        // overflow decision can't oscillate). The `…` chevron is excluded — it
+        // only appears when something is already collapsed.
+        let probe = SizeProposal::unspecified();
+        let mut natural_w = 0.0_f32;
+        for &uid in &self.unit_ids {
+            if let Some(s) = ctx.measure_intrinsic(uid, probe) {
+                natural_w += s.width;
+            }
+        }
+        let has_trailing = self.trailing_id.is_some();
+        if let Some(tid) = self.trailing_id
+            && let Some(s) = ctx.measure_intrinsic(tid, probe)
+        {
+            natural_w += s.width;
+        }
+
+        // With a trailing slot the breadcrumb spans the offered width (the
+        // Spacer pushes the trailing control to the edge); otherwise it
+        // shrink-wraps to its content, clamped to the offered width so it never
+        // spills its container.
+        let width = if has_trailing {
+            proposal.width.unwrap_or(natural_w)
+        } else {
+            proposal
+                .width
+                .map(|w| natural_w.min(w))
+                .unwrap_or(natural_w)
+        };
+
+        let height = ctx
+            .child_size(root, proposal)
+            .map(|s| s.height)
+            .unwrap_or(BREADCRUMB_ITEM_HEIGHT);
+        Size::new(width, height).into()
     }
 
     fn place_children(
@@ -517,11 +735,47 @@ impl Widget for Breadcrumb {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
         for child in children.iter_mut() {
             child.origin = bounds.origin();
             child.size = bounds.size();
+        }
+
+        // Compute the collapse set from intrinsic widths (measured even while
+        // hidden) against the width left for the crumbs.
+        let probe = SizeProposal::unspecified();
+        let trailing_w = self
+            .trailing_id
+            .and_then(|tid| ctx.measure_intrinsic(tid, probe))
+            .map(|s| s.width)
+            .unwrap_or(0.0);
+        let avail = (bounds.width - trailing_w).max(0.0);
+
+        let unit_w: Vec<f32> = self
+            .unit_ids
+            .iter()
+            .map(|&uid| {
+                ctx.measure_intrinsic(uid, probe)
+                    .map(|s| s.width)
+                    .unwrap_or(0.0)
+            })
+            .collect();
+        let ellipsis_w = self
+            .ellipsis_unit_id
+            .and_then(|eu| ctx.measure_intrinsic(eu, probe))
+            .map(|s| s.width)
+            .unwrap_or(0.0);
+
+        let flags = compute_breadcrumb_overflow(avail, &unit_w, &self.collapsible, ellipsis_w);
+
+        if *self.last_flags.borrow() != flags {
+            *self.last_flags.borrow_mut() = flags.clone();
+            let any = flags.iter().any(|&c| c);
+            self.collapsed.set(flags);
+            if self.is_overflowing.get() != any {
+                self.is_overflowing.set(any);
+            }
         }
     }
 
@@ -534,5 +788,177 @@ impl Widget for Breadcrumb {
 
     fn children(&self) -> Vec<WidgetId> {
         self.root_child_id.into_iter().collect()
+    }
+}
+
+/// Decide which crumbs collapse into the overflow `…` menu.
+///
+/// Returns a per-slot `collapsed` flag (`true` = hidden). The root and current
+/// crumbs (and any non-collapsible pre-registered crumb) are kept; collapsible
+/// crumbs are hidden from the **left-middle outward** (lowest index first) until
+/// the shown crumbs — plus the `…` chevron once anything is hidden — fit in
+/// `avail`. If even the kept crumbs + chevron don't fit, the remainder overflows
+/// residually (nothing left to collapse).
+fn compute_breadcrumb_overflow(
+    avail: f32,
+    unit_w: &[f32],
+    collapsible: &[bool],
+    ellipsis_w: f32,
+) -> Vec<bool> {
+    let n = unit_w.len();
+    let mut collapsed = vec![false; n];
+    if n == 0 {
+        return collapsed;
+    }
+    let full: f32 = unit_w.iter().sum();
+    if full <= avail + 0.5 {
+        return collapsed; // everything fits — no chevron
+    }
+    loop {
+        let any_hidden = collapsed.iter().any(|&c| c);
+        let shown: f32 = (0..n)
+            .filter(|&i| !collapsed[i])
+            .map(|i| unit_w[i])
+            .sum::<f32>()
+            + if any_hidden { ellipsis_w } else { 0.0 };
+        if shown <= avail + 0.5 {
+            break;
+        }
+        match (0..n).find(|&i| collapsible[i] && !collapsed[i]) {
+            Some(i) => collapsed[i] = true,
+            None => break, // nothing left to collapse — residual overflow
+        }
+    }
+    collapsed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bastyde_canvas::MockTextBackend;
+    use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
+
+    fn themed_tree() -> WidgetTree {
+        WidgetTree::new()
+            .with_theme(bastyde_core::presets::intui::light())
+            .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())))
+    }
+
+    fn trail(n: usize) -> Breadcrumb {
+        let mut bc = Breadcrumb::new();
+        for i in 0..n {
+            let last = i + 1 == n;
+            let item = if last {
+                BreadcrumbItem::current(lit!(format!("Crumb {i}")))
+            } else {
+                BreadcrumbItem::new(lit!(format!("Crumb {i}"))).on_activate_fn(|_| {})
+            };
+            bc = bc.item(item);
+        }
+        bc
+    }
+
+    // ── compute_breadcrumb_overflow ──────────────────────────────────────────
+
+    #[test]
+    fn nothing_collapses_when_it_all_fits() {
+        let flags = compute_breadcrumb_overflow(
+            500.0,
+            &[40.0, 40.0, 40.0, 40.0, 40.0],
+            &[false, true, true, true, false],
+            30.0,
+        );
+        assert_eq!(flags, vec![false; 5]);
+    }
+
+    #[test]
+    fn middle_collapses_from_the_left_keeping_root_and_current() {
+        // full = 200 > 160. hide #1 → 40*4+30=190 > 160; hide #2 → 40*3+30=150 ≤ 160.
+        let flags = compute_breadcrumb_overflow(
+            160.0,
+            &[40.0, 40.0, 40.0, 40.0, 40.0],
+            &[false, true, true, true, false],
+            30.0,
+        );
+        assert_eq!(flags, vec![false, true, true, false, false]);
+    }
+
+    #[test]
+    fn all_middle_collapses_when_very_narrow() {
+        let flags = compute_breadcrumb_overflow(
+            100.0,
+            &[40.0, 40.0, 40.0, 40.0, 40.0],
+            &[false, true, true, true, false],
+            30.0,
+        );
+        assert_eq!(
+            flags,
+            vec![false, true, true, true, false],
+            "root and current always survive; all middle collapse"
+        );
+    }
+
+    #[test]
+    fn two_crumbs_never_collapse() {
+        let flags = compute_breadcrumb_overflow(10.0, &[40.0, 40.0], &[false, false], 30.0);
+        assert_eq!(flags, vec![false, false], "no collapsible middle to hide");
+    }
+
+    // ── Integration ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn wide_trail_does_not_overflow_narrow_does() {
+        let bc = trail(6);
+        let overflowing = bc.is_overflowing();
+        let mut tree = themed_tree();
+        let _id = tree.add(bc);
+
+        tree.layout(SizeProposal::exact(2000.0, 30.0));
+        assert!(!overflowing.get(), "a wide trail should not overflow");
+
+        tree.layout(SizeProposal::exact(160.0, 30.0));
+        assert!(
+            overflowing.get(),
+            "a narrow trail should collapse middle crumbs into the … menu"
+        );
+
+        tree.layout(SizeProposal::exact(2000.0, 30.0));
+        assert!(
+            !overflowing.get(),
+            "re-widening restores all crumbs (intrinsic measure → no stale collapse)"
+        );
+    }
+
+    #[test]
+    fn overflow_menu_rows_are_dormant_while_the_chevron_is_closed() {
+        // The collapsed crumbs' menu rows live in the (closed) chevron popover;
+        // they must not render until it opens.
+        let bc = trail(6);
+        let mut tree = themed_tree();
+        let _id = tree.add(bc);
+        tree.layout(SizeProposal::exact(160.0, 30.0)); // narrow → middle collapses
+
+        let active_menu_items: u32 = tree
+            .widget_type_histogram()
+            .iter()
+            .filter(|(k, _)| k.contains("menu_item::MenuItem"))
+            .map(|(_, v)| *v)
+            .sum();
+        assert_eq!(
+            active_menu_items, 0,
+            "overflow menu rows stay dormant until the … chevron opens"
+        );
+    }
+
+    #[test]
+    fn builds_under_rtl() {
+        use bastyde_core::environment::LayoutDirection;
+        let bc = trail(5);
+        let mut tree = themed_tree();
+        tree.set_layout_direction(LayoutDirection::RightToLeft);
+        let id = tree.add(bc);
+        tree.layout(SizeProposal::exact(200.0, 30.0));
+        assert!(tree.bounds(id).width > 0.0);
     }
 }
