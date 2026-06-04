@@ -625,6 +625,18 @@ impl WidgetTree {
                     ctx,
                 ))
             }
+            // `PointerEnter` / `PointerLeave` are per-node hover transitions
+            // synthesized by `handle_pointer_move`, not part of the raw pointer
+            // stream. Running them through the ancestor preview pass would let
+            // a drag-detecting ancestor whose `on_pointer_event` returns
+            // `Handled` silently swallow a descendant's hover (its cursor and
+            // `on_hover` would never fire). They are delivered to their target
+            // directly via the bubble pass (where Enter/Leave fire `on_hover`),
+            // so they have no business in preview. `PointerMove`/`Down`/`Up`
+            // and `Scroll` still preview through the catch-all below — the
+            // tab-bar wheel-remap (`tab_widget/bar.rs`) and the split-view /
+            // rich-text drag guards depend on that.
+            WidgetEvent::PointerEnter | WidgetEvent::PointerLeave => None,
             _ => {
                 let has = node.external_handlers.on_pointer_event.is_some()
                     || node.handlers.on_pointer_event.is_some();
@@ -1591,6 +1603,80 @@ mod tests {
         tree.pointer_move(Point::new(200.0, 200.0));
         tree.pointer_move(Point::new(50.0, 25.0));
         assert_eq!(tree.hovered, None);
+    }
+
+    #[test]
+    fn ancestor_pointer_handler_does_not_suppress_descendant_hover() {
+        use crate::event::EventResponse;
+        use crate::test_widgets::StackWidget;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        // The child reports its own hover transitions via `on_hover`.
+        let hovered = Rc::new(Cell::new(false));
+        let h = hovered.clone();
+
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FillWidget::new().on_hover(move |entered, _ctx| h.set(entered)));
+        // An ancestor whose `on_pointer_event` greedily claims everything it
+        // previews — exactly the "drag-detecting ancestor" footgun. Before the
+        // fix it consumed the descendant's `PointerEnter`/`Leave` in the
+        // preview pass and the child's hover never fired.
+        tree.add(
+            StackWidget::new()
+                .add_child(child)
+                .on_pointer_event(|_event, _ctx| EventResponse::Handled),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.pointer_move(Point::new(50.0, 25.0));
+        assert!(
+            hovered.get(),
+            "a greedy ancestor on_pointer_event must NOT swallow the child's PointerEnter"
+        );
+
+        tree.pointer_move(Point::new(500.0, 500.0));
+        assert!(
+            !hovered.get(),
+            "PointerLeave must likewise reach the child despite the ancestor"
+        );
+    }
+
+    #[test]
+    fn destroy_subtree_clears_dangling_pointer_capture() {
+        use crate::event::{EventResponse, Modifiers, PointerButton};
+        use crate::test_widgets::StackWidget;
+
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FillWidget::new().on_pointer_event(|event, ctx| {
+            if matches!(event, WidgetEvent::PointerDown { .. }) {
+                ctx.capture_pointer();
+            }
+            EventResponse::Ignored
+        }));
+        let parent = tree.add(StackWidget::new().add_child(child));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        // A press inside the child captures the pointer to it.
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(50.0, 25.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(
+            tree.pointer_captured_by,
+            Some(child),
+            "PointerDown handler should have captured the pointer"
+        );
+
+        // Tearing down the capturing subtree (e.g. mid-gesture rebuild) must
+        // release the capture eagerly rather than leaving a dangling id that
+        // swallows every later Move/Up until the next layout pass heals it.
+        tree.destroy_subtree(parent);
+        assert_eq!(
+            tree.pointer_captured_by, None,
+            "destroy_subtree must clear a capture anchored at a destroyed widget"
+        );
     }
 
     // NOTE: legacy `shortcut_intercepts_before_widget` test removed with

@@ -11,6 +11,56 @@ use crate::binding::{Binding, BindingLevel, BindingRegistry};
 use crate::widget_id::WidgetId;
 
 // ---------------------------------------------------------------------------
+// Feedback-loop guard (debug-only)
+// ---------------------------------------------------------------------------
+//
+// The snapshot-and-release notification model lets an observer freely
+// re-enter `set` on the same (or another) signal. That flexibility also means
+// an *accidental* feedback loop — signal A's observer writes B, B's observer
+// writes A, neither guarded by an equality check — recurses without bound and
+// blows the stack with no actionable diagnostic. In debug builds we track the
+// per-thread notification depth and panic with a pointer at the likely cause
+// once it crosses a limit set far above any legitimate synchronous cascade.
+// Release builds carry no counter and no check.
+#[cfg(debug_assertions)]
+const SIGNAL_NOTIFY_DEPTH_LIMIT: u32 = 256;
+
+#[cfg(debug_assertions)]
+thread_local! {
+    static SIGNAL_NOTIFY_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// RAII increment of the per-thread Signal-notification depth (debug only).
+#[cfg(debug_assertions)]
+struct NotifyDepthGuard;
+
+#[cfg(debug_assertions)]
+impl NotifyDepthGuard {
+    fn enter() -> Self {
+        SIGNAL_NOTIFY_DEPTH.with(|d| {
+            let next = d.get() + 1;
+            assert!(
+                next <= SIGNAL_NOTIFY_DEPTH_LIMIT,
+                "Signal notification nested {next} deep (limit {SIGNAL_NOTIFY_DEPTH_LIMIT}) — \
+                 almost certainly an unbounded feedback loop between observers (e.g. signal A's \
+                 observer sets B and B's observer sets A). Break the cycle: guard the write with \
+                 an equality check (`if sig.get() != v {{ sig.set(v) }}`), or drop one edge with \
+                 a WeakSignal."
+            );
+            d.set(next);
+        });
+        NotifyDepthGuard
+    }
+}
+
+#[cfg(debug_assertions)]
+impl Drop for NotifyDepthGuard {
+    fn drop(&mut self) {
+        SIGNAL_NOTIFY_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ObserverHandle — RAII guard for observer cleanup
 // ---------------------------------------------------------------------------
 
@@ -324,6 +374,16 @@ impl<T: Clone + 'static> Signal<T> {
     /// notification delivers the value as written by *that* call; observer
     /// additions or removals made during a callback take effect only on
     /// subsequent notifications.
+    ///
+    /// # Feedback loops
+    ///
+    /// Re-entrancy is supported, but a write cascade that never settles — A's
+    /// observer writes B and B's observer writes A, with no equality guard — is
+    /// an unbounded recursion that will overflow the stack. Guard reactive
+    /// writes that may cycle (`if sig.get() != v { sig.set(v) }`) or break one
+    /// edge with a [`WeakSignal`]. In debug builds a depth guard turns a runaway
+    /// loop into a diagnostic panic instead of a silent stack overflow; release
+    /// builds carry no such check.
     pub fn try_set(&self, value: T) -> Result<(), SignalAccessError> {
         match &self.kind {
             SignalKind::Mutable { inner, .. } => {
@@ -335,6 +395,11 @@ impl<T: Clone + 'static> Signal<T> {
                         guard.observers.iter().map(|e| e.callback.clone()).collect();
                     (guard.value.clone(), callbacks)
                 };
+                // Debug-only: a re-entrant observer bumps this depth; an
+                // unbounded feedback loop trips the limit and panics with a
+                // diagnostic rather than overflowing the stack.
+                #[cfg(debug_assertions)]
+                let _depth = NotifyDepthGuard::enter();
                 for cb in &callbacks {
                     cb(&snapshot);
                 }
@@ -1316,6 +1381,22 @@ mod tests {
         });
         s.set(1);
         assert_eq!(s.get(), 2);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "feedback loop")]
+    fn unbounded_feedback_loop_panics_with_diagnostic() {
+        // A's observer bumps B and B's observer bumps A, unconditionally, so
+        // the cascade never settles. The debug depth guard must convert the
+        // would-be stack overflow into an actionable panic.
+        let a = Signal::new(0_i32);
+        let b = Signal::new(0_i32);
+        let b_for_a = b.clone();
+        let _ha = a.observe(move |v| b_for_a.set(*v + 1));
+        let a_for_b = a.clone();
+        let _hb = b.observe(move |v| a_for_b.set(*v + 1));
+        a.set(1);
     }
 
     #[test]

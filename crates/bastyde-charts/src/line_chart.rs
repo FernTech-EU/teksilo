@@ -1,7 +1,9 @@
 //! LineChart — points connected by polylines, single or multi-series.
 //!
-//! PR 3 ships the core widget (lines, optional points, axes, grid, legend).
-//! Area fill, hover tooltip, and edge-flip placement land in PR 4.
+//! Lines, optional point markers, axes, grid, and legend, plus optional area
+//! fill (`area_fill` / `area_fill_opacity`) and an interactive hover tooltip
+//! (`hover_tooltip`) with a nearest-point marker and edge-flip placement so the
+//! tooltip never clips the plot rect.
 
 use std::cell::RefCell;
 use std::rc::Rc;

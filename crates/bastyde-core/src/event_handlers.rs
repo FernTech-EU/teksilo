@@ -65,6 +65,18 @@ pub(crate) struct EventHandlers {
     /// per-widget hook.
     pub on_key_preview: Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
     pub on_focus: Option<Box<dyn FnMut(bool, &mut EventContext)>>,
+    /// Low-level escape hatch for the raw pointer stream, run *before* gesture
+    /// recognition. Unlike most handlers it fires in the **preview pass** on
+    /// every strict ancestor of the target (root → parent-of-target) for
+    /// `PointerMove` / `PointerDown` / `PointerUp` and `Scroll`; an ancestor
+    /// returning `EventResponse::Handled` consumes the event and stops it
+    /// reaching the target. This is what lets a `SplitView` divider or a tab
+    /// bar claim a drag/wheel before a descendant `ScrollArea` does.
+    ///
+    /// `PointerEnter` / `PointerLeave` are deliberately **excluded** from the
+    /// preview pass — they are per-node hover transitions, so they only reach
+    /// the hovered node itself (via its bubble pass) and can never be swallowed
+    /// by an ancestor's `on_pointer_event`.
     pub on_pointer_event: Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
     pub on_scroll: Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
     pub on_access_action:

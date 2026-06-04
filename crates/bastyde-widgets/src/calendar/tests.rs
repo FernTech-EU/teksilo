@@ -178,27 +178,56 @@ fn count_descendants(tree: &WidgetTree, root: WidgetId) -> usize {
 }
 
 #[test]
-fn range_mode_first_click_does_not_set_value() {
-    // The first click in range mode should park the anchor without
-    // touching the bound `value` signal. Observers of `value` only
-    // see the committed range after the second click.
+fn range_mode_first_commit_parks_anchor_second_commit_sets_value() {
+    // The first commit in range mode parks the anchor without touching the
+    // bound `value` signal; only the second commit publishes the range. We
+    // drive the real widget through its keyboard path (the calendar root owns
+    // `.focusable` + `.on_key`, and Enter commits the focused day) rather than
+    // poking module-private internals — the second commit doubles as a
+    // positive control proving the keystrokes actually land.
+    use bastyde_core::event::{Key, Modifiers, WidgetEvent};
+
     let mut tree = light_tree();
     let value: Signal<Option<DateRange>> = Signal::new(None);
-    let _id = tree.add(Calendar::range(value.clone()));
+    let id = tree.add(Calendar::range(value.clone()));
     tree.layout(SizeProposal {
         width: Some(400.0),
         height: None,
     });
-    // Initial state: no value, no anchor.
-    assert_eq!(value.get(), None);
+    assert_eq!(value.get(), None, "no value before any commit");
 
-    // We can't easily simulate a click here without dispatch
-    // plumbing, but we can directly invoke `commit_date` via the
-    // public `Calendar::single` analog. Range mode commit is tested
-    // via the public range API instead.
-    // (Direct commit_date is module-private; the value-stays-None
-    // assertion is the contract being defended. A subsequent
-    // headless-event test in the test harness can simulate clicks.)
+    tree.focus(id);
+
+    let press = |tree: &mut WidgetTree, key: Key| {
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key,
+            modifiers: Modifiers::NONE,
+            text: None,
+        });
+    };
+
+    // First Enter: park the anchor on the focused day. `value` must stay None
+    // (observers shouldn't see a transient one-day range).
+    press(&mut tree, Key::Enter);
+    assert_eq!(
+        value.get(),
+        None,
+        "first commit must park the anchor without publishing a range"
+    );
+
+    // Move focus, then a second Enter commits the range.
+    press(&mut tree, Key::ArrowRight);
+    press(&mut tree, Key::Enter);
+    let committed = value.get();
+    assert!(
+        committed.is_some(),
+        "second commit must publish a range (also proves the keystrokes landed)"
+    );
+    let range = committed.unwrap();
+    assert!(
+        range.start < range.end,
+        "ArrowRight then commit should span two adjacent days, got {range:?}"
+    );
 }
 
 #[test]

@@ -1436,6 +1436,14 @@ impl WidgetTree {
             self.set_hovered(None);
             self.update_hover_within_signals(old, None);
         }
+        // Symmetric with focus/hover above: a pointer capture anchored at the
+        // widget about to disappear would otherwise swallow every subsequent
+        // Move/Up (dispatch rejects inactive targets) until the next layout
+        // pass runs `revalidate_interaction_state`. Drop it eagerly so capture
+        // never outlives its owner, even when a destroy happens mid-gesture.
+        if self.pointer_captured_by == Some(widget_id) {
+            self.pointer_captured_by = None;
+        }
         self.arena.destroy(widget_id);
     }
 
