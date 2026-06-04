@@ -152,15 +152,22 @@ impl Widget for WizardHeader {
         let steps = self.steps.clone();
         let current_step = self.current_step.clone();
 
-        let progress = current_step.map({
-            let steps = steps.clone();
-            move |index| format!("Step {} of {}", *index + 1, steps.len())
-        });
         // Zip the step index with the locale signal so the resolved
-        // title / supporting text re-derive on BOTH a step change AND a
-        // locale switch (the steps hold `LocalizedString`; resolving
-        // inside `map` keeps the bound text widgets locale-reactive).
+        // title / supporting text / step counter re-derive on BOTH a step
+        // change AND a locale switch (the steps hold `LocalizedString`;
+        // resolving inside `map` keeps the bound text widgets
+        // locale-reactive).
         let locale = ctx.locale_signal();
+        let progress = current_step.zip(&locale).map({
+            let steps = steps.clone();
+            move |pair| {
+                bastyde_i18n::tr_widget!(wizard_step_counter(
+                    index = (pair.0 + 1) as i64,
+                    total = steps.len() as i64
+                ))
+                .resolve_now()
+            }
+        });
         let title = current_step.zip(&locale).map({
             let steps = steps.clone();
             move |pair| {

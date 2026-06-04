@@ -211,6 +211,13 @@ impl MenuItem {
         self.label.resolve_now()
     }
 
+    /// Like [`label`](Self::label) but returns the unresolved
+    /// [`LocalizedString`], so embedders can mirror the label *reactively*
+    /// (re-resolving on a locale switch) instead of freezing a snapshot.
+    pub fn label_localized(&self) -> LocalizedString {
+        self.label.clone()
+    }
+
     /// Clone out a shared handle to the activation closure. Returns `None`
     /// when this MenuItem has no action (e.g. it's a submenu trigger). The
     /// returned `Rc` aliases MenuItem's own internal handle — invoking it
@@ -1179,17 +1186,14 @@ impl Widget for MenuItem {
             MenuItemMode::Radio { .. } => Role::MenuItemRadio,
         };
         builder.set_role(role);
-        // Use the stripped form for the announced name when we've
-        // parsed a mnemonic — screen readers say "Save", not
-        // "ampersand-Save". `parsed_mnemonic` is populated inside
-        // `build()`; before the first build (rare — accessibility
-        // walks always run post-build) we fall back to a fresh parse
-        // so the AT tree is correct even from cold.
-        let parsed_name = self
-            .parsed_mnemonic
-            .as_ref()
-            .map(|p| p.stripped.clone())
-            .unwrap_or_else(|| parse_mnemonic(&self.label.resolve_now()).stripped);
+        // Use the stripped form for the announced name — screen readers
+        // say "Save", not "ampersand-Save". Re-parse from a fresh
+        // `resolve_now()` every walk rather than reading the build-time
+        // `parsed_mnemonic` cache: a locale switch marks the tree dirty
+        // (re-walking AT) but does NOT rebuild the item, so the cache
+        // would otherwise announce the stale-locale name. The cached
+        // mnemonic index is still used for the underline in `paint`.
+        let parsed_name = parse_mnemonic(&self.label.resolve_now()).stripped;
         builder.set_name(parsed_name);
 
         // Toggle state for Check / Radio. Mirrors `Checkbox`:

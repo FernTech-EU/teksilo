@@ -201,12 +201,13 @@ pub enum IconLocation {
 type CommandFactory = Box<dyn Fn(&mut EventContext)>;
 
 pub struct Button {
-    /// Button label as a `Prop<String>`. `new(...)` / `new(lit!(...))`
-    /// store `Prop::Static(resolved)`; `bind_label(signal)` upgrades
-    /// it to `Prop::Bound`, so the inner `TextWidget` re-renders
-    /// reactively without rebuilding the Button. The accessibility
-    /// node's `set_name` reads the current value via `Prop::get()`,
-    /// keeping AT in sync with bound updates.
+    /// Button label as a `Prop<String>`. `new(tr!(...))` stores a
+    /// `Prop::Bound` (locale-reactive) when an i18n manager is installed,
+    /// falling back to `Prop::Static` for `lit!(...)` or no manager;
+    /// `bind_label(signal)` overrides with a caller-supplied source. Either
+    /// way the inner `TextWidget` re-renders reactively without rebuilding
+    /// the Button. The accessibility node's `set_name` reads the current
+    /// value via `Prop::get()`, keeping AT in sync with bound updates.
     label: bastyde_core::signal::Prop<String>,
     /// Tier-1 design-language variant hint (Filled, Plain, Ghost, …).
     /// The active [`ButtonStyle`] decides what to do with it.
@@ -279,14 +280,21 @@ pub struct Button {
 impl Button {
     /// Construct a button from a `LocalizedString` label. The label may
     /// come from `tr!(...)` (translated) or `lit!(...)`
-    /// (explicit non-translated). The text is resolved eagerly at
-    /// construction and stored as a plain `String`; locale changes rebuild
-    /// the composite parent, which re-creates this `Button` with a fresh
-    /// translation.
+    /// (explicit non-translated). When an `I18nManager` is installed, a
+    /// `tr!(...)` label becomes a `Prop::Bound` that observes the locale
+    /// version signal, so the inner `TextWidget` re-renders on a locale
+    /// switch without rebuilding the Button — matching `TextWidget::new`.
+    /// `lit!(...)` and the no-manager case resolve to a static `String`.
     pub fn new(label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         Self {
-            label: bastyde_core::signal::Prop::Static(ls.resolve_now()),
+            // `Prop::from(LocalizedString)` yields `Prop::Bound` (reactive)
+            // when a manager is installed, `Prop::Static` otherwise — the
+            // same conversion `TextWidget::new` uses. A locale change then
+            // updates the label live; without this it stayed frozen because
+            // `set_locale` marks the tree dirty (relayout/repaint) but does
+            // NOT rebuild composites.
+            label: bastyde_core::signal::Prop::from(ls),
             // Int UI default is a Plain (non-primary) button; the caller
             // opts into `ButtonVariant::Filled` for the one primary action.
             variant: ButtonVariant::Plain,

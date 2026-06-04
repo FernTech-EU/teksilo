@@ -34,7 +34,14 @@ pub struct ModalContainer {
     /// its visual title. When `None`, `accessibility()` falls back to
     /// the generic i18n `a11y_dialog_name` string so there's always
     /// a non-empty name for screen readers.
-    title: Option<String>,
+    /// AT name for the `Role::Dialog` node. Kept as a `LocalizedString`
+    /// (not eagerly resolved) so an explicit `.title(tr!(...))` follows a
+    /// live locale switch — `accessibility()` re-resolves on the AT
+    /// re-walk. The content-derived hint path is wrapped as a literal
+    /// (the core `accessible_title_hint` trait returns a plain `String`,
+    /// since core can't name `LocalizedString`); dialogs rebuild on show
+    /// so the hint is still current-locale at present time.
+    title: Option<LocalizedString>,
     /// Per-call override for the modal panel chrome. Replaces the
     /// theme-wide `style_slots.dialog` and the IntUI default
     /// `RecipeDialogStyle` for just this container.
@@ -82,7 +89,7 @@ impl ModalContainer {
     /// visible title string.
     pub fn title(mut self, title: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = title.into();
-        self.title = Some(ls.resolve_now());
+        self.title = Some(ls);
         self
     }
 }
@@ -108,7 +115,10 @@ impl Widget for ModalContainer {
             if self.title.is_none()
                 && let Some(hint) = content.accessible_title_hint()
             {
-                self.title = Some(hint);
+                // The core `accessible_title_hint` trait can only return a
+                // plain `String`, so wrap it as a literal. Resolved fresh
+                // at present time (dialogs rebuild on show).
+                self.title = Some(LocalizedString::literal(hint));
             }
             self.content_id = Some(ctx.add_boxed(content));
         }
@@ -163,7 +173,8 @@ impl Widget for ModalContainer {
         builder.set_role(bastyde_core::accesskit::Role::Dialog);
         let name = self
             .title
-            .clone()
+            .as_ref()
+            .map(|t| t.resolve_now())
             .unwrap_or_else(|| bastyde_i18n::tr_widget!(a11y_dialog_name()).resolve_now());
         builder.set_name(name);
         // ModalContainer is always modal — it's the one path that goes

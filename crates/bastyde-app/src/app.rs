@@ -596,7 +596,13 @@ impl BastydeAppHandler {
     }
 
     fn post_event(&mut self, event_loop: &ActiveEventLoop) {
-        self.wm.drain_pending_locale_requests();
+        // App-wide environment changes (theme / locale) raised by a handler
+        // in one window fan out to every window's tree, marking the
+        // non-originating windows dirty. Those windows never received the
+        // triggering event, so they would otherwise stay un-repainted —
+        // `request_redraw_all()` below (gated on these flags) fixes that.
+        let had_locale = self.wm.drain_pending_locale_requests();
+        let had_theme = self.wm.drain_pending_theme_requests();
         let had_commands = self.wm.drain_close_window_requests();
         let had_modal_requests = self.process_modal_requests(event_loop);
         let had_modal_dismissals = self.process_modal_dismissals();
@@ -606,7 +612,12 @@ impl BastydeAppHandler {
         // registry routes through the per-window queue. Translate each
         // into the appropriate winit call.
         self.wm.drain_window_commands();
-        if had_commands || had_modal_requests || had_modal_dismissals {
+        if had_locale
+            || had_theme
+            || had_commands
+            || had_modal_requests
+            || had_modal_dismissals
+        {
             if let Some(trace) = &mut self.idle_trace {
                 trace.note_request_redraw_all();
             }

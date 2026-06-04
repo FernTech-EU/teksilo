@@ -26,12 +26,15 @@ use bastyde_i18n::LocalizedString;
 
 #[derive(Debug)]
 struct AccordionRegion {
-    name: String,
+    /// Kept as a `LocalizedString` (not eagerly resolved) so the region's
+    /// AT name follows a live locale switch — `accessibility()` re-runs on
+    /// the AT re-walk and re-resolves below.
+    name: LocalizedString,
     child: Option<WidgetId>,
 }
 
 impl AccordionRegion {
-    fn new(name: String, child: WidgetId) -> Self {
+    fn new(name: LocalizedString, child: WidgetId) -> Self {
         Self {
             name,
             child: Some(child),
@@ -66,7 +69,7 @@ impl Widget for AccordionRegion {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::Region);
-        builder.set_name(&self.name);
+        builder.set_name(self.name.resolve_now());
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -244,7 +247,7 @@ impl Widget for Accordion {
         if let Some(content_id) = self.content_id {
             // Wrap content in AccordionRegion (Role::Region) so AT can navigate
             // to the content via the header's aria-controls relationship.
-            let region_id = ctx.add(AccordionRegion::new(self.title.resolve_now(), content_id));
+            let region_id = ctx.add(AccordionRegion::new(self.title.clone(), content_id));
             self.region_id = Some(region_id);
 
             // Disclosure animation is handled by `Collapse`, which

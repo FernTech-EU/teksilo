@@ -1286,7 +1286,12 @@ impl WidgetTree {
 
         // --- Environment changes (architecture §9.5) ---
         if let Some(theme) = ctx.theme_request {
-            self.set_theme(theme);
+            // Stored, not applied: the app layer routes this through
+            // `WindowManager::set_theme` so every window re-themes, matching
+            // the app-wide `set_locale` path below. Applying
+            // `WidgetTree::set_theme` inline would re-theme only the
+            // originating window.
+            self.pending_theme_request = Some(theme);
         }
         if let Some(locale) = ctx.locale_request {
             // Stored, not applied: the app layer must route this through

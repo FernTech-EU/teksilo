@@ -96,7 +96,11 @@ pub struct SplitButton {
     // Build state
     interaction: Signal<InteractionState>,
     selected: Signal<usize>,
-    labels: Rc<Vec<String>>,
+    /// Unresolved labels mirrored from the menu items, kept as
+    /// `LocalizedString` (not snapshots) so the main-region label and AT
+    /// name follow a live locale switch — `build` re-resolves them through
+    /// a locale-zipped signal and `accessibility` re-resolves on each walk.
+    labels: Rc<Vec<LocalizedString>>,
     /// Tracks whether the dropdown overlay is currently visible.
     /// Drives the accessibility `set_expanded()` state so AT announces
     /// "collapsed" / "expanded" as the menu opens and closes.
@@ -380,7 +384,7 @@ impl Widget for SplitButton {
         // activation so selecting it from the menu also promotes its index
         // to the current default. ----
 
-        let mut labels_vec: Vec<String> = Vec::new();
+        let mut labels_vec: Vec<LocalizedString> = Vec::new();
         let mut actions_vec: Vec<Option<Rc<dyn Fn(&mut EventContext)>>> = Vec::new();
         // Split button menus always open Below the trigger (the chevron
         // half lives at the bottom-right of the button), so the menu's
@@ -397,7 +401,7 @@ impl Widget for SplitButton {
             match row {
                 Row::Item(boxed_item) => {
                     let mut item = *boxed_item;
-                    let label = item.label().to_string();
+                    let label = item.label_localized();
                     let action = item.action();
                     let my_index = labels_vec.len();
                     labels_vec.push(label);
@@ -499,11 +503,13 @@ impl Widget for SplitButton {
         // ---- Main-region label bound to `selected` ----
         let main_label_text = {
             let labels = labels_rc.clone();
-            selected.map(move |i| {
+            // Zip the locale signal so the displayed default-action label
+            // re-resolves on a locale switch, not only on selection change.
+            selected.zip(&ctx.locale_signal()).map(move |(i, _)| {
                 if labels.is_empty() {
                     String::new()
                 } else {
-                    labels[(*i).min(labels.len() - 1)].clone()
+                    labels[(*i).min(labels.len() - 1)].resolve_now()
                 }
             })
         };
@@ -803,7 +809,7 @@ impl Widget for SplitButton {
         builder.set_role(bastyde_core::accesskit::Role::Button);
         if !self.labels.is_empty() {
             let idx = self.selected.get().min(self.labels.len() - 1);
-            builder.set_name(self.labels[idx].as_str());
+            builder.set_name(self.labels[idx].resolve_now());
         }
         // Framework a11y walker sets `set_disabled` from arena state.
         builder.set_has_popup(bastyde_core::accesskit::HasPopup::Menu);

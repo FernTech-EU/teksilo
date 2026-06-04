@@ -426,7 +426,7 @@ impl Widget for TabHeader {
                     .embedded()
                     .size(IconButtonSize::Compact)
                     .focusable(false)
-                    .tooltip(lit!("Close tab"))
+                    .tooltip(bastyde_i18n::tr_widget!(tab_close_tooltip()))
                     .on_activate_fn(move |ctx| (close_fn)(ctx));
                 let close_id = ctx.add(close_button);
                 // Hover-only: the button is hidden when the

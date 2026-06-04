@@ -207,6 +207,35 @@ mod tests {
     }
 
     #[test]
+    fn set_theme_from_event_handler_is_parked_not_applied() {
+        use crate::ThemeAppearance;
+
+        let mut tree = WidgetTree::new();
+        // `WidgetTree::new()` starts on the light preset.
+        assert_eq!(tree.theme().appearance, ThemeAppearance::Light);
+
+        let widget = tree.add(FillWidget::new().on_tap(|_pos, ctx| {
+            ctx.set_theme(crate::presets::intui::dark());
+        }));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.click(widget);
+
+        // The tree's own theme must NOT have been flipped inline — the app
+        // layer routes the switch through `WindowManager::set_theme` so it
+        // fans out to *every* window, not just this one.
+        assert_eq!(tree.theme().appearance, ThemeAppearance::Light);
+        // The request is parked for the app layer to drain.
+        let parked = tree.take_pending_theme_request();
+        assert_eq!(
+            parked.map(|t| t.appearance),
+            Some(ThemeAppearance::Dark)
+        );
+        // Drained exactly once.
+        assert!(tree.take_pending_theme_request().is_none());
+    }
+
+    #[test]
     fn idle_deadline_provides_time_budget() {
         let deadline = crate::idle::IdleDeadline::new(std::time::Duration::from_millis(100));
         assert!(!deadline.did_timeout());

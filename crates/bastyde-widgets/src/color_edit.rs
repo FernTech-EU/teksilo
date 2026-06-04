@@ -345,7 +345,10 @@ impl Widget for ColorEdit {
             ColorBinding::Nullable { source, .. } => {
                 let alpha = alpha_enabled;
                 let show_hex = self.show_hex_in_trigger;
-                source.map(move |opt| match opt {
+                // Zip the locale signal so the "no color" placeholder
+                // re-resolves on a live locale switch — `source.map` alone
+                // only re-fires when the color changes.
+                source.zip(&ctx.locale_signal()).map(move |(opt, _)| match opt {
                     Some(c) if show_hex => c.to_hex_upper(alpha),
                     Some(_) => String::new(),
                     None => resolve_message_widget("color-edit-trigger-empty-placeholder", &[]),
