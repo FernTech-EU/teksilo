@@ -313,6 +313,62 @@ impl AccessNodeBuilder {
         self.inner.set_size_of_set(size);
     }
 
+    // ── Grid / table semantics (`aria-rowcount` / `aria-colindex` / …) ──
+    //
+    // Typed wrappers over the corresponding `accesskit::Node` setters so
+    // grid/table widgets don't have to drop to `inner_mut()`. On a
+    // `Role::Grid` / `Role::Table` container set the *logical* row/column
+    // counts (not the realized window); on each cell set its 1-based
+    // row/column index.
+
+    /// Total logical row count on a grid/table container (`aria-rowcount`).
+    pub fn set_row_count(&mut self, count: usize) {
+        self.inner.set_row_count(count);
+    }
+
+    /// Total logical column count on a grid/table container (`aria-colcount`).
+    pub fn set_column_count(&mut self, count: usize) {
+        self.inner.set_column_count(count);
+    }
+
+    /// 1-based row index of a cell / row (`aria-rowindex`).
+    pub fn set_row_index(&mut self, index: usize) {
+        self.inner.set_row_index(index);
+    }
+
+    /// 1-based column index of a cell (`aria-colindex`).
+    pub fn set_column_index(&mut self, index: usize) {
+        self.inner.set_column_index(index);
+    }
+
+    /// Number of rows a cell spans (`aria-rowspan`).
+    pub fn set_row_span(&mut self, span: usize) {
+        self.inner.set_row_span(span);
+    }
+
+    /// Number of columns a cell spans (`aria-colspan`).
+    pub fn set_column_span(&mut self, span: usize) {
+        self.inner.set_column_span(span);
+    }
+
+    /// Whether the container allows multiple selected items
+    /// (`aria-multiselectable`). Set on the `Role::Grid` / `Role::ListBox`
+    /// container in multi-select mode.
+    pub fn set_multiselectable(&mut self, value: bool) {
+        if value {
+            self.inner.set_multiselectable();
+        } else {
+            self.inner.clear_multiselectable();
+        }
+    }
+
+    /// The currently-active descendant (`aria-activedescendant`) — the
+    /// roving-focus pattern where focus stays on a composite container and
+    /// this points at the focused child (e.g. the focused grid cell).
+    pub fn set_active_descendant(&mut self, id: NodeId) {
+        self.inner.set_active_descendant(id);
+    }
+
     /// Flag the node as a modal dialog. Use on `Role::Dialog` /
     /// `Role::AlertDialog` when input is blocked outside the dialog.
     pub fn set_modal(&mut self) {

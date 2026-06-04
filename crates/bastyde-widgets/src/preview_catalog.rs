@@ -45,10 +45,11 @@ use crate::primitives::{
 use crate::primitives::{MaxSize, RectWidget};
 use crate::{
     Accordion, Avatar, AvatarPresence, AvatarShape, AvatarSize, Badge, Breadcrumb, BreadcrumbItem,
-    Button, ButtonVariant, Card, Checkbox, ComboBox, GroupBox, GroupHeader, IconButton,
-    IconButtonSize, Link, ListView, MenuItem, MenuList, Panel, ProgressBar, RadioButton,
-    RadioGroup, ScrollArea, SegmentedControl, Slider, Snackbar, SplitButton, SplitView,
-    StandardListItem, StandardTreeItem, StatusBar, TabWidget, Toggle, ToolBox, Toolbar, TreeView,
+    Button, ButtonVariant, Card, Checkbox, ComboBox, GridSizing, GridView, GroupBox, GroupHeader,
+    IconButton, IconButtonSize, Link, ListView, MenuItem, MenuList, Panel, ProgressBar,
+    RadioButton, RadioGroup, ScrollArea, SegmentedControl, Slider, Snackbar, SplitButton,
+    SplitView, StandardListItem, StandardTreeItem, StatusBar, TabWidget, Toggle, ToolBox, Toolbar,
+    TreeView,
 };
 
 // ---------------------------------------------------------------------------
@@ -1416,6 +1417,108 @@ impl WidgetCatalog for ListView<String> {
     }
 }
 register_widget_catalog_at!("crates/bastyde-widgets/src/list_view.rs", ListView<String>);
+
+// ---------------------------------------------------------------------------
+// GridView
+// ---------------------------------------------------------------------------
+
+impl WidgetCatalog for GridView<String> {
+    fn id() -> &'static str {
+        "grid_view"
+    }
+    fn group() -> &'static str {
+        "Data"
+    }
+    fn display_name() -> &'static str {
+        "GridView"
+    }
+    fn variants() -> Vec<PreviewVariant> {
+        fn items(n: usize) -> bastyde_data::ListModel<String> {
+            bastyde_data::ListModel::from_vec((0..n).map(|i| format!("Tile {i}")).collect())
+        }
+        // RectWidget is a leaf, so layer the label over it in a ZStack.
+        fn tile_z(caption: &str, selected: bool) -> Box<dyn Widget> {
+            let bg = if selected {
+                SurfaceRole::AccentSubtle
+            } else {
+                SurfaceRole::Raised
+            };
+            Box::new(
+                crate::primitives::ZStack::new()
+                    .child(RectWidget::new().background(bg))
+                    .child(
+                        Center::new().child(
+                            TextWidget::new(lit!(caption.to_string())).color(TextRole::Primary),
+                        ),
+                    ),
+            )
+        }
+        fn framed(grid: GridView<String>) -> Box<dyn Widget> {
+            Box::new(
+                FixedSize::new()
+                    .bind_width(360.0_f32)
+                    .bind_height(320.0_f32)
+                    .child(grid),
+            )
+        }
+
+        fn adaptive() -> Box<dyn Widget> {
+            framed(
+                GridView::new(items(40), |tc| tile_z(&tc.item, tc.is_selected))
+                    .sizing(GridSizing::Adaptive {
+                        min_width: 90.0,
+                        max_width: None,
+                        height: 64.0,
+                    })
+                    .spacing(8.0),
+            )
+        }
+        fn fixed_columns() -> Box<dyn Widget> {
+            framed(
+                GridView::new(items(40), |tc| tile_z(&tc.item, tc.is_selected))
+                    .column_count(4, 64.0)
+                    .spacing(8.0),
+            )
+        }
+        fn selectable() -> Box<dyn Widget> {
+            use bastyde_data::{SelectionMode, SelectionModel};
+            let sel = SelectionModel::new(SelectionMode::Multi);
+            sel.select(2);
+            framed(
+                GridView::new(items(40), |tc| tile_z(&tc.item, tc.is_selected))
+                    .sizing(GridSizing::Adaptive {
+                        min_width: 90.0,
+                        max_width: None,
+                        height: 64.0,
+                    })
+                    .spacing(8.0)
+                    .selection(sel),
+            )
+        }
+        fn waterfall() -> Box<dyn Widget> {
+            // `.item_height` drives the exact per-item height, so the tile
+            // widget itself can stay plain.
+            framed(
+                GridView::new(items(40), |tc| tile_z(&tc.item, tc.is_selected))
+                    .column_count(3, 64.0)
+                    .waterfall(64.0)
+                    .item_height(|i| 48.0 + (i % 5) as f32 * 18.0)
+                    .spacing(8.0),
+            )
+        }
+
+        vec![
+            PreviewVariant::scenario("adaptive", adaptive),
+            PreviewVariant::scenario("fixed_columns", fixed_columns),
+            PreviewVariant::scenario("selection", selectable),
+            PreviewVariant::scenario("waterfall", waterfall),
+        ]
+    }
+    fn build(variant: &str, _knobs: &KnobValues) -> Box<dyn Widget> {
+        scenario_for::<Self>(variant)
+    }
+}
+register_widget_catalog_at!("crates/bastyde-widgets/src/grid_view.rs", GridView<String>);
 
 // ---------------------------------------------------------------------------
 // TreeView

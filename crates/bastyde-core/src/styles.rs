@@ -32,6 +32,8 @@ mod dialog_style;
 mod drop_target_style;
 #[path = "styles/drop_zone_style.rs"]
 mod drop_zone_style;
+#[path = "styles/grid_view_style.rs"]
+mod grid_view_style;
 #[path = "styles/icon_button_style.rs"]
 mod icon_button_style;
 #[path = "styles/link_style.rs"]
@@ -117,6 +119,9 @@ pub use drop_target_style::{
 };
 pub use drop_zone_style::{
     DropZoneStyle, DropZoneStyleConfig, DropZoneVisualState, SharedDropZoneStyle,
+};
+pub use grid_view_style::{
+    GridFocusRingRecipe, GridInsertionRecipe, GridMarqueeRecipe, GridViewStyle, SharedGridViewStyle,
 };
 pub use icon_button_style::{
     IconButtonSize, IconButtonStyle, IconButtonStyleConfig, SharedIconButtonStyle,

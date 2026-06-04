@@ -1,0 +1,136 @@
+//! Accessibility wrappers for `GridView` tiles.
+//!
+//! Each realized tile is wrapped in a [`TileA11y`] node carrying
+//! `Role::GridCell` plus the ARIA grid coordinates (row/column index,
+//! position-in-set / size-of-set) so screen readers announce
+//! "row R, column C — N of M". The container itself emits `Role::Grid`
+//! with the *logical* row/column totals (see `GridView::accessibility`).
+
+use bastyde_canvas::{Rect, SizeProposal};
+
+use bastyde_core::accessibility::AccessNodeBuilder;
+use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
+use bastyde_core::widget_id::WidgetId;
+
+/// Wraps a tile's delegate widget with `Role::GridCell` + grid coordinates.
+///
+/// 1-based `row_index` / `col_index` follow the ARIA convention. The
+/// `position` / `total` pair (`aria-posinset` / `aria-setsize`) report the
+/// flat 1-based index and the *logical* item count — not the realized
+/// window — so virtualization stays invisible to assistive tech.
+#[derive(Debug)]
+pub(crate) struct TileA11y {
+    child: WidgetId,
+    row_index: usize, // 1-based
+    col_index: usize, // 1-based
+    position: usize,  // 1-based flat index
+    total: usize,     // logical item count
+    selected: bool,
+}
+
+impl TileA11y {
+    pub(crate) fn new(
+        child: WidgetId,
+        row_index_1based: usize,
+        col_index_1based: usize,
+        position_1based: usize,
+        total: usize,
+        selected: bool,
+    ) -> Self {
+        Self {
+            child,
+            row_index: row_index_1based,
+            col_index: col_index_1based,
+            position: position_1based,
+            total,
+            selected,
+        }
+    }
+}
+
+impl Widget for TileA11y {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> bastyde_core::widget::LayoutResponse {
+        ctx.child_size(self.child, proposal)
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(bastyde_core::accesskit::Role::GridCell);
+        builder.set_selected(self.selected);
+        builder.set_position_in_set(self.position);
+        builder.set_size_of_set(self.total);
+        builder.set_row_index(self.row_index);
+        builder.set_column_index(self.col_index);
+        builder.add_action(bastyde_core::accesskit::Action::Click);
+        builder.add_action(bastyde_core::accesskit::Action::Focus);
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        vec![self.child]
+    }
+}
+
+/// Wraps a section header with `Role::RowHeader` and its row position.
+#[derive(Debug)]
+pub(crate) struct SectionHeaderA11y {
+    child: WidgetId,
+    title: String,
+}
+
+impl SectionHeaderA11y {
+    pub(crate) fn new(child: WidgetId, title: String) -> Self {
+        Self { child, title }
+    }
+}
+
+impl Widget for SectionHeaderA11y {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> bastyde_core::widget::LayoutResponse {
+        ctx.child_size(self.child, proposal)
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(bastyde_core::accesskit::Role::RowHeader);
+        builder.set_name(self.title.clone());
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        vec![self.child]
+    }
+}

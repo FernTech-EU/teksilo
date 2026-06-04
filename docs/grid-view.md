@@ -1,0 +1,157 @@
+# GridView — Virtualized 2D Tile Grid
+
+`GridView<T>` is the photo-gallery / icon-view / file-manager-grid /
+collection-view widget — the 2D sibling of [`ListView`](widgets-overview.md)
+and `TableView`. It is bound to a `ListModel<T>` / `ListDataSource`, realizes
+only the tiles currently visible (plus a buffer), reflows on resize, and is
+fully keyboard-navigable and accessible.
+
+Source: [crates/bastyde-widgets/src/grid_view.rs](../crates/bastyde-widgets/src/grid_view.rs)
+(+ `grid_view/` submodules). Demo: `cargo run -p grid-view`.
+
+```rust
+use bastyde::widgets::{GridView, GridSizing, grouping_sections};
+
+GridView::new(model, |tc| {
+    Box::new(card_for(tc.item, tc.is_selected))
+})
+.sizing(GridSizing::Adaptive { min_width: 140.0, max_width: Some(220.0), height: 110.0 })
+.spacing(10.0)
+.selection(selection_model)         // Multi → marquee + Ctrl/Shift
+.reorderable(true)
+.sections(grouping_sections(&model, |p| p.album))
+.pinned_section_headers(true)
+.a11y_label("Photo library")
+```
+
+## Layout strategies
+
+A pluggable `GridLayoutStrategy` drives virtualization; three ship:
+
+| Strategy | Selected by | Heights | Notes |
+| --- | --- | --- | --- |
+| **Uniform** (default) | `.sizing(...)` / `.tile_size` / `.column_count` | fixed | Exact O(1) positions. The common photo/icon grid. |
+| **Variable row** | `.variable_row_heights(estimated)` | each row = tallest tile | SwiftUI `LazyVGrid`. Auto-measure + scroll-anchoring, or exact via `.item_height(i)`. |
+| **Waterfall** | `.waterfall(estimated)` | per-item | Pinterest column-balanced flow. No scroll-anchoring (items reflow across columns). O(n) per layout on height change — fine for hundreds–low-thousands. |
+
+**Tile sizing** ([`GridSizing`]):
+
+- `Fixed { width, height }` — exact tile size; column count derived (tiles not stretched).
+- `FixedColumnCount { count, height }` — exactly `count` stretched columns.
+- `Adaptive { min_width, max_width, height }` — fit as many ≥ `min_width` columns as possible, stretch up to `max_width` (CSS `repeat(auto-fill, minmax(...))` / Flutter `maxCrossAxisExtent`).
+
+Sugar: `.tile_size(w, h)`, `.column_count(n, h)`. Spacing: `.column_spacing`,
+`.row_spacing`, `.spacing` (both), `.content_inset(EdgeInsets)`.
+
+### Variable heights under virtualization
+
+Off-screen tiles aren't built, so their heights are unknown. Two paths:
+
+- **Auto-measure** (default for `variable_row_heights` / `waterfall`): the body
+  pane measures each realized tile (`ctx.child_size`, height-for-width) and feeds
+  it back. Unmeasured rows use the estimate. When a corrected estimate shifts
+  content at/above the viewport top, `VariableRowGrid` adjusts `scroll_y` to keep
+  it visually stationary (one-frame latency, no jump). Backed by a prefix-sum
+  offset table with O(log n) row↔y lookups.
+- **Exact** (`.item_height(index)`): row heights are seeded exactly as
+  `max(item_height(i))` over the row — exact scrollbar, zero jitter, no
+  measurement.
+
+## Selection
+
+Pass a flat `SelectionModel` (`None` / `Single` / `Multi`). Mouse: click =
+select, Ctrl+click = toggle, Shift+click = reading-order range (Finder /
+Explorer). Ctrl+A = select-all. `Multi` mode adds **rubber-band marquee** — a
+drag on the empty background sweeps a rectangle and selects every intersecting
+tile (Ctrl/Shift at drag-start = additive). The hit-test is geometric, so it
+selects tiles outside the realized window. `.on_selection_changed(|set|)` fires
+on every change (interactive or programmatic). `.marquee_selection(false)`
+disables marquee.
+
+## Keyboard navigation
+
+Focus (the *current* item) is tracked separately from selection and shown by a
+painted focus ring. Matrix (RTL-aware; horizontal arrows swap):
+
+| Keys | Action |
+| --- | --- |
+| Arrow ←/→ | ±1 (within row; `.wrap_navigation(true)` to cross rows) |
+| Arrow ↑/↓ | ±columns |
+| Home / End | first / last of row |
+| Ctrl+Home / Ctrl+End | first / last item |
+| PageUp / PageDown | ± a viewport of rows + scroll |
+| Space | toggle selection |
+| Enter | `.on_tile_activate` (else select) |
+| Esc | clear focus |
+| Ctrl+A | select all |
+| Alt+Arrow | reorder the focused tile (when `.reorderable`) |
+| printable | type-ahead (needs `.type_ahead_label(i)`; `.type_ahead_timeout`) |
+| Tab | `.tab_traversal(WithinGrid \| OutOfGrid)` |
+
+Shift + any navigation extends the selection range. Every navigation scrolls
+the new focus into view.
+
+## Scrolling
+
+`.scroll_y_signal()` / `.max_scroll_y_signal()` / `.viewport_ratio_y_signal()`
+expose the reactive scroll state (wire an external `ScrollBar` with
+`.show_scrollbar(false)` so it survives rebuilds). `.ensure_index_visible(i,
+ScrollAnchor)` / `.scroll_to_index(i, ScrollAnchor)` where `ScrollAnchor` is
+`Auto | Start | Center | End`. `.overscroll_behavior(Chain | Contain)` controls
+scroll chaining. `.on_near_end(threshold, || ...)` fires when the scroll nears
+the end — the incremental-loading hook.
+
+## Drag-and-drop reorder
+
+`.reorderable(true)` enables intra-grid drag (and keyboard Alt+Arrow), calling
+the model's `move_item`. A vertical insertion bar shows where the item lands.
+`.on_item_drop(|payload, index, ctx| -> bool)` accepts external drops at a flat
+insertion index (reuses the framework DnD pipeline).
+
+## Sections & sticky headers
+
+`.sections(provider)` groups the flat model; a header is rendered above each
+section's tile band. `grouping_sections(&model, key_fn)` builds a provider by
+partitioning consecutive equal-key runs. `.section_header_delegate(|section,
+title|)` customizes the header (default: bold title text);
+`.section_header_height(h)`. `.pinned_section_headers(true)` keeps the current
+section's header pinned to the top while scrolling (one reused slot widget).
+Sections compose with the **uniform** tile layout. The flat index space is
+unchanged, so selection and keyboard navigation are unaffected.
+
+## Other
+
+- `.on_tile_activate(|index, ctx|)` — double-click / Enter (distinct from selection).
+- `.tile_context_menu(|index, pos, ctx| -> Option<Box<dyn Widget>>)` — per-tile menu.
+- `.empty_view(|| ...)` when the model is empty; `.loading_view(|| ...)` + `.is_loading(signal)` for an overlaid loading state.
+- RTL is honored automatically (column 0 draws at the trailing edge; horizontal arrows swap).
+
+## Theming
+
+`GridView` renders tiles through the app delegate, so its only widget-owned
+chrome is paint-time decoration. The Tier-3 `GridViewStyle` protocol exposes
+that as recipe data — focus ring (`GridFocusRingRecipe`), marquee
+(`GridMarqueeRecipe`), drag-insertion bar (`GridInsertionRecipe`), and the
+sticky-header surface role. Each method has a default, so a custom style
+overrides only what it cares about. Precedence: `.style(...)` per-call →
+`theme.style_slots.grid_view` theme-wide → the stock `RecipeGridViewStyle`.
+The container itself uses theme roles (`BorderRole::Focused` / `Accent`,
+`SurfaceRole::Raised`) by default.
+
+## Accessibility
+
+The container emits `Role::Grid` with the **logical** `row_count` /
+`column_count` (not the realized window), `multiselectable` in Multi mode,
+`active_descendant` pointing at the focused tile (roving focus), and a
+`Live::Polite` selection-count value. Each tile is wrapped in `Role::GridCell`
+with 1-based `row_index` / `column_index` + `pos_in_set` / `size_of_set`.
+Section headers are `Role::RowHeader`. Screen readers announce "row R, column
+C — N of M" and the selection count.
+
+## Tests
+
+Headless (no GPU): [crates/bastyde-widgets/src/grid_view/tests.rs](../crates/bastyde-widgets/src/grid_view/tests.rs)
+plus unit tests in `layout/offsets.rs` and `layout/strategy.rs`. Coverage:
+virtualization window, column derivation, tile placement (uniform / variable /
+waterfall / sectioned), prefix-sum + anchoring, selection, 2D keyboard,
+reorder, type-ahead, incremental-loading hook, and accessibility roles.

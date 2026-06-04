@@ -33,6 +33,7 @@ pub(crate) mod drag_preview;
 pub mod drop_target;
 pub mod drop_zone;
 pub mod file_picker_field;
+pub mod grid_view;
 pub mod group_box;
 pub mod group_header;
 pub mod hex_color_input;
@@ -130,6 +131,10 @@ pub use file_picker_field::{FilePickerField, FilePickerKind};
 pub use group_box::GroupBox;
 pub use group_header::GroupHeader;
 pub use hex_color_input::HexColorInput;
+pub use grid_view::{
+    GridSectionProvider, GridSizing, GridTabTraversal, GridView, GroupingSections, ScrollAnchor,
+    TileContext, grouping_sections,
+};
 pub use icon_button::{BuiltInIcons, IconButton, IconButtonSize};
 pub use input_dialog::InputDialog;
 pub use link::Link;

@@ -131,6 +131,27 @@ impl SelectionModel {
         }
     }
 
+    /// Replace the selection with `indices` (or, when `additive`, union them
+    /// into the current selection). Used by rubber-band / marquee selection,
+    /// where the selected set is an arbitrary subset rather than a range. In
+    /// `Single` mode the highest index wins; `None` mode is a no-op.
+    pub fn select_indices(&self, indices: impl IntoIterator<Item = usize>, additive: bool) {
+        if self.mode == SelectionMode::None {
+            return;
+        }
+        let mut set = if additive {
+            self.selection.get()
+        } else {
+            BTreeSet::new()
+        };
+        set.extend(indices);
+        if self.mode == SelectionMode::Single {
+            let last = set.iter().next_back().copied();
+            set = last.into_iter().collect();
+        }
+        self.selection.set(set);
+    }
+
     /// Select all indices from 0 to count-1.
     pub fn select_all(&self, count: usize) {
         if self.mode == SelectionMode::None {
@@ -318,6 +339,18 @@ mod tests {
         let model = SelectionModel::new(SelectionMode::Multi);
         model.select_all(5);
         assert_eq!(model.selected_indices(), vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn select_indices_replaces_then_adds() {
+        let model = SelectionModel::new(SelectionMode::Multi);
+        model.select(1);
+        // Non-additive replaces.
+        model.select_indices([4, 5], false);
+        assert_eq!(model.selected_indices(), vec![4, 5]);
+        // Additive unions.
+        model.select_indices([2], true);
+        assert_eq!(model.selected_indices(), vec![2, 4, 5]);
     }
 
     #[test]

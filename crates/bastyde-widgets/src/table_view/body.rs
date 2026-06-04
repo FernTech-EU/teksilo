@@ -124,7 +124,7 @@ impl Widget for BodyRow {
         }
         builder.set_role(bastyde_core::accesskit::Role::Row);
         builder.set_selected(self.selected);
-        builder.inner_mut().set_row_index(self.row_index_1based);
+        builder.set_row_index(self.row_index_1based);
     }
 
     fn children(&self) -> Vec<WidgetId> {

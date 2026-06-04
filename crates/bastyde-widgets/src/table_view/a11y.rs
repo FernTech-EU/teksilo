@@ -102,9 +102,8 @@ impl Widget for CellA11y {
             builder.set_name(name.clone());
         }
         builder.set_selected(self.selected);
-        let n = builder.inner_mut();
-        n.set_row_index(self.row_index_1based);
-        n.set_column_index(self.col_index_1based);
+        builder.set_row_index(self.row_index_1based);
+        builder.set_column_index(self.col_index_1based);
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -174,11 +173,10 @@ impl Widget for TreeRowA11y {
         if let Some(exp) = self.expanded {
             builder.set_expanded(exp);
         }
-        let n = builder.inner_mut();
-        n.set_row_index(self.row_index_1based);
+        builder.set_row_index(self.row_index_1based);
         // Clamp to 1.. — AccessKit's `set_level` is `usize` but ARIA
         // levels start at 1.
-        n.set_level(self.level_1based.max(1));
+        builder.inner_mut().set_level(self.level_1based.max(1));
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -241,14 +239,13 @@ impl Widget for ColumnHeaderA11y {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::ColumnHeader);
         builder.set_name(self.name.clone());
-        let n = builder.inner_mut();
-        n.set_column_index(self.col_index_1based);
+        builder.set_column_index(self.col_index_1based);
         if let Some(dir) = self.sort {
             let ak_dir = match dir {
                 SortDirection::Ascending => bastyde_core::accesskit::SortDirection::Ascending,
                 SortDirection::Descending => bastyde_core::accesskit::SortDirection::Descending,
             };
-            n.set_sort_direction(ak_dir);
+            builder.inner_mut().set_sort_direction(ak_dir);
         }
     }
 

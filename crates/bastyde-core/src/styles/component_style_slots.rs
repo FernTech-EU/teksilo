@@ -28,7 +28,8 @@ use crate::styles::{
     SharedAvatarStyle, SharedBadgeStyle, SharedBannerStyle, SharedButtonStyle, SharedCalendarStyle,
     SharedCardStyle, SharedCheckboxStyle, SharedColorPickerStyle, SharedComboBoxStyle,
     SharedDateEditStyle, SharedDialogStyle, SharedDropTargetStyle, SharedDropZoneStyle,
-    SharedIconButtonStyle, SharedLinkStyle, SharedListContainerStyle, SharedMenuItemStyle,
+    SharedGridViewStyle, SharedIconButtonStyle, SharedLinkStyle, SharedListContainerStyle,
+    SharedMenuItemStyle,
     SharedPanelStyle, SharedPopoverStyle, SharedProgressBarStyle, SharedRadioStyle,
     SharedRichTextEditorStyle, SharedScrollBarStyle, SharedSearchFieldStyle,
     SharedSegmentedControlStyle, SharedSliderStyle, SharedSnackbarStyle, SharedSpinBoxStyle,
@@ -76,6 +77,7 @@ pub struct ComponentStyleSlots {
     pub list_container: Option<SharedListContainerStyle>,
     pub drop_zone: Option<SharedDropZoneStyle>,
     pub drop_target: Option<SharedDropTargetStyle>,
+    pub grid_view: Option<SharedGridViewStyle>,
 }
 
 impl std::fmt::Debug for ComponentStyleSlots {
@@ -119,6 +121,7 @@ impl std::fmt::Debug for ComponentStyleSlots {
             .field("list_container", &self.list_container.is_some())
             .field("drop_zone", &self.drop_zone.is_some())
             .field("drop_target", &self.drop_target.is_some())
+            .field("grid_view", &self.grid_view.is_some())
             .finish()
     }
 }
@@ -170,5 +173,6 @@ impl PartialEq for ComponentStyleSlots {
             && rc_eq(&self.list_container, &other.list_container)
             && rc_eq(&self.drop_zone, &other.drop_zone)
             && rc_eq(&self.drop_target, &other.drop_target)
+            && rc_eq(&self.grid_view, &other.grid_view)
     }
 }
