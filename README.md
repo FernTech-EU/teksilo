@@ -139,7 +139,7 @@ The rules under which Bastyde is built:
 
 **Animations.** Composable wrappers for the common cases (collapse, fade, slide, crossfade, blur, shake, pulse). Each respects the system "reduce motion" setting.
 
-**Drag and drop.** Intra-app DnD with typed payloads, drop indicators, and edge auto-scroll. Cross-application DnD via the OS clipboard is a known gap.
+**Drag and drop.** Intra-app DnD with typed payloads, drop indicators, and edge auto-scroll. Cross-application (OS) DnD is supported in both directions — inbound drops and outbound app-to-OS export.
 
 **Persistent settings.** Reactive K/V store and typed structs with migrations, atomic writes, and crash-safe quarantine of corrupt files. Automatic window-state restore with monitor-aware geometry sanitize.
 
