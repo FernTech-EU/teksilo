@@ -558,12 +558,23 @@ impl WindowManager {
             // debug inspector's shell wrapper). The wrapped id becomes
             // the window's effective root for modal-focus lookup, since
             // the wrapper still descends into the user's tree.
+            //
+            // The app-wide default is intentionally skipped for modal
+            // windows: it installs app-level chrome (the toast host, the
+            // inspector shell) that should belong to the primary window,
+            // not to transient native-window modals (dialogs, message
+            // boxes, wizards). Without this guard the shared toast
+            // registry would render every live toast in the modal too,
+            // anchored to the wrong window. An app that genuinely wants
+            // chrome on a specific modal can still set a per-window
+            // override on that window's `WindowConfig`.
             if let Some(post_root) = config.take_post_root_builder() {
                 root_id = post_root(&mut tree, root_id);
-            } else if let Some(default_post_root) = self
-                .app_context_template
-                .as_ref()
-                .and_then(|t| t.app_state::<crate::DefaultPostRoot>().cloned())
+            } else if !is_modal
+                && let Some(default_post_root) = self
+                    .app_context_template
+                    .as_ref()
+                    .and_then(|t| t.app_state::<crate::DefaultPostRoot>().cloned())
             {
                 root_id = (default_post_root.0)(&mut tree, root_id);
             }
@@ -907,6 +918,12 @@ impl WindowManager {
     }
 
     /// Broadcast a theme change to all windows.
+    ///
+    /// `ThemeMode` is `App`-level state, so a user-driven theme set under
+    /// `FollowSystem`/`Native` is last-writer-wins against the next OS theme
+    /// event (`handle_theme_changed`). The default `Manual` mode ignores OS
+    /// events, so an app that wants user theme choices to stick should stay on
+    /// `Manual` (the default).
     pub fn set_theme(&mut self, theme: Theme) {
         self.theme = theme.clone();
         for managed in self.windows.values_mut() {
@@ -1051,13 +1068,19 @@ impl WindowManager {
     /// [`WindowManager::set_locale`] so the `I18nManager` (active locale,
     /// version signal, RTL direction) and every tree stay in sync.
     /// Invalid or unsupported locale strings are logged and dropped.
-    pub fn drain_pending_locale_requests(&mut self) {
+    ///
+    /// Returns `true` if any request was drained, so the caller can repaint
+    /// every window — the fan-out marks non-originating windows dirty but
+    /// only the window that received the triggering event gets its own
+    /// `request_redraw`.
+    pub fn drain_pending_locale_requests(&mut self) -> bool {
         let mut requests: Vec<String> = Vec::new();
         for managed in self.windows.values_mut() {
             if let Some(loc) = managed.tree.take_pending_locale_request() {
                 requests.push(loc);
             }
         }
+        let had_requests = !requests.is_empty();
         for loc_str in requests {
             match loc_str.parse::<bastyde_i18n::LanguageIdentifier>() {
                 Ok(loc) => self.set_locale(loc),
@@ -1066,6 +1089,30 @@ impl WindowManager {
                 }
             }
         }
+        had_requests
+    }
+
+    /// Drain per-tree theme-switch requests raised by handlers via
+    /// [`EventContext::set_theme`](bastyde_core::widget::EventContext::set_theme)
+    /// and route each through [`WindowManager::set_theme`] so the new theme is
+    /// applied to *every* window, not just the one whose handler requested it.
+    ///
+    /// Returns `true` if any request was drained (same repaint rationale as
+    /// [`WindowManager::drain_pending_locale_requests`]). If several windows
+    /// raised a request in the same tick, each is applied in turn — the last
+    /// wins, matching the locale path.
+    pub fn drain_pending_theme_requests(&mut self) -> bool {
+        let mut requests: Vec<Theme> = Vec::new();
+        for managed in self.windows.values_mut() {
+            if let Some(theme) = managed.tree.take_pending_theme_request() {
+                requests.push(theme);
+            }
+        }
+        let had_requests = !requests.is_empty();
+        for theme in requests {
+            self.set_theme(theme);
+        }
+        had_requests
     }
 }
 

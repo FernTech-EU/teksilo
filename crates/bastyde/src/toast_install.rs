@@ -39,7 +39,7 @@ use std::rc::Rc;
 
 use bastyde_app::{BastydeAppBuilder, DefaultPostRoot};
 use bastyde_widgets::notification::{NotificationArchive, NotificationArchiveModel};
-use bastyde_widgets::primitives::ZStack;
+use bastyde_widgets::primitives::{Expand, ZStack};
 use bastyde_widgets::toast::{ToastHost, ToastInstallOptions, ToastRegistry};
 
 /// Extension trait on [`BastydeAppBuilder`] that wires up the Toast
@@ -121,7 +121,16 @@ impl BastydeAppBuilderToastExt for BastydeAppBuilder {
         let post_root = DefaultPostRoot::new(move |tree, root_id| {
             let host = ToastHost::new(registry_for_hook.clone(), options_for_hook.clone());
             let host_id = tree.add(host);
-            let stack = ZStack::new().add_child(root_id).add_child(host_id);
+            // The framework force-fills a *window root* to the window
+            // bounds, but inside this ZStack the user's root becomes a
+            // child sized to its own `layout_response`. A non-flex root
+            // (a plain `VStack`, the common case) reports its content
+            // height, so it would collapse to the top of the window and
+            // leave the lower area blank. Wrap it in an `Expand` so it
+            // fills the ZStack exactly as it filled the window when it
+            // was the bare root — the wrapping stays layout-transparent.
+            let filled_root = tree.add(Expand::new().respect_intrinsic().child_id(root_id));
+            let stack = ZStack::new().add_child(filled_root).add_child(host_id);
             tree.add(stack)
         });
 

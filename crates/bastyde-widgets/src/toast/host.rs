@@ -221,12 +221,24 @@ impl Widget for ToastHost {
         self.frame_tick_sub = Some(ctx.subscribe_frame_tick());
 
         // Pending-dismiss-callback drain handler (attached once).
+        //
+        // The host fills the whole viewport so its toast children can
+        // anchor at absolute corner coordinates, but it must NOT eat
+        // clicks meant for the user content below it in the wrapping
+        // `ZStack`. `event_pass_through(true)` makes the host
+        // transparent to hit-testing: its toast children are still
+        // hit-tested first (clicks on a toast land on the toast), but a
+        // click that misses every toast falls through to the user root
+        // instead of being swallowed by the host's full-viewport
+        // background. Without this, *all* pointer input is blocked.
         if !self.has_pending_drain_handler.get() {
             let registry_for_drain = self.registry.clone();
-            let handlers = HandlerSet::new().on_pointer_event(move |_event, ctx| {
-                registry_for_drain.drain_pending_dismiss_callbacks(ctx);
-                bastyde_core::event::EventResponse::Ignored
-            });
+            let handlers = HandlerSet::new()
+                .event_pass_through(true)
+                .on_pointer_event(move |_event, ctx| {
+                    registry_for_drain.drain_pending_dismiss_callbacks(ctx);
+                    bastyde_core::event::EventResponse::Ignored
+                });
             ctx.apply_self_handlers(handlers);
             self.has_pending_drain_handler.set(true);
         }
@@ -316,5 +328,174 @@ impl Widget for ToastHost {
 
     fn children(&self) -> Vec<WidgetId> {
         self.toast_surface_ids.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::primitives::{Expand, FixedSize, VStack, ZStack};
+    use crate::toast::Toast;
+    use crate::toast::registry::ToastRegistry;
+    use bastyde_canvas::SizeProposal;
+    use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::LocalizedString;
+
+    fn opts() -> ToastInstallOptions {
+        ToastInstallOptions {
+            archive: None,
+            ..ToastInstallOptions::default()
+        }
+    }
+
+    /// A user root smaller than the window (the common case: a VStack of
+    /// content that does not itself fill the height).
+    fn small_root() -> impl Widget {
+        VStack::new().child(
+            FixedSize::new()
+                .bind_width(200.0)
+                .bind_height(120.0)
+                .child(crate::primitives::Spacer::new()),
+        )
+    }
+
+    fn surface_bounds(structure: &str) -> (Rect, Rect) {
+        let o = opts();
+        let registry = ToastRegistry::new(o.clone());
+        registry.enqueue(Toast::info(LocalizedString::literal("Hello")));
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let user_root = tree.add(small_root());
+        let host_id = tree.add(ToastHost::new(registry.clone(), o));
+        match structure {
+            // install_toast as shipped before the fix: ZStack { root, host }.
+            "bare" => {
+                tree.add(ZStack::new().add_child(user_root).add_child(host_id));
+            }
+            // install_toast with the Expand fill wrap: ZStack { Expand(root), host }.
+            "expand" => {
+                let filled = tree.add(Expand::new().respect_intrinsic().child_id(user_root));
+                tree.add(ZStack::new().add_child(filled).add_child(host_id));
+            }
+            _ => unreachable!(),
+        }
+
+        tree.layout(SizeProposal::exact(900.0, 600.0));
+
+        let host_bounds = tree.bounds(host_id);
+        let surfaces = tree.children(host_id);
+        assert_eq!(surfaces.len(), 1, "[{structure}] expected one toast surface");
+        (host_bounds, tree.bounds(surfaces[0]))
+    }
+
+    /// The host must fill the window and place its toast surface at the
+    /// bottom-trailing corner, fully on-screen — regardless of whether
+    /// the user root is wrapped in an `Expand`. This is the regression
+    /// guard for "no toast anywhere" / "toast off-screen".
+    #[test]
+    fn toast_surface_is_visible_at_bottom_right_with_and_without_expand() {
+        for structure in ["bare", "expand"] {
+            let (host_bounds, sb) = surface_bounds(structure);
+
+            assert!(
+                (host_bounds.width - 900.0).abs() < 0.5
+                    && (host_bounds.height - 600.0).abs() < 0.5,
+                "[{structure}] host should fill window, got {host_bounds:?}"
+            );
+            assert!(sb.height > 1.0, "[{structure}] surface collapsed: {sb:?}");
+            assert!(
+                sb.y >= -0.5 && sb.y + sb.height <= 600.5,
+                "[{structure}] surface vertically off-screen: {sb:?}"
+            );
+            assert!(
+                sb.x >= -0.5 && sb.x + sb.width <= 900.5,
+                "[{structure}] surface horizontally off-screen: {sb:?}"
+            );
+            // bottom-trailing anchor: lower-right quadrant.
+            assert!(
+                sb.y + sb.height > 400.0,
+                "[{structure}] surface not near bottom: {sb:?}"
+            );
+            assert!(
+                sb.x + sb.width > 500.0,
+                "[{structure}] surface not near right edge: {sb:?}"
+            );
+        }
+    }
+
+    /// Investigation: a flexless VStack root fills the window (bounds
+    /// 900x600) but top-clusters its children, leaving the slack at the
+    /// bottom; inserting an `Expand::vertical` between body and status
+    /// pins the status bar to the bottom edge. Documents the layout
+    /// contract so a future reader doesn't mistake the top-clustering
+    /// for a window bug.
+    #[test]
+    fn flexless_root_top_clusters_expand_pins_to_bottom() {
+        use crate::primitives::Spacer;
+        let build = |with_expand: bool| {
+            let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+            let toolbar = tree.add(FixedSize::new().bind_width(900.0).bind_height(40.0).child(Spacer::new()));
+            let status = tree.add(FixedSize::new().bind_width(900.0).bind_height(30.0).child(Spacer::new()));
+            let mut vstack = VStack::new().spacing(0.0).add_child(toolbar);
+            if with_expand {
+                let body = tree.add(FixedSize::new().bind_width(900.0).bind_height(100.0).child(Spacer::new()));
+                let filled = tree.add(Expand::vertical().respect_intrinsic().child_id(body));
+                vstack = vstack.add_child(filled);
+            } else {
+                let body = tree.add(FixedSize::new().bind_width(900.0).bind_height(100.0).child(Spacer::new()));
+                vstack = vstack.add_child(body);
+            }
+            vstack = vstack.add_child(status);
+            let root = tree.add(vstack);
+            tree.layout(SizeProposal::exact(900.0, 600.0));
+            (tree.bounds(root), tree.bounds(status))
+        };
+
+        let (root_plain, status_plain) = build(false);
+        assert!((root_plain.height - 600.0).abs() < 0.5, "root fills window");
+        assert!((status_plain.y - 140.0).abs() < 0.5, "flexless: status top-clusters at 140");
+
+        let (root_exp, status_exp) = build(true);
+        assert!((root_exp.height - 600.0).abs() < 0.5, "root still fills window");
+        assert!(
+            (status_exp.y + status_exp.height - 600.0).abs() < 0.5,
+            "with Expand::vertical the status bar pins to the bottom edge, got {status_exp:?}"
+        );
+    }
+
+    /// The host is built at startup with an EMPTY registry (the common
+    /// case: the main window). A toast enqueued LATER (via
+    /// `show_toast`) must drive a rebuild so the surface appears on the
+    /// next layout pass. This reproduces the real-app path that the
+    /// first test (toast present at build time) does not exercise.
+    #[test]
+    fn host_shows_toast_enqueued_after_initial_layout() {
+        let o = opts();
+        let registry = ToastRegistry::new(o.clone());
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let user_root = tree.add(small_root());
+        let host_id = tree.add(ToastHost::new(registry.clone(), o));
+        let filled = tree.add(Expand::new().respect_intrinsic().child_id(user_root));
+        tree.add(ZStack::new().add_child(filled).add_child(host_id));
+
+        tree.layout(SizeProposal::exact(900.0, 600.0));
+        assert_eq!(
+            tree.children(host_id).len(),
+            0,
+            "no toast should be present before any enqueue"
+        );
+
+        // Equivalent to `ctx.show_toast(...)` after startup.
+        registry.enqueue(Toast::info(LocalizedString::literal("Later")));
+
+        // A subsequent layout pass (next frame) must rebuild the host
+        // and materialise the surface.
+        tree.layout(SizeProposal::exact(900.0, 600.0));
+        assert_eq!(
+            tree.children(host_id).len(),
+            1,
+            "toast enqueued after initial layout did not appear — host did not rebuild"
+        );
     }
 }

@@ -25,7 +25,7 @@ use std::time::Duration;
 use bastyde::prelude::*;
 use bastyde::settings::AppPaths;
 use bastyde::widgets::{
-    Button, ButtonVariant, HStack, Padding, Spacer, StatusBar, TextWidget, Toolbar, VStack,
+    Button, ButtonVariant, Expand, HStack, Padding, Spacer, StatusBar, TextWidget, Toolbar, VStack,
 };
 
 fn build_root() -> impl Widget {
@@ -35,7 +35,12 @@ fn build_root() -> impl Widget {
     VStack::new()
         .spacing(0.0)
         .child(toolbar(next_id.clone(), upload_handle))
-        .child(body())
+        // `Expand::vertical` marks where the VStack's leftover height
+        // goes: the body fills the middle and the status bar is pushed
+        // to the bottom edge. Without it, a flexless VStack top-aligns
+        // its children (the SwiftUI/flexbox stack rule) and the status
+        // bar would sit directly under the body.
+        .child(Expand::vertical().respect_intrinsic().child(body()))
         .child(status_bar())
 }
 
