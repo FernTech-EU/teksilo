@@ -70,17 +70,33 @@ impl WidgetTree {
         };
         if let WidgetEvent::KeyDown { key, .. } = &event
             && *key == overlay_back_key
-            && self.overlay_manager.len() > 1
         {
-            if let Some((_id, content_ids, focus_restore)) = self.overlay_manager.dismiss_top() {
-                self.dormant_dismissed_content(&content_ids, &mut *ops);
-                if let Some(restore_id) = focus_restore
-                    && self.arena.is_active(restore_id)
+            // Count menu-level (non-host) overlays. A revealed collapsible
+            // `MenuBar` is itself a *host* overlay (Role::MenuBar), so a
+            // single open top-level menu sitting over it must NOT be treated
+            // as a nested submenu — otherwise the back key would close the
+            // menu instead of letting the menubar navigate to the previous
+            // one. Only when ≥2 non-host overlays are stacked (a submenu over
+            // its parent menu) does the back key dismiss the top overlay.
+            let nested_menu_overlays = {
+                let ids: Vec<_> = self.overlay_manager.stack.iter().map(|o| o.id).collect();
+                ids.into_iter()
+                    .filter(|&id| !self.overlay_is_host_surface(id))
+                    .count()
+            };
+            if nested_menu_overlays > 1 {
+                if let Some((_id, content_ids, focus_restore)) =
+                    self.overlay_manager.dismiss_top()
                 {
-                    self.focus_ops(restore_id, &mut *ops);
+                    self.dormant_dismissed_content(&content_ids, &mut *ops);
+                    if let Some(restore_id) = focus_restore
+                        && self.arena.is_active(restore_id)
+                    {
+                        self.focus_ops(restore_id, &mut *ops);
+                    }
                 }
+                return;
             }
-            return;
         }
 
         if let WidgetEvent::KeyDown {

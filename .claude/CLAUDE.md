@@ -43,6 +43,7 @@ cargo run -p toast-demo                         # Toast notifications + persiste
 cargo run -p async-demo                         # bastyde-async: spawn_local + spawn_blocking + spawn_local_with (opt-in async executor)
 cargo run -p tab-migration                      # Cross-TabWidget tab drag-and-drop (migrate tabs between two groups)
 cargo run -p over-constraint                     # Graceful shrink / layout priority / height-for-width + inspector overflow stripes (F12)
+cargo run -p collapsible-menu-bar                # MenuBar hamburger mode: responsive collapse + reveal-trailing-the-button + Alt/F10 keyboard reveal
 ```
 
 ## Tools

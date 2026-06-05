@@ -454,6 +454,16 @@ impl IconButton {
             .tooltip(bastyde_i18n::tr_widget!(a11y_builtin_bell()))
     }
 
+    /// Menu / hamburger button (three horizontal bars). Used by the
+    /// collapsible [`MenuBar`](crate::menu_bar::MenuBar) as the
+    /// collapsed representation that reveals the bar when activated.
+    /// Advertises `HasPopup::Menu` for assistive technology.
+    pub fn menu() -> Self {
+        Self::new((BuiltInIcons::global().menu)())
+            .tooltip(bastyde_i18n::tr_widget!(a11y_builtin_menu()))
+            .has_popup(bastyde_core::accesskit::HasPopup::Menu)
+    }
+
     /// Visibility toggle (eye / eye-off). Toggles password visibility.
     /// Uses the icon-swap bistate mode internally — the icon advertises
     /// the **expected action**, matching the prevailing password-field
@@ -838,6 +848,7 @@ pub struct BuiltInIcons {
     pub bell: fn() -> IconWidget,
     pub eye: fn() -> IconWidget,
     pub eye_off: fn() -> IconWidget,
+    pub menu: fn() -> IconWidget,
 }
 
 static GLOBAL_ICONS: OnceLock<BuiltInIcons> = OnceLock::new();
@@ -855,6 +866,7 @@ impl BuiltInIcons {
             bell: default_bell_icon,
             eye: default_eye_icon,
             eye_off: default_eye_off_icon,
+            menu: default_menu_icon,
         }
     }
 
@@ -912,6 +924,10 @@ fn default_eye_icon() -> IconWidget {
 
 fn default_eye_off_icon() -> IconWidget {
     IconWidget::from_svg(include_str!("../resources/icons/builtin-eye-off.svg"))
+}
+
+fn default_menu_icon() -> IconWidget {
+    IconWidget::from_svg(include_str!("../resources/icons/builtin-menu.svg"))
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

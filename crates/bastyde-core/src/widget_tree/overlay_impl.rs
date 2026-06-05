@@ -439,18 +439,35 @@ impl WidgetTree {
     /// and stop the upward walk in `dismiss_self_overlay_chain_for_source`,
     /// so a popover hosted inside a composite tooltip can dismiss
     /// itself (or its menu cascade) without taking the host with it.
-    fn overlay_is_host_surface(&self, overlay_id: crate::overlay::OverlayId) -> bool {
+    pub(super) fn overlay_is_host_surface(&self, overlay_id: crate::overlay::OverlayId) -> bool {
         let Some(overlay) = self.overlay_manager.overlay(overlay_id) else {
             return false;
         };
         let Some(node) = self.arena.get(overlay.content_id) else {
             return false;
         };
-        let mut builder = AccessNodeBuilder::new();
-        node.widget.accessibility(&mut builder);
+        // Prefer an `.access_role(...)` override (e.g. a collapsible
+        // `MenuBar`'s bar-content node marked `Role::MenuBar`) over the
+        // widget's own role — the override is what the AccessKit walker
+        // surfaces, so it must also decide host-ness here. Without this,
+        // the revealed bar would not be recognised as a host and
+        // `dismiss_all_except_hosts` (called when a menu opens) would
+        // tear it down mid-navigation.
+        let role = node
+            .access_overrides
+            .as_ref()
+            .and_then(|o| o.role)
+            .unwrap_or_else(|| {
+                let mut builder = AccessNodeBuilder::new();
+                node.widget.accessibility(&mut builder);
+                builder.role()
+            });
         matches!(
-            builder.role(),
-            accesskit::Role::Tooltip | accesskit::Role::Dialog | accesskit::Role::AlertDialog
+            role,
+            accesskit::Role::Tooltip
+                | accesskit::Role::Dialog
+                | accesskit::Role::AlertDialog
+                | accesskit::Role::MenuBar
         )
     }
 

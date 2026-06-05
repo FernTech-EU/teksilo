@@ -139,7 +139,7 @@ pub use icon_button::{BuiltInIcons, IconButton, IconButtonSize};
 pub use input_dialog::InputDialog;
 pub use link::Link;
 pub use list_view::ListView;
-pub use menu_bar::MenuBar;
+pub use menu_bar::{CollapsePolicy, MenuBar};
 pub use menu_item::MenuItem;
 pub use menu_list::{MenuList, MenuSeparator};
 pub use message_box::{

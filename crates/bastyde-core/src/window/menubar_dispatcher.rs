@@ -53,7 +53,15 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::event::{Key, Modifiers};
+use crate::widget::EventContext;
 use crate::widget_id::WidgetId;
+
+/// A closure that reveals a collapsed (hamburger) `MenuBar` — it shows
+/// the bar as a floating overlay. Carried by [`MenubarAction`] so that
+/// `bastyde-app` can run the reveal (which needs an [`EventContext`])
+/// before performing the focus / open-menu step. Must be idempotent:
+/// calling it when the bar is already revealed is a no-op.
+pub type MenubarReveal = Rc<dyn Fn(&mut EventContext)>;
 
 /// A `KeyDown` event passed through the menubar dispatcher.
 #[derive(Debug, Clone)]
@@ -65,19 +73,51 @@ pub struct MenubarKeyEvent {
 /// The result of `MenubarDispatcher::try_handle`. The caller (the
 /// app-level event loop in `bastyde-app`) translates this into the
 /// concrete WidgetTree calls.
-#[derive(Debug, Clone)]
+///
+/// Cannot derive `Debug` because of the `reveal` closure; a manual
+/// impl is provided below.
+#[derive(Clone)]
 pub enum MenubarAction {
     /// Focus the trigger and synthesise a click on it so its menu
     /// opens. Used for `Alt+<letter>` mnemonic activation.
-    OpenMenu { trigger_id: WidgetId },
+    ///
+    /// When `reveal` is `Some` (collapsed/hamburger `MenuBar`),
+    /// `bastyde-app` runs the reveal closure (and a synchronous layout
+    /// pass) FIRST, so the trigger has valid bounds before the
+    /// synthesised click.
+    OpenMenu {
+        trigger_id: WidgetId,
+        reveal: Option<MenubarReveal>,
+    },
     /// Focus the trigger without opening any menu. Used for `F10`
     /// (which puts the menubar in "navigation" mode without revealing
-    /// a dropdown).
-    FocusTrigger { trigger_id: WidgetId },
+    /// a dropdown). `reveal` is `Some` for a collapsed `MenuBar`.
+    FocusTrigger {
+        trigger_id: WidgetId,
+        reveal: Option<MenubarReveal>,
+    },
     /// Swallow the event silently. Used for `Alt+<letter>` chords
     /// with no matching menubar mnemonic — without this, the chord
     /// would reach a focused text input as an unwanted character.
     Intercept,
+}
+
+impl std::fmt::Debug for MenubarAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MenubarAction::OpenMenu { trigger_id, reveal } => f
+                .debug_struct("OpenMenu")
+                .field("trigger_id", trigger_id)
+                .field("reveal", &reveal.as_ref().map(|_| "<reveal>"))
+                .finish(),
+            MenubarAction::FocusTrigger { trigger_id, reveal } => f
+                .debug_struct("FocusTrigger")
+                .field("trigger_id", trigger_id)
+                .field("reveal", &reveal.as_ref().map(|_| "<reveal>"))
+                .finish(),
+            MenubarAction::Intercept => f.write_str("Intercept"),
+        }
+    }
 }
 
 /// Object-safe trait implemented by `MenuBar`. `bastyde-app` consults

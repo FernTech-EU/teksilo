@@ -31,7 +31,9 @@ pub use config::{ModalConfig, PostRootBuilder, RootBuilder, WindowConfig};
 pub use decorations::DecorationsMode;
 pub use icon::WindowIcon;
 pub use id::BastydeWindowId;
-pub use menubar_dispatcher::{MenubarAction, MenubarDispatcher, MenubarGuard, MenubarKeyEvent};
+pub use menubar_dispatcher::{
+    MenubarAction, MenubarDispatcher, MenubarGuard, MenubarKeyEvent, MenubarReveal,
+};
 pub use ops::{NoopWindowOps, WindowOps};
 pub use placement::WindowPlacement;
 pub use state::WindowState;

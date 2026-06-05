@@ -707,6 +707,18 @@ impl BastydeAppHandler {
             .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
+        // For a collapsed (hamburger) MenuBar, the action carries a
+        // `reveal` closure. We must run it (it shows the bar as a
+        // floating overlay) and then re-layout synchronously, so the
+        // trigger has valid bounds before we focus / synthesise the
+        // click on it. Compute the same layout proposal the redraw
+        // path uses.
+        let proposal = {
+            let size = current.platform_window.surface_size();
+            let sf = current.platform_window.scale_factor() as f32;
+            SizeProposal::exact(size.0 as f32 / sf, size.1 as f32 / sf)
+        };
+
         {
             let mut ops = crate::window_manager::WindowOpsImpl::new(
                 &mut self.wm,
@@ -718,10 +730,22 @@ impl BastydeAppHandler {
             );
             match action {
                 MenubarAction::Intercept => {}
-                MenubarAction::FocusTrigger { trigger_id } => {
+                MenubarAction::FocusTrigger { trigger_id, reveal } => {
+                    if let Some(reveal) = reveal {
+                        current
+                            .tree
+                            .run_with_event_context(&mut ops, |ctx| reveal(ctx));
+                        current.tree.layout_with_ops(proposal, &mut ops);
+                    }
                     current.tree.focus_ops(trigger_id, &mut ops);
                 }
-                MenubarAction::OpenMenu { trigger_id } => {
+                MenubarAction::OpenMenu { trigger_id, reveal } => {
+                    if let Some(reveal) = reveal {
+                        current
+                            .tree
+                            .run_with_event_context(&mut ops, |ctx| reveal(ctx));
+                        current.tree.layout_with_ops(proposal, &mut ops);
+                    }
                     current.tree.focus_ops(trigger_id, &mut ops);
                     let pointer = current.tree.bounds(trigger_id).center();
                     current.tree.dispatch_event_with_ops(

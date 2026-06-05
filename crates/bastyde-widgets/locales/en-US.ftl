@@ -50,6 +50,7 @@ a11y-builtin-copy = Copy
 a11y-builtin-clear = Clear
 a11y-builtin-add = Add
 a11y-builtin-bell = Notifications
+a11y-builtin-menu = Menu
 a11y-builtin-visibility = Toggle visibility
 a11y-password-reveal = Toggle password visibility
 a11y-caps-lock-on = Caps Lock is on

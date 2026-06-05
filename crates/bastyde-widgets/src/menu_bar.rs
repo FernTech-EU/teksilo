@@ -17,29 +17,47 @@
 //!     .trailing_slot(Button::new(lit!("Settings")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Settings)))
 //! ```
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use bastyde_canvas::{Rect, Size, SizeProposal};
+use bastyde_canvas::{Point, Rect, Size, SizeProposal};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, Modifiers, WidgetEvent};
+use bastyde_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{
     CursorIcon, EventContext, LayoutContext, PendingChild, Widget, WidgetPlacement,
 };
-use bastyde_core::widget_builder::HandlerSet;
+use bastyde_core::widget_builder::{HandlerSet, WidgetBuilder};
 use bastyde_core::widget_id::WidgetId;
-use bastyde_core::window::{MenubarAction, MenubarDispatcher, MenubarGuard, MenubarKeyEvent};
+use bastyde_core::window::{
+    MenubarAction, MenubarDispatcher, MenubarGuard, MenubarKeyEvent, MenubarReveal,
+};
 use bastyde_tokens::{SurfaceRole, TextStyleRole};
 
+use crate::icon_button::IconButton;
 use crate::menu_context::MenuContext;
 use crate::menu_item::MenuLabel;
 use crate::menu_item::ParsedMnemonic;
 use crate::menu_item::parse_mnemonic;
 use crate::primitives::{HStack, Padding, RectWidget, Spacer, ZStack};
 use bastyde_i18n::LocalizedString;
+
+/// Controls how a [`MenuBar`] made collapsible via [`MenuBar::collapsible`]
+/// decides between the full inline bar and the hamburger representation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CollapsePolicy {
+    /// Collapse to a hamburger only when the bar's intrinsic width
+    /// exceeds the width it is allotted; otherwise show the full inline
+    /// bar. Mirrors the responsive `Toolbar` overflow behaviour.
+    #[default]
+    Responsive,
+    /// Always show the hamburger, regardless of available width. The
+    /// "force hamburger" / compact mode.
+    Always,
+}
 
 // ---------------------------------------------------------------------------
 // MenuBarEntry — pending menu definition
@@ -76,6 +94,22 @@ pub struct MenuBar {
     /// window-state slot is single-occupancy and a second install
     /// `debug_assert!`s otherwise.
     install_dispatcher: bool,
+    /// When `Some`, the bar can collapse to a hamburger `IconButton`.
+    /// `None` (the default) is the classic always-inline MenuBar.
+    collapse_policy: Option<CollapsePolicy>,
+    /// `true` while collapsed (hamburger shown). Source of truth for
+    /// the visibility bindings. Driven by the responsive decision in
+    /// `place_children` (or pinned `true` for `CollapsePolicy::Always`).
+    collapsed: Signal<bool>,
+    /// `true` while the collapsed bar is shown as a floating overlay.
+    revealed: Signal<bool>,
+    /// Idempotence guard for the responsive write (Toolbar pattern).
+    last_collapsed: Cell<bool>,
+    /// The bar root (ZStack) id, captured in `build()`. Used both as the
+    /// inline content and as the floating-overlay content when collapsed.
+    bar_id: Option<WidgetId>,
+    /// The hamburger `IconButton` id, captured in `build()`.
+    hamburger_id: Option<WidgetId>,
 }
 
 impl MenuBar {
@@ -87,7 +121,60 @@ impl MenuBar {
             root_child_id: None,
             menubar_guard: RefCell::new(None),
             install_dispatcher: true,
+            collapse_policy: None,
+            collapsed: Signal::new(false),
+            revealed: Signal::new(false),
+            last_collapsed: Cell::new(false),
+            bar_id: None,
+            hamburger_id: None,
         }
+    }
+
+    /// Enable the optional **hamburger** representation. When there
+    /// isn't room for the full inline bar, it collapses to a single
+    /// hamburger (☰) [`IconButton`]; activating it (click, `Alt`+
+    /// mnemonic, `F10`, or bare-`Alt`-tap) reveals the full bar as a
+    /// floating overlay over content. Clicking outside the bar or
+    /// pressing `Escape` hides it again.
+    ///
+    /// Uses [`CollapsePolicy::Responsive`]. Observe the collapsed state
+    /// via [`is_collapsed`](Self::is_collapsed), or bind your own signal
+    /// with [`collapsible_bound`](Self::collapsible_bound).
+    pub fn collapsible(mut self) -> Self {
+        self.collapse_policy.get_or_insert(CollapsePolicy::Responsive);
+        self
+    }
+
+    /// Like [`collapsible`](Self::collapsible), but uses the supplied
+    /// signal as the collapsed-state source so the application can
+    /// observe (and react to) collapse transitions. The responsive
+    /// decision writes this signal.
+    pub fn collapsible_bound(mut self, collapsed: Signal<bool>) -> Self {
+        self.collapse_policy.get_or_insert(CollapsePolicy::Responsive);
+        self.last_collapsed.set(collapsed.get());
+        self.collapsed = collapsed;
+        self
+    }
+
+    /// Set the collapse policy (and enable collapsible mode).
+    /// [`CollapsePolicy::Always`] forces the hamburger regardless of
+    /// available width — i.e. **collapsed by default**.
+    pub fn collapse_policy(mut self, policy: CollapsePolicy) -> Self {
+        self.collapse_policy = Some(policy);
+        // Start already-collapsed for `Always` so the first frame shows
+        // the hamburger (no one-frame inline flash before `place_children`
+        // sets the signal).
+        if policy == CollapsePolicy::Always {
+            self.collapsed.set(true);
+            self.last_collapsed.set(true);
+        }
+        self
+    }
+
+    /// A clone of the collapsed-state signal (`true` while the
+    /// hamburger is shown). Call after [`collapsible`](Self::collapsible).
+    pub fn is_collapsed(&self) -> Signal<bool> {
+        self.collapsed.clone()
     }
 
     /// Skip the window-state dispatcher install. The MenuBar still
@@ -154,10 +241,10 @@ impl MenubarDispatcher for MenuBarDispatcher {
         // Works on every platform (F10 is not transformed by any OS
         // input layer the way Alt+letter is on macOS).
         if event.modifiers == Modifiers::NONE && matches!(event.key, Key::F10) {
-            return self
-                .trigger_ids
-                .first()
-                .map(|&id| MenubarAction::FocusTrigger { trigger_id: id });
+            return self.trigger_ids.first().map(|&id| MenubarAction::FocusTrigger {
+                trigger_id: id,
+                reveal: None,
+            });
         }
         // Alt+<letter> mnemonics. On macOS, Option+letter is
         // intercepted by the OS to compose accented characters
@@ -185,7 +272,10 @@ impl MenubarDispatcher for MenuBarDispatcher {
             if let Some(c) = lookup_char {
                 if let Some(&idx) = self.mnemonic_table.get(&c) {
                     if let Some(&tid) = self.trigger_ids.get(idx) {
-                        return Some(MenubarAction::OpenMenu { trigger_id: tid });
+                        return Some(MenubarAction::OpenMenu {
+                            trigger_id: tid,
+                            reveal: None,
+                        });
                     }
                 }
                 // Letter-with-Alt that doesn't match any mnemonic —
@@ -204,9 +294,54 @@ impl MenubarDispatcher for MenuBarDispatcher {
         // Bare-Alt-tap (no other key during the hold) → focus the
         // first trigger in menubar-active mode (no menu opens until
         // ArrowDown / Enter / Space).
-        self.trigger_ids
-            .first()
-            .map(|&id| MenubarAction::FocusTrigger { trigger_id: id })
+        self.trigger_ids.first().map(|&id| MenubarAction::FocusTrigger {
+            trigger_id: id,
+            reveal: None,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CollapsibleMenuBarDispatcher — wraps MenuBarDispatcher for hamburger mode
+// ---------------------------------------------------------------------------
+
+/// Delegates to the inner [`MenuBarDispatcher`], and — when the bar is
+/// currently collapsed — attaches a `reveal` closure to the returned
+/// action so `bastyde-app` reveals the floating bar (and re-layouts)
+/// before focusing / opening. Preserves the inner dispatcher's
+/// platform-specific behaviour (macOS Alt+letter compile-out, F10,
+/// bare-Alt-tap) by pure delegation.
+struct CollapsibleMenuBarDispatcher {
+    inner: MenuBarDispatcher,
+    collapsed: Signal<bool>,
+    reveal: MenubarReveal,
+}
+
+impl CollapsibleMenuBarDispatcher {
+    fn with_reveal(&self, action: MenubarAction) -> MenubarAction {
+        if !self.collapsed.get() {
+            return action;
+        }
+        let reveal = Some(self.reveal.clone());
+        match action {
+            MenubarAction::OpenMenu { trigger_id, .. } => {
+                MenubarAction::OpenMenu { trigger_id, reveal }
+            }
+            MenubarAction::FocusTrigger { trigger_id, .. } => {
+                MenubarAction::FocusTrigger { trigger_id, reveal }
+            }
+            MenubarAction::Intercept => MenubarAction::Intercept,
+        }
+    }
+}
+
+impl MenubarDispatcher for CollapsibleMenuBarDispatcher {
+    fn try_handle(&self, event: &MenubarKeyEvent) -> Option<MenubarAction> {
+        self.inner.try_handle(event).map(|a| self.with_reveal(a))
+    }
+
+    fn on_alt_tap(&self) -> Option<MenubarAction> {
+        self.inner.on_alt_tap().map(|a| self.with_reveal(a))
     }
 }
 
@@ -648,8 +783,94 @@ impl Widget for MenuBar {
         let padding_id = ctx.add(padding);
 
         let zstack = ZStack::new().add_child(bg_id).add_child(padding_id);
-        let root_id = ctx.add(zstack);
+        // In collapsible mode the `Role::MenuBar` landmark lives on the
+        // bar content node (not the composing widget) so it travels into
+        // the floating overlay AND so `overlay_is_host_surface` treats
+        // the revealed bar as a host (menu-open dismissal spares it).
+        let root_id = if self.collapse_policy.is_some() {
+            ctx.add(zstack.access_role(bastyde_core::accesskit::Role::MenuBar))
+        } else {
+            ctx.add(zstack)
+        };
         self.root_child_id = Some(root_id);
+        self.bar_id = Some(root_id);
+
+        // Collapsible (hamburger) mode: build the hamburger button and
+        // the reveal closure that floats the bar as an overlay; gate
+        // inline visibility on `collapsed` / `revealed`.
+        let mut children = vec![root_id];
+        let collapsible_reveal: Option<MenubarReveal> = if self.collapse_policy.is_some() {
+            let bar_id = root_id;
+            let revealed = self.revealed.clone();
+            let collapsed = self.collapsed.clone();
+
+            // The bar overlay trails the hamburger (the developer is
+            // responsible for placing the hamburger). The anchor cell is
+            // filled after the button is added, since the reveal closure
+            // is created before the button id is known.
+            let anchor_cell: Rc<Cell<Option<WidgetId>>> = Rc::new(Cell::new(None));
+            // First trigger, focused on reveal so the bar is immediately
+            // keyboard-navigable (arrows move between menus, Enter opens).
+            let first_trigger = trigger_ids.first().copied();
+
+            let reveal: MenubarReveal = {
+                let revealed = revealed.clone();
+                let anchor_cell = anchor_cell.clone();
+                Rc::new(move |ctx: &mut EventContext| {
+                    if revealed.get() {
+                        return; // idempotent — already revealed
+                    }
+                    revealed.set(true);
+                    ctx.activate(bar_id);
+                    let anchor = anchor_cell.get().unwrap_or(bar_id);
+                    let on_dismiss: Rc<dyn Fn()> = {
+                        let revealed = revealed.clone();
+                        Rc::new(move || revealed.set(false))
+                    };
+                    ctx.show_overlay(OverlayRequest {
+                        content_id: bar_id,
+                        anchor,
+                        placement: OverlayPlacement::TrailingEdge,
+                        dismiss: DismissBehavior::EscapeOrClickOutside,
+                        layer: OverlayLayer::InTree,
+                        parent_overlay: None,
+                        on_dismiss: Some(on_dismiss),
+                        fade_duration: None,
+                    });
+                    if let Some(trigger) = first_trigger {
+                        ctx.request_focus(trigger);
+                    }
+                })
+            };
+
+            // `IconButton::menu()` already advertises `HasPopup::Menu` and
+            // an accessible name ("Menu"). Binding `expanded_when(revealed)`
+            // completes the ARIA disclosure pattern: the button reports
+            // `expanded=true` while the bar is shown, `false` while collapsed.
+            let hamburger = IconButton::menu()
+                .expanded_when(revealed.clone())
+                .on_activate_fn({
+                    let reveal = reveal.clone();
+                    move |ctx| reveal(ctx)
+                });
+            let hamburger_id = ctx.add(hamburger);
+            anchor_cell.set(Some(hamburger_id));
+            self.hamburger_id = Some(hamburger_id);
+
+            // Hamburger visible only while collapsed.
+            ctx.visible_when(hamburger_id, collapsed.clone());
+            // Bar active when shown inline (`!collapsed`) OR as the
+            // floating overlay (`revealed`). Keeping it active while
+            // revealed prevents the visibility binding from fighting the
+            // overlay activation.
+            let bar_active = collapsed.zip(&revealed).map(|(c, r)| !*c || *r);
+            ctx.visible_when(bar_id, bar_active);
+
+            children.push(hamburger_id);
+            Some(reveal)
+        } else {
+            None
+        };
 
         // Window-level menubar key dispatcher (F10 / Alt+letter /
         // Alt-tap). Installed on every platform — `MenuBar` is an
@@ -673,15 +894,23 @@ impl Widget for MenuBar {
             && let Some(window) = ctx.window()
         {
             *self.menubar_guard.borrow_mut() = None;
-            let dispatcher: Rc<dyn MenubarDispatcher> = Rc::new(MenuBarDispatcher {
+            let inner = MenuBarDispatcher {
                 trigger_ids: trigger_ids.clone(),
                 mnemonic_table,
-            });
+            };
+            let dispatcher: Rc<dyn MenubarDispatcher> = match collapsible_reveal {
+                Some(reveal) => Rc::new(CollapsibleMenuBarDispatcher {
+                    inner,
+                    collapsed: self.collapsed.clone(),
+                    reveal,
+                }),
+                None => Rc::new(inner),
+            };
             let guard = window.install_menubar_dispatcher(dispatcher);
             *self.menubar_guard.borrow_mut() = Some(guard);
         }
 
-        vec![root_id]
+        children
     }
 
     fn layout_response(
@@ -689,6 +918,17 @@ impl Widget for MenuBar {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> bastyde_core::widget::LayoutResponse {
+        // Collapsed: size to the hamburger's natural size (a small box),
+        // don't stretch to the full allotted width.
+        if self.collapse_policy.is_some() && self.collapsed.get() {
+            return match self.hamburger_id {
+                Some(id) => ctx
+                    .child_size(id, SizeProposal::unspecified())
+                    .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
+                None => proposal.resolve(0.0, 0.0),
+            }
+            .into();
+        }
         match self.root_child_id {
             Some(id) => {
                 let content_proposal = SizeProposal {
@@ -708,22 +948,79 @@ impl Widget for MenuBar {
     fn place_children(
         &self,
         bounds: Rect,
-        _proposal: SizeProposal,
+        proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
+        // Responsive collapse decision (Toolbar pattern): compare the
+        // bar's intrinsic width against the allotted width and toggle
+        // `collapsed`, idempotently (the guard avoids relayout churn).
+        if let Some(policy) = self.collapse_policy {
+            let should_collapse = match policy {
+                CollapsePolicy::Always => true,
+                CollapsePolicy::Responsive => {
+                    if self.revealed.get() {
+                        // Don't un-collapse while the overlay is up — it
+                        // would make the bar both inline and floating.
+                        self.collapsed.get()
+                    } else if let (Some(bar_id), Some(avail)) =
+                        (self.bar_id, proposal.width)
+                    {
+                        ctx.measure_intrinsic(bar_id, SizeProposal::unspecified())
+                            .map(|s| s.width)
+                            .unwrap_or(0.0)
+                            > avail + 0.5
+                    } else {
+                        // Unbounded width (or no bar) → never collapse.
+                        false
+                    }
+                }
+            };
+            if self.last_collapsed.get() != should_collapse {
+                self.last_collapsed.set(should_collapse);
+                self.collapsed.set(should_collapse);
+            }
+        }
+
+        // The hamburger keeps a constant width: place it at its intrinsic
+        // size, leading-aligned, so a stretching parent can't widen it.
+        // Everything else (the bar, inline or as the re-laid overlay) fills
+        // the bounds; dormant children are skipped by the layout pass.
+        let collapsed = self.collapse_policy.is_some() && self.collapsed.get();
         for child in children.iter_mut() {
-            child.origin = bounds.origin();
-            child.size = bounds.size();
+            if collapsed && Some(child.id) == self.hamburger_id {
+                let size = ctx
+                    .measure_intrinsic(child.id, SizeProposal::unspecified())
+                    .unwrap_or_else(|| bounds.size());
+                let x = if ctx.is_rtl() {
+                    bounds.right() - size.width
+                } else {
+                    bounds.x
+                };
+                child.origin = Point::new(x, bounds.y);
+                child.size = size;
+            } else {
+                child.origin = bounds.origin();
+                child.size = bounds.size();
+            }
         }
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(bastyde_core::accesskit::Role::MenuBar);
+        // In collapsible mode the `Role::MenuBar` landmark lives on the
+        // bar content node so it travels into the floating overlay; the
+        // composing widget node stays a generic container.
+        if self.collapse_policy.is_none() {
+            builder.set_role(bastyde_core::accesskit::Role::MenuBar);
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        self.root_child_id.into_iter().collect()
+        let mut v: Vec<WidgetId> = self.root_child_id.into_iter().collect();
+        if let Some(h) = self.hamburger_id {
+            v.push(h);
+        }
+        v
     }
 }
 
@@ -965,7 +1262,7 @@ mod tests {
         });
         assert!(matches!(
             action,
-            Some(MenubarAction::FocusTrigger { trigger_id }) if trigger_id == fake_id(10)
+            Some(MenubarAction::FocusTrigger { trigger_id, .. }) if trigger_id == fake_id(10)
         ));
     }
 
@@ -993,7 +1290,7 @@ mod tests {
         });
         assert!(matches!(
             action,
-            Some(MenubarAction::OpenMenu { trigger_id }) if trigger_id == fake_id(10)
+            Some(MenubarAction::OpenMenu { trigger_id, .. }) if trigger_id == fake_id(10)
         ));
     }
 
@@ -1063,7 +1360,7 @@ mod tests {
         let action = d.on_alt_tap();
         assert!(matches!(
             action,
-            Some(MenubarAction::FocusTrigger { trigger_id }) if trigger_id == fake_id(10)
+            Some(MenubarAction::FocusTrigger { trigger_id, .. }) if trigger_id == fake_id(10)
         ));
     }
 
@@ -1080,6 +1377,440 @@ mod tests {
                 modifiers: Modifiers::NONE,
             })
             .is_none()
+        );
+    }
+
+    // ── Collapsible (hamburger) mode ─────────────────────────────────────
+
+    fn collapsible_tree() -> WidgetTree {
+        let mut t = WidgetTree::new()
+            .with_theme(bastyde_core::presets::intui::light())
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                bastyde_canvas::MockTextBackend::new(),
+            )));
+        t.set_window_state(WindowState::new(WindowStateInit {
+            id: BastydeWindowId::new(1),
+            string_id: Some("test".to_string()),
+            placement: WindowPlacement::Floating,
+            title: "Test".to_string(),
+            size: (800, 600),
+            position: (0, 0),
+            focused: false,
+            resizable: true,
+            always_on_top: false,
+        }));
+        t
+    }
+
+    #[test]
+    fn collapsible_always_shows_hamburger() {
+        let mut t = collapsible_tree();
+        let mb_widget = MenuBar::new()
+            .menu(lit!("&File"), || Box::new(MenuList::new()))
+            .menu(lit!("&Edit"), || Box::new(MenuList::new()))
+            .collapse_policy(CollapsePolicy::Always);
+        let collapsed = mb_widget.is_collapsed();
+        let mb = t.add(mb_widget);
+        // Two passes: pass 1 sets `collapsed`, pass 2 settles visibility.
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        assert!(collapsed.get(), "Always policy must collapse to hamburger");
+        let children = t.children(mb);
+        assert_eq!(children.len(), 2, "[bar, hamburger]");
+        let (bar, hamburger) = (children[0], children[1]);
+        assert!(t.is_active(hamburger), "hamburger active when collapsed");
+        assert!(
+            !t.is_active(bar),
+            "bar dormant when collapsed and not revealed"
+        );
+    }
+
+    /// The hamburger keeps a constant (intrinsic) width even when a
+    /// stretching parent hands the collapsed MenuBar a much wider slot.
+    #[test]
+    fn collapsible_hamburger_keeps_constant_width_in_wide_slot() {
+        use crate::primitives::FixedSize;
+        let mut t = collapsible_tree();
+        let mb = t.add(
+            MenuBar::new()
+                .menu(lit!("&File"), || Box::new(MenuList::new()))
+                .menu(lit!("&Edit"), || Box::new(MenuList::new()))
+                .collapse_policy(CollapsePolicy::Always),
+        );
+        // FixedSize fills its child to 600px wide.
+        let _slot = t.add(FixedSize::new().bind_width(600.0_f32).child_id(mb));
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        t.layout(SizeProposal::exact(800.0, 100.0));
+
+        let hamburger = t.children(mb)[1];
+        let hw = t.bounds(hamburger).width;
+        assert!(
+            hw > 0.0 && hw < 200.0,
+            "hamburger width {hw} must stay compact, not fill the 600px slot"
+        );
+    }
+
+    #[test]
+    fn collapsible_responsive_collapses_when_narrow() {
+        let mut t = collapsible_tree();
+        let mb_widget = MenuBar::new()
+            .menu(lit!("&File"), || Box::new(MenuList::new()))
+            .menu(lit!("&Edit"), || Box::new(MenuList::new()))
+            .menu(lit!("&View"), || Box::new(MenuList::new()))
+            .collapsible();
+        let collapsed = mb_widget.is_collapsed();
+        let _mb = t.add(mb_widget);
+        t.layout(SizeProposal::exact(40.0, 100.0));
+        t.layout(SizeProposal::exact(40.0, 100.0));
+        assert!(collapsed.get(), "narrow width must collapse to hamburger");
+    }
+
+    #[test]
+    fn collapsible_responsive_expands_when_wide() {
+        let mut t = collapsible_tree();
+        let mb_widget = MenuBar::new()
+            .menu(lit!("&File"), || Box::new(MenuList::new()))
+            .menu(lit!("&Edit"), || Box::new(MenuList::new()))
+            .collapsible();
+        let collapsed = mb_widget.is_collapsed();
+        let mb = t.add(mb_widget);
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        assert!(!collapsed.get(), "wide width must show the inline bar");
+        let children = t.children(mb);
+        assert!(t.is_active(children[0]), "bar active inline when wide");
+        assert!(
+            !t.is_active(children[1]),
+            "hamburger dormant when bar is inline"
+        );
+    }
+
+    /// A collapsible MenuBar wide enough on its own becomes a hamburger
+    /// once its allotted width drops below the bar's intrinsic width.
+    #[test]
+    fn collapsible_responsive_toggles_with_width() {
+        let mut t = collapsible_tree();
+        let mb_widget = MenuBar::new()
+            .menu(lit!("&File"), || Box::new(MenuList::new()))
+            .menu(lit!("&Edit"), || Box::new(MenuList::new()))
+            .menu(lit!("&View"), || Box::new(MenuList::new()))
+            .collapsible();
+        let collapsed = mb_widget.is_collapsed();
+        let _mb = t.add(mb_widget);
+
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        assert!(!collapsed.get(), "wide → inline");
+
+        t.layout(SizeProposal::exact(30.0, 100.0));
+        t.layout(SizeProposal::exact(30.0, 100.0));
+        assert!(collapsed.get(), "narrow → hamburger");
+
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        assert!(!collapsed.get(), "wide again → inline");
+    }
+
+    #[test]
+    fn collapsible_click_hamburger_reveals_bar_overlay() {
+        let mut t = collapsible_tree();
+        let mb = t.add(
+            MenuBar::new()
+                .menu(lit!("&File"), || Box::new(MenuList::new()))
+                .menu(lit!("&Edit"), || Box::new(MenuList::new()))
+                .collapse_policy(CollapsePolicy::Always),
+        );
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        let children = t.children(mb);
+        let (bar, hamburger) = (children[0], children[1]);
+        assert!(!t.is_active(bar), "bar hidden before reveal");
+
+        t.click(hamburger);
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        assert!(t.is_active(bar), "clicking the hamburger reveals the bar");
+    }
+
+    #[test]
+    fn collapsible_reveal_focuses_first_trigger() {
+        let mut t = collapsible_tree();
+        let mb = t.add(
+            MenuBar::new()
+                .menu(lit!("&File"), || Box::new(MenuList::new()))
+                .menu(lit!("&Edit"), || Box::new(MenuList::new()))
+                .collapse_policy(CollapsePolicy::Always),
+        );
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        let hamburger = t.children(mb)[1];
+
+        t.click(hamburger);
+        t.layout(SizeProposal::exact(800.0, 100.0));
+
+        let triggers = collect_descendants_with_role(&t, mb, Role::MenuItem);
+        assert_eq!(triggers.len(), 2);
+        assert_eq!(
+            t.focused(),
+            Some(triggers[0]),
+            "revealing the bar focuses the first menu trigger"
+        );
+    }
+
+    /// Regression: ArrowLeft must navigate to the PREVIOUS top-level menu
+    /// in the revealed bar, not close the current one. The bar is itself a
+    /// host overlay, so the dispatch-level "overlay back" key (ArrowLeft in
+    /// LTR) must not mistake an open top-level menu for a nested submenu.
+    #[test]
+    fn collapsible_revealed_bar_left_navigates_not_closes() {
+        let menu = |label: &'static str| {
+            move || -> Box<dyn Widget> {
+                Box::new(MenuList::new().item(crate::menu_item::MenuItem::new(lit!(label))))
+            }
+        };
+        let mut t = collapsible_tree();
+        let mb = t.add(
+            MenuBar::new()
+                .menu(lit!("&File"), menu("New"))
+                .menu(lit!("&Edit"), menu("Undo"))
+                .menu(lit!("&View"), menu("Zoom"))
+                .collapse_policy(CollapsePolicy::Always),
+        );
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        let hamburger = t.children(mb)[1];
+        t.click(hamburger);
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        let triggers = collect_descendants_with_role(&t, mb, Role::MenuItem);
+        let expanded = |t: &WidgetTree| -> Vec<bool> {
+            triggers
+                .iter()
+                .map(|&id| t.accessibility_node(id).is_expanded())
+                .collect()
+        };
+
+        // Open File → Edit → View via ArrowRight.
+        t.press_key(Key::ArrowRight, Modifiers::NONE);
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        t.press_key(Key::ArrowRight, Modifiers::NONE);
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        assert_eq!(expanded(&t), vec![false, false, true], "RIGHT reached View");
+
+        // ArrowLeft must move to Edit (the previous menu), NOT close View.
+        t.press_key(Key::ArrowLeft, Modifiers::NONE);
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        assert_eq!(
+            expanded(&t),
+            vec![false, true, false],
+            "LEFT navigates to the previous menu (Edit), not closes"
+        );
+
+        // And once more to File.
+        t.press_key(Key::ArrowLeft, Modifiers::NONE);
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        assert_eq!(
+            expanded(&t),
+            vec![true, false, false],
+            "LEFT again reaches File"
+        );
+    }
+
+    /// Accessibility: the hamburger is a `Role::Button` whose `expanded`
+    /// state tracks whether the bar is revealed (the ARIA disclosure
+    /// pattern), and dismissing the bar restores focus to the hamburger.
+    #[test]
+    fn collapsible_hamburger_accessibility() {
+        let mut t = collapsible_tree();
+        let mb = t.add(
+            MenuBar::new()
+                .menu(lit!("&File"), || Box::new(MenuList::new()))
+                .menu(lit!("&Edit"), || Box::new(MenuList::new()))
+                .collapse_policy(CollapsePolicy::Always),
+        );
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        let hamburger = t.children(mb)[1];
+
+        // Collapsed: a button that is NOT expanded.
+        let info = t.accessibility_node(hamburger);
+        assert_eq!(info.role(), Role::Button);
+        assert!(
+            !info.is_expanded(),
+            "collapsed hamburger reports expanded=false"
+        );
+
+        // Revealed: expanded flips to true; the bar is a MenuBar landmark.
+        t.click(hamburger);
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        assert!(
+            t.accessibility_node(hamburger).is_expanded(),
+            "revealed hamburger reports expanded=true"
+        );
+        assert!(first_descendant_with_role(&t, mb, Role::MenuBar).is_some());
+
+        // Dismiss with Escape: expanded back to false, focus restored to
+        // the hamburger (not lost in the now-hidden bar).
+        t.press_key(Key::Escape, Modifiers::NONE);
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        assert!(
+            !t.accessibility_node(hamburger).is_expanded(),
+            "collapsed again after Escape"
+        );
+        assert_eq!(
+            t.focused(),
+            Some(hamburger),
+            "focus returns to the hamburger after the bar is dismissed"
+        );
+    }
+
+    /// Regression: arrow-navigating between menus must NOT tear down the
+    /// revealed bar. `MenuContext::open_at` calls `dismiss_all_except_hosts`;
+    /// the bar overlay is marked `Role::MenuBar` (a host) via an access-role
+    /// override, so it must survive — and its triggers keep valid (non-zero)
+    /// bounds so dropdowns anchor under them, not at the window origin.
+    #[test]
+    fn collapsible_revealed_bar_survives_arrow_navigation() {
+        let mut t = collapsible_tree();
+        let mb = t.add(
+            MenuBar::new()
+                .menu(lit!("&File"), || Box::new(MenuList::new()))
+                .menu(lit!("&Edit"), || Box::new(MenuList::new()))
+                .menu(lit!("&View"), || Box::new(MenuList::new()))
+                .collapse_policy(CollapsePolicy::Always),
+        );
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        let (bar, hamburger) = (t.children(mb)[0], t.children(mb)[1]);
+
+        t.click(hamburger);
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        assert!(t.is_active(bar), "bar revealed");
+
+        // Arrow-navigate to the next menu.
+        t.press_key(Key::ArrowRight, Modifiers::NONE);
+        t.layout(SizeProposal::exact(800.0, 100.0));
+
+        assert!(
+            t.is_active(bar),
+            "bar must stay visible while navigating between menus"
+        );
+        // Triggers remain laid out inside the floating bar (offset from the
+        // origin), so the opened dropdown anchors under a trigger.
+        let triggers = collect_descendants_with_role(&t, mb, Role::MenuItem);
+        let b = t.bounds(triggers[1]);
+        assert!(
+            b.width > 0.0 && (b.x > 0.0 || b.y > 0.0),
+            "trigger stays laid out in the floating bar, not collapsed to the origin: {b:?}"
+        );
+    }
+
+    #[test]
+    fn collapsible_escape_hides_revealed_bar() {
+        let mut t = collapsible_tree();
+        let mb = t.add(
+            MenuBar::new()
+                .menu(lit!("&File"), || Box::new(MenuList::new()))
+                .menu(lit!("&Edit"), || Box::new(MenuList::new()))
+                .collapse_policy(CollapsePolicy::Always),
+        );
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        let children = t.children(mb);
+        let (bar, hamburger) = (children[0], children[1]);
+
+        t.click(hamburger);
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        assert!(t.is_active(bar));
+
+        t.press_key(Key::Escape, Modifiers::NONE);
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        assert!(!t.is_active(bar), "Escape hides the revealed bar");
+    }
+
+    #[test]
+    fn collapsible_click_outside_hides_revealed_bar() {
+        let mut t = collapsible_tree();
+        let mb = t.add(
+            MenuBar::new()
+                .menu(lit!("&File"), || Box::new(MenuList::new()))
+                .menu(lit!("&Edit"), || Box::new(MenuList::new()))
+                .collapse_policy(CollapsePolicy::Always),
+        );
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        let children = t.children(mb);
+        let (bar, hamburger) = (children[0], children[1]);
+
+        t.click(hamburger);
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        assert!(t.is_active(bar));
+
+        // Click well below the top bar strip — outside the overlay.
+        t.pointer_down_button(
+            bastyde_canvas::Point::new(400.0, 400.0),
+            bastyde_core::event::PointerButton::Primary,
+        );
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        assert!(!t.is_active(bar), "click outside hides the revealed bar");
+    }
+
+    #[test]
+    fn collapsible_bar_carries_menubar_role() {
+        let mut t = collapsible_tree();
+        let mb = t.add(
+            MenuBar::new()
+                .menu(lit!("&File"), || Box::new(MenuList::new()))
+                .collapsible(),
+        );
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        t.layout(SizeProposal::exact(800.0, 100.0));
+        // In collapsible mode the MenuBar landmark moves onto the bar
+        // content node (so it travels into the floating overlay and is
+        // treated as a host surface). It is still reachable as a descendant.
+        assert!(
+            first_descendant_with_role(&t, mb, Role::MenuBar).is_some(),
+            "the bar content node carries Role::MenuBar"
+        );
+    }
+
+    #[test]
+    fn collapsible_dispatcher_injects_reveal_only_when_collapsed() {
+        let collapsed = Signal::new(true);
+        let reveal: MenubarReveal = std::rc::Rc::new(|_| {});
+        let d = CollapsibleMenuBarDispatcher {
+            inner: MenuBarDispatcher {
+                trigger_ids: vec![fake_id(10)],
+                mnemonic_table: HashMap::new(),
+            },
+            collapsed: collapsed.clone(),
+            reveal,
+        };
+
+        let action = d.try_handle(&MenubarKeyEvent {
+            key: Key::F10,
+            modifiers: Modifiers::NONE,
+        });
+        assert!(
+            matches!(
+                action,
+                Some(MenubarAction::FocusTrigger {
+                    reveal: Some(_),
+                    ..
+                })
+            ),
+            "collapsed → reveal attached"
+        );
+
+        collapsed.set(false);
+        let action = d.try_handle(&MenubarKeyEvent {
+            key: Key::F10,
+            modifiers: Modifiers::NONE,
+        });
+        assert!(
+            matches!(
+                action,
+                Some(MenubarAction::FocusTrigger { reveal: None, .. })
+            ),
+            "expanded → no reveal (classic inline behaviour)"
         );
     }
 }
