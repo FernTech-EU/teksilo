@@ -3,8 +3,9 @@
 
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    Button, ButtonVariant, CommandLinkButton, Divider, HStack, IconButton, IconLocation,
-    IconWidget, MenuItem, PopoverButton, PopoverIconButton, SplitButton, TextWidget, VStack,
+    Button, ButtonVariant, CommandLinkButton, Divider, HStack, IconButton, IconButtonSize,
+    IconLocation, IconWidget, MenuItem, PopoverButton, PopoverIconButton, SplitButton, TextWidget,
+    VStack,
 };
 
 use crate::shared::{Signals, section, tab_header};
@@ -88,6 +89,39 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .child(IconButton::search().tooltip(tr!(demo_find())))
             .child(IconButton::expand().tooltip(tr!(demo_open()))),
     );
+    // All five IconButtonSize steps, same glyph so the size delta reads
+    // clearly: Compact 22 · Default 24 · Toolbar 30 · Large 40 · Hero 50.
+    let icon_sizes = section(
+        ctx,
+        lit!("IconButton — sizes"),
+        HStack::new()
+            .spacing(12.0)
+            .child(
+                IconButton::search()
+                    .size(IconButtonSize::Compact)
+                    .tooltip(lit!("Compact · 22dp")),
+            )
+            .child(
+                IconButton::search()
+                    .size(IconButtonSize::Default)
+                    .tooltip(lit!("Default · 24dp")),
+            )
+            .child(
+                IconButton::search()
+                    .size(IconButtonSize::Toolbar)
+                    .tooltip(lit!("Toolbar · 30dp")),
+            )
+            .child(
+                IconButton::search()
+                    .size(IconButtonSize::Large)
+                    .tooltip(lit!("Large · 40dp")),
+            )
+            .child(
+                IconButton::search()
+                    .size(IconButtonSize::Hero)
+                    .tooltip(lit!("Hero · 50dp")),
+            ),
+    );
     let cmd_link = section(
         ctx,
         lit!("CommandLinkButton"),
@@ -139,6 +173,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .add_child(states)
             .add_child(with_icon)
             .add_child(icon_btns)
+            .add_child(icon_sizes)
             .add_child(cmd_link)
             .add_child(popover_btn)
             .add_child(popover_icon)
@@ -268,6 +303,37 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     }
                     IconButton::expand() {
                         tooltip: tr!(demo_open())
+                    }
+                }
+            }
+
+            VStack {
+                spacing: 6.0
+                TextWidget::new(lit!("IconButton — sizes")) {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
+                HStack {
+                    spacing: 12.0
+                    IconButton::search() {
+                        size: IconButtonSize::Compact
+                        tooltip: lit!("Compact · 22dp")
+                    }
+                    IconButton::search() {
+                        size: IconButtonSize::Default
+                        tooltip: lit!("Default · 24dp")
+                    }
+                    IconButton::search() {
+                        size: IconButtonSize::Toolbar
+                        tooltip: lit!("Toolbar · 30dp")
+                    }
+                    IconButton::search() {
+                        size: IconButtonSize::Large
+                        tooltip: lit!("Large · 40dp")
+                    }
+                    IconButton::search() {
+                        size: IconButtonSize::Hero
+                        tooltip: lit!("Hero · 50dp")
                     }
                 }
             }

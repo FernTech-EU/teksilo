@@ -1,7 +1,9 @@
-//! Settings tab — ShortcutSettings (and PrivacySettings note).
+//! Settings tab — ShortcutSettings + live PrivacySettings (telemetry consent UI).
 
 use bastyde::prelude::*;
-use bastyde::widgets::{Divider, Expand, Panel, ShortcutSettings, TextWidget, VStack};
+use bastyde::widgets::{
+    Divider, Expand, Panel, PrivacySettings, ShortcutSettings, TextWidget, VStack,
+};
 
 use crate::shared::{Signals, section, tab_header};
 
@@ -35,12 +37,23 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     .child(ShortcutSettings::new()),
             ),
     );
+    // Live consent UI. A no-network StubReporter is wired in main.rs so
+    // this renders the real scope toggles / accept-reject / inspect
+    // accordion rather than the "telemetry not configured" placeholder.
     let privacy = section(
         ctx,
         lit!("PrivacySettings"),
-        TextWidget::new(tr!(set_privacy_note()))
-            .style(TextStyleRole::Small)
-            .color(TextRole::Secondary),
+        Panel::new()
+            .background(SurfaceRole::Raised)
+            .border_color(BorderRole::Default)
+            .border_width(1.0)
+            .corner_radius(8.0)
+            .padding(16.0)
+            .child(
+                Expand::horizontal()
+                    .respect_intrinsic()
+                    .child(PrivacySettings::new()),
+            ),
     );
     ctx.add(
         VStack::new()
@@ -59,6 +72,11 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
         Expand::horizontal()
             .respect_intrinsic()
             .child(ShortcutSettings::new()),
+    );
+    let privacy_body_id = ctx.add(
+        Expand::horizontal()
+            .respect_intrinsic()
+            .child(PrivacySettings::new()),
     );
 
     bati!(ctx => VStack {
@@ -98,9 +116,13 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     style: TextStyleRole::SmallBold
                     color: TextRole::Accent
                 }
-                TextWidget::new(tr!(set_privacy_note())) {
-                    style: TextStyleRole::Small
-                    color: TextRole::Secondary
+                Panel {
+                    background: SurfaceRole::Raised
+                    border_color: BorderRole::Default
+                    border_width: 1.0
+                    corner_radius: 8.0
+                    padding: 16.0
+                    child_id: privacy_body_id
                 }
             }
         }

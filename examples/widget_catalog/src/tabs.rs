@@ -18,17 +18,21 @@ use crate::shared::Signals;
 
 pub mod animations;
 pub mod buttons;
+pub mod charts;
 pub mod chrome;
 pub mod color;
 pub mod containers;
 pub mod data;
 pub mod datetime;
+pub mod dragdrop;
 pub mod indicators;
 pub mod inputs;
 pub mod layout;
 pub mod menus;
 pub mod overlays;
 pub mod palette;
+pub mod richtext;
+pub mod scene;
 pub mod settings;
 pub mod styling;
 pub mod text;
@@ -113,11 +117,32 @@ pub static TABS: &[TabEntry] = &[
         bati: indicators::bati,
     },
     TabEntry {
+        lowercase_name: "charts",
+        title_fn: charts::title,
+        refs_fn: charts::refs,
+        classic: charts::classic,
+        bati: charts::bati,
+    },
+    TabEntry {
+        lowercase_name: "scene",
+        title_fn: scene::title,
+        refs_fn: scene::refs,
+        classic: scene::classic,
+        bati: scene::bati,
+    },
+    TabEntry {
         lowercase_name: "text",
         title_fn: text::title,
         refs_fn: text::refs,
         classic: text::classic,
         bati: text::bati,
+    },
+    TabEntry {
+        lowercase_name: "richtext",
+        title_fn: richtext::title,
+        refs_fn: richtext::refs,
+        classic: richtext::classic,
+        bati: richtext::bati,
     },
     TabEntry {
         lowercase_name: "datetime",
@@ -153,6 +178,13 @@ pub static TABS: &[TabEntry] = &[
         refs_fn: data::refs,
         classic: data::classic,
         bati: data::bati,
+    },
+    TabEntry {
+        lowercase_name: "dragdrop",
+        title_fn: dragdrop::title,
+        refs_fn: dragdrop::refs,
+        classic: dragdrop::classic,
+        bati: dragdrop::bati,
     },
     TabEntry {
         lowercase_name: "animations",

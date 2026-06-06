@@ -5,11 +5,31 @@ use bastyde::prelude::*;
 use bastyde::tokens::Orientation;
 use bastyde::widgets::scroll_bar::ScrollBarOrientation;
 use bastyde::widgets::{
-    Accordion, Card, Checkbox, Divider, FixedSize, GroupBox, GroupHeader, Panel, ScrollArea,
-    ScrollBar, SplitView, TextWidget, ToolBox, ToolBoxItem, VStack,
+    Accordion, Card, Checkbox, Divider, FixedSize, GroupBox, GroupHeader, Padding, Panel,
+    ScrollArea, ScrollBar, SplitView, TabId, TabInfo, TabWidget, TextWidget, ToolBox, ToolBoxItem,
+    VStack,
 };
 
 use crate::shared::{Signals, color_cell, section, tab_header};
+
+/// A small embedded TabWidget with three static tabs. The fully
+/// featured TabWidget (closable / reorderable / overflow / pinned) is
+/// in the `tab_widget` example; this is the catalog's at-a-glance demo.
+fn embedded_tab_widget(selected: Signal<Option<TabId>>) -> TabWidget {
+    let body = |s: &'static str| {
+        Padding::uniform(12.0).child(TextWidget::new(lit!(s)).style(TextStyleRole::Body))
+    };
+    TabWidget::new(selected)
+        .static_tab(
+            TabInfo::new().title(lit!("Overview")),
+            body("Overview — an embedded TabWidget with three static tabs."),
+        )
+        .static_tab(
+            TabInfo::new().title(lit!("Details")),
+            body("Details — closable + reorderable + overflow tabs live in the tab_widget example."),
+        )
+        .static_tab(TabInfo::new().title(lit!("Settings")), body("Settings — tab content."))
+}
 
 pub fn title() -> LocalizedString {
     tr!(tab_containers_title())
@@ -46,6 +66,14 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     .style(TextStyleRole::Small)
                     .color(TextRole::Secondary),
             ),
+    );
+    let tab_widget = section(
+        ctx,
+        lit!("TabWidget"),
+        FixedSize::new()
+            .bind_width(420.0_f32)
+            .bind_height(160.0_f32)
+            .child(embedded_tab_widget(sigs.inner_tabs_selected.clone())),
     );
     let group_box = section(
         ctx,
@@ -164,6 +192,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
             .child(Divider::new())
             .add_child(panel)
             .add_child(card)
+            .add_child(tab_widget)
             .add_child(group_box)
             .add_child(group_header)
             .add_child(accordion)
@@ -194,6 +223,13 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     .style(TextStyleRole::Small)
                     .color(TextRole::Secondary),
             ),
+    );
+    let inner_sel: Signal<Option<TabId>> = ctx.signal(None);
+    let tab_widget_widget = ctx.add(
+        FixedSize::new()
+            .bind_width(420.0_f32)
+            .bind_height(160.0_f32)
+            .child(embedded_tab_widget(inner_sel)),
     );
     let toolbox_widget = ctx.add(
         ToolBox::new(sigs.tool_box_selected.clone())
@@ -291,6 +327,15 @@ pub fn bati(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 #{ card_widget }
+            }
+
+            VStack {
+                spacing: 6.0
+                TextWidget::new(lit!("TabWidget")) {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
+                #{ tab_widget_widget }
             }
 
             VStack {

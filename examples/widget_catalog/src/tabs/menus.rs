@@ -1,7 +1,10 @@
 //! Menus tab — MenuBar, MenuList, MenuItem.
 
 use bastyde::prelude::*;
-use bastyde::widgets::{Divider, MenuBar, MenuItem, MenuList, TextWidget, VStack};
+use bastyde::widgets::{
+    CollapsePolicy, Divider, FixedSize, HStack, MenuBar, MenuItem, MenuList, Slider, TextWidget,
+    VStack,
+};
 
 use crate::shared::{Signals, section, tab_header};
 
@@ -63,6 +66,49 @@ fn make_menu_bar() -> MenuBar {
         })
 }
 
+/// A responsive collapsible (hamburger) menu bar. `no_dispatcher_install`
+/// because the catalog's host window already owns the keyboard slot.
+fn make_collapsible_bar() -> MenuBar {
+    MenuBar::new()
+        .collapse_policy(CollapsePolicy::Responsive)
+        .no_dispatcher_install()
+        .menu(tr!(mnu_file()), || {
+            Box::new(
+                MenuList::new()
+                    .item(MenuItem::new(tr!(demo_new())).on_activate_fn(|_| println!("New")))
+                    .item(MenuItem::new(tr!(demo_open())).on_activate_fn(|_| println!("Open")))
+                    .separator()
+                    .item(MenuItem::new(tr!(demo_quit())).on_activate_fn(|_| println!("Quit"))),
+            )
+        })
+        .menu(tr!(mnu_menu_edit()), || {
+            Box::new(
+                MenuList::new()
+                    .item(MenuItem::new(tr!(demo_undo())).on_activate_fn(|_| println!("Undo")))
+                    .item(MenuItem::new(tr!(demo_redo())).on_activate_fn(|_| println!("Redo"))),
+            )
+        })
+}
+
+/// Slider-driven width box around a responsive collapsible bar: narrow
+/// the slider until the menus fold into a ☰, widen it to bring them back.
+fn collapsible_section(width: Signal<f32>) -> impl Widget + 'static {
+    VStack::new()
+        .spacing(8.0)
+        .child(
+            HStack::new()
+                .spacing(8.0)
+                .child(TextWidget::new(lit!("Width")).style(TextStyleRole::Small))
+                .child(Slider::new(width.clone(), 80.0, 520.0).label(lit!("Bar width"))),
+        )
+        .child(
+            FixedSize::new()
+                .bind_width(width)
+                .bind_height(36.0_f32)
+                .child(make_collapsible_bar()),
+        )
+}
+
 fn make_menu_list() -> MenuList {
     MenuList::new()
         .item(MenuItem::new(tr!(demo_cut())).on_activate_fn(|_| println!("Cut")))
@@ -75,6 +121,12 @@ fn make_menu_list() -> MenuList {
 pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     let header = tab_header(ctx, title(), refs());
     let menu_bar = section(ctx, lit!("MenuBar"), make_menu_bar());
+    let collapsible_width = ctx.signal(160.0_f32);
+    let collapsible = section(
+        ctx,
+        lit!("MenuBar (collapsible / hamburger)"),
+        collapsible_section(collapsible_width),
+    );
     let menu_list = section(ctx, tr!(mnu_menu_list_standalone()), make_menu_list());
     let menu_item = section(
         ctx,
@@ -91,6 +143,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .add_child(header)
             .child(Divider::new())
             .add_child(menu_bar)
+            .add_child(collapsible)
             .add_child(menu_list)
             .add_child(menu_item),
     )
@@ -100,6 +153,8 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // MenuBar's `.menu(...)` method takes a closure — bati! property
     // syntax can't express that cleanly, so we pre-register.
     let menu_bar = ctx.add(make_menu_bar());
+    let collapsible_width = ctx.signal(160.0_f32);
+    let collapsible = ctx.add(collapsible_section(collapsible_width));
     let menu_list = ctx.add(make_menu_list());
 
     bati!(ctx => VStack {
@@ -124,6 +179,15 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 #{ menu_bar }
+            }
+
+            VStack {
+                spacing: 6.0
+                TextWidget::new(lit!("MenuBar (collapsible / hamburger)")) {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
+                #{ collapsible }
             }
 
             VStack {

@@ -43,6 +43,10 @@ tab-overlays-title = Surcouches
 tab-data-title = Données
 tab-animations-title = Animations
 tab-settings-title = Paramètres
+tab-charts-title = Graphiques
+tab-scene-title = Scène
+tab-richtext-title = Texte enrichi
+tab-dragdrop-title = Glisser-déposer
 
 # ── Deep-dive references ────────────────────────────────────────────────
 tab-palette-refs = Tous les rôles de surface, de texte et d'éditeur, avec un pangramme texte enrichi + emojis pour rendre le changement de thème visible. Voir : docs/reactive-theme.md.
@@ -62,6 +66,10 @@ tab-overlays-refs = Infobulles, popovers, dialogues, snackbars. Voir : cargo run
 tab-data-refs = ListView, TreeView, TableView, TreeTable. Voir : cargo run -p data_grid, cargo run -p tree_table, cargo run -p data_collections.
 tab-animations-refs = Fade, pulse, slide, blur et leurs amis. Voir : cargo run -p animations, cargo run -p animations_kit.
 tab-settings-refs = Widgets de réaffectation des raccourcis et de paramètres de confidentialité. Voir : cargo run -p shortcuts_demo.
+tab-charts-refs = Graphiques en barres, courbes et anneau (bastyde-charts). Voir : cargo run -p chart_demo.
+tab-scene-refs = Vue de scène panoramique / zoomable (bastyde-scene). Voir : cargo run -p scene_showcase, cargo run -p scene_corkboard.
+tab-richtext-refs = Texte enrichi éditable et en lecture seule sur le modèle text-document. Voir : cargo run -p rich_text_editor, cargo run -p rich_text_viewer.
+tab-dragdrop-refs = DropZone et DropTarget pour les dépôts OS / internes. Voir : cargo run -p file_drop.
 
 # ── Tab body placeholder ────────────────────────────────────────────────
 stub-heading = Bientôt disponible
@@ -414,3 +422,31 @@ ovr-section-popover = Popover (autonome)
 ovr-section-dialog = Dialog (via MessageBox)
 ovr-section-messagebox = MessageBox — variantes de gravité
 ovr-section-shadow = Shadow (primitive visuelle)
+
+# ── Toast triggers (Overlays tab) ──────────────────────────────────────
+ovr-toast-btn-info = Info
+ovr-toast-btn-success = Succès
+ovr-toast-btn-warning = Avertissement
+ovr-toast-btn-error = Erreur
+ovr-toast-btn-loading = Chargement
+ovr-toast-info-msg = Pour information
+ovr-toast-success-msg = Enregistré
+ovr-toast-warning-msg = Avertissement
+ovr-toast-warning-body = Jetez-y un œil dès que possible.
+ovr-toast-error-msg = Échec de la compilation
+ovr-toast-error-body = Trois erreurs, deux avertissements.
+ovr-toast-error-action = Voir les erreurs
+ovr-toast-loading-msg = Traitement en cours…
+
+# ── Drag & Drop tab ────────────────────────────────────────────────────
+dnd-zone-images-title = Déposez des images ici
+dnd-zone-images-subtitle = PNG · JPEG · GIF
+dnd-zone-any-title = Déposez n'importe quoi ici
+dnd-zone-any-subtitle = fichiers, texte ou liens
+dnd-target-body = DropTarget — entoure un Panel ; déposez un fichier pour voir la bordure se surligner
+dnd-target-hint = Relâchez pour déposer
+dnd-log-initial = Les éléments déposés apparaîtront ici.
+dnd-section-zone-any = DropZone — fichiers / texte / URL
+dnd-section-zone-images = DropZone — images uniquement
+dnd-section-target = DropTarget — conteneur englobant
+dnd-section-log = Journal des dépôts

@@ -22,6 +22,7 @@ use bastyde::widgets::{
     StatusBar, Switcher, TabId, TabInfo, TabWidget, TextWidget, TitleBar, Toggle, VStack,
     WindowFrame, keystroke_format::format_keystroke,
 };
+use bastyde_telemetry::{StubReporter, TelemetryBundle, TelemetryMode};
 
 mod cli;
 mod shared;
@@ -65,9 +66,28 @@ fn main() {
         .framework_locales(bastyde::widgets::framework_locales());
 
     BastydeAppBuilder::new()
+        // Paths + settings must be set BEFORE the persistent-archive
+        // toast install and before `.telemetry(...)` (both read them).
+        .application("com", "FernTech", "widget-catalog")
+        .settings(SettingsBundle::new())
         .install_inspector_in_debug()
         .install_file_dialog()
+        // Toast host + persistent notification archive — drives the
+        // Overlays tab's Toast section and notification bell.
+        .install_toast_default()
+        // External (OS) drag-and-drop — drives the Drag & Drop tab's
+        // DropZone / DropTarget file drops.
+        .install_external_dnd()
         .register_tooltips(build_tooltip_registry())
+        // Telemetry: a stub (no-network) reporter is enough to make the
+        // Settings tab's PrivacySettings render its live consent UI
+        // instead of the "not configured" placeholder.
+        .telemetry(
+            TelemetryBundle::new(1)
+                .with_anonymous(Rc::new(StubReporter::anonymous()))
+                .with_default_mode(TelemetryMode::Anonymous)
+                .with_data_processor_name("FernTech"),
+        )
         .theme(bastyde::presets::intui::light())
         .i18n(i18n)
         .initial_window(

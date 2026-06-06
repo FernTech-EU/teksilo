@@ -47,6 +47,10 @@ tab-overlays-title = الطبقات العلوية
 tab-data-title = البيانات
 tab-animations-title = الحركات
 tab-settings-title = الإعدادات
+tab-charts-title = الرسوم البيانية
+tab-scene-title = المشهد
+tab-richtext-title = النص الغني
+tab-dragdrop-title = السحب والإفلات
 
 # ── المراجع التفصيلية ───────────────────────────────────────────────────
 tab-palette-refs = جميع أدوار الأسطح والنصوص والمحرّر، مع عبارة شاملة بالنص الغني وبالإيموجي لإظهار تأثير تبديل المظهر بصريًا. انظر: docs/reactive-theme.md.
@@ -66,6 +70,10 @@ tab-overlays-refs = التلميحات والنوافذ المنبثقة وال�
 tab-data-refs = ListView و TreeView و TableView و TreeTable. انظر: cargo run -p data_grid, cargo run -p tree_table, cargo run -p data_collections.
 tab-animations-refs = التلاشي والنبض والانزلاق والضبابية وما إلى ذلك. انظر: cargo run -p animations, cargo run -p animations_kit.
 tab-settings-refs = ودجات إعادة ربط الاختصارات وإعدادات الخصوصية. انظر: cargo run -p shortcuts_demo.
+tab-charts-refs = رسوم بيانية شريطية وخطية وحلقية (bastyde-charts). انظر: cargo run -p chart_demo.
+tab-scene-refs = منطقة عرض مشهد قابلة للتحريك والتكبير (bastyde-scene). انظر: cargo run -p scene_showcase, cargo run -p scene_corkboard.
+tab-richtext-refs = نص غني قابل للتحرير وللقراءة فقط فوق نموذج text-document. انظر: cargo run -p rich_text_editor, cargo run -p rich_text_viewer.
+tab-dragdrop-refs = DropZone و DropTarget لعمليات الإفلات من النظام أو داخل التطبيق. انظر: cargo run -p file_drop.
 
 # ── حشو لمحتوى علامة التبويب (للأقسام المؤقتة) ──────────────────────────
 stub-heading = قريبًا
@@ -418,3 +426,31 @@ ovr-section-popover = Popover (مستقل)
 ovr-section-dialog = Dialog (عبر MessageBox)
 ovr-section-messagebox = MessageBox — متغيرات الخطورة
 ovr-section-shadow = Shadow (عنصر بصري أساسي)
+
+# ── Toast triggers (Overlays tab) ──────────────────────────────────────
+ovr-toast-btn-info = معلومة
+ovr-toast-btn-success = نجاح
+ovr-toast-btn-warning = تحذير
+ovr-toast-btn-error = خطأ
+ovr-toast-btn-loading = جارٍ التحميل
+ovr-toast-info-msg = إشعار معلوماتي
+ovr-toast-success-msg = تم الحفظ
+ovr-toast-warning-msg = تحذير
+ovr-toast-warning-body = ألقِ نظرة عندما تتاح لك فرصة.
+ovr-toast-error-msg = فشل البناء
+ovr-toast-error-body = ثلاثة أخطاء، وتحذيران.
+ovr-toast-error-action = عرض الأخطاء
+ovr-toast-loading-msg = جارٍ العمل…
+
+# ── Drag & Drop tab ────────────────────────────────────────────────────
+dnd-zone-images-title = أفلِت الصور هنا
+dnd-zone-images-subtitle = PNG · JPEG · GIF
+dnd-zone-any-title = أفلِت أي شيء هنا
+dnd-zone-any-subtitle = ملفات أو نصوص أو روابط
+dnd-target-body = DropTarget — يلتف حول Panel؛ أفلِت ملفًا لرؤية تمييز الحدود
+dnd-target-hint = حرّر للإفلات
+dnd-log-initial = ستظهر العناصر المُفلَتة هنا.
+dnd-section-zone-any = DropZone — ملفات / نص / روابط
+dnd-section-zone-images = DropZone — صور فقط
+dnd-section-target = DropTarget — حاوية ملتفّة
+dnd-section-log = سجل الإفلات

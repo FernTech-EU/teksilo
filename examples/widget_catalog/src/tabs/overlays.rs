@@ -1,6 +1,7 @@
 //! Overlays tab — Tooltip (cascading 3-tier showcase), Popover, Dialog,
 //! MessageBox, Snackbar, Shadow.
 
+use std::rc::Rc;
 use std::time::Duration;
 
 use bastyde::prelude::*;
@@ -9,6 +10,46 @@ use bastyde::widgets::{
     MessageBoxButtons, Panel, Popover, ProgressBar, Snackbar, Spacer, TabInfo, TabWidget,
     TextWidget, VStack,
 };
+
+/// A row of toast triggers (one per severity) plus the
+/// `NotificationCenterButton` bell. `install_toast_default()` in
+/// main.rs registers the host + archive that make these live.
+fn toast_row(archive: Option<Rc<NotificationArchiveModel>>) -> impl Widget + 'static {
+    let mut row = HStack::new()
+        .spacing(8.0)
+        .child(Button::new(tr!(ovr_toast_btn_info())).on_activate_fn(|ctx| {
+            ctx.show_toast(Toast::info(tr!(ovr_toast_info_msg())));
+        }))
+        .child(
+            Button::new(tr!(ovr_toast_btn_success()))
+                .variant(ButtonVariant::Filled)
+                .on_activate_fn(|ctx| {
+                    ctx.show_toast(Toast::success(tr!(ovr_toast_success_msg())));
+                }),
+        )
+        .child(Button::new(tr!(ovr_toast_btn_warning())).on_activate_fn(|ctx| {
+            ctx.show_toast(
+                Toast::warning(tr!(ovr_toast_warning_msg())).body(tr!(ovr_toast_warning_body())),
+            );
+        }))
+        .child(Button::new(tr!(ovr_toast_btn_error())).on_activate_fn(|ctx| {
+            ctx.show_toast(
+                Toast::error(tr!(ovr_toast_error_msg()))
+                    .body(tr!(ovr_toast_error_body()))
+                    .action(ToastAction::primary(tr!(ovr_toast_error_action()), |_| {
+                        println!("[widget-catalog] show errors clicked");
+                    })),
+            );
+        }))
+        .child(Button::new(tr!(ovr_toast_btn_loading())).on_activate_fn(|ctx| {
+            ctx.show_toast(Toast::loading(tr!(ovr_toast_loading_msg())));
+        }))
+        .child(Spacer::new());
+    if let Some(archive) = archive {
+        row = row.child(NotificationCenterButton::new(archive));
+    }
+    row
+}
 
 use crate::shared::{
     KEY_STAT_FOOD, KEY_STAT_HAPPINESS, KEY_STAT_TRADE, KEY_TIP_A, KEY_TIP_B, KEY_TIP_C, Signals,
@@ -354,6 +395,8 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     .style(TextStyleRole::Small),
             ),
     );
+    let archive = ctx.app_state::<Rc<NotificationArchiveModel>>().cloned();
+    let toast = section(ctx, lit!("Toast + NotificationCenterButton"), toast_row(archive));
 
     ctx.add(
         VStack::new()
@@ -365,6 +408,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .add_child(dialog)
             .add_child(messagebox)
             .add_child(snackbar)
+            .add_child(toast)
             .add_child(shadow),
     )
 }
@@ -397,6 +441,8 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .trigger(Button::new(tr!(overlays_show_snackbar())).variant(ButtonVariant::Filled))
             .auto_dismiss_after(Duration::from_secs(3)),
     );
+    let archive = ctx.app_state::<Rc<NotificationArchiveModel>>().cloned();
+    let toast_widget = ctx.add(toast_row(archive));
 
     bati!(ctx => VStack {
             spacing: 20.0
@@ -524,6 +570,15 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 #{ snackbar_widget }
+            }
+
+            VStack {
+                spacing: 6.0
+                TextWidget::new(lit!("Toast + NotificationCenterButton")) {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
+                #{ toast_widget }
             }
 
             VStack {
