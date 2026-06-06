@@ -749,6 +749,36 @@ mod tests {
     }
 
     #[test]
+    fn has_running_timers_gates_the_idle_frame_loop() {
+        // Regression: an empty toast host used to keep a permanent
+        // `frame_tick` subscription, waking the event loop at ~60 fps
+        // forever (a steady idle-CPU drain on any app that called
+        // `install_toast_default()`). The host now arms its per-frame
+        // timer only while `has_running_timers()` is true.
+        let r = fresh_registry();
+
+        // Empty queue: nothing to decrement → no subscription.
+        assert!(!r.has_running_timers());
+
+        // A sticky / persistent toast has no finite timer → still no tick.
+        let (sticky, _) = r.enqueue(Toast::error(lit!("sticky")).persistent());
+        assert!(!r.has_running_timers());
+
+        // A timed toast arms the timer → host subscribes.
+        let (timed, _) =
+            r.enqueue(Toast::info(lit!("timed")).auto_dismiss_after(Duration::from_millis(500)));
+        assert!(r.has_running_timers());
+
+        // Expire it: the only running timer is gone, so the host drops
+        // the subscription again even though the sticky toast remains.
+        let expired = r.tick_timers(Duration::from_millis(600), false);
+        assert!(expired);
+        assert!(!r.live_entry_ids().contains(&timed.entry_id()));
+        assert!(r.live_entry_ids().contains(&sticky.entry_id()));
+        assert!(!r.has_running_timers());
+    }
+
+    #[test]
     fn loading_constructor_is_persistent_with_spinner_leading() {
         let r = fresh_registry();
         let (h, _) = r.enqueue(Toast::loading(lit!("Uploading")));

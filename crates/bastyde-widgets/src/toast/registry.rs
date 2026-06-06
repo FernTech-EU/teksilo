@@ -484,6 +484,35 @@ impl ToastRegistry {
         any
     }
 
+    /// Whether any live entry has a finite, still-running auto-dismiss
+    /// timer. The host gates its per-frame `frame_tick` subscription on
+    /// this: with no running timer (the queue is empty, or every live
+    /// toast is sticky / `time_left == None`) there is nothing to
+    /// decrement each frame, so the host drops the subscription and lets
+    /// the event loop sleep. Without this gate an empty toast host kept
+    /// the loop awake at ~60 fps forever (a steady idle-CPU drain).
+    pub(crate) fn has_running_timers(&self) -> bool {
+        self.inner
+            .borrow()
+            .live_entries
+            .iter()
+            .any(|e| e.time_left.is_some())
+    }
+
+    /// Smallest remaining auto-dismiss duration among live timed
+    /// toasts, or `None` if no toast has a running timer. The host uses
+    /// this to schedule a single `wake_at` deadline at the soonest
+    /// expiry instead of polling every frame — so a visible-but-idle
+    /// toast lets the event loop sleep.
+    pub(crate) fn min_running_timer(&self) -> Option<std::time::Duration> {
+        self.inner
+            .borrow()
+            .live_entries
+            .iter()
+            .filter_map(|e| e.time_left)
+            .min()
+    }
+
     /// Read-only snapshot of live entry ids — the host's `build()`
     /// uses this to know how many surfaces to construct, in what
     /// order. The actual entry data is read via `with_entry`.

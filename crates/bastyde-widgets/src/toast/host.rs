@@ -18,13 +18,12 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use bastyde_canvas::{Rect, SizeProposal, Vec2};
 use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::binding::BindingLevel;
 use bastyde_core::build_context::BuildContext;
-use bastyde_core::frame_tick_scheduler::FrameTickSubscription;
 use bastyde_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
@@ -100,10 +99,10 @@ pub struct ToastHost {
     /// ids at the time of the last `build()`. Used by `place_children`
     /// to know the placement order.
     toast_surface_ids: Vec<WidgetId>,
-    /// Owner subscription — dropped on rebuild and re-issued. Drives
-    /// the per-frame timer + hover-pause logic.
-    frame_tick_sub: Option<FrameTickSubscription>,
-    /// `Instant` of the last frame-tick — used to compute `dt`.
+    /// `Instant` of the last timer tick — used to compute `dt`. The
+    /// auto-dismiss timer is driven by a `wake_at` deadline (see
+    /// `build`), not a per-frame subscription, so a visible toast does
+    /// not pin the event loop at 60 fps.
     last_tick_at: Rc<RefCell<Option<Instant>>>,
     /// Set true once any pointer-event handler has been attached so
     /// subsequent rebuilds don't re-attach. The handler drives the
@@ -119,7 +118,6 @@ impl ToastHost {
             registry,
             options,
             toast_surface_ids: Vec::new(),
-            frame_tick_sub: None,
             last_tick_at: Rc::new(RefCell::new(None)),
             has_pending_drain_handler: Cell::new(false),
         }
@@ -151,6 +149,43 @@ impl std::fmt::Debug for ToastHost {
             .field("options", &self.options)
             .finish()
     }
+}
+
+/// While a hovered toast freezes its countdown we can't know in advance
+/// when the pointer will leave, so we poll on this coarse interval just
+/// to notice the un-hover. Hovering is a brief, deliberate user action,
+/// so ~8 Hz here is negligible (and only while actually hovering).
+const HOVER_POLL_INTERVAL: Duration = Duration::from_millis(120);
+/// Floor on the scheduled wake delay so an almost-expired toast can't
+/// schedule a zero/near-zero deadline and busy-loop for one frame.
+const MIN_WAKE_DELAY: Duration = Duration::from_millis(8);
+
+/// (Re)arm the auto-dismiss deadline. When a toast is hovered (and
+/// hover-pause is on) the countdown is frozen, so we schedule a short
+/// poll to detect the un-hover; otherwise we sleep right up to the
+/// soonest expiry. Merges with any existing earlier deadline so we never
+/// push another widget's pending `wake_at` out.
+fn schedule_toast_wake(
+    registry: &ToastRegistry,
+    wake_at: &Rc<Cell<Option<Instant>>>,
+    pause_on_hover_group: bool,
+    now: Instant,
+) {
+    let paused = pause_on_hover_group && registry.hover_count_signal().get() > 0;
+    let delay = if paused {
+        HOVER_POLL_INTERVAL
+    } else {
+        match registry.min_running_timer() {
+            Some(remaining) => remaining.max(MIN_WAKE_DELAY),
+            None => return, // nothing left to wait for
+        }
+    };
+    let target = now + delay;
+    let merged = match wake_at.get() {
+        Some(existing) if existing <= target => existing,
+        _ => target,
+    };
+    wake_at.set(Some(merged));
 }
 
 impl Widget for ToastHost {
@@ -192,33 +227,72 @@ impl Widget for ToastHost {
             surface_ids.push(ctx.add(surface));
         }
 
-        // Frame-tick effect: decrement timers, dismiss expired.
-        let registry_for_tick = self.registry.clone();
-        let last_tick_at = self.last_tick_at.clone();
-        let pause_on_hover_group = self.options.pause_on_hover_group;
-        ctx.effect(&ctx.frame_tick(), move |_delta_from_signal| {
-            // Use real-time delta. (The signal carries the framework's
-            // measured delta, but for tests + simulated clocks we
-            // recompute from wall-clock so the host stays in sync
-            // regardless of how the tick was scheduled.)
-            let now = Instant::now();
-            let dt = {
-                let mut last = last_tick_at.borrow_mut();
-                let result = last
-                    .map(|t| now.saturating_duration_since(t))
-                    .unwrap_or_default();
-                *last = Some(now);
-                result
-            };
-            if dt.is_zero() {
-                return;
+        // Auto-dismiss timer. Driven by a one-shot `wake_at` deadline,
+        // NOT a per-frame subscription: a visible toast lets the event
+        // loop SLEEP until its soonest expiry instead of repainting the
+        // whole window at 60 fps just to decrement an invisible counter.
+        // `build()` re-runs on every queue mutation (the `version_signal`
+        // Rebuild binding above), so the deadline is re-armed whenever a
+        // timed toast appears and torn down when the last one expires.
+        // (Spinners inside `loading` toasts animate via their own
+        // AnimatedQuad path and keep ticking regardless of this.)
+        if self.registry.has_running_timers() {
+            let registry_for_tick = self.registry.clone();
+            let last_tick_at = self.last_tick_at.clone();
+            let wake_at = ctx.wake_at_handle();
+            let pause_on_hover_group = self.options.pause_on_hover_group;
+
+            // Stamp the dt baseline at arm time so the first deadline wake
+            // measures a real elapsed delta. (The effect consults
+            // wall-clock, not the frame-tick signal — whose delta is
+            // clamped to 0.1 s and would under-count a multi-second sleep.)
+            if last_tick_at.borrow().is_none() {
+                *last_tick_at.borrow_mut() = Some(Instant::now());
             }
-            let paused = pause_on_hover_group && registry_for_tick.hover_count_signal().get() > 0;
-            registry_for_tick.tick_timers(dt, paused);
-        });
-        // Replace any prior subscription with a fresh one.
-        self.frame_tick_sub = None;
-        self.frame_tick_sub = Some(ctx.subscribe_frame_tick());
+
+            let wake_for_tick = wake_at.clone();
+            ctx.effect(&ctx.frame_tick(), move |_delta_from_signal| {
+                let now = Instant::now();
+                let dt = {
+                    let mut last = last_tick_at.borrow_mut();
+                    let result = last
+                        .map(|t| now.saturating_duration_since(t))
+                        .unwrap_or_default();
+                    *last = Some(now);
+                    result
+                };
+                let paused =
+                    pause_on_hover_group && registry_for_tick.hover_count_signal().get() > 0;
+                registry_for_tick.tick_timers(dt, paused);
+                // Re-arm for the next expiry. (An expiry dismisses via a
+                // version bump → rebuild, which re-arms too; rescheduling
+                // here also covers the case where an unrelated frame ran
+                // the effect before the deadline.)
+                if registry_for_tick.has_running_timers() {
+                    schedule_toast_wake(
+                        &registry_for_tick,
+                        &wake_for_tick,
+                        pause_on_hover_group,
+                        now,
+                    );
+                }
+            });
+
+            // Arm the initial deadline so the loop wakes at expiry even if
+            // nothing else requests a frame in the meantime.
+            schedule_toast_wake(
+                &self.registry,
+                &wake_at,
+                pause_on_hover_group,
+                Instant::now(),
+            );
+        } else {
+            // No running timer: reset the dt baseline so the next timed
+            // toast measures from its own arrival, not from a stale
+            // timestamp left over from a previous toast session (which
+            // would otherwise instant-expire it on the first tick).
+            *self.last_tick_at.borrow_mut() = None;
+        }
 
         // Pending-dismiss-callback drain handler (attached once).
         //
@@ -496,6 +570,107 @@ mod tests {
             tree.children(host_id).len(),
             1,
             "toast enqueued after initial layout did not appear — host did not rebuild"
+        );
+    }
+
+    /// Full auto-dismiss lifecycle in a live `WidgetTree`: a timed toast
+    /// appears, the host arms its per-frame timer (gate true), then the
+    /// timer expires, the surface is removed, and the gate goes false so
+    /// the event loop can sleep again. This is the headless analogue of
+    /// the real-window CPU time-series: pump while a toast is alive, idle
+    /// once it auto-dismisses.
+    #[test]
+    fn timed_toast_auto_dismisses_and_releases_the_frame_loop() {
+        use std::time::Duration;
+
+        let o = opts();
+        let registry = ToastRegistry::new(o.clone());
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let user_root = tree.add(small_root());
+        let host_id = tree.add(ToastHost::new(registry.clone(), o));
+        let filled = tree.add(Expand::new().respect_intrinsic().child_id(user_root));
+        tree.add(ZStack::new().add_child(filled).add_child(host_id));
+
+        tree.layout(SizeProposal::exact(900.0, 600.0));
+        assert_eq!(tree.children(host_id).len(), 0);
+        assert!(
+            !registry.has_running_timers(),
+            "empty host must not keep the frame loop awake"
+        );
+
+        // Show a toast with a finite auto-dismiss timer.
+        registry.enqueue(
+            Toast::info(LocalizedString::literal("Saved"))
+                .auto_dismiss_after(Duration::from_millis(500)),
+        );
+        tree.layout(SizeProposal::exact(900.0, 600.0));
+        assert_eq!(tree.children(host_id).len(), 1, "surface should appear");
+        assert!(
+            registry.has_running_timers(),
+            "a live timed toast must arm the frame loop"
+        );
+
+        // Frames elapse past the timeout (the host's frame-tick effect
+        // calls this with wall-clock dt; we drive it directly).
+        let expired = registry.tick_timers(Duration::from_millis(600), false);
+        assert!(expired, "the toast should expire after its timeout");
+
+        // Next layout pass rebuilds the host: surface gone, loop idle.
+        tree.layout(SizeProposal::exact(900.0, 600.0));
+        assert_eq!(
+            tree.children(host_id).len(),
+            0,
+            "expired toast surface should be torn down"
+        );
+        assert!(
+            !registry.has_running_timers(),
+            "after the last timer expires the host must release the frame loop"
+        );
+    }
+
+    /// A visible timed toast must arm a one-shot `wake_at` deadline so
+    /// the event loop sleeps until expiry — not pin a 60 fps poll. An
+    /// empty host, or one holding only sticky toasts, arms no deadline.
+    #[test]
+    fn timed_toast_schedules_a_deadline_not_a_poll() {
+        use std::time::{Duration, Instant};
+
+        let o = opts();
+        let registry = ToastRegistry::new(o.clone());
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let user_root = tree.add(small_root());
+        let host_id = tree.add(ToastHost::new(registry.clone(), o));
+        let filled = tree.add(Expand::new().respect_intrinsic().child_id(user_root));
+        tree.add(ZStack::new().add_child(filled).add_child(host_id));
+
+        let wake = tree.wake_at_handle();
+
+        // Empty host: nothing to wait for.
+        tree.layout(SizeProposal::exact(900.0, 600.0));
+        assert!(wake.get().is_none(), "empty host must not arm a wake deadline");
+
+        // Sticky-only: a persistent toast has no timer → still no deadline.
+        registry.enqueue(Toast::error(LocalizedString::literal("sticky")).persistent());
+        tree.layout(SizeProposal::exact(900.0, 600.0));
+        assert!(
+            wake.get().is_none(),
+            "a sticky toast has no timer, so no deadline is armed"
+        );
+
+        // Timed toast: a future deadline appears (not an immediate wake).
+        let before = Instant::now();
+        registry.enqueue(
+            Toast::info(LocalizedString::literal("timed"))
+                .auto_dismiss_after(Duration::from_secs(5)),
+        );
+        tree.layout(SizeProposal::exact(900.0, 600.0));
+        let deadline = wake.get();
+        assert!(deadline.is_some(), "timed toast must arm a wake deadline");
+        assert!(
+            deadline.unwrap() > before,
+            "deadline must be in the future, not an immediate busy-wake"
         );
     }
 }
