@@ -984,6 +984,89 @@ impl BastydeAppHandler {
         Ok(())
     }
 
+    /// Try to route an `AppEvent::External` payload as a
+    /// [`NativeMenuEventPayload`](bastyde_platform::native_menu::NativeMenuEventPayload)
+    /// posted when the user chose an item in the platform's native menu bar.
+    /// Resolves the item's [`MenuItemId`](bastyde_core::MenuItemId) to its
+    /// recorded intent / action via the [`NativeMenuHandle`](bastyde_platform::native_menu::NativeMenuHandle)
+    /// and fires it inside the originating window's `EventContext` with
+    /// `IntentSource::Menu` — the same pipeline an in-window `MenuItem` uses.
+    /// Same take/run-with-context/reinsert shape as the file-dialog router; any
+    /// miss is dropped silently.
+    fn try_route_native_menu_payload(
+        &mut self,
+        payload: Box<dyn std::any::Any + Send>,
+        event_loop: &ActiveEventLoop,
+    ) -> Result<(), Box<dyn std::any::Any + Send>> {
+        use bastyde_core::Intent;
+        use bastyde_core::telemetry::IntentSource;
+        use bastyde_platform::native_menu::{NativeMenuEventPayload, NativeMenuHandle};
+
+        let payload = match payload.downcast::<NativeMenuEventPayload>() {
+            Ok(boxed) => *boxed,
+            Err(other) => return Err(other),
+        };
+
+        let target_winit = self
+            .wm
+            .bastyde_to_winit_map()
+            .get(&payload.window_id_owner)
+            .copied();
+        let Some(winit_id) = target_winit else {
+            return Ok(());
+        };
+
+        let handle = self
+            .wm
+            .app_context_template()
+            .and_then(|t| t.app_state::<NativeMenuHandle>().cloned());
+        let Some(handle) = handle else {
+            return Ok(());
+        };
+        let Some(activation) = handle.activation(payload.window_id_owner, payload.item_id) else {
+            // Item not found (menu replaced / window torn down) — drop.
+            return Ok(());
+        };
+
+        let Some(mut current) = self.wm.take_managed(winit_id) else {
+            return Ok(());
+        };
+        let current_id = current.bastyde_id;
+
+        #[cfg(not(target_os = "macos"))]
+        let current_handle = current
+            .platform_window
+            .window()
+            .window_handle()
+            .ok()
+            .map(|h| h.as_raw());
+        let current_arc = Some(current.platform_window.window_arc());
+
+        {
+            let mut ops = crate::window_manager::WindowOpsImpl::new(
+                &mut self.wm,
+                event_loop,
+                current_id,
+                #[cfg(not(target_os = "macos"))]
+                current_handle,
+                current_arc,
+            );
+            current.tree.run_with_event_context(&mut ops, |ctx| {
+                ctx.with_intent_source(IntentSource::Menu, |ctx| {
+                    if let Some(name) = activation.intent {
+                        ctx.send_intent(Intent::new(name));
+                    }
+                    if let Some(action) = &activation.action {
+                        action(ctx);
+                    }
+                });
+            });
+        }
+
+        self.wm.reinsert_managed(winit_id, current);
+        Ok(())
+    }
+
     /// Try to interpret an `AppEvent::External` payload as an
     /// [`ExternalDndEventPayload`](bastyde_platform::external_dnd::ExternalDndEventPayload)
     /// posted by a platform drag backend and route it to the originating
@@ -1578,11 +1661,25 @@ impl BastydeAppHandler {
             // On Linux/Windows (winit 0.30) minimize fires `Focused(false)`
             // — no separate minimize event — so this path covers it.
             WindowEvent::Focused(focused) => {
+                let mut newly_focused = None;
                 if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     managed.focused = focused;
                     let active = managed.focused && !managed.occluded;
                     managed.tree.set_window_active(active);
                     managed.state.set_focused_from_os(focused);
+                    if focused {
+                        newly_focused = Some(managed.bastyde_id);
+                    }
+                }
+                // The global native menu (macOS) follows window focus: make the
+                // focused window's installed menu the visible one.
+                if let Some(bastyde_id) = newly_focused
+                    && let Some(handle) = self.wm.app_context_template().and_then(|t| {
+                        t.app_state::<bastyde_platform::native_menu::NativeMenuHandle>()
+                            .cloned()
+                    })
+                {
+                    handle.activate_window(bastyde_id);
                 }
             }
             // macOS-only in winit 0.30 (X11/Wayland/Windows never emit
@@ -1732,6 +1829,12 @@ impl ApplicationHandler<AppEvent> for BastydeAppHandler {
                     None => None,
                     Some(payload) => self
                         .try_route_async_completion_payload(payload, event_loop)
+                        .err(),
+                };
+                let payload = match payload {
+                    None => None,
+                    Some(payload) => self
+                        .try_route_native_menu_payload(payload, event_loop)
                         .err(),
                 };
                 if let Some(payload) = payload {
@@ -2167,6 +2270,27 @@ impl BastydeAppBuilder {
         let handle = ExternalDndHandle::new(default_backend());
         self.app_state_registry
             .insert(TypeId::of::<ExternalDndHandle>(), Box::new(handle));
+        self
+    }
+
+    /// Install the native (OS) menu service. Registers a
+    /// [`NativeMenuHandle`](bastyde_platform::native_menu::NativeMenuHandle)
+    /// wrapping the platform's default backend (a real `NSMenu` on macOS, a
+    /// no-op elsewhere) into the app-state registry.
+    ///
+    /// Once installed, a [`MenuBar`](bastyde_widgets::MenuBar) built with
+    /// `from_model(..).native_on_macos(..)` mirrors its [`MenuModel`] into the
+    /// global menu bar on macOS, and item activations route back through the
+    /// usual `Intent`/`Action` pipeline. The global menu follows window focus
+    /// automatically (see the `WindowEvent::Focused` arm).
+    ///
+    /// Apps that ship a custom backend bypass this and call
+    /// `.app_state(NativeMenuHandle::new(my_backend))` directly.
+    pub fn install_native_menu(mut self) -> Self {
+        use bastyde_platform::native_menu::{NativeMenuHandle, default_backend};
+        let handle = NativeMenuHandle::new(default_backend());
+        self.app_state_registry
+            .insert(TypeId::of::<NativeMenuHandle>(), Box::new(handle));
         self
     }
 

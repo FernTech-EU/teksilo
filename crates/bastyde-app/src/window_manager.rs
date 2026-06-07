@@ -711,6 +711,14 @@ impl WindowManager {
         {
             handle.detach(bastyde_id);
         }
+        // Forget this window's native (OS) menu + its activation map.
+        if let Some(handle) = self
+            .app_context_template
+            .as_ref()
+            .and_then(|t| t.app_state::<bastyde_platform::native_menu::NativeMenuHandle>())
+        {
+            handle.clear_window(bastyde_id);
+        }
         if let Some(winit_id) = self.bastyde_to_winit.remove(&bastyde_id)
             && let Some(mut managed) = self.windows.remove(&winit_id)
         {

@@ -45,7 +45,11 @@ serde_json = { workspace = true, optional = true }
 # `file-dialog` feature on bastyde-platform brings in just the trait
 # surface — no rfd, no async-std. The real `RfdAsyncBackend` is opt-in
 # via `bastyde-app/rfd-backend` (chained from `bastyde/file-dialog`).
-bastyde-platform = { workspace = true, features = ["file-dialog"] }
+# `native-menu` brings in the `NativeMenuHandle`/`NativeMenuSnapshot` surface so
+# `MenuBar::from_model(..).native_on_macos(..)` can mirror a `MenuModel` into the
+# OS menu bar (real NSMenu on macOS, a no-op backend elsewhere). The objc2 deps
+# behind it are macOS-target-only, so non-macOS builds pay nothing.
+bastyde-platform = { workspace = true, features = ["file-dialog", "native-menu"] }
 bastyde-preview = { workspace = true, optional = true }
 # `open` powers rich-tooltip links that point at real URLs
 # (http, https, mailto, file paths, …). Small, pure-Rust, no deps

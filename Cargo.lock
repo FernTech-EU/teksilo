@@ -2993,6 +2993,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "native-menu"
+version = "0.5.0"
+dependencies = [
+ "bastyde",
+]
+
+[[package]]
 name = "ndk"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

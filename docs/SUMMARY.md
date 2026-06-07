@@ -73,6 +73,11 @@ directory.
   persistent `NotificationArchiveModel` + `NotificationLog` / bell
   `NotificationCenterButton` / `NotificationLogDialog` UI;
   `BastydeAppBuilder::install_toast_default()` one-line install.
+- [native-menu.md](native-menu.md) — declarative `MenuModel` shared by the
+  in-window `MenuBar` and the macOS native menu bar (`NSMenu`);
+  `MenuBar::from_model(..).native_on_macos(..)`,
+  `BastydeAppBuilder::install_native_menu()`, reactive checks, ⌘ key
+  equivalents, focus-follows-window.
 - [drag-and-drop.md](drag-and-drop.md) — drag payloads, drop targets,
   hit testing, the three user stories that share the underlying machinery.
 - [multi-window.md](multi-window.md) — `WindowConfig`, signal-driven

@@ -28,7 +28,7 @@ use bastyde_core::accessibility::AccessNodeBuilder;
 use bastyde_core::build_context::BuildContext;
 use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
-use bastyde_core::signal::Signal;
+use bastyde_core::signal::{Prop, Signal};
 use bastyde_core::styles::{MenuItemStyleConfig, SharedMenuItemStyle};
 use bastyde_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use bastyde_core::widget_builder::HandlerSet;
@@ -118,8 +118,10 @@ pub struct MenuItem {
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn bastyde_core::widget::Widget>>,
     action: Option<CommandFactory>,
-    /// Initial enabled-state; forwarded to the arena at build time.
-    initial_enabled: bool,
+    /// Enabled-state (static or signal-bound); forwarded to the arena at build
+    /// time via `enabled_when`, so a bound signal disables/enables the item
+    /// reactively (paint, cursor, AT all follow).
+    enabled: Prop<bool>,
     /// Plain / Check / Radio — see [`MenuItemMode`].
     mode: MenuItemMode,
     /// Sibling ids for radio-group AT announcement. Set by
@@ -180,7 +182,7 @@ impl MenuItem {
             rich_tooltip_source: None,
             composite_tooltip_content: None,
             action: None,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             mode: MenuItemMode::Plain,
             radio_group_ids: None,
             submenu_factory: None,
@@ -256,11 +258,12 @@ impl MenuItem {
         self
     }
 
-    /// Set the initial enabled state. Forwarded to the arena at build
-    /// time. For reactive enable/disable, call
-    /// `ctx.enabled_when(menu_item_id, signal)` on the composing widget.
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.initial_enabled = enabled;
+    /// Set the enabled state — static or signal-bound. A bound `Signal<bool>`
+    /// enables/disables the item reactively (paint, cursor, and AT all follow),
+    /// so `MenuItem::new(...).enabled(can_save_signal)` greys out live without a
+    /// rebuild.
+    pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
+        self.enabled = enabled.into();
         self
     }
 
@@ -325,7 +328,7 @@ impl MenuItem {
             rich_tooltip_source: None,
             composite_tooltip_content: None,
             action: None,
-            initial_enabled: true,
+            enabled: Prop::Static(true),
             mode: MenuItemMode::Plain,
             radio_group_ids: None,
             submenu_factory: Some(Box::new(factory)),
@@ -468,7 +471,7 @@ impl std::fmt::Debug for MenuItem {
         };
         f.debug_struct("MenuItem")
             .field("label", &self.label)
-            .field("initial_enabled", &self.initial_enabled)
+            .field("enabled", &self.enabled)
             .field("is_submenu", &self.submenu_factory.is_some())
             .field("mode", &mode)
             .finish()
@@ -493,10 +496,10 @@ impl Widget for MenuItem {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         use crate::styles::recipe_menu_item_style as menu;
         let self_id = ctx.self_id();
-        // Forward initial-enabled into the arena; see IconButton.
-        if !self.initial_enabled {
-            ctx.enabled_when(self_id, false);
-        }
+        // Forward enabled (static or signal-bound) into the arena. A bound
+        // signal makes enable/disable reactive — the framework's
+        // effective_enabled drives paint / cursor / AT.
+        ctx.enabled_when(self_id, self.enabled.clone());
         let effective_enabled = ctx.effective_enabled_signal(self_id);
 
         // Interaction seeds to Idle; the framework's effective_enabled

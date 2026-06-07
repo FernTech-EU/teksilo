@@ -44,6 +44,7 @@ pub mod link;
 pub(crate) mod list_item_a11y;
 pub(crate) mod list_source;
 pub mod list_view;
+pub mod menu;
 pub mod menu_bar;
 pub(crate) mod menu_context;
 pub mod menu_item;
@@ -139,6 +140,9 @@ pub use icon_button::{BuiltInIcons, IconButton, IconButtonSize};
 pub use input_dialog::InputDialog;
 pub use link::Link;
 pub use list_view::ListView;
+pub use menu::{
+    MenuEntry, MenuItemState, MenuItems, MenuModel, MenuNode, NativeMenuMode, StandardMenuRole,
+};
 pub use menu_bar::{CollapsePolicy, MenuBar};
 pub use menu_item::MenuItem;
 pub use menu_list::{MenuList, MenuSeparator};

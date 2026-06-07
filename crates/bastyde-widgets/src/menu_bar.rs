@@ -110,6 +110,14 @@ pub struct MenuBar {
     bar_id: Option<WidgetId>,
     /// The hamburger `IconButton` id, captured in `build()`.
     hamburger_id: Option<WidgetId>,
+    /// The declarative source model, when this bar was built via
+    /// [`from_model`](Self::from_model). Drives the native menu mirror.
+    model: Option<crate::menu::MenuModel>,
+    /// macOS native-menu behaviour (mirror to / suppress in-window).
+    native_mode: crate::menu::NativeMenuMode,
+    /// RAII binding keeping the native menu's reactive observers alive while
+    /// this bar is mounted.
+    native_binding: RefCell<Option<crate::menu::native::NativeMenuBinding>>,
 }
 
 impl MenuBar {
@@ -127,7 +135,58 @@ impl MenuBar {
             last_collapsed: Cell::new(false),
             bar_id: None,
             hamburger_id: None,
+            model: None,
+            native_mode: crate::menu::NativeMenuMode::Off,
+            native_binding: RefCell::new(None),
         }
+    }
+
+    /// Build a menu bar from a declarative [`MenuModel`](crate::menu::MenuModel)
+    /// — the single source of truth shared with the native OS menu bar. Each
+    /// top-level menu in the model becomes an in-window dropdown; combine with
+    /// [`native_on_macos`](Self::native_on_macos) to also mirror it into the
+    /// macOS system menu bar.
+    pub fn from_model(model: crate::menu::MenuModel) -> Self {
+        let mut bar = Self::new();
+        // Entries are derived from the model on every `build()` (see
+        // `model_entries`), so runtime structural changes — `MenuModel::push_item`
+        // / `remove` / `push_menu` — re-render the in-window bar too (the bar
+        // binds `model.version()` at `Rebuild` level).
+        bar.model = Some(model);
+        bar
+    }
+
+    /// Derive the in-window menu entries from the model's top-level menus. Each
+    /// `Submenu` node becomes a dropdown whose factory builds a `MenuList` from
+    /// its children. `Standard` roles + bare items/separators at top level have
+    /// no in-window representation.
+    fn model_entries(model: &crate::menu::MenuModel) -> Vec<MenuBarEntry> {
+        model
+            .nodes()
+            .iter()
+            .filter_map(|node| match node {
+                crate::menu::MenuNode::Submenu { title, children, .. } => {
+                    let children = children.clone();
+                    Some(MenuBarEntry {
+                        label: title.clone(),
+                        factory: Box::new(move || {
+                            Box::new(crate::menu::model::build_menu_list(&children))
+                        }),
+                    })
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Choose how this bar behaves on macOS, where the convention is a global
+    /// menu bar at the top of the screen. Requires the bar to have been built
+    /// with [`from_model`](Self::from_model) and the app to have called
+    /// `install_native_menu()`. No effect on other platforms (the in-window bar
+    /// renders there regardless).
+    pub fn native_on_macos(mut self, mode: crate::menu::NativeMenuMode) -> Self {
+        self.native_mode = mode;
+        self
     }
 
     /// Enable the optional **hamburger** representation. When there
@@ -212,6 +271,36 @@ impl MenuBar {
         self.trailing_slot
             .push(PendingChild::Deferred(Box::new(widget)));
         self
+    }
+
+    /// macOS `Suppress` path: a zero-chrome bar that renders only the
+    /// leading/trailing slots (the OS menu bar carries the menus). No triggers,
+    /// no F10/Alt dispatcher.
+    fn build_suppressed(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let mut row = HStack::new().spacing(2.0);
+        for pending in self.leading_slot.drain(..) {
+            match pending {
+                PendingChild::Id(id) => row = row.add_child(id),
+                PendingChild::Deferred(w) => {
+                    let id = ctx.add_boxed(w);
+                    row = row.add_child(id);
+                }
+            }
+        }
+        row = row.child(Spacer::new());
+        for pending in self.trailing_slot.drain(..) {
+            match pending {
+                PendingChild::Id(id) => row = row.add_child(id),
+                PendingChild::Deferred(w) => {
+                    let id = ctx.add_boxed(w);
+                    row = row.add_child(id);
+                }
+            }
+        }
+        let row_id = ctx.add(row);
+        self.root_child_id = Some(row_id);
+        self.bar_id = Some(row_id);
+        vec![row_id]
     }
 }
 
@@ -684,6 +773,33 @@ impl Widget for MenuOverlayHost {
 
 impl Widget for MenuBar {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Mirror the model into the native OS menu bar (macOS) when requested.
+        // The bridge is a no-op without a `NativeMenuHandle` in app-state.
+        if self.native_mode.installs_native()
+            && cfg!(target_os = "macos")
+            && let Some(model) = &self.model
+        {
+            *self.native_binding.borrow_mut() = crate::menu::native::install(model, ctx);
+        }
+
+        // A runtime structural change (`MenuModel::push_item`/`remove`/…) bumps
+        // the model version; rebuild so the in-window dropdowns AND the native
+        // menu re-derive from the new structure.
+        if let Some(model) = &self.model {
+            model.version().bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                bastyde_core::BindingLevel::Rebuild,
+            );
+        }
+
+        // On macOS with `Suppress`, the global menu bar IS the menu — render
+        // only the optional leading/trailing slots in-window (no triggers, no
+        // F10/Alt dispatcher).
+        if self.native_mode.suppresses_in_window() {
+            return self.build_suppressed(ctx);
+        }
+
         let theme_signal = ctx.theme_signal();
 
         let open_index: Signal<Option<usize>> = ctx.signal(None);
@@ -711,7 +827,12 @@ impl Widget for MenuBar {
         // for Alt+letter activation.
         let mut mnemonic_table: HashMap<char, usize> = HashMap::new();
 
-        let entries = std::mem::take(&mut self.entries);
+        // Model-built bars re-derive entries from the (possibly mutated) model
+        // every build; classic `.menu()` bars consume their stored entries.
+        let entries = match &self.model {
+            Some(model) => Self::model_entries(model),
+            None => std::mem::take(&mut self.entries),
+        };
         for (i, entry) in entries.into_iter().enumerate() {
             let parsed: ParsedMnemonic = parse_mnemonic(&entry.label.resolve_now());
 
@@ -1812,5 +1933,87 @@ mod tests {
             ),
             "expanded → no reveal (classic inline behaviour)"
         );
+    }
+
+    #[test]
+    fn from_model_builds_in_window_triggers() {
+        use crate::menu::{MenuEntry, MenuModel};
+        let model = MenuModel::new()
+            .menu(lit!("&File"), |m| {
+                m.item(MenuEntry::new(lit!("&New")).intent("app.new"))
+                    .separator()
+                    .item(MenuEntry::new(lit!("&Quit")).intent("app.quit"))
+            })
+            .menu(lit!("&Edit"), |m| {
+                m.item(MenuEntry::new(lit!("Cu&t")).intent("app.cut"))
+            });
+
+        let mut t = tree_with_window();
+        let mb = t.add(MenuBar::from_model(model));
+        t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
+
+        // Two top-level menus → two triggers, names mnemonic-stripped.
+        let triggers = collect_descendants_with_role(&t, mb, Role::MenuItem);
+        assert_eq!(triggers.len(), 2);
+        assert_eq!(t.accessibility_node(triggers[0]).name(), Some("File"));
+        assert_eq!(t.accessibility_node(triggers[1]).name(), Some("Edit"));
+    }
+
+    #[test]
+    fn runtime_model_mutation_rebuilds_in_window_bar() {
+        use crate::menu::{MenuEntry, MenuModel};
+        let model = MenuModel::new()
+            .menu(lit!("&File"), |m| m.item(MenuEntry::new(lit!("&New"))));
+        let model_handle = model.clone();
+
+        let mut t = tree_with_window();
+        let mb = t.add(MenuBar::from_model(model));
+        t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
+        assert_eq!(collect_descendants_with_role(&t, mb, Role::MenuItem).len(), 1);
+
+        // Add a top-level menu at runtime → version bump → Rebuild binding →
+        // the next layout re-derives the in-window triggers.
+        model_handle.push_menu(lit!("&Edit"), |m| m.item(MenuEntry::new(lit!("Cu&t"))));
+        t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
+        assert_eq!(collect_descendants_with_role(&t, mb, Role::MenuItem).len(), 2);
+
+        // Remove it again.
+        let nodes_ids: Vec<_> = {
+            model_handle
+                .nodes()
+                .iter()
+                .filter_map(|n| match n {
+                    crate::menu::MenuNode::Submenu { id, title, .. }
+                        if title.resolve_now().contains("Edit") =>
+                    {
+                        Some(*id)
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        assert!(model_handle.remove(nodes_ids[0]));
+        t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
+        assert_eq!(collect_descendants_with_role(&t, mb, Role::MenuItem).len(), 1);
+    }
+
+    #[test]
+    fn native_suppress_hides_in_window_bar_on_macos() {
+        use crate::menu::{MenuEntry, MenuModel, NativeMenuMode};
+        let model = MenuModel::new().menu(lit!("&File"), |m| {
+            m.item(MenuEntry::new(lit!("&New")).intent("app.new"))
+        });
+        let mut t = tree_with_window();
+        let mb = t.add(MenuBar::from_model(model).native_on_macos(NativeMenuMode::Suppress));
+        t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
+
+        let triggers = collect_descendants_with_role(&t, mb, Role::MenuItem);
+        if cfg!(target_os = "macos") {
+            // Suppressed: the OS menu bar carries the menus, no in-window triggers.
+            assert!(triggers.is_empty(), "macOS Suppress renders no in-window triggers");
+        } else {
+            // Other platforms ignore the flag and render the in-window bar.
+            assert_eq!(triggers.len(), 1);
+        }
     }
 }

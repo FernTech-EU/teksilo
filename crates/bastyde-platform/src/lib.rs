@@ -6,6 +6,8 @@ pub mod external_dnd;
 pub mod file_dialog;
 #[cfg(target_os = "linux")]
 pub(crate) mod linux_helpers;
+#[cfg(feature = "native-menu")]
+pub mod native_menu;
 pub mod os_theme;
 pub mod title_bar_host;
 pub mod window;

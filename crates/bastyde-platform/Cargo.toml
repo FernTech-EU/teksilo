@@ -46,6 +46,13 @@ file-dialog = []
 # off the UI thread. Implies `file-dialog`.
 rfd-backend = ["file-dialog", "dep:rfd", "dep:async-std"]
 
+# Defines the native (OS) menu trait surface (NativeMenuBackend,
+# NativeMenuHandle, NativeMenuSnapshot, NativeMenuEventPayload) and the
+# per-OS backends (macOS NSMenu; Noop elsewhere). Lets `bastyde-widgets`
+# mirror a `MenuModel` into the platform's global menu bar. No external
+# deps beyond what each target already links.
+native-menu = []
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = [
@@ -69,6 +76,10 @@ objc2-app-kit = { version = "0.3", features = [
     "NSImage",
     "NSApplication",
     "NSEvent",
+    # Native (OS) menu bar mirroring a `MenuModel`: NSMenu / NSMenuItem,
+    # key equivalents, on/off/mixed item state.
+    "NSMenu",
+    "NSMenuItem",
 ] }
 objc2-foundation = { version = "0.3", features = [
     "NSArray",

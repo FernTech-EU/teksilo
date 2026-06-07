@@ -258,6 +258,15 @@ impl<'a> BuildContext<'a> {
         self.tree.app_context().app_state::<T>()
     }
 
+    /// Borrow the [`AppEventPoster`](crate::AppEventPoster) installed by the
+    /// framework, if any. Mirrors [`EventContext::poster`](crate::widget::EventContext::poster).
+    /// Used by integrations that wire a platform callback (e.g. a native menu
+    /// item) to post a typed payload back to the UI loop. Returns `None` for
+    /// trees built outside an app (tests / headless).
+    pub fn poster(&self) -> Option<&std::sync::Arc<dyn crate::AppEventPoster>> {
+        self.tree.app_context().poster()
+    }
+
     /// Bind a widget's visibility to a boolean prop or compatibility state binding.
     pub fn visible_when(&mut self, id: WidgetId, state: impl Into<crate::signal::Prop<bool>>) {
         self.tree.visible_when(id, state);

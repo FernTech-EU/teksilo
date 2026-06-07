@@ -36,7 +36,10 @@ bastyde-canvas = { workspace = true }
 bastyde-tokens = { workspace = true }
 bastyde-i18n = { workspace = true }
 bastyde-render = { workspace = true }
-bastyde-platform = { workspace = true }
+# `native-menu` is always on: `install_native_menu()` and the native-menu
+# payload router reference `bastyde_platform::native_menu` directly. The objc2
+# backing is macOS-target-only, so non-macOS builds pay nothing.
+bastyde-platform = { workspace = true, features = ["native-menu"] }
 # bastyde-widgets is needed for the tooltip registry type surface
 # (`BastydeAppBuilder::register_tooltips` takes `Vec<TooltipContent>`).
 # Registration wiring only — no widget constructors used here.
