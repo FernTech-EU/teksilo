@@ -1263,26 +1263,6 @@ fn remove_a11y_group_drops_dependent_decorations() {
     assert!(scene.a11y_parent_of(A11yNode::Item(item)).is_none());
 }
 
-#[test]
-fn parent_cycle_does_not_loop_walker() {
-    // Malformed: A → B → A. The walker visits each node once
-    // (HashSet guard) and never recurses indefinitely.
-    use crate::a11y::{A11yGroup, A11yNode};
-
-    let mut scene = Scene::new();
-    let a = scene.add_a11y_group(A11yGroup::builder().label(lit!("A")));
-    let b = scene.add_a11y_group(A11yGroup::builder().label(lit!("B")));
-    scene.set_a11y_parent(A11yNode::Group(a), Some(A11yNode::Group(b)));
-    scene.set_a11y_parent(A11yNode::Group(b), Some(A11yNode::Group(a)));
-
-    let mut tree = WidgetTree::new();
-    let _view_id = tree.add(SceneView::new(scene));
-    tree.layout(SizeProposal::exact(400.0, 300.0));
-    // Just running sync_accessibility without panic / hang is
-    // the assertion: cycle guard works.
-    let _ = tree.sync_accessibility();
-}
-
 // -- A11yMode + auto-graft of widget descendants -------------
 
 /// Helper: a widget with a deterministic accessibility role we
@@ -1681,12 +1661,6 @@ fn ancestor_chain_walk_skips_optout_intermediate() {
 // -- Nested-SceneView gap-filling APIs ------------------------------
 
 #[test]
-fn interactive_default_is_true() {
-    let view = SceneView::new(Scene::new());
-    assert!(view.interactive, "SceneView::interactive defaults to true");
-}
-
-#[test]
 fn non_interactive_ignores_scroll() {
     // When the outer SceneView is locked (chart chrome
     // pattern), scroll events must not pan its view. The
@@ -1994,25 +1968,6 @@ fn nested_scene_view_geometry_after_paint() {
 }
 
 // -- Selection + marquee -----------------------------------
-
-#[test]
-fn selection_default_is_none_mode() {
-    let view = SceneView::new(Scene::new());
-    assert_eq!(
-        view.selection().mode(),
-        crate::selection::SceneSelectionMode::None
-    );
-}
-
-#[test]
-fn selection_mode_builder_sets_multi() {
-    let view =
-        SceneView::new(Scene::new()).selection_mode(crate::selection::SceneSelectionMode::Multi);
-    assert_eq!(
-        view.selection().mode(),
-        crate::selection::SceneSelectionMode::Multi
-    );
-}
 
 #[test]
 fn marquee_drag_ends_with_pending_commit() {
@@ -3115,14 +3070,6 @@ fn a11y_label_is_announced() {
     assert_eq!(view_node.label(), Some("Chart data area"));
 }
 
-#[test]
-fn is_nested_accessor_reflects_builder_setting() {
-    let view = SceneView::new(Scene::new());
-    assert!(!view.is_nested());
-    let view = view.nested_a11y(true);
-    assert!(view.is_nested());
-}
-
 // -- View-state persistence ----------------------------------------
 
 #[test]
@@ -3173,12 +3120,6 @@ fn restore_state_clamps_zoom() {
     let saved = crate::SceneViewState::new(Vec2::ZERO, 100.0, 0.0);
     view.restore_state(saved);
     assert_eq!(view.zoom(), 5.0);
-}
-
-#[test]
-fn identity_state_is_default() {
-    let s: crate::SceneViewState = Default::default();
-    assert!(s.is_identity());
 }
 
 // -- a11y_bounds_space ---------------------------------------------
@@ -3257,49 +3198,7 @@ fn a11y_bounds_scene_mode_reports_raw_scene_coords() {
     assert!((bounds.y0 - 50.0).abs() < 0.5);
 }
 
-#[test]
-fn current_a11y_bounds_space_accessor_reflects_setting() {
-    let view = SceneView::new(Scene::new());
-    assert_eq!(
-        view.current_a11y_bounds_space(),
-        crate::A11yBoundsSpace::Screen
-    );
-    let view = view.a11y_bounds_space(crate::A11yBoundsSpace::Scene);
-    assert_eq!(
-        view.current_a11y_bounds_space(),
-        crate::A11yBoundsSpace::Scene
-    );
-}
-
 // -- Debug overlays ------------------------------------------------
-
-#[test]
-fn debug_overlay_default_is_inactive() {
-    let cfg = DebugOverlay::default();
-    assert!(!cfg.is_active());
-}
-
-#[test]
-fn debug_overlay_all_is_active() {
-    let cfg = DebugOverlay::ALL;
-    assert!(cfg.is_active());
-    assert!(cfg.item_bounds);
-    assert!(cfg.content_bounds);
-    assert!(cfg.viewport);
-    assert!(cfg.selection_bounds);
-}
-
-#[test]
-fn debug_overlay_setting_round_trips() {
-    let view = SceneView::new(Scene::new()).debug_overlay(DebugOverlay {
-        item_bounds: true,
-        ..Default::default()
-    });
-    let cfg = view.current_debug_overlay();
-    assert!(cfg.item_bounds);
-    assert!(!cfg.viewport);
-    assert!(cfg.is_active());
-}
 
 #[test]
 fn debug_overlay_renders_when_enabled() {

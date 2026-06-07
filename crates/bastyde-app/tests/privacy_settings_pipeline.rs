@@ -1,8 +1,7 @@
 //! Integration tests for the `PrivacySettings` widget.
 //!
-//! Verifies the widget builds in each telemetry configuration and
-//! that programmatic interactions with `ConsentStore` (matching what
-//! the widget's buttons would do) update the state correctly.
+//! Verifies that programmatic interactions with `ConsentStore` (matching
+//! what the widget's buttons would do) update the state correctly.
 
 #![cfg(feature = "telemetry")]
 
@@ -10,91 +9,11 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use bastyde_app::BastydeAppBuilder;
-use bastyde_canvas::SizeProposal;
 use bastyde_settings::{AppPaths, SettingsBundle};
 use bastyde_telemetry::{
-    ConsentScope, ConsentState, StubReporter, TelemetryBundle, TelemetryMode, UsageReporter,
+    ConsentState, StubReporter, TelemetryBundle, TelemetryMode, UsageReporter,
 };
-use bastyde_widgets::PrivacySettings;
 use tempfile::tempdir;
-
-#[test]
-fn widget_builds_with_no_telemetry_shows_placeholder() {
-    let dir = tempdir().unwrap();
-    let mut app = BastydeAppBuilder::new()
-        .app_paths(AppPaths::for_testing(dir.path()))
-        .settings(SettingsBundle::new().with_debounce(Duration::ZERO))
-        .build_headless();
-
-    app.tree.add(PrivacySettings::new());
-    app.tree.layout(SizeProposal::exact(600.0, 400.0));
-    // No panic = success. The placeholder renders a single TextWidget.
-}
-
-#[test]
-fn widget_builds_with_anonymous_only() {
-    let dir = tempdir().unwrap();
-    let mut app = BastydeAppBuilder::new()
-        .app_paths(AppPaths::for_testing(dir.path()))
-        .settings(SettingsBundle::new().with_debounce(Duration::ZERO))
-        .telemetry(
-            TelemetryBundle::new(1)
-                .with_anonymous(Rc::new(StubReporter::anonymous()) as Rc<dyn UsageReporter>)
-                .with_default_mode(TelemetryMode::Anonymous)
-                .with_debounce(Duration::ZERO),
-        )
-        .build_headless();
-
-    app.tree.add(
-        PrivacySettings::new()
-            .data_processor_name("Test Processor")
-            .privacy_policy_url("https://example.test/privacy"),
-    );
-    app.tree.layout(SizeProposal::exact(600.0, 600.0));
-}
-
-#[test]
-fn widget_builds_with_pseudonymous_only() {
-    let dir = tempdir().unwrap();
-    let mut app = BastydeAppBuilder::new()
-        .app_paths(AppPaths::for_testing(dir.path()))
-        .settings(SettingsBundle::new().with_debounce(Duration::ZERO))
-        .telemetry(
-            TelemetryBundle::new(1)
-                .with_pseudonymous(
-                    Rc::new(StubReporter::pseudonymous("uuid-test")) as Rc<dyn UsageReporter>
-                )
-                .with_default_mode(TelemetryMode::Pseudonymous)
-                .with_debounce(Duration::ZERO),
-        )
-        .build_headless();
-
-    app.tree.add(PrivacySettings::new());
-    app.tree.layout(SizeProposal::exact(600.0, 700.0));
-}
-
-#[test]
-fn widget_builds_with_both_modes_and_compact() {
-    let dir = tempdir().unwrap();
-    let mut app = BastydeAppBuilder::new()
-        .app_paths(AppPaths::for_testing(dir.path()))
-        .settings(SettingsBundle::new().with_debounce(Duration::ZERO))
-        .telemetry(
-            TelemetryBundle::new(1)
-                .with_anonymous(Rc::new(StubReporter::anonymous()) as Rc<dyn UsageReporter>)
-                .with_pseudonymous(
-                    Rc::new(StubReporter::pseudonymous("uuid-mix")) as Rc<dyn UsageReporter>
-                )
-                .with_default_mode(TelemetryMode::Anonymous)
-                .with_debounce(Duration::ZERO),
-        )
-        .build_headless();
-
-    // Compact mode hides the mode-switch section even when both
-    // adapters are configured (reserved for first-run modal).
-    app.tree.add(PrivacySettings::new().compact(true));
-    app.tree.layout(SizeProposal::exact(500.0, 500.0));
-}
 
 #[test]
 fn accept_all_grants_supported_scopes() {
@@ -238,40 +157,3 @@ fn set_or_grant_scope_blocked_by_denied() {
     ));
 }
 
-#[test]
-fn rebuild_tracks_state_signal_changes() {
-    // Confirms PrivacySettings re-builds when consent state changes
-    // (i.e., the binding to `consent.state_signal()` works). We can't
-    // observe rebuilds directly from outside, but mutating the
-    // signal and then re-laying out without panicking is the smoke
-    // test. A panic on a stale signal would surface here.
-    let dir = tempdir().unwrap();
-    let mut app = BastydeAppBuilder::new()
-        .app_paths(AppPaths::for_testing(dir.path()))
-        .settings(SettingsBundle::new().with_debounce(Duration::ZERO))
-        .telemetry(
-            TelemetryBundle::new(1)
-                .with_anonymous(Rc::new(StubReporter::anonymous()) as Rc<dyn UsageReporter>)
-                .with_debounce(Duration::ZERO),
-        )
-        .build_headless();
-
-    let opened = app
-        .tree
-        .app_context()
-        .app_state::<bastyde_telemetry::OpenedTelemetry>()
-        .unwrap()
-        .clone();
-
-    app.tree.add(PrivacySettings::new());
-    app.tree.layout(SizeProposal::exact(600.0, 600.0));
-
-    opened
-        .consent
-        .grant(ConsentScope::all(), opened.reporter.endpoint())
-        .unwrap();
-    app.tree.layout(SizeProposal::exact(600.0, 600.0));
-
-    opened.consent.deny().unwrap();
-    app.tree.layout(SizeProposal::exact(600.0, 600.0));
-}

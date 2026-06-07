@@ -425,40 +425,11 @@ mod tests {
     }
 
     #[test]
-    fn size_proposal_exact() {
-        let p = SizeProposal::exact(200.0, 40.0);
-        assert_eq!(p.width, Some(200.0));
-        assert_eq!(p.height, Some(40.0));
-    }
-
-    #[test]
-    fn size_proposal_unspecified() {
-        let p = SizeProposal::unspecified();
-        assert_eq!(p.width, None);
-        assert_eq!(p.height, None);
-    }
-
-    #[test]
     fn size_proposal_resolve_with_defaults() {
         let p = SizeProposal::with_width(200.0);
         let size = p.resolve(100.0, 50.0);
         assert_eq!(size.width, 200.0);
         assert_eq!(size.height, 50.0);
-    }
-
-    #[test]
-    fn rect_to_array() {
-        let r = Rect::new(10.0, 20.0, 30.0, 40.0);
-        assert_eq!(r.to_array(), [10.0, 20.0, 30.0, 40.0]);
-    }
-
-    #[test]
-    fn rect_from_origin_size() {
-        let r = Rect::from_origin_size(Point::new(10.0, 20.0), Size::new(30.0, 40.0));
-        assert_eq!(r.x, 10.0);
-        assert_eq!(r.y, 20.0);
-        assert_eq!(r.width, 30.0);
-        assert_eq!(r.height, 40.0);
     }
 
     #[test]

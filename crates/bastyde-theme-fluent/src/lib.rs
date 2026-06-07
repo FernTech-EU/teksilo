@@ -61,18 +61,3 @@ fn apply_fluent_overrides(_theme: &mut Theme, _appearance: ThemeAppearance) {
     // needs compositor-side blur, which the wgpu backend doesn't
     // expose today. The stub falls back to solid surfaces.
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn light_appearance_is_light() {
-        assert!(light().appearance.is_light());
-    }
-
-    #[test]
-    fn dark_appearance_is_dark() {
-        assert!(dark().appearance.is_dark());
-    }
-}

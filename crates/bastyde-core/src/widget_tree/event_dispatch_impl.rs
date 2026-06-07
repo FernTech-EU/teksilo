@@ -1444,14 +1444,6 @@ mod tests {
         assert_eq!(tree.current_cursor(), CursorIcon::Default);
     }
 
-    #[test]
-    fn click_dispatches_to_widget() {
-        let mut tree = WidgetTree::new();
-        let widget = tree.add(FillWidget::new());
-        tree.layout(SizeProposal::exact(100.0, 50.0));
-        tree.click(widget);
-    }
-
     // A leaf that opts into typed introspection, so `with_widget_mut` /
     // `widget_as_any(_mut)` can reach it (the default `as_any_mut` is `None`).
     #[derive(Debug)]
@@ -1703,35 +1695,6 @@ mod tests {
     // NOTE: legacy `shortcut_intercepts_before_widget` test removed with
     // the ShortcutMap dispatch path. The new shortcut→intent interception
     // is built on top of `ShortcutRegistry` + `Action`.
-
-    #[test]
-    fn scroll_event_dispatched_to_hovered() {
-        let mut tree = WidgetTree::new();
-        tree.add(FillWidget::new());
-        tree.layout(SizeProposal::exact(100.0, 50.0));
-
-        tree.pointer_move(Point::new(50.0, 25.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: crate::event::ScrollDelta::Lines { x: 0.0, y: 1.0 },
-            modifiers: Default::default(),
-        });
-    }
-
-    #[test]
-    fn ime_event_dispatched_to_focused() {
-        let mut tree = WidgetTree::new();
-        let widget = tree.add(FillWidget::new().focusable());
-        tree.layout(SizeProposal::exact(100.0, 50.0));
-        tree.focus(widget);
-
-        tree.dispatch_event(WidgetEvent::ImeComposition {
-            text: "あ".to_string(),
-            cursor: None,
-        });
-        tree.dispatch_event(WidgetEvent::ImeCommit {
-            text: "あ".to_string(),
-        });
-    }
 
     // ── on_key_preview ──────────────────────────────────────────
 

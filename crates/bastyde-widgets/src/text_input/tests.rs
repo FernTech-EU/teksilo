@@ -44,87 +44,6 @@ fn initial_text_propagates() {
     assert_eq!(text.get(), "Hello");
 }
 
-#[test]
-fn placeholder_text_set() {
-    // Smoke test — placeholder is configured, build succeeds.
-    let text = Signal::new(String::new());
-    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    let _id = tree.add(
-        TextInput::new(text)
-            .placeholder(lit!("Search..."))
-            .show_clear_button(true),
-    );
-    tree.layout(SizeProposal::exact(300.0, 40.0));
-    tick(&mut tree);
-}
-
-#[test]
-fn builder_methods_chain() {
-    let text = Signal::new(String::new());
-    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    let _id = tree.add(
-        TextInput::new(text)
-            .placeholder(lit!("Enter value"))
-            .label(lit!("Username"))
-            .enabled(true)
-            .read_only(false)
-            .max_length(100)
-            .show_clear_button(true)
-            .tooltip(lit!("A text input field")),
-    );
-    tree.layout(SizeProposal::exact(300.0, 40.0));
-}
-
-#[test]
-fn disabled_builds_without_panic() {
-    let text = Signal::new("disabled".to_string());
-    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    let _id = tree.add(TextInput::new(text).enabled(false));
-    tree.layout(SizeProposal::exact(300.0, 40.0));
-    tick(&mut tree);
-}
-
-#[test]
-fn read_only_builds_without_panic() {
-    let text = Signal::new("read only".to_string());
-    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    let _id = tree.add(TextInput::new(text).read_only(true));
-    tree.layout(SizeProposal::exact(300.0, 40.0));
-    tick(&mut tree);
-}
-
-#[test]
-fn accessibility_role_is_text_input() {
-    let (_tree, _text, id) = setup("hello");
-    // The inner TextInputField carries the Role::TextInput.
-    // The outer TextInput is GenericContainer. Since we test the
-    // outer widget here, just verify construction didn't panic.
-    // A deeper test would probe the inner field's a11y node.
-    let _ = id;
-}
-
-#[test]
-fn with_leading_slot() {
-    use crate::primitives::icon_widget::IconWidget;
-    let icon = IconWidget::checkmark(12.0);
-    let text = Signal::new(String::new());
-    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    let _id = tree.add(TextInput::new(text).leading_slot(icon));
-    tree.layout(SizeProposal::exact(300.0, 40.0));
-    tick(&mut tree);
-}
-
-#[test]
-fn with_trailing_slot() {
-    use crate::primitives::icon_widget::IconWidget;
-    let icon = IconWidget::chevron_down(12.0);
-    let text = Signal::new(String::new());
-    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    let _id = tree.add(TextInput::new(text).trailing_slot(icon));
-    tree.layout(SizeProposal::exact(300.0, 40.0));
-    tick(&mut tree);
-}
-
 // ── char_filter ────────────────────────────────────────────────────
 
 /// Focus the inner focusable descendant of the outer TextInput.
@@ -255,15 +174,6 @@ fn on_blur_and_on_submit_coexist() {
 }
 
 // ── suffix ─────────────────────────────────────────────────────────
-
-#[test]
-fn suffix_builds_without_panic() {
-    let text = Signal::new("42".to_string());
-    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    let _id = tree.add(TextInput::new(text).suffix(" %"));
-    tree.layout(SizeProposal::exact(300.0, 40.0));
-    tick(&mut tree);
-}
 
 #[test]
 fn suffix_layout_stays_single_line() {

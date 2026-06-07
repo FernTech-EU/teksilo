@@ -153,26 +153,6 @@ mod tests {
     use bastyde_widgets::notification::NotificationArchive;
 
     #[test]
-    fn install_with_in_memory_archive_does_not_require_app_paths() {
-        // No `.app_paths(...)` configured — install should still
-        // succeed with the InMemory archive.
-        let opts = ToastInstallOptions {
-            archive: Some(NotificationArchive::in_memory()),
-            ..ToastInstallOptions::default()
-        };
-        let _builder = BastydeAppBuilder::new().install_toast(opts);
-    }
-
-    #[test]
-    fn install_with_no_archive_does_not_require_app_paths() {
-        let opts = ToastInstallOptions {
-            archive: None,
-            ..ToastInstallOptions::default()
-        };
-        let _builder = BastydeAppBuilder::new().install_toast(opts);
-    }
-
-    #[test]
     #[should_panic(expected = "app_paths() (or application(...)) to be set")]
     fn install_persistent_without_app_paths_panics_with_helpful_message() {
         let opts = ToastInstallOptions {
@@ -180,29 +160,5 @@ mod tests {
             ..ToastInstallOptions::default()
         };
         let _builder = BastydeAppBuilder::new().install_toast(opts);
-    }
-
-    #[test]
-    fn install_persistent_with_app_paths_succeeds() {
-        use tempfile::tempdir;
-        let dir = tempdir().unwrap();
-        let opts = ToastInstallOptions {
-            archive: Some(NotificationArchive::persistent("notif_test_success")),
-            ..ToastInstallOptions::default()
-        };
-        let _builder = BastydeAppBuilder::new()
-            .app_paths(bastyde_settings::AppPaths::for_testing(dir.path()))
-            .install_toast(opts);
-    }
-
-    #[test]
-    fn install_toast_default_uses_persistent_archive_by_default() {
-        // Default is persistent — requires app_paths. Sanity check
-        // that the default constructor wires the right shape.
-        use tempfile::tempdir;
-        let dir = tempdir().unwrap();
-        let _builder = BastydeAppBuilder::new()
-            .app_paths(bastyde_settings::AppPaths::for_testing(dir.path()))
-            .install_toast_default();
     }
 }

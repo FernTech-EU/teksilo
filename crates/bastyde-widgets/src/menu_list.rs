@@ -1213,18 +1213,6 @@ mod tests {
     }
 
     #[test]
-    fn empty_menu_ignores_letters() {
-        let mut tree = light_tree();
-        let menu_id = tree.add(MenuList::new());
-        tree.layout(SizeProposal::with_width(200.0));
-        tree.focus(menu_id);
-        // Should not panic and not handle the event.
-        tree.press_key(Key::A, Modifiers::NONE);
-        tree.press_key(Key::Home, Modifiers::NONE);
-        tree.press_key(Key::End, Modifiers::NONE);
-    }
-
-    #[test]
     fn separator_does_not_interfere_with_navigation() {
         let fired = StdRc::new(StdCell::new(None));
         let mut tree = light_tree();

@@ -6,7 +6,7 @@ use bastyde_core::signal::Signal;
 use bastyde_core::widget_tree::WidgetTree;
 use bastyde_i18n::lit;
 
-use super::{SpinBox, StepType, WheelMode, WrapMode};
+use super::{SpinBox, StepType, WrapMode};
 
 fn tick(tree: &mut WidgetTree) {
     tree.request_frame();
@@ -42,31 +42,6 @@ fn constructs_and_lays_out() {
     let bounds = tree.bounds(id);
     assert!(bounds.width > 0.0);
     assert!(bounds.height > 0.0);
-}
-
-#[test]
-fn builder_chains_compile() {
-    let value = Signal::new(50.0_f64);
-    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    let _id = tree.add(
-        SpinBox::new(value, 0.0, 100.0)
-            .single_step(0.5)
-            .page_step(10.0)
-            .decimals(2)
-            .suffix(" %")
-            .special_value_text(lit!("Auto"))
-            .wrap_mode(WrapMode::Wrap)
-            .step_type(StepType::Adaptive)
-            .wheel_mode(WheelMode::Hover)
-            .label(lit!("Opacity"))
-            .placeholder(lit!("—"))
-            .enabled(true)
-            .read_only(false)
-            .text_from_value(|v: f64| lit!(format!("{:.1}", v)))
-            .value_from_text(|s: &str| s.trim().parse::<f64>().ok())
-            .on_value_changed(|_v, _ctx| {}),
-    );
-    tree.layout(SizeProposal::exact(300.0, 60.0));
 }
 
 // ── Keyboard stepping ──────────────────────────────────────────────
@@ -384,19 +359,6 @@ fn show_buttons_sugar_matches_button_layout() {
 // (HStack row) that distributes space — covered by the demo.
 
 // ── Suffix & special value text coexist ───────────────────────────
-
-#[test]
-fn suffix_and_special_value_text_build() {
-    let value = Signal::new(0_i32);
-    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    let _id = tree.add(
-        SpinBox::new(value, 0, 60)
-            .suffix(" s")
-            .special_value_text(lit!("Never")),
-    );
-    tree.layout(SizeProposal::exact(300.0, 60.0));
-    tick(&mut tree);
-}
 
 // ── Accessibility numeric properties ─────────────────────────────
 

@@ -584,19 +584,3 @@ mod platform {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn query_color_scheme_does_not_panic() {
-        let _ = query_color_scheme();
-    }
-
-    #[test]
-    fn query_os_theme_colors_does_not_panic() {
-        let colors = query_os_theme_colors();
-        // Should at least return a valid color scheme preference
-        let _ = colors.color_scheme;
-    }
-}

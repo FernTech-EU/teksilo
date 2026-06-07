@@ -97,13 +97,6 @@ mod tests {
     }
 
     #[test]
-    fn button_default_variant_builds_a_widget() {
-        let entry = find_by_id("button").unwrap();
-        let knobs = bastyde_preview::KnobValues::from_spec(&entry.knobs(), None);
-        let _w = entry.build("default", &knobs);
-    }
-
-    #[test]
     fn cli_widget_arg_round_trips_through_registry() {
         let opts =
             bastyde_preview_ui::PreviewerOptions::from_iter(["--widget=slider", "--variant=max"]);

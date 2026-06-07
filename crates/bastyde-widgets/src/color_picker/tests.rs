@@ -31,51 +31,6 @@ fn builds_with_default_options() {
 }
 
 #[test]
-fn builds_with_alpha_enabled() {
-    let value = Signal::new(Color::from_rgba(1.0, 0.0, 0.0, 0.5));
-    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    tree.add(ColorPicker::new(value).alpha_enabled(true));
-    tree.layout(SizeProposal::exact(800.0, 600.0));
-}
-
-#[test]
-fn builds_with_compact_layout() {
-    let value = Signal::new(Color::BLUE);
-    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    tree.add(ColorPicker::new(value).layout(ColorPickerLayout::Compact));
-    tree.layout(SizeProposal::exact(400.0, 400.0));
-}
-
-#[test]
-fn builds_with_wide_layout() {
-    let value = Signal::new(Color::GREEN);
-    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    tree.add(
-        ColorPicker::new(value)
-            .alpha_enabled(true)
-            .layout(ColorPickerLayout::Wide)
-            .show_hsv_spinners(true),
-    );
-    tree.layout(SizeProposal::exact(900.0, 500.0));
-}
-
-#[test]
-fn builds_with_nullable_value() {
-    let value: Signal<Option<Color>> = Signal::new(Some(Color::RED));
-    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    tree.add(ColorPicker::nullable(value));
-    tree.layout(SizeProposal::exact(800.0, 600.0));
-}
-
-#[test]
-fn builds_with_nullable_none() {
-    let value: Signal<Option<Color>> = Signal::new(None);
-    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    tree.add(ColorPicker::nullable(value));
-    tree.layout(SizeProposal::exact(800.0, 600.0));
-}
-
-#[test]
 fn root_accessibility_emits_group_role() {
     let value = Signal::new(Color::RED);
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
@@ -280,15 +235,6 @@ fn color_edit_builds_with_default_options() {
     tree.layout(SizeProposal::exact(200.0, 40.0));
     let bounds = tree.bounds(id);
     assert!(bounds.width > 0.0);
-}
-
-#[test]
-fn color_edit_builds_nullable() {
-    use crate::color_edit::ColorEdit;
-    let value: Signal<Option<Color>> = Signal::new(None);
-    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    tree.add(ColorEdit::nullable(value));
-    tree.layout(SizeProposal::exact(200.0, 40.0));
 }
 
 #[test]

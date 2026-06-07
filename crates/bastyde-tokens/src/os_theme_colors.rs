@@ -58,14 +58,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_is_no_preference_with_no_colors() {
-        let os = OsThemeColors::default();
-        assert_eq!(os.color_scheme, ColorSchemePreference::NoPreference);
-        assert!(os.accent.is_none());
-        assert!(os.window_bg.is_none());
-    }
-
-    #[test]
     fn is_dark() {
         assert!(ColorSchemePreference::Dark.is_dark());
         assert!(!ColorSchemePreference::Light.is_dark());

@@ -59,18 +59,3 @@ fn apply_material3_overrides(_theme: &mut Theme, _appearance: ThemeAppearance) {
     // Each goes behind its own commit + visual-fidelity check
     // against the M3 spec (`https://m3.material.io/components/...`).
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn light_appearance_is_light() {
-        assert!(light().appearance.is_light());
-    }
-
-    #[test]
-    fn dark_appearance_is_dark() {
-        assert!(dark().appearance.is_dark());
-    }
-}

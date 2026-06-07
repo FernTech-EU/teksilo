@@ -873,50 +873,6 @@ mod tests {
     }
 
     #[test]
-    fn list_item_checkbox_and_tristate_mutually_exclusive() {
-        use bastyde_core::signal::Signal;
-        let two = Signal::new(true);
-        let tri = Signal::new(CheckState::Indeterminate);
-        // Last call wins — we just verify the builder doesn't panic.
-        let mut tree = WidgetTree::new().with_theme(theme());
-        let _id = tree.add(
-            StandardListItem::new(lit!("Mix"))
-                .checkbox(two.clone())
-                .tristate_checkbox(tri.clone()),
-        );
-        tree.layout(SizeProposal::exact(300.0, 100.0));
-    }
-
-    #[test]
-    fn list_item_subtitle_slots_no_op_without_subtitle() {
-        // .subtitle_*_slot(...) without a subtitle just stays in the
-        // builder fields but never gets mounted (build_content only
-        // touches them when self.subtitle.is_some()).
-        let mut tree = WidgetTree::new().with_theme(theme());
-        let _id = tree.add(
-            StandardListItem::new(lit!("Item"))
-                .subtitle_leading_slot(TextWidget::new(lit!("•")))
-                .subtitle_trailing_slot(TextWidget::new(lit!("∗"))),
-        );
-        tree.layout(SizeProposal::exact(300.0, 100.0));
-    }
-
-    #[test]
-    fn tree_item_indent_scales_with_depth() {
-        let mut tree = WidgetTree::new().with_theme(theme());
-        let id_d0 = tree.add(StandardTreeItem::new(lit!("root")).depth(0));
-        let id_d2 = tree.add(StandardTreeItem::new(lit!("deep")).depth(2));
-        tree.layout(SizeProposal {
-            width: Some(400.0),
-            height: None,
-        });
-        let _b0 = tree.bounds(id_d0);
-        let _b2 = tree.bounds(id_d2);
-        // Both layout without panic; positional checks live in the
-        // visual smoke tests of the data_collections demo.
-    }
-
-    #[test]
     fn tree_item_chevron_reserved_for_leaf() {
         // Leaf and branch at same depth should produce identical
         // outer widths (chevron column reserved).

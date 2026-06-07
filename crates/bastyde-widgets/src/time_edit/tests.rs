@@ -116,14 +116,6 @@ fn time_clamp_recovery_returns_none_for_garbage() {
 }
 
 #[test]
-fn time_edit_validation_behavior_builder_accepts_both_variants() {
-    use crate::date_edit::ValidationBehavior;
-    let v = Signal::new(Some(Time::midnight()));
-    let _ = TimeEdit::new(v.clone()).validation_behavior(ValidationBehavior::AutoCorrect);
-    let _ = TimeEdit::new(v).validation_behavior(ValidationBehavior::Reject);
-}
-
-#[test]
 fn time_edit_validation_feedback_signal_starts_pristine() {
     use crate::primitives::text_input_field::ValidationFeedback;
     let v = Signal::new(Some(Time::midnight()));

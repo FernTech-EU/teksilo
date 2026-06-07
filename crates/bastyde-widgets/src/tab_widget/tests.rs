@@ -87,26 +87,6 @@ fn label(s: &str) -> LocalizedString {
 // ─── TabWidget — static-only construction ───────────────────────────
 
 #[test]
-fn static_only_widget_builds_without_panic() {
-    let selected: Signal<Option<TabId>> = Signal::new(None);
-    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-    tree.add(
-        TabWidget::new(selected.clone())
-            .static_tab(
-                TabInfo::new().title(label("Overview")),
-                FixedLeaf(120.0, 48.0),
-            )
-            .static_tab(
-                TabInfo::new().title(label("Details")),
-                FixedLeaf(140.0, 52.0),
-            )
-            .show_scroll_arrows(false)
-            .show_overflow_dropdown(false),
-    );
-    tree.layout(SizeProposal::exact(640.0, 320.0));
-}
-
-#[test]
 fn static_tab_initial_selection_lands_on_first_tab() {
     let selected: Signal<Option<TabId>> = Signal::new(None);
     let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());

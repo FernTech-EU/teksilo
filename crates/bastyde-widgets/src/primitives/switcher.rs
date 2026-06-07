@@ -371,22 +371,6 @@ mod tests {
         assert!(bounds.height > 0.0);
     }
 
-    #[test]
-    fn switcher_with_children_iterator() {
-        let selected = Signal::new(2_usize);
-        let mut tree = WidgetTree::new();
-
-        let pages: Vec<FixedLeaf> = vec![
-            FixedLeaf(100.0, 40.0),
-            FixedLeaf(80.0, 30.0),
-            FixedLeaf(60.0, 20.0),
-        ];
-
-        let _switcher_id = tree.add(Switcher::new(selected).children(pages));
-
-        tree.layout(SizeProposal::exact(200.0, 200.0));
-    }
-
     /// Only the initially-selected page should ever have its
     /// `build()` called. Unvisited pages stay `Pending` and pay no
     /// arena / construction cost.

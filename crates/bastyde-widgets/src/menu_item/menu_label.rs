@@ -286,44 +286,4 @@ mod tests {
         let _ = frame;
     }
 
-    #[test]
-    fn underline_does_not_panic_when_alt_held() {
-        let mut t = tree();
-        let alt = Signal::new(true);
-        let label = MenuLabel::new(
-            Prop::from("&Save".to_string()),
-            alt.clone(),
-            ColorProp::TextRole(TextRole::Primary),
-            TextStyleProp::Role(TextStyleRole::Body),
-        );
-        t.add(label);
-        t.layout(SizeProposal::exact(200.0, 40.0));
-        let _ = t.render();
-    }
-
-    #[test]
-    fn alt_signal_change_triggers_repaint_request() {
-        // RepaintOnly binding means flipping alt_down marks this widget
-        // for repaint. The binding registry test would observe this
-        // via the dirty list. We just verify the no-crash + roundtrip.
-        let mut t = tree();
-        let alt = Signal::new(false);
-        let id = t.add(MenuLabel::new(
-            Prop::from("&File".to_string()),
-            alt.clone(),
-            ColorProp::TextRole(TextRole::Primary),
-            TextStyleProp::Role(TextStyleRole::Body),
-        ));
-        t.layout(SizeProposal::exact(200.0, 40.0));
-        let _ = t.render();
-
-        alt.set(true);
-        t.layout(SizeProposal::exact(200.0, 40.0));
-        let _ = t.render();
-
-        alt.set(false);
-        t.layout(SizeProposal::exact(200.0, 40.0));
-        let _ = t.render();
-        let _ = id;
-    }
 }

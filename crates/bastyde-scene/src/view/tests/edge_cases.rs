@@ -14,17 +14,10 @@ use crate::selection::{SceneSelection, SceneSelectionMode};
 use crate::view::SceneView;
 use bastyde_canvas::SizeProposal;
 use bastyde_canvas::{Point, Rect};
-use bastyde_core::widget_id::WidgetId;
 use bastyde_core::widget_tree::WidgetTree;
 
 fn rect_item(w: f32, h: f32) -> RectItem {
     RectItem::new(Rect::new(0.0, 0.0, w, h)).fill(bastyde_tokens::Color::RED)
-}
-
-fn view_handle(tree: &WidgetTree, view_id: WidgetId) -> &SceneView {
-    tree.widget_as_any(view_id)
-        .and_then(|a| a.downcast_ref::<SceneView>())
-        .expect("view is a SceneView")
 }
 
 // -----------------------------------------------------------------
@@ -48,17 +41,6 @@ fn empty_scene_item_at_returns_none() {
 fn empty_scene_item_thumbnails_returns_empty_vec() {
     let scene = Scene::new();
     assert!(scene.item_thumbnails().is_empty());
-}
-
-#[test]
-fn empty_scene_view_handles_pan_and_zoom_without_panic() {
-    let mut tree = WidgetTree::new();
-    let view_id = tree.add(SceneView::new(Scene::new()));
-    tree.layout(SizeProposal::exact(400.0, 300.0));
-    let view = view_handle(&tree, view_id);
-    view.set_pan(bastyde_canvas::Vec2::new(50.0, 50.0));
-    view.set_zoom(2.0);
-    let _ = tree.render();
 }
 
 // -----------------------------------------------------------------

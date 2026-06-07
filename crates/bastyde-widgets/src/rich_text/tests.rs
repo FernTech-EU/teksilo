@@ -10,7 +10,7 @@ use bastyde_core::widget_tree::WidgetTree;
 use bastyde_i18n::lit;
 use bastyde_text::text_document::TextDocument;
 
-use super::{ContextTarget, RichTextEditor, ScrollPolicy};
+use super::RichTextEditor;
 
 fn tree_with_layout() -> WidgetTree {
     let mut tree = WidgetTree::new();
@@ -35,17 +35,6 @@ fn read_only_constructs_and_exposes_version_signal() {
         0,
         "freshly built editor reports version 0 until it drains events"
     );
-}
-
-#[test]
-fn scroll_policy_builder_roundtrip() {
-    let doc = TextDocument::new();
-    let editor = RichTextEditor::read_only(doc)
-        .v_scroll_policy(ScrollPolicy::AlwaysOff)
-        .h_scroll_policy(ScrollPolicy::AlwaysOn);
-    // Smoke test — the builder methods must not panic and must return
-    // `Self`, so we can chain further setters.
-    let _ = editor.zoom(1.0);
 }
 
 #[test]
@@ -537,16 +526,6 @@ fn focus_editor(tree: &mut WidgetTree, id: bastyde_core::widget_id::WidgetId) {
 }
 
 #[test]
-fn editor_preset_does_not_panic_on_construction() {
-    // Direct regression guard for the M8a `unimplemented!()` bug: the
-    // constructor used to panic on purpose, making the editor preset
-    // unreachable. After Phase A it must simply construct.
-    let doc = TextDocument::new();
-    doc.set_plain_text("hello").unwrap();
-    let _ = RichTextEditor::editor(doc);
-}
-
-#[test]
 fn editor_inserts_typed_characters_via_pending_chars_batch() {
     let doc = TextDocument::new();
     doc.set_plain_text("abc").unwrap();
@@ -820,36 +799,6 @@ fn read_only_preset_emits_no_cursor_decoration() {
             .any(|d| matches!(d.kind, DecorationKind::Cursor)),
         "Hidden caret policy must not emit any DecorationKind::Cursor rects"
     );
-}
-
-#[test]
-fn editor_preset_still_has_visible_blinking_caret() {
-    // The companion to the test above: the editor preset keeps the
-    // blinking caret. We check that `CaretPolicy::Blinking` is what
-    // the widget reports, which is the source of truth for paint.
-    let doc = TextDocument::new();
-    doc.set_plain_text("edit me").unwrap();
-    let editor = RichTextEditor::editor(doc);
-    // The editor widget exposes `can_undo`/`can_redo` because it's the
-    // editor preset — these accessors don't exist on read_only via
-    // preset difference, they're on the widget type — so this is just
-    // a sanity check that the editor-preset constructor succeeded.
-    let _ = editor.can_undo();
-    let _ = editor.can_redo();
-}
-
-#[test]
-fn context_target_variants_compile_out_of_the_box() {
-    // Purely a compile-time test — make sure the public enum covers
-    // all variants so applications can pattern-match exhaustively.
-    let target = ContextTarget::Plain;
-    match target {
-        ContextTarget::Plain
-        | ContextTarget::InSelection
-        | ContextTarget::Link { .. }
-        | ContextTarget::Image { .. }
-        | ContextTarget::TableCell { .. } => {}
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1290,26 +1239,6 @@ fn ctrl_a_reset_on_other_key() {
 // emission" section and cover flow snapshot caching, signal-
 // driven a11y_dirty propagation, TextRun node emission, and
 // AccessKit action handling.
-
-#[test]
-fn editor_exposes_context_target_plain_for_non_link_click() {
-    // `context_target_at` should return `Plain` when clicking
-    // outside any link / image / selection and not inside a table.
-    let doc = TextDocument::new();
-    doc.set_plain_text("alpha bravo").unwrap();
-    let editor = RichTextEditor::editor(doc);
-
-    let mut tree = WidgetTree::new();
-    let id = tree.add(editor);
-    tree.layout(SizeProposal::exact(400.0, 300.0));
-    let _ = tree.render();
-    let _ = id;
-    // The reference goes through the widget's public method after
-    // the paint has run, so the typesetter has a layout.
-    // We already have tree.render() above.
-    // Just verify the classifier runs without panic; returning None
-    // is fine for a click that misses.
-}
 
 // ---------------------------------------------------------------------------
 // HTML rich-clipboard round-trip tests

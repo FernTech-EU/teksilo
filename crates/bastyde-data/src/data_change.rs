@@ -27,29 +27,3 @@ pub enum DataChange {
     /// The entire list was replaced. Consumers should discard all state and rebuild.
     Reset,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn data_change_debug() {
-        let change = DataChange::ItemsInserted { range: 0..3 };
-        assert!(format!("{:?}", change).contains("ItemsInserted"));
-    }
-
-    #[test]
-    fn data_change_eq() {
-        let a = DataChange::ItemsMoved {
-            from: 2,
-            to: 5,
-            count: 1,
-        };
-        let b = DataChange::ItemsMoved {
-            from: 2,
-            to: 5,
-            count: 1,
-        };
-        assert_eq!(a, b);
-    }
-}

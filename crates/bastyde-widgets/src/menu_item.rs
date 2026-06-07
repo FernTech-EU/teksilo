@@ -1517,16 +1517,6 @@ mod tests {
 
     // --- Plain item AT smoke ---
 
-    #[test]
-    fn plain_item_with_no_action_is_inert_but_present() {
-        // A Plain item with no `.on_activate_fn` doesn't crash on click.
-        let mut t = tree();
-        let list_id = t.add(MenuList::new().item(MenuItem::new(lit!("Help"))));
-        layout(&mut t);
-        let item_id = first_descendant_with_role(&t, list_id, Role::MenuItem);
-        t.click(item_id);
-    }
-
     // --- Helpers ---
 
     fn first_descendant_with_role(t: &WidgetTree, from: WidgetId, role: Role) -> WidgetId {

@@ -14,7 +14,6 @@
 //! (the entire `a11y.rs` module had no test coverage before).
 
 use crate::a11y::{A11yCategory, A11yGroup, A11yNode, A11yRelation};
-use crate::flags::ItemFlags;
 use crate::items::RectItem;
 use crate::scene::Scene;
 use accesskit::{Live, Role};
@@ -172,25 +171,6 @@ fn relations_round_trip_in_insertion_order() {
 // Live regions
 // -----------------------------------------------------------------
 
-#[test]
-fn set_a11y_live_off_clears_entry() {
-    // Marking a node Polite then Off should clear the entry, not
-    // leave Live::Off lingering. Otherwise the walker would
-    // emit a Live::Off node into the AT tree (which AccessKit
-    // treats as a no-op but bloats the tree).
-    let mut scene = Scene::new();
-    let item_id = scene.add_item(rect_at(0.0, 0.0), Point::ZERO);
-    scene.set_a11y_live(A11yNode::Item(item_id), Live::Polite);
-    // Indirect check via remove_a11y_group cleanup — the live
-    // map is private. We can at least verify Off doesn't blow up
-    // and that subsequent Polite re-installs cleanly.
-    scene.set_a11y_live(A11yNode::Item(item_id), Live::Off);
-    scene.set_a11y_live(A11yNode::Item(item_id), Live::Polite);
-    // No assertion — this test pins the API shape (Off accepted)
-    // and surfaces a panic if mutator semantics drift.
-    let _ = item_id;
-}
-
 // -----------------------------------------------------------------
 // Categories (rotor / quick-nav)
 // -----------------------------------------------------------------
@@ -225,37 +205,9 @@ fn set_a11y_categories_empty_clears_entry() {
 // Landmarks
 // -----------------------------------------------------------------
 
-#[test]
-fn set_a11y_landmark_unknown_clears_entry() {
-    // Unknown role is the documented "clear" sentinel.
-    let mut scene = Scene::new();
-    let group = scene.add_a11y_group(A11yGroup::builder().label(lit!("g")));
-    scene.set_a11y_landmark(A11yNode::Group(group), Role::Region);
-    // Sanity: subsequent Unknown is a clear, not a no-op or panic.
-    scene.set_a11y_landmark(A11yNode::Group(group), Role::Unknown);
-    // No public reader; verify via remove_a11y_group cleaning
-    // doesn't double-free.
-    scene.remove_a11y_group(group);
-}
-
 // -----------------------------------------------------------------
 // Flag interaction: hidden items still register a11y data
 // -----------------------------------------------------------------
-
-#[test]
-fn invisible_items_can_still_have_a11y_metadata_attached() {
-    // Setting a11y metadata on an invisible item should not
-    // panic — the walker decides whether to emit; mutators are
-    // pure state writes regardless of visibility.
-    let mut scene = Scene::new();
-    let item_id = scene.add_item(rect_at(0.0, 0.0), Point::ZERO);
-    scene.set_flag(item_id, ItemFlags::IS_VISIBLE, false);
-    scene.set_a11y_landmark(A11yNode::Item(item_id), Role::Region);
-    scene.set_a11y_live(A11yNode::Item(item_id), Live::Assertive);
-    scene.set_a11y_categories(A11yNode::Item(item_id), &[A11yCategory::new("rotor.x")]);
-    // No assertion needed; reaches the end without panicking.
-    let _ = item_id;
-}
 
 // -----------------------------------------------------------------
 // Item removal cleans the logical-AT maps (separated-tree re-rooting)

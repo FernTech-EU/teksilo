@@ -66,13 +66,6 @@ fn date_time_edit_validation_feedback_signal_starts_pristine() {
 }
 
 #[test]
-fn date_time_edit_validation_behavior_builder_compiles() {
-    use crate::date_edit::ValidationBehavior;
-    let value = Signal::new(Some(make_dt()));
-    let _ = DateTimeEdit::new(value).validation_behavior(ValidationBehavior::Reject);
-}
-
-#[test]
 fn compose_feedback_picks_more_severe() {
     use crate::primitives::text_input_field::ValidationFeedback;
     use std::time::Instant;

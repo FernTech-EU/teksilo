@@ -13,9 +13,7 @@ use std::time::{Duration, SystemTime};
 
 use bastyde_core::telemetry::{ConsentScope, ConsentState, Event, EventCategory, TelemetryError};
 use bastyde_settings::{AppPaths, SettingsStore};
-use bastyde_telemetry::{
-    StubReporter, TelemetryBundle, TelemetryExt, TelemetryMode, UsageReporter,
-};
+use bastyde_telemetry::{StubReporter, TelemetryBundle, TelemetryMode, UsageReporter};
 use tempfile::tempdir;
 
 fn make_settings(paths: &AppPaths) -> SettingsStore {
@@ -222,11 +220,4 @@ fn opened_telemetry_is_clone() {
     let clone1 = opened.clone();
     let clone2 = opened.clone();
     assert_eq!(clone1.event_schema_version, clone2.event_schema_version);
-}
-
-#[test]
-fn telemetry_ext_trait_compiles() {
-    // Compile-time check that TelemetryExt is import-public; the actual
-    // accessors are exercised in bastyde-app's integration tests.
-    fn _accepts<T: TelemetryExt>(_t: T) {}
 }

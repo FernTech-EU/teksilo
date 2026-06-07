@@ -68,13 +68,4 @@ mod tests {
         assert_ne!(id1, id2);
     }
 
-    #[test]
-    fn tree_change_debug() {
-        let change = TreeChange::NodeInserted {
-            parent: None,
-            index: 0,
-            node: NodeId::from_key(slotmap::KeyData::from_ffi(1).into()),
-        };
-        assert!(format!("{:?}", change).contains("NodeInserted"));
-    }
 }

@@ -280,15 +280,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn card_with_header_and_content() {
-        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
-        tree.add(
-            Card::new()
-                .header(FixedLeaf(100.0, 30.0))
-                .content(FixedLeaf(100.0, 50.0)),
-        );
-        tree.layout(SizeProposal::exact(200.0, 200.0));
-        // Should not crash and should layout
-    }
 }

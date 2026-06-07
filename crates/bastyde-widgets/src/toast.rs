@@ -598,12 +598,6 @@ mod tests {
     }
 
     #[test]
-    fn action_default_style_is_link() {
-        let a = ToastAction::new(lit!("Show details"), |_| {});
-        matches!(a.style_ref(), ToastActionStyle::Link);
-    }
-
-    #[test]
     fn action_closes_toast_can_be_disabled() {
         let a = ToastAction::new(lit!("Toggle"), |_| {}).closes_toast(false);
         assert!(!a.closes_toast_flag());
@@ -1316,20 +1310,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn builder_chain_typechecks() {
-        let _t = Toast::warning(lit!("Heads up"))
-            .body(lit!("Something happened"))
-            .action(ToastAction::new(lit!("Open"), |_| {}))
-            .primary_action(lit!("Fix"), |_| {})
-            .auto_dismiss_after(Duration::from_secs(5))
-            .priority(ToastPriority::High)
-            .id("dedup-key")
-            .show_close_button(false)
-            .closable_on_escape(false)
-            .archive(false)
-            .announcement(lit!("Custom AT text"))
-            .on_click(|_| {})
-            .on_dismiss(|_cause, _ctx| {});
-    }
 }

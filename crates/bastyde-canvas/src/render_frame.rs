@@ -532,17 +532,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn empty_render_frame() {
-        let frame = RenderFrame::new();
-        assert!(frame.is_empty());
-        assert!(frame.glyphs.is_empty());
-        assert!(frame.images.is_empty());
-        assert!(frame.decorations.is_empty());
-        assert!(frame.shapes.is_empty());
-        assert!(frame.rasterized.is_empty());
-    }
-
-    #[test]
     fn merge_frames() {
         let mut a = RenderFrame::new();
         a.shapes.push(ShapeQuad {

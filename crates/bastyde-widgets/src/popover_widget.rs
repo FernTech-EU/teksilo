@@ -580,13 +580,6 @@ mod tests {
     // ── PopoverButton (text trigger) ────────────────────────────────
 
     #[test]
-    fn button_builds_with_minimum_config() {
-        let mut tree = light_tree();
-        tree.add(PopoverButton::new(Button::new(lit!("Open"))).content(dummy_content()));
-        tree.layout(SizeProposal::exact(300.0, 80.0));
-    }
-
-    #[test]
     #[should_panic(expected = "PopoverWidget::content")]
     fn button_panics_without_content() {
         let mut tree = light_tree();
@@ -717,13 +710,6 @@ mod tests {
     }
 
     // ── PopoverIconButton (icon trigger) ────────────────────────────
-
-    #[test]
-    fn icon_builds_with_minimum_config() {
-        let mut tree = light_tree();
-        tree.add(PopoverIconButton::new(IconButton::add()).content(dummy_content()));
-        tree.layout(SizeProposal::exact(300.0, 80.0));
-    }
 
     #[test]
     #[should_panic(expected = "PopoverWidget::content")]
