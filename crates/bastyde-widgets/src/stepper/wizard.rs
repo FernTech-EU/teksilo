@@ -1,0 +1,303 @@
+//! [`Wizard`] — a thin modal launcher around [`Stepper`](super::Stepper).
+//!
+//! Renders as a button (or a custom `.trigger(...)` widget) that opens a modal
+//! containing a `Stepper` built from the same [`Step`]s. The modal's Cancel and
+//! a wrapped Finish both dismiss it.
+
+use std::rc::Rc;
+
+use bastyde_canvas::{Rect, SizeProposal};
+use bastyde_core::accessibility::AccessNodeBuilder;
+use bastyde_core::build_context::BuildContext;
+use bastyde_core::event::{EventResponse, Key, WidgetEvent};
+use bastyde_core::modal::{ModalCloseBehavior, ModalPresentation, ModalRequest};
+use bastyde_core::widget::{
+    CursorIcon, EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement,
+};
+use bastyde_core::widget_builder::HandlerSet;
+use bastyde_core::widget_id::WidgetId;
+use bastyde_i18n::{LocalizedString, lit};
+
+use super::controller::StepperController;
+use super::step::Step;
+use super::Stepper;
+use crate::button::{Button, ButtonVariant};
+use crate::dialog::ModalContainer;
+use crate::overlay_trigger::OverlayTrigger;
+
+const DEFAULT_WIZARD_WIDTH: u32 = 640;
+const DEFAULT_WIZARD_HEIGHT: u32 = 460;
+
+type FinishAction = Rc<dyn Fn(&mut EventContext, &StepperController)>;
+
+/// The shared, cloneable modal recipe captured by the trigger handlers.
+struct WizardSpec {
+    title: LocalizedString,
+    steps: Vec<Step>,
+    presentation: ModalPresentation,
+    close_behavior: ModalCloseBehavior,
+    size: (u32, u32),
+    non_linear: bool,
+    back_label: LocalizedString,
+    next_label: LocalizedString,
+    finish_label: LocalizedString,
+    skip_label: LocalizedString,
+    cancel_label: LocalizedString,
+    finish_action: Option<FinishAction>,
+}
+
+fn present_wizard(spec: &Rc<WizardSpec>, ctx: &mut EventContext) {
+    if spec.steps.is_empty() {
+        return;
+    }
+    let spec = spec.clone();
+    let presentation = spec.presentation;
+    let close_behavior = spec.close_behavior;
+    let (w, h) = spec.size;
+    let title = spec.title.resolve_now();
+    ctx.present_modal(
+        ModalRequest::deferred(move |tree| {
+            let finish = spec.finish_action.clone();
+            let stepper = Stepper::new()
+                .steps(spec.steps.clone())
+                .non_linear(spec.non_linear)
+                .back_label(spec.back_label.clone())
+                .next_label(spec.next_label.clone())
+                .finish_label(spec.finish_label.clone())
+                .skip_label(spec.skip_label.clone())
+                .cancel(spec.cancel_label.clone(), |ctx, _ctrl| ctx.dismiss_modal())
+                .on_finish(move |ctx, ctrl| {
+                    if let Some(action) = &finish {
+                        action(ctx, ctrl);
+                    }
+                    ctx.dismiss_modal();
+                });
+            tree.add(ModalContainer::boxed(Box::new(stepper)))
+        })
+        .presentation(presentation)
+        .close_behavior(close_behavior)
+        .title(title)
+        .size(w, h),
+    );
+}
+
+/// A button (or custom trigger) that opens a modal [`Stepper`](super::Stepper).
+pub struct Wizard {
+    label: LocalizedString,
+    variant: ButtonVariant,
+    enabled: bool,
+    presentation: ModalPresentation,
+    close_behavior: ModalCloseBehavior,
+    size: (u32, u32),
+    non_linear: bool,
+    steps: Vec<Step>,
+    back_label: LocalizedString,
+    next_label: LocalizedString,
+    finish_label: LocalizedString,
+    skip_label: LocalizedString,
+    cancel_label: LocalizedString,
+    finish_action: Option<FinishAction>,
+    pending_trigger: Option<Box<dyn Widget>>,
+    root_child_id: Option<WidgetId>,
+}
+
+impl Wizard {
+    pub fn new(label: impl Into<LocalizedString>) -> Self {
+        Self {
+            label: label.into(),
+            variant: ButtonVariant::Filled,
+            enabled: true,
+            presentation: ModalPresentation::Auto,
+            close_behavior: ModalCloseBehavior::Manual,
+            size: (DEFAULT_WIZARD_WIDTH, DEFAULT_WIZARD_HEIGHT),
+            non_linear: false,
+            steps: Vec::new(),
+            back_label: lit!("Back"),
+            next_label: lit!("Next"),
+            finish_label: lit!("Finish"),
+            skip_label: lit!("Skip"),
+            cancel_label: lit!("Cancel"),
+            finish_action: None,
+            pending_trigger: None,
+            root_child_id: None,
+        }
+    }
+
+    pub fn step(mut self, step: Step) -> Self {
+        self.steps.push(step);
+        self
+    }
+    pub fn steps(mut self, steps: impl IntoIterator<Item = Step>) -> Self {
+        self.steps.extend(steps);
+        self
+    }
+    pub fn variant(mut self, variant: ButtonVariant) -> Self {
+        self.variant = variant;
+        self
+    }
+    pub fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+    pub fn non_linear(mut self, non_linear: bool) -> Self {
+        self.non_linear = non_linear;
+        self
+    }
+    pub fn presentation(mut self, presentation: ModalPresentation) -> Self {
+        self.presentation = presentation;
+        self
+    }
+    pub fn close_behavior(mut self, close_behavior: ModalCloseBehavior) -> Self {
+        self.close_behavior = close_behavior;
+        self
+    }
+    pub fn size(mut self, width: u32, height: u32) -> Self {
+        self.size = (width, height);
+        self
+    }
+    pub fn back_label(mut self, label: impl Into<LocalizedString>) -> Self {
+        self.back_label = label.into();
+        self
+    }
+    pub fn next_label(mut self, label: impl Into<LocalizedString>) -> Self {
+        self.next_label = label.into();
+        self
+    }
+    pub fn finish_label(mut self, label: impl Into<LocalizedString>) -> Self {
+        self.finish_label = label.into();
+        self
+    }
+    pub fn skip_label(mut self, label: impl Into<LocalizedString>) -> Self {
+        self.skip_label = label.into();
+        self
+    }
+    pub fn cancel_label(mut self, label: impl Into<LocalizedString>) -> Self {
+        self.cancel_label = label.into();
+        self
+    }
+    pub fn on_finish(
+        mut self,
+        action: impl Fn(&mut EventContext, &StepperController) + 'static,
+    ) -> Self {
+        self.finish_action = Some(Rc::new(action));
+        self
+    }
+    pub fn trigger(mut self, trigger: impl Widget + 'static) -> Self {
+        self.pending_trigger = Some(Box::new(trigger));
+        self
+    }
+
+    fn spec(&self) -> Rc<WizardSpec> {
+        Rc::new(WizardSpec {
+            title: self.label.clone(),
+            steps: self.steps.clone(),
+            presentation: self.presentation,
+            close_behavior: self.close_behavior,
+            size: self.size,
+            non_linear: self.non_linear,
+            back_label: self.back_label.clone(),
+            next_label: self.next_label.clone(),
+            finish_label: self.finish_label.clone(),
+            skip_label: self.skip_label.clone(),
+            cancel_label: self.cancel_label.clone(),
+            finish_action: self.finish_action.clone(),
+        })
+    }
+}
+
+impl std::fmt::Debug for Wizard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Wizard")
+            .field("label", &self.label)
+            .field("steps", &self.steps.len())
+            .finish()
+    }
+}
+
+impl Widget for Wizard {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let enabled = self.enabled;
+        let spec = self.spec();
+
+        let root_id = if let Some(trigger) = self.pending_trigger.take() {
+            let handlers = HandlerSet::new()
+                .focusable(true)
+                .cursor(CursorIcon::Pointer)
+                .on_tap({
+                    let spec = spec.clone();
+                    move |_pos, ctx| {
+                        if enabled {
+                            present_wizard(&spec, ctx);
+                        }
+                    }
+                })
+                .on_key({
+                    let spec = spec.clone();
+                    move |event, ctx| match event {
+                        WidgetEvent::KeyUp {
+                            key: Key::Enter | Key::Space,
+                            ..
+                        } if enabled => {
+                            present_wizard(&spec, ctx);
+                            EventResponse::Handled
+                        }
+                        _ => EventResponse::Ignored,
+                    }
+                })
+                .on_access_action({
+                    let spec = spec.clone();
+                    move |action, ctx| {
+                        if action == bastyde_core::accesskit::Action::Click && enabled {
+                            present_wizard(&spec, ctx);
+                            EventResponse::Handled
+                        } else {
+                            EventResponse::Ignored
+                        }
+                    }
+                });
+            ctx.add(OverlayTrigger::new(trigger, handlers).name(self.label.clone()))
+        } else {
+            ctx.add(
+                Button::new(self.label.clone())
+                    .variant(self.variant)
+                    .enabled(enabled)
+                    .on_activate_fn(move |ctx| {
+                        if enabled {
+                            present_wizard(&spec, ctx);
+                        }
+                    }),
+            )
+        };
+
+        self.root_child_id = Some(root_id);
+        vec![root_id]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        self.root_child_id
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(140.0, 40.0))
+            .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(bastyde_core::accesskit::Role::GenericContainer);
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.root_child_id.into_iter().collect()
+    }
+}

@@ -39,9 +39,8 @@ a11y-window-minimize-name = Minimize
 a11y-window-maximize-name = Maximize
 a11y-window-restore-name = Restore
 a11y-window-close-name = Close
-a11y-wizard-progress-name = Wizard progress
-a11y-wizard-content-name = Wizard content
-wizard-step-counter = Step { $index } of { $total }
+a11y-stepper-indicator-strip-name = Steps
+a11y-stepper-content-name = Step content
 tab-close-tooltip = Close tab
 a11y-builtin-browse = Browse
 a11y-builtin-expand = Expand
@@ -114,6 +113,7 @@ messagebox-show-details = Show details
 # disclosure plus action buttons. Param-bearing keys use Fluent
 # variable syntax `{ $name }`.
 privacy-not-configured = Telemetry is not configured for this application.
+privacy-a11y-group-name = Privacy & Telemetry settings
 privacy-heading = Privacy & Telemetry
 privacy-notice-controller = Data is processed by { $processor }; the technical processor is { $adapter } (endpoint: { $endpoint }).
 privacy-notice-purposes = Purposes: improve the application — which features are used, where bugs cluster, what platforms we run on. No content of documents, no clipboard, no keystrokes, no screen captures.

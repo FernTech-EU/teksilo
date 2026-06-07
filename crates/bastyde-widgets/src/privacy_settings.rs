@@ -254,7 +254,8 @@ impl Widget for PrivacySettings {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(bastyde_core::accesskit::Role::Group);
-        builder.set_name("Privacy & Telemetry settings");
+        // Locale-reactive: the AT walker re-resolves on a locale change.
+        builder.set_name(tr_widget!(privacy_a11y_group_name()).resolve_now());
     }
 }
 
@@ -776,4 +777,77 @@ fn build_inspect_accordion(telemetry: &OpenedTelemetry, n: usize) -> Accordion {
         Signal::new(false),
     )
     .content(Padding::uniform(10.0).child(body))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bastyde_canvas::SizeProposal;
+    use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::{
+        I18nConfig, I18nManager, LanguageIdentifier,
+        thread_local::{clear, install},
+    };
+
+    /// Resolve the accessibility name of the single `Role::Group`
+    /// container node the widget emits.
+    fn group_name(tree: &mut WidgetTree) -> String {
+        let update = tree.sync_accessibility();
+        let group = update
+            .nodes
+            .iter()
+            .find(|(_, n)| n.role() == bastyde_core::accesskit::Role::Group)
+            .expect("PrivacySettings emits a Role::Group container");
+        group.1.label().unwrap_or("").to_string()
+    }
+
+    /// The container exposes `Role::Group` with a non-empty accessible
+    /// name. Uses the no-telemetry placeholder path (the `accessibility`
+    /// impl runs regardless of `OpenedTelemetry`). Resolution goes through
+    /// the real framework widget bundle (`tr_widget!`).
+    #[test]
+    fn container_has_group_role_and_name() {
+        clear();
+        let cfg = I18nConfig::test_only("en-US", &[]).framework_locales(crate::framework_locales());
+        install(I18nManager::from_config(&cfg));
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        tree.add(PrivacySettings::new());
+        tree.layout(SizeProposal::exact(600.0, 400.0));
+
+        assert_eq!(group_name(&mut tree), "Privacy & Telemetry settings");
+        clear();
+    }
+
+    /// Regression for the hardcoded-English bug: the accessible name is
+    /// locale-reactive — switching the locale re-resolves it through
+    /// `tr_widget!` against the framework widget bundle instead of
+    /// returning a frozen literal.
+    #[test]
+    fn a11y_name_is_locale_reactive() {
+        clear();
+        let cfg = I18nConfig::test_only("en-US", &[])
+            .with_locale("fr-FR", &[])
+            .framework_locales(crate::framework_locales());
+        let mgr = I18nManager::from_config(&cfg);
+        install(mgr.clone());
+
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        tree.add(PrivacySettings::new());
+        tree.layout(SizeProposal::exact(600.0, 400.0));
+        assert_eq!(group_name(&mut tree), "Privacy & Telemetry settings");
+
+        let fr: LanguageIdentifier = "fr-FR".parse().unwrap();
+        mgr.set_locale(fr);
+        // Tell the tree the locale changed so it re-emits the AT cache.
+        tree.set_locale("fr-FR".to_string());
+        tree.layout(SizeProposal::exact(600.0, 400.0));
+
+        assert_eq!(
+            group_name(&mut tree),
+            "Paramètres de confidentialité et de télémétrie",
+            "container name must re-resolve on locale change"
+        );
+        clear();
+    }
 }

@@ -76,6 +76,7 @@ pub mod snackbar;
 pub mod spin_box;
 pub mod spinner;
 pub mod split_button;
+pub mod stepper;
 pub mod split_view;
 pub mod standard_item;
 pub mod status_bar;
@@ -92,7 +93,6 @@ pub mod toolbar;
 pub mod tooltip;
 pub mod tree_table;
 pub mod tree_view;
-pub mod wizard;
 
 #[cfg(feature = "preview")]
 mod preview_catalog;
@@ -185,6 +185,9 @@ pub use spin_box::{
 };
 pub use spinner::Spinner;
 pub use split_button::SplitButton;
+pub use stepper::{
+    ChromePosition, Step, StepStatus, Stepper, StepperController, StepperOrientation, Wizard,
+};
 pub use split_view::SplitView;
 pub use standard_item::{StandardListItem, StandardTreeItem};
 pub use status_bar::StatusBar;
@@ -211,7 +214,6 @@ pub use toolbar::{
 };
 pub use tree_table::TreeTable;
 pub use tree_view::{TreeRowContext, TreeView};
-pub use wizard::{Wizard, WizardStep};
 
 /// The framework bundle: bastyde-widgets' own translatable strings, grouped
 /// by locale. Registered by applications via

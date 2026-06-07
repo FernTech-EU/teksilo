@@ -26,9 +26,8 @@ a11y-window-minimize-name = Réduire
 a11y-window-maximize-name = Agrandir
 a11y-window-restore-name = Restaurer
 a11y-window-close-name = Fermer
-a11y-wizard-progress-name = Progression de l'assistant
-a11y-wizard-content-name = Contenu de l'assistant
-wizard-step-counter = Étape { $index } sur { $total }
+a11y-stepper-indicator-strip-name = Étapes
+a11y-stepper-content-name = Contenu de l'étape
 tab-close-tooltip = Fermer l'onglet
 a11y-builtin-browse = Parcourir
 a11y-builtin-expand = Agrandir
@@ -98,6 +97,7 @@ messagebox-show-details = Afficher les détails
 # Mention d'information RGPD Art. 13 + boutons d'action. Les clés à
 # paramètres utilisent la syntaxe Fluent { $nom }.
 privacy-not-configured = La télémétrie n'est pas configurée pour cette application.
+privacy-a11y-group-name = Paramètres de confidentialité et de télémétrie
 privacy-heading = Confidentialité et télémétrie
 privacy-notice-controller = Les données sont traitées par { $processor } ; le sous-traitant technique est { $adapter } (point de collecte : { $endpoint }).
 privacy-notice-purposes = Finalités : amélioration de l'application — quelles fonctionnalités sont utilisées, où se concentrent les bugs, sur quelles plates-formes l'application tourne. Aucun contenu de document, ni presse-papiers, ni frappe clavier, ni capture d'écran.

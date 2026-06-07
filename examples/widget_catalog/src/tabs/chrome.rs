@@ -2,8 +2,8 @@
 
 use bastyde::prelude::*;
 use bastyde::widgets::{
-    Banner, Breadcrumb, BreadcrumbItem, Button, ButtonVariant, Divider, HStack, StatusBar,
-    TextWidget, Toolbar, VStack, Wizard, WizardStep,
+    Banner, Breadcrumb, BreadcrumbItem, Button, ButtonVariant, Divider, FixedSize, HStack,
+    StatusBar, Step, Stepper, TextWidget, Toolbar, VStack, Wizard,
 };
 
 use crate::shared::{Signals, section, tab_header};
@@ -19,21 +19,56 @@ pub fn refs() -> LocalizedString {
 fn make_wizard() -> Wizard {
     Wizard::new(tr!(chr_wizard_title()))
         .step(
-            WizardStep::new(tr!(chr_wizard_step1())).content(|| {
+            Step::new(tr!(chr_wizard_step1())).content(|| {
                 TextWidget::new(tr!(chr_wizard_step1_body())).style(TextStyleRole::Body)
             }),
         )
         .step(
-            WizardStep::new(tr!(chr_wizard_step2())).content(|| {
+            Step::new(tr!(chr_wizard_step2())).content(|| {
                 TextWidget::new(tr!(chr_wizard_step2_body())).style(TextStyleRole::Body)
             }),
         )
         .step(
-            WizardStep::new(tr!(chr_wizard_step3())).content(|| {
+            Step::new(tr!(chr_wizard_step3())).content(|| {
                 TextWidget::new(tr!(chr_wizard_step3_body())).style(TextStyleRole::Body)
             }),
         )
         .trigger(Button::new(tr!(chr_wizard_trigger())).variant(ButtonVariant::Filled))
+}
+
+/// Embedded (inline) modern Stepper: a visible indicator strip, non-linear
+/// navigation, a per-step validation gate, and an optional step with Skip.
+/// Demonstrates the data-flow pattern — step content writes a `Signal`,
+/// `complete_when` derives the Next gate from it.
+fn make_stepper() -> Stepper {
+    let gate = Signal::new(false);
+    let gate_for_step = gate.clone();
+    Stepper::new()
+        .non_linear(true)
+        .step(
+            Step::new(lit!("Account"))
+                .supporting_text(lit!("Complete this step to continue"))
+                .content(move || {
+                    let gate = gate_for_step.clone();
+                    Button::new(lit!("Mark step complete"))
+                        .variant(ButtonVariant::Tinted)
+                        .on_activate_fn(move |_ctx| gate.set(true))
+                })
+                .complete_when(gate),
+        )
+        .step(
+            Step::new(lit!("Preferences"))
+                .optional(true)
+                .content(|| {
+                    TextWidget::new(lit!("This step is optional — Skip is offered."))
+                        .style(TextStyleRole::Body)
+                }),
+        )
+        .step(
+            Step::new(lit!("Review"))
+                .content(|| TextWidget::new(lit!("All set — press Finish.")).style(TextStyleRole::Body)),
+        )
+        .help(lit!("Help"), |_ctx, _ctrl| {})
 }
 
 pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
@@ -89,6 +124,11 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .item(BreadcrumbItem::current(tr!(chr_breadcrumb_current()))),
     );
     let wizard = section(ctx, lit!("Wizard"), make_wizard());
+    let stepper = section(
+        ctx,
+        lit!("Stepper (embedded)"),
+        FixedSize::new().bind_height(220.0).child(make_stepper()),
+    );
 
     ctx.add(
         VStack::new()
@@ -99,7 +139,8 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .add_child(status_bar)
             .add_child(banners)
             .add_child(breadcrumb)
-            .add_child(wizard),
+            .add_child(wizard)
+            .add_child(stepper),
     )
 }
 
@@ -109,6 +150,7 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     // bati! Type::ctor(args) { method: value }. Wizard takes nested
     // steps with closures — pre-register.
     let wizard_widget = ctx.add(make_wizard());
+    let stepper_widget = ctx.add(FixedSize::new().bind_height(220.0).child(make_stepper()));
 
     bati!(ctx => VStack {
             spacing: 20.0
@@ -205,6 +247,15 @@ pub fn bati(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 #{ wizard_widget }
+            }
+
+            VStack {
+                spacing: 6.0
+                TextWidget::new(lit!("Stepper (embedded)")) {
+                    style: TextStyleRole::SmallBold
+                    color: TextRole::Accent
+                }
+                #{ stepper_widget }
             }
         }
     )

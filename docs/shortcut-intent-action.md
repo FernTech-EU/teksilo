@@ -691,6 +691,7 @@ impl Widget for Root {
 | Disable reactively                         | `.enabled_when(signal)`                                              |
 | Composite predicate (AND/OR/NOT)           | `a.and(&b.not())`, `a.or(&b)`, `s.not()` on `Signal<bool>`           |
 | Tuple multi-source signal                  | `a.zip(&b)`, `a.zip3(&b, &c)`                                        |
+| Switch to a selected inner signal          | `selector.flat_map(\|t\| inner_signal(t))`                          |
 | Consume when disabled                      | `.propagate_when_disabled(false)`                                    |
 | Declare a handler                          | `Action::new("id").on_invoke(\|intent, ctx\| …)`                     |
 | Propagate after observing                  | `.on_invoke_with_response(\|i, c\| IntentResponse::Propagated)`      |

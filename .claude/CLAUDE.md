@@ -280,6 +280,7 @@ HStack::new()
 
 - `Signal<T>` — unified reactive type. `Signal::new(value)` for mutable, `signal.map(|v| ...)` for derived
 - Multi-source combinators: `a.zip(&b)` / `a.zip3(&b, &c)` on any `Signal<T: Clone>`; `a.and(&b)` / `a.or(&b)` / `s.not()` on `Signal<bool>`. Derived signals dirty-track **every** upstream root, so widgets binding to a composite predicate re-render on any source change.
+- Switch/bind combinator: `selector.flat_map(|t| pick_signal(t))` returns a `Signal<U>` whose value **and** dirty-tracking follow the inner signal chosen by the closure from `selector`'s current value; when `selector` changes it re-selects and follows the new inner (reactive "switchLatest"). Binding stays O(1) via a single composite source that resolves the active inner on each dirty-poll. Use to track the *active* item's reactive flag out of a set — e.g. gate a Next button on the currently-shown step's completion `Signal<bool>`.
 - `Prop<T>` — widget property type: `Prop::Static(T)` or `Prop::Bound(Signal<T>)`. Methods accept `impl Into<Prop<T>>`
 - `ColorProp` / `TextStyleProp` — theme-aware prop types for colors and text styles. See **Theming** below.
 - `ObserverHandle` — RAII guard. Dropping removes the callback (no memory leak)

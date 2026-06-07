@@ -541,6 +541,80 @@ impl<T: Clone + 'static> Signal<T> {
         }
     }
 
+    /// Switch / bind: derive a signal whose value **and** dirty-tracking
+    /// follow the inner `Signal<U>` selected by `f` from this signal's
+    /// current value. When *this* signal changes, `f` re-selects a
+    /// (possibly different) inner signal and the result follows that one
+    /// instead — the classic reactive "switchLatest" combinator.
+    ///
+    /// Unlike [`map`](Self::map), the result depends on an inner source
+    /// that is chosen dynamically, so it exposes a **single composite
+    /// `DerivedSource`** whose dirty/clear evaluate the currently-selected
+    /// inner each time they are polled. Binding registration stays O(1)
+    /// regardless of how many distinct inner signals `f` may return.
+    ///
+    /// Typical use — track the *active* item's reactive flag out of a set:
+    ///
+    /// ```ignore
+    /// // disable Next until the currently-shown step's gate is satisfied
+    /// let gate = current_step.flat_map(move |i| completion[*i].clone());
+    /// ctx.enabled_when(next_id, gate);
+    /// ```
+    pub fn flat_map<U: Clone + 'static>(
+        &self,
+        f: impl Fn(&T) -> Signal<U> + 'static,
+    ) -> Signal<U> {
+        let f: Rc<dyn Fn(&T) -> Signal<U>> = Rc::new(f);
+        let outer_compute = self.as_compute();
+        let outer_sources = self.as_sources();
+
+        // compute: select the inner signal from the outer value, read it.
+        let compute: Rc<dyn Fn() -> U> = {
+            let f = f.clone();
+            let outer_compute = outer_compute.clone();
+            Rc::new(move || f(&outer_compute()).get())
+        };
+
+        // One composite source: dirty when the outer sources are dirty OR
+        // the *current* inner signal's sources are dirty. The token anchors
+        // a unique heap address used as the stable `source_id`.
+        let token: Rc<()> = Rc::new(());
+        let source_id = Rc::as_ptr(&token) as usize;
+
+        let dirty: Rc<dyn Fn() -> bool> = {
+            let token = token.clone();
+            let f = f.clone();
+            let outer_compute = outer_compute.clone();
+            let outer_sources = outer_sources.clone();
+            Rc::new(move || {
+                let _keep = &token;
+                outer_sources.iter().any(|s| (s.dirty)()) || f(&outer_compute()).is_dirty()
+            })
+        };
+        let clear: Rc<dyn Fn()> = {
+            let f = f.clone();
+            let outer_compute = outer_compute.clone();
+            Rc::new(move || {
+                let _keep = &token;
+                for s in &outer_sources {
+                    (s.clear)();
+                }
+                f(&outer_compute()).clear_dirty();
+            })
+        };
+
+        Signal {
+            kind: SignalKind::Derived {
+                compute,
+                sources: vec![DerivedSource {
+                    dirty,
+                    clear,
+                    source_id,
+                }],
+            },
+        }
+    }
+
     /// Borrow a compute closure that reads this signal's current value.
     /// For mutable signals this clones the inner cell's value; for
     /// derived signals it clones the parent compute `Rc`.
@@ -1012,6 +1086,84 @@ mod tests {
         assert!(derived.is_dirty());
         derived.clear_dirty();
         assert!(!derived.is_dirty());
+    }
+
+    #[test]
+    fn flat_map_follows_selected_inner_value() {
+        let a = Signal::new(10);
+        let b = Signal::new(20);
+        let which = Signal::new(0usize);
+        let (a2, b2) = (a.clone(), b.clone());
+        let out = which.flat_map(move |i| if *i == 0 { a2.clone() } else { b2.clone() });
+
+        assert_eq!(out.get(), 10); // follows a
+        a.set(11);
+        assert_eq!(out.get(), 11); // tracks a's value
+        which.set(1);
+        assert_eq!(out.get(), 20); // switched to b
+        b.set(21);
+        assert_eq!(out.get(), 21);
+        a.set(999); // a is no longer selected — ignored
+        assert_eq!(out.get(), 21);
+    }
+
+    #[test]
+    fn flat_map_dirty_tracks_outer_and_current_inner() {
+        let a = Signal::new(0);
+        let b = Signal::new(0);
+        let which = Signal::new(0usize);
+        let (a2, b2) = (a.clone(), b.clone());
+        let out = which.flat_map(move |i| if *i == 0 { a2.clone() } else { b2.clone() });
+        out.clear_dirty();
+        assert!(!out.is_dirty());
+
+        // The current inner (a) flipping makes the result dirty.
+        a.set(5);
+        assert!(out.is_dirty());
+        out.clear_dirty();
+        assert!(!out.is_dirty());
+
+        // The non-selected inner (b) flipping does NOT.
+        b.set(7);
+        assert!(!out.is_dirty());
+
+        // The outer selector flipping makes the result dirty.
+        which.set(1);
+        assert!(out.is_dirty());
+        out.clear_dirty();
+
+        // Now b is selected, so b flipping is tracked and a is ignored.
+        b.set(8);
+        assert!(out.is_dirty());
+        out.clear_dirty();
+        a.set(9);
+        assert!(!out.is_dirty());
+    }
+
+    #[test]
+    fn flat_map_binding_rerenders_on_inner_and_outer_change() {
+        use crate::binding::{BindingLevel, BindingRegistry};
+        use slotmap::KeyData;
+        let fake_id: WidgetId = KeyData::from_ffi(1).into();
+        let inner = Signal::new(false);
+        let which = Signal::new(0usize);
+        let inner2 = inner.clone();
+        let gate = which.flat_map(move |_| inner2.clone());
+
+        let registry = BindingRegistry::new();
+        gate.bind_to(fake_id, &registry, BindingLevel::Relayout);
+        assert!(registry.flush_dirty().is_empty());
+
+        // A change to the currently-selected inner must dirty the bound widget.
+        inner.set(true);
+        let dirty = registry.flush_dirty();
+        assert_eq!(dirty.len(), 1, "selected-inner change must re-render");
+        assert_eq!(dirty[0].0, fake_id);
+
+        // A change to the outer selector must also dirty it.
+        which.set(0);
+        let dirty = registry.flush_dirty();
+        assert_eq!(dirty.len(), 1, "outer-selector change must re-render");
     }
 
     #[test]
