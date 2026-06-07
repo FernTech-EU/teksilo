@@ -192,10 +192,10 @@ impl Widget for Slider {
         // Capture the thumb radius at build time. The event handlers
         // need it for value computation, but they only receive
         // `EventContext` and can't reach the theme at event time.
-        // The IntUI thumb diameter is the recipe's design constant —
-        // a custom `SliderStyle` impl with a different thumb size
-        // would need its own hit-region logic on the parent widget.
-        let thumb_radius = crate::styles::recipe_slider_style::SLIDER_THUMB_DIAMETER * 0.5;
+        // Query the *resolved* style so a custom `SliderStyle` with a
+        // different thumb size keeps drag hit-testing aligned, instead of
+        // baking in the recipe's design constant.
+        let thumb_radius = style.thumb_diameter(&cfg) * 0.5;
 
         let value = self.value.clone();
         let step = self.step;

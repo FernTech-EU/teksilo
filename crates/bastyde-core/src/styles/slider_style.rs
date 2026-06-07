@@ -53,6 +53,16 @@ pub struct SliderStyleConfig {
 
 pub trait SliderStyle: 'static {
     fn make_body(&self, cfg: &SliderStyleConfig, ctx: &mut BuildContext) -> WidgetId;
+
+    /// Diameter, in logical pixels, of the draggable thumb produced by
+    /// `make_body`. The host `Slider` widget uses this to compute the drag
+    /// hit-region and the position→value mapping at event time (when it can
+    /// no longer reach the theme). The default matches the IntUI recipe's
+    /// thumb; a custom style that paints a different thumb size MUST override
+    /// this too, or dragging will map to the wrong pixel boundary.
+    fn thumb_diameter(&self, _cfg: &SliderStyleConfig) -> f32 {
+        14.0
+    }
 }
 
 pub type SharedSliderStyle = Rc<dyn SliderStyle>;

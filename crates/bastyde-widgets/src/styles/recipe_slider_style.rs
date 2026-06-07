@@ -37,6 +37,10 @@ pub const SLIDER_TICK_SIZE: f32 = 2.0;
 pub struct RecipeSliderStyle;
 
 impl SliderStyle for RecipeSliderStyle {
+    fn thumb_diameter(&self, _cfg: &SliderStyleConfig) -> f32 {
+        SLIDER_THUMB_DIAMETER
+    }
+
     fn make_body(&self, cfg: &SliderStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         ctx.add(SliderBody {
             value_normalized: cfg.value_normalized.clone(),
