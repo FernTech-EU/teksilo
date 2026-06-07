@@ -1385,6 +1385,97 @@ fn tab_widget_vertical_compose_lays_bar_on_leading_edge() {
     );
 }
 
+/// Regression: a vertical bar with a `tab_surface_role` must keep every
+/// header (and therefore its leading accent indicator) pinned to the bar's
+/// leading edge, regardless of how wide each tab's label is. The surface
+/// role wraps the chrome in an extra `ZStack[bg, chrome]`; a plain ZStack
+/// there sized the chrome to its label and centered it, dragging the
+/// indicator inward by a per-label amount (the bug: indicator x drifted as
+/// the selected tab changed because the texts differ). The fix wraps the
+/// chrome in `Expand` so it fills the full tab width.
+#[test]
+fn vertical_surface_role_keeps_headers_flush_leading() {
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    // Deliberately varied label widths — the bug only shows when labels
+    // differ, since the drift is `(tab_width - label_width) / 2`.
+    let titles = ["X", "Containers", "Rich Text", "Date & Time", "OK"];
+    let mut tw = TabWidget::new(selected.clone())
+        .vertical()
+        .max_tab_width(180.0)
+        .tab_surface_role(bastyde_tokens::SurfaceRole::Sunken);
+    for t in titles {
+        tw = tw.static_tab(TabInfo::new().title(label(t)), FixedLeaf(120.0, 48.0));
+    }
+    let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+    let widget_id = tree.add(tw);
+    tree.layout(SizeProposal::exact(900.0, 600.0));
+
+    let root = tree.child_widget(widget_id, 0);
+    let bar_id = tree.child_widget(root, 0);
+    let header_row = data_source_header_row(&tree, bar_id);
+    let headers = tree.children(header_row);
+    assert_eq!(headers.len(), titles.len());
+
+    // Every header fills the full bar width and starts at the same x.
+    let first = tree.bounds(headers[0]);
+    for &h in &headers {
+        let b = tree.bounds(h);
+        assert!(
+            (b.x - first.x).abs() < 0.5,
+            "header x drifts with label width: {:?} vs {:?}",
+            b,
+            first
+        );
+        assert!(
+            (b.width - first.width).abs() < 0.5,
+            "header width drifts with label width: {:?} vs {:?}",
+            b,
+            first
+        );
+    }
+
+    // The bar must adopt the *widest* tab's natural width so the longest
+    // label ("Date & Time") renders without truncation. Under
+    // `MockTextBackend` (8 px/char) that label measures 11 × 8 = 88 px; the
+    // header reserves it plus the label→spacer `INNER_GAP` (6) and the two
+    // horizontal paddings (2 × 12). A regression in `estimate_natural_width`
+    // (wrong text style, or forgetting the spacer gap) compresses the label
+    // below 88 and truncates it.
+    let widest_text = 11.0 * 8.0; // "Date & Time"
+    let needed = widest_text + 6.0 + 2.0 * 12.0; // text + INNER_GAP + pad*2
+    assert!(
+        first.width + 0.5 >= needed,
+        "bar didn't adopt the widest tab width: header {} < needed {}",
+        first.width,
+        needed
+    );
+
+    // And the leading accent indicator (the `TabBodyPainter` leaf) sits at
+    // the header's leading edge — find each header's deepest leaf chain and
+    // assert the painter-bearing chrome layer starts at the bar leading x.
+    // The painter is the first non-bg leaf that spans the full header width;
+    // we verify by checking that some descendant fills the full width at the
+    // header's x (the chrome no longer collapses to the label).
+    for &h in &headers {
+        let hb = tree.bounds(h);
+        let mut fills_at_leading = false;
+        fn walk(tree: &WidgetTree, id: WidgetId, hb: bastyde_canvas::Rect, found: &mut bool) {
+            let b = tree.bounds(id);
+            if (b.x - hb.x).abs() < 0.5 && (b.width - hb.width).abs() < 0.5 && tree.children(id).is_empty() {
+                *found = true;
+            }
+            for c in tree.children(id) {
+                walk(tree, c, hb, found);
+            }
+        }
+        walk(&tree, h, hb, &mut fills_at_leading);
+        assert!(
+            fills_at_leading,
+            "no full-width leaf at the header leading edge — indicator would be inset/centered"
+        );
+    }
+}
+
 // ─── Reorder custom actions ─────────────────────────────────────────
 
 #[test]

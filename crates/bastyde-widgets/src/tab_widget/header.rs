@@ -41,7 +41,7 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_i18n::LocalizedString;
 use bastyde_tokens::TextRole;
 
-use crate::primitives::{RectWidget, ZStack};
+use crate::primitives::{Expand, RectWidget, ZStack};
 use crate::{HStack, IconButton, IconButtonSize, IconWidget, TextWidget};
 
 /// Minimum natural width when the label is empty / extremely short.
@@ -250,10 +250,15 @@ impl TabHeader {
             .as_ref()
             .map(|s| s.get())
             .unwrap_or_else(|| self.label.clone().resolve_now());
+        // Measure with the SAME style the label widget actually renders
+        // with — `TextWidget` defaults to `TextStyleRole::Body`. Measuring
+        // with `small` here underestimated the natural width, so the bar
+        // sized too narrow and the longest label truncated once the chrome
+        // was made to fill the tab (it previously overflowed, masking this).
         let text_width = if let Some(backend) = ctx.text_backend {
             backend
                 .borrow_mut()
-                .layout_single_line(&label, &ctx.theme.typography.small, None)
+                .layout_single_line(&label, &ctx.theme.typography.body, None)
                 .width
         } else {
             label.len() as f32 * FALLBACK_CHAR_WIDTH
@@ -274,9 +279,17 @@ impl TabHeader {
             .as_ref()
             .map(|_| btn::BUTTON_ICON_SIZE + INNER_GAP)
             .unwrap_or(0.0);
+        // The non-pinned row always carries a flexible `Spacer` after the
+        // label (it pins trailing controls to the edge / absorbs Shared
+        // slack). It contributes zero width, but the row's HStack still
+        // places an `INNER_GAP` between the label and the spacer — so the
+        // widest label needs `INNER_GAP` more than the text alone, or it
+        // truncates by exactly that amount. Reserve it here.
+        let spacer_gap = if self.pinned { 0.0 } else { INNER_GAP };
         // Bounds == visual rect now (no focus-ring envelope), so
         // natural width is purely content + horizontal padding.
-        (text_width + icon_size + leading_size + trailing_size + pad_h * 2.0).max(NATURAL_MIN_WIDTH)
+        (text_width + icon_size + leading_size + trailing_size + spacer_gap + pad_h * 2.0)
+            .max(NATURAL_MIN_WIDTH)
     }
 
     pub(crate) fn intrinsic_height(_ctx: &LayoutContext) -> f32 {
@@ -517,7 +530,16 @@ impl Widget for TabHeader {
         // corners.
         let root_id = if let Some(ref role) = self.tab_surface_role {
             let bg_id = ctx.add(RectWidget::new().background(role.clone()));
-            ctx.add(ZStack::new().add_child(bg_id).add_child(chrome_id))
+            // The chrome (a `ZStack[indicator-painter, label-row]`) reports
+            // its *content* width via `layout_response` — a plain `ZStack`
+            // wrapper would size it to the label and CENTER it, dragging the
+            // leading accent indicator inward by `(tab_width - label_width)/2`
+            // and making the indicator's x drift per tab as labels differ.
+            // Wrap the chrome in `Expand` so it fills the full tab bounds
+            // (the indicator stays pinned to the leading edge); the bg rect
+            // already fills.
+            let filled_chrome = ctx.add(Expand::new().child_id(chrome_id));
+            ctx.add(ZStack::new().add_child(bg_id).add_child(filled_chrome))
         } else {
             chrome_id
         };
