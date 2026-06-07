@@ -184,13 +184,23 @@ impl Widget for Toggle {
         }
         {
             let toggle = toggle.clone();
+            // Lone-KeyUp guard: track whether we saw the matching KeyDown so
+            // a stray KeyUp (e.g. a shortcut consumed the KeyDown and focus
+            // returned here) does NOT toggle.
+            let key_pressed = std::cell::Cell::new(false);
             handlers = handlers.on_key(move |event, _ctx| match event {
                 WidgetEvent::KeyDown {
                     key: Key::Space, ..
-                } => EventResponse::Handled,
+                } => {
+                    key_pressed.set(true);
+                    EventResponse::Handled
+                }
                 WidgetEvent::KeyUp {
                     key: Key::Space, ..
                 } => {
+                    if !key_pressed.replace(false) {
+                        return EventResponse::Ignored;
+                    }
                     toggle();
                     EventResponse::Handled
                 }
@@ -309,6 +319,25 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 60.0));
 
         tree.focus(t);
+        tree.press_key(Key::Space, Modifiers::NONE);
+        assert!(on.get());
+    }
+
+    #[test]
+    fn lone_keyup_does_not_toggle() {
+        // Lone-KeyUp guard: a KeyUp with no matching KeyDown must NOT toggle.
+        let on = Signal::new(false);
+        let mut tree = WidgetTree::new();
+        let t = tree.add(Toggle::new(on.clone()));
+        tree.layout(SizeProposal::exact(100.0, 60.0));
+
+        tree.focus(t);
+        tree.dispatch_event(WidgetEvent::KeyUp {
+            key: Key::Space,
+            modifiers: Modifiers::NONE,
+        });
+        assert!(!on.get(), "a lone KeyUp must not toggle the switch");
+
         tree.press_key(Key::Space, Modifiers::NONE);
         assert!(on.get());
     }

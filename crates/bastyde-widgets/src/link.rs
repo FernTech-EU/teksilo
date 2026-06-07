@@ -238,6 +238,13 @@ impl Widget for Link {
                             key: Key::Space | Key::Enter,
                             ..
                         } => {
+                            // Lone-KeyUp guard: only activate if we saw the
+                            // matching KeyDown (state is Pressed). A KeyUp with
+                            // no preceding KeyDown — e.g. a shortcut consumed the
+                            // KeyDown and focus returned here — must NOT activate.
+                            if int_key.get() != InteractionState::Pressed {
+                                return EventResponse::Ignored;
+                            }
                             if let Some(ref action) = *action_for_key {
                                 action(ctx);
                             }
@@ -325,5 +332,53 @@ impl Widget for Link {
 
     fn children(&self) -> Vec<WidgetId> {
         self.root_child_id.into_iter().collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bastyde_core::event::Modifiers;
+    use bastyde_core::widget_tree::WidgetTree;
+    use bastyde_i18n::lit;
+    use std::cell::Cell;
+
+    #[test]
+    fn keyup_without_keydown_does_not_fire() {
+        // Lone-KeyUp guard: when a shortcut consumes the KeyDown and
+        // focus returns to the link, the trailing KeyUp must NOT activate.
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let fired = Rc::new(Cell::new(0_u32));
+        let fired_for_link = fired.clone();
+        let link = tree.add(Link::new(lit!("T")).on_activate_fn(move |_ctx| {
+            fired_for_link.set(fired_for_link.get() + 1);
+        }));
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+        tree.focus(link);
+
+        tree.dispatch_event(WidgetEvent::KeyUp {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(
+            fired.get(),
+            0,
+            "a lone KeyUp (no matching KeyDown) must not activate the link",
+        );
+
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+            text: None,
+        });
+        tree.dispatch_event(WidgetEvent::KeyUp {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(
+            fired.get(),
+            1,
+            "a matched KeyDown + KeyUp pair must activate exactly once",
+        );
     }
 }

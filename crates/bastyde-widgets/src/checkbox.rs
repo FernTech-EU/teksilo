@@ -445,6 +445,13 @@ impl Widget for Checkbox {
                         WidgetEvent::KeyUp {
                             key: Key::Space, ..
                         } => {
+                            // Lone-KeyUp guard: only toggle if we saw the
+                            // matching KeyDown (state is Pressed). A stray KeyUp
+                            // — e.g. a shortcut consumed the KeyDown and focus
+                            // returned here — must NOT toggle.
+                            if int_key.get() != InteractionState::Pressed {
+                                return EventResponse::Ignored;
+                            }
                             kind_key.toggle();
                             int_key.set(InteractionState::Focused);
                             EventResponse::Handled
@@ -587,6 +594,27 @@ mod tests {
         assert!(checked.get());
         tree.press_key(Key::Space, Modifiers::NONE);
         assert!(!checked.get());
+    }
+
+    #[test]
+    fn lone_keyup_does_not_toggle() {
+        // Lone-KeyUp guard: a KeyUp with no matching KeyDown (e.g. a shortcut
+        // consumed the KeyDown, then focus returned here) must NOT toggle.
+        let checked = Signal::new(false);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let cb = tree.add(Checkbox::new(checked.clone()).label(lit!("Accept")));
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+        tree.focus(cb);
+
+        tree.dispatch_event(WidgetEvent::KeyUp {
+            key: Key::Space,
+            modifiers: Modifiers::NONE,
+        });
+        assert!(!checked.get(), "a lone KeyUp must not toggle the checkbox");
+
+        // A matched pair still toggles.
+        tree.press_key(Key::Space, Modifiers::NONE);
+        assert!(checked.get());
     }
 
     #[test]

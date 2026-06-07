@@ -301,6 +301,13 @@ impl Widget for RadioButton {
                         WidgetEvent::KeyUp {
                             key: Key::Space, ..
                         } => {
+                            // Lone-KeyUp guard: only select if we saw the
+                            // matching KeyDown (state is Pressed). A stray KeyUp
+                            // — e.g. a shortcut consumed the KeyDown and focus
+                            // returned here — must NOT select.
+                            if int_key.get() != InteractionState::Pressed {
+                                return EventResponse::Ignored;
+                            }
                             sel_key.set(value);
                             int_key.set(InteractionState::Focused);
                             EventResponse::Handled
@@ -431,6 +438,26 @@ mod tests {
         tree.layout(SizeProposal::exact(200.0, 200.0));
 
         tree.focus(r1);
+        tree.press_key(Key::Space, Modifiers::NONE);
+        assert_eq!(selected.get(), 1);
+    }
+
+    #[test]
+    fn lone_keyup_does_not_select() {
+        // Lone-KeyUp guard: a KeyUp with no matching KeyDown must NOT select.
+        let selected = Signal::new(0_usize);
+        let mut tree = WidgetTree::new().with_theme(bastyde_core::presets::intui::light());
+        let _r0 = tree.add(RadioButton::new(0, selected.clone()).label(lit!("A")));
+        let r1 = tree.add(RadioButton::new(1, selected.clone()).label(lit!("B")));
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+
+        tree.focus(r1);
+        tree.dispatch_event(WidgetEvent::KeyUp {
+            key: Key::Space,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(selected.get(), 0, "a lone KeyUp must not select the radio");
+
         tree.press_key(Key::Space, Modifiers::NONE);
         assert_eq!(selected.get(), 1);
     }
