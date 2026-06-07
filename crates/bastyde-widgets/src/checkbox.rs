@@ -24,6 +24,7 @@ use bastyde_core::widget_id::WidgetId;
 use bastyde_data::CheckState;
 use bastyde_tokens::{TextRole, TextStyleRole, VAlignment};
 
+use crate::button::InteractionState;
 use crate::primitives::{HStack, MinSize, TextWidget, VStack};
 use bastyde_i18n::LocalizedString;
 
@@ -283,16 +284,6 @@ impl std::fmt::Debug for Checkbox {
 
 /// Internal interaction state — local to this widget's handlers; the
 /// active `CheckboxStyle` only sees the four derived boolean signals
-/// (is_hovered, is_pressed, is_focused, is_disabled).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum InteractionState {
-    Idle,
-    Hovered,
-    Pressed,
-    Focused,
-    Disabled,
-}
-
 impl Widget for Checkbox {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         use crate::styles::recipe_checkbox_style as cb_dims;

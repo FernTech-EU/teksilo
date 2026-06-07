@@ -18,6 +18,7 @@ use bastyde_core::widget_builder::HandlerSet;
 use bastyde_core::widget_id::WidgetId;
 use bastyde_tokens::{TextRole, TextStyleRole, VAlignment};
 
+use crate::button::InteractionState;
 use crate::primitives::{HStack, MinSize, TextWidget, VStack};
 use bastyde_i18n::LocalizedString;
 
@@ -160,16 +161,6 @@ impl std::fmt::Debug for RadioButton {
 
 /// Internal interaction state — local to this widget's handlers; the
 /// active `RadioStyle` only sees the four derived boolean signals
-/// (is_hovered, is_pressed, is_focused, is_disabled) plus is_selected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum InteractionState {
-    Idle,
-    Hovered,
-    Pressed,
-    Focused,
-    Disabled,
-}
-
 impl Widget for RadioButton {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         use crate::styles::recipe_radio_style as radio_dims;
