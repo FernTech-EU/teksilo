@@ -194,12 +194,10 @@ Reference documents live in `docs/`. Good entry points:
 
 What is not yet shipped:
 
-- **macOS native menu bar.** Menus work; they don't yet live in the system menu bar.
 - **CJK IME composition.** Latin and BiDi input compose correctly; Chinese, Japanese, and Korean input methods need to be tested by actual users.
 - **X11 custom title bars.** Wayland, Windows, and macOS backends ship. On X11 the custom-chrome operations return `PlatformError::Unsupported` rather than failing silently, and the window falls back to native server-side decorations.
-- **Mobile and web.** Linux and Windows are the primary targets; macOS works modulo the menu bar gap. No mobile or web targets.
+- **Mobile and web.** Linux and Windows are the primary targets. No mobile or web targets.
 - **API stability.** Pre-1.0; breaking changes are expected between minor versions.
-- **Issue response time.** Best-effort. Single maintainer.
 
 ## Architecture stack
 

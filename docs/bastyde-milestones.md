@@ -360,13 +360,13 @@ Clipboard: already implemented in Milestone 8 — TextInput reuses it directly.
 
 **`WindowConfig`** replaces the previous `.window_title` / `.window_size` / `.root` / `.custom_chrome` shim methods on `BastydeAppBuilder` (deleted — no back-compat). `WindowPlacement` (4-variant `Floating` / `Maximized` / `Fullscreen` / `Minimized`) replaces boolean soup. `DecorationsMode` (3-variant `Native` / `CustomChrome` / `None`) replaces `custom_chrome: bool`. `ModalConfig` (always-paired parent + focus_target) replaces the previous `modal: bool` + `parent: Option<BastydeWindowId>` two-field pattern. `WindowIcon` adds the icon-at-creation capability. `BastydeAppBuilder::initial_window(WindowConfig)` is the only window entry point; every example in `examples/*` now uses it.
 
-**Remaining deliverables for Milestone 10:**
+**Milestone 10 deliverables — done:**
 
-Native menu bar: NSMenu on macOS, widget-based MenuBar (from Milestone 4) inside the window on Windows and Linux. Declarative MenuBar description through BastydeApp builder. Abstraction over the platform difference: the application declares its menu structure once, and Bastyde routes to native on macOS and to the in-window MenuBar elsewhere.
+Native menu bar (done; on-device macOS validation pending): a single declarative [`MenuModel`](../crates/bastyde-widgets/src/menu/model.rs) is mirrored to the global `NSMenu` on macOS and to the in-window widget `MenuBar` elsewhere — `install_native_menu()` + `MenuBar::from_model(..).native_on_macos(..)`. The `NativeMenuBackend` trait + plain `NativeMenuSnapshot` boundary keep `bastyde-platform` free of widget types and leave room for Windows `HMENU` / Linux DBus backends (no-op today). See [native-menu.md](native-menu.md).
 
-File dialog: native open/save via `rfd` crate or OS APIs. Async result via EventLoopProxy.
+File dialog (done): native open/save/pick-folder via the `rfd` crate (`install_file_dialog`), async result delivered through `EventLoopProxy` / `post_external`. See [examples/file_dialogs](../examples/file_dialogs/src/main.rs).
 
-**Blocked by:** Platform-specific Cocoa/AppKit code for macOS menu bar (goes beyond winit).
+**Was blocked by:** platform-specific Cocoa/AppKit code for the macOS menu bar (beyond winit) — now implemented in `bastyde-platform/src/native_menu/macos.rs` (objc2 `NSMenu`).
 
 **Tests (done):**
 
@@ -384,9 +384,9 @@ File dialog: native open/save via `rfd` crate or OS APIs. Async result via Event
 - TitleBar's minimize / maximize / close buttons write through `WindowState::placement` (not the chrome host)
 - Focus returns to parent after modal dismissal
 
-**Tests (remaining):**
+**Tests (done):**
 
-- Native menu bar on macOS mirrors the declared MenuBar structure
+- Native menu: `MenuModel` mutation → version bump; `MenuBar::from_model` builds the in-window triggers; runtime `push_menu`/`remove` re-derive the bar; the platform `MemoryNativeMenuBackend` records the mirrored snapshot + activations (headless). On-device macOS NSMenu rendering still needs a manual run.
 - File dialog returns selected path asynchronously without blocking the event loop
 
 ---
@@ -397,7 +397,7 @@ Beyond the Milestone 6 / 7 / 8 / 10 tails tracked above, five areas are the obvi
 
 - **IME / CJK input.** Platform-side composition window positioning + composition rendering in `bastyde-platform` + dead-key handling. The TextInput and RichTextEditor APIs don't change when this lands; the handler hooks are already in place. Blocked on winit IME glue and per-OS composition-window surface work.
 - **External (OS) DnD backends.** *Inbound* OS drops are done via `ExternalDndBackend` (`install_external_dnd()`): macOS `NSDraggingDestination` (verified), Windows OLE `IDropTarget`, Wayland `wl_data_device`, X11 no-op. Files / text / URLs flow into the in-app pipeline as an external `DragPayload`; the `DropZone` widget consumes them. *Outbound* drag (Bastyde → other app) is now done: a `start_drag` whose payload carries MIME auto-escalates to a native OS drag at the window boundary (macOS `NSDraggingSource`, Wayland `wl_data_source` — both verified; Windows/X11 decline), completes via `on_drag_ended(DropOutcome)`, recovers the typed payload on re-entry (cross-window DnD), Copy-only.
-- **Native menu bar on macOS + native file dialogs.** `NSMenu` binding so a single declarative menu description routes to native on macOS and to the existing widget-based `MenuBar` elsewhere. Native file open/save dialog via `rfd`, with async result through `EventLoopProxy`. These are the remainder of Milestone 10.
+- **Native menu bar on macOS + native file dialogs — done.** A single declarative `MenuModel` routes to the native `NSMenu` on macOS (`install_native_menu()` + `MenuBar::native_on_macos`) and to the widget-based `MenuBar` elsewhere (on-device macOS validation pending); see [native-menu.md](native-menu.md). Native file open/save via `rfd` with async result through `EventLoopProxy` shipped as well.
 - **Virtualized dropdowns.** Shipped for `ComboBox` — large lists now materialize only the visible rows via a `ListView` routed through a bridged `ListSource`, and the searchable filtered path rides the same renderer. `MenuList` grew a `max_visible_items` viewport cap (panel height + internal `ScrollArea`) but does **not** yet virtualize: its API takes arbitrary `impl Widget` children, so true virtualization needs a model-driven rewrite. Remaining follow-up: model-backed MenuList API.
 - **ShortcutFormatter (locale + platform).** `shortcut.rs` currently renders chords as `Ctrl+S` regardless of platform or locale. The design calls for `⌘S` on macOS and translated modifier names (`Strg+S` in German). A single formatter hook consulted by `MenuItem::for_shortcut(id)` and `TooltipContent::for_shortcut(id)` — tracked as part of the M7 polish tail.
 
@@ -414,4 +414,4 @@ Beyond the Milestone 6 / 7 / 8 / 10 tails tracked above, five areas are the obvi
 | 7 | Internationalization | ✅ Largely done | bastyde-i18n + bastyde-i18n-macros, `tr!`/`tr_widget!` with compile-time validation and Levenshtein suggestions, compile-time fallback, dual-bundle with explicit framework registration, hot-reload, RTL with Arabic/Hebrew fonts. ShortcutFormatter remaining. |
 | 8 | Rich Text Editor | ✅ Largely done | Both presets delivered: `RichTextEditor::read_only` (M8a) + `RichTextEditor::editor` (M8b). Shared core with per-preset PolicyBundle. HTML rich-clipboard round-trip (arboard, with native Wayland); `PasteUnformatted` (Ctrl+Shift+V); default right-click context menu with slot-based replacement via `context_menu(factory)`. Full godot-rich-text parity port: Tab / Shift+Tab table-nav + list-indent, Ctrl+Enter, Enter-in-cell, Backspace-in-list, Shift+Arrow cell selection, link / image click callbacks, horizontal caret-visibility, 36 widget-level API methods (formatting setters + toggles, query getters, list / table / cursor mirrors, programmatic clipboard, runtime zoom), plus `format_version` / `document_loaded_count` observability signals. RTF clipboard payload remains. |
 | 9 | Text Input | ✅ Done | TextInput (single-line, opt-in multiline) + generic SpinBox<T> with SpinValue trait. IME composition / CJK deferred to platform work — TextInput API unchanged when that lands. |
-| 10 | Multi-Window and Platform | Largely done | Full multi-window API shipped — `WindowConfig`, reactive `WindowState` with OS↔signal re-entrancy guard, synchronous `ctx.open_window` via `WindowOps` trait, `ctx.open_modal`, `DecorationsMode`, `WindowIcon`, trimmed `PlatformTitleBarHost`, `multi_window` example. Native menu bar + file dialogs remaining. |
+| 10 | Multi-Window and Platform | ✅ Largely done | Full multi-window API shipped — `WindowConfig`, reactive `WindowState` with OS↔signal re-entrancy guard, synchronous `ctx.open_window` via `WindowOps` trait, `ctx.open_modal`, `DecorationsMode`, `WindowIcon`, trimmed `PlatformTitleBarHost`, `multi_window` example. Native menu bar (`MenuModel` → `NSMenu`) and native file dialogs now shipped (macOS menu bar pending on-device validation). |
