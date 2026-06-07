@@ -54,7 +54,10 @@ pub struct FormLayout {
     pending_rows: Vec<PendingFormRow>,
     label_gap: f32,
     row_spacing: f32,
-    a11y_label: Option<String>,
+    /// Stored unresolved so the AT name re-localizes on a locale change
+    /// (the tree re-walks `accessibility()` and re-resolves) instead of
+    /// freezing at build time.
+    a11y_label: Option<LocalizedString>,
 }
 
 impl FormLayout {
@@ -88,8 +91,7 @@ impl FormLayout {
     /// `GenericContainer` — an unnamed landmark is worse than no
     /// landmark for AT users.
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
-        let ls: LocalizedString = label.into();
-        self.a11y_label = Some(ls.resolve_now());
+        self.a11y_label = Some(label.into());
         self
     }
 
@@ -380,10 +382,10 @@ impl Widget for FormLayout {
     fn paint(&self, _bounds: Rect, _canvas: &mut bastyde_canvas::Canvas, _ctx: &PaintContext) {}
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        match self.a11y_label.as_deref() {
-            Some(name) => {
+        match self.a11y_label.as_ref() {
+            Some(ls) => {
                 builder.set_role(bastyde_core::accesskit::Role::Form);
-                builder.set_name(name);
+                builder.set_name(ls.resolve_now());
             }
             None => {
                 builder.set_role(bastyde_core::accesskit::Role::GenericContainer);
@@ -428,6 +430,31 @@ mod tests {
         // Row height = max(20, 25) = 25
         assert!((tree.bounds(label).height - 25.0).abs() < 0.01);
         assert!((tree.bounds(field).height - 25.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn labeled_form_emits_form_role_and_name() {
+        // The AT name is resolved lazily in `accessibility()` (not frozen at
+        // build time), so a localized label still resolves correctly when the
+        // tree is walked.
+        let mut tree = WidgetTree::new();
+        let form = tree.add(FormLayout::new().label(bastyde_i18n::lit!("Account")));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        let info = tree.accessibility_node(form);
+        assert_eq!(info.role(), bastyde_core::accesskit::Role::Form);
+        assert_eq!(info.name(), Some("Account"));
+    }
+
+    #[test]
+    fn unlabeled_form_is_presentational() {
+        let mut tree = WidgetTree::new();
+        let form = tree.add(FormLayout::new());
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        let info = tree.accessibility_node(form);
+        assert_eq!(
+            info.role(),
+            bastyde_core::accesskit::Role::GenericContainer
+        );
     }
 
     #[test]
