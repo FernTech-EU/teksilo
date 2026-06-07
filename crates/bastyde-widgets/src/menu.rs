@@ -24,7 +24,7 @@
 pub mod model;
 pub mod native;
 
-pub use model::{MenuEntry, MenuItemState, MenuItems, MenuModel, MenuNode};
+pub use model::{MenuEntry, MenuItemState, MenuItems, MenuModel, MenuNode, StandardMenu};
 pub use native::NativeMenuMode;
 
 // Re-export the platform standard-menu roles so apps name them through the

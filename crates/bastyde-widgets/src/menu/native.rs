@@ -17,12 +17,12 @@ use bastyde_core::MenuItemId;
 use bastyde_data::CheckState;
 use bastyde_platform::native_menu::{
     MenuItemDelta, NativeCheck, NativeKeyEquivalent, NativeMenuActivation, NativeMenuHandle,
-    NativeMenuNode, NativeMenuSnapshot,
+    NativeMenuNode, NativeMenuSnapshot, StandardMenuRole,
 };
 
 use crate::menu_item::parse_mnemonic;
 
-use super::model::{MenuItemState, MenuModel, MenuNode};
+use super::model::{MenuItemState, MenuModel, MenuNode, StandardMenu};
 
 /// How a [`MenuBar`](crate::menu_bar::MenuBar) built from a [`MenuModel`]
 /// behaves on macOS, where the convention is a global menu bar at the top of the
@@ -72,13 +72,35 @@ pub(crate) fn install(model: &MenuModel, ctx: &BuildContext) -> Option<NativeMen
 
     let mut activations = HashMap::new();
     let mut reactive = Vec::new();
-    let roots = {
+    let mut roots: Vec<NativeMenuNode> = {
         let nodes = model.nodes();
         nodes
             .iter()
             .filter_map(|n| resolve_node(n, ctx, &mut activations, &mut reactive))
             .collect()
     };
+    // macOS requires a leading application menu. If the model didn't declare one,
+    // inject a default (English `lit!` labels; the app overrides via
+    // `MenuModel::standard_menu(StandardMenu::app()...)`). Resolving here keeps
+    // every user-visible string in the i18n layer.
+    let has_app = roots.iter().any(|n| {
+        matches!(
+            n,
+            NativeMenuNode::Standard {
+                role: StandardMenuRole::App,
+                ..
+            }
+        )
+    });
+    if !has_app {
+        roots.insert(
+            0,
+            NativeMenuNode::Standard {
+                role: StandardMenuRole::App,
+                labels: StandardMenu::app().resolve_labels(),
+            },
+        );
+    }
     let snapshot = NativeMenuSnapshot { roots };
 
     handle.set_window_menu(window_id, snapshot, activations, poster);
@@ -150,7 +172,10 @@ fn resolve_node(
 ) -> Option<NativeMenuNode> {
     match node {
         MenuNode::Separator => Some(NativeMenuNode::Separator),
-        MenuNode::Standard(role) => Some(NativeMenuNode::Standard(*role)),
+        MenuNode::Standard(sm) => Some(NativeMenuNode::Standard {
+            role: sm.role(),
+            labels: sm.resolve_labels(),
+        }),
         MenuNode::Submenu { title, children, .. } => Some(NativeMenuNode::Submenu {
             title: strip_title(&title.resolve_now()),
             children: children

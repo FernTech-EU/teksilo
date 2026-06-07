@@ -2016,4 +2016,95 @@ mod tests {
             assert_eq!(triggers.len(), 1);
         }
     }
+
+    /// End-to-end coverage of the model→native bridge (`menu::native::install`)
+    /// via the recording `MemoryNativeMenuBackend` — the testable half of the
+    /// native path (the `NSMenu` core itself needs a live AppKit loop). Verifies
+    /// title stripping, check state, the auto-injected localized app menu, and
+    /// that standard-menu labels go through i18n (no hardcoded English).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_install_records_localized_snapshot() {
+        use crate::menu::{MenuEntry, MenuModel, NativeMenuMode, StandardMenu};
+        use bastyde_core::AppEventPoster;
+        use bastyde_platform::native_menu::{
+            MemoryNativeMenuBackend, NativeCheck, NativeMenuHandle, NativeMenuNode, StandardMenuRole,
+        };
+        use std::any::{Any, TypeId};
+        use std::collections::HashMap;
+        use std::sync::Arc;
+
+        struct NullPoster;
+        impl AppEventPoster for NullPoster {
+            fn post_subscription_event(
+                &self,
+                _: bastyde_core::SubscriptionId,
+                _: Box<dyn Any + Send>,
+            ) {
+            }
+            fn post_external(&self, _: Box<dyn Any + Send>) {}
+        }
+
+        let grid = Signal::new(true);
+        let model = MenuModel::new()
+            // App menu with a localized Quit — must NOT be hardcoded English.
+            .standard_menu(StandardMenu::app().quit(lit!("Quitter")))
+            .menu(lit!("&File"), |m| {
+                m.item(MenuEntry::new(lit!("&New")).intent("app.new"))
+                    .item(MenuEntry::new(lit!("Show &Grid")).checkable(grid.clone()))
+            });
+
+        let backend = MemoryNativeMenuBackend::new();
+        let handle = NativeMenuHandle::new(backend.clone());
+        let mut app_state: HashMap<TypeId, Box<dyn Any>> = HashMap::new();
+        app_state.insert(TypeId::of::<NativeMenuHandle>(), Box::new(handle));
+        let poster: Arc<dyn AppEventPoster> = Arc::new(NullPoster);
+
+        let mut t = tree_with_window();
+        t.set_app_context(Rc::new(
+            bastyde_core::event_source::TreeAppContext::empty()
+                .with_app_state(app_state)
+                .with_poster(poster),
+        ));
+        let _mb = t.add(MenuBar::from_model(model).native_on_macos(NativeMenuMode::Coexist));
+        t.layout(bastyde_canvas::SizeProposal::exact(800.0, 100.0));
+
+        let snap = backend
+            .menu_for(BastydeWindowId::new(1))
+            .expect("native snapshot recorded for the window");
+
+        // App menu is first, with the localized Quit label (not "Quit").
+        match &snap.roots[0] {
+            NativeMenuNode::Standard {
+                role: StandardMenuRole::App,
+                labels,
+            } => {
+                assert_eq!(labels.quit, "Quitter", "Quit label routes through i18n");
+                assert_eq!(labels.about, "About", "default About label resolved");
+            }
+            other => panic!("expected leading App menu, got {other:?}"),
+        }
+
+        // File submenu: mnemonics stripped, checkable reflects the bound signal.
+        let file = snap
+            .roots
+            .iter()
+            .find_map(|n| match n {
+                NativeMenuNode::Submenu { title, children } if title == "File" => Some(children),
+                _ => None,
+            })
+            .expect("File submenu in snapshot");
+        assert!(
+            file.iter()
+                .any(|n| matches!(n, NativeMenuNode::Item { title, .. } if title == "New")),
+            "New item present, '&' stripped"
+        );
+        assert!(
+            file.iter().any(|n| matches!(
+                n,
+                NativeMenuNode::Item { title, check: NativeCheck::On, .. } if title == "Show Grid"
+            )),
+            "checkable item reflects the bound signal (On) with stripped title"
+        );
+    }
 }

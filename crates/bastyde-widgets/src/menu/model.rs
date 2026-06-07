@@ -165,9 +165,125 @@ pub enum MenuNode {
     },
     /// A separator line.
     Separator,
-    /// A platform-standard menu (macOS App / Window / Help). Rendered by the
-    /// native backend; ignored by the in-window bar.
-    Standard(StandardMenuRole),
+    /// A platform-standard menu (macOS App / Window / Help) with localized
+    /// chrome. Rendered by the native backend; ignored by the in-window bar.
+    Standard(StandardMenu),
+}
+
+/// A platform-standard menu (macOS App / Window / Help) with **localized**
+/// labels. The framework wires the system selectors (About / Hide / Quit,
+/// Minimize / Zoom); you supply the strings — defaults are English `lit!`s, so
+/// pass `tr!`-resolved [`LocalizedString`]s for a localized app menu. This keeps
+/// the OS menu bar inside the i18n net like every other widget.
+#[derive(Clone)]
+pub struct StandardMenu {
+    role: StandardMenuRole,
+    title: LocalizedString,
+    about: LocalizedString,
+    hide: LocalizedString,
+    quit: LocalizedString,
+    minimize: LocalizedString,
+    zoom: LocalizedString,
+}
+
+impl StandardMenu {
+    /// The application menu (About / Hide / Quit). `title` is the bold app-name
+    /// submenu label — set it to your localized app name.
+    pub fn app() -> Self {
+        Self {
+            role: StandardMenuRole::App,
+            title: LocalizedString::literal("App"),
+            about: LocalizedString::literal("About"),
+            hide: LocalizedString::literal("Hide"),
+            quit: LocalizedString::literal("Quit"),
+            minimize: LocalizedString::literal(""),
+            zoom: LocalizedString::literal(""),
+        }
+    }
+
+    /// The Window menu (Minimize / Zoom + the live window list).
+    pub fn window() -> Self {
+        Self {
+            role: StandardMenuRole::Window,
+            title: LocalizedString::literal("Window"),
+            about: LocalizedString::literal(""),
+            hide: LocalizedString::literal(""),
+            quit: LocalizedString::literal(""),
+            minimize: LocalizedString::literal("Minimize"),
+            zoom: LocalizedString::literal("Zoom"),
+        }
+    }
+
+    /// The Help menu.
+    pub fn help() -> Self {
+        Self {
+            role: StandardMenuRole::Help,
+            title: LocalizedString::literal("Help"),
+            about: LocalizedString::literal(""),
+            hide: LocalizedString::literal(""),
+            quit: LocalizedString::literal(""),
+            minimize: LocalizedString::literal(""),
+            zoom: LocalizedString::literal(""),
+        }
+    }
+
+    /// Default standard menu for a role.
+    pub fn for_role(role: StandardMenuRole) -> Self {
+        match role {
+            StandardMenuRole::App => Self::app(),
+            StandardMenuRole::Window => Self::window(),
+            StandardMenuRole::Help => Self::help(),
+        }
+    }
+
+    /// This menu's role.
+    pub fn role(&self) -> StandardMenuRole {
+        self.role
+    }
+
+    /// Submenu title (the app name for `App`; the menu label for Window / Help).
+    pub fn title(mut self, title: impl Into<LocalizedString>) -> Self {
+        self.title = title.into();
+        self
+    }
+    /// "About …" label (App).
+    pub fn about(mut self, label: impl Into<LocalizedString>) -> Self {
+        self.about = label.into();
+        self
+    }
+    /// "Hide …" label (App).
+    pub fn hide(mut self, label: impl Into<LocalizedString>) -> Self {
+        self.hide = label.into();
+        self
+    }
+    /// "Quit …" label (App).
+    pub fn quit(mut self, label: impl Into<LocalizedString>) -> Self {
+        self.quit = label.into();
+        self
+    }
+    /// "Minimize" label (Window).
+    pub fn minimize(mut self, label: impl Into<LocalizedString>) -> Self {
+        self.minimize = label.into();
+        self
+    }
+    /// "Zoom" label (Window).
+    pub fn zoom(mut self, label: impl Into<LocalizedString>) -> Self {
+        self.zoom = label.into();
+        self
+    }
+
+    /// Resolve to the platform's localized-label struct (widget-layer i18n
+    /// resolution happens here, so the platform never hardcodes English).
+    pub(crate) fn resolve_labels(&self) -> bastyde_platform::native_menu::StandardLabels {
+        bastyde_platform::native_menu::StandardLabels {
+            title: self.title.resolve_now(),
+            about: self.about.resolve_now(),
+            hide: self.hide.resolve_now(),
+            quit: self.quit.resolve_now(),
+            minimize: self.minimize.resolve_now(),
+            zoom: self.zoom.resolve_now(),
+        }
+    }
 }
 
 /// Builder for the contents of one (sub)menu — a sequence of items, separators,
@@ -273,9 +389,16 @@ impl MenuModel {
         self
     }
 
-    /// Append a platform-standard top-level menu (macOS App / Window / Help).
+    /// Append a platform-standard top-level menu (macOS App / Window / Help)
+    /// with default (English) labels. Use [`standard_menu`](Self::standard_menu)
+    /// to supply localized labels.
     pub fn standard(self, role: StandardMenuRole) -> Self {
-        self.nodes.borrow_mut().push(MenuNode::Standard(role));
+        self.standard_menu(StandardMenu::for_role(role))
+    }
+
+    /// Append a platform-standard top-level menu with localized labels.
+    pub fn standard_menu(self, menu: StandardMenu) -> Self {
+        self.nodes.borrow_mut().push(MenuNode::Standard(menu));
         self.bump();
         self
     }
@@ -462,10 +585,10 @@ mod tests {
         let nodes = model.nodes();
         assert_eq!(nodes.len(), 2);
         assert!(matches!(nodes[0], MenuNode::Submenu { .. }));
-        assert!(matches!(
-            nodes[1],
-            MenuNode::Standard(StandardMenuRole::Window)
-        ));
+        let MenuNode::Standard(sm) = &nodes[1] else {
+            panic!("expected standard menu");
+        };
+        assert_eq!(sm.role(), StandardMenuRole::Window);
     }
 
     #[test]

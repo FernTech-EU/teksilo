@@ -141,7 +141,8 @@ pub use input_dialog::InputDialog;
 pub use link::Link;
 pub use list_view::ListView;
 pub use menu::{
-    MenuEntry, MenuItemState, MenuItems, MenuModel, MenuNode, NativeMenuMode, StandardMenuRole,
+    MenuEntry, MenuItemState, MenuItems, MenuModel, MenuNode, NativeMenuMode, StandardMenu,
+    StandardMenuRole,
 };
 pub use menu_bar::{CollapsePolicy, MenuBar};
 pub use menu_item::MenuItem;

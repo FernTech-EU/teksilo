@@ -176,9 +176,33 @@ the window closes.
 
 ## Standard macOS menus
 
-A minimal application menu (About / Hide / Quit, with ⌘Q) is auto-prepended
-unless the model declares its own `StandardMenuRole::App`. `Window` and `Help`
-roles are wired to the standard AppKit menus.
+The App / Window / Help menus carry **system selectors** (About / Hide / Quit,
+Minimize / Zoom, the live window list) but their **labels go through i18n** like
+every other widget — the platform layer never hardcodes English. Declare them
+with localized strings:
+
+```rust
+use bastyde::widgets::StandardMenu;
+
+MenuModel::new()
+    .standard_menu(StandardMenu::app()
+        .title(tr!(app_name()))       // bold app-name submenu
+        .about(tr!(about()))
+        .hide(tr!(hide()))
+        .quit(tr!(quit())))           // e.g. "Quitter" on a French system
+    .menu(tr!(file()), |m| …)
+    .standard_menu(StandardMenu::window());   // Minimize / Zoom + window list
+```
+
+- `StandardMenu::{app, window, help}` give English `lit!` defaults; pass `tr!`
+  to localize. `.standard(role)` is sugar for the all-default menu.
+- A default **App** menu is auto-injected as the leading menu if the model
+  declares none (so ⌘Q always works) — labels resolved through the widget layer,
+  not the platform crate.
+- **Window** adds Minimize (⌘M, `performMiniaturize:`) + Zoom (`performZoom:`)
+  and registers the menu with AppKit so the live window list appears.
+- **Help** is a localized titled submenu registered as the help menu. Custom Help
+  items beyond that are best declared as a normal `.menu(...)`.
 
 ## Architecture
 

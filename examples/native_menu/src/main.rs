@@ -18,7 +18,7 @@ use bastyde::core::shortcut::{KeyStroke, Shortcut};
 use bastyde::prelude::*;
 use bastyde::widgets::{
     Button, Divider, Expand, HStack, MenuBar, MenuEntry, MenuModel, NativeMenuMode, Padding, Panel,
-    StatusBar, TextWidget, VStack,
+    StandardMenu, StatusBar, TextWidget, VStack,
 };
 
 #[derive(Debug)]
@@ -100,7 +100,12 @@ impl Widget for Root {
                             move |_| g.set(!g.get())
                         }),
                 )
-            });
+            })
+            // Standard macOS menus — labels go through i18n (pass `tr!` for a
+            // localized app); the framework wires the system selectors. The
+            // App menu is auto-injected, but declaring it lets us localize it.
+            .standard_menu(StandardMenu::app().title(lit!("Native Menu")))
+            .standard_menu(StandardMenu::window());
 
         // Keep a handle so window buttons can mutate the menu at runtime.
         let model_handle = model.clone();

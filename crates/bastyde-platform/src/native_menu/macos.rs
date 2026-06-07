@@ -32,7 +32,7 @@ use objc2_foundation::{NSString, ns_string};
 
 use super::{
     MenuItemDelta, NativeCheck, NativeKeyEquivalent, NativeMenuBackend, NativeMenuEventPayload,
-    NativeMenuNode, NativeMenuSnapshot, StandardMenuRole,
+    NativeMenuNode, NativeMenuSnapshot, StandardLabels, StandardMenuRole,
 };
 
 // ============================================================
@@ -220,34 +220,42 @@ fn build_root_menu(
     let bar = NSMenu::initWithTitle(mtm.alloc::<NSMenu>(), ns_string!(""));
     bar.setAutoenablesItems(false);
 
-    // Conventional first menu, unless the model declares its own App role.
-    let has_app = snapshot
-        .roots
-        .iter()
-        .any(|n| matches!(n, NativeMenuNode::Standard(StandardMenuRole::App)));
-    if !has_app {
-        bar.addItem(&app_menu_item(mtm));
-    }
-
+    // The widget layer guarantees a leading App menu (with localized labels), so
+    // the platform never fabricates user-visible strings of its own.
     for node in &snapshot.roots {
         match node {
-            NativeMenuNode::Standard(StandardMenuRole::App) => {
-                bar.addItem(&app_menu_item(mtm));
+            NativeMenuNode::Standard {
+                role: StandardMenuRole::App,
+                labels,
+            } => {
+                bar.addItem(&app_menu_item(mtm, labels));
             }
-            NativeMenuNode::Standard(StandardMenuRole::Window) => {
-                let item = top_level_item(mtm, "Window");
-                let sub = NSMenu::initWithTitle(mtm.alloc::<NSMenu>(), &NSString::from_str("Window"));
+            NativeMenuNode::Standard {
+                role: StandardMenuRole::Window,
+                labels,
+            } => {
+                let item = top_level_item(mtm, &labels.title);
+                let sub = NSMenu::initWithTitle(mtm.alloc::<NSMenu>(), &NSString::from_str(&labels.title));
                 sub.setAutoenablesItems(false);
+                // Standard window-management items (localized titles, system
+                // selectors), then the live window list AppKit maintains.
+                sub.addItem(&standard_item(mtm, &labels.minimize, sel!(performMiniaturize:), "m"));
+                sub.addItem(&standard_item(mtm, &labels.zoom, sel!(performZoom:), ""));
+                sub.addItem(&NSMenuItem::separatorItem(mtm));
                 item.setSubmenu(Some(&sub));
                 bar.addItem(&item);
                 NSApplication::sharedApplication(mtm).setWindowsMenu(Some(&sub));
             }
-            NativeMenuNode::Standard(StandardMenuRole::Help) => {
-                let item = top_level_item(mtm, "Help");
-                let sub = NSMenu::initWithTitle(mtm.alloc::<NSMenu>(), &NSString::from_str("Help"));
+            NativeMenuNode::Standard {
+                role: StandardMenuRole::Help,
+                labels,
+            } => {
+                let item = top_level_item(mtm, &labels.title);
+                let sub = NSMenu::initWithTitle(mtm.alloc::<NSMenu>(), &NSString::from_str(&labels.title));
                 sub.setAutoenablesItems(false);
                 item.setSubmenu(Some(&sub));
                 bar.addItem(&item);
+                NSApplication::sharedApplication(mtm).setHelpMenu(Some(&sub));
             }
             NativeMenuNode::Submenu { title, children } => {
                 let item = top_level_item(mtm, title);
@@ -300,7 +308,7 @@ fn build_submenu(
                 menu.addItem(&item);
             }
             // Standard roles only make sense at the top level.
-            NativeMenuNode::Standard(_) => {}
+            NativeMenuNode::Standard { .. } => {}
         }
     }
     menu
@@ -375,24 +383,19 @@ fn control_state(check: NativeCheck) -> NSControlStateValue {
     }
 }
 
-/// Build the conventional macOS application menu (About / Hide / Quit). Its
-/// items target the standard responder-chain selectors, so they work without
-/// any app wiring.
-fn app_menu_item(mtm: MainThreadMarker) -> Retained<NSMenuItem> {
-    let bar_item = top_level_item(mtm, "");
-    let menu = NSMenu::initWithTitle(mtm.alloc::<NSMenu>(), ns_string!(""));
+/// Build the conventional macOS application menu (About / Hide / Quit) from
+/// localized `labels`. Items target the standard responder-chain selectors, so
+/// they work without any app wiring.
+fn app_menu_item(mtm: MainThreadMarker, labels: &StandardLabels) -> Retained<NSMenuItem> {
+    let bar_item = top_level_item(mtm, &labels.title);
+    let menu = NSMenu::initWithTitle(mtm.alloc::<NSMenu>(), &NSString::from_str(&labels.title));
     menu.setAutoenablesItems(false);
 
-    let about = standard_item(mtm, "About", sel!(orderFrontStandardAboutPanel:), "");
-    menu.addItem(&about);
+    menu.addItem(&standard_item(mtm, &labels.about, sel!(orderFrontStandardAboutPanel:), ""));
     menu.addItem(&NSMenuItem::separatorItem(mtm));
-
-    let hide = standard_item(mtm, "Hide", sel!(hide:), "h");
-    menu.addItem(&hide);
+    menu.addItem(&standard_item(mtm, &labels.hide, sel!(hide:), "h"));
     menu.addItem(&NSMenuItem::separatorItem(mtm));
-
-    let quit = standard_item(mtm, "Quit", sel!(terminate:), "q");
-    menu.addItem(&quit);
+    menu.addItem(&standard_item(mtm, &labels.quit, sel!(terminate:), "q"));
 
     bar_item.setSubmenu(Some(&menu));
     bar_item

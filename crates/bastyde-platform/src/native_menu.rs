@@ -88,17 +88,38 @@ pub struct NativeKeyEquivalent {
 }
 
 /// Standard, platform-defined menus with required placement/behaviour (the
-/// macOS App / Edit / Window / Help menus, with their About / Quit / Services /
-/// standard-edit / window-management items). The backend supplies the correct
-/// native structure for these; the in-window `MenuBar` ignores them.
+/// macOS App / Window / Help menus, with their About / Hide / Quit /
+/// window-management items wired to system selectors). The backend supplies the
+/// native structure; the in-window `MenuBar` ignores these.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StandardMenuRole {
-    /// The application menu (About / Services / Hide / Quit). Must be first.
+    /// The application menu (About / Hide / Quit). Must be first.
     App,
     /// The Window menu (Minimize / Zoom / window list).
     Window,
     /// The Help menu.
     Help,
+}
+
+/// Display strings for a [`StandardMenuRole`], **already localized** by the
+/// widget layer. The platform layer never hardcodes user-visible menu text — it
+/// applies whatever the snapshot carries — so a standard menu honours the app's
+/// locale (e.g. "Quitter" / "Masquer" on a French system) instead of leaking
+/// English literals onto the most visible native surface.
+#[derive(Debug, Clone, Default)]
+pub struct StandardLabels {
+    /// Submenu title (Window / Help; the App submenu typically uses the app name).
+    pub title: String,
+    /// "About …" (App).
+    pub about: String,
+    /// "Hide …" (App).
+    pub hide: String,
+    /// "Quit …" (App).
+    pub quit: String,
+    /// "Minimize" (Window).
+    pub minimize: String,
+    /// "Zoom" (Window).
+    pub zoom: String,
 }
 
 /// One node of a native menu tree.
@@ -126,8 +147,13 @@ pub enum NativeMenuNode {
     },
     /// A separator line.
     Separator,
-    /// A platform-standard menu the backend fills in.
-    Standard(StandardMenuRole),
+    /// A platform-standard menu the backend fills in, with localized chrome.
+    Standard {
+        /// Which standard menu.
+        role: StandardMenuRole,
+        /// Localized display strings (supplied by the widget layer).
+        labels: StandardLabels,
+    },
 }
 
 /// A complete, resolved description of one window's menu tree.
