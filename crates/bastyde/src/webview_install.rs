@@ -34,16 +34,22 @@ pub trait BastydeAppBuilderWebViewExt {
     /// `servo-backend` features) or a custom / mock backend.
     fn install_web_view<B: WebViewBackend + 'static>(self, backend: B) -> Self;
 
-    /// Convenience: install with the best backend available in this build.
+    /// Convenience: install with the engine selected by the enabled cargo
+    /// feature:
+    /// - `bastyde/web-view-wry` → the production `WryBackend` (macOS WKWebView /
+    ///   Windows WebView2 / Linux-X11 WebKitGTK).
+    /// - `bastyde/web-view-servo` (and not `-wry`) → the best-effort
+    ///   `ServoBackend` (Linux/Wayland).
+    /// - plain `bastyde/web-view` → the inert [`NoopWebViewBackend`] (renders
+    ///   nothing — for builds that want the widget without bundling an engine,
+    ///   and the only safe long-running default vs the op-accumulating
+    ///   `MemoryWebViewBackend` used in tests).
     ///
-    /// **Today this registers the headless [`MemoryWebViewBackend`] — it does
-    /// not render a real page.** The native `wry` / `servo` backends are
-    /// opt-in features on `bastyde-webview` that are not yet wired into this
-    /// default (the parent-handle round-trip into `build_as_child` is the
-    /// spike's job — see the plan). Apps that need a real engine today pass
-    /// one explicitly via [`install_web_view`](Self::install_web_view).
+    /// Apps needing runtime Wayland-vs-X11 selection enable both engine
+    /// features and pass the backend explicitly via
+    /// [`install_web_view`](Self::install_web_view).
     ///
-    /// [`MemoryWebViewBackend`]: bastyde_webview::MemoryWebViewBackend
+    /// [`NoopWebViewBackend`]: bastyde_webview::NoopWebViewBackend
     fn install_web_view_default(self) -> Self;
 }
 
@@ -53,9 +59,17 @@ impl BastydeAppBuilderWebViewExt for BastydeAppBuilder {
     }
 
     fn install_web_view_default(self) -> Self {
-        // Inert no-op backend (renders nothing, records nothing) until a native
-        // engine feature is wired — safe for a long-running app, unlike the
-        // op-accumulating `MemoryWebViewBackend` used in tests.
-        self.app_state(WebViewRegistry::new(bastyde_webview::NoopWebViewBackend))
+        #[cfg(feature = "web-view-wry")]
+        {
+            self.app_state(WebViewRegistry::new(bastyde_webview::WryBackend::new()))
+        }
+        #[cfg(all(feature = "web-view-servo", not(feature = "web-view-wry")))]
+        {
+            self.app_state(WebViewRegistry::new(bastyde_webview::ServoBackend::new()))
+        }
+        #[cfg(not(any(feature = "web-view-wry", feature = "web-view-servo")))]
+        {
+            self.app_state(WebViewRegistry::new(bastyde_webview::NoopWebViewBackend))
+        }
     }
 }

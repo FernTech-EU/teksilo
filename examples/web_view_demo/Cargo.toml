@@ -10,5 +10,14 @@ publish = false
 name = "web-view-demo"
 path = "src/main.rs"
 
+# By default the demo installs the headless backend (no page renders). To run
+# against a real engine:
+#   cargo run -p web-view-demo --features wry     # macOS / Windows / Linux-X11
+#   cargo run -p web-view-demo --features servo   # Linux / Wayland (best-effort)
+[features]
+default = []
+wry = ["bastyde/web-view-wry"]
+servo = ["bastyde/web-view-servo"]
+
 [dependencies]
 bastyde = { workspace = true, features = ["web-view"] }

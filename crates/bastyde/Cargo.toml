@@ -75,6 +75,14 @@ file-dialog-trait = ["bastyde-app/file-dialog"]
 # are further opt-in features ON `bastyde-webview` itself; the default
 # `web-view` build ships only the headless `MemoryWebViewBackend`.
 web-view = ["dep:bastyde-webview", "bastyde-app/web-view"]
+# Engine-backed variants: enable the native engine on `bastyde-webview` and
+# make `install_web_view_default()` pick it. `web-view-wry` is the production
+# engine (macOS/Windows/Linux-X11); `web-view-servo` is the best-effort
+# pure-Rust engine (Linux/Wayland). Plain `web-view` ships only the headless
+# backend. Apps needing runtime Wayland-vs-X11 selection enable both and pass
+# the backend explicitly via `install_web_view(...)`.
+web-view-wry = ["web-view", "bastyde-webview/wry-backend"]
+web-view-servo = ["web-view", "bastyde-webview/servo-backend"]
 
 # Optional main-thread async executor (`bastyde-async`): adds
 # `BastydeAppBuilder::install_async()` plus `ctx.spawn_local(...)` /

@@ -1322,7 +1322,10 @@ dependencies = [
  "bastyde-core",
  "bastyde-tokens",
  "bastyde-widgets",
+ "dpi",
+ "raw-window-handle",
  "servo",
+ "url",
  "wry",
 ]
 
