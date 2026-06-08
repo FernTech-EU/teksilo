@@ -817,6 +817,48 @@ impl BastydeAppHandler {
         }
     }
 
+    /// Run `f` against window `winit_id`'s tree with a real
+    /// [`WindowOps`](bastyde_core::WindowOps) sink (so `open_window`,
+    /// `parent_window_handle`, etc. work). Encapsulates the take-out /
+    /// build-`WindowOpsImpl` / reinsert dance that the `AppEvent::External`
+    /// routers and the mount-action drain all share — keeping the reinsert
+    /// (whose omission silently freezes a window) in exactly one place.
+    /// No-op if `winit_id` is not a managed window.
+    fn run_in_window(
+        &mut self,
+        winit_id: winit::window::WindowId,
+        event_loop: &ActiveEventLoop,
+        f: impl FnOnce(&mut WidgetTree, &mut crate::window_manager::WindowOpsImpl),
+    ) {
+        let Some(mut current) = self.wm.take_managed(winit_id) else {
+            return;
+        };
+        let current_id = current.bastyde_id;
+
+        #[cfg(not(target_os = "macos"))]
+        let current_handle = current
+            .platform_window
+            .window()
+            .window_handle()
+            .ok()
+            .map(|h| h.as_raw());
+        let current_arc = Some(current.platform_window.window_arc());
+
+        {
+            let mut ops = crate::window_manager::WindowOpsImpl::new(
+                &mut self.wm,
+                event_loop,
+                current_id,
+                #[cfg(not(target_os = "macos"))]
+                current_handle,
+                current_arc,
+            );
+            f(&mut current.tree, &mut ops);
+        }
+
+        self.wm.reinsert_managed(winit_id, current);
+    }
+
     /// Try to route an `AppEvent::External` payload as a
     /// [`FileDialogEventPayload`](bastyde_platform::file_dialog::FileDialogEventPayload).
     /// Returns `Ok(())` if the payload matched and was delivered to
@@ -915,38 +957,15 @@ impl BastydeAppHandler {
 
     /// Drain queued post-mount actions for every window that has any, each
     /// with a real [`EventContext`] (so `ctx.parent_window_handle()` resolves).
-    /// Mirrors the routing take/ops/reinsert dance, iterated per window. Cheap
-    /// when nothing is queued (the common case): one map scan, no allocation.
+    /// Modal-blocked windows are skipped — their actions (e.g. a WebView
+    /// opening its native engine subview) stay queued until the modal closes,
+    /// so a native surface can't appear over a modal. Cheap when nothing is
+    /// queued (the common case): one map scan, the returned Vec is empty and
+    /// unallocated.
     fn process_pending_mount_actions(&mut self, event_loop: &ActiveEventLoop) {
         let winit_ids = self.wm.winit_ids_with_pending_mount_actions();
         for winit_id in winit_ids {
-            let Some(mut current) = self.wm.take_managed(winit_id) else {
-                continue;
-            };
-            let current_id = current.bastyde_id;
-
-            #[cfg(not(target_os = "macos"))]
-            let current_handle = current
-                .platform_window
-                .window()
-                .window_handle()
-                .ok()
-                .map(|h| h.as_raw());
-            let current_arc = Some(current.platform_window.window_arc());
-
-            {
-                let mut ops = crate::window_manager::WindowOpsImpl::new(
-                    &mut self.wm,
-                    event_loop,
-                    current_id,
-                    #[cfg(not(target_os = "macos"))]
-                    current_handle,
-                    current_arc,
-                );
-                current.tree.run_mount_actions(&mut ops);
-            }
-
-            self.wm.reinsert_managed(winit_id, current);
+            self.run_in_window(winit_id, event_loop, |tree, ops| tree.run_mount_actions(ops));
         }
     }
 
@@ -989,35 +1008,9 @@ impl BastydeAppHandler {
                 return Ok(());
             };
 
-            let Some(mut current) = self.wm.take_managed(winit_id) else {
-                return Ok(());
-            };
-            let current_id = current.bastyde_id;
-
-            #[cfg(not(target_os = "macos"))]
-            let current_handle = current
-                .platform_window
-                .window()
-                .window_handle()
-                .ok()
-                .map(|h| h.as_raw());
-            let current_arc = Some(current.platform_window.window_arc());
-
-            {
-                let mut ops = crate::window_manager::WindowOpsImpl::new(
-                    &mut self.wm,
-                    event_loop,
-                    current_id,
-                    #[cfg(not(target_os = "macos"))]
-                    current_handle,
-                    current_arc,
-                );
-                current
-                    .tree
-                    .run_with_event_context(&mut ops, |ctx| registry.deliver(payload, ctx));
-            }
-
-            self.wm.reinsert_managed(winit_id, current);
+            self.run_in_window(winit_id, event_loop, move |tree, ops| {
+                tree.run_with_event_context(ops, |ctx| registry.deliver(payload, ctx));
+            });
             Ok(())
         }
         #[cfg(not(feature = "web-view"))]

@@ -201,6 +201,16 @@ struct RegistryState {
     callbacks: RefCell<HashMap<WebViewId, Registered>>,
     /// Bumped per `open`, purely for diagnostics.
     open_count: Cell<u64>,
+    /// The `(web_view_id, window)` of the delivery currently in flight, if any
+    /// (`deliver` removes the callback, runs it, then reinserts). If a
+    /// re-entrant `unregister`/`purge_window` hits this id/window while the
+    /// callback runs, `delivery_aborted` is set and `deliver` skips the
+    /// reinsert — so a since-purged callback is never resurrected even if
+    /// widget teardown becomes synchronous. `deliver` is not itself re-entrant
+    /// (backend events are posted, not delivered inline), so a single slot
+    /// suffices.
+    delivering: Cell<Option<(WebViewId, BastydeWindowId)>>,
+    delivery_aborted: Cell<bool>,
 }
 
 /// Per-app web-view service. Registered in app-state by
@@ -221,6 +231,8 @@ impl WebViewRegistry {
                 backend: RefCell::new(Box::new(backend)),
                 callbacks: RefCell::new(HashMap::new()),
                 open_count: Cell::new(0),
+                delivering: Cell::new(None),
+                delivery_aborted: Cell::new(false),
             }),
         }
     }
@@ -258,15 +270,15 @@ impl WebViewRegistry {
     pub fn deliver(&self, payload: WebViewEventPayload, ctx: &mut EventContext) {
         // Take the callback out so the map borrow isn't held while the
         // (re-entrant-capable) callback runs — it may itself open another web
-        // view, which inserts. Then put it back.
+        // view, which inserts. Then put it back via `or_insert`, so a *newer*
+        // registration created during the callback wins and is not clobbered.
         //
-        // The reinsert is via `or_insert`, so a *newer* registration created
-        // during the callback wins and is not clobbered. Reinsertion of a
-        // since-purged entry cannot happen: `unregister`/`purge_window` run
-        // only from `WebView::drop` / the window-close path, both of which are
-        // deferred until after event dispatch completes — so the entry can't
-        // be purged mid-callback. (If teardown ever becomes synchronous, this
-        // needs a tombstone to avoid resurrecting a dead callback.)
+        // The `delivering` slot guards the one remaining hazard: if the
+        // callback synchronously tears the widget/window down (a re-entrant
+        // `unregister` / `purge_window` for this id/window), we must NOT
+        // resurrect the dead callback. That marks `delivery_aborted`, and we
+        // skip the reinsert below. (Today teardown is deferred so this never
+        // fires, but the guard makes the invariant hold unconditionally.)
         let entry = self.inner.callbacks.borrow_mut().remove(&payload.web_view_id);
         let Some(mut reg) = entry else {
             return;
@@ -275,17 +287,29 @@ impl WebViewRegistry {
             // Stale routing — drop, don't reinsert.
             return;
         }
-        (reg.callback)(payload.event, ctx);
         self.inner
-            .callbacks
-            .borrow_mut()
-            .entry(payload.web_view_id)
-            .or_insert(reg);
+            .delivering
+            .set(Some((payload.web_view_id, reg.window_id)));
+        self.inner.delivery_aborted.set(false);
+
+        (reg.callback)(payload.event, ctx);
+
+        self.inner.delivering.set(None);
+        if !self.inner.delivery_aborted.get() {
+            self.inner
+                .callbacks
+                .borrow_mut()
+                .entry(payload.web_view_id)
+                .or_insert(reg);
+        }
     }
 
     /// Drop the registration for a single web view (widget removed).
     pub fn unregister(&self, web_view_id: WebViewId) {
         self.inner.callbacks.borrow_mut().remove(&web_view_id);
+        if matches!(self.inner.delivering.get(), Some((id, _)) if id == web_view_id) {
+            self.inner.delivery_aborted.set(true);
+        }
     }
 
     /// Drop every registration owned by `window_id`. Called by
@@ -297,6 +321,9 @@ impl WebViewRegistry {
             .callbacks
             .borrow_mut()
             .retain(|_, r| r.window_id != window_id);
+        if matches!(self.inner.delivering.get(), Some((_, win)) if win == window_id) {
+            self.inner.delivery_aborted.set(true);
+        }
     }
 
     /// Number of registered web views. Test helper.
@@ -538,9 +565,13 @@ pub fn memory_registry() -> (WebViewRegistry, MemoryWebViewRecords) {
 #[derive(Debug, Default)]
 pub struct NoopWebViewBackend;
 
-struct NoopHandle;
+/// A [`WebViewHandle`] whose every method is a no-op. Shared by
+/// [`NoopWebViewBackend`] and the not-yet-wired `WryBackend` / `ServoBackend`
+/// scaffolds, so a method added to the trait is implemented in exactly one
+/// place. `pub(crate)` — backends return it boxed; apps never name it.
+pub(crate) struct NoopWebViewHandle;
 
-impl WebViewHandle for NoopHandle {
+impl WebViewHandle for NoopWebViewHandle {
     fn set_bounds(&self, _bounds: Rect) {}
     fn load_url(&self, _url: &str) {}
     fn load_html(&self, _html: &str, _base_url: Option<&str>) {}
@@ -563,6 +594,6 @@ impl WebViewBackend for NoopWebViewBackend {
         _attrs: WebViewAttributes,
         _poster: Option<Arc<dyn AppEventPoster>>,
     ) -> Box<dyn WebViewHandle> {
-        Box::new(NoopHandle)
+        Box::new(NoopWebViewHandle)
     }
 }

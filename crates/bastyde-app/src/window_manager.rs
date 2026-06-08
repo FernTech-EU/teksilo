@@ -876,11 +876,14 @@ impl WindowManager {
 
     /// Winit ids of every window whose tree has post-mount actions queued
     /// (via `BuildContext::run_after_mount`) waiting to run. Drained by
-    /// `BastydeAppHandler::process_pending_mount_actions`.
+    /// `BastydeAppHandler::process_pending_mount_actions`. Modal-blocked
+    /// windows are excluded so their actions (e.g. a WebView opening a native
+    /// engine subview) stay queued until the modal closes — a native surface
+    /// must not appear over a modal-blocked parent.
     pub(crate) fn winit_ids_with_pending_mount_actions(&self) -> Vec<winit::window::WindowId> {
         self.windows
             .iter()
-            .filter(|(_, m)| m.tree.has_pending_mount_actions())
+            .filter(|(_, m)| m.tree.has_pending_mount_actions() && !self.is_blocked(m.bastyde_id))
             .map(|(id, _)| *id)
             .collect()
     }

@@ -16,14 +16,13 @@
 
 use std::sync::Arc;
 
-use bastyde_canvas::Rect;
 use bastyde_core::AppEventPoster;
 use bastyde_core::raw_handle::ParentHandle;
 use bastyde_core::window::BastydeWindowId;
 
 use crate::backend::{
-    ConsoleLevel, WebViewAttributes, WebViewBackend, WebViewEvent, WebViewEventPayload,
-    WebViewHandle, WebViewId,
+    ConsoleLevel, NoopWebViewHandle, WebViewAttributes, WebViewBackend, WebViewEvent,
+    WebViewEventPayload, WebViewHandle, WebViewId,
 };
 
 /// Best-effort Wayland engine backend. **Not yet wired** — see the module docs.
@@ -61,22 +60,6 @@ impl WebViewBackend for ServoBackend {
             };
             poster.post_external(Box::new(payload) as Box<dyn std::any::Any + Send>);
         }
-        Box::new(NoopServoHandle)
+        Box::new(NoopWebViewHandle)
     }
-}
-
-struct NoopServoHandle;
-
-impl WebViewHandle for NoopServoHandle {
-    fn set_bounds(&self, _bounds: Rect) {}
-    fn load_url(&self, _url: &str) {}
-    fn load_html(&self, _html: &str, _base_url: Option<&str>) {}
-    fn eval(&self, _script: &str) {}
-    fn post_message(&self, _msg: &str) {}
-    fn reload(&self) {}
-    fn go_back(&self) {}
-    fn go_forward(&self) {}
-    fn stop(&self) {}
-    fn set_visible(&self, _visible: bool) {}
-    fn set_focus(&self) {}
 }
