@@ -1,38 +1,42 @@
 //! `WryBackend` — production engine backend (macOS WKWebView / Windows
-//! WebView2 / Linux-X11 WebKitGTK) via the `wry` crate.
+//! WebView2 / Linux-X11 WebKitGTK) via the [`wry`] crate.
 //!
-//! **Scaffold.** This module is gated behind the `wry-backend` feature and is
-//! intentionally inert until the spike wires the real engine: the `wry`
-//! dependency is commented out in `Cargo.toml`, and the parent-handle
-//! round-trip (`ctx.parent_window_handle()` → `WebViewBuilder::build_as_child`)
-//! is the first thing to verify on each platform. Today `open` returns a
-//! no-op handle that surfaces a `ConsoleMessage` so enabling the feature
-//! compiles and runs without silently pretending to render.
+//! Gated behind the `wry-backend` feature. The native engine subview is
+//! created with [`WebViewBuilder::build_as_child`] against the OS parent
+//! window handle that the `WebView` widget hands us from its post-mount
+//! [`EventContext`](bastyde_core::widget::EventContext) (see
+//! `BuildContext::run_after_mount`). Browser events (IPC messages, page-load
+//! status, title changes, navigations) are translated into [`WebViewEvent`]s
+//! and posted back through the supplied [`AppEventPoster`].
 //!
-//! Implementation checklist (per the plan, phases 2–3):
-//! - `WebViewBuilder::new().build_as_child(&parent)` with the `attrs`.
-//! - `with_ipc_handler` → `poster.post_external(WebViewEventPayload {
-//!   event: WebViewEvent::Message(..) })`.
-//! - `with_navigation_handler` returning false to cancel; emit
-//!   `NavigationStarted` / `NavigationFinished`.
-//! - `with_asynchronous_custom_protocol` for each `attrs.custom_protocols`.
-//! - `set_bounds` issued on every layout change (required on Linux-X11).
-//! - Linux Wayland: return a handle whose first action posts
-//!   `NavigationFinished { success: false }` + a `ConsoleMessage` (use Servo
-//!   there instead).
+//! Per the plan, this is the macOS / Windows / Linux-X11 backend. On
+//! Linux/Wayland `build_as_child` is unsupported by WebKitGTK (X11 reparenting
+//! only) — use the Servo backend there.
+//!
+//! **Known gaps (tracked):** custom-protocol *handlers* are not yet plumbed
+//! through `WebViewAttributes` (only scheme names are carried), so `app://`
+//! style local serving is not wired here; `go_back`/`go_forward` are driven
+//! via `history.back()/forward()` (wry 0.55 exposes no direct history API).
 
 use std::sync::Arc;
 
+use bastyde_canvas::Rect;
 use bastyde_core::AppEventPoster;
 use bastyde_core::raw_handle::ParentHandle;
 use bastyde_core::window::BastydeWindowId;
 
+use wry::{
+    PageLoadEvent, WebView, WebViewBuilder,
+    dpi::{LogicalPosition, LogicalSize},
+};
+
 use crate::backend::{
-    ConsoleLevel, NoopWebViewHandle, WebViewAttributes, WebViewBackend, WebViewEvent,
+    ConsoleLevel, NoopWebViewHandle, WebSource, WebViewAttributes, WebViewBackend, WebViewEvent,
     WebViewEventPayload, WebViewHandle, WebViewId,
 };
 
-/// Production engine backend. **Not yet wired** — see the module docs.
+/// Production engine backend. Construct and hand to
+/// `install_web_view(WryBackend::new())`.
 #[derive(Debug, Default)]
 pub struct WryBackend {
     _private: (),
@@ -45,31 +49,214 @@ impl WryBackend {
     }
 }
 
+/// Post a [`WebViewEvent`] back to the UI loop, if a poster is available.
+fn post(
+    poster: &Option<Arc<dyn AppEventPoster>>,
+    window_id: BastydeWindowId,
+    web_view_id: WebViewId,
+    event: WebViewEvent,
+) {
+    if let Some(poster) = poster {
+        let payload = WebViewEventPayload {
+            window_id_owner: window_id,
+            web_view_id,
+            event,
+        };
+        poster.post_external(Box::new(payload) as Box<dyn std::any::Any + Send>);
+    }
+}
+
 impl WebViewBackend for WryBackend {
     fn open(
         &mut self,
         web_view_id: WebViewId,
         window_id: BastydeWindowId,
-        _parent: Option<ParentHandle>,
-        _attrs: WebViewAttributes,
+        parent: Option<ParentHandle>,
+        attrs: WebViewAttributes,
         poster: Option<Arc<dyn AppEventPoster>>,
     ) -> Box<dyn WebViewHandle> {
-        // Announce that the real engine isn't wired yet, so callers see a
-        // clear signal rather than a blank, silently-dead view.
-        if let Some(poster) = &poster {
-            let payload = WebViewEventPayload {
-                window_id_owner: window_id,
+        let Some(parent) = parent else {
+            // No OS parent handle (e.g. opened before the window-ops sink was
+            // available). Can't create a child subview — report and no-op.
+            post(
+                &poster,
+                window_id,
                 web_view_id,
-                event: WebViewEvent::ConsoleMessage {
+                WebViewEvent::ConsoleMessage {
                     level: ConsoleLevel::Warn,
-                    text: "WryBackend is a scaffold — the wry engine is not yet wired (enable \
-                           after the spike). No page will render."
+                    text: "WryBackend: no parent window handle available; webview not created"
                         .to_string(),
                 },
-            };
-            poster.post_external(Box::new(payload) as Box<dyn std::any::Any + Send>);
+            );
+            return Box::new(NoopWebViewHandle);
+        };
+
+        let mut builder = WebViewBuilder::new();
+
+        match &attrs.source {
+            Some(WebSource::Url(url)) => builder = builder.with_url(url.clone()),
+            Some(WebSource::Html { html, .. }) => builder = builder.with_html(html.clone()),
+            None => {}
         }
-        // Placeholder handle — every call is a no-op until the engine is wired.
-        Box::new(NoopWebViewHandle)
+        if let Some(ua) = &attrs.user_agent {
+            builder = builder.with_user_agent(ua.clone());
+        }
+        builder = builder
+            .with_transparent(attrs.transparent)
+            .with_devtools(attrs.devtools);
+
+        // --- Browser event handlers → WebViewEvent (each gets its own clone) ---
+        {
+            let poster = poster.clone();
+            builder = builder.with_ipc_handler(move |req| {
+                post(
+                    &poster,
+                    window_id,
+                    web_view_id,
+                    WebViewEvent::Message(req.body().clone()),
+                );
+            });
+        }
+        {
+            let poster = poster.clone();
+            builder = builder.with_on_page_load_handler(move |event, url| {
+                let ev = match event {
+                    PageLoadEvent::Started => WebViewEvent::PageLoadStarted,
+                    PageLoadEvent::Finished => WebViewEvent::PageLoadFinished,
+                };
+                post(&poster, window_id, web_view_id, ev);
+                // Surface a NavigationFinished on load completion so the
+                // url/Ready bindings settle even without a separate nav-finish
+                // callback in wry 0.55.
+                if matches!(event, PageLoadEvent::Finished) {
+                    post(
+                        &poster,
+                        window_id,
+                        web_view_id,
+                        WebViewEvent::NavigationFinished { url, success: true },
+                    );
+                }
+            });
+        }
+        {
+            let poster = poster.clone();
+            builder = builder.with_navigation_handler(move |url| {
+                post(
+                    &poster,
+                    window_id,
+                    web_view_id,
+                    WebViewEvent::NavigationStarted {
+                        url,
+                        can_cancel: false,
+                    },
+                );
+                true // allow — pre-navigation veto is not yet exposed app-side
+            });
+        }
+        {
+            let poster = poster.clone();
+            builder = builder.with_document_title_changed_handler(move |title| {
+                post(
+                    &poster,
+                    window_id,
+                    web_view_id,
+                    WebViewEvent::TitleChanged(title),
+                );
+            });
+        }
+
+        match builder.build_as_child(&parent) {
+            Ok(webview) => Box::new(WryHandle { webview }),
+            Err(e) => {
+                post(
+                    &poster,
+                    window_id,
+                    web_view_id,
+                    WebViewEvent::ConsoleMessage {
+                        level: ConsoleLevel::Error,
+                        text: format!("WryBackend: failed to create webview: {e}"),
+                    },
+                );
+                Box::new(NoopWebViewHandle)
+            }
+        }
     }
+}
+
+/// Live handle wrapping a `wry::WebView`. `!Send`, but the backend lives in
+/// app-state and only ever runs on the main thread, so every call here is
+/// main-thread. Dropping the handle drops the `WebView`, tearing the native
+/// subview down (RAII).
+struct WryHandle {
+    webview: WebView,
+}
+
+impl WebViewHandle for WryHandle {
+    fn set_bounds(&self, bounds: Rect) {
+        let _ = self.webview.set_bounds(wry::Rect {
+            position: LogicalPosition::new(bounds.x, bounds.y).into(),
+            size: LogicalSize::new(bounds.width, bounds.height).into(),
+        });
+    }
+    fn load_url(&self, url: &str) {
+        let _ = self.webview.load_url(url);
+    }
+    fn load_html(&self, html: &str, _base_url: Option<&str>) {
+        // wry 0.55 has no runtime load_html; emulate via document.write so a
+        // post-open HTML swap still works.
+        let _ = self.webview.evaluate_script(&format!(
+            "document.open();document.write({});document.close();",
+            js_string(html)
+        ));
+    }
+    fn eval(&self, script: &str) {
+        let _ = self.webview.evaluate_script(script);
+    }
+    fn post_message(&self, msg: &str) {
+        // Rust → JS: dispatch a `bastyde-message` event carrying `msg` as data.
+        let _ = self.webview.evaluate_script(&format!(
+            "window.dispatchEvent(new MessageEvent('bastyde-message',{{data:{}}}))",
+            js_string(msg)
+        ));
+    }
+    fn reload(&self) {
+        let _ = self.webview.reload();
+    }
+    fn go_back(&self) {
+        let _ = self.webview.evaluate_script("history.back()");
+    }
+    fn go_forward(&self) {
+        let _ = self.webview.evaluate_script("history.forward()");
+    }
+    fn stop(&self) {
+        let _ = self.webview.evaluate_script("window.stop()");
+    }
+    fn set_visible(&self, visible: bool) {
+        let _ = self.webview.set_visible(visible);
+    }
+    fn set_focus(&self) {
+        let _ = self.webview.focus();
+    }
+}
+
+/// Encode `s` as a JavaScript string literal (double-quoted, escaped) so it can
+/// be safely interpolated into an `evaluate_script` body.
+fn js_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{2028}' => out.push_str("\\u2028"),
+            '\u{2029}' => out.push_str("\\u2029"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }

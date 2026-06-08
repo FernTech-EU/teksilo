@@ -20,18 +20,18 @@ bastyde-canvas = { workspace = true }
 #
 # wry 0.55.1 (winit-0.30 compatible) is the production backend on
 # macOS / Windows / Linux-X11; servo 0.2.0 is the best-effort Wayland
-# backend. The dependency lines are scaffolded but commented until the
-# spike verifies the embedding round-trip — see `src/wry_backend.rs`.
-# wry = { version = "0.55.1", optional = true }
-# servo = { version = "0.2.0", optional = true }
+# backend. Both are optional + feature-gated, so the default build never
+# pulls a browser engine.
+wry = { version = "0.55.1", optional = true, features = ["devtools"] }
+servo = { version = "0.2.0", optional = true }
 
 [features]
 default = []
-# Enable once the wry dependency above is uncommented and the spike
-# (parent-handle round-trip into `build_as_child`) is verified.
-wry-backend = []
-# Enable once the servo dependency above is uncommented.
-servo-backend = []
+# Production engine backend (macOS WKWebView / Windows WebView2 /
+# Linux-X11 WebKitGTK) via `wry`.
+wry-backend = ["dep:wry"]
+# Best-effort pure-Rust engine backend (Linux/Wayland) via `servo`.
+servo-backend = ["dep:servo"]
 
 [dev-dependencies]
 bastyde-core = { workspace = true }
