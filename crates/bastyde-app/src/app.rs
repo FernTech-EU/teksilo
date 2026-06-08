@@ -910,6 +910,82 @@ impl BastydeAppHandler {
         }
     }
 
+    /// Try to route an `AppEvent::External` payload as a
+    /// [`WebViewEventPayload`](bastyde_webview::WebViewEventPayload) posted by a
+    /// web-view engine backend, delivering it to the originating window's tree
+    /// via [`WebViewRegistry::deliver`](bastyde_webview::WebViewRegistry::deliver).
+    /// Returns `Ok(())` if matched and delivered, `Err(payload)` to hand the
+    /// box back for fallthrough. Same take/run-with-context/reinsert dance as
+    /// [`Self::try_route_file_dialog_payload`].
+    #[cfg_attr(not(feature = "web-view"), allow(unused_variables))]
+    fn try_route_web_view_payload(
+        &mut self,
+        payload: Box<dyn std::any::Any + Send>,
+        event_loop: &ActiveEventLoop,
+    ) -> Result<(), Box<dyn std::any::Any + Send>> {
+        #[cfg(feature = "web-view")]
+        {
+            use bastyde_webview::{WebViewEventPayload, WebViewRegistry};
+
+            let payload = match payload.downcast::<WebViewEventPayload>() {
+                Ok(boxed) => *boxed,
+                Err(other) => return Err(other),
+            };
+
+            let target_winit = self
+                .wm
+                .bastyde_to_winit_map()
+                .get(&payload.window_id_owner)
+                .copied();
+            let Some(winit_id) = target_winit else {
+                return Ok(());
+            };
+
+            let registry = self
+                .wm
+                .app_context_template()
+                .and_then(|t| t.app_state::<WebViewRegistry>().cloned());
+            let Some(registry) = registry else {
+                return Ok(());
+            };
+
+            let Some(mut current) = self.wm.take_managed(winit_id) else {
+                return Ok(());
+            };
+            let current_id = current.bastyde_id;
+
+            #[cfg(not(target_os = "macos"))]
+            let current_handle = current
+                .platform_window
+                .window()
+                .window_handle()
+                .ok()
+                .map(|h| h.as_raw());
+            let current_arc = Some(current.platform_window.window_arc());
+
+            {
+                let mut ops = crate::window_manager::WindowOpsImpl::new(
+                    &mut self.wm,
+                    event_loop,
+                    current_id,
+                    #[cfg(not(target_os = "macos"))]
+                    current_handle,
+                    current_arc,
+                );
+                current
+                    .tree
+                    .run_with_event_context(&mut ops, |ctx| registry.deliver(payload, ctx));
+            }
+
+            self.wm.reinsert_managed(winit_id, current);
+            Ok(())
+        }
+        #[cfg(not(feature = "web-view"))]
+        {
+            Err(payload)
+        }
+    }
+
     /// Try to route an `AppEvent::External` payload as an
     /// [`AsyncCompletionPayload`](bastyde_core::AsyncCompletionPayload) posted
     /// by the `bastyde-async` executor when a `spawn_local_with` future
@@ -1836,6 +1912,10 @@ impl ApplicationHandler<AppEvent> for BastydeAppHandler {
                     Some(payload) => self
                         .try_route_native_menu_payload(payload, event_loop)
                         .err(),
+                };
+                let payload = match payload {
+                    None => None,
+                    Some(payload) => self.try_route_web_view_payload(payload, event_loop).err(),
                 };
                 if let Some(payload) = payload {
                     {

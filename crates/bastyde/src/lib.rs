@@ -89,6 +89,17 @@ pub use bastyde_inspector as inspector;
 #[cfg(feature = "toast")]
 pub mod toast_install;
 
+/// Embeddable [`WebView`](bastyde_webview::WebView) widget. Re-exported as
+/// `bastyde::web_view`. The `install_web_view{,_default}` methods come from
+/// [`BastydeAppBuilderWebViewExt`](webview_install::BastydeAppBuilderWebViewExt),
+/// re-exported through [`prelude`].
+#[cfg(feature = "web-view")]
+pub use bastyde_webview as web_view;
+
+/// WebView install hook (extension trait on `BastydeAppBuilder`).
+#[cfg(feature = "web-view")]
+pub mod webview_install;
+
 pub mod prelude {
     // DSL entry point
     pub use bastyde_macros::bati;
@@ -187,6 +198,17 @@ pub mod prelude {
         NotificationCenterButton, NotificationEntry, NotificationLog, NotificationLogDialog, Toast,
         ToastAction, ToastActionStyle, ToastDismissCause, ToastHandle, ToastHost,
         ToastInstallOptions, ToastPriority, ToastRegistry, ToastSeverity,
+    };
+
+    // WebView. The extension trait adds `install_web_view{,_default}()` to
+    // `BastydeAppBuilder`; the `WebView` widget + its public backend surface
+    // come into scope so apps `use bastyde::prelude::*` and embed web content.
+    #[cfg(feature = "web-view")]
+    pub use crate::webview_install::BastydeAppBuilderWebViewExt;
+    #[cfg(feature = "web-view")]
+    pub use bastyde_webview::{
+        WebSource, WebView, WebViewBackend, WebViewEvent, WebViewHandle, WebViewId, WebViewRegistry,
+        WebViewStyle,
     };
 
     // Native file dialogs. The extension trait brings

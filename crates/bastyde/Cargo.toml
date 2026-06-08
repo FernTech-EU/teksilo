@@ -64,6 +64,18 @@ file-dialog = ["bastyde-app/rfd-backend"]
 # backend.
 file-dialog-trait = ["bastyde-app/file-dialog"]
 
+# Embeddable `WebView` widget (`bastyde-webview`). Brings in the widget,
+# the backend trait + `WebViewRegistry`, and the
+# `BastydeAppBuilderWebViewExt::install_web_view{,_default}` entry point
+# (defined in this crate, mirroring `toast`). Also turns on the matching
+# `bastyde-app/web-view` feature so the app event loop can route backend
+# events (`WebViewEventPayload`) back to the originating window's tree.
+# Off by default — apps that don't embed web content pay zero compile
+# time for a browser engine. The native engine backends (`wry` / `servo`)
+# are further opt-in features ON `bastyde-webview` itself; the default
+# `web-view` build ships only the headless `MemoryWebViewBackend`.
+web-view = ["dep:bastyde-webview", "bastyde-app/web-view"]
+
 # Optional main-thread async executor (`bastyde-async`): adds
 # `BastydeAppBuilder::install_async()` plus `ctx.spawn_local(...)` /
 # `spawn_blocking` for imperative async-in-UI flows. Off by default — apps
@@ -156,6 +168,7 @@ bastyde-widgets = { workspace = true, optional = true }
 bastyde-text = { path = "../bastyde-text", version = "0.5.0", optional = true, default-features = false }
 bastyde-i18n = { workspace = true, optional = true }
 bastyde-inspector = { workspace = true, optional = true }
+bastyde-webview = { workspace = true, optional = true }
 bastyde-resources = { workspace = true }
 bastyde-theme-material3 = { workspace = true, optional = true }
 bastyde-theme-macos = { workspace = true, optional = true }

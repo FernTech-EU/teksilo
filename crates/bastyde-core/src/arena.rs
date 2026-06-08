@@ -85,6 +85,17 @@ pub struct WidgetNode {
     /// Symmetric to `focus_within_signal`. See
     /// `WidgetBuilder::hover_within`.
     pub(crate) hover_within_signal: Option<Signal<bool>>,
+    /// User-bound signal that the framework sets to `true` while this
+    /// node is `ActivationState::Active` and `false` while it is
+    /// `Dormant`. Opted into via `BuildContext::activation_signal`.
+    /// Unlike every other widget — which is hidden automatically when
+    /// the paint pass skips a dormant subtree — a widget that owns a
+    /// resource living *outside* the wgpu pass (a native OS subview: a
+    /// `WebView` engine surface) has no other way to learn it was parked
+    /// dormant by a `Switcher` / `visible_when` gate, so it cannot hide
+    /// that resource. This signal is that notification. Set only on an
+    /// actual Active↔Dormant transition. See `set_dormant` / `activate`.
+    pub(crate) activation_signal: Option<Signal<bool>>,
     pub(crate) alignment_override: Option<bastyde_tokens::Alignment>,
     /// When true, the paint pass clips child rendering to this widget's bounds.
     /// Set by scroll areas and overflow-hidden containers.
@@ -272,6 +283,7 @@ impl WidgetNode {
             tab_stop: None,
             focus_within_signal: None,
             hover_within_signal: None,
+            activation_signal: None,
             alignment_override: None,
             clips_children: false,
             ime: None,
@@ -779,8 +791,19 @@ impl WidgetArena {
     /// Set a widget subtree to dormant state (state preserved, not rendered).
     /// Recursively dormants all children.
     pub fn set_dormant(&mut self, id: WidgetId) {
+        let mut became_dormant = None;
         if let Some(node) = self.nodes.get_mut(id) {
+            let was_active = node.activation == ActivationState::Active;
             node.activation = ActivationState::Dormant;
+            // Snapshot the signal to set *after* releasing the node
+            // borrow — the observer (e.g. a WebView's set_visible bridge)
+            // runs synchronously and must not re-enter the arena node.
+            if was_active {
+                became_dormant = node.activation_signal.clone();
+            }
+        }
+        if let Some(sig) = became_dormant {
+            sig.set(false);
         }
         let children: Vec<WidgetId> = self.children(id).to_vec();
         for child in children {
@@ -804,10 +827,18 @@ impl WidgetArena {
     /// ([`visibility_checks_iter`](Self::visibility_checks_iter)) still owns
     /// the eventual activate/dormant transitions when the gate flips.
     pub fn activate(&mut self, id: WidgetId) {
+        let mut became_active = None;
         if let Some(node) = self.nodes.get_mut(id) {
+            let was_dormant = node.activation != ActivationState::Active;
             node.activation = ActivationState::Active;
             node.dirty.needs_layout = true;
             node.dirty.needs_paint = true;
+            if was_dormant {
+                became_active = node.activation_signal.clone();
+            }
+        }
+        if let Some(sig) = became_active {
+            sig.set(true);
         }
         let children: Vec<WidgetId> = self.children(id).to_vec();
         for child in children {

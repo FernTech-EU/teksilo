@@ -29,6 +29,12 @@ rfd-backend = ["file-dialog", "bastyde-platform/rfd-backend"]
 # `PrivacySettings` widget surface light up together. Off by default
 # — apps that don't ship analytics pay nothing.
 telemetry = ["dep:bastyde-telemetry", "dep:uuid", "bastyde-widgets/telemetry"]
+# WebView routing. Lets the app event loop downcast a `WebViewEventPayload`
+# in the `AppEvent::External` arm and route it to the originating window's
+# `WebViewRegistry::deliver`, and purge per-window registrations on close.
+# Pulls in `bastyde-webview` for the payload + registry types. Off by
+# default; the umbrella `bastyde/web-view` feature turns it on.
+web-view = ["dep:bastyde-webview"]
 
 [dependencies]
 bastyde-core = { workspace = true }
@@ -45,6 +51,7 @@ bastyde-platform = { workspace = true, features = ["native-menu"] }
 # Registration wiring only — no widget constructors used here.
 bastyde-widgets = { workspace = true }
 bastyde-settings = { workspace = true }
+bastyde-webview = { workspace = true, optional = true }
 bastyde-telemetry = { workspace = true, optional = true }
 bastyde-text = { workspace = true, optional = true }
 winit = { workspace = true }

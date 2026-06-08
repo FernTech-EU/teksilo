@@ -719,6 +719,16 @@ impl WindowManager {
         {
             handle.clear_window(bastyde_id);
         }
+        // Drop any web-view event callbacks owned by this window so a late
+        // backend event can't route into a torn-down tree.
+        #[cfg(feature = "web-view")]
+        if let Some(registry) = self
+            .app_context_template
+            .as_ref()
+            .and_then(|t| t.app_state::<bastyde_webview::WebViewRegistry>())
+        {
+            registry.purge_window(bastyde_id);
+        }
         if let Some(winit_id) = self.bastyde_to_winit.remove(&bastyde_id)
             && let Some(mut managed) = self.windows.remove(&winit_id)
         {

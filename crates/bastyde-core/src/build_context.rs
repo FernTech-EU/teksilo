@@ -272,6 +272,21 @@ impl<'a> BuildContext<'a> {
         self.tree.visible_when(id, state);
     }
 
+    /// Observe a node's framework activation as a `Signal<bool>` — `true`
+    /// while active, `false` while parked dormant by a `Switcher` /
+    /// `visible_when` gate. Initialised to the node's current state and
+    /// updated only on an actual Active↔Dormant transition.
+    ///
+    /// Ordinary widgets never need this: dormant subtrees are simply not
+    /// painted, so they vanish for free. It exists for the one case where
+    /// "not painted" ≠ "hidden" — a widget owning a native OS resource
+    /// that renders *outside* the wgpu pass (a `WebView`'s engine subview).
+    /// Such a widget does `ctx.effect(&ctx.activation_signal(id), move |a|
+    /// handle.set_visible(*a))` to hide/show the native surface in lockstep.
+    pub fn activation_signal(&mut self, id: WidgetId) -> Signal<bool> {
+        self.tree.activation_signal(id)
+    }
+
     /// Bind an opacity multiplier (0..1) to a widget. The render walker
     /// emits `SetOpacity(value)` before painting the widget's subtree
     /// and `RestoreOpacity` afterwards, so the multiplier composes

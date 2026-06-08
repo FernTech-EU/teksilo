@@ -2128,6 +2128,30 @@ impl WidgetTree {
         }
     }
 
+    /// Install (or reuse) the activation signal on a node and return a
+    /// handle to it. The framework sets it to `false` when the node is
+    /// parked dormant (`Switcher` / `visible_when`) and `true` when it is
+    /// re-activated — see [`crate::arena::WidgetArena::set_dormant`] /
+    /// [`activate`](crate::arena::WidgetArena::activate). The returned
+    /// signal is initialised to the node's current active state. Used by
+    /// widgets owning a resource outside the paint pass (a native subview)
+    /// that must hide/show it in lockstep with framework activation.
+    pub fn activation_signal(&mut self, id: WidgetId) -> crate::signal::Signal<bool> {
+        if let Some(node) = self.arena.get_mut(id) {
+            if let Some(existing) = node.activation_signal.clone() {
+                return existing;
+            }
+            let active = node.activation == crate::arena::ActivationState::Active;
+            let sig = crate::signal::Signal::new(active);
+            node.activation_signal = Some(sig.clone());
+            sig
+        } else {
+            // Node missing (shouldn't happen in build) — hand back a
+            // detached signal so the caller still gets a valid handle.
+            crate::signal::Signal::new(true)
+        }
+    }
+
     /// Bind an opacity multiplier (0..1) to a widget. The render walker
     /// emits `SetOpacity(value)` before painting the widget's subtree
     /// and `RestoreOpacity` afterwards, so the multiplier composes
@@ -2398,5 +2422,72 @@ impl WidgetTree {
 impl Default for WidgetTree {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod activation_signal_tests {
+    use super::*;
+    use crate::build_context::BuildContext;
+    use crate::signal::Signal;
+    use crate::widget::{LayoutContext, LayoutResponse, Widget};
+    use bastyde_canvas::SizeProposal;
+
+    /// A leaf that, on build, opts into its activation signal and mirrors it
+    /// into an out-of-band signal the test can read.
+    #[derive(Debug)]
+    struct ActivationProbe {
+        log: Signal<Vec<bool>>,
+    }
+
+    impl Widget for ActivationProbe {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let id = ctx.self_id();
+            let vis = ctx.activation_signal(id);
+            let log = self.log.clone();
+            ctx.effect(&vis, move |active| {
+                let mut v = log.get();
+                v.push(*active);
+                log.set(v);
+            });
+            Vec::new()
+        }
+
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> LayoutResponse {
+            proposal.resolve(10.0, 10.0).into()
+        }
+    }
+
+    #[test]
+    fn activation_signal_fires_on_dormant_and_reactivate() {
+        let mut tree = WidgetTree::new();
+        let log = Signal::new(Vec::<bool>::new());
+        let probe = tree.add(ActivationProbe { log: log.clone() });
+
+        // Gate the probe's visibility on a signal.
+        let visible = Signal::new(true);
+        tree.visible_when(probe, visible.clone());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        // Initially active: effect registration alone fires nothing.
+        assert_eq!(log.get(), Vec::<bool>::new());
+
+        // Hide → dormant → activation signal false.
+        visible.set(false);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        assert_eq!(log.get(), vec![false]);
+
+        // Show → active → activation signal true.
+        visible.set(true);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        assert_eq!(log.get(), vec![false, true]);
+
+        // Redundant relayout while active fires nothing new.
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        assert_eq!(log.get(), vec![false, true]);
     }
 }

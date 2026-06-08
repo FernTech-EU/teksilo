@@ -88,6 +88,8 @@ mod toast_style;
 mod toggle_style;
 #[path = "styles/tooltip_style.rs"]
 mod tooltip_style;
+#[path = "styles/web_view_style.rs"]
+mod web_view_style;
 
 pub use avatar_style::{
     AvatarCorner, AvatarPresence, AvatarShape, AvatarSize, AvatarStyle, AvatarStyleConfig,
@@ -180,3 +182,6 @@ pub use theme_extension::ThemeExtensions;
 pub use toast_style::{SharedToastStyle, ToastPriority, ToastStyle, ToastStyleConfig};
 pub use toggle_style::{SharedToggleStyle, ToggleStyle, ToggleStyleConfig, ToggleVariant};
 pub use tooltip_style::{SharedTooltipStyle, TooltipStyle, TooltipStyleConfig};
+pub use web_view_style::{
+    SharedWebViewStyle, WebViewStyle, WebViewStyleConfig, WebViewVisualState,
+};
