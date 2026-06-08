@@ -256,10 +256,17 @@ impl WebViewRegistry {
     /// Called by `bastyde-app` from the `AppEvent::External` arm. Dropped
     /// silently if the callback was already purged (window/widget gone).
     pub fn deliver(&self, payload: WebViewEventPayload, ctx: &mut EventContext) {
-        // Take the callback out across the user code so the borrow on the
-        // map isn't held while the (re-entrant-capable) callback runs, then
-        // put it back. A callback removed mid-call (widget dropped) simply
-        // isn't reinserted.
+        // Take the callback out so the map borrow isn't held while the
+        // (re-entrant-capable) callback runs — it may itself open another web
+        // view, which inserts. Then put it back.
+        //
+        // The reinsert is via `or_insert`, so a *newer* registration created
+        // during the callback wins and is not clobbered. Reinsertion of a
+        // since-purged entry cannot happen: `unregister`/`purge_window` run
+        // only from `WebView::drop` / the window-close path, both of which are
+        // deferred until after event dispatch completes — so the entry can't
+        // be purged mid-callback. (If teardown ever becomes synchronous, this
+        // needs a tombstone to avoid resurrecting a dead callback.)
         let entry = self.inner.callbacks.borrow_mut().remove(&payload.web_view_id);
         let Some(mut reg) = entry else {
             return;
@@ -520,4 +527,42 @@ impl WebViewBackend for MemoryWebViewBackend {
 pub fn memory_registry() -> (WebViewRegistry, MemoryWebViewRecords) {
     let (backend, records) = MemoryWebViewBackend::new();
     (WebViewRegistry::new(backend), records)
+}
+
+/// A backend that renders nothing and records nothing — every call is a no-op.
+///
+/// Unlike [`MemoryWebViewBackend`] (which accumulates an unbounded op log for
+/// test assertions), this is safe to install in a long-running app as the
+/// placeholder default until a native engine backend is wired. Used by
+/// `install_web_view_default`.
+#[derive(Debug, Default)]
+pub struct NoopWebViewBackend;
+
+struct NoopHandle;
+
+impl WebViewHandle for NoopHandle {
+    fn set_bounds(&self, _bounds: Rect) {}
+    fn load_url(&self, _url: &str) {}
+    fn load_html(&self, _html: &str, _base_url: Option<&str>) {}
+    fn eval(&self, _script: &str) {}
+    fn post_message(&self, _msg: &str) {}
+    fn reload(&self) {}
+    fn go_back(&self) {}
+    fn go_forward(&self) {}
+    fn stop(&self) {}
+    fn set_visible(&self, _visible: bool) {}
+    fn set_focus(&self) {}
+}
+
+impl WebViewBackend for NoopWebViewBackend {
+    fn open(
+        &mut self,
+        _web_view_id: WebViewId,
+        _window_id: BastydeWindowId,
+        _parent: Option<ParentHandle>,
+        _attrs: WebViewAttributes,
+        _poster: Option<Arc<dyn AppEventPoster>>,
+    ) -> Box<dyn WebViewHandle> {
+        Box::new(NoopHandle)
+    }
 }

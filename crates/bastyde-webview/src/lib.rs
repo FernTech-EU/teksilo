@@ -49,9 +49,9 @@ mod servo_backend;
 pub use servo_backend::ServoBackend;
 
 pub use backend::{
-    ConsoleLevel, MemoryWebViewBackend, MemoryWebViewRecords, WebSource, WebViewAttributes,
-    WebViewBackend, WebViewEvent, WebViewEventPayload, WebViewHandle, WebViewId, WebViewOp,
-    WebViewRegistry, memory_registry,
+    ConsoleLevel, MemoryWebViewBackend, MemoryWebViewRecords, NoopWebViewBackend, WebSource,
+    WebViewAttributes, WebViewBackend, WebViewEvent, WebViewEventPayload, WebViewHandle, WebViewId,
+    WebViewOp, WebViewRegistry, memory_registry,
 };
 pub use recipe_web_view_style::RecipeWebViewStyle;
 

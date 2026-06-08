@@ -53,8 +53,9 @@ impl BastydeAppBuilderWebViewExt for BastydeAppBuilder {
     }
 
     fn install_web_view_default(self) -> Self {
-        // Headless placeholder backend until a native engine feature is wired.
-        let (registry, _records) = bastyde_webview::memory_registry();
-        self.app_state(registry)
+        // Inert no-op backend (renders nothing, records nothing) until a native
+        // engine feature is wired — safe for a long-running app, unlike the
+        // op-accumulating `MemoryWebViewBackend` used in tests.
+        self.app_state(WebViewRegistry::new(bastyde_webview::NoopWebViewBackend))
     }
 }
