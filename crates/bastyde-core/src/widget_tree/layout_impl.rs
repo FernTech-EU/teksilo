@@ -94,6 +94,10 @@ impl WidgetTree {
         for id in to_activate {
             self.arena.activate(id);
         }
+        // Fire activation_signal observers (e.g. a WebView's set_visible
+        // bridge) after the whole visibility pass has committed — not from
+        // inside the set_dormant/activate recursion above.
+        self.flush_activation_signals();
     }
 
     /// Dismiss any active overlay whose content widget is no longer

@@ -2196,6 +2196,23 @@ impl WidgetTree {
         }
     }
 
+    /// Fire the `activation_signal` of every node that transitioned
+    /// Active↔Dormant since the last flush. Called at a well-defined tree-level
+    /// point (the end of `process_state_changes`), never from inside the arena
+    /// recursion — so an observer (e.g. a `WebView` calling the engine's
+    /// `set_visible`) runs after the visibility pass has fully committed,
+    /// matching the `focus_within` / `hover_within` update discipline.
+    pub(crate) fn flush_activation_signals(&mut self) {
+        let changes = self.arena.take_activation_changes();
+        for (id, active) in changes {
+            // Re-read the signal at flush time; the node still exists (the
+            // transition was recorded in the same synchronous operation).
+            if let Some(sig) = self.arena.get(id).and_then(|n| n.activation_signal.clone()) {
+                sig.set(active);
+            }
+        }
+    }
+
     /// Bind an opacity multiplier (0..1) to a widget. The render walker
     /// emits `SetOpacity(value)` before painting the widget's subtree
     /// and `RestoreOpacity` afterwards, so the multiplier composes

@@ -346,6 +346,17 @@ pub struct WidgetArena {
     /// container can size an item it intends to keep hidden without that size
     /// leaking into the normal per-pass cache.
     measuring: std::cell::Cell<bool>,
+    /// Active↔Dormant transitions of nodes carrying an `activation_signal`,
+    /// recorded by [`set_dormant`](Self::set_dormant) / [`activate`](Self::activate)
+    /// and drained by `WidgetTree::flush_activation_signals` *after* the
+    /// mutation completes. Signals are fired at the tree level, never from
+    /// inside the arena recursion — mirroring how `focus_within` /
+    /// `hover_within` are updated from `WidgetTree` methods rather than mid
+    /// mutation, so an observer (e.g. a `WebView`'s `set_visible`, which on a
+    /// real backend is an OS call) never runs while the arena is being walked.
+    /// Only nodes with a signal contribute, so the buffer is empty for the
+    /// overwhelming majority of trees.
+    pending_activation_changes: Vec<(WidgetId, bool)>,
 }
 
 /// Hashable key for a [`bastyde_canvas::SizeProposal`] used by the per-pass
@@ -388,6 +399,7 @@ impl WidgetArena {
             roots_dirty: true,
             layout_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             measuring: std::cell::Cell::new(false),
+            pending_activation_changes: Vec::new(),
         }
     }
 
@@ -791,19 +803,16 @@ impl WidgetArena {
     /// Set a widget subtree to dormant state (state preserved, not rendered).
     /// Recursively dormants all children.
     pub fn set_dormant(&mut self, id: WidgetId) {
-        let mut became_dormant = None;
         if let Some(node) = self.nodes.get_mut(id) {
             let was_active = node.activation == ActivationState::Active;
             node.activation = ActivationState::Dormant;
-            // Snapshot the signal to set *after* releasing the node
-            // borrow — the observer (e.g. a WebView's set_visible bridge)
-            // runs synchronously and must not re-enter the arena node.
-            if was_active {
-                became_dormant = node.activation_signal.clone();
+            // Record the Active→Dormant transition for nodes that opted into an
+            // activation signal; the signal is fired later by
+            // `WidgetTree::flush_activation_signals`, not here — see the
+            // `pending_activation_changes` field docs.
+            if was_active && node.activation_signal.is_some() {
+                self.pending_activation_changes.push((id, false));
             }
-        }
-        if let Some(sig) = became_dormant {
-            sig.set(false);
         }
         let children: Vec<WidgetId> = self.children(id).to_vec();
         for child in children {
@@ -827,18 +836,17 @@ impl WidgetArena {
     /// ([`visibility_checks_iter`](Self::visibility_checks_iter)) still owns
     /// the eventual activate/dormant transitions when the gate flips.
     pub fn activate(&mut self, id: WidgetId) {
-        let mut became_active = None;
         if let Some(node) = self.nodes.get_mut(id) {
-            let was_dormant = node.activation != ActivationState::Active;
+            // Only Dormant→Active is a real "show" transition. Guard on
+            // `== Dormant` (not `!= Active`) so a `Destroyed` node — or any
+            // future non-Active state — is never resurrected or signalled.
+            let was_dormant = node.activation == ActivationState::Dormant;
             node.activation = ActivationState::Active;
             node.dirty.needs_layout = true;
             node.dirty.needs_paint = true;
-            if was_dormant {
-                became_active = node.activation_signal.clone();
+            if was_dormant && node.activation_signal.is_some() {
+                self.pending_activation_changes.push((id, true));
             }
-        }
-        if let Some(sig) = became_active {
-            sig.set(true);
         }
         let children: Vec<WidgetId> = self.children(id).to_vec();
         for child in children {
@@ -870,6 +878,14 @@ impl WidgetArena {
             parent.children.retain(|&c| c != id);
         }
         self.nodes.remove(id);
+    }
+
+    /// Drain the buffered Active↔Dormant transitions recorded since the last
+    /// call. Each `(id, active)` is fed to `WidgetTree::flush_activation_signals`
+    /// which fires the node's `activation_signal` — at the tree level, outside
+    /// any arena mutation.
+    pub(crate) fn take_activation_changes(&mut self) -> Vec<(WidgetId, bool)> {
+        std::mem::take(&mut self.pending_activation_changes)
     }
 
     pub fn is_active(&self, id: WidgetId) -> bool {

@@ -111,8 +111,10 @@ pub struct WebView {
     url_signal: Option<Signal<String>>,
     title_signal: Option<Signal<String>>,
     loading_signal: Option<Signal<bool>>,
-    can_go_back: Option<Signal<bool>>,
-    can_go_forward: Option<Signal<bool>>,
+    // NOTE: can-go-back / can-go-forward bindings are intentionally absent
+    // until a history-aware backend can drive them — shipping builders that
+    // never update the bound signal would be a silent lie. Re-add alongside
+    // the wry/servo history wiring.
 
     // User event callbacks.
     on_message: Option<MessageCallback>,
@@ -153,8 +155,6 @@ impl WebView {
             url_signal: None,
             title_signal: None,
             loading_signal: None,
-            can_go_back: None,
-            can_go_forward: None,
             on_message: None,
             on_title_changed: None,
         }
@@ -222,18 +222,6 @@ impl WebView {
     /// Bind the loading flag (read-only — true between page-load start/finish).
     pub fn bind_loading(mut self, signal: Signal<bool>) -> Self {
         self.loading_signal = Some(signal);
-        self
-    }
-
-    /// Bind the "can go back" flag (read-only).
-    pub fn bind_can_go_back(mut self, signal: Signal<bool>) -> Self {
-        self.can_go_back = Some(signal);
-        self
-    }
-
-    /// Bind the "can go forward" flag (read-only).
-    pub fn bind_can_go_forward(mut self, signal: Signal<bool>) -> Self {
-        self.can_go_forward = Some(signal);
         self
     }
 
@@ -305,8 +293,6 @@ impl WebView {
         let url_signal = self.url_signal.clone();
         let title_signal = self.title_signal.clone();
         let loading_signal = self.loading_signal.clone();
-        let can_go_back = self.can_go_back.clone();
-        let can_go_forward = self.can_go_forward.clone();
         let state_signal = self.state_signal.clone();
         let on_message = self.on_message.clone();
         let on_title_changed = self.on_title_changed.clone();
@@ -351,9 +337,7 @@ impl WebView {
             | WebViewEvent::DownloadStarted { .. }
             | WebViewEvent::NavigationStarted { .. }
             | WebViewEvent::ConsoleMessage { .. } => {
-                // Surfaced via dedicated callbacks in a later phase; the
-                // can_go_* flags are reserved for a history-aware backend.
-                let _ = (&can_go_back, &can_go_forward);
+                // Surfaced via dedicated callbacks in a later phase.
             }
         }
     }
