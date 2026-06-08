@@ -32,7 +32,7 @@ use wry::{
 
 use crate::backend::{
     ConsoleLevel, NoopWebViewHandle, WebSource, WebViewAttributes, WebViewBackend, WebViewEvent,
-    WebViewEventPayload, WebViewHandle, WebViewId,
+    WebViewHandle, WebViewId, js_string, post_event,
 };
 
 /// Production engine backend. Construct and hand to
@@ -49,21 +49,35 @@ impl WryBackend {
     }
 }
 
-/// Post a [`WebViewEvent`] back to the UI loop, if a poster is available.
-fn post(
+/// Report engine-init failure: drive the widget to its Error chrome via
+/// `NavigationFinished { success: false }` (the visual-state signal), plus a
+/// console message for diagnostics. Returns a no-op handle so the (now-Some)
+/// widget handle stops the open from being retried into the same failure.
+fn fail(
     poster: &Option<Arc<dyn AppEventPoster>>,
     window_id: BastydeWindowId,
     web_view_id: WebViewId,
-    event: WebViewEvent,
-) {
-    if let Some(poster) = poster {
-        let payload = WebViewEventPayload {
-            window_id_owner: window_id,
-            web_view_id,
-            event,
-        };
-        poster.post_external(Box::new(payload) as Box<dyn std::any::Any + Send>);
-    }
+    text: String,
+) -> Box<dyn WebViewHandle> {
+    post_event(
+        poster,
+        window_id,
+        web_view_id,
+        WebViewEvent::ConsoleMessage {
+            level: ConsoleLevel::Error,
+            text,
+        },
+    );
+    post_event(
+        poster,
+        window_id,
+        web_view_id,
+        WebViewEvent::NavigationFinished {
+            url: String::new(),
+            success: false,
+        },
+    );
+    Box::new(NoopWebViewHandle)
 }
 
 impl WebViewBackend for WryBackend {
@@ -76,19 +90,14 @@ impl WebViewBackend for WryBackend {
         poster: Option<Arc<dyn AppEventPoster>>,
     ) -> Box<dyn WebViewHandle> {
         let Some(parent) = parent else {
-            // No OS parent handle (e.g. opened before the window-ops sink was
-            // available). Can't create a child subview — report and no-op.
-            post(
+            // No OS parent handle — can't create a child subview. Surface the
+            // Error state so the widget doesn't sit in Loading forever.
+            return fail(
                 &poster,
                 window_id,
                 web_view_id,
-                WebViewEvent::ConsoleMessage {
-                    level: ConsoleLevel::Warn,
-                    text: "WryBackend: no parent window handle available; webview not created"
-                        .to_string(),
-                },
+                "WryBackend: no parent window handle available; webview not created".to_string(),
             );
-            return Box::new(NoopWebViewHandle);
         };
 
         let mut builder = WebViewBuilder::new();
@@ -109,7 +118,7 @@ impl WebViewBackend for WryBackend {
         {
             let poster = poster.clone();
             builder = builder.with_ipc_handler(move |req| {
-                post(
+                post_event(
                     &poster,
                     window_id,
                     web_view_id,
@@ -124,12 +133,12 @@ impl WebViewBackend for WryBackend {
                     PageLoadEvent::Started => WebViewEvent::PageLoadStarted,
                     PageLoadEvent::Finished => WebViewEvent::PageLoadFinished,
                 };
-                post(&poster, window_id, web_view_id, ev);
+                post_event(&poster, window_id, web_view_id, ev);
                 // Surface a NavigationFinished on load completion so the
                 // url/Ready bindings settle even without a separate nav-finish
                 // callback in wry 0.55.
                 if matches!(event, PageLoadEvent::Finished) {
-                    post(
+                    post_event(
                         &poster,
                         window_id,
                         web_view_id,
@@ -141,7 +150,7 @@ impl WebViewBackend for WryBackend {
         {
             let poster = poster.clone();
             builder = builder.with_navigation_handler(move |url| {
-                post(
+                post_event(
                     &poster,
                     window_id,
                     web_view_id,
@@ -156,7 +165,7 @@ impl WebViewBackend for WryBackend {
         {
             let poster = poster.clone();
             builder = builder.with_document_title_changed_handler(move |title| {
-                post(
+                post_event(
                     &poster,
                     window_id,
                     web_view_id,
@@ -167,18 +176,12 @@ impl WebViewBackend for WryBackend {
 
         match builder.build_as_child(&parent) {
             Ok(webview) => Box::new(WryHandle { webview }),
-            Err(e) => {
-                post(
-                    &poster,
-                    window_id,
-                    web_view_id,
-                    WebViewEvent::ConsoleMessage {
-                        level: ConsoleLevel::Error,
-                        text: format!("WryBackend: failed to create webview: {e}"),
-                    },
-                );
-                Box::new(NoopWebViewHandle)
-            }
+            Err(e) => fail(
+                &poster,
+                window_id,
+                web_view_id,
+                format!("WryBackend: failed to create webview: {e}"),
+            ),
         }
     }
 }
@@ -237,26 +240,4 @@ impl WebViewHandle for WryHandle {
     fn set_focus(&self) {
         let _ = self.webview.focus();
     }
-}
-
-/// Encode `s` as a JavaScript string literal (double-quoted, escaped) so it can
-/// be safely interpolated into an `evaluate_script` body.
-fn js_string(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{2028}' => out.push_str("\\u2028"),
-            '\u{2029}' => out.push_str("\\u2029"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
 }

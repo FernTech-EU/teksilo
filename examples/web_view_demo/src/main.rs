@@ -35,10 +35,13 @@ fn main() {
                     let title = Signal::new(String::from("Loading…"));
 
                     // --- The WebView (pre-mounted so the toolbar can drive it) ---
+                    // Load the bundled page inline. (Custom-protocol *handlers*
+                    // aren't plumbed through WebViewAttributes yet, so an
+                    // `app://` URL would 404 on a real engine — inline HTML
+                    // renders today and the page is self-contained.)
                     let webview_id = tree.add(
                         WebView::new()
-                            .url("app://index.html")
-                            .custom_protocol("app")
+                            .html(include_str!("../assets/index.html"))
                             .devtools(cfg!(debug_assertions))
                             .bind_url(url.clone())
                             .bind_title(title.clone())

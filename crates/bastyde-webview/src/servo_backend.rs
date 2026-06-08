@@ -44,8 +44,8 @@ use servo::{
 use url::Url;
 
 use crate::backend::{
-    ConsoleLevel, WebSource, WebViewAttributes, WebViewBackend, WebViewEvent, WebViewEventPayload,
-    WebViewHandle, WebViewId, NoopWebViewHandle,
+    ConsoleLevel, NoopWebViewHandle, WebSource, WebViewAttributes, WebViewBackend, WebViewEvent,
+    WebViewHandle, WebViewId, js_string, post_event,
 };
 
 /// Best-effort Wayland engine backend. Construct and hand to
@@ -62,20 +62,34 @@ impl ServoBackend {
     }
 }
 
-fn post(
+/// Report engine-init failure: drive the widget to its Error chrome via
+/// `NavigationFinished { success: false }`, plus a console message. Returns a
+/// no-op handle. Mirrors `wry_backend::fail`.
+fn fail(
     poster: &Option<Arc<dyn AppEventPoster>>,
     window_id: BastydeWindowId,
     web_view_id: WebViewId,
-    event: WebViewEvent,
-) {
-    if let Some(poster) = poster {
-        let payload = WebViewEventPayload {
-            window_id_owner: window_id,
-            web_view_id,
-            event,
-        };
-        poster.post_external(Box::new(payload) as Box<dyn std::any::Any + Send>);
-    }
+    text: String,
+) -> Box<dyn WebViewHandle> {
+    post_event(
+        poster,
+        window_id,
+        web_view_id,
+        WebViewEvent::ConsoleMessage {
+            level: ConsoleLevel::Error,
+            text,
+        },
+    );
+    post_event(
+        poster,
+        window_id,
+        web_view_id,
+        WebViewEvent::NavigationFinished {
+            url: String::new(),
+            success: false,
+        },
+    );
+    Box::new(NoopWebViewHandle)
 }
 
 impl WebViewBackend for ServoBackend {
@@ -88,32 +102,23 @@ impl WebViewBackend for ServoBackend {
         poster: Option<Arc<dyn AppEventPoster>>,
     ) -> Box<dyn WebViewHandle> {
         let Some(parent) = parent else {
-            post(
+            return fail(
                 &poster,
                 window_id,
                 web_view_id,
-                WebViewEvent::ConsoleMessage {
-                    level: ConsoleLevel::Warn,
-                    text: "ServoBackend: no parent window handle available; webview not created"
-                        .to_string(),
-                },
+                "ServoBackend: no parent window handle available; webview not created".to_string(),
             );
-            return Box::new(NoopWebViewHandle);
         };
 
         let (Ok(display_handle), Ok(window_handle)) =
             (parent.display_handle(), parent.window_handle())
         else {
-            post(
+            return fail(
                 &poster,
                 window_id,
                 web_view_id,
-                WebViewEvent::ConsoleMessage {
-                    level: ConsoleLevel::Error,
-                    text: "ServoBackend: could not resolve raw window/display handles".to_string(),
-                },
+                "ServoBackend: could not resolve raw window/display handles".to_string(),
             );
-            return Box::new(NoopWebViewHandle);
         };
 
         // Servo renders into its own GL surface over the whole window. A real
@@ -123,16 +128,12 @@ impl WebViewBackend for ServoBackend {
             match WindowRenderingContext::new(display_handle, window_handle, initial_size) {
                 Ok(ctx) => Rc::new(ctx),
                 Err(e) => {
-                    post(
+                    return fail(
                         &poster,
                         window_id,
                         web_view_id,
-                        WebViewEvent::ConsoleMessage {
-                            level: ConsoleLevel::Error,
-                            text: format!("ServoBackend: rendering context init failed: {e:?}"),
-                        },
+                        format!("ServoBackend: rendering context init failed: {e:?}"),
                     );
-                    return Box::new(NoopWebViewHandle);
                 }
             };
         let _ = rendering_context.make_current();
@@ -155,7 +156,7 @@ impl WebViewBackend for ServoBackend {
         }
         let webview = builder.build();
 
-        post(
+        post_event(
             &poster,
             window_id,
             web_view_id,
@@ -186,7 +187,7 @@ impl WebViewDelegate for ServoEventDelegate {
     fn notify_load_status_changed(&self, webview: ServoWebView, status: LoadStatus) {
         match status {
             LoadStatus::Started => {
-                post(
+                post_event(
                     &self.poster,
                     self.window_id,
                     self.web_view_id,
@@ -195,13 +196,13 @@ impl WebViewDelegate for ServoEventDelegate {
             }
             LoadStatus::HeadParsed => {}
             LoadStatus::Complete => {
-                post(
+                post_event(
                     &self.poster,
                     self.window_id,
                     self.web_view_id,
                     WebViewEvent::PageLoadFinished,
                 );
-                post(
+                post_event(
                     &self.poster,
                     self.window_id,
                     self.web_view_id,
@@ -215,7 +216,7 @@ impl WebViewDelegate for ServoEventDelegate {
     }
 
     fn notify_page_title_changed(&self, _webview: ServoWebView, title: Option<String>) {
-        post(
+        post_event(
             &self.poster,
             self.window_id,
             self.web_view_id,
@@ -255,9 +256,13 @@ impl WebViewHandle for ServoHandle {
     }
     fn post_message(&self, msg: &str) {
         // No built-in IPC channel; emulate Rust→JS via a dispatched event.
-        let escaped = msg.replace('\\', "\\\\").replace('"', "\\\"");
+        // Uses the shared, fully-escaping js_string (the hand-rolled escaper
+        // here previously missed \n / \t / U+2028 / U+2029 → silent SyntaxError).
         self.webview.evaluate_javascript(
-            format!("window.dispatchEvent(new MessageEvent('bastyde-message',{{data:\"{escaped}\"}}))"),
+            format!(
+                "window.dispatchEvent(new MessageEvent('bastyde-message',{{data:{}}}))",
+                js_string(msg)
+            ),
             |_result| {},
         );
     }

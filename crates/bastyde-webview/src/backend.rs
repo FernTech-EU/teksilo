@@ -159,6 +159,56 @@ pub struct WebViewEventPayload {
     pub event: WebViewEvent,
 }
 
+/// Post a [`WebViewEvent`] back to the UI loop, if a poster is available.
+/// Shared by every engine backend so the emit path lives in one place.
+#[allow(dead_code)] // used only by the feature-gated engine backends
+pub(crate) fn post_event(
+    poster: &Option<Arc<dyn AppEventPoster>>,
+    window_id: BastydeWindowId,
+    web_view_id: WebViewId,
+    event: WebViewEvent,
+) {
+    if let Some(poster) = poster {
+        let payload = WebViewEventPayload {
+            window_id_owner: window_id,
+            web_view_id,
+            event,
+        };
+        poster.post_external(Box::new(payload) as Box<dyn std::any::Any + Send>);
+    }
+}
+
+/// Encode `s` as a JavaScript string literal (double-quoted, fully escaped) so
+/// it can be safely interpolated into an `evaluate_script` body. Lives in the
+/// shared backend module (not in one engine's file) so every JS-executing
+/// backend uses the same audited escaper — an incomplete escape is a JS
+/// injection / silent-SyntaxError hazard.
+///
+/// Escapes the JS-significant characters: `"`, `\`, the C0 controls (incl.
+/// `\n` / `\r` / `\t`), and U+2028 / U+2029 (LINE / PARAGRAPH SEPARATOR — these
+/// are line terminators *inside* JS string literals pre-ES2019 and silently
+/// break the literal otherwise).
+#[allow(dead_code)] // used only by the feature-gated engine backends
+pub(crate) fn js_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{2028}' => out.push_str("\\u2028"),
+            '\u{2029}' => out.push_str("\\u2029"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 /// Swappable web-view engine backend.
 ///
 /// The real backends (`WryBackend` / `ServoBackend`, behind their features)
