@@ -34,9 +34,10 @@ use bastyde_core::event::{EventResponse, Key, WidgetEvent};
 use bastyde_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
 use bastyde_core::signal::Signal;
 use bastyde_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
+use bastyde_core::styles::{SharedSplitButtonStyle, SplitButtonStyle, SplitButtonStyleConfig};
 use bastyde_core::widget_builder::{HandlerSet, WidgetBuilder};
 use bastyde_core::widget_id::WidgetId;
-use bastyde_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole};
+use bastyde_tokens::TextRole;
 
 use crate::button::{ButtonVariant, InteractionState};
 use crate::menu_item::MenuItem;
@@ -69,6 +70,9 @@ pub const SPLIT_BUTTON_CHEVRON_ICON_SIZE: f32 = 12.0;
 pub struct SplitButton {
     rows: Vec<Row>,
     variant: ButtonVariant,
+    /// Per-call Tier-3 chrome override. `None` ⇒ theme slot ⇒ the built-in
+    /// `RecipeSplitButtonStyle`.
+    style_override: Option<SharedSplitButtonStyle>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,
     initial_selected: usize,
@@ -118,6 +122,7 @@ impl SplitButton {
         Self {
             rows: Vec::new(),
             variant: ButtonVariant::Plain,
+            style_override: None,
             initial_enabled: true,
             initial_selected: 0,
             promote_on_select: true,
@@ -169,6 +174,14 @@ impl SplitButton {
 
     pub fn variant(mut self, variant: ButtonVariant) -> Self {
         self.variant = variant;
+        self
+    }
+
+    /// Override the Tier-3 frame chrome for this instance. Takes precedence
+    /// over `theme.style_slots.split_button` and the built-in
+    /// `RecipeSplitButtonStyle`.
+    pub fn style(mut self, style: impl SplitButtonStyle) -> Self {
+        self.style_override = Some(Rc::new(style));
         self
     }
 
@@ -277,49 +290,36 @@ impl std::fmt::Debug for SplitButton {
     }
 }
 
-// --- Color resolution (variant × state × theme) ---
+// --- Text-color resolution (variant × state) ---
 //
-// Mirrors Button::resolve_bg / resolve_text / resolve_border so a Button
-// and a SplitButton with the same variant look identical. If Button's
-// color tables ever diverge from these, update both sides.
+// Only the default-action label and chevron icon colour are resolved here;
+// the frame background / border moved to `RecipeSplitButtonStyle`. Mirrors
+// `Button::resolve_text_role` so a Button and a SplitButton with the same
+// variant read identically — keep them in lockstep if Button's text table
+// changes.
 
-// SplitButton has not yet migrated to the trait-driven `ButtonStyle`
-// surface. For now it normalises the 7-value `ButtonVariant` down to
-// the three buckets it knows how to paint: `Filled` family
-// (Filled / Destructive), `Plain` family (Plain / Tinted / Outlined),
-// `Ghost` family (Ghost / Link).
+// SplitButton normalises the 7-value `ButtonVariant` down to the three
+// buckets it knows how to paint: `Filled` family (Filled / Destructive),
+// `Plain` family (Plain / Tinted / Outlined), `Ghost` family (Ghost / Link).
+// `classify` is shared with the Tier-3 `RecipeSplitButtonStyle` (frame
+// background / border) so the frame and the widget-owned text colour stay in
+// lockstep; the widget keeps `resolve_text_role` (mirrors how `Button` keeps
+// its own text-role resolution while delegating chrome to `ButtonStyle`).
 #[derive(Copy, Clone, Eq, PartialEq)]
 #[allow(clippy::enum_variant_names)]
-enum SplitButtonFamily {
+pub(crate) enum SplitButtonFamily {
     FilledLike,
     PlainLike,
     GhostLike,
 }
 
-fn classify(variant: ButtonVariant) -> SplitButtonFamily {
+pub(crate) fn classify(variant: ButtonVariant) -> SplitButtonFamily {
     match variant {
         ButtonVariant::Filled | ButtonVariant::Destructive => SplitButtonFamily::FilledLike,
         ButtonVariant::Plain | ButtonVariant::Tinted | ButtonVariant::Outlined => {
             SplitButtonFamily::PlainLike
         }
         ButtonVariant::Ghost | ButtonVariant::Link => SplitButtonFamily::GhostLike,
-    }
-}
-
-fn resolve_bg_role(variant: ButtonVariant, state: InteractionState) -> SurfaceRole {
-    match (classify(variant), state) {
-        (SplitButtonFamily::FilledLike, InteractionState::Disabled) => SurfaceRole::AccentDisabled,
-        (SplitButtonFamily::FilledLike, InteractionState::Pressed) => SurfaceRole::AccentPressed,
-        (SplitButtonFamily::FilledLike, InteractionState::Hovered) => SurfaceRole::AccentHover,
-        (SplitButtonFamily::FilledLike, _) => SurfaceRole::Accent,
-
-        (SplitButtonFamily::PlainLike, InteractionState::Pressed) => SurfaceRole::Pressed,
-        (SplitButtonFamily::PlainLike, InteractionState::Hovered) => SurfaceRole::Hover,
-        (SplitButtonFamily::PlainLike, _) => SurfaceRole::Main,
-
-        (SplitButtonFamily::GhostLike, InteractionState::Pressed) => SurfaceRole::Pressed,
-        (SplitButtonFamily::GhostLike, InteractionState::Hovered) => SurfaceRole::Hover,
-        (SplitButtonFamily::GhostLike, _) => SurfaceRole::Transparent,
     }
 }
 
@@ -333,52 +333,26 @@ fn resolve_text_role(variant: ButtonVariant, state: InteractionState) -> TextRol
     }
 }
 
-fn resolve_border_role(variant: ButtonVariant, state: InteractionState) -> BorderRole {
-    if state == InteractionState::Focused {
-        return BorderRole::Focused;
-    }
-    match classify(variant) {
-        SplitButtonFamily::FilledLike | SplitButtonFamily::GhostLike => BorderRole::Transparent,
-        SplitButtonFamily::PlainLike => match state {
-            InteractionState::Hovered | InteractionState::Pressed => BorderRole::Strong,
-            _ => BorderRole::Default,
-        },
-    }
-}
-
-/// Border width for the SplitButton frame: thickens to the theme's
-/// `focus_ring_width` on focus, rests at the variant's normal
-/// width otherwise.
-fn resolve_border_width(
-    variant: ButtonVariant,
-    state: InteractionState,
-    normal_bw: f32,
-    focus_bw: f32,
-) -> f32 {
-    if state == InteractionState::Focused {
-        return focus_bw;
-    }
-    match classify(variant) {
-        SplitButtonFamily::FilledLike | SplitButtonFamily::GhostLike => 0.0,
-        SplitButtonFamily::PlainLike => normal_bw,
-    }
-}
-
 impl Widget for SplitButton {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let normal_bw = SPLIT_BUTTON_BORDER_WIDTH;
-        let focus_bw = ctx.theme().shape.focus_ring_width;
-        let style = self.variant;
+        let variant = self.variant;
         let self_id = ctx.self_id();
         // Forward initial-enabled into the arena; see IconButton.
         if !self.initial_enabled {
             ctx.enabled_when(self_id, false);
         }
-        // `effective_enabled` available if the chrome ever needs it
-        // for reactive `is_disabled` derivation. Today the leaves
-        // handle disabled-color substitution via their own paint
-        // (`PaintContext::effective_enabled`).
-        let _effective_enabled = ctx.effective_enabled_signal(self_id);
+        // Drives the style's reactive `is_disabled` (custom chrome may dim
+        // the frame). The recipe default leaves the frame undimmed and the
+        // leaves substitute disabled colours in their own paint.
+        let effective_enabled = ctx.effective_enabled_signal(self_id);
+
+        // Resolve the active frame chrome: per-call override > theme slot >
+        // built-in `RecipeSplitButtonStyle`.
+        let split_style: SharedSplitButtonStyle = self
+            .style_override
+            .clone()
+            .or_else(|| ctx.theme().style_slots.split_button.clone())
+            .unwrap_or_else(|| Rc::new(crate::styles::RecipeSplitButtonStyle));
 
         // ---- Extract label / action for each MenuItem and wrap each item's
         // activation so selecting it from the menu also promotes its index
@@ -493,11 +467,13 @@ impl Widget for SplitButton {
             }
         });
 
-        // ---- Derived reactive roles ----
-        let bg_role = interaction.map(move |s| resolve_bg_role(style, *s));
-        let text_role = interaction.map(move |s| resolve_text_role(style, *s));
-        let border_role = interaction.map(move |s| resolve_border_role(style, *s));
-        // `divider` is a RectWidget used as a 1-dp vertical rule; role-based
+        // ---- Derived reactive text role (frame bg/border live in the style) ----
+        // Text colour stays a widget concern (mirrors Button's
+        // `resolve_text_role`); it tints the default-action label and the
+        // chevron icon. The frame background / border is resolved inside the
+        // active `SplitButtonStyle` from the interaction bools built below.
+        let text_role = interaction.map(move |s| resolve_text_role(variant, *s));
+        // The divider is a RectWidget used as a 1-dp vertical rule; role-based
         // so it follows theme changes without an intermediate signal.
 
         // ---- Main-region label bound to `selected` ----
@@ -648,7 +624,8 @@ impl Widget for SplitButton {
         // `hover_within` writes `hovered_signal` whenever the pointer is
         // over a strict descendant of this HStack — i.e. main_region,
         // divider, or chevron_region — driving the unified Hovered halo.
-        let row_id = ctx.add(
+        // This assembled row is the interactive `content` the style frames.
+        let content_id = ctx.add(
             HStack::new()
                 .spacing(0.0)
                 .add_child(main_region_id)
@@ -657,27 +634,20 @@ impl Widget for SplitButton {
                 .hover_within(hovered_signal),
         );
 
-        // Border width reacts to focus state — thickens to the
-        // accent `focus_ring_width` on focus, matching the Int UI
-        // convention applied uniformly across all input widgets.
-        let border_width =
-            interaction.map(move |s| resolve_border_width(style, *s, normal_bw, focus_bw));
-
-        // ---- Shared frame (single RectWidget behind the row) ----
-        let bg_rect = RectWidget::new()
-            .bind_background(bg_role)
-            .bind_border_color(border_role)
-            .bind_border_width(border_width)
-            .corner_radius(CornerRadius::uniform(SPLIT_BUTTON_CORNER_RADIUS));
-        let bg_id = ctx.add(bg_rect);
-
-        let frame_id = ctx.add(ZStack::new().add_child(bg_id).add_child(row_id));
-
-        // Enforce an overall minimum size: main min_width + divider + chevron.
-        let total_min_width =
-            SPLIT_BUTTON_MIN_WIDTH + SPLIT_BUTTON_DIVIDER_WIDTH + SPLIT_BUTTON_CHEVRON_WIDTH;
-        let root_id =
-            ctx.add(MinSize::new(total_min_width, SPLIT_BUTTON_HEIGHT).child_id(frame_id));
+        // ---- Delegate the shared frame chrome to the Tier-3 style ----
+        // The style owns the background fill, border, corner radius, and
+        // overall min size; we hand it the interactive row plus the live
+        // interaction bools (derived from the single `interaction` enum,
+        // which carries exactly one transient state at a time).
+        let cfg = SplitButtonStyleConfig {
+            content: content_id,
+            is_pressed: interaction.map(|s| *s == InteractionState::Pressed),
+            is_hovered: interaction.map(|s| *s == InteractionState::Hovered),
+            is_focused: interaction.map(|s| *s == InteractionState::Focused),
+            is_disabled: effective_enabled.map(|on| !*on),
+            variant,
+        };
+        let root_id = split_style.make_body(&cfg, ctx);
         self.root_child_id = Some(root_id);
 
         // ---- Self handlers: the SplitButton is the single focus stop.
@@ -929,6 +899,37 @@ mod tests {
             fired.get(),
             1,
             "full KeyDown+KeyUp fires the default action"
+        );
+    }
+
+    /// A per-call `.style(...)` override is consulted: the custom
+    /// `SplitButtonStyle::make_body` runs and frames the interactive content.
+    #[test]
+    fn custom_style_make_body_is_invoked() {
+        struct MarkerStyle(StdRc<StdCell<bool>>);
+        impl SplitButtonStyle for MarkerStyle {
+            fn make_body(
+                &self,
+                cfg: &SplitButtonStyleConfig,
+                _ctx: &mut BuildContext,
+            ) -> WidgetId {
+                self.0.set(true);
+                // Frame the pre-built interactive row verbatim.
+                cfg.content
+            }
+        }
+
+        let fired = StdRc::new(StdCell::new(false));
+        let mut tree = themed_tree();
+        tree.add(
+            SplitButton::new()
+                .item(MenuItem::new(lit!("A")))
+                .style(MarkerStyle(fired.clone())),
+        );
+        tree.layout(SizeProposal::exact(300.0, 60.0));
+        assert!(
+            fired.get(),
+            "a per-call SplitButtonStyle override must drive the frame chrome"
         );
     }
 
