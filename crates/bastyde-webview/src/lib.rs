@@ -91,14 +91,21 @@ pub struct WebView {
     attrs: WebViewAttributes,
     web_view_id: WebViewId,
     handle: SharedHandle,
-    last_bounds: Cell<Option<Rect>>,
-    opened: Cell<bool>,
+    /// Shared with the post-mount open action so it can apply the first
+    /// `set_bounds` immediately after the engine opens.
+    last_bounds: Rc<Cell<Option<Rect>>>,
+    /// Guards `run_after_mount` enqueue against rebuilds (queue at most once).
+    mount_queued: Cell<bool>,
+    /// Window id captured from `BuildContext::window()` (the post-mount
+    /// `EventContext` has no direct window-id accessor).
+    window_id: Cell<Option<BastydeWindowId>>,
     style_override: Option<SharedWebViewStyle>,
     root_child_id: Option<WidgetId>,
     /// Internal lifecycle state driving the overlay chrome.
     state_signal: Signal<WebViewVisualState>,
-    /// Registry clone captured at build for `Drop`-time unregistration.
-    registry: RefCell<Option<WebViewRegistry>>,
+    /// Registry handle, written by the post-mount open action and read by
+    /// `Drop` for unregistration. Shared so the moved open closure can set it.
+    registry: Rc<RefCell<Option<WebViewRegistry>>>,
 
     // Optional outbound (read-only) bindings.
     url_signal: Option<Signal<String>>,
@@ -116,7 +123,7 @@ impl std::fmt::Debug for WebView {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WebView")
             .field("web_view_id", &self.web_view_id)
-            .field("opened", &self.opened.get())
+            .field("opened", &self.handle.borrow().is_some())
             .field("source", &self.attrs.source)
             .finish_non_exhaustive()
     }
@@ -136,12 +143,13 @@ impl WebView {
             attrs: WebViewAttributes::default(),
             web_view_id: WebViewId::next(),
             handle: Rc::new(RefCell::new(None)),
-            last_bounds: Cell::new(None),
-            opened: Cell::new(false),
+            last_bounds: Rc::new(Cell::new(None)),
+            mount_queued: Cell::new(false),
+            window_id: Cell::new(None),
             style_override: None,
             root_child_id: None,
             state_signal: Signal::new(WebViewVisualState::Loading),
-            registry: RefCell::new(None),
+            registry: Rc::new(RefCell::new(None)),
             url_signal: None,
             title_signal: None,
             loading_signal: None,
@@ -374,46 +382,74 @@ impl Widget for WebView {
         );
         self.root_child_id = Some(body);
 
-        // --- Open the native engine subview once, via the app registry ---
-        if !self.opened.get()
-            && self.handle.borrow().is_none()
-            && let Some(registry) = ctx.app_state::<WebViewRegistry>().cloned()
-        {
-            let window_id = ctx
-                .window()
-                .map(|w| w.id())
-                .unwrap_or_else(|| BastydeWindowId::new(0));
-            let poster = ctx.poster().cloned();
-            let on_event = self.make_event_callback();
-            let handle = registry.open(
-                self.web_view_id,
-                window_id,
-                // Parent handle is not available from BuildContext (only from
-                // an app-driven EventContext's window-ops sink). Native
-                // backends treat None as "defer until a handle arrives"; the
-                // MemoryWebViewBackend ignores it. Wiring the real handle is
-                // the spike's job — see docs/plan.
-                None,
-                self.attrs.clone(),
-                poster,
-                on_event,
-            );
-            *self.handle.borrow_mut() = Some(handle);
-            self.opened.set(true);
-            *self.registry.borrow_mut() = Some(registry);
-        }
+        // Capture the window id now — the post-mount EventContext has no
+        // direct window-id accessor, but BuildContext::window() does.
+        self.window_id
+            .set(ctx.window().map(|w| w.id()));
 
         // --- Visibility bridge: framework activation → engine set_visible ---
         // The single reason this widget needs the activation signal: a native
         // subview ignores the wgpu paint pass, so a Switcher parking us
-        // dormant would otherwise leave the engine surface visible.
+        // dormant would otherwise leave the engine surface visible. The effect
+        // no-ops until the engine handle exists (opened post-mount below).
         let vis = ctx.activation_signal(self_id);
-        let handle = self.handle.clone();
+        let effect_handle = self.handle.clone();
         ctx.effect(&vis, move |active| {
-            if let Some(h) = handle.borrow().as_ref() {
+            if let Some(h) = effect_handle.borrow().as_ref() {
                 h.set_visible(*active);
             }
         });
+
+        // --- Open the native engine subview once, AFTER mount ---
+        // Opening is deferred to a post-mount EventContext because that is the
+        // only place a widget can read the OS parent window handle
+        // (`ctx.parent_window_handle()`) together with `app_state` + `poster`
+        // — exactly what a real engine's `build_as_child(parent)` needs.
+        if !self.mount_queued.get() {
+            self.mount_queued.set(true);
+            let web_view_id = self.web_view_id;
+            let window_id = self.window_id.get();
+            let attrs = self.attrs.clone();
+            let handle_slot = self.handle.clone();
+            let bounds_slot = self.last_bounds.clone();
+            let registry_slot = self.registry.clone();
+            let activation = vis;
+            let on_event = self.make_event_callback();
+
+            ctx.run_after_mount(move |ectx| {
+                // Guard against a double-open if a rebuild ever re-queues.
+                if handle_slot.borrow().is_some() {
+                    return;
+                }
+                let Some(registry) = ectx.app_state::<WebViewRegistry>().cloned() else {
+                    // No engine configured (install_web_view not called) —
+                    // the widget renders just its overlay chrome.
+                    return;
+                };
+                let parent = ectx.parent_window_handle();
+                let poster = ectx.poster().cloned();
+                let wid = window_id.unwrap_or_else(|| BastydeWindowId::new(0));
+
+                let handle =
+                    registry.open(web_view_id, wid, parent, attrs, poster, on_event);
+                // Apply the bounds layout already resolved, then the current
+                // activation state (so a view mounted while its tab is parked
+                // opens hidden, not visible-then-flashing).
+                if let Some(b) = bounds_slot.get() {
+                    handle.set_bounds(b);
+                }
+                // The engine subview opens visible by default, so only act on
+                // the parked case: a view mounted while its tab is dormant must
+                // be hidden at birth (no visible-then-hidden flash). Active
+                // opens need no redundant set_visible(true).
+                if !activation.get() {
+                    handle.set_visible(false);
+                }
+
+                *handle_slot.borrow_mut() = Some(handle);
+                *registry_slot.borrow_mut() = Some(registry);
+            });
+        }
 
         self.children()
     }

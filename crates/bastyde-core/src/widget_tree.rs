@@ -268,6 +268,14 @@ pub struct WidgetTree {
     /// next `layout()` automatically re-arms `frame_tick_requested`
     /// so the frame-tick effects run on the wake-up pass.
     pub(crate) pending_wake_at: std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>>,
+    /// One-shot post-mount actions enqueued during `build()` via
+    /// [`BuildContext::run_after_mount`], drained by the app loop (and by
+    /// tests) through [`WidgetTree::run_mount_actions`] with a real
+    /// [`EventContext`](crate::widget::EventContext) — the only place a widget
+    /// can read the OS parent handle / app-state / poster together after it is
+    /// mounted. Used by widgets that own a native resource needing a window
+    /// handle to initialise (a `WebView`'s engine subview).
+    pub(crate) pending_mount_actions: Vec<Box<dyn FnOnce(&mut crate::widget::EventContext)>>,
     /// Wall-clock time of the previous `layout()` call (for delta computation).
     pub(crate) last_frame_time: Option<std::time::Instant>,
     /// Set by [`EventContext::close_window`] during dispatch; drained
@@ -406,6 +414,7 @@ impl WidgetTree {
             frame_tick_requested: std::rc::Rc::new(std::cell::Cell::new(false)),
             a11y_update_requested: std::rc::Rc::new(std::cell::Cell::new(false)),
             pending_wake_at: std::rc::Rc::new(std::cell::Cell::new(None)),
+            pending_mount_actions: Vec::new(),
             last_frame_time: None,
             close_window_requested: false,
             pending_locale_request: None,
@@ -472,6 +481,41 @@ impl WidgetTree {
             // not meaningful for an empty tree.
             drop(ctx);
         }
+    }
+
+    /// Enqueue a one-shot action to run with a real
+    /// [`EventContext`](crate::widget::EventContext) after the current build,
+    /// once the tree is mounted under its window. Used via
+    /// [`BuildContext::run_after_mount`]. Drained by
+    /// [`Self::run_mount_actions`].
+    pub(crate) fn queue_mount_action(
+        &mut self,
+        action: Box<dyn FnOnce(&mut crate::widget::EventContext)>,
+    ) {
+        self.pending_mount_actions.push(action);
+    }
+
+    /// Whether any post-mount actions are waiting to run.
+    pub fn has_pending_mount_actions(&self) -> bool {
+        !self.pending_mount_actions.is_empty()
+    }
+
+    /// Drain and run every queued post-mount action with a fresh
+    /// [`EventContext`](crate::widget::EventContext) built over `ops`. The app
+    /// loop calls this each iteration with a real `WindowOps` sink (so
+    /// `ctx.parent_window_handle()` resolves); headless tests call it with a
+    /// `NoopWindowOps`. Actions enqueued *by* an action (rare) are left for the
+    /// next drain rather than run re-entrantly.
+    pub fn run_mount_actions(&mut self, ops: &mut dyn crate::window::WindowOps) {
+        if self.pending_mount_actions.is_empty() {
+            return;
+        }
+        let actions = std::mem::take(&mut self.pending_mount_actions);
+        self.run_with_event_context(ops, move |ctx| {
+            for action in actions {
+                action(ctx);
+            }
+        });
     }
 
     /// Attach the [`WindowState`](crate::window::WindowState) for this
@@ -2460,6 +2504,52 @@ mod activation_signal_tests {
         ) -> LayoutResponse {
             proposal.resolve(10.0, 10.0).into()
         }
+    }
+
+    /// A widget that enqueues a post-mount action via `run_after_mount` has it
+    /// run exactly once, with a real `EventContext`, when the tree drains
+    /// (`run_mount_actions`) — and `has_pending_mount_actions` reflects the
+    /// queue state.
+    #[derive(Debug)]
+    struct MountActionProbe {
+        ran: Signal<u32>,
+    }
+
+    impl Widget for MountActionProbe {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let ran = self.ran.clone();
+            ctx.run_after_mount(move |_ectx| ran.set(ran.get() + 1));
+            Vec::new()
+        }
+
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> LayoutResponse {
+            proposal.resolve(10.0, 10.0).into()
+        }
+    }
+
+    #[test]
+    fn run_after_mount_runs_once_on_drain() {
+        let mut tree = WidgetTree::new();
+        let ran = Signal::new(0_u32);
+        tree.add(MountActionProbe { ran: ran.clone() });
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        // Queued during build, not yet run.
+        assert!(tree.has_pending_mount_actions());
+        assert_eq!(ran.get(), 0);
+
+        // Drain with a Noop sink (as headless callers do).
+        tree.run_mount_actions(&mut crate::window::NoopWindowOps);
+        assert_eq!(ran.get(), 1);
+        assert!(!tree.has_pending_mount_actions());
+
+        // Draining again is a no-op (the queue is empty).
+        tree.run_mount_actions(&mut crate::window::NoopWindowOps);
+        assert_eq!(ran.get(), 1);
     }
 
     #[test]

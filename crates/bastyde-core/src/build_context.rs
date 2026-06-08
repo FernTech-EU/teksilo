@@ -272,6 +272,19 @@ impl<'a> BuildContext<'a> {
         self.tree.visible_when(id, state);
     }
 
+    /// Enqueue a one-shot action to run shortly after this build, with a real
+    /// [`EventContext`](crate::widget::EventContext) — the only place a widget
+    /// can read the OS parent window handle (`ctx.parent_window_handle()`),
+    /// `app_state`, and `poster` *together*, after it is mounted under its
+    /// window. The action runs at most once per enqueue (the app loop drains
+    /// the queue each iteration); a widget that rebuilds must guard against
+    /// enqueuing twice. Built for widgets owning a native OS resource that
+    /// needs a window handle to initialise (a `WebView`'s engine subview);
+    /// ordinary widgets never need it.
+    pub fn run_after_mount(&mut self, f: impl FnOnce(&mut crate::widget::EventContext) + 'static) {
+        self.tree.queue_mount_action(Box::new(f));
+    }
+
     /// Observe a node's framework activation as a `Signal<bool>` — `true`
     /// while active, `false` while parked dormant by a `Switcher` /
     /// `visible_when` gate. Initialised to the node's current state and

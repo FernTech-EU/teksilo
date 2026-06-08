@@ -32,6 +32,10 @@ fn tree_with_registry(registry: WebViewRegistry) -> WidgetTree {
 
 fn layout(tree: &mut WidgetTree) {
     tree.layout(SizeProposal::exact(800.0, 600.0));
+    // The app loop drains post-mount actions each iteration with a real
+    // WindowOps; headless tests pump them with a Noop sink (parent handle is
+    // None, app_state present). This is where the WebView opens its engine.
+    tree.run_mount_actions(&mut bastyde_core::NoopWindowOps);
 }
 
 #[test]
@@ -131,6 +135,35 @@ fn webview_in_switcher_hides_native_subview_on_tab_away() {
     assert_eq!(records.visibility_log(wv_id), vec![false, true, false]);
 
     let _ = switcher_id;
+}
+
+/// A WebView mounted while already parked dormant must open *hidden* — no
+/// visible-then-hidden flash. Exercises the post-mount open reading the current
+/// activation state.
+#[test]
+fn webview_opened_while_parked_starts_hidden() {
+    let (registry, records) = memory_registry();
+    let mut tree = tree_with_registry(registry);
+
+    let webview = WebView::new().url("about:blank");
+    let wv_id = webview.id();
+    let node = tree.add(webview);
+
+    // Park it dormant before the post-mount open runs.
+    let visible = Signal::new(false);
+    tree.visible_when(node, visible.clone());
+    layout(&mut tree); // build → dormant → pump mount actions → open hidden
+
+    assert_eq!(
+        records.visibility_log(wv_id),
+        vec![false],
+        "a WebView opened while parked dormant must start hidden"
+    );
+
+    // Reveal it → set_visible(true).
+    visible.set(true);
+    layout(&mut tree);
+    assert_eq!(records.visibility_log(wv_id), vec![false, true]);
 }
 
 /// Dropping the WebView (tree teardown) tears down the engine handle (RAII).

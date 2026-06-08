@@ -874,6 +874,17 @@ impl WindowManager {
         self.windows.insert(id, managed);
     }
 
+    /// Winit ids of every window whose tree has post-mount actions queued
+    /// (via `BuildContext::run_after_mount`) waiting to run. Drained by
+    /// `BastydeAppHandler::process_pending_mount_actions`.
+    pub(crate) fn winit_ids_with_pending_mount_actions(&self) -> Vec<winit::window::WindowId> {
+        self.windows
+            .iter()
+            .filter(|(_, m)| m.tree.has_pending_mount_actions())
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
     /// `pub(crate)` access to the windows map used by
     /// [`WindowOpsImpl`].
     pub(crate) fn windows_map(&self) -> &HashMap<winit::window::WindowId, ManagedWindow> {

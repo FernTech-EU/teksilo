@@ -607,6 +607,9 @@ impl BastydeAppHandler {
         let had_modal_requests = self.process_modal_requests(event_loop);
         let had_modal_dismissals = self.process_modal_dismissals();
         self.process_pending(event_loop);
+        // Drain post-mount actions (e.g. a WebView opening its native engine
+        // subview, which needs the OS parent handle only reachable here).
+        self.process_pending_mount_actions(event_loop);
         // Drain per-window command queues: app-side writes to
         // WindowState signals emitted WindowCommand values that the
         // registry routes through the per-window queue. Translate each
@@ -907,6 +910,43 @@ impl BastydeAppHandler {
         #[cfg(not(feature = "file-dialog"))]
         {
             Err(payload)
+        }
+    }
+
+    /// Drain queued post-mount actions for every window that has any, each
+    /// with a real [`EventContext`] (so `ctx.parent_window_handle()` resolves).
+    /// Mirrors the routing take/ops/reinsert dance, iterated per window. Cheap
+    /// when nothing is queued (the common case): one map scan, no allocation.
+    fn process_pending_mount_actions(&mut self, event_loop: &ActiveEventLoop) {
+        let winit_ids = self.wm.winit_ids_with_pending_mount_actions();
+        for winit_id in winit_ids {
+            let Some(mut current) = self.wm.take_managed(winit_id) else {
+                continue;
+            };
+            let current_id = current.bastyde_id;
+
+            #[cfg(not(target_os = "macos"))]
+            let current_handle = current
+                .platform_window
+                .window()
+                .window_handle()
+                .ok()
+                .map(|h| h.as_raw());
+            let current_arc = Some(current.platform_window.window_arc());
+
+            {
+                let mut ops = crate::window_manager::WindowOpsImpl::new(
+                    &mut self.wm,
+                    event_loop,
+                    current_id,
+                    #[cfg(not(target_os = "macos"))]
+                    current_handle,
+                    current_arc,
+                );
+                current.tree.run_mount_actions(&mut ops);
+            }
+
+            self.wm.reinsert_managed(winit_id, current);
         }
     }
 
