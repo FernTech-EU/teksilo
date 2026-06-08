@@ -61,6 +61,23 @@ pub use bastyde_core::styles::{
     SharedWebViewStyle, WebViewStyle, WebViewStyleConfig, WebViewVisualState,
 };
 
+/// Whether the process is running under a Wayland session — the signal for
+/// choosing the Servo backend (wry's WebKitGTK does X11 reparenting only).
+///
+/// Mirrors winit's backend selection: an explicit `WINIT_UNIX_BACKEND=wayland|x11`
+/// wins (so XWayland forced to X11 correctly reports `false`, where wry works);
+/// otherwise a non-empty `WAYLAND_DISPLAY` means Wayland. Always `false` off
+/// Linux. Apps that drive engine selection themselves (`install_web_view(...)`)
+/// can use this to pick a backend.
+pub fn is_wayland() -> bool {
+    match std::env::var("WINIT_UNIX_BACKEND") {
+        Ok(b) if b.eq_ignore_ascii_case("wayland") => return true,
+        Ok(b) if b.eq_ignore_ascii_case("x11") => return false,
+        _ => {}
+    }
+    std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty())
+}
+
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
