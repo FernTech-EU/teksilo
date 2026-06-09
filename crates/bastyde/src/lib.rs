@@ -92,12 +92,14 @@ pub mod toast_install;
 /// Embeddable [`WebView`](bastyde_webview::WebView) widget. Re-exported as
 /// `bastyde::web_view`. The `install_web_view{,_default}` methods come from
 /// [`BastydeAppBuilderWebViewExt`](webview_install::BastydeAppBuilderWebViewExt),
-/// re-exported through [`prelude`].
-#[cfg(feature = "web-view")]
+/// re-exported through [`prelude`]. Present for any web-view feature —
+/// engine-backed (`web-view` = wry, `web-view-servo` = +Servo) or
+/// `web-view-headless` (no engine).
+#[cfg(any(feature = "web-view-headless", feature = "web-view"))]
 pub use bastyde_webview as web_view;
 
 /// WebView install hook (extension trait on `BastydeAppBuilder`).
-#[cfg(feature = "web-view")]
+#[cfg(any(feature = "web-view-headless", feature = "web-view"))]
 pub mod webview_install;
 
 pub mod prelude {
@@ -203,9 +205,9 @@ pub mod prelude {
     // WebView. The extension trait adds `install_web_view{,_default}()` to
     // `BastydeAppBuilder`; the `WebView` widget + its public backend surface
     // come into scope so apps `use bastyde::prelude::*` and embed web content.
-    #[cfg(feature = "web-view")]
+    #[cfg(any(feature = "web-view-headless", feature = "web-view"))]
     pub use crate::webview_install::BastydeAppBuilderWebViewExt;
-    #[cfg(feature = "web-view")]
+    #[cfg(any(feature = "web-view-headless", feature = "web-view"))]
     pub use bastyde_webview::{
         WebSource, WebView, WebViewBackend, WebViewEvent, WebViewHandle, WebViewId, WebViewRegistry,
         WebViewStyle,

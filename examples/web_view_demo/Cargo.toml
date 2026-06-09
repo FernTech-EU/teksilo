@@ -10,16 +10,14 @@ publish = false
 name = "web-view-demo"
 path = "src/main.rs"
 
-# By default the demo installs the inert no-op backend (renders nothing). To
-# run against a real engine:
-#   cargo run -p web-view-demo --features wry     # wry (macOS / Windows / Linux-X11)
-#   cargo run -p web-view-demo --features servo   # wry + Servo; Servo used on Wayland,
-#                                                 # wry on X11 / macOS / Windows
+# The demo depends on `bastyde/web-view`, which is wry by default — so a plain
+# `cargo run -p web-view-demo` renders via wry (macOS / Windows / Linux-X11).
+# Add the Wayland fallback with:
+#   cargo run -p web-view-demo --features servo   # wry + Servo; Servo on Wayland
 [features]
 default = []
-wry = ["bastyde/web-view-wry"]
-# `servo` is additive — bastyde/web-view-servo implies web-view-wry, so this
-# ships both engines and the runtime picks Servo only under a Wayland session.
+# `servo` is additive — `bastyde/web-view-servo` implies `web-view` (wry), so
+# this ships both engines and the runtime picks Servo only under Wayland.
 servo = ["bastyde/web-view-servo"]
 
 [dependencies]

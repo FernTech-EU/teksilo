@@ -35,18 +35,17 @@ pub trait BastydeAppBuilderWebViewExt {
     fn install_web_view<B: WebViewBackend + 'static>(self, backend: B) -> Self;
 
     /// Convenience: install the engine selected by the enabled cargo feature.
-    /// wry is the default everywhere it works; Servo is opt-in and additive.
-    /// - `bastyde/web-view-wry` → the production `WryBackend` (macOS WKWebView /
-    ///   Windows WebView2 / Linux-X11 WebKitGTK).
-    /// - `bastyde/web-view-servo` (which *implies* `web-view-wry`) → both
-    ///   engines, chosen at runtime: `ServoBackend` under a Wayland session
-    ///   (where wry's WebKitGTK can't reparent), `WryBackend` everywhere else.
-    ///   The recommended Linux setup — ship both, let the session decide. See
+    /// wry is the default; Servo is opt-in and additive.
+    /// - `bastyde/web-view` → the production `WryBackend` (macOS WKWebView /
+    ///   Windows WebView2 / Linux-X11 WebKitGTK). The default engine.
+    /// - `bastyde/web-view-servo` (which *implies* `web-view`) → both engines,
+    ///   chosen at runtime: `ServoBackend` under a Wayland session (where wry's
+    ///   WebKitGTK can't reparent), `WryBackend` everywhere else. The
+    ///   recommended Linux setup — ship both, let the session decide. See
     ///   [`is_wayland`](bastyde_webview::is_wayland).
-    /// - plain `bastyde/web-view` → the inert [`NoopWebViewBackend`] (renders
-    ///   nothing — for builds that want the widget without bundling an engine,
-    ///   and the only safe long-running default vs the op-accumulating
-    ///   `MemoryWebViewBackend` used in tests).
+    /// - `bastyde/web-view-headless` (and not `web-view`) → the inert
+    ///   [`NoopWebViewBackend`] (renders nothing — headless tests, or apps that
+    ///   bring their own backend via [`install_web_view`](Self::install_web_view)).
     ///
     /// (Servo *alone* — no wry fallback — isn't reachable via the umbrella
     /// features by design; depend on `bastyde-webview` directly with
@@ -63,8 +62,9 @@ impl BastydeAppBuilderWebViewExt for BastydeAppBuilder {
     }
 
     fn install_web_view_default(self) -> Self {
-        // Both engines compiled in: pick per session at runtime.
-        #[cfg(all(feature = "web-view-wry", feature = "web-view-servo"))]
+        // `web-view-servo` implies `web-view` (wry), so both engines are
+        // compiled in: pick per session at runtime.
+        #[cfg(feature = "web-view-servo")]
         {
             if bastyde_webview::is_wayland() {
                 self.app_state(WebViewRegistry::new(bastyde_webview::ServoBackend::new()))
@@ -72,15 +72,13 @@ impl BastydeAppBuilderWebViewExt for BastydeAppBuilder {
                 self.app_state(WebViewRegistry::new(bastyde_webview::WryBackend::new()))
             }
         }
-        #[cfg(all(feature = "web-view-wry", not(feature = "web-view-servo")))]
+        // wry only.
+        #[cfg(all(feature = "web-view", not(feature = "web-view-servo")))]
         {
             self.app_state(WebViewRegistry::new(bastyde_webview::WryBackend::new()))
         }
-        #[cfg(all(feature = "web-view-servo", not(feature = "web-view-wry")))]
-        {
-            self.app_state(WebViewRegistry::new(bastyde_webview::ServoBackend::new()))
-        }
-        #[cfg(not(any(feature = "web-view-wry", feature = "web-view-servo")))]
+        // No engine (headless / bring-your-own).
+        #[cfg(all(feature = "web-view-headless", not(feature = "web-view")))]
         {
             self.app_state(WebViewRegistry::new(bastyde_webview::NoopWebViewBackend))
         }

@@ -64,32 +64,29 @@ file-dialog = ["bastyde-app/rfd-backend"]
 # backend.
 file-dialog-trait = ["bastyde-app/file-dialog"]
 
-# Embeddable `WebView` widget (`bastyde-webview`). Brings in the widget,
-# the backend trait + `WebViewRegistry`, and the
+# Embeddable `WebView` widget (`bastyde-webview`), backed by the production
+# `wry` engine (macOS WKWebView / Windows WebView2 / Linux-X11 WebKitGTK) —
+# **wry is the default engine**, so enabling `web-view` gives you a working
+# webview out of the box. Brings in the widget, the backend trait +
+# `WebViewRegistry`, the `wry` engine backend, and the
 # `BastydeAppBuilderWebViewExt::install_web_view{,_default}` entry point
-# (defined in this crate, mirroring `toast`). Also turns on the matching
-# `bastyde-app/web-view` feature so the app event loop can route backend
-# events (`WebViewEventPayload`) back to the originating window's tree.
-# Off by default — apps that don't embed web content pay zero compile
-# time for a browser engine. The native engine backends (`wry` / `servo`)
-# are further opt-in features ON `bastyde-webview` itself; the default
-# `web-view` build ships only the headless `MemoryWebViewBackend`.
-web-view = ["dep:bastyde-webview", "bastyde-app/web-view"]
-# Engine-backed variants. `web-view-wry` is the production engine
-# (macOS / Windows / Linux-X11) — wry is the default everywhere it works.
-#
-# `web-view-servo` is *additive*: it implies `web-view-wry` and adds Servo as
-# the Linux/Wayland fallback. So enabling it ships BOTH engines and
+# (defined in this crate, mirroring `toast`); also turns on `bastyde-app/web-view`
+# so the event loop routes backend events back to the originating window's tree.
+# Off in `bastyde`'s own default set — apps that don't embed web content pull no
+# browser engine. (Mirrors the `file-dialog` / `file-dialog-trait` split.)
+web-view = ["web-view-headless", "bastyde-webview/wry-backend"]
+# Additive Servo support for Linux/Wayland (where wry's WebKitGTK can't
+# reparent). Implies `web-view`, so this ships BOTH engines and
 # `install_web_view_default()` picks Servo only under a Wayland session, wry
-# otherwise — wry stays the default on every other platform. This deliberately
-# avoids a "servo-only on macOS/Windows" build, where Servo is the wrong engine
-# (it renders whole-window via GL, conflicting with wgpu) and wry is unavailable
-# as a fallback. An app that genuinely wants Servo *alone* (e.g. a Linux-only,
-# no-GTK target) bypasses the umbrella feature and depends on
-# `bastyde-webview` directly with `features = ["servo-backend"]`, installing
-# `ServoBackend` explicitly via `install_web_view(...)`.
-web-view-wry = ["web-view", "bastyde-webview/wry-backend"]
-web-view-servo = ["web-view-wry", "bastyde-webview/servo-backend"]
+# everywhere else. Never a "servo-only" build — Servo renders whole-window via
+# GL (conflicting with wgpu) and is the wrong engine off Wayland.
+web-view-servo = ["web-view", "bastyde-webview/servo-backend"]
+# The widget + event routing WITHOUT any engine — `install_web_view_default()`
+# installs the inert no-op backend. For headless tests, or apps that bring
+# their own backend via `install_web_view(custom)`. The escape hatch for a
+# true Servo-only target: add `bastyde-webview` directly with
+# `features = ["servo-backend"]` and install `ServoBackend` explicitly.
+web-view-headless = ["dep:bastyde-webview", "bastyde-app/web-view"]
 
 # Optional main-thread async executor (`bastyde-async`): adds
 # `BastydeAppBuilder::install_async()` plus `ctx.spawn_local(...)` /

@@ -7,15 +7,11 @@
 //! visibility cannot ride the wgpu paint pass. Switching back re-shows it with
 //! in-page state intact.
 //!
-//! Run with a real engine to see a page render:
-//! - `cargo run -p web-view-demo --features wry` — wry (macOS / Windows /
-//!   Linux-X11).
-//! - `cargo run -p web-view-demo --features servo` — adds Servo (used on a
-//!   Wayland session; wry elsewhere).
-//!
-//! **Plain `cargo run -p web-view-demo`** installs the inert no-op backend, so
-//! no page renders — but the widget wiring, the tab/dormancy `set_visible`
-//! bridge, and the toolbar/IPC plumbing are all still exercised.
+//! Run:
+//! - `cargo run -p web-view-demo` — renders via wry (the default engine:
+//!   macOS WKWebView / Windows WebView2 / Linux-X11 WebKitGTK).
+//! - `cargo run -p web-view-demo --features servo` — also ships Servo, used
+//!   under a Wayland session (wry elsewhere).
 
 use bastyde::core::binding::BindingLevel;
 use bastyde::prelude::*;
