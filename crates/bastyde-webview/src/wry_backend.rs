@@ -173,6 +173,40 @@ impl WebViewBackend for WryBackend {
                 );
             });
         }
+        // Downloads are observed, not steered: the started handler returns
+        // `true` (allow) with wry's default destination, because the app's
+        // callback runs on a later event-loop tick (events are posted, not
+        // delivered inline) and so cannot supply a path synchronously. Apps
+        // get start/finish notifications for progress UI / toasts.
+        {
+            let poster = poster.clone();
+            builder = builder.with_download_started_handler(move |url, path| {
+                post_event(
+                    &poster,
+                    window_id,
+                    web_view_id,
+                    WebViewEvent::DownloadStarted {
+                        url,
+                        suggested_path: path.clone(),
+                    },
+                );
+                true
+            });
+        }
+        {
+            let poster = poster.clone();
+            builder = builder.with_download_completed_handler(move |_url, path, success| {
+                post_event(
+                    &poster,
+                    window_id,
+                    web_view_id,
+                    WebViewEvent::DownloadFinished {
+                        path: path.unwrap_or_default(),
+                        success,
+                    },
+                );
+            });
+        }
 
         match builder.build_as_child(&parent) {
             Ok(webview) => Box::new(WryHandle { webview }),
@@ -239,5 +273,11 @@ impl WebViewHandle for WryHandle {
     }
     fn set_focus(&self) {
         let _ = self.webview.focus();
+    }
+    fn open_devtools(&self) {
+        self.webview.open_devtools();
+    }
+    fn close_devtools(&self) {
+        self.webview.close_devtools();
     }
 }

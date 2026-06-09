@@ -15,7 +15,7 @@
 
 use bastyde::core::binding::BindingLevel;
 use bastyde::prelude::*;
-use bastyde::web_view::WebView;
+use bastyde::web_view::{PageLoadState, WebView};
 use bastyde::widgets::{Button, Divider, Expand, HStack, Spacer, Switcher, TextWidget, VStack};
 
 fn main() {
@@ -32,12 +32,14 @@ fn main() {
                     let selected = Signal::new(0_usize); // 0 = Browser, 1 = Native UI
                     let url = Signal::new(String::from("app://index.html"));
                     let title = Signal::new(String::from("Loading…"));
+                    let loading = Signal::new(false);
 
                     // --- The WebView (pre-mounted so the toolbar can drive it) ---
                     // Load the bundled page inline. (Custom-protocol *handlers*
                     // aren't plumbed through WebViewAttributes yet, so an
                     // `app://` URL would 404 on a real engine — inline HTML
                     // renders today and the page is self-contained.)
+                    let loading_cb = loading.clone();
                     let webview_id = tree.add(
                         WebView::new()
                             .html(include_str!("../assets/index.html"))
@@ -46,6 +48,18 @@ fn main() {
                             .bind_title(title.clone())
                             .on_message(|msg, _ctx| {
                                 println!("JS → Rust: {msg}");
+                            })
+                            .on_page_load(move |state, _ctx| {
+                                loading_cb.set(state == PageLoadState::Started);
+                            })
+                            .on_navigation(|nav, _ctx| {
+                                println!("navigating → {}", nav.url);
+                            })
+                            .on_download_started(|d, _ctx| {
+                                println!("download started: {} → {:?}", d.url, d.suggested_path);
+                            })
+                            .on_download_finished(|o, _ctx| {
+                                println!("download finished (ok={}): {:?}", o.success, o.path);
                             }),
                     );
 
@@ -80,9 +94,26 @@ fn main() {
                             w.post_message(r#"{"from":"rust"}"#)
                         });
                     });
+                    // Runtime DevTools toggle (debug builds; no-op where unsupported).
+                    let devtools = Button::new(lit!("DevTools")).on_activate_fn(move |ctx| {
+                        ctx.with_widget_mut::<WebView>(webview_id, BindingLevel::RepaintOnly, |w| {
+                            w.open_devtools()
+                        });
+                    });
+                    // Programmatic two-way navigation: setting the bound URL signal
+                    // drives `load_url` through `bind_url` (the engine's own echo is
+                    // filtered, so this doesn't loop).
+                    let go_external = {
+                        let url = url.clone();
+                        Button::new(lit!("Load example.com"))
+                            .on_activate_fn(move |_| url.set("https://example.com".into()))
+                    };
 
                     // --- URL display (reactive) ---
                     let url_label = TextWidget::new(lit!("")).bind_text(url.clone());
+                    // --- Loading indicator (driven by on_page_load) ---
+                    let loading_label = TextWidget::new(lit!(""))
+                        .bind_text(loading.map(|l| if *l { "  ⏳" } else { "" }.to_string()));
 
                     // --- Dormancy status line: the visible pass/fail indicator ---
                     let status = selected.map(|s| {
@@ -118,7 +149,10 @@ fn main() {
                         .child(fwd)
                         .child(reload)
                         .child(send)
+                        .child(devtools)
+                        .child(go_external)
                         .child(url_label)
+                        .child(loading_label)
                         .child(Spacer::new());
 
                     tree.add(

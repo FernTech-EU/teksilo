@@ -92,17 +92,40 @@ WebView::new()
     .user_agent("MyApp/1.0")
     .transparent(true)
     .devtools(cfg!(debug_assertions))
-    .bind_url(url_signal)              // Signal<String> — updated on navigation finish
+    .bind_url(url_signal)              // Signal<String> — TWO-WAY (see below)
     .bind_title(title_signal)         // Signal<String> — updated on title change
     .bind_loading(loading_signal)     // Signal<bool>   — true between page-load start/finish
     .on_message(|msg: String, ctx| { … })       // JS → Rust (window.ipc.postMessage)
     .on_title_changed(|title, ctx| { … })
+    .on_navigation(|nav, ctx| { … })             // observer — NavigationInfo (no veto, see below)
+    .on_page_load(|state, ctx| { … })            // PageLoadState::{Started, Finished}
+    .on_download_started(|d, ctx| { … })         // DownloadStart { url, suggested_path }
+    .on_download_finished(|o, ctx| { … })        // DownloadOutcome { path, success }
     .style(MyWebViewStyle)            // Tier-3 overlay chrome override
 ```
 
 Imperative controls (call via `ctx.with_widget_mut::<WebView>(id, RepaintOnly, |w| …)`):
 `load_url`, `eval`, `post_message` (Rust → JS), `reload`, `go_back`,
-`go_forward`, `stop`. The stable routing identity is `WebView::id() -> WebViewId`.
+`go_forward`, `stop`, `open_devtools` / `close_devtools` (runtime toggle; no-op
+where unsupported). The stable routing identity is `WebView::id() -> WebViewId`.
+
+**Two-way `bind_url`.** The engine writes the resolved URL into the bound signal
+on navigation-finish, and an external `url_signal.set("…")` drives programmatic
+navigation (equivalent to `load_url`). The engine's own echo is filtered, so the
+two directions don't loop. The **initial** page comes from `.url()` / `.html()`
+/ `.source()`; the signal's value at build time is taken as the baseline and
+does not trigger a navigation — `bind_url` governs navigation *after* the first
+load. (Don't bind the same signal directly to an editable `TextInput`, or every
+keystroke navigates — drive navigation from a "Go" button / Enter handler that
+sets the signal instead.)
+
+**Observers, not vetoes.** `on_navigation` and `on_download_*` are notification
+callbacks. Bastyde delivers backend events on a later event-loop tick (posted,
+not delivered inline), so a synchronous decision can't be returned to the
+engine: a navigation cannot be *cancelled* from `on_navigation`
+(`NavigationInfo::can_cancel` is always `false` today), and a download's
+destination path cannot be redirected from `on_download_started`. Use them for
+URL-bar sync, logging, progress UI, and toasts.
 
 **Lifecycle.** `build()` creates the style-driven overlay (loading/error chrome)
 and captures the host `BastydeWindowId`; the native engine subview is opened
@@ -174,9 +197,11 @@ context menus over webviews).
 `set_visible` / `load_url` / …) into a shared `MemoryWebViewRecords`, with no
 GPU / window / engine. The headless suite
 ([tests/basic_lifecycle.rs](../crates/bastyde-webview/tests/basic_lifecycle.rs))
-covers open/teardown, bounds tracking, and the headline dormancy assertion — a
+covers open/teardown, bounds tracking, the headline dormancy assertion — a
 `WebView` parked in a real `Switcher` issues `set_visible(false)` on tab-away
-and `set_visible(true)` on tab-back. Install it with
+and `set_visible(true)` on tab-back — plus two-way `bind_url` navigation,
+download-event delivery to the callbacks, and the runtime devtools toggle.
+Install it with
 `install_web_view(MemoryWebViewBackend::new().0)` (or the `memory_registry()`
 one-liner) and pump post-mount opens with `tree.run_mount_actions(&mut NoopWindowOps)`.
 

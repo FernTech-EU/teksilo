@@ -117,6 +117,11 @@ pub trait WebViewHandle: 'static {
     fn set_visible(&self, visible: bool);
     /// Give the engine subview keyboard focus.
     fn set_focus(&self);
+    /// Open the engine's developer tools (no-op on backends that don't
+    /// expose them — Servo's embedding API has no clean devtools hook today).
+    fn open_devtools(&self) {}
+    /// Close the engine's developer tools (no-op where unsupported).
+    fn close_devtools(&self) {}
 }
 
 /// A browser lifecycle / JS→Rust event surfaced by a backend.
@@ -412,6 +417,8 @@ pub enum WebViewOp {
     Stop { web_view_id: WebViewId },
     SetVisible { web_view_id: WebViewId, visible: bool },
     SetFocus { web_view_id: WebViewId },
+    OpenDevtools { web_view_id: WebViewId },
+    CloseDevtools { web_view_id: WebViewId },
     Dropped { web_view_id: WebViewId },
 }
 
@@ -473,6 +480,8 @@ fn op_web_view_id(op: &WebViewOp) -> WebViewId {
         | WebViewOp::Stop { web_view_id }
         | WebViewOp::SetVisible { web_view_id, .. }
         | WebViewOp::SetFocus { web_view_id }
+        | WebViewOp::OpenDevtools { web_view_id }
+        | WebViewOp::CloseDevtools { web_view_id }
         | WebViewOp::Dropped { web_view_id } => *web_view_id,
     }
 }
@@ -560,6 +569,16 @@ impl WebViewHandle for MemoryWebViewHandle {
     }
     fn set_focus(&self) {
         self.records.push(WebViewOp::SetFocus {
+            web_view_id: self.web_view_id,
+        });
+    }
+    fn open_devtools(&self) {
+        self.records.push(WebViewOp::OpenDevtools {
+            web_view_id: self.web_view_id,
+        });
+    }
+    fn close_devtools(&self) {
+        self.records.push(WebViewOp::CloseDevtools {
             web_view_id: self.web_view_id,
         });
     }

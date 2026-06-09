@@ -94,6 +94,58 @@ use bastyde_core::window::BastydeWindowId;
 
 type MessageCallback = Rc<RefCell<dyn FnMut(String, &mut EventContext)>>;
 type TitleCallback = Rc<RefCell<dyn FnMut(String, &mut EventContext)>>;
+type NavigationCallback = Rc<RefCell<dyn FnMut(NavigationInfo, &mut EventContext)>>;
+type PageLoadCallback = Rc<RefCell<dyn FnMut(PageLoadState, &mut EventContext)>>;
+type DownloadStartCallback = Rc<RefCell<dyn FnMut(DownloadStart, &mut EventContext)>>;
+type DownloadFinishCallback = Rc<RefCell<dyn FnMut(DownloadOutcome, &mut EventContext)>>;
+
+/// Page-load lifecycle phase, passed to [`WebView::on_page_load`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageLoadState {
+    /// The page began loading resources.
+    Started,
+    /// The page finished loading.
+    Finished,
+}
+
+/// A navigation the page initiated, passed to [`WebView::on_navigation`].
+///
+/// This is an **observer**, not a veto: wry decides navigation synchronously,
+/// but Bastyde delivers backend events on a later event-loop tick (events are
+/// posted, not delivered inline), so a true pre-navigation veto cannot be
+/// surfaced through this callback. `can_cancel` is therefore always `false` on
+/// the current backends — the field exists for forward compatibility. Use the
+/// callback for URL-bar sync and logging.
+#[derive(Debug, Clone)]
+pub struct NavigationInfo {
+    /// The URL being navigated to.
+    pub url: String,
+    /// Whether the backend supports vetoing this navigation (always `false`
+    /// today — see the type docs).
+    pub can_cancel: bool,
+}
+
+/// A download the page started, passed to [`WebView::on_download_started`].
+///
+/// Observational: the destination path is the engine's default and cannot be
+/// redirected from the callback (the decision is asynchronous). Use it to drive
+/// progress UI / toasts.
+#[derive(Debug, Clone)]
+pub struct DownloadStart {
+    /// Source URL of the download.
+    pub url: String,
+    /// The engine's chosen destination path.
+    pub suggested_path: std::path::PathBuf,
+}
+
+/// A finished (or failed) download, passed to [`WebView::on_download_finished`].
+#[derive(Debug, Clone)]
+pub struct DownloadOutcome {
+    /// Where the file was written.
+    pub path: std::path::PathBuf,
+    /// Whether the download completed successfully.
+    pub success: bool,
+}
 
 /// Shared slot holding the live engine handle once opened. Cloned into the
 /// activation-signal effect so the visibility bridge can reach the handle
@@ -124,7 +176,10 @@ pub struct WebView {
     /// `Drop` for unregistration. Shared so the moved open closure can set it.
     registry: Rc<RefCell<Option<WebViewRegistry>>>,
 
-    // Optional outbound (read-only) bindings.
+    // Optional bindings.
+    /// Two-way: the engine writes the resolved URL on navigation-finish, and
+    /// an external `.set()` drives programmatic navigation (guarded against
+    /// the echo via `nav_guard`).
     url_signal: Option<Signal<String>>,
     title_signal: Option<Signal<String>>,
     loading_signal: Option<Signal<bool>>,
@@ -132,10 +187,17 @@ pub struct WebView {
     // until a history-aware backend can drive them — shipping builders that
     // never update the bound signal would be a silent lie. Re-add alongside
     // the wry/servo history wiring.
+    /// The URL the engine last reported / we last drove, so the inbound
+    /// navigation effect skips the engine's own echo (no navigate loop).
+    nav_guard: Rc<RefCell<Option<String>>>,
 
     // User event callbacks.
     on_message: Option<MessageCallback>,
     on_title_changed: Option<TitleCallback>,
+    on_navigation: Option<NavigationCallback>,
+    on_page_load: Option<PageLoadCallback>,
+    on_download_started: Option<DownloadStartCallback>,
+    on_download_finished: Option<DownloadFinishCallback>,
 }
 
 impl std::fmt::Debug for WebView {
@@ -172,8 +234,13 @@ impl WebView {
             url_signal: None,
             title_signal: None,
             loading_signal: None,
+            nav_guard: Rc::new(RefCell::new(None)),
             on_message: None,
             on_title_changed: None,
+            on_navigation: None,
+            on_page_load: None,
+            on_download_started: None,
+            on_download_finished: None,
         }
     }
 
@@ -223,8 +290,16 @@ impl WebView {
         self
     }
 
-    /// Two-way-ish URL binding: updated when in-page navigation completes.
-    /// (Programmatic navigation is via [`load_url`](Self::load_url).)
+    /// Two-way URL binding. The engine writes the resolved URL into `signal`
+    /// when an in-page navigation completes; calling `signal.set("…")`
+    /// externally drives programmatic navigation (equivalent to
+    /// [`load_url`](Self::load_url)). The engine's own echo is filtered, so
+    /// the two directions don't loop.
+    ///
+    /// The **initial** page still comes from [`url`](Self::url) /
+    /// [`html`](Self::html) / [`source`](Self::source); `bind_url` governs
+    /// navigation *after* the first load (the signal's value at build time is
+    /// taken as the baseline and does not trigger a navigation).
     pub fn bind_url(mut self, signal: Signal<String>) -> Self {
         self.url_signal = Some(signal);
         self
@@ -254,6 +329,43 @@ impl WebView {
         cb: impl FnMut(String, &mut EventContext) + 'static,
     ) -> Self {
         self.on_title_changed = Some(Rc::new(RefCell::new(cb)));
+        self
+    }
+
+    /// Called when a navigation starts (observer — see [`NavigationInfo`]; it
+    /// cannot veto). Useful for URL-bar sync before the load completes.
+    pub fn on_navigation(
+        mut self,
+        cb: impl FnMut(NavigationInfo, &mut EventContext) + 'static,
+    ) -> Self {
+        self.on_navigation = Some(Rc::new(RefCell::new(cb)));
+        self
+    }
+
+    /// Called when page loading starts and finishes (see [`PageLoadState`]).
+    pub fn on_page_load(
+        mut self,
+        cb: impl FnMut(PageLoadState, &mut EventContext) + 'static,
+    ) -> Self {
+        self.on_page_load = Some(Rc::new(RefCell::new(cb)));
+        self
+    }
+
+    /// Called when the page begins a download (see [`DownloadStart`]).
+    pub fn on_download_started(
+        mut self,
+        cb: impl FnMut(DownloadStart, &mut EventContext) + 'static,
+    ) -> Self {
+        self.on_download_started = Some(Rc::new(RefCell::new(cb)));
+        self
+    }
+
+    /// Called when a download finishes or fails (see [`DownloadOutcome`]).
+    pub fn on_download_finished(
+        mut self,
+        cb: impl FnMut(DownloadOutcome, &mut EventContext) + 'static,
+    ) -> Self {
+        self.on_download_finished = Some(Rc::new(RefCell::new(cb)));
         self
     }
 
@@ -298,6 +410,14 @@ impl WebView {
     pub fn stop(&self) {
         self.with_handle(|h| h.stop());
     }
+    /// Open the engine's developer tools (no-op where unsupported, e.g. Servo).
+    pub fn open_devtools(&self) {
+        self.with_handle(|h| h.open_devtools());
+    }
+    /// Close the engine's developer tools.
+    pub fn close_devtools(&self) {
+        self.with_handle(|h| h.close_devtools());
+    }
 
     fn with_handle(&self, f: impl FnOnce(&dyn WebViewHandle)) {
         if let Some(h) = self.handle.borrow().as_ref() {
@@ -311,8 +431,13 @@ impl WebView {
         let title_signal = self.title_signal.clone();
         let loading_signal = self.loading_signal.clone();
         let state_signal = self.state_signal.clone();
+        let nav_guard = self.nav_guard.clone();
         let on_message = self.on_message.clone();
         let on_title_changed = self.on_title_changed.clone();
+        let on_navigation = self.on_navigation.clone();
+        let on_page_load = self.on_page_load.clone();
+        let on_download_started = self.on_download_started.clone();
+        let on_download_finished = self.on_download_finished.clone();
 
         move |event, ctx| match event {
             WebViewEvent::PageLoadStarted => {
@@ -320,15 +445,31 @@ impl WebView {
                     s.set(true);
                 }
                 state_signal.set(WebViewVisualState::Loading);
+                if let Some(cb) = &on_page_load {
+                    (cb.borrow_mut())(PageLoadState::Started, ctx);
+                }
             }
             WebViewEvent::PageLoadFinished => {
                 if let Some(s) = &loading_signal {
                     s.set(false);
                 }
                 state_signal.set(WebViewVisualState::Ready);
+                if let Some(cb) = &on_page_load {
+                    (cb.borrow_mut())(PageLoadState::Finished, ctx);
+                }
+            }
+            WebViewEvent::NavigationStarted { url, can_cancel } => {
+                if let Some(cb) = &on_navigation {
+                    (cb.borrow_mut())(NavigationInfo { url, can_cancel }, ctx);
+                }
             }
             WebViewEvent::NavigationFinished { url, success } => {
                 if success {
+                    // Record the engine-resolved URL as the guard BEFORE
+                    // writing the bound signal, so the inbound navigation
+                    // effect (which fires on the `set`) recognises it as the
+                    // engine's own echo and does not re-navigate.
+                    *nav_guard.borrow_mut() = Some(url.clone());
                     if let Some(s) = &url_signal {
                         s.set(url);
                     }
@@ -350,11 +491,28 @@ impl WebView {
                     (cb.borrow_mut())(msg, ctx);
                 }
             }
-            WebViewEvent::DownloadFinished { .. }
-            | WebViewEvent::DownloadStarted { .. }
-            | WebViewEvent::NavigationStarted { .. }
-            | WebViewEvent::ConsoleMessage { .. } => {
-                // Surfaced via dedicated callbacks in a later phase.
+            WebViewEvent::DownloadStarted {
+                url,
+                suggested_path,
+            } => {
+                if let Some(cb) = &on_download_started {
+                    (cb.borrow_mut())(
+                        DownloadStart {
+                            url,
+                            suggested_path,
+                        },
+                        ctx,
+                    );
+                }
+            }
+            WebViewEvent::DownloadFinished { path, success } => {
+                if let Some(cb) = &on_download_finished {
+                    (cb.borrow_mut())(DownloadOutcome { path, success }, ctx);
+                }
+            }
+            WebViewEvent::ConsoleMessage { .. } => {
+                // Diagnostics only (backend init / unsupported-op reports);
+                // not surfaced to a dedicated app callback today.
             }
         }
     }
@@ -400,6 +558,29 @@ impl Widget for WebView {
                 h.set_visible(*active);
             }
         });
+
+        // --- Inbound navigation: external `url_signal.set()` → load_url ---
+        // Seed the guard with the signal's current value so the effect's
+        // registration tick (it fires immediately with the current value) is
+        // treated as the baseline and does NOT navigate — the initial page
+        // comes from `attrs.source`, not the binding. Subsequent external
+        // changes that differ from the guard drive a navigation; the engine's
+        // own echo is filtered because `NavigationFinished` updates the guard
+        // before writing the signal.
+        if let Some(url_signal) = self.url_signal.clone() {
+            *self.nav_guard.borrow_mut() = Some(url_signal.get());
+            let nav_guard = self.nav_guard.clone();
+            let nav_handle = self.handle.clone();
+            ctx.effect(&url_signal, move |url| {
+                if nav_guard.borrow().as_deref() == Some(url.as_str()) {
+                    return;
+                }
+                *nav_guard.borrow_mut() = Some(url.clone());
+                if let Some(h) = nav_handle.borrow().as_ref() {
+                    h.load_url(url);
+                }
+            });
+        }
 
         // --- Open the native engine subview once, AFTER mount ---
         // Opening is deferred to a post-mount EventContext because that is the
