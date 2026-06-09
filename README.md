@@ -147,6 +147,8 @@ The rules under which Bastyde is built:
 
 **Charts.** BarChart, LineChart, and PieChart (with donut and center slot), generic over the app's data type. Locale-aware axis formatting and theme integration are built in.
 
+**Web view (prototype).** Embed HTML / web content as a `WebView` widget — the one widget that can't render into the wgpu surface, so the engine is a native OS subview composited on top. It behaves like a normal widget otherwise: SwiftUI-style layout, dormancy-aware visibility (a tab-parked page hides its subview), JS↔Rust messaging, two-way URL binding, and `Role::WebView` accessibility. **Still a prototype.** The default engine is **wry** (macOS WKWebView / Windows WebView2 / Linux-X11 WebKitGTK) and is functional; on Linux it needs the WebKitGTK toolkit and, on a Wayland session, XWayland (see [`docs/web-view.md`](docs/web-view.md)). The **Servo** backend (the native Wayland path) is **work in progress** — it constructs a real engine but isn't frame-driven yet. See [`docs/web-view.md`](docs/web-view.md).
+
 **Widget previewer.** Storybook-style 3-pane explorer (navigator, canvas, knob form) for the widget catalog, with live property editing, multi-variant rendering, and PNG export. Custom widget libraries register via `inventory::submit!` and become previewable with no extra wiring.
 
 **Tooling.** In-app debug inspector (F12, debug builds only) with tabs for tree, properties, accessibility, theme, focus, shortcuts, overlays, and data models. Opt-in privacy-conscious telemetry stack with compile-time-validated event schemas and a build-time linter for schema drift.

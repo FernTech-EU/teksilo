@@ -1,5 +1,11 @@
 # WebView — Embedded Web Content
 
+> **Status: prototype.** The **wry** backend (the default) is functional on
+> macOS / Windows / Linux-X11 and, via XWayland, on Linux/Wayland. The **Servo**
+> backend (the native Wayland path) is **work in progress** — it constructs a
+> real engine but is not yet frame-driven, so it does not paint a page. See
+> [Servo backend: requirements & status](#servo-backend-requirements--status).
+
 `WebView` embeds HTML / web content in a Bastyde window — for documentation
 panes, license dialogs, OAuth flows, Markdown previews, help centers,
 dashboards, or any HTML/SPA-driven surface. It lives in its own crate,
@@ -112,6 +118,47 @@ window. A winit app must therefore, on Linux:
 The continuous poll (step 2) keeps the loop awake; that is the cost of hosting a
 GTK engine inside a winit app today. A future revision may pump only while a
 `WebView` is mounted.
+
+## Servo backend: requirements & status
+
+Servo (`servo = 0.2.0`) is the intended **native Wayland** engine — pure Rust,
+no GTK reparenting problem. It is **work in progress**: the backend compiles and
+constructs a real Servo webview, but it is **not yet frame-driven**, so it does
+not paint a page. Building `--features servo` and running on Wayland selects it
+(via [`is_wayland`](../crates/bastyde-webview/src/lib.rs)) and you get the
+loading wash plus a "constructed but not yet frame-driven" console message — not
+web content. For now, use wry + XWayland on Linux.
+
+**Build requirements (Linux).** Servo pulls a large native toolchain on top of
+the wry/WebKitGTK deps above. Expect to install (Debian/Ubuntu names; exact set
+varies with the Servo release):
+
+```bash
+# LLVM/Clang + media + font/graphics stack Servo links against
+sudo apt install llvm clang libclang-dev \
+                 gstreamer1.0-plugins-base libgstreamer-plugins-base1.0-dev \
+                 libgstreamer1.0-dev gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
+                 libfontconfig1-dev libfreetype-dev libxcb1-dev libx11-dev \
+                 libgl1-mesa-dev libegl1-mesa-dev
+```
+
+Servo's own [build setup docs](https://book.servo.org/hacking/setting-up-your-environment.html)
+are authoritative; `./mach bootstrap` in a Servo checkout lists the current
+system packages for your distro. The first build also downloads and compiles the
+**entire Servo tree** — many GB and a long compile.
+
+**What remains (Phase 4).** To make Servo actually render:
+
+1. Wire an `EventLoopWaker` to bastyde-app's winit proxy so Servo gets pumped.
+2. Call `servo.spin_event_loop()` + `webview.paint()` +
+   `rendering_context.present()` from the render loop.
+3. Composite Servo's surface as a **positioned region** rather than the whole
+   window — its GL/surfman context currently wants the entire window surface,
+   which conflicts with wgpu owning it.
+
+Until then the Servo path is best-effort and documented, not a supported engine.
+JS→Rust IPC (`window.ipc`) is also unsupported on Servo (no built-in channel
+like wry's `with_ipc_handler`).
 
 ## Installing the subsystem
 
@@ -252,13 +299,9 @@ one-liner) and pump post-mount opens with `tree.run_mount_actions(&mut NoopWindo
 - **Custom-protocol handlers** (`app://` serving local SPAs) are not yet plumbed
   through `WebViewAttributes` — only scheme *names* are carried, no dispatch
   closure. Load local content inline with `.html(...)` for now.
-- **Servo backend is real-API but not yet frame-driven** (the plan's Phase 4):
-  Servo renders whole-window via GL/surfman and must be pumped by
-  `spin_event_loop` / `paint` / `present` + an `EventLoopWaker` wired into
-  bastyde-app's render loop — not done yet, and its GL context conflicts with
-  wgpu owning the same surface. The backend constructs a real Servo webview and
-  reports the not-yet-driven state via a console event. JS→Rust IPC
-  (`window.ipc`) is unsupported on Servo (no built-in channel).
+- **Servo backend is work in progress** (not yet frame-driven, no render). See
+  [Servo backend: requirements & status](#servo-backend-requirements--status)
+  for build deps and the remaining Phase-4 work.
 - **`load_html` `base_url`** is ignored on wry (no runtime load-HTML API;
   emulated via `document.write`).
 - **HiDPI / monitor moves** mid-flight: wry handles its native engines; Servo
