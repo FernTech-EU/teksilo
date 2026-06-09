@@ -71,6 +71,21 @@ the umbrella `bastyde` crate. **wry is the default engine.**
 
 Pinned versions: `wry = 0.55.1`, `servo = 0.2.0`.
 
+### Linux build dependencies (wry / WebKitGTK)
+
+wry's Linux backend is WebKitGTK, so building anything that enables `web-view`
+on Linux (including `web-view-demo`) needs the GTK / WebKit2GTK development
+headers. On Debian / Ubuntu:
+
+```bash
+sudo apt install libpango1.0-dev libgdk-pixbuf-2.0-dev libatk1.0-dev \
+                 libgtk-3-dev libjavascriptcoregtk-4.1-dev libwebkit2gtk-4.1-dev
+```
+
+macOS (WKWebView) and Windows (WebView2) need no extra system packages. On
+Wayland, prefer the Servo backend (`web-view-servo`) — WebKitGTK can't reparent
+into a child window there.
+
 ## Installing the subsystem
 
 `BastydeAppBuilderWebViewExt` (re-exported through `bastyde::prelude`) adds two

@@ -45,7 +45,7 @@ cargo run -p tab-migration                      # Cross-TabWidget tab drag-and-d
 cargo run -p over-constraint                     # Graceful shrink / layout priority / height-for-width + inspector overflow stripes (F12)
 cargo run -p collapsible-menu-bar                # MenuBar hamburger mode: responsive collapse + reveal-trailing-the-button + Alt/F10 keyboard reveal
 cargo run -p native-menu                         # Native OS menu bar: one MenuModel → in-window MenuBar + macOS NSMenu (focus-follows-window, reactive checks, ⌘ key equivalents)
-cargo run -p web-view-demo                       # Embedded WebView (wry by default) in a TabWidget: dormancy/visibility bridge + JS↔Rust IPC; --features servo adds the Wayland engine
+cargo run -p web-view-demo                       # Embedded WebView (wry by default) in a TabWidget: dormancy/visibility bridge + JS↔Rust IPC; --features servo adds the Wayland engine. Linux needs WebKitGTK dev deps — see docs/web-view.md "Linux build dependencies" (apt: libgtk-3-dev libjavascriptcoregtk-4.1-dev libwebkit2gtk-4.1-dev …)
 ```
 
 ## Tools
