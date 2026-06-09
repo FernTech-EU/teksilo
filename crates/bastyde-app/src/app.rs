@@ -1542,6 +1542,7 @@ impl BastydeAppHandler {
                 if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     managed.translation_state.set_scale_factor(scale_factor);
                     managed.platform_window.set_scale_factor(scale_factor);
+                    managed.tree.set_device_scale_factor(scale_factor as f32);
                 }
                 #[cfg(feature = "text")]
                 {

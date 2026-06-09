@@ -235,12 +235,13 @@ struct ServoHandle {
 }
 
 impl WebViewHandle for ServoHandle {
-    fn set_bounds(&self, bounds: Rect) {
+    fn set_bounds(&self, bounds: Rect, scale_factor: f32) {
         // Servo's surface is whole-window; honour size, ignore position (it
-        // can't render to a sub-rectangle through this context).
+        // can't render to a sub-rectangle through this context). Size is in
+        // device pixels (logical × scale).
         self.webview.resize(PhysicalSize::new(
-            bounds.width.max(1.0) as u32,
-            bounds.height.max(1.0) as u32,
+            (bounds.width * scale_factor).max(1.0) as u32,
+            (bounds.height * scale_factor).max(1.0) as u32,
         ));
     }
     fn load_url(&self, url: &str) {

@@ -78,6 +78,29 @@ pub fn is_wayland() -> bool {
     std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty())
 }
 
+/// Pump pending GTK / GLib main-loop events.
+///
+/// wry's Linux engine (WebKitGTK) lives on the GLib main loop. When the webview
+/// is embedded in a winit app (which does not run GTK's loop), the host must
+/// pump it each event-loop turn or the page never lays out, paints, or runs
+/// timers. Call this from `BastydeAppBuilder::on_loop_tick` with a poll source
+/// held high while any `WebView` is alive.
+///
+/// No-op off Linux, or without the `wry-backend` engine. Safe to call
+/// unconditionally — before `gtk::init()` it does nothing.
+#[cfg(all(target_os = "linux", feature = "wry-backend"))]
+pub fn pump_gtk_events() {
+    if gtk::is_initialized() {
+        while gtk::events_pending() {
+            gtk::main_iteration_do(false);
+        }
+    }
+}
+
+/// No-op stub on platforms / builds where wry's GTK loop isn't in play.
+#[cfg(not(all(target_os = "linux", feature = "wry-backend")))]
+pub fn pump_gtk_events() {}
+
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -163,6 +186,12 @@ pub struct WebView {
     /// Shared with the post-mount open action so it can apply the first
     /// `set_bounds` immediately after the engine opens.
     last_bounds: Rc<Cell<Option<Rect>>>,
+    /// Host window HiDPI scale, read from `LayoutContext::scale_factor` in
+    /// `place_children`. Handed to the backend's `set_bounds` so engines that
+    /// position in device pixels (WebKitGTK on X11) land correctly under
+    /// fractional scaling. Shared so the post-mount open closure can read it.
+    /// Defaults to 1.0 until the first layout.
+    scale: Rc<Cell<f32>>,
     /// Guards `run_after_mount` enqueue against rebuilds (queue at most once).
     mount_queued: Cell<bool>,
     /// Window id captured from `BuildContext::window()` (the post-mount
@@ -225,6 +254,7 @@ impl WebView {
             web_view_id: WebViewId::next(),
             handle: Rc::new(RefCell::new(None)),
             last_bounds: Rc::new(Cell::new(None)),
+            scale: Rc::new(Cell::new(1.0)),
             mount_queued: Cell::new(false),
             window_id: Cell::new(None),
             style_override: None,
@@ -594,6 +624,7 @@ impl Widget for WebView {
             let attrs = self.attrs.clone();
             let handle_slot = self.handle.clone();
             let bounds_slot = self.last_bounds.clone();
+            let scale_slot = self.scale.clone();
             let registry_slot = self.registry.clone();
             let activation = vis;
             let on_event = self.make_event_callback();
@@ -618,7 +649,7 @@ impl Widget for WebView {
                 // activation state (so a view mounted while its tab is parked
                 // opens hidden, not visible-then-flashing).
                 if let Some(b) = bounds_slot.get() {
-                    handle.set_bounds(b);
+                    handle.set_bounds(b, scale_slot.get());
                 }
                 // The engine subview opens visible by default, so only act on
                 // the parked case: a view mounted while its tab is dormant must
@@ -648,18 +679,26 @@ impl Widget for WebView {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
         for child in children.iter_mut() {
             child.origin = bounds.origin();
             child.size = bounds.size();
         }
-        // Mirror the new bounds onto the native subview when they change.
-        // A bounds change always comes from a relayout, so this is the
-        // reliable place to track it (paint is coalesced and may be skipped).
-        if self.last_bounds.get() != Some(bounds) {
+        // Mirror the new bounds onto the native subview. The bounds are logical;
+        // `ctx.scale_factor` is the host window's HiDPI device scale (a scale
+        // change triggers a relayout, so this runs then too). The backend uses
+        // both: engines that position in device pixels (WebKitGTK on X11) need
+        // logical × scale. Store the scale so the post-mount open path can apply
+        // the first bounds at the right scale.
+        let scale = ctx.scale_factor;
+        let scale_changed = (self.scale.get() - scale).abs() > f32::EPSILON;
+        if scale_changed {
+            self.scale.set(scale);
+        }
+        if self.last_bounds.get() != Some(bounds) || scale_changed {
             self.last_bounds.set(Some(bounds));
-            self.with_handle(|h| h.set_bounds(bounds));
+            self.with_handle(|h| h.set_bounds(bounds, scale));
         }
     }
 

@@ -6,6 +6,14 @@ use super::LayoutResponse;
 pub struct LayoutContext<'a> {
     pub theme: &'a crate::styles::Theme,
     pub layout_direction: crate::environment::LayoutDirection,
+    /// Host window HiDPI device scale (physical px per logical px). The layout
+    /// pass is otherwise fully logical, and the renderer applies this scale at
+    /// the vertex stage — so **ordinary widgets must ignore this**. It exists
+    /// only as the escape hatch for widgets that bridge to a device-pixel OS
+    /// resource (e.g. a `WebView` sizing its native subview, which on some
+    /// toolkits — WebKitGTK on X11 — ignores fractional scaling and needs
+    /// device pixels). 1.0 in headless / test contexts.
+    pub scale_factor: f32,
     /// Text backend for accurate text measurement during layout.
     pub text_backend: Option<&'a std::rc::Rc<std::cell::RefCell<dyn bastyde_canvas::TextBackend>>>,
     /// Arena reference for querying child widget sizes.
@@ -33,6 +41,7 @@ impl<'a> LayoutContext<'a> {
         Self {
             theme,
             layout_direction: crate::environment::LayoutDirection::LeftToRight,
+            scale_factor: 1.0,
             text_backend: None,
             arena: None,
             extras: None,

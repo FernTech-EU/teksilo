@@ -204,6 +204,13 @@ pub struct WidgetTree {
     prefers_high_contrast: bool,
     prefers_reduced_motion: bool,
     text_scale_factor: f64,
+    /// Host window HiDPI device scale (physical px per logical px), fed by
+    /// `bastyde-app` before each layout. Surfaced to widgets via
+    /// `LayoutContext::scale_factor`. The widget tree is otherwise fully
+    /// logical (the renderer applies this scale at the vertex stage); this is
+    /// the escape hatch for widgets that must size a device-pixel OS resource
+    /// (e.g. a `WebView`'s native subview). 1.0 in headless / test contexts.
+    device_scale_factor: f32,
     /// Active drag-and-drop session, if any.
     pub(crate) active_drag: Option<crate::drag_state::DragSession>,
     /// Source widget of an in-flight OS (outbound) drag that escalated past
@@ -403,6 +410,7 @@ impl WidgetTree {
             prefers_high_contrast: false,
             prefers_reduced_motion: false,
             text_scale_factor: 1.0,
+            device_scale_factor: 1.0,
             active_drag: None,
             outbound_drag_source: None,
             os_drag_reentered: false,
@@ -1547,6 +1555,20 @@ impl WidgetTree {
     /// OS text scaling factor (1.0 = normal).
     pub fn text_scale_factor(&self) -> f64 {
         self.text_scale_factor
+    }
+
+    /// Set the host window HiDPI device scale (physical px per logical px).
+    /// Called by `bastyde-app` before each layout from
+    /// `platform_window.scale_factor()`. Surfaced to widgets via
+    /// `LayoutContext::scale_factor`. No dirty-marking: it rides the layout
+    /// pass that follows, and a scale change already triggers a relayout.
+    pub fn set_device_scale_factor(&mut self, scale_factor: f32) {
+        self.device_scale_factor = scale_factor;
+    }
+
+    /// The host window HiDPI device scale most recently set (1.0 by default).
+    pub fn device_scale_factor(&self) -> f32 {
+        self.device_scale_factor
     }
 
     /// Mark a widget as clipping its children to its bounds (scroll areas).

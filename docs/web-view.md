@@ -82,9 +82,36 @@ sudo apt install libpango1.0-dev libgdk-pixbuf-2.0-dev libatk1.0-dev \
                  libgtk-3-dev libjavascriptcoregtk-4.1-dev libwebkit2gtk-4.1-dev
 ```
 
-macOS (WKWebView) and Windows (WebView2) need no extra system packages. On
-Wayland, prefer the Servo backend (`web-view-servo`) — WebKitGTK can't reparent
-into a child window there.
+macOS (WKWebView) and Windows (WebView2) need no extra system packages.
+
+#### wry on Linux needs the GTK loop pumped (and X11)
+
+WebKitGTK runs on the GTK / GLib main loop and embeds only as an **X11** child
+window. A winit app must therefore, on Linux:
+
+1. **Init GTK** — handled automatically; `WryBackend::open` calls `gtk::init()`.
+2. **Pump the GLib loop each turn** — winit doesn't, so the page never paints
+   otherwise. Call [`bastyde_webview::pump_gtk_events`] from
+   `BastydeAppBuilder::on_loop_tick`, holding the poll source high while a
+   `WebView` is alive:
+   ```rust
+   let poll = std::rc::Rc::new(std::cell::Cell::new(true));
+   BastydeAppBuilder::new()
+       .on_loop_tick(poll.clone(), || { bastyde::web_view::pump_gtk_events(); false })
+       // …
+   ```
+   (`pump_gtk_events` is a no-op off Linux / without the wry engine, so the call
+   is portable.)
+3. **Run under X11** — winit 0.30 picks Wayland whenever `WAYLAND_DISPLAY` is
+   set, and hands wry a Wayland handle it can't embed into. On a Wayland
+   session, switch to XWayland *before* the event loop is built (unset
+   `WAYLAND_DISPLAY`, set `GDK_BACKEND=x11`), or build `--features servo` for
+   the native Wayland engine. `examples/web_view_demo` does this automatically
+   (see its `force_xwayland_for_wry`).
+
+The continuous poll (step 2) keeps the loop awake; that is the cost of hosting a
+GTK engine inside a winit app today. A future revision may pump only while a
+`WebView` is mounted.
 
 ## Installing the subsystem
 

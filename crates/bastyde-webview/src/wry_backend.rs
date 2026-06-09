@@ -9,9 +9,19 @@
 //! status, title changes, navigations) are translated into [`WebViewEvent`]s
 //! and posted back through the supplied [`AppEventPoster`].
 //!
-//! Per the plan, this is the macOS / Windows / Linux-X11 backend. On
-//! Linux/Wayland `build_as_child` is unsupported by WebKitGTK (X11 reparenting
-//! only) — use the Servo backend there.
+//! Per the plan, this is the macOS / Windows / Linux-X11 backend.
+//!
+//! **Linux requirements.** WebKitGTK runs on the GTK / GLib main loop and can
+//! only embed as a child window under **X11**:
+//! - GTK must be initialised before the first webview — `open` calls
+//!   `gtk::init()` (idempotent, main-thread) since winit doesn't.
+//! - The host must pump the GLib loop each turn or the page never paints — see
+//!   [`crate::pump_gtk_events`], driven from `BastydeAppBuilder::on_loop_tick`.
+//! - The parent must be an X11 window. winit 0.30 picks Wayland whenever
+//!   `WAYLAND_DISPLAY` is set, handing wry a Wayland handle it can't embed into
+//!   ("window handle kind is not supported"). On a Wayland session, run under
+//!   XWayland (unset `WAYLAND_DISPLAY` + `GDK_BACKEND=x11` before winit init),
+//!   or use the Servo backend.
 //!
 //! **Known gaps (tracked):** custom-protocol *handlers* are not yet plumbed
 //! through `WebViewAttributes` (only scheme names are carried), so `app://`
@@ -25,10 +35,10 @@ use bastyde_core::AppEventPoster;
 use bastyde_core::raw_handle::ParentHandle;
 use bastyde_core::window::BastydeWindowId;
 
-use wry::{
-    PageLoadEvent, WebView, WebViewBuilder,
-    dpi::{LogicalPosition, LogicalSize},
-};
+use wry::{PageLoadEvent, WebView, WebViewBuilder};
+// Logical positioning is the macOS / Windows path; Linux converts to Physical.
+#[cfg(not(target_os = "linux"))]
+use wry::dpi::{LogicalPosition, LogicalSize};
 
 use crate::backend::{
     ConsoleLevel, NoopWebViewHandle, WebSource, WebViewAttributes, WebViewBackend, WebViewEvent,
@@ -89,6 +99,20 @@ impl WebViewBackend for WryBackend {
         attrs: WebViewAttributes,
         poster: Option<Arc<dyn AppEventPoster>>,
     ) -> Box<dyn WebViewHandle> {
+        // On Linux, WebKitGTK requires GTK to be initialised before any webview
+        // is created (and its GLib loop pumped each turn — see
+        // `crate::pump_gtk_events`). winit doesn't init GTK, so do it here. It's
+        // idempotent and main-thread-only; `open` always runs on the main thread.
+        #[cfg(target_os = "linux")]
+        if gtk::init().is_err() {
+            return fail(
+                &poster,
+                window_id,
+                web_view_id,
+                "WryBackend: gtk::init() failed — WebKitGTK needs GTK initialised".to_string(),
+            );
+        }
+
         let Some(parent) = parent else {
             // No OS parent handle — can't create a child subview. Surface the
             // Error state so the widget doesn't sit in Loading forever.
@@ -229,11 +253,36 @@ struct WryHandle {
 }
 
 impl WebViewHandle for WryHandle {
-    fn set_bounds(&self, bounds: Rect) {
-        let _ = self.webview.set_bounds(wry::Rect {
-            position: LogicalPosition::new(bounds.x, bounds.y).into(),
-            size: LogicalSize::new(bounds.width, bounds.height).into(),
-        });
+    fn set_bounds(&self, bounds: Rect, scale_factor: f32) {
+        // On Linux the subview is a WebKitGTK child window using integer GDK
+        // scaling (GDK_SCALE), which ignores the fractional factor wgpu renders
+        // at — so logical bounds land at the wrong place and size. Convert to
+        // device pixels (logical × scale) and pass them as Physical so the
+        // child lands correctly regardless of GTK's own scale. macOS WKWebView
+        // / Windows WebView2 position in logical units and handle DPI
+        // themselves, so keep the proven logical path there.
+        #[cfg(target_os = "linux")]
+        let rect = wry::Rect {
+            position: wry::dpi::PhysicalPosition::new(
+                (bounds.x * scale_factor) as f64,
+                (bounds.y * scale_factor) as f64,
+            )
+            .into(),
+            size: wry::dpi::PhysicalSize::new(
+                (bounds.width * scale_factor) as f64,
+                (bounds.height * scale_factor) as f64,
+            )
+            .into(),
+        };
+        #[cfg(not(target_os = "linux"))]
+        let rect = {
+            let _ = scale_factor;
+            wry::Rect {
+                position: LogicalPosition::new(bounds.x, bounds.y).into(),
+                size: LogicalSize::new(bounds.width, bounds.height).into(),
+            }
+        };
+        let _ = self.webview.set_bounds(rect);
     }
     fn load_url(&self, url: &str) {
         let _ = self.webview.load_url(url);

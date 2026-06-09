@@ -30,11 +30,18 @@ url = { version = "2", optional = true }
 dpi = { version = "0.1", optional = true }
 raw-window-handle = { version = "0.6", optional = true }
 
+# wry's Linux engine is WebKitGTK, which runs on the GLib/GTK main loop. When
+# embedded in a winit (non-GTK) app, the host must `gtk::init()` and pump the
+# GTK loop each turn or the page never paints — that's what `pump_gtk_events`
+# does. Same gtk major (0.18) that wry 0.55 pulls. Linux-only.
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = { version = "0.18", optional = true }
+
 [features]
 default = []
 # Production engine backend (macOS WKWebView / Windows WebView2 /
 # Linux-X11 WebKitGTK) via `wry`.
-wry-backend = ["dep:wry"]
+wry-backend = ["dep:wry", "dep:gtk"]
 # Best-effort pure-Rust engine backend (Linux/Wayland) via `servo`.
 servo-backend = ["dep:servo", "dep:url", "dep:dpi", "dep:raw-window-handle"]
 

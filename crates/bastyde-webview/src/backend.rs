@@ -91,9 +91,15 @@ pub struct WebViewAttributes {
 /// All methods are `&self` — the handle is cheaply shareable and the engine
 /// state lives behind the platform's own interior mutability.
 pub trait WebViewHandle: 'static {
-    /// Reposition / resize the native subview within its parent window, in
-    /// logical pixels. Issued whenever the widget's layout bounds change.
-    fn set_bounds(&self, bounds: Rect);
+    /// Reposition / resize the native subview within its parent window.
+    /// `bounds` is in **logical** pixels (Bastyde's coordinate system);
+    /// `scale_factor` is the host window's HiDPI scale. Most engines position
+    /// in logical units, but some need device pixels (`bounds × scale_factor`)
+    /// because their own toolkit runs at a different scale than the wgpu
+    /// surface — notably WebKitGTK on X11/XWayland, which uses integer GDK
+    /// scaling and ignores fractional factors. Issued whenever the widget's
+    /// layout bounds or the window scale change.
+    fn set_bounds(&self, bounds: Rect, scale_factor: f32);
     /// Navigate to a URL.
     fn load_url(&self, url: &str);
     /// Load inline HTML.
@@ -512,7 +518,9 @@ struct MemoryWebViewHandle {
 }
 
 impl WebViewHandle for MemoryWebViewHandle {
-    fn set_bounds(&self, bounds: Rect) {
+    fn set_bounds(&self, bounds: Rect, _scale_factor: f32) {
+        // Record logical bounds (scale-independent) so test assertions stay
+        // resolution-agnostic.
         self.records.push(WebViewOp::SetBounds {
             web_view_id: self.web_view_id,
             bounds,
@@ -643,7 +651,7 @@ pub struct NoopWebViewBackend;
 pub(crate) struct NoopWebViewHandle;
 
 impl WebViewHandle for NoopWebViewHandle {
-    fn set_bounds(&self, _bounds: Rect) {}
+    fn set_bounds(&self, _bounds: Rect, _scale_factor: f32) {}
     fn load_url(&self, _url: &str) {}
     fn load_html(&self, _html: &str, _base_url: Option<&str>) {}
     fn eval(&self, _script: &str) {}

@@ -481,6 +481,10 @@ impl WindowManager {
         };
 
         let mut tree = WidgetTree::new().with_theme(initial_theme);
+        // Surface the window's HiDPI device scale to widgets that bridge to a
+        // device-pixel OS resource (e.g. a `WebView` subview). Refreshed on
+        // `ScaleFactorChanged`; the tree is otherwise fully logical.
+        tree.set_device_scale_factor(scale_factor as f32);
 
         // Seed the tree from the active i18n manager (if any). Without
         // this, `WidgetTree::new()` defaults to `LayoutDirection::LeftToRight`

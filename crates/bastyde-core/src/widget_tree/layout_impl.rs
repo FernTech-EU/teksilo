@@ -329,6 +329,7 @@ impl WidgetTree {
                 proposal,
                 &base_theme,
                 self.layout_direction,
+                self.device_scale_factor,
                 self.text_backend.as_ref(),
                 Some(extras),
             );
@@ -358,6 +359,7 @@ impl WidgetTree {
                 let ctx = LayoutContext {
                     theme: &resolved_theme,
                     layout_direction: self.layout_direction,
+                    scale_factor: self.device_scale_factor,
                     text_backend: self.text_backend.as_ref(),
                     arena: Some(&self.arena),
                     extras: Some(extras),
@@ -418,6 +420,7 @@ impl WidgetTree {
                 content_proposal,
                 &base_theme,
                 self.layout_direction,
+                self.device_scale_factor,
                 self.text_backend.as_ref(),
                 Some(extras),
             );
@@ -474,6 +477,7 @@ fn layout_widget_recursive(
     proposal: SizeProposal,
     base_theme: &crate::styles::Theme,
     layout_direction: crate::environment::LayoutDirection,
+    scale_factor: f32,
     text_backend: Option<&std::rc::Rc<std::cell::RefCell<dyn bastyde_canvas::TextBackend>>>,
     extras: Option<crate::widget::LayoutExtras<'_>>,
 ) {
@@ -487,6 +491,7 @@ fn layout_widget_recursive(
         let ctx = LayoutContext {
             theme: &resolved_theme,
             layout_direction,
+            scale_factor,
             text_backend,
             arena: Some(arena),
             extras,
@@ -532,6 +537,7 @@ fn layout_widget_recursive(
             let ctx = LayoutContext {
                 theme: &resolved_theme,
                 layout_direction,
+                scale_factor,
                 text_backend,
                 arena: Some(arena),
                 extras,
@@ -561,6 +567,7 @@ fn layout_widget_recursive(
                     child_proposal,
                     base_theme,
                     layout_direction,
+                    scale_factor,
                     text_backend,
                     extras,
                 );

@@ -12,6 +12,13 @@
 //!   macOS WKWebView / Windows WebView2 / Linux-X11 WebKitGTK).
 //! - `cargo run -p web-view-demo --features servo` — also ships Servo, used
 //!   under a Wayland session (wry elsewhere).
+//!
+//! **Wayland note.** wry's WebKitGTK can only embed as a *child window* under
+//! X11; on a native Wayland session `build_as_child` fails and the WebView
+//! shows its error wash (a pink fill). Servo is the eventual native-Wayland
+//! engine, but its backend isn't frame-driven yet. So on a Wayland session this
+//! demo forces itself onto XWayland (`GDK_BACKEND=x11`) so wry can embed —
+//! unless built `--features servo`, where the runtime picks Servo instead.
 
 use bastyde::core::binding::BindingLevel;
 use bastyde::prelude::*;
@@ -19,8 +26,19 @@ use bastyde::web_view::{PageLoadState, WebView};
 use bastyde::widgets::{Button, Divider, Expand, HStack, Spacer, Switcher, TextWidget, VStack};
 
 fn main() {
+    force_xwayland_for_wry();
+
+    // On Linux, wry's WebKitGTK runs on the GLib main loop; winit doesn't pump
+    // it, so the page never paints unless we drive it each turn. Hold the poll
+    // source high and pump GTK every tick. No-op off Linux / without wry.
+    let poll = std::rc::Rc::new(std::cell::Cell::new(true));
+
     BastydeAppBuilder::new()
         .theme(intui::light())
+        .on_loop_tick(poll.clone(), || {
+            bastyde::web_view::pump_gtk_events();
+            false
+        })
         .install_inspector_in_debug()
         .install_web_view_default()
         .initial_window(
@@ -166,3 +184,36 @@ fn main() {
         )
         .run();
 }
+
+/// On a Wayland session, force the process onto XWayland so wry's WebKitGTK can
+/// embed as a child window (native Wayland has no window reparenting, so
+/// `build_as_child` fails there → the WebView's pink error wash). No-op off
+/// Linux, when already pinned to a backend, or when built `--features servo`
+/// (there the runtime should pick the native Servo engine on Wayland instead).
+#[cfg(all(target_os = "linux", not(feature = "servo")))]
+fn force_xwayland_for_wry() {
+    let on_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty());
+    let have_x_display = std::env::var_os("DISPLAY").is_some_and(|v| !v.is_empty());
+    if on_wayland && have_x_display {
+        // winit 0.30 removed WINIT_UNIX_BACKEND; it now picks Wayland purely
+        // because WAYLAND_DISPLAY is set. Removing it makes winit fall back to
+        // the X11 (XWayland) DISPLAY, and GDK_BACKEND=x11 puts wry's WebKitGTK
+        // on X11 too — so the parent handle wry receives is an X11 handle it
+        // can embed into.
+        // SAFETY: called as the very first statement in `main`, before any
+        // winit / GTK / thread initialisation reads the environment.
+        unsafe {
+            std::env::remove_var("WAYLAND_DISPLAY");
+            std::env::set_var("GDK_BACKEND", "x11");
+        }
+        eprintln!(
+            "web-view-demo: Wayland session detected — switching to XWayland (unset \
+             WAYLAND_DISPLAY, GDK_BACKEND=x11) so wry's WebKitGTK can embed. Build with \
+             `--features servo` for the native Wayland engine path."
+        );
+    }
+}
+
+/// No-op: not Linux, or built with the Servo engine (runtime picks it on Wayland).
+#[cfg(not(all(target_os = "linux", not(feature = "servo"))))]
+fn force_xwayland_for_wry() {}
