@@ -34,24 +34,24 @@ pub trait BastydeAppBuilderWebViewExt {
     /// `servo-backend` features) or a custom / mock backend.
     fn install_web_view<B: WebViewBackend + 'static>(self, backend: B) -> Self;
 
-    /// Convenience: install with the engine selected by the enabled cargo
-    /// feature(s):
-    /// - `bastyde/web-view-wry` only → the production `WryBackend` (macOS
-    ///   WKWebView / Windows WebView2 / Linux-X11 WebKitGTK).
-    /// - `bastyde/web-view-servo` only → the best-effort `ServoBackend`
-    ///   (Linux/Wayland).
-    /// - **both** → chosen at runtime: `ServoBackend` under a Wayland session
-    ///   (where wry's WebKitGTK can't reparent), `WryBackend` everywhere else
-    ///   (X11 / macOS / Windows). This is the recommended Linux setup — ship
-    ///   both engines and let the session decide. See
+    /// Convenience: install the engine selected by the enabled cargo feature.
+    /// wry is the default everywhere it works; Servo is opt-in and additive.
+    /// - `bastyde/web-view-wry` → the production `WryBackend` (macOS WKWebView /
+    ///   Windows WebView2 / Linux-X11 WebKitGTK).
+    /// - `bastyde/web-view-servo` (which *implies* `web-view-wry`) → both
+    ///   engines, chosen at runtime: `ServoBackend` under a Wayland session
+    ///   (where wry's WebKitGTK can't reparent), `WryBackend` everywhere else.
+    ///   The recommended Linux setup — ship both, let the session decide. See
     ///   [`is_wayland`](bastyde_webview::is_wayland).
     /// - plain `bastyde/web-view` → the inert [`NoopWebViewBackend`] (renders
     ///   nothing — for builds that want the widget without bundling an engine,
     ///   and the only safe long-running default vs the op-accumulating
     ///   `MemoryWebViewBackend` used in tests).
     ///
-    /// For full control, pass a backend explicitly via
-    /// [`install_web_view`](Self::install_web_view).
+    /// (Servo *alone* — no wry fallback — isn't reachable via the umbrella
+    /// features by design; depend on `bastyde-webview` directly with
+    /// `features = ["servo-backend"]` and pass `ServoBackend` to
+    /// [`install_web_view`](Self::install_web_view) if you truly want that.)
     ///
     /// [`NoopWebViewBackend`]: bastyde_webview::NoopWebViewBackend
     fn install_web_view_default(self) -> Self;
