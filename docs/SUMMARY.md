@@ -78,6 +78,10 @@ directory.
   `MenuBar::from_model(..).native_on_macos(..)`,
   `BastydeAppBuilder::install_native_menu()`, reactive checks, ⌘ key
   equivalents, focus-follows-window.
+- [web-view.md](web-view.md) — embeddable `WebView` widget (native OS
+  subview on top of wgpu), pluggable `WebViewBackend` (wry default /
+  Servo additive for Wayland / headless), the dormancy→`set_visible`
+  activation bridge, JS↔Rust IPC, `install_web_view_default()`.
 - [drag-and-drop.md](drag-and-drop.md) — drag payloads, drop targets,
   hit testing, the three user stories that share the underlying machinery.
 - [multi-window.md](multi-window.md) — `WindowConfig`, signal-driven
