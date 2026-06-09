@@ -264,8 +264,8 @@ struct RegistryState {
 }
 
 /// Per-app web-view service. Registered in app-state by
-/// [`install_web_view`](crate::BastydeAppBuilderWebViewExt::install_web_view);
-/// reachable from any `build()` / handler via
+/// `BastydeAppBuilderWebViewExt::install_web_view` (in the `bastyde` umbrella
+/// crate); reachable from any `build()` / handler via
 /// `ctx.app_state::<WebViewRegistry>()`. Cloneable; clones share the same
 /// backend and event-callback map.
 #[derive(Clone)]
@@ -615,10 +615,12 @@ pub fn memory_registry() -> (WebViewRegistry, MemoryWebViewRecords) {
 #[derive(Debug, Default)]
 pub struct NoopWebViewBackend;
 
-/// A [`WebViewHandle`] whose every method is a no-op. Shared by
-/// [`NoopWebViewBackend`] and the not-yet-wired `WryBackend` / `ServoBackend`
-/// scaffolds, so a method added to the trait is implemented in exactly one
-/// place. `pub(crate)` — backends return it boxed; apps never name it.
+/// A [`WebViewHandle`] whose every method is a no-op. Returned by
+/// [`NoopWebViewBackend`], and by the `WryBackend` / `ServoBackend` engine
+/// backends on their failure paths (no parent handle, engine-init error) so a
+/// failed open still yields a live, harmless handle. Defined once so a method
+/// added to the trait is implemented in exactly one place. `pub(crate)` —
+/// backends return it boxed; apps never name it.
 pub(crate) struct NoopWebViewHandle;
 
 impl WebViewHandle for NoopWebViewHandle {

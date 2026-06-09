@@ -10,13 +10,16 @@ publish = false
 name = "web-view-demo"
 path = "src/main.rs"
 
-# By default the demo installs the headless backend (no page renders). To run
-# against a real engine:
-#   cargo run -p web-view-demo --features wry     # macOS / Windows / Linux-X11
-#   cargo run -p web-view-demo --features servo   # Linux / Wayland (best-effort)
+# By default the demo installs the inert no-op backend (renders nothing). To
+# run against a real engine:
+#   cargo run -p web-view-demo --features wry     # wry (macOS / Windows / Linux-X11)
+#   cargo run -p web-view-demo --features servo   # wry + Servo; Servo used on Wayland,
+#                                                 # wry on X11 / macOS / Windows
 [features]
 default = []
 wry = ["bastyde/web-view-wry"]
+# `servo` is additive — bastyde/web-view-servo implies web-view-wry, so this
+# ships both engines and the runtime picks Servo only under a Wayland session.
 servo = ["bastyde/web-view-servo"]
 
 [dependencies]
